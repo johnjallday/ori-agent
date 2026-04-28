@@ -3,10 +3,12 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // ============================================================================
@@ -20,9 +22,9 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspace_notes (id, workspace_id, name, content, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, note.ID, note.WorkspaceID, note.Name, note.Content, note.CreatedAt, note.UpdatedAt)
+		INSERT INTO workspace_notes (id, workspace_id, name, content, vault_reference_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, note.ID, note.WorkspaceID, note.Name, note.Content, encodeNoteVaultReference(note.VaultRef), note.CreatedAt, note.UpdatedAt)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -40,18 +42,22 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 // GetNote retrieves a note by ID.
 func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, error) {
 	note := &WorkspaceNote{}
+	var vaultReferenceJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, name, content, created_at, updated_at
+		SELECT id, workspace_id, name, content, COALESCE(vault_reference_json, ''), created_at, updated_at
 		FROM workspace_notes WHERE id = ?
 	`, id).Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Content,
-		&note.CreatedAt, &note.UpdatedAt)
+		&vaultReferenceJSON, &note.CreatedAt, &note.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrNoteNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get note: %w", err)
+	}
+	if note.VaultRef, err = decodeNoteVaultReference(vaultReferenceJSON.String); err != nil {
+		return nil, fmt.Errorf("failed to decode note vault reference: %w", err)
 	}
 
 	return note, nil
@@ -61,9 +67,9 @@ func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, e
 func (s *SQLiteStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspace_notes
-		SET name = ?, content = ?, workspace_id = ?, updated_at = ?
+		SET name = ?, content = ?, workspace_id = ?, vault_reference_json = ?, updated_at = ?
 		WHERE id = ?
-	`, note.Name, note.Content, note.WorkspaceID, note.UpdatedAt, note.ID)
+	`, note.Name, note.Content, note.WorkspaceID, encodeNoteVaultReference(note.VaultRef), note.UpdatedAt, note.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update note: %w", err)
@@ -95,7 +101,7 @@ func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, workspace_id, name,
 		       CASE WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 100) || '...' ELSE content END as preview,
-		       created_at, updated_at
+		       COALESCE(vault_reference_json, ''), created_at, updated_at
 		FROM workspace_notes
 		WHERE workspace_id = ?
 		ORDER BY updated_at DESC
@@ -108,14 +114,43 @@ func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 	notes := make([]WorkspaceNoteListItem, 0)
 	for rows.Next() {
 		var note WorkspaceNoteListItem
+		var vaultReferenceRaw string
 		if err := rows.Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Preview,
-			&note.CreatedAt, &note.UpdatedAt); err != nil {
+			&vaultReferenceRaw, &note.CreatedAt, &note.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan note: %w", err)
+		}
+		note.VaultRef, err = decodeNoteVaultReference(vaultReferenceRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode note vault reference: %w", err)
 		}
 		notes = append(notes, note)
 	}
 
 	return notes, nil
+}
+
+func encodeNoteVaultReference(ref *vaultref.Reference) string {
+	clean := vaultref.Normalize(ref)
+	if clean == nil {
+		return ""
+	}
+	data, err := json.Marshal(clean)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func decodeNoteVaultReference(raw string) (*vaultref.Reference, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil, nil
+	}
+	var ref vaultref.Reference
+	if err := json.Unmarshal([]byte(raw), &ref); err != nil {
+		return nil, err
+	}
+	return vaultref.Normalize(&ref), nil
 }
 
 // SearchNotes performs full-text search across note names and content.

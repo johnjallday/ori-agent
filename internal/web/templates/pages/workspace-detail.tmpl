@@ -3815,10 +3815,11 @@
       outline-offset: 2px;
     }
 
-    .workspace-detail-item-result,
-    .workspace-detail-item-change,
-    .workspace-detail-item-run,
-    .workspace-detail-item-delete {
+	    .workspace-detail-item-result,
+	    .workspace-detail-item-change,
+	    .workspace-detail-item-sync,
+	    .workspace-detail-item-run,
+	    .workspace-detail-item-delete {
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
@@ -3865,27 +3866,50 @@
       opacity: 1;
     }
 
-    .workspace-detail-item-run {
-      right: 2rem;
-      color: var(--primary-color);
-      opacity: 0.85;
-    }
+	    .workspace-detail-item-run {
+	      right: 2rem;
+	      color: var(--primary-color);
+	      opacity: 0.85;
+	    }
 
-    .workspace-detail-item-run:hover {
-      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.15);
-      color: var(--primary-color);
-      opacity: 1;
-    }
+	    .workspace-detail-item-run.is-shifted {
+	      right: 3.6rem;
+	    }
 
-    .workspace-detail-item-run:disabled {
-      opacity: 0.35;
-      cursor: not-allowed;
-      pointer-events: none;
-    }
+	    .workspace-detail-item-run:hover {
+	      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.15);
+	      color: var(--primary-color);
+	      opacity: 1;
+	    }
 
-    .workspace-detail-item-delete {
-      right: 0.4rem;
-      color: var(--text-muted);
+	    .workspace-detail-item-run:disabled {
+	      opacity: 0.35;
+	      cursor: not-allowed;
+	      pointer-events: none;
+	    }
+
+	    .workspace-detail-item-sync {
+	      right: 2rem;
+	      color: #0f766e;
+	      opacity: 0.9;
+	    }
+
+	    .workspace-detail-item-sync:hover {
+	      background: rgba(15, 118, 110, 0.14);
+	      color: #0f766e;
+	      opacity: 1;
+	    }
+
+	    .workspace-detail-item-sync:disabled,
+	    .workspace-detail-item-sync.is-syncing {
+	      cursor: wait;
+	      opacity: 0.48;
+	      pointer-events: none;
+	    }
+
+	    .workspace-detail-item-delete {
+	      right: 0.4rem;
+	      color: var(--text-muted);
       opacity: 0;
     }
 
@@ -3897,10 +3921,30 @@
       opacity: 1;
     }
 
-    .workspace-detail-item-delete:hover {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
-    }
+	    .workspace-detail-item-delete:hover {
+	      background: rgba(239, 68, 68, 0.15);
+	      color: #ef4444;
+	    }
+
+	    .workspace-detail-vault-reference-badge {
+	      display: inline-flex;
+	      align-items: center;
+	      padding: 0.08rem 0.42rem;
+	      margin-left: 0.35rem;
+	      border-radius: 999px;
+	      border: 1px solid rgba(15, 118, 110, 0.28);
+	      background: rgba(15, 118, 110, 0.1);
+	      color: #0f766e;
+	      font-size: 0.68rem;
+	      font-weight: 700;
+	      text-transform: uppercase;
+	      vertical-align: middle;
+	    }
+
+	    .workspace-detail-vault-reference-label {
+	      margin-left: 0.35rem;
+	      color: var(--text-secondary);
+	    }
 
     .workspace-detail-task-result-meta {
       font-size: 0.75rem;
@@ -6761,8 +6805,9 @@
       min-height: 2.5em;
     }
 
-    /* Vault attachment drop target on the Files panel */
-    #workspace-detail-files-panel.is-vault-drop-target {
+    /* Vault drop target on workspace panels */
+    #workspace-detail-files-panel.is-vault-drop-target,
+    #workspace-detail-notes-panel.is-vault-drop-target {
       outline: 2px dashed var(--bs-primary, #f59e0b);
       outline-offset: -4px;
       box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);

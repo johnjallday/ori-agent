@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 func setupTestDB(t *testing.T) (*database.DB, func()) {
@@ -785,8 +786,18 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 		WorkspaceID: "test-folder",
 		Name:        "Test Note",
 		Content:     "This is test content for the note.",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		VaultRef: &vaultref.Reference{
+			SourceKind:   "note",
+			VaultID:      "vault-1",
+			VaultName:    "Private Vault",
+			RecordID:     "record-1",
+			RecordLabel:  "Source Entry",
+			PayloadKey:   "note",
+			ImportedAt:   "2026-04-28T12:00:00Z",
+			LastSyncedAt: "2026-04-28T12:05:00Z",
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	// Create
@@ -812,6 +823,17 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 	}
 	if got.Content != note.Content {
 		t.Errorf("Expected Content %s, got %s", note.Content, got.Content)
+	}
+	if got.VaultRef == nil || got.VaultRef.RecordID != "record-1" || got.VaultRef.PayloadKey != "note" {
+		t.Fatalf("Expected vault reference to round-trip, got %#v", got.VaultRef)
+	}
+
+	listed, err := store.ListNotesByWorkspace(ctx, "test-folder")
+	if err != nil {
+		t.Fatalf("Failed to list notes: %v", err)
+	}
+	if len(listed) != 1 || listed[0].VaultRef == nil || listed[0].VaultRef.VaultName != "Private Vault" {
+		t.Fatalf("Expected listed note vault reference, got %#v", listed)
 	}
 }
 

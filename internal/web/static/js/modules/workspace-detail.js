@@ -64,9 +64,12 @@ function getDisplayStatus(status) {
 }
 
 function buildWorkspaceSlugConflictMessage(conflict) {
-  const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
-  const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
-  const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+  const requestedSlug =
+    typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+  const suggestedSlug =
+    typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+  const location =
+    typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
   const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
 
   const parts = [
@@ -98,7 +101,8 @@ const TASK_REQUIREMENT_KEYS = Object.freeze({
 });
 
 const TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY = 'workspace-detail-task-assist-specialist';
-const ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX = 'workspace-detail-entry-agent-prompt-dismissed:';
+const ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX =
+  'workspace-detail-entry-agent-prompt-dismissed:';
 
 const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
   travel_itinerary: Object.freeze({
@@ -106,30 +110,77 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
     label: 'Travel Itinerary Planner',
     agentName: 'Travel Itinerary Planner',
     agentType: 'tool-calling',
-    description: 'Plans day-by-day travel itineraries with neighborhood guidance, food picks, museum ideas, budget notes, and pacing.',
-    systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
+    description:
+      'Plans day-by-day travel itineraries with neighborhood guidance, food picks, museum ideas, budget notes, and pacing.',
+    systemPrompt:
+      'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
     nameTokens: ['travel', 'trip', 'itinerary'],
-    scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood']
+    scorePhrases: [
+      'day by day',
+      'day-by-day',
+      'itinerary',
+      'trip plan',
+      'travel plan',
+      'restaurant',
+      'restaurants',
+      'food',
+      'museum',
+      'museums',
+      'nightlife',
+      'day trip',
+      'day trips',
+      'budget breakdown',
+      'budget',
+      'accommodation',
+      'accommodation areas',
+      'neighborhood',
+      'neighbourhood'
+    ]
   }),
   hotel_booking: Object.freeze({
     key: 'hotel_booking',
     label: 'Hotel Booking Agent',
     agentName: 'Hotel Booking Agent',
     agentType: 'tool-calling',
-    description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
-    systemPrompt: 'You are a hotel booking assistant. Help compare hotel options by neighborhood, budget, amenities, and transport tradeoffs. Ask for missing constraints before recommending stays, and do not invent live prices or confirmed bookings.',
+    description:
+      'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+    systemPrompt:
+      'You are a hotel booking assistant. Help compare hotel options by neighborhood, budget, amenities, and transport tradeoffs. Ask for missing constraints before recommending stays, and do not invent live prices or confirmed bookings.',
     nameTokens: ['hotel', 'lodging', 'accommodation'],
-    scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels']
+    scorePhrases: [
+      'hotel',
+      'hotels',
+      'stay',
+      'stays',
+      'lodging',
+      'accommodation',
+      'where to stay',
+      'book hotel',
+      'book hotels'
+    ]
   }),
   flight_booking: Object.freeze({
     key: 'flight_booking',
     label: 'Flight Booking Agent',
     agentName: 'Flight Booking Agent',
     agentType: 'tool-calling',
-    description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
-    systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
+    description:
+      'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+    systemPrompt:
+      'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
     nameTokens: ['flight', 'airfare', 'airport'],
-    scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing']
+    scorePhrases: [
+      'flight',
+      'flights',
+      'airfare',
+      'airport',
+      'route option',
+      'route options',
+      'connection',
+      'connections',
+      'transfer',
+      'transfer timing'
+    ]
   })
 });
 
@@ -269,7 +320,10 @@ export class WorkspaceDetailPage {
     this.setupRealtime();
     if (restoredBlockedTask) {
       this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
-      window.setTimeout(() => this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage), 360);
+      window.setTimeout(
+        () => this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage),
+        360
+      );
     }
     if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
@@ -312,7 +366,12 @@ export class WorkspaceDetailPage {
       homeAssistantQuickReviewBtn
     } = this.elements;
 
-    if (!homeAssistantQuickPlanBtn || !homeAssistantQuickTasksBtn || !homeAssistantQuickNotesBtn || !homeAssistantQuickReviewBtn) {
+    if (
+      !homeAssistantQuickPlanBtn ||
+      !homeAssistantQuickTasksBtn ||
+      !homeAssistantQuickNotesBtn ||
+      !homeAssistantQuickReviewBtn
+    ) {
       return;
     }
 
@@ -395,7 +454,16 @@ export class WorkspaceDetailPage {
     const vaultUnlockBtn = document.getElementById('hubVaultUnlockBtn');
     const vaultAttachmentList = document.getElementById('hubVaultAttachmentList');
 
-    if (!modal || !dropZone || !fileInput || !submitBtn || !selectedFilesPreview || !selectedFilesList || !devicePane || !vaultPane) {
+    if (
+      !modal ||
+      !dropZone ||
+      !fileInput ||
+      !submitBtn ||
+      !selectedFilesPreview ||
+      !selectedFilesList ||
+      !devicePane ||
+      !vaultPane
+    ) {
       return;
     }
 
@@ -435,7 +503,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    dropZone.addEventListener('dragover', (event) => {
+    dropZone.addEventListener('dragover', event => {
       if (this.fileModalState.source !== 'device') {
         return;
       }
@@ -447,14 +515,14 @@ export class WorkspaceDetailPage {
       dropZone.classList.remove('drag-active');
     });
 
-    dropZone.addEventListener('drop', (event) => {
+    dropZone.addEventListener('drop', event => {
       if (this.fileModalState.source !== 'device') {
         return;
       }
       event.preventDefault();
       dropZone.classList.remove('drag-active');
       if (event.dataTransfer.files.length > 0) {
-        this.fileModalState.selectedItems = Array.from(event.dataTransfer.files).map((file) => ({
+        this.fileModalState.selectedItems = Array.from(event.dataTransfer.files).map(file => ({
           source: 'device',
           name: file.name,
           size: Number(file.size || 0),
@@ -466,7 +534,7 @@ export class WorkspaceDetailPage {
 
     fileInput.addEventListener('change', () => {
       if (fileInput.files.length > 0) {
-        this.fileModalState.selectedItems = Array.from(fileInput.files).map((file) => ({
+        this.fileModalState.selectedItems = Array.from(fileInput.files).map(file => ({
           source: 'device',
           name: file.name,
           size: Number(file.size || 0),
@@ -484,7 +552,9 @@ export class WorkspaceDetailPage {
     });
 
     vaultSearchInput?.addEventListener('input', () => {
-      this.fileModalState.searchQuery = String(vaultSearchInput.value || '').trim().toLowerCase();
+      this.fileModalState.searchQuery = String(vaultSearchInput.value || '')
+        .trim()
+        .toLowerCase();
       this.renderFileModalVaultAttachments();
     });
 
@@ -496,14 +566,14 @@ export class WorkspaceDetailPage {
       await this.unlockSelectedVaultForFileModal();
     });
 
-    vaultUnlockPassword?.addEventListener('keydown', async (event) => {
+    vaultUnlockPassword?.addEventListener('keydown', async event => {
       if (event.key === 'Enter') {
         event.preventDefault();
         await this.unlockSelectedVaultForFileModal();
       }
     });
 
-    vaultAttachmentList?.addEventListener('click', (event) => {
+    vaultAttachmentList?.addEventListener('click', event => {
       const trigger = event.target.closest('[data-vault-attachment-id]');
       if (!trigger) {
         return;
@@ -596,12 +666,7 @@ export class WorkspaceDetailPage {
   }
 
   renderFileModalSource() {
-    const {
-      devicePane,
-      vaultPane,
-      deviceBtn,
-      vaultBtn
-    } = this.fileModalElements;
+    const { devicePane, vaultPane, deviceBtn, vaultBtn } = this.fileModalElements;
 
     const usingVault = this.fileModalState.source === 'vault';
 
@@ -624,7 +689,9 @@ export class WorkspaceDetailPage {
 
   renderFileModalSelectionPreview() {
     const { selectedFilesPreview, selectedFilesList, submitBtn } = this.fileModalElements;
-    const items = Array.isArray(this.fileModalState.selectedItems) ? this.fileModalState.selectedItems : [];
+    const items = Array.isArray(this.fileModalState.selectedItems)
+      ? this.fileModalState.selectedItems
+      : [];
 
     if (!selectedFilesPreview || !selectedFilesList || !submitBtn) {
       return;
@@ -639,16 +706,17 @@ export class WorkspaceDetailPage {
     selectedFilesPreview.style.display = 'block';
     submitBtn.disabled = false;
 
-    selectedFilesList.innerHTML = items.map((item, index) => {
-      const meta = [];
-      if (Number.isFinite(item.size) && item.size > 0) {
-        meta.push(this.formatFileSize(item.size));
-      }
-      if (item.source === 'vault') {
-        meta.push(item.recordLabel || 'Vault entry');
-      }
+    selectedFilesList.innerHTML = items
+      .map((item, index) => {
+        const meta = [];
+        if (Number.isFinite(item.size) && item.size > 0) {
+          meta.push(this.formatFileSize(item.size));
+        }
+        if (item.source === 'vault') {
+          meta.push(item.recordLabel || 'Vault entry');
+        }
 
-      return `
+        return `
         <div class="d-flex justify-content-between align-items-center p-2" style="background: var(--bg-secondary); border-radius: 8px; gap: 0.75rem;">
           <div style="min-width: 0;">
             <div style="color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -662,7 +730,8 @@ export class WorkspaceDetailPage {
           <button type="button" class="btn-close btn-sm" onclick="window.workspaceDetail?.removeFileModalSelection(${index})"></button>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   removeFileModalSelection(index) {
@@ -685,8 +754,13 @@ export class WorkspaceDetailPage {
 
     if (!force && this.fileModalState.vaults.length) {
       if (!this.fileModalState.selectedVaultId) {
-        const storedVaultId = String(window.localStorage?.getItem('ori-selected-vault-id') || '').trim();
-        this.fileModalState.selectedVaultId = this.fileModalState.vaults.find((item) => item.id === storedVaultId)?.id || this.fileModalState.vaults[0]?.id || '';
+        const storedVaultId = String(
+          window.localStorage?.getItem('ori-selected-vault-id') || ''
+        ).trim();
+        this.fileModalState.selectedVaultId =
+          this.fileModalState.vaults.find(item => item.id === storedVaultId)?.id ||
+          this.fileModalState.vaults[0]?.id ||
+          '';
         if (vaultSelect) {
           vaultSelect.value = this.fileModalState.selectedVaultId;
         }
@@ -711,19 +785,26 @@ export class WorkspaceDetailPage {
       const data = await response.json();
       this.fileModalState.vaults = Array.isArray(data?.vaults) ? data.vaults : [];
 
-      const storedVaultId = String(window.localStorage?.getItem('ori-selected-vault-id') || '').trim();
+      const storedVaultId = String(
+        window.localStorage?.getItem('ori-selected-vault-id') || ''
+      ).trim();
       const preferredVaultId = this.fileModalState.selectedVaultId || storedVaultId;
-      this.fileModalState.selectedVaultId = this.fileModalState.vaults.find((item) => item.id === preferredVaultId)?.id || this.fileModalState.vaults[0]?.id || '';
+      this.fileModalState.selectedVaultId =
+        this.fileModalState.vaults.find(item => item.id === preferredVaultId)?.id ||
+        this.fileModalState.vaults[0]?.id ||
+        '';
 
       if (vaultSelect) {
         if (!this.fileModalState.vaults.length) {
           vaultSelect.innerHTML = '<option value="">No vaults available</option>';
         } else {
-          vaultSelect.innerHTML = this.fileModalState.vaults.map((vault) => {
-            const label = `${vault.name || 'Vault'} · ${Number(vault.record_count || 0)} ${Number(vault.record_count || 0) === 1 ? 'entry' : 'entries'}`;
-            const selected = vault.id === this.fileModalState.selectedVaultId ? ' selected' : '';
-            return `<option value="${this.escapeHtml(vault.id)}"${selected}>${this.escapeHtml(label)}</option>`;
-          }).join('');
+          vaultSelect.innerHTML = this.fileModalState.vaults
+            .map(vault => {
+              const label = `${vault.name || 'Vault'} · ${Number(vault.record_count || 0)} ${Number(vault.record_count || 0) === 1 ? 'entry' : 'entries'}`;
+              const selected = vault.id === this.fileModalState.selectedVaultId ? ' selected' : '';
+              return `<option value="${this.escapeHtml(vault.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+            })
+            .join('');
         }
         vaultSelect.disabled = !this.fileModalState.vaults.length;
       }
@@ -740,7 +821,9 @@ export class WorkspaceDetailPage {
         vaultSelect.innerHTML = '<option value="">No vaults available</option>';
         vaultSelect.disabled = true;
       }
-      this.renderFileModalVaultAttachments('No vaults available yet. Create and unlock a vault first.');
+      this.renderFileModalVaultAttachments(
+        'No vaults available yet. Create and unlock a vault first.'
+      );
     } finally {
       this.fileModalState.loadingVaults = false;
     }
@@ -766,7 +849,9 @@ export class WorkspaceDetailPage {
     this.renderFileModalVaultAttachments();
 
     try {
-      const statusResponse = await fetch(`/api/vault/status?vault_id=${encodeURIComponent(selectedVaultId)}`);
+      const statusResponse = await fetch(
+        `/api/vault/status?vault_id=${encodeURIComponent(selectedVaultId)}`
+      );
       if (!statusResponse.ok) {
         throw new Error('Failed to load vault status');
       }
@@ -779,7 +864,9 @@ export class WorkspaceDetailPage {
         return;
       }
 
-      const listResponse = await fetch(`/api/vault/records?vault_id=${encodeURIComponent(selectedVaultId)}`);
+      const listResponse = await fetch(
+        `/api/vault/records?vault_id=${encodeURIComponent(selectedVaultId)}`
+      );
       if (!listResponse.ok) {
         throw new Error('Failed to load vault records');
       }
@@ -787,22 +874,28 @@ export class WorkspaceDetailPage {
       const listData = await listResponse.json();
       const records = Array.isArray(listData?.records) ? listData.records : [];
       const selectedVault = this.getFileModalSelectedVault();
-      const recordDetails = await Promise.all(records.map(async (record) => {
-        try {
-          const response = await fetch(`/api/vault/records/${encodeURIComponent(record.id)}?vault_id=${encodeURIComponent(selectedVaultId)}`);
-          if (!response.ok) {
+      const recordDetails = await Promise.all(
+        records.map(async record => {
+          try {
+            const response = await fetch(
+              `/api/vault/records/${encodeURIComponent(record.id)}?vault_id=${encodeURIComponent(selectedVaultId)}`
+            );
+            if (!response.ok) {
+              return null;
+            }
+            return await response.json();
+          } catch (error) {
+            console.warn('Failed to load vault record for workspace import:', record?.id, error);
             return null;
           }
-          return await response.json();
-        } catch (error) {
-          console.warn('Failed to load vault record for workspace import:', record?.id, error);
-          return null;
-        }
-      }));
+        })
+      );
 
       this.fileModalState.vaultAttachments = recordDetails
         .filter(Boolean)
-        .flatMap((record) => this.extractVaultAttachmentsForWorkspaceModal(record, selectedVault?.name || 'Vault'))
+        .flatMap(record =>
+          this.extractVaultAttachmentsForWorkspaceModal(record, selectedVault?.name || 'Vault')
+        )
         .sort((left, right) => new Date(right.updatedAt || 0) - new Date(left.updatedAt || 0));
     } catch (error) {
       console.error('Failed to load vault attachments for workspace modal:', error);
@@ -818,7 +911,7 @@ export class WorkspaceDetailPage {
 
   getFileModalSelectedVault() {
     const selectedVaultId = String(this.fileModalState.selectedVaultId || '').trim();
-    return this.fileModalState.vaults.find((vault) => vault.id === selectedVaultId) || null;
+    return this.fileModalState.vaults.find(vault => vault.id === selectedVaultId) || null;
   }
 
   extractVaultAttachmentsForWorkspaceModal(record, vaultName) {
@@ -829,10 +922,11 @@ export class WorkspaceDetailPage {
 
     const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
     return attachments
-      .filter((attachment) => attachment && String(attachment.content_base64 || '').trim())
+      .filter(attachment => attachment && String(attachment.content_base64 || '').trim())
       .map((attachment, index) => ({
         source: 'vault',
         id: `${record.id}:${attachment.id || index}:${attachment.name || 'attachment'}`,
+        attachmentId: String(attachment.id || ''),
         name: String(attachment.name || `attachment-${index + 1}`),
         size: Number(attachment.size_bytes || 0),
         mimeType: String(attachment.mime_type || 'application/octet-stream'),
@@ -849,20 +943,25 @@ export class WorkspaceDetailPage {
   }
 
   renderFileModalVaultAttachments(overrideMessage = '') {
-    const { vaultAttachmentList, vaultLockedState, vaultUnlockBtn, vaultSearchInput } = this.fileModalElements;
+    const { vaultAttachmentList, vaultLockedState, vaultUnlockBtn, vaultSearchInput } =
+      this.fileModalElements;
     if (!vaultAttachmentList || !vaultLockedState) {
       return;
     }
 
     const state = this.fileModalState;
-    const selectedIds = new Set((state.selectedItems || []).map((item) => item.id));
+    const selectedIds = new Set((state.selectedItems || []).map(item => item.id));
 
     if (vaultUnlockBtn) {
       vaultUnlockBtn.disabled = !state.selectedVaultId;
     }
 
     if (vaultSearchInput) {
-      vaultSearchInput.disabled = state.loadingVaults || state.loadingAttachments || !state.selectedVaultId || Boolean(state.vaultStatus?.locked);
+      vaultSearchInput.disabled =
+        state.loadingVaults ||
+        state.loadingAttachments ||
+        !state.selectedVaultId ||
+        Boolean(state.vaultStatus?.locked);
     }
 
     vaultLockedState.hidden = true;
@@ -878,22 +977,26 @@ export class WorkspaceDetailPage {
     }
 
     if (!state.vaults.length) {
-      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">No vaults available yet. Create one in Vault first.</div>';
+      vaultAttachmentList.innerHTML =
+        '<div class="hub-file-vault-empty">No vaults available yet. Create one in Vault first.</div>';
       return;
     }
 
     if (state.loadingAttachments) {
-      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Loading files from the selected vault...</div>';
+      vaultAttachmentList.innerHTML =
+        '<div class="hub-file-vault-empty">Loading files from the selected vault...</div>';
       return;
     }
 
     if (!state.selectedVaultId) {
-      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Select a vault to browse its attached files.</div>';
+      vaultAttachmentList.innerHTML =
+        '<div class="hub-file-vault-empty">Select a vault to browse its attached files.</div>';
       return;
     }
 
     if (!state.vaultStatus?.available) {
-      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">That vault is not available right now.</div>';
+      vaultAttachmentList.innerHTML =
+        '<div class="hub-file-vault-empty">That vault is not available right now.</div>';
       return;
     }
 
@@ -902,22 +1005,20 @@ export class WorkspaceDetailPage {
       if (vaultSearchInput) {
         vaultSearchInput.disabled = true;
       }
-      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Unlock the selected vault to browse attached files.</div>';
+      vaultAttachmentList.innerHTML =
+        '<div class="hub-file-vault-empty">Unlock the selected vault to browse attached files.</div>';
       return;
     }
 
     const query = String(state.searchQuery || '').trim();
-    const filteredAttachments = state.vaultAttachments.filter((item) => {
+    const filteredAttachments = state.vaultAttachments.filter(item => {
       if (!query) {
         return true;
       }
 
-      const haystack = [
-        item.name,
-        item.recordLabel,
-        item.workspaceId,
-        item.vaultName
-      ].join(' ').toLowerCase();
+      const haystack = [item.name, item.recordLabel, item.workspaceId, item.vaultName]
+        .join(' ')
+        .toLowerCase();
       return haystack.includes(query);
     });
 
@@ -928,10 +1029,11 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    vaultAttachmentList.innerHTML = filteredAttachments.map((item) => {
-      const isSelected = selectedIds.has(item.id);
-      const workspaceMeta = item.workspaceId ? `Workspace ${item.workspaceId}` : 'Global entry';
-      return `
+    vaultAttachmentList.innerHTML = filteredAttachments
+      .map(item => {
+        const isSelected = selectedIds.has(item.id);
+        const workspaceMeta = item.workspaceId ? `Workspace ${item.workspaceId}` : 'Global entry';
+        return `
         <button type="button" class="hub-file-vault-item${isSelected ? ' is-selected' : ''}" data-vault-attachment-id="${this.escapeHtml(item.id)}">
           <span class="hub-file-vault-item-icon">${this.renderFileModalVaultIcon(item)}</span>
           <span class="hub-file-vault-item-main">
@@ -942,7 +1044,8 @@ export class WorkspaceDetailPage {
           <span class="hub-file-vault-item-check" aria-hidden="true"></span>
         </button>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   renderFileModalVaultIcon(item) {
@@ -957,11 +1060,13 @@ export class WorkspaceDetailPage {
   }
 
   toggleVaultAttachmentSelection(attachmentId) {
-    const index = this.fileModalState.selectedItems.findIndex((item) => item.id === attachmentId);
+    const index = this.fileModalState.selectedItems.findIndex(item => item.id === attachmentId);
     if (index >= 0) {
       this.fileModalState.selectedItems.splice(index, 1);
     } else {
-      const attachment = this.fileModalState.vaultAttachments.find((item) => item.id === attachmentId);
+      const attachment = this.fileModalState.vaultAttachments.find(
+        item => item.id === attachmentId
+      );
       if (!attachment) {
         return;
       }
@@ -989,18 +1094,22 @@ export class WorkspaceDetailPage {
 
     if (vaultUnlockBtn) {
       vaultUnlockBtn.disabled = true;
-      vaultUnlockBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Unlocking';
+      vaultUnlockBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1"></span> Unlocking';
     }
 
     try {
-      const response = await fetch(`/api/vault/unlock?vault_id=${encodeURIComponent(selectedVaultId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vault_id: selectedVaultId,
-          vault_password: password
-        })
-      });
+      const response = await fetch(
+        `/api/vault/unlock?vault_id=${encodeURIComponent(selectedVaultId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vault_id: selectedVaultId,
+            vault_password: password
+          })
+        }
+      );
 
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/json') ? await response.json() : null;
@@ -1032,24 +1141,26 @@ export class WorkspaceDetailPage {
     }
     panel.dataset.vaultDropBound = 'true';
 
-    const hasVaultDrag = (event) => {
+    const hasVaultDrag = event => {
       if (window.__oriVaultDragAttachment || window.__oriVaultDragRecord) {
         return true;
       }
       const types = event.dataTransfer?.types;
       if (!types) return false;
       const list = Array.from(types);
-      return list.includes('application/x-ori-vault-attachment') ||
-        list.includes('application/x-ori-vault-record');
+      return (
+        list.includes('application/x-ori-vault-attachment') ||
+        list.includes('application/x-ori-vault-record')
+      );
     };
 
-    panel.addEventListener('dragenter', (event) => {
+    panel.addEventListener('dragenter', event => {
       if (!hasVaultDrag(event)) return;
       event.preventDefault();
       panel.classList.add('is-vault-drop-target');
     });
 
-    panel.addEventListener('dragover', (event) => {
+    panel.addEventListener('dragover', event => {
       if (!hasVaultDrag(event)) return;
       event.preventDefault();
       if (event.dataTransfer) {
@@ -1058,14 +1169,14 @@ export class WorkspaceDetailPage {
       panel.classList.add('is-vault-drop-target');
     });
 
-    panel.addEventListener('dragleave', (event) => {
+    panel.addEventListener('dragleave', event => {
       if (event.target !== panel && panel.contains(event.relatedTarget)) {
         return;
       }
       panel.classList.remove('is-vault-drop-target');
     });
 
-    panel.addEventListener('drop', async (event) => {
+    panel.addEventListener('drop', async event => {
       const attachmentPayload = window.__oriVaultDragAttachment;
       const recordPayload = window.__oriVaultDragRecord;
       if (!attachmentPayload && !recordPayload) {
@@ -1077,6 +1188,7 @@ export class WorkspaceDetailPage {
       window.__oriVaultDragAttachment = null;
       window.__oriVaultDragRecord = null;
       delete document.body.dataset.vaultAttachmentDragging;
+      delete document.body.dataset.vaultRecordDragging;
 
       if (attachmentPayload) {
         await this.attachVaultAttachmentToFiles(attachmentPayload);
@@ -1094,7 +1206,7 @@ export class WorkspaceDetailPage {
     }
     panel.dataset.vaultDropBound = 'true';
 
-    const hasVaultRecordDrag = (event) => {
+    const hasVaultRecordDrag = event => {
       if (window.__oriVaultDragRecord) {
         return true;
       }
@@ -1103,13 +1215,13 @@ export class WorkspaceDetailPage {
       return Array.from(types).includes('application/x-ori-vault-record');
     };
 
-    panel.addEventListener('dragenter', (event) => {
+    panel.addEventListener('dragenter', event => {
       if (!hasVaultRecordDrag(event)) return;
       event.preventDefault();
       panel.classList.add('is-vault-drop-target');
     });
 
-    panel.addEventListener('dragover', (event) => {
+    panel.addEventListener('dragover', event => {
       if (!hasVaultRecordDrag(event)) return;
       event.preventDefault();
       if (event.dataTransfer) {
@@ -1118,14 +1230,14 @@ export class WorkspaceDetailPage {
       panel.classList.add('is-vault-drop-target');
     });
 
-    panel.addEventListener('dragleave', (event) => {
+    panel.addEventListener('dragleave', event => {
       if (event.target !== panel && panel.contains(event.relatedTarget)) {
         return;
       }
       panel.classList.remove('is-vault-drop-target');
     });
 
-    panel.addEventListener('drop', async (event) => {
+    panel.addEventListener('drop', async event => {
       const recordPayload = window.__oriVaultDragRecord;
       if (!recordPayload) {
         return;
@@ -1136,28 +1248,96 @@ export class WorkspaceDetailPage {
       window.__oriVaultDragRecord = null;
       window.__oriVaultDragAttachment = null;
       delete document.body.dataset.vaultAttachmentDragging;
+      delete document.body.dataset.vaultRecordDragging;
       await this.attachVaultRecordToNotes(recordPayload);
     });
   }
 
+  normalizeVaultReference(ref) {
+    if (!ref || typeof ref !== 'object') return null;
+    const normalized = {
+      source_kind: String(ref.source_kind || ref.sourceKind || '').trim(),
+      vault_id: String(ref.vault_id || ref.vaultId || '').trim(),
+      vault_name: String(ref.vault_name || ref.vaultName || '').trim(),
+      record_id: String(ref.record_id || ref.recordId || '').trim(),
+      record_label: String(ref.record_label || ref.recordLabel || '').trim(),
+      record_type: String(ref.record_type || ref.recordType || '').trim(),
+      attachment_id: String(ref.attachment_id || ref.attachmentId || '').trim(),
+      attachment_name: String(ref.attachment_name || ref.attachmentName || '').trim(),
+      payload_key: String(ref.payload_key || ref.payloadKey || '').trim(),
+      imported_at: String(ref.imported_at || ref.importedAt || '').trim(),
+      last_synced_at: String(ref.last_synced_at || ref.lastSyncedAt || '').trim()
+    };
+    if (!normalized.record_id) return null;
+    return normalized;
+  }
+
+  buildVaultReferenceFromItem(item, sourceKind, overrides = {}) {
+    const base = {
+      source_kind: sourceKind || item?.sourceKind || item?.source_kind || '',
+      vault_id: item?.vaultId || item?.vault_id || '',
+      vault_name: item?.vaultName || item?.vault_name || '',
+      record_id: item?.recordId || item?.record_id || '',
+      record_label: item?.recordLabel || item?.record_label || '',
+      record_type: item?.recordType || item?.record_type || '',
+      attachment_id: item?.attachmentId || item?.attachment_id || '',
+      attachment_name: item?.name || item?.attachmentName || item?.attachment_name || '',
+      imported_at: new Date().toISOString()
+    };
+    return this.normalizeVaultReference({ ...base, ...overrides });
+  }
+
+  buildVaultReferenceFromRecord(record, sourceKind, overrides = {}) {
+    const base = {
+      source_kind: sourceKind || '',
+      vault_id: record?.vaultId || record?.vault_id || '',
+      vault_name: record?.vaultName || record?.vault_name || '',
+      record_id: record?.recordId || record?.record_id || record?.id || '',
+      record_label: record?.recordLabel || record?.record_label || record?.label || '',
+      record_type: record?.recordType || record?.record_type || record?.type || '',
+      imported_at: new Date().toISOString()
+    };
+    return this.normalizeVaultReference({ ...base, ...overrides });
+  }
+
+  vaultReferenceDisplayName(ref) {
+    const normalized = this.normalizeVaultReference(ref);
+    if (!normalized) return '';
+    const record = normalized.record_label || 'Vault entry';
+    const vault = normalized.vault_name || 'Private vault';
+    return `${record} · ${vault}`;
+  }
+
+  renderVaultReferenceBadge(ref) {
+    const normalized = this.normalizeVaultReference(ref);
+    if (!normalized) return '';
+    const label = this.vaultReferenceDisplayName(normalized);
+    return `
+      <span class="workspace-detail-vault-reference-badge" title="${this.escapeHtml(label)}">Private Vault Reference</span>
+      <span class="workspace-detail-vault-reference-label">${this.escapeHtml(label)}</span>
+    `;
+  }
+
+  vaultReferenceNotes(ref) {
+    const normalized = this.normalizeVaultReference(ref);
+    if (!normalized) return '';
+    return `Private Vault Reference: ${this.vaultReferenceDisplayName(normalized)}`;
+  }
+
   extractNoteContentFromVaultRecord(record) {
     if (!record || !record.payload || typeof record.payload !== 'object') {
-      return '';
+      return { content: '', payloadKey: '' };
     }
     const payload = record.payload;
-    if (typeof payload.note === 'string' && payload.note.trim()) {
-      return payload.note;
-    }
-    if (typeof payload.content === 'string' && payload.content.trim()) {
-      return payload.content;
-    }
-    if (typeof payload.text === 'string' && payload.text.trim()) {
-      return payload.text;
+    for (const key of ['note', 'content', 'text', 'body', 'value']) {
+      if (typeof payload[key] === 'string' && payload[key].trim()) {
+        return { content: payload[key], payloadKey: key };
+      }
     }
     try {
-      return '```json\n' + JSON.stringify(payload, null, 2) + '\n```';
+      return { content: '```json\n' + JSON.stringify(payload, null, 2) + '\n```', payloadKey: '' };
     } catch (_) {
-      return '';
+      return { content: '', payloadKey: '' };
     }
   }
 
@@ -1166,21 +1346,28 @@ export class WorkspaceDetailPage {
 
     if (!record.payloadRevealed) {
       if (window.Toast) {
-        window.Toast.warning(`Reveal "${record.recordLabel || 'this entry'}" first so its note content can be copied.`);
+        window.Toast.warning(
+          `Reveal "${record.recordLabel || 'this entry'}" first so its note content can be copied.`
+        );
       }
       return;
     }
 
-    const content = this.extractNoteContentFromVaultRecord(record);
-    if (!content) {
+    const extracted = this.extractNoteContentFromVaultRecord(record);
+    if (!extracted.content) {
       if (window.Toast) {
-        window.Toast.warning(`"${record.recordLabel || 'This entry'}" has no readable note content to copy.`);
+        window.Toast.warning(
+          `"${record.recordLabel || 'This entry'}" has no readable note content to copy.`
+        );
       }
       return;
     }
 
     const title = record.recordLabel || 'Vault note';
-    const ok = await this.createNote(title, content);
+    const vaultReference = this.buildVaultReferenceFromRecord(record, 'note', {
+      payload_key: extracted.payloadKey
+    });
+    const ok = await this.createNote(title, extracted.content, null, { vaultReference });
     if (!ok) {
       return;
     }
@@ -1202,12 +1389,18 @@ export class WorkspaceDetailPage {
     let succeeded = 0;
     for (const attachment of record.attachments) {
       try {
-        await this.attachVaultAttachmentToFiles({
-          ...attachment,
-          recordLabel: record.recordLabel,
-          recordId: record.recordId,
-          vaultId: record.vaultId
-        }, { silent: true });
+        await this.attachVaultAttachmentToFiles(
+          {
+            ...attachment,
+            attachmentId: attachment.attachmentId || attachment.id,
+            recordLabel: record.recordLabel,
+            recordId: record.recordId,
+            recordType: record.recordType,
+            vaultId: record.vaultId,
+            vaultName: record.vaultName
+          },
+          { silent: true }
+        );
         succeeded += 1;
       } catch (error) {
         console.error('Failed to attach vault record attachment:', error);
@@ -1215,9 +1408,11 @@ export class WorkspaceDetailPage {
     }
 
     if (succeeded > 0 && window.Toast) {
-      window.Toast.success(succeeded === 1
-        ? `Added 1 file from "${record.recordLabel}"`
-        : `Added ${succeeded} files from "${record.recordLabel}"`);
+      window.Toast.success(
+        succeeded === 1
+          ? `Added 1 file from "${record.recordLabel}"`
+          : `Added ${succeeded} files from "${record.recordLabel}"`
+      );
     } else if (succeeded === 0 && window.Toast) {
       window.Toast.error('Failed to attach files from the vault entry');
     }
@@ -1241,14 +1436,21 @@ export class WorkspaceDetailPage {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('workspace_id', this.workspaceId);
-      if (item.recordLabel) {
+      const vaultReference = this.buildVaultReferenceFromItem(item, 'file');
+      if (vaultReference) {
+        formData.append('vault_reference', JSON.stringify(vaultReference));
+        formData.append('notes', this.vaultReferenceNotes(vaultReference));
+      } else if (item.recordLabel) {
         formData.append('notes', `From vault entry: ${item.recordLabel}`);
       }
 
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
-        method: 'POST',
-        body: formData
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`Failed to add ${item.name || 'vault file'} to the workspace`);
@@ -1289,7 +1491,9 @@ export class WorkspaceDetailPage {
 
   async uploadSelectedFileModalItems() {
     const { submitBtn, titleInput, notesInput } = this.fileModalElements;
-    const items = Array.isArray(this.fileModalState.selectedItems) ? this.fileModalState.selectedItems : [];
+    const items = Array.isArray(this.fileModalState.selectedItems)
+      ? this.fileModalState.selectedItems
+      : [];
 
     if (!items.length) {
       return;
@@ -1305,9 +1509,8 @@ export class WorkspaceDetailPage {
 
     try {
       for (const item of items) {
-        const file = item.source === 'vault'
-          ? this.buildWorkspaceFileFromVaultAttachment(item)
-          : item.file;
+        const file =
+          item.source === 'vault' ? this.buildWorkspaceFileFromVaultAttachment(item) : item.file;
 
         if (!file) {
           throw new Error(`Missing file data for ${item.name || 'selected item'}`);
@@ -1317,12 +1520,22 @@ export class WorkspaceDetailPage {
         formData.append('file', file);
         formData.append('workspace_id', this.workspaceId);
         if (title) formData.append('title', title);
-        if (notes) formData.append('notes', notes);
+        const vaultReference =
+          item.source === 'vault' ? this.buildVaultReferenceFromItem(item, 'file') : null;
+        if (vaultReference) {
+          formData.append('vault_reference', JSON.stringify(vaultReference));
+          formData.append('notes', notes || this.vaultReferenceNotes(vaultReference));
+        } else if (notes) {
+          formData.append('notes', notes);
+        }
 
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
-          method: 'POST',
-          body: formData
-        });
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`,
+          {
+            method: 'POST',
+            body: formData
+          }
+        );
 
         if (!response.ok) {
           throw new Error(`Failed to add ${item.name || 'file'} to the workspace`);
@@ -1330,11 +1543,16 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) {
-        window.Toast.success(items.length === 1 ? 'File added to workspace' : 'Files added to workspace');
+        window.Toast.success(
+          items.length === 1 ? 'File added to workspace' : 'Files added to workspace'
+        );
       }
       await this.loadFiles();
 
-      const modal = typeof bootstrap !== 'undefined' ? bootstrap.Modal.getInstance(this.fileModalElements.modal) : null;
+      const modal =
+        typeof bootstrap !== 'undefined'
+          ? bootstrap.Modal.getInstance(this.fileModalElements.modal)
+          : null;
       modal?.hide();
     } catch (error) {
       console.error('Workspace file modal upload failed:', error);
@@ -1344,7 +1562,8 @@ export class WorkspaceDetailPage {
     } finally {
       if (submitBtn) {
         submitBtn.disabled = this.fileModalState.selectedItems.length === 0;
-        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/></svg> Add to Workspace';
+        submitBtn.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/></svg> Add to Workspace';
       }
     }
   }
@@ -1461,8 +1680,12 @@ export class WorkspaceDetailPage {
       taskResultBreakdown: document.getElementById('workspace-detail-task-result-breakdown'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
       taskResultNextSteps: document.getElementById('workspace-detail-task-result-next-steps'),
-      taskResultNextStepsCopy: document.getElementById('workspace-detail-task-result-next-steps-copy'),
-      taskResultNextStepsActions: document.getElementById('workspace-detail-task-result-next-steps-actions'),
+      taskResultNextStepsCopy: document.getElementById(
+        'workspace-detail-task-result-next-steps-copy'
+      ),
+      taskResultNextStepsActions: document.getElementById(
+        'workspace-detail-task-result-next-steps-actions'
+      ),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
       taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
       taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
@@ -1471,8 +1694,12 @@ export class WorkspaceDetailPage {
       taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
       taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
       taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
-      taskExecutionNextStepBtn: document.getElementById('workspace-detail-task-execution-next-step'),
-      taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
+      taskExecutionNextStepBtn: document.getElementById(
+        'workspace-detail-task-execution-next-step'
+      ),
+      taskExecutionViewResultBtn: document.getElementById(
+        'workspace-detail-task-execution-view-result'
+      ),
       taskConfirmModal: document.getElementById('workspace-detail-task-confirm-modal'),
       taskConfirmEyebrow: document.getElementById('workspace-detail-task-confirm-eyebrow'),
       taskConfirmTitle: document.getElementById('workspace-detail-task-confirm-title'),
@@ -1481,7 +1708,9 @@ export class WorkspaceDetailPage {
       taskConfirmDetails: document.getElementById('workspace-detail-task-confirm-details'),
       taskConfirmSequence: document.getElementById('workspace-detail-task-confirm-sequence'),
       taskConfirmStepMode: document.getElementById('workspace-detail-task-confirm-step-mode'),
-      taskConfirmStepModeInput: document.getElementById('workspace-detail-task-confirm-step-mode-input'),
+      taskConfirmStepModeInput: document.getElementById(
+        'workspace-detail-task-confirm-step-mode-input'
+      ),
       taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
@@ -1493,7 +1722,9 @@ export class WorkspaceDetailPage {
       taskAssistAgentName: document.getElementById('workspace-detail-task-assist-agent-name'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
-      taskAssistContextScroll: document.getElementById('workspace-detail-task-assist-context-scroll'),
+      taskAssistContextScroll: document.getElementById(
+        'workspace-detail-task-assist-context-scroll'
+      ),
       taskAssistAnswerScroll: document.getElementById('workspace-detail-task-assist-answer-scroll'),
       taskAssistSummaryWrap: document.getElementById('workspace-detail-task-assist-summary-wrap'),
       taskAssistSummaryKnown: document.getElementById('workspace-detail-task-assist-summary-known'),
@@ -1504,19 +1735,35 @@ export class WorkspaceDetailPage {
       taskAssistFormWrap: document.getElementById('workspace-detail-task-assist-form-wrap'),
       taskAssistFormSummary: document.getElementById('workspace-detail-task-assist-form-summary'),
       taskAssistFormFields: document.getElementById('workspace-detail-task-assist-form-fields'),
-      taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
-      taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
+      taskAssistRecommendationWrap: document.getElementById(
+        'workspace-detail-task-assist-recommendation-wrap'
+      ),
+      taskAssistRecommendation: document.getElementById(
+        'workspace-detail-task-assist-recommendation'
+      ),
       taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
-      taskAssistChoiceSummary: document.getElementById('workspace-detail-task-assist-choice-summary'),
+      taskAssistChoiceSummary: document.getElementById(
+        'workspace-detail-task-assist-choice-summary'
+      ),
       taskAssistChoiceList: document.getElementById('workspace-detail-task-assist-choice-list'),
-      taskAssistSpecialistWrap: document.getElementById('workspace-detail-task-assist-specialist-wrap'),
-      taskAssistSpecialistCopy: document.getElementById('workspace-detail-task-assist-specialist-copy'),
-      taskAssistSpecialistActionBtn: document.getElementById('workspace-detail-task-assist-specialist-action'),
+      taskAssistSpecialistWrap: document.getElementById(
+        'workspace-detail-task-assist-specialist-wrap'
+      ),
+      taskAssistSpecialistCopy: document.getElementById(
+        'workspace-detail-task-assist-specialist-copy'
+      ),
+      taskAssistSpecialistActionBtn: document.getElementById(
+        'workspace-detail-task-assist-specialist-action'
+      ),
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
-      taskAssistResponsePreview: document.getElementById('workspace-detail-task-assist-response-preview'),
-      taskAssistResponseToggle: document.getElementById('workspace-detail-task-assist-response-toggle'),
+      taskAssistResponsePreview: document.getElementById(
+        'workspace-detail-task-assist-response-preview'
+      ),
+      taskAssistResponseToggle: document.getElementById(
+        'workspace-detail-task-assist-response-toggle'
+      ),
       taskAssistResponse: document.getElementById('workspace-detail-task-assist-response'),
       taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
       taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
@@ -1559,7 +1806,9 @@ export class WorkspaceDetailPage {
       mcpEmailActionSearch: document.getElementById('workspace-detail-mcp-email-action-search'),
       mcpEmailActionDraft: document.getElementById('workspace-detail-mcp-email-action-draft'),
       mcpEmailActionSend: document.getElementById('workspace-detail-mcp-email-action-send'),
-      mcpEmailSendConfirmWrap: document.getElementById('workspace-detail-mcp-email-send-confirm-wrap'),
+      mcpEmailSendConfirmWrap: document.getElementById(
+        'workspace-detail-mcp-email-send-confirm-wrap'
+      ),
       mcpEmailSendConfirmInput: document.getElementById('workspace-detail-mcp-email-send-confirm'),
       mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
@@ -1576,12 +1825,20 @@ export class WorkspaceDetailPage {
       settingsAskHandoffInput: document.getElementById('workspace-detail-settings-ask-handoff'),
       settingsPlanningFields: document.getElementById('workspace-detail-settings-planning-fields'),
       settingsPlanningModeInput: document.getElementById('workspace-detail-settings-planning-mode'),
-      settingsClarificationModeInput: document.getElementById('workspace-detail-settings-clarification-mode'),
+      settingsClarificationModeInput: document.getElementById(
+        'workspace-detail-settings-clarification-mode'
+      ),
       settingsTasksDirInput: document.getElementById('workspace-detail-settings-tasks-dir'),
-      settingsExecutionModeInput: document.getElementById('workspace-detail-settings-execution-mode'),
+      settingsExecutionModeInput: document.getElementById(
+        'workspace-detail-settings-execution-mode'
+      ),
       settingsWritePRDInput: document.getElementById('workspace-detail-settings-write-prd'),
-      settingsWriteTaskListInput: document.getElementById('workspace-detail-settings-write-task-list'),
-      settingsRequireBranchInput: document.getElementById('workspace-detail-settings-require-branch'),
+      settingsWriteTaskListInput: document.getElementById(
+        'workspace-detail-settings-write-task-list'
+      ),
+      settingsRequireBranchInput: document.getElementById(
+        'workspace-detail-settings-require-branch'
+      ),
       settingsSaveBtn: document.getElementById('workspace-detail-settings-save'),
       skillsModal: document.getElementById('workspace-detail-skills-modal'),
       skillsForm: document.getElementById('workspace-detail-skills-form'),
@@ -1593,15 +1850,31 @@ export class WorkspaceDetailPage {
       skillTrustedInput: document.getElementById('workspace-detail-skill-trusted'),
       skillPlanningFields: document.getElementById('workspace-detail-skill-planning-fields'),
       skillPlanningModeInput: document.getElementById('workspace-detail-skill-planning-mode'),
-      skillPlanningClarificationModeInput: document.getElementById('workspace-detail-skill-planning-clarification-mode'),
-      skillPlanningTasksDirInput: document.getElementById('workspace-detail-skill-planning-tasks-dir'),
-      skillPlanningDefaultExecutionInput: document.getElementById('workspace-detail-skill-planning-default-execution'),
-      skillPlanningWritePRDInput: document.getElementById('workspace-detail-skill-planning-write-prd'),
-      skillPlanningWriteTaskListInput: document.getElementById('workspace-detail-skill-planning-write-task-list'),
-      skillPlanningSyncTasksInput: document.getElementById('workspace-detail-skill-planning-sync-tasks'),
-      skillPlanningRequireBranchInput: document.getElementById('workspace-detail-skill-planning-require-branch'),
+      skillPlanningClarificationModeInput: document.getElementById(
+        'workspace-detail-skill-planning-clarification-mode'
+      ),
+      skillPlanningTasksDirInput: document.getElementById(
+        'workspace-detail-skill-planning-tasks-dir'
+      ),
+      skillPlanningDefaultExecutionInput: document.getElementById(
+        'workspace-detail-skill-planning-default-execution'
+      ),
+      skillPlanningWritePRDInput: document.getElementById(
+        'workspace-detail-skill-planning-write-prd'
+      ),
+      skillPlanningWriteTaskListInput: document.getElementById(
+        'workspace-detail-skill-planning-write-task-list'
+      ),
+      skillPlanningSyncTasksInput: document.getElementById(
+        'workspace-detail-skill-planning-sync-tasks'
+      ),
+      skillPlanningRequireBranchInput: document.getElementById(
+        'workspace-detail-skill-planning-require-branch'
+      ),
       skillAgentOptions: document.getElementById('workspace-detail-skill-agent-options'),
-      skillAgentAccessSummary: document.getElementById('workspace-detail-skill-agent-access-summary'),
+      skillAgentAccessSummary: document.getElementById(
+        'workspace-detail-skill-agent-access-summary'
+      ),
       skillSubmitBtn: document.getElementById('workspace-detail-skills-submit'),
 
       // Directory explorer modal
@@ -1609,7 +1882,9 @@ export class WorkspaceDetailPage {
       directoryExplorerTitle: document.getElementById('workspace-directory-explorer-title'),
       directoryExplorerSubtitle: document.getElementById('workspace-directory-explorer-subtitle'),
       directoryExplorerSummary: document.getElementById('workspace-directory-explorer-summary'),
-      directoryExplorerBreadcrumb: document.getElementById('workspace-directory-explorer-breadcrumb'),
+      directoryExplorerBreadcrumb: document.getElementById(
+        'workspace-directory-explorer-breadcrumb'
+      ),
       directoryExplorerSearch: document.getElementById('workspace-directory-explorer-search'),
       directoryExplorerSortBtn: document.getElementById('workspace-directory-explorer-sort'),
       directoryExplorerRefreshBtn: document.getElementById('workspace-directory-explorer-refresh'),
@@ -1624,7 +1899,7 @@ export class WorkspaceDetailPage {
   bindEvents() {
     // Quick input
     this.elements.smartSubmit?.addEventListener('click', () => this.handleQuickInput());
-    this.elements.smartInput?.addEventListener('keypress', (e) => {
+    this.elements.smartInput?.addEventListener('keypress', e => {
       if (e.key === 'Enter') this.handleQuickInput();
     });
 
@@ -1652,17 +1927,21 @@ export class WorkspaceDetailPage {
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
 
     // Directory buttons
-    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal(this.elements.addDirectoryBtn));
+    this.elements.addDirectoryBtn?.addEventListener('click', () =>
+      this.showAddDirectoryModal(this.elements.addDirectoryBtn)
+    );
     this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
     this.elements.refreshMcpBtn?.addEventListener('click', async () => {
-      await this.loadAvailableMCPServers(true).catch((error) => {
+      await this.loadAvailableMCPServers(true).catch(error => {
         console.warn('Failed to refresh MCP connector catalog:', error);
       });
       await this.loadWorkspace();
     });
-    this.elements.mcpList?.addEventListener('click', (event) => this.handleWorkspaceMCPListClick(event));
-    this.elements.mcpForm?.addEventListener('submit', (event) => {
+    this.elements.mcpList?.addEventListener('click', event =>
+      this.handleWorkspaceMCPListClick(event)
+    );
+    this.elements.mcpForm?.addEventListener('submit', event => {
       event.preventDefault();
       this.submitWorkspaceMCPModal();
     });
@@ -1674,38 +1953,54 @@ export class WorkspaceDetailPage {
       this.elements.mcpEmailActionSearch,
       this.elements.mcpEmailActionDraft,
       this.elements.mcpEmailActionSend
-    ].forEach((checkbox) => {
+    ].forEach(checkbox => {
       checkbox?.addEventListener('change', () => this.handleWorkspaceMCPEmailActionChange());
     });
-    this.elements.mcpEmailAccountSelect?.addEventListener('change', () => this.updateWorkspaceMCPEmailAccountSummary());
-    this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
-    this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
+    this.elements.mcpEmailAccountSelect?.addEventListener('change', () =>
+      this.updateWorkspaceMCPEmailAccountSummary()
+    );
+    this.elements.mcpAgentOptions?.addEventListener('change', () =>
+      this.updateWorkspaceMCPAgentAccessSummary()
+    );
+    this.elements.mcpModal?.addEventListener('hidden.bs.modal', () =>
+      this.resetWorkspaceMCPModal()
+    );
 
     // Workspace settings
-    this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
+    this.elements.configToggleBtn?.addEventListener('click', () =>
+      this.toggleWorkspaceConfigExpanded()
+    );
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
     this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
     this.elements.uiSmokeTestBtn?.addEventListener('click', () => this.runUISmokeTest());
-    this.elements.intentForm?.addEventListener('submit', (event) => {
+    this.elements.intentForm?.addEventListener('submit', event => {
       event.preventDefault();
       this.saveWorkspaceIntent();
     });
-    this.elements.intentReviewBtn?.addEventListener('click', () => this.reviewWorkspaceIntentSetup());
-    this.elements.intentApplyBtn?.addEventListener('click', () => this.applyWorkspaceIntentReview());
+    this.elements.intentReviewBtn?.addEventListener('click', () =>
+      this.reviewWorkspaceIntentSetup()
+    );
+    this.elements.intentApplyBtn?.addEventListener('click', () =>
+      this.applyWorkspaceIntentReview()
+    );
     [
       this.elements.intentDescriptionInput,
       this.elements.intentSystemsInput,
       this.elements.intentCapabilitiesInput,
       this.elements.intentContextInput
-    ].forEach((input) => {
+    ].forEach(input => {
       input?.addEventListener('input', () => this.clearWorkspaceIntentReview());
     });
-    this.elements.settingsForm?.addEventListener('submit', (event) => {
+    this.elements.settingsForm?.addEventListener('submit', event => {
       event.preventDefault();
       this.saveWorkspaceSettings();
     });
-    this.elements.settingsProfileInput?.addEventListener('change', () => this.handleWorkspaceSettingsProfileChange());
-    this.elements.settingsPresetInput?.addEventListener('change', () => this.handleWorkspaceSettingsPresetChange());
+    this.elements.settingsProfileInput?.addEventListener('change', () =>
+      this.handleWorkspaceSettingsProfileChange()
+    );
+    this.elements.settingsPresetInput?.addEventListener('change', () =>
+      this.handleWorkspaceSettingsPresetChange()
+    );
     [
       this.elements.settingsModeInput,
       this.elements.settingsConfirmationInput,
@@ -1721,26 +2016,34 @@ export class WorkspaceDetailPage {
       this.elements.settingsWritePRDInput,
       this.elements.settingsWriteTaskListInput,
       this.elements.settingsRequireBranchInput
-    ].forEach((input) => {
+    ].forEach(input => {
       input?.addEventListener('change', () => this.handleWorkspaceSettingsFieldChange());
     });
 
     // Skill buttons
     this.elements.addSkillBtn?.addEventListener('click', () => this.openWorkspaceSkillModal());
     this.elements.refreshSkillsBtn?.addEventListener('click', async () => {
-      await this.loadAvailableSkills(true).catch((error) => {
+      await this.loadAvailableSkills(true).catch(error => {
         console.warn('Failed to refresh skill catalog:', error);
       });
       await this.loadWorkspace();
     });
-    this.elements.skillsList?.addEventListener('click', (event) => this.handleWorkspaceSkillListClick(event));
-    this.elements.skillsForm?.addEventListener('submit', (event) => {
+    this.elements.skillsList?.addEventListener('click', event =>
+      this.handleWorkspaceSkillListClick(event)
+    );
+    this.elements.skillsForm?.addEventListener('submit', event => {
       event.preventDefault();
       this.submitWorkspaceSkillModal();
     });
-    this.elements.skillNameSelect?.addEventListener('change', () => this.handleWorkspaceSkillSelectionChange());
-    this.elements.skillAgentOptions?.addEventListener('change', () => this.updateWorkspaceSkillAgentAccessSummary());
-    this.elements.skillsModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceSkillModal());
+    this.elements.skillNameSelect?.addEventListener('change', () =>
+      this.handleWorkspaceSkillSelectionChange()
+    );
+    this.elements.skillAgentOptions?.addEventListener('change', () =>
+      this.updateWorkspaceSkillAgentAccessSummary()
+    );
+    this.elements.skillsModal?.addEventListener('hidden.bs.modal', () =>
+      this.resetWorkspaceSkillModal()
+    );
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
       this.handleWorkspaceSkillSelectionChange();
@@ -1754,7 +2057,9 @@ export class WorkspaceDetailPage {
         this.showTaskResult(this.currentExecutionTaskId, { closeExecutionModal: true });
       }
     });
-    this.elements.taskExecutionNextStepBtn?.addEventListener('click', () => this.advanceCurrentExecutionStep());
+    this.elements.taskExecutionNextStepBtn?.addEventListener('click', () =>
+      this.advanceCurrentExecutionStep()
+    );
     this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-result');
     });
@@ -1770,24 +2075,56 @@ export class WorkspaceDetailPage {
       this.setExecutionNextStepEnabled(false);
       this.renderTaskExecutionBreakdown(null);
     });
-    this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
-    this.elements.taskConfirmConfirmBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(true));
-    this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () => this.handleTaskConfirmHidden());
-    this.elements.taskAssistBackBtn?.addEventListener('click', () => this.closeTaskAssistPage({ replaceRoute: true }));
-    this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
-    this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
-    this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
-    this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
-    this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () => this.handleAssistSpecialistAction());
-    this.elements.taskAssistResponseToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
-    this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    this.elements.taskConfirmCancelBtn?.addEventListener('click', () =>
+      this.handleTaskConfirmChoice(false)
+    );
+    this.elements.taskConfirmConfirmBtn?.addEventListener('click', () =>
+      this.handleTaskConfirmChoice(true)
+    );
+    this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () =>
+      this.handleTaskConfirmHidden()
+    );
+    this.elements.taskAssistBackBtn?.addEventListener('click', () =>
+      this.closeTaskAssistPage({ replaceRoute: true })
+    );
+    this.elements.taskAssistRetryBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('retry')
+    );
+    this.elements.taskAssistContinueBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('continue_with_instruction')
+    );
+    this.elements.taskAssistSwitchBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('switch_agent_retry')
+    );
+    this.elements.taskAssistFailBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('mark_failed')
+    );
+    this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () =>
+      this.handleAssistSpecialistAction()
+    );
+    this.elements.taskAssistResponseToggle?.addEventListener('click', () =>
+      this.toggleAssistResponseExpanded()
+    );
+    this.elements.taskAssistAgent?.addEventListener('change', () =>
+      this.updateAssistSwitchButtonState()
+    );
     window.addEventListener('popstate', () => this.restoreTaskAssistPageFromRoute());
-    this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
+    this.elements.addAgentSubmitBtn?.addEventListener('click', () =>
+      this.addSelectedAgentToWorkspace()
+    );
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
-    this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
-    this.elements.agentModelSelect?.addEventListener('change', () => this.updateAgentModelSelectionSummary());
-    this.elements.agentModelSubmitBtn?.addEventListener('click', () => this.submitAgentModelChange());
-    this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () => this.resetAgentModelModal());
+    this.elements.addAgentModal?.addEventListener('show.bs.modal', () => {
+      this.populateAddAgentOptions();
+    });
+    this.elements.agentModelSelect?.addEventListener('change', () =>
+      this.updateAgentModelSelectionSummary()
+    );
+    this.elements.agentModelSubmitBtn?.addEventListener('click', () =>
+      this.submitAgentModelChange()
+    );
+    this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () =>
+      this.resetAgentModelModal()
+    );
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -1797,65 +2134,101 @@ export class WorkspaceDetailPage {
     console.log('[workspace-detail] EventBus available:', !!window.EventBus);
     if (window.EventBus) {
       console.log('[workspace-detail] Registering EventBus listeners');
-      EventBus.on('task:created', (data) => {
-        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
-          this.loadTasks();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'task:created',
+        data => {
+          if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+            this.loadTasks();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('task:updated', (data) => {
-        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
-          this.loadTasks();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'task:updated',
+        data => {
+          if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+            this.loadTasks();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('session:created', (data) => {
-        if (!data?.folderId || data.folderId === this.workspaceId) {
-          this.loadSessions();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'session:created',
+        data => {
+          if (!data?.folderId || data.folderId === this.workspaceId) {
+            this.loadSessions();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('note:created', (data) => {
-        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
-          this.loadNotes();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'note:created',
+        data => {
+          if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+            this.loadNotes();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('note:updated', (data) => {
-        console.log('[workspace-detail] note:updated received', data?.workspaceId, 'this.workspaceId:', this.workspaceId);
-        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
-          console.log('[workspace-detail] calling loadNotes');
-          this.loadNotes();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'note:updated',
+        data => {
+          console.log(
+            '[workspace-detail] note:updated received',
+            data?.workspaceId,
+            'this.workspaceId:',
+            this.workspaceId
+          );
+          if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+            console.log('[workspace-detail] calling loadNotes');
+            this.loadNotes();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('workspace:files:updated', (data) => {
-        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
-          this.loadFiles();
-        }
-      }, 'workspaceDetail');
+      EventBus.on(
+        'workspace:files:updated',
+        data => {
+          if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+            this.loadFiles();
+          }
+        },
+        'workspaceDetail'
+      );
 
-      EventBus.on('agent:created', async () => {
-        await this.loadAgentCatalog(true);
-        await this.populateAddAgentOptions();
-      }, 'workspaceDetail');
+      EventBus.on(
+        'agent:created',
+        async () => {
+          await this.loadAgentCatalog(true);
+          await this.populateAddAgentOptions();
+        },
+        'workspaceDetail'
+      );
     }
   }
 
   bindDirectoryExplorerEvents() {
-    this.elements.directoryExplorerRefreshBtn?.addEventListener('click', () => this.loadDirectoryExplorerFiles({ force: true }));
+    this.elements.directoryExplorerRefreshBtn?.addEventListener('click', () =>
+      this.loadDirectoryExplorerFiles({ force: true })
+    );
 
     this.elements.directoryExplorerSortBtn?.addEventListener('click', () => {
-      this.directoryExplorer.sortDirection = this.directoryExplorer.sortDirection === 'asc' ? 'desc' : 'asc';
+      this.directoryExplorer.sortDirection =
+        this.directoryExplorer.sortDirection === 'asc' ? 'desc' : 'asc';
       this.renderDirectoryExplorer();
     });
 
-    this.elements.directoryExplorerSearch?.addEventListener('input', (event) => {
+    this.elements.directoryExplorerSearch?.addEventListener('input', event => {
       this.directoryExplorer.searchQuery = (event.target.value || '').trim();
       this.renderDirectoryExplorer();
     });
 
-    this.elements.directoryExplorerTree?.addEventListener('click', (event) => {
+    this.elements.directoryExplorerTree?.addEventListener('click', event => {
       const toggleButton = event.target.closest('[data-action="toggle-folder"]');
       if (toggleButton) {
         const path = this.decodeDataPath(toggleButton.dataset.path);
@@ -1871,7 +2244,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    this.elements.directoryExplorerTree?.addEventListener('keydown', (event) => {
+    this.elements.directoryExplorerTree?.addEventListener('keydown', event => {
       const nodeButton = event.target.closest('[data-action="select-node"]');
       if (!nodeButton) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -1889,7 +2262,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    this.elements.directoryExplorerPreview?.addEventListener('click', (event) => {
+    this.elements.directoryExplorerPreview?.addEventListener('click', event => {
       const entryButton = event.target.closest('[data-action="select-node"]');
       if (!entryButton) return;
       const path = this.decodeDataPath(entryButton.dataset.path);
@@ -1897,7 +2270,7 @@ export class WorkspaceDetailPage {
       this.selectDirectoryNode(path, type, { autoExpand: true });
     });
 
-    this.elements.directoryExplorerBreadcrumb?.addEventListener('click', (event) => {
+    this.elements.directoryExplorerBreadcrumb?.addEventListener('click', event => {
       const crumb = event.target.closest('[data-action="breadcrumb"]');
       if (!crumb) return;
       const path = this.decodeDataPath(crumb.dataset.path);
@@ -1944,9 +2317,10 @@ export class WorkspaceDetailPage {
 
     const result = await response.json().catch(() => ({}));
     if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
-      const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
-        ? result.conflict.suggested_slug.trim()
-        : '';
+      const suggestedSlug =
+        typeof result.conflict.suggested_slug === 'string'
+          ? result.conflict.suggested_slug.trim()
+          : '';
       if (suggestedSlug && window.confirm(buildWorkspaceSlugConflictMessage(result.conflict))) {
         return this.renameWorkspace(newName, suggestedSlug);
       }
@@ -2001,7 +2375,7 @@ export class WorkspaceDetailPage {
       input.focus();
       input.select();
 
-      const finishEdit = async (save) => {
+      const finishEdit = async save => {
         const newValue = input.value.trim();
         input.remove();
         element.style.display = originalDisplay || '';
@@ -2032,9 +2406,10 @@ export class WorkspaceDetailPage {
           } else if (this.workspace) {
             this.workspace[field] = newValue;
             if (field === 'description') {
-              this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
-                ? this.workspace.shared_data
-                : {};
+              this.workspace.shared_data =
+                this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+                  ? this.workspace.shared_data
+                  : {};
               this.workspace.shared_data.workspace_bootstrap = {
                 ...(this.workspace.shared_data.workspace_bootstrap || {}),
                 goal: newValue
@@ -2062,12 +2437,13 @@ export class WorkspaceDetailPage {
           }
         } catch (err) {
           console.error(`Failed to update ${field}:`, err);
-          if (!err?.cancelled && window.Toast) window.Toast.error(err.message || `Failed to update ${field}`);
+          if (!err?.cancelled && window.Toast)
+            window.Toast.error(err.message || `Failed to update ${field}`);
         }
       };
 
       input.addEventListener('blur', () => finishEdit(true));
-      input.addEventListener('keydown', (evt) => {
+      input.addEventListener('keydown', evt => {
         if (evt.key === 'Enter' && !isMultiline) {
           evt.preventDefault();
           input.blur();
@@ -2083,7 +2459,7 @@ export class WorkspaceDetailPage {
 
     // Add click handler to edit button
     if (editBtn) {
-      editBtn.addEventListener('click', (e) => {
+      editBtn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
         startEdit();
@@ -2096,11 +2472,13 @@ export class WorkspaceDetailPage {
    */
   async loadWorkspace() {
     try {
-      const response = await fetch(`/api/orchestration/workspace?id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/workspace?id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
-      await this.loadAvailableSkills().catch((error) => {
+      await this.loadAvailableSkills().catch(error => {
         console.warn('Failed to load skill catalog for workspace detail:', error);
       });
       this.workspaceSettings = this.normalizeWorkspaceSettings(
@@ -2110,11 +2488,16 @@ export class WorkspaceDetailPage {
         this.workspace?.workspace_settings_effective_behavior,
         this.workspaceSettings
       );
-      if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
+      if (
+        window.OriAskRouting &&
+        typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
+      ) {
         window.OriAskRouting.refreshWorkspaceIdentity({
           workspace_id: this.workspaceId,
           page_path: window.location?.pathname || '',
-          surface: window.location?.pathname?.includes('/canvas') ? 'workspace_canvas' : 'workspace_detail',
+          surface: window.location?.pathname?.includes('/canvas')
+            ? 'workspace_canvas'
+            : 'workspace_detail',
           origin: 'ask_ori'
         });
       }
@@ -2196,10 +2579,14 @@ export class WorkspaceDetailPage {
     add(sharedEntryAgentName, { isEntryAgent: true });
     add(this.workspace.entry_agent_name, { isEntryAgent: true });
     if (Array.isArray(this.workspace.agent_instances)) {
-      this.workspace.agent_instances.forEach((instance) => add(instance?.name, { isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint) }));
+      this.workspace.agent_instances.forEach(instance =>
+        add(instance?.name, {
+          isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint)
+        })
+      );
     }
     if (Array.isArray(this.workspace.agents)) {
-      this.workspace.agents.forEach((name) => add(name));
+      this.workspace.agents.forEach(name => add(name));
     }
 
     return Array.from(seen.values());
@@ -2212,10 +2599,11 @@ export class WorkspaceDetailPage {
     if (String(this.workspace.shared_data?.entry_agent_name || '').trim()) return true;
 
     if (Array.isArray(this.workspace.agent_instances)) {
-      return this.workspace.agent_instances.some((instance) => (
-        Boolean(instance?.entry_point || instance?.entryPoint)
-        && String(instance?.name || '').trim()
-      ));
+      return this.workspace.agent_instances.some(
+        instance =>
+          Boolean(instance?.entry_point || instance?.entryPoint) &&
+          String(instance?.name || '').trim()
+      );
     }
 
     return false;
@@ -2232,7 +2620,8 @@ export class WorkspaceDetailPage {
         category: 'agent',
         severity: 'error',
         title: 'Entry agent is missing',
-        description: 'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
+        description:
+          'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
         action: 'entry_agent',
         actionLabel: 'Create Entry Agent',
         agentName: defaults.seedName || 'Workspace Manager',
@@ -2245,24 +2634,29 @@ export class WorkspaceDetailPage {
         category: 'verification',
         severity: 'warning',
         title: 'Agent catalog could not be verified',
-        description: 'The workspace health check could not compare workspace agents against the current runnable agent catalog.',
+        description:
+          'The workspace health check could not compare workspace agents against the current runnable agent catalog.',
         meta: ['Agent verification unavailable']
       });
     } else {
-      references.forEach((reference) => {
+      references.forEach(reference => {
         if (this.getAgentProfile(reference.name)) return;
         const hasSnapshot = this.hasWorkspaceAgentSnapshot(reference.name);
         issues.push({
           category: 'agent',
           severity: hasSnapshot ? 'warning' : 'error',
           title: hasSnapshot
-            ? (reference.isEntryAgent ? 'Entry agent can be restored' : 'Workspace agent can be restored')
-            : (reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing'),
+            ? reference.isEntryAgent
+              ? 'Entry agent can be restored'
+              : 'Workspace agent can be restored'
+            : reference.isEntryAgent
+              ? 'Entry agent is missing'
+              : 'Workspace agent is missing',
           description: hasSnapshot
             ? `"${reference.name}" has a workspace snapshot on disk and will be restored automatically the next time the workspace runs. You can also recreate the agent definition manually.`
-            : (reference.isEntryAgent
+            : reference.isEntryAgent
               ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
-              : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`),
+              : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
           actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
           agentName: reference.name,
@@ -2280,20 +2674,27 @@ export class WorkspaceDetailPage {
         category: 'verification',
         severity: 'warning',
         title: 'Linked files could not be verified',
-        description: 'The workspace health check could not load the current file attachments, so broken file links could not be confirmed.',
+        description:
+          'The workspace health check could not load the current file attachments, so broken file links could not be confirmed.',
         meta: ['File verification unavailable']
       });
     } else if (Array.isArray(this.files)) {
-      this.files.forEach((file) => {
+      this.files.forEach(file => {
         const meta = file?.file_meta && typeof file.file_meta === 'object' ? file.file_meta : null;
         if (!meta) return;
 
-        const title = String(file?.title || meta?.name || 'Untitled File').trim() || 'Untitled File';
-        const hasLinkTarget = [meta.relative_path, meta.original_path, meta.url]
-          .some((value) => String(value || '').trim());
+        const title =
+          String(file?.title || meta?.name || 'Untitled File').trim() || 'Untitled File';
+        const hasLinkTarget = [meta.relative_path, meta.original_path, meta.url].some(value =>
+          String(value || '').trim()
+        );
         const pathLabel = String(meta.relative_path || meta.original_path || meta.url || '').trim();
 
-        if (String(meta.status || '').trim().toLowerCase() === 'missing') {
+        if (
+          String(meta.status || '')
+            .trim()
+            .toLowerCase() === 'missing'
+        ) {
           issues.push({
             category: 'file',
             severity: 'warning',
@@ -2341,10 +2742,10 @@ export class WorkspaceDetailPage {
     }
 
     const issues = this.collectWorkspaceHealthIssues();
-    const errorCount = issues.filter((issue) => issue.severity === 'error').length;
-    const agentIssueCount = issues.filter((issue) => issue.category === 'agent').length;
-    const fileIssueCount = issues.filter((issue) => issue.category === 'file').length;
-    const verificationIssueCount = issues.filter((issue) => issue.category === 'verification').length;
+    const errorCount = issues.filter(issue => issue.severity === 'error').length;
+    const agentIssueCount = issues.filter(issue => issue.category === 'agent').length;
+    const fileIssueCount = issues.filter(issue => issue.category === 'file').length;
+    const verificationIssueCount = issues.filter(issue => issue.category === 'verification').length;
 
     if (issues.length === 0) {
       return {
@@ -2364,7 +2765,9 @@ export class WorkspaceDetailPage {
       parts.push(`${fileIssueCount} linked file issue${fileIssueCount === 1 ? '' : 's'}`);
     }
     if (verificationIssueCount > 0) {
-      parts.push(`${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`);
+      parts.push(
+        `${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`
+      );
     }
     const attentionVerb = issues.length === 1 ? 'needs' : 'need';
 
@@ -2373,9 +2776,15 @@ export class WorkspaceDetailPage {
       badge: errorCount > 0 ? 'Needs Attention' : 'Warnings',
       summary: `${parts.join(' and ')} ${attentionVerb} attention before this workspace is fully reliable.`,
       meta: [
-        agentIssueCount > 0 ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}` : 'Agents: healthy',
-        fileIssueCount > 0 ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}` : 'Files: healthy',
-        verificationIssueCount > 0 ? `Checks: ${verificationIssueCount} unavailable` : 'Checks: complete'
+        agentIssueCount > 0
+          ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}`
+          : 'Agents: healthy',
+        fileIssueCount > 0
+          ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}`
+          : 'Files: healthy',
+        verificationIssueCount > 0
+          ? `Checks: ${verificationIssueCount} unavailable`
+          : 'Checks: complete'
       ],
       issues
     };
@@ -2399,10 +2808,10 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceHealthIssue(issue) {
     const severity = issue?.severity === 'error' ? 'error' : 'warning';
-    const iconPath = severity === 'error'
-      ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'
-      : '<path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2"/>'
-      ;
+    const iconPath =
+      severity === 'error'
+        ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'
+        : '<path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2"/>';
     const meta = Array.isArray(issue?.meta) ? issue.meta.filter(Boolean) : [];
     let actionMarkup = '';
 
@@ -2440,11 +2849,15 @@ export class WorkspaceDetailPage {
         <div>
           <div class="workspace-detail-health-issue-title">${this.escapeHtml(issue?.title || 'Workspace issue')}</div>
           <p class="workspace-detail-health-issue-copy">${this.escapeHtml(issue?.description || '')}</p>
-          ${meta.length > 0 ? `
+          ${
+            meta.length > 0
+              ? `
             <div class="workspace-detail-health-issue-meta">
-              ${meta.map((item) => `<span class="workspace-detail-health-issue-pill">${this.escapeHtml(item)}</span>`).join('')}
+              ${meta.map(item => `<span class="workspace-detail-health-issue-pill">${this.escapeHtml(item)}</span>`).join('')}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
         ${actionMarkup}
       </div>
@@ -2452,7 +2865,13 @@ export class WorkspaceDetailPage {
   }
 
   renderWorkspaceHealth() {
-    if (!this.elements.healthPanel || !this.elements.healthSummary || !this.elements.healthBadge || !this.elements.healthMeta || !this.elements.healthList) {
+    if (
+      !this.elements.healthPanel ||
+      !this.elements.healthSummary ||
+      !this.elements.healthBadge ||
+      !this.elements.healthMeta ||
+      !this.elements.healthList
+    ) {
       return;
     }
 
@@ -2461,24 +2880,31 @@ export class WorkspaceDetailPage {
     this.elements.healthBadge.textContent = health.badge;
     this.elements.healthBadge.className = `workspace-detail-health-badge is-${health.status}`;
     this.elements.healthMeta.innerHTML = Array.isArray(health.meta)
-      ? health.meta.map((item) => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`).join('')
+      ? health.meta
+          .map(item => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`)
+          .join('')
       : '';
 
     if (!Array.isArray(health.issues) || health.issues.length === 0) {
       this.elements.healthList.classList.add('is-empty');
-      this.elements.healthList.innerHTML = health.status === 'healthy'
-        ? this.renderWorkspaceHealthEmptyState()
-        : '<div class="workspace-detail-empty">Checking workspace health...</div>';
+      this.elements.healthList.innerHTML =
+        health.status === 'healthy'
+          ? this.renderWorkspaceHealthEmptyState()
+          : '<div class="workspace-detail-empty">Checking workspace health...</div>';
     } else {
       this.elements.healthList.classList.remove('is-empty');
-      this.elements.healthList.innerHTML = health.issues.map((issue) => this.renderWorkspaceHealthIssue(issue)).join('');
+      this.elements.healthList.innerHTML = health.issues
+        .map(issue => this.renderWorkspaceHealthIssue(issue))
+        .join('');
     }
 
     if (this.elements.healthRefreshBtn) {
       this.elements.healthRefreshBtn.disabled = this.workspaceHealthCheckRunning;
     }
     if (this.elements.healthRefreshLabel) {
-      this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning ? 'Running...' : 'Run Health Check';
+      this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning
+        ? 'Running...'
+        : 'Run Health Check';
     }
     this.renderUISmokeTestResult();
   }
@@ -2488,7 +2914,9 @@ export class WorkspaceDetailPage {
       this.elements.uiSmokeTestBtn.disabled = this.uiSmokeTestRunning;
     }
     if (this.elements.uiSmokeTestLabel) {
-      this.elements.uiSmokeTestLabel.textContent = this.uiSmokeTestRunning ? 'Running...' : 'Run UI Smoke Test';
+      this.elements.uiSmokeTestLabel.textContent = this.uiSmokeTestRunning
+        ? 'Running...'
+        : 'Run UI Smoke Test';
     }
 
     const resultEl = this.elements.uiSmokeTestResult;
@@ -2527,7 +2955,7 @@ export class WorkspaceDetailPage {
         <span class="workspace-detail-ui-smoke-status is-${status}">${this.escapeHtml(status)}</span>
       </div>
       <div class="workspace-detail-ui-smoke-checks">
-        ${checks.map((check) => this.renderUISmokeTestCheck(check)).join('')}
+        ${checks.map(check => this.renderUISmokeTestCheck(check)).join('')}
       </div>
     `;
   }
@@ -2537,10 +2965,9 @@ export class WorkspaceDetailPage {
     const icon = status === 'passed' ? '&#10003;' : '!';
     const statusCode = Number(check?.status_code) || 0;
     const duration = Number(check?.duration_ms) || 0;
-    const meta = [
-      statusCode ? `HTTP ${statusCode}` : '',
-      `${duration}ms`
-    ].filter(Boolean).join(' | ');
+    const meta = [statusCode ? `HTTP ${statusCode}` : '', `${duration}ms`]
+      .filter(Boolean)
+      .join(' | ');
 
     return `
       <div class="workspace-detail-ui-smoke-check is-${status}">
@@ -2604,11 +3031,7 @@ export class WorkspaceDetailPage {
     this.renderWorkspaceHealth();
 
     try {
-      await Promise.all([
-        this.loadWorkspace(),
-        this.loadAgentCatalog(true),
-        this.loadFiles()
-      ]);
+      await Promise.all([this.loadWorkspace(), this.loadAgentCatalog(true), this.loadFiles()]);
     } finally {
       this.workspaceHealthCheckRunning = false;
       this.renderWorkspaceHealth();
@@ -2673,9 +3096,11 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceIntent() {
     const intent = this.getWorkspaceIntentState();
-    if (this.elements.intentDescriptionInput) this.elements.intentDescriptionInput.value = intent.description;
+    if (this.elements.intentDescriptionInput)
+      this.elements.intentDescriptionInput.value = intent.description;
     if (this.elements.intentSystemsInput) this.elements.intentSystemsInput.value = intent.systems;
-    if (this.elements.intentCapabilitiesInput) this.elements.intentCapabilitiesInput.value = intent.capabilities;
+    if (this.elements.intentCapabilitiesInput)
+      this.elements.intentCapabilitiesInput.value = intent.capabilities;
     if (this.elements.intentContextInput) this.elements.intentContextInput.value = intent.context;
     if (this.elements.intentSummary) {
       this.elements.intentSummary.textContent = intent.description
@@ -2687,11 +3112,12 @@ export class WorkspaceDetailPage {
   setWorkspaceIntentStatus(message = '', tone = '') {
     if (!this.elements.intentStatus) return;
     this.elements.intentStatus.textContent = String(message || '').trim();
-    this.elements.intentStatus.style.color = tone === 'error'
-      ? 'var(--danger-color, #ef4444)'
-      : tone === 'success'
-        ? 'var(--success-color, #22c55e)'
-        : 'var(--text-secondary)';
+    this.elements.intentStatus.style.color =
+      tone === 'error'
+        ? 'var(--danger-color, #ef4444)'
+        : tone === 'success'
+          ? 'var(--success-color, #22c55e)'
+          : 'var(--text-secondary)';
   }
 
   setWorkspaceIntentBusy(isBusy, mode = 'save') {
@@ -2707,7 +3133,9 @@ export class WorkspaceDetailPage {
     }
     if (mode === 'apply' && this.elements.intentApplyBtn) {
       this.elements.intentApplyBtn.disabled = Boolean(isBusy) || !this.workspaceIntentReviewPlan;
-      this.elements.intentApplyBtn.textContent = isBusy ? 'Applying Setup...' : 'Apply Recommended Setup';
+      this.elements.intentApplyBtn.textContent = isBusy
+        ? 'Applying Setup...'
+        : 'Apply Recommended Setup';
     }
   }
 
@@ -2730,7 +3158,8 @@ export class WorkspaceDetailPage {
       this.elements.intentReviewPanel.hidden = true;
     }
     if (this.elements.intentReviewSummary) {
-      this.elements.intentReviewSummary.textContent = 'Ori can review this workspace description and propose an updated starter setup.';
+      this.elements.intentReviewSummary.textContent =
+        'Ori can review this workspace description and propose an updated starter setup.';
     }
     if (this.elements.intentReviewResults) {
       this.elements.intentReviewResults.innerHTML = '';
@@ -2742,19 +3171,28 @@ export class WorkspaceDetailPage {
   }
 
   buildWorkspaceIntentReviewCard(item, kind) {
-    const attribute = kind === 'agent'
-      ? 'data-workspace-intent-review-agent'
-      : kind === 'mcp'
-        ? 'data-workspace-intent-review-mcp'
-        : 'data-workspace-intent-review-skill';
-    const label = kind === 'mcp'
-      ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Bind' : 'Bind')
-      : kind === 'skill'
-        ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Attach' : 'Attach')
-        : (item.action === 'create' ? 'Create' : 'Invite');
-    const secondaryChipClass = item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
-      ? 'source'
-      : 'status';
+    const attribute =
+      kind === 'agent'
+        ? 'data-workspace-intent-review-agent'
+        : kind === 'mcp'
+          ? 'data-workspace-intent-review-mcp'
+          : 'data-workspace-intent-review-skill';
+    const label =
+      kind === 'mcp'
+        ? item.action && item.action.indexOf('install') >= 0
+          ? 'Install + Bind'
+          : 'Bind'
+        : kind === 'skill'
+          ? item.action && item.action.indexOf('install') >= 0
+            ? 'Install + Attach'
+            : 'Attach'
+          : item.action === 'create'
+            ? 'Create'
+            : 'Invite';
+    const secondaryChipClass =
+      item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
+        ? 'source'
+        : 'status';
 
     return `
       <label class="workspace-setup-option modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
@@ -2778,12 +3216,17 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const lead = Array.isArray(plan.agents) ? plan.agents.find((agent) => agent.role === 'lead') : null;
-    const optionalAgents = Array.isArray(plan.agents) ? plan.agents.filter((agent) => agent.role !== 'lead') : [];
+    const lead = Array.isArray(plan.agents)
+      ? plan.agents.find(agent => agent.role === 'lead')
+      : null;
+    const optionalAgents = Array.isArray(plan.agents)
+      ? plan.agents.filter(agent => agent.role !== 'lead')
+      : [];
     const mcps = Array.isArray(plan.mcps) ? plan.mcps : [];
     const skills = Array.isArray(plan.skills) ? plan.skills : [];
 
-    const leadMarkup = lead ? `
+    const leadMarkup = lead
+      ? `
       <div class="modern-card p-3 mb-3" style="border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);">
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
@@ -2794,50 +3237,62 @@ export class WorkspaceDetailPage {
           <span class="workspace-detail-mcp-chip status">${lead.action === 'create' ? 'Create' : 'Invite'}</span>
         </div>
       </div>
-    ` : '';
+    `
+      : '';
 
-    this.elements.intentReviewSummary.textContent = plan.summary || 'Ori reviewed the workspace intent and prepared an updated setup.';
+    this.elements.intentReviewSummary.textContent =
+      plan.summary || 'Ori reviewed the workspace intent and prepared an updated setup.';
     this.elements.intentReviewResults.innerHTML = `
       <div class="row g-3">
         <div class="col-lg-6">
           <div class="workspace-setup-section">
             <div class="workspace-setup-label">Agents</div>
             ${leadMarkup}
-            ${optionalAgents.length > 0
-              ? optionalAgents.map((agent) => this.buildWorkspaceIntentReviewCard(agent, 'agent')).join('')
-              : '<div class="workspace-detail-empty">No additional agents recommended right now.</div>'}
+            ${
+              optionalAgents.length > 0
+                ? optionalAgents
+                    .map(agent => this.buildWorkspaceIntentReviewCard(agent, 'agent'))
+                    .join('')
+                : '<div class="workspace-detail-empty">No additional agents recommended right now.</div>'
+            }
           </div>
         </div>
         <div class="col-lg-6">
           <div class="workspace-setup-section">
             <div class="workspace-setup-label">Workspace Connections</div>
-            ${mcps.length > 0
-              ? mcps.map((item) => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
-              : '<div class="workspace-detail-empty">No MCP recommendations right now.</div>'}
+            ${
+              mcps.length > 0
+                ? mcps.map(item => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
+                : '<div class="workspace-detail-empty">No MCP recommendations right now.</div>'
+            }
           </div>
           <div class="workspace-setup-section mt-3">
             <div class="workspace-setup-label">Workspace Skills</div>
-            ${skills.length > 0
-              ? skills.map((item) => this.buildWorkspaceIntentReviewCard(item, 'skill')).join('')
-              : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'}
+            ${
+              skills.length > 0
+                ? skills.map(item => this.buildWorkspaceIntentReviewCard(item, 'skill')).join('')
+                : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'
+            }
           </div>
         </div>
         <div class="col-12">
           <div class="workspace-detail-settings-summary-card">
             <div class="workspace-detail-settings-summary-title">How Ori Will Apply This</div>
             <ul class="workspace-setup-preview-list mb-0">
-              ${(Array.isArray(plan.notes) ? plan.notes : []).map((note) => `<li>${this.escapeHtml(note)}</li>`).join('')}
+              ${(Array.isArray(plan.notes) ? plan.notes : []).map(note => `<li>${this.escapeHtml(note)}</li>`).join('')}
             </ul>
           </div>
         </div>
       </div>
     `;
     this.elements.intentReviewPanel.hidden = false;
-    this.elements.intentReviewResults.querySelectorAll(
-      'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
-    ).forEach((input) => {
-      input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
-    });
+    this.elements.intentReviewResults
+      .querySelectorAll(
+        'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
+      )
+      .forEach(input => {
+        input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
+      });
     this.setWorkspaceIntentBusy(false, 'apply');
     this.updateWorkspaceIntentReviewSelectionSummary();
   }
@@ -2847,16 +3302,24 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const optionalAgentCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || [])
-      .filter((input) => input.checked)
-      .length;
-    const mcpCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || [])
-      .filter((input) => input.checked)
-      .length;
-    const skillCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || [])
-      .filter((input) => input.checked)
-      .length;
-    const totalAgents = (this.workspaceIntentReviewPlan.agents?.some((agent) => agent.role === 'lead') ? 1 : 0) + optionalAgentCount;
+    const optionalAgentCount = Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-agent]'
+      ) || []
+    ).filter(input => input.checked).length;
+    const mcpCount = Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-mcp]'
+      ) || []
+    ).filter(input => input.checked).length;
+    const skillCount = Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-skill]'
+      ) || []
+    ).filter(input => input.checked).length;
+    const totalAgents =
+      (this.workspaceIntentReviewPlan.agents?.some(agent => agent.role === 'lead') ? 1 : 0) +
+      optionalAgentCount;
 
     const parts = [`${totalAgents} agent${totalAgents === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
@@ -2870,25 +3333,37 @@ export class WorkspaceDetailPage {
       return null;
     }
 
-    const lead = this.workspaceIntentReviewPlan.agents?.find((agent) => agent.role === 'lead');
+    const lead = this.workspaceIntentReviewPlan.agents?.find(agent => agent.role === 'lead');
     const selectedAgents = lead ? [lead] : [];
-    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || []).forEach((input) => {
+    Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-agent]'
+      ) || []
+    ).forEach(input => {
       if (!input.checked) return;
-      const match = this.workspaceIntentReviewPlan.agents.find((agent) => agent.id === input.value);
+      const match = this.workspaceIntentReviewPlan.agents.find(agent => agent.id === input.value);
       if (match) selectedAgents.push(match);
     });
 
     const selectedMCPs = [];
-    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || []).forEach((input) => {
+    Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-mcp]'
+      ) || []
+    ).forEach(input => {
       if (!input.checked) return;
-      const match = this.workspaceIntentReviewPlan.mcps.find((item) => item.id === input.value);
+      const match = this.workspaceIntentReviewPlan.mcps.find(item => item.id === input.value);
       if (match) selectedMCPs.push(match);
     });
 
     const selectedSkills = [];
-    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || []).forEach((input) => {
+    Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-skill]'
+      ) || []
+    ).forEach(input => {
       if (!input.checked) return;
-      const match = this.workspaceIntentReviewPlan.skills.find((item) => item.id === input.value);
+      const match = this.workspaceIntentReviewPlan.skills.find(item => item.id === input.value);
       if (match) selectedSkills.push(match);
     });
 
@@ -2936,9 +3411,10 @@ export class WorkspaceDetailPage {
 
       if (this.workspace) {
         this.workspace.description = payload.description;
-        this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
-          ? this.workspace.shared_data
-          : {};
+        this.workspace.shared_data =
+          this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+            ? this.workspace.shared_data
+            : {};
         this.workspace.shared_data.workspace_bootstrap = payload.workspace_bootstrap;
       }
 
@@ -2965,14 +3441,20 @@ export class WorkspaceDetailPage {
   }
 
   async reviewWorkspaceIntentSetup() {
-    if (!window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.reviewWorkspaceInput !== 'function') {
+    if (
+      !window.WorkspaceBootstrapReview ||
+      typeof window.WorkspaceBootstrapReview.reviewWorkspaceInput !== 'function'
+    ) {
       if (window.Toast) window.Toast.error('Workspace setup review is unavailable');
       return;
     }
 
     const intent = this.getWorkspaceIntentFromForm();
     if (!intent.description) {
-      this.setWorkspaceIntentStatus('Add a workspace description before running setup review.', 'error');
+      this.setWorkspaceIntentStatus(
+        'Add a workspace description before running setup review.',
+        'error'
+      );
       this.elements.intentDescriptionInput?.focus();
       return;
     }
@@ -2984,7 +3466,8 @@ export class WorkspaceDetailPage {
       this.elements.intentReviewPanel.hidden = false;
     }
     if (this.elements.intentReviewSummary) {
-      this.elements.intentReviewSummary.textContent = 'Ori is reviewing the workspace description and preparing a refreshed setup plan...';
+      this.elements.intentReviewSummary.textContent =
+        'Ori is reviewing the workspace description and preparing a refreshed setup plan...';
     }
     if (this.elements.intentReviewResults) {
       this.elements.intentReviewResults.innerHTML = '';
@@ -3018,7 +3501,11 @@ export class WorkspaceDetailPage {
   }
 
   async applyWorkspaceIntentReview() {
-    if (!this.workspaceIntentReviewPlan || !window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.applySelectedPlan !== 'function') {
+    if (
+      !this.workspaceIntentReviewPlan ||
+      !window.WorkspaceBootstrapReview ||
+      typeof window.WorkspaceBootstrapReview.applySelectedPlan !== 'function'
+    ) {
       return;
     }
 
@@ -3033,18 +3520,33 @@ export class WorkspaceDetailPage {
     this.setWorkspaceIntentStatus('Applying recommended setup...');
 
     try {
-      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(this.workspaceId, selectedPlan);
+      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(
+        this.workspaceId,
+        selectedPlan
+      );
       await this.loadWorkspace();
       await Promise.all([this.loadNotes(), this.loadDirectories()]);
 
       const summaryParts = [];
-      if (result.invitedAgents > 0) summaryParts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'} invited`);
-      if (result.boundMCPs > 0) summaryParts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'} bound`);
-      if (result.attachedSkills > 0) summaryParts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`);
+      if (result.invitedAgents > 0)
+        summaryParts.push(
+          `${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'} invited`
+        );
+      if (result.boundMCPs > 0)
+        summaryParts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'} bound`);
+      if (result.attachedSkills > 0)
+        summaryParts.push(
+          `${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`
+        );
       if (result.failures.length > 0) {
-        this.setWorkspaceIntentStatus(`Setup applied with partial success. ${result.failures[0]}`, 'error');
+        this.setWorkspaceIntentStatus(
+          `Setup applied with partial success. ${result.failures[0]}`,
+          'error'
+        );
         if (window.Toast) {
-          window.Toast.warning(`Workspace setup applied with partial success${summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''}.`);
+          window.Toast.warning(
+            `Workspace setup applied with partial success${summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''}.`
+          );
         }
       } else {
         this.setWorkspaceIntentStatus(
@@ -3063,7 +3565,10 @@ export class WorkspaceDetailPage {
       }
     } catch (error) {
       console.error('Failed to apply workspace setup review:', error);
-      this.setWorkspaceIntentStatus(error.message || 'Failed to apply workspace setup review', 'error');
+      this.setWorkspaceIntentStatus(
+        error.message || 'Failed to apply workspace setup review',
+        'error'
+      );
       if (window.Toast) {
         window.Toast.error(error.message || 'Failed to apply workspace setup review');
       }
@@ -3134,14 +3639,15 @@ export class WorkspaceDetailPage {
 
     if (!this.elements.childrenList) return;
 
-    this.elements.childrenList.innerHTML = this.children.map(child => {
-      const name = child.name || 'Unnamed Workspace';
-      const description = child.description || '';
-      const colorAccent = child.color ? `border-left: 3px solid ${child.color};` : '';
-      const childCount = (child.children || []).length;
-      const hasChildren = childCount > 0;
+    this.elements.childrenList.innerHTML = this.children
+      .map(child => {
+        const name = child.name || 'Unnamed Workspace';
+        const description = child.description || '';
+        const colorAccent = child.color ? `border-left: 3px solid ${child.color};` : '';
+        const childCount = (child.children || []).length;
+        const hasChildren = childCount > 0;
 
-      return `
+        return `
         <div class="workspace-detail-child-card"
              data-workspace-id="${child.id}"
              role="button"
@@ -3152,9 +3658,11 @@ export class WorkspaceDetailPage {
              style="${colorAccent}">
           <div class="child-name">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: ${child.color || 'var(--text-secondary)'}; flex-shrink: 0;">
-              ${hasChildren
-                ? '<path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75M12,15C13.5,15 16.5,15.75 16.5,17.25V18H7.5V17.25C7.5,15.75 10.5,15 12,15Z"/>'
-                : '<path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>'}
+              ${
+                hasChildren
+                  ? '<path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75M12,15C13.5,15 16.5,15.75 16.5,17.25V18H7.5V17.25C7.5,15.75 10.5,15 12,15Z"/>'
+                  : '<path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>'
+              }
             </svg>
             <span>${this.escapeHtml(name)}</span>
           </div>
@@ -3165,7 +3673,8 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   /**
@@ -3177,7 +3686,9 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -3286,9 +3797,10 @@ export class WorkspaceDetailPage {
     }
 
     const behaviorLabel = this.escapeHtml(templateRef.templateName || templateRef.templateId);
-    const stepLabel = !isParent && (templateRef.stepName || templateRef.stepId)
-      ? ` · ${this.escapeHtml(templateRef.stepName || templateRef.stepId)}`
-      : '';
+    const stepLabel =
+      !isParent && (templateRef.stepName || templateRef.stepId)
+        ? ` · ${this.escapeHtml(templateRef.stepName || templateRef.stepId)}`
+        : '';
     const safeHref = this.buildBehaviorStudioHref(templateRef.templateId);
     const title = `Open ${templateRef.templateName || templateRef.templateId} in Orchestration Skills`;
 
@@ -3309,7 +3821,7 @@ export class WorkspaceDetailPage {
   collectWorkspaceWorkflowReferences() {
     const workflowRefs = new Map();
 
-    this.tasks.forEach((task) => {
+    this.tasks.forEach(task => {
       const templateRef = this.getTaskTemplateReference(task);
       if (!templateRef) {
         return;
@@ -3334,7 +3846,7 @@ export class WorkspaceDetailPage {
     });
 
     return Array.from(workflowRefs.values())
-      .map((entry) => ({
+      .map(entry => ({
         templateId: entry.templateId,
         templateName: entry.templateName || entry.templateId,
         taskCount: entry.taskIds.size,
@@ -3361,14 +3873,15 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    list.innerHTML = workflows.map((workflow) => {
-      const safeHref = this.buildBehaviorStudioHref(workflow.templateId);
-      const workflowLabel = this.escapeHtml(workflow.templateName || workflow.templateId);
-      const taskLabel = `${workflow.taskCount} task${workflow.taskCount === 1 ? '' : 's'}`;
-      const instanceLabel = `${workflow.workflowCount} run${workflow.workflowCount === 1 ? '' : 's'}`;
-      const title = `Open ${workflow.templateName || workflow.templateId} in Orchestration Skills`;
+    list.innerHTML = workflows
+      .map(workflow => {
+        const safeHref = this.buildBehaviorStudioHref(workflow.templateId);
+        const workflowLabel = this.escapeHtml(workflow.templateName || workflow.templateId);
+        const taskLabel = `${workflow.taskCount} task${workflow.taskCount === 1 ? '' : 's'}`;
+        const instanceLabel = `${workflow.workflowCount} run${workflow.workflowCount === 1 ? '' : 's'}`;
+        const title = `Open ${workflow.templateName || workflow.templateId} in Orchestration Skills`;
 
-      return `
+        return `
         <a href="${safeHref}"
            class="workspace-detail-workflow-link workspace-detail-workflow-chip"
            title="${this.escapeHtml(title)}"
@@ -3385,7 +3898,8 @@ export class WorkspaceDetailPage {
           </svg>
         </a>
       `;
-    }).join('');
+      })
+      .join('');
 
     panel.style.display = '';
   }
@@ -3407,7 +3921,8 @@ export class WorkspaceDetailPage {
     const groups = this.buildAgentGroups();
     if (groups.length === 0) {
       if (this.tasksLoading) {
-        this.elements.agentsList.innerHTML = '<div class="workspace-detail-loading">Loading agents...</div>';
+        this.elements.agentsList.innerHTML =
+          '<div class="workspace-detail-loading">Loading agents...</div>';
       } else {
         this.elements.agentsList.innerHTML = `
           <div class="workspace-detail-empty">
@@ -3421,22 +3936,30 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.agentsList.innerHTML = groups.map((group) => {
-      const taskCount = group.tasks.length;
-      const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
-      const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
-      const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
-      const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
-      const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
-      const encodedAgentName = encodeURIComponent(group.name);
-      const modelLabel = group.isUnassigned ? '' : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
-      const canFlip = !group.isUnassigned;
-      const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
-      const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
-      const removeLabel = group.instanceCount > 1
-        ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
-        : `Remove ${group.name} from workspace`;
-      const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+    this.elements.agentsList.innerHTML = groups
+      .map(group => {
+        const taskCount = group.tasks.length;
+        const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+        const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
+        const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
+        const capabilityBadges = group.isUnassigned
+          ? ''
+          : this.renderAgentCapabilityBadges(group.name);
+        const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
+        const encodedAgentName = encodeURIComponent(group.name);
+        const modelLabel = group.isUnassigned
+          ? ''
+          : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
+        const canFlip = !group.isUnassigned;
+        const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+        const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
+        const removeLabel =
+          group.instanceCount > 1
+            ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+            : `Remove ${group.name} from workspace`;
+        const removeButton =
+          group.isWorkspaceAgent && !group.isUnassigned
+            ? `
         <button type="button"
                 class="workspace-detail-agent-remove-btn"
                 title="${this.escapeHtml(removeLabel)}"
@@ -3446,11 +3969,14 @@ export class WorkspaceDetailPage {
             <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
           </svg>
         </button>
-      ` : '';
-      const instanceChip = group.instanceCount > 1
-        ? `<span class="workspace-detail-agent-instance-tag">${group.instanceCount}x</span>`
-        : '';
-      const frontFlipButton = canFlip ? `
+      `
+            : '';
+        const instanceChip =
+          group.instanceCount > 1
+            ? `<span class="workspace-detail-agent-instance-tag">${group.instanceCount}x</span>`
+            : '';
+        const frontFlipButton = canFlip
+          ? `
         <button type="button"
                 class="workspace-detail-agent-flip-btn"
                 title="Show ${this.escapeHtml(group.name)} info"
@@ -3460,8 +3986,11 @@ export class WorkspaceDetailPage {
             <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
           </svg>
         </button>
-      ` : '';
-      const taskActionButton = group.isUnassigned ? '' : `
+      `
+          : '';
+        const taskActionButton = group.isUnassigned
+          ? ''
+          : `
         <button type="button"
                 class="workspace-detail-agent-section-btn"
                 title="Add task for ${this.escapeHtml(group.name)}"
@@ -3472,12 +4001,10 @@ export class WorkspaceDetailPage {
           </svg>
         </button>
       `;
-      const backFace = canFlip
-        ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
-        : '';
-      const flippedClass = isFlipped ? ' is-flipped' : '';
+        const backFace = canFlip ? this.renderAgentBackFace(group, cardMeta, encodedAgentName) : '';
+        const flippedClass = isFlipped ? ' is-flipped' : '';
 
-      return `
+        return `
       <section class="workspace-detail-agent-card${flippedClass}" data-agent-name="${this.escapeHtml(group.name)}" data-agent-key="${this.escapeHtml(group.key)}">
         <div class="workspace-detail-agent-card-flipper">
           <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-front">
@@ -3511,7 +4038,8 @@ export class WorkspaceDetailPage {
         </div>
       </section>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   renderAgentModelBadge(agentName, profile, encodedAgentName = '') {
@@ -3519,9 +4047,7 @@ export class WorkspaceDetailPage {
     const editable = this.agentAllowsModelEditing(profile);
     const label = model || 'Set model';
     const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${model ? '' : ' is-empty'}`;
-    const title = model
-      ? `Change model for ${agentName}`
-      : `Set model for ${agentName}`;
+    const title = model ? `Change model for ${agentName}` : `Set model for ${agentName}`;
 
     if (!editable) {
       return model ? `<span class="${badgeClass}">${this.escapeHtml(model)}</span>` : '';
@@ -3543,7 +4069,11 @@ export class WorkspaceDetailPage {
 
   agentAllowsModelEditing(profile) {
     if (!profile) return false;
-    return String(profile.source || 'user').trim().toLowerCase() !== 'cli';
+    return (
+      String(profile.source || 'user')
+        .trim()
+        .toLowerCase() !== 'cli'
+    );
   }
 
   renderAgentBackFace(group, cardMeta, encodedAgentName) {
@@ -3558,13 +4088,22 @@ export class WorkspaceDetailPage {
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
 
     const mcpServers = this.getEffectiveWorkspaceMCPServerNames(group.name);
-    const mcpMarkup = mcpServers.length > 0
-      ? mcpServers.map((server) => `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`).join('')
-      : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
-    const removeLabel = group.instanceCount > 1
-      ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
-      : `Remove ${group.name} from workspace`;
-    const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+    const mcpMarkup =
+      mcpServers.length > 0
+        ? mcpServers
+            .map(
+              server =>
+                `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`
+            )
+            .join('')
+        : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
+    const removeLabel =
+      group.instanceCount > 1
+        ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+        : `Remove ${group.name} from workspace`;
+    const removeButton =
+      group.isWorkspaceAgent && !group.isUnassigned
+        ? `
       <button type="button"
               class="workspace-detail-agent-remove-btn"
               title="${this.escapeHtml(removeLabel)}"
@@ -3574,7 +4113,8 @@ export class WorkspaceDetailPage {
           <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
         </svg>
       </button>
-    ` : '';
+    `
+        : '';
 
     return `
       <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
@@ -3625,7 +4165,7 @@ export class WorkspaceDetailPage {
   renderAgentSkillsChips(skillsState, profile = null) {
     const fallbackSkills = [];
     const fallbackSeen = new Set();
-    const addFallbackSkill = (value) => {
+    const addFallbackSkill = value => {
       const name = String(value || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
@@ -3645,7 +4185,10 @@ export class WorkspaceDetailPage {
       if (fallbackSkills.length > 0) {
         return fallbackSkills
           .slice(0, 8)
-          .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`)
+          .map(
+            skill =>
+              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
+          )
           .join('');
       }
       return '<span class="workspace-detail-agent-info-empty">Loading skills...</span>';
@@ -3659,14 +4202,17 @@ export class WorkspaceDetailPage {
       if (fallbackSkills.length > 0) {
         return fallbackSkills
           .slice(0, 8)
-          .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`)
+          .map(
+            skill =>
+              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
+          )
           .join('');
       }
       return '<span class="workspace-detail-agent-info-empty">Failed to load skills.</span>';
     }
 
     const enabledSkills = Array.isArray(skillsState.skills)
-      ? skillsState.skills.filter((skill) => skill.enabled !== false && skill.name)
+      ? skillsState.skills.filter(skill => skill.enabled !== false && skill.name)
       : [];
 
     if (enabledSkills.length === 0) {
@@ -3676,7 +4222,10 @@ export class WorkspaceDetailPage {
     const visibleSkills = enabledSkills.slice(0, 8);
     const overflowCount = enabledSkills.length - visibleSkills.length;
     const chips = visibleSkills
-      .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill.name)}</span>`)
+      .map(
+        skill =>
+          `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill.name)}</span>`
+      )
       .join('');
 
     return overflowCount > 0
@@ -3686,7 +4235,9 @@ export class WorkspaceDetailPage {
 
   getAgentCardElementByKey(agentKey) {
     if (!this.elements?.agentsList || !agentKey) return null;
-    const cards = this.elements.agentsList.querySelectorAll('.workspace-detail-agent-card[data-agent-key]');
+    const cards = this.elements.agentsList.querySelectorAll(
+      '.workspace-detail-agent-card[data-agent-key]'
+    );
     for (const card of cards) {
       if (card.getAttribute('data-agent-key') === agentKey) {
         return card;
@@ -3706,9 +4257,11 @@ export class WorkspaceDetailPage {
     const skillsState = this.getAgentSkillsState(agentName);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
 
-    const skillContainers = card.querySelectorAll('.workspace-detail-agent-skills-list[data-agent-skills-key]');
+    const skillContainers = card.querySelectorAll(
+      '.workspace-detail-agent-skills-list[data-agent-skills-key]'
+    );
     let updated = false;
-    skillContainers.forEach((container) => {
+    skillContainers.forEach(container => {
       if (container.getAttribute('data-agent-skills-key') === key) {
         container.innerHTML = skillsMarkup;
         updated = true;
@@ -3759,7 +4312,11 @@ export class WorkspaceDetailPage {
     if (!normalizedName || !key) return { status: 'idle', skills: [] };
 
     const existing = this.agentSkillsCache.get(key);
-    if (existing?.status === 'loaded' || existing?.status === 'conflict' || existing?.status === 'error') {
+    if (
+      existing?.status === 'loaded' ||
+      existing?.status === 'conflict' ||
+      existing?.status === 'error'
+    ) {
       return existing;
     }
     if (this.agentSkillsPromises.has(key)) {
@@ -3785,14 +4342,20 @@ export class WorkspaceDetailPage {
         const data = await response.json();
         const skills = Array.isArray(data?.skills)
           ? data.skills
-            .map((skill) => ({
-              name: String(skill?.name || '').trim(),
-              description: String(skill?.description || '').trim(),
-              enabled: skill?.enabled !== false,
-              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-              allowedTools: Array.isArray(skill?.allowed_tools) ? skill.allowed_tools.map((value) => String(value || '').trim()).filter(Boolean) : []
-            }))
-            .filter((skill) => skill.name)
+              .map(skill => ({
+                name: String(skill?.name || '').trim(),
+                description: String(skill?.description || '').trim(),
+                enabled: skill?.enabled !== false,
+                requiredMCPServers: Array.isArray(skill?.required_mcp_servers)
+                  ? skill.required_mcp_servers
+                      .map(value => String(value || '').trim())
+                      .filter(Boolean)
+                  : [],
+                allowedTools: Array.isArray(skill?.allowed_tools)
+                  ? skill.allowed_tools.map(value => String(value || '').trim()).filter(Boolean)
+                  : []
+              }))
+              .filter(skill => skill.name)
           : [];
 
         this.agentSkillsCache.set(key, { status: 'loaded', skills });
@@ -3842,15 +4405,18 @@ export class WorkspaceDetailPage {
       return group;
     };
 
-    if (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0) {
-      this.workspace.agent_instances.forEach((instance) => {
+    if (
+      Array.isArray(this.workspace?.agent_instances) &&
+      this.workspace.agent_instances.length > 0
+    ) {
+      this.workspace.agent_instances.forEach(instance => {
         const group = ensureGroup(instance?.name, { isWorkspaceAgent: true, isUnassigned: false });
         if (group) {
           group.instanceCount += 1;
         }
       });
     } else {
-      this.getWorkspaceAgentNames().forEach((name) => {
+      this.getWorkspaceAgentNames().forEach(name => {
         const group = ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
         if (group) {
           group.instanceCount = Math.max(1, group.instanceCount);
@@ -3859,10 +4425,10 @@ export class WorkspaceDetailPage {
     }
 
     const topLevelTasks = Array.isArray(this.tasks)
-      ? this.tasks.filter((task) => !task.parent_task_id)
+      ? this.tasks.filter(task => !task.parent_task_id)
       : [];
 
-    topLevelTasks.forEach((task) => {
+    topLevelTasks.forEach(task => {
       const assigned = String(task?.to || '').trim();
       if (assigned && assigned !== 'unassigned') {
         ensureGroup(assigned)?.tasks.push(task);
@@ -3875,7 +4441,7 @@ export class WorkspaceDetailPage {
     const extraGroups = [];
     const unassignedGroups = [];
 
-    groups.forEach((group) => {
+    groups.forEach(group => {
       if (group.isUnassigned) {
         unassignedGroups.push(group);
       } else if (group.isWorkspaceAgent) {
@@ -3899,17 +4465,23 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
     }
-    return tasks.map((task) => this.renderTaskGroup(task)).join('');
+    return tasks.map(task => this.renderTaskGroup(task)).join('');
   }
 
   getSortedSubtasks(parentId) {
     const normalizedParentId = String(parentId || '').trim();
     if (!normalizedParentId || !Array.isArray(this.tasks)) return [];
     return this.tasks
-      .filter((item) => String(item?.parent_task_id || '').trim() === normalizedParentId)
+      .filter(item => String(item?.parent_task_id || '').trim() === normalizedParentId)
       .sort((a, b) => {
-        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
-        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        const aIndex =
+          Number.isFinite(a?.subtask_index) && a.subtask_index > 0
+            ? a.subtask_index
+            : Number.MAX_SAFE_INTEGER;
+        const bIndex =
+          Number.isFinite(b?.subtask_index) && b.subtask_index > 0
+            ? b.subtask_index
+            : Number.MAX_SAFE_INTEGER;
         if (aIndex !== bIndex) return aIndex - bIndex;
         const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
         const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
@@ -3927,12 +4499,15 @@ export class WorkspaceDetailPage {
     const isCollapsed = this.collapsedWorkflows.has(task.id);
     const groupClasses = ['workspace-detail-workflow-group'];
     if (isCollapsed) groupClasses.push('is-collapsed');
-    const subtaskMarkup = subtasks.map((subtask, index) => {
-      const stepNumber = Number.isFinite(subtask?.subtask_index) && subtask.subtask_index > 0
-        ? subtask.subtask_index
-        : index + 1;
-      return this.renderTaskItem(subtask, { isSubtask: true, stepNumber });
-    }).join('');
+    const subtaskMarkup = subtasks
+      .map((subtask, index) => {
+        const stepNumber =
+          Number.isFinite(subtask?.subtask_index) && subtask.subtask_index > 0
+            ? subtask.subtask_index
+            : index + 1;
+        return this.renderTaskItem(subtask, { isSubtask: true, stepNumber });
+      })
+      .join('');
 
     return `
       <div class="${groupClasses.join(' ')}" data-workflow-id="${this.escapeHtml(task.id)}">
@@ -3965,7 +4540,7 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(sessions) || sessions.length === 0) {
       return '<div class="workspace-detail-empty workspace-detail-empty-inline">No sessions yet.</div>';
     }
-    return sessions.map((session) => this.renderSessionItem(session)).join('');
+    return sessions.map(session => this.renderSessionItem(session)).join('');
   }
 
   getTaskScheduleIndicatorData(task) {
@@ -3975,7 +4550,9 @@ export class WorkspaceDetailPage {
     const scheduleName = typeof task.schedule_name === 'string' ? task.schedule_name.trim() : '';
     const title = scheduleName
       ? `${isActive ? 'Scheduled task' : 'Scheduled task (paused)'}: ${scheduleName}`
-      : (isActive ? 'Scheduled task' : 'Scheduled task (paused)');
+      : isActive
+        ? 'Scheduled task'
+        : 'Scheduled task (paused)';
 
     return { isActive, title };
   }
@@ -3985,7 +4562,8 @@ export class WorkspaceDetailPage {
     if (!scheduleInfo) return '';
 
     const stateClass = scheduleInfo.isActive ? 'active' : 'paused';
-    const variantClass = variant === 'board' ? 'workspace-detail-task-schedule-indicator-board' : '';
+    const variantClass =
+      variant === 'board' ? 'workspace-detail-task-schedule-indicator-board' : '';
     const classes = ['workspace-detail-task-schedule-indicator', stateClass, variantClass]
       .filter(Boolean)
       .join(' ');
@@ -4002,16 +4580,26 @@ export class WorkspaceDetailPage {
   }
 
   renderTaskItem(task, options = {}) {
-    const { isSubtask = false, stepNumber = null, isParent: isParentHint = false, subtaskCount = 0, collapsed = false } = options;
+    const {
+      isSubtask = false,
+      stepNumber = null,
+      isParent: isParentHint = false,
+      subtaskCount = 0,
+      collapsed = false
+    } = options;
     const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
     const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    const subtasks = isSubtask ? [] : this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const subtasks = isSubtask
+      ? []
+      : this.tasks.filter(subtask => subtask.parent_task_id === task.id);
     const isParent = isParentHint || subtasks.length > 0;
     const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
-    const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
-    const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+    const hasUnassignedSubtasks =
+      isParent && subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
+    const hasRunningSubtasks =
+      isParent && subtasks.some(subtask => subtask.status === 'in_progress');
     const canExecute = isParent
       ? parentSubtaskCount > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
       : task.status !== 'in_progress' || awaitingNextStep;
@@ -4019,17 +4607,23 @@ export class WorkspaceDetailPage {
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
     const executeTitle = isParent
-      ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
-        : hasRunningSubtasks ? 'A subtask is already running'
+      ? hasUnassignedSubtasks
+        ? 'Assign agents to all subtasks before executing'
+        : hasRunningSubtasks
+          ? 'A subtask is already running'
           : 'Execute workflow now'
-      : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-        : awaitingNextStep ? 'Execute the next internal step'
-          : task.status === 'in_progress' ? 'Task is already running'
-          : 'Execute task now';
+      : !assignedAgent
+        ? 'Will auto-assign a workspace agent before execution'
+        : awaitingNextStep
+          ? 'Execute the next internal step'
+          : task.status === 'in_progress'
+            ? 'Task is already running'
+            : 'Execute task now';
     const resultTitle = hasResultData
       ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
       : '';
-    const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+    const assistTitle =
+      statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const taskMetaParts = [];
     if (isParent) {
@@ -4037,7 +4631,9 @@ export class WorkspaceDetailPage {
       taskMetaParts.push(`<span class="workspace-detail-workflow-steps">${stepsLabel}</span>`);
     }
     if (assignedAgent) {
-      taskMetaParts.push(`<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`);
+      taskMetaParts.push(
+        `<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`
+      );
     }
     if (scheduleIndicator) {
       taskMetaParts.push(scheduleIndicator);
@@ -4069,13 +4665,16 @@ export class WorkspaceDetailPage {
     const parentBadge = isParent
       ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtasks">Workflow</span>'
       : '';
-    const stepBadge = isSubtask && stepNumber !== null
-      ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
-      : '';
+    const stepBadge =
+      isSubtask && stepNumber !== null
+        ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
+        : '';
 
     return `
       <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
-        ${hasAssistData ? `
+        ${
+          hasAssistData
+            ? `
         <button type="button"
                 class="workspace-detail-item-result"
                 onclick="event.stopPropagation(); window.workspaceDetail?.openTask('${task.id}')"
@@ -4085,7 +4684,9 @@ export class WorkspaceDetailPage {
             <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
           </svg>
         </button>
-        ` : hasResultData ? `
+        `
+            : hasResultData
+              ? `
         <button type="button"
                 class="workspace-detail-item-result"
                 onclick="event.stopPropagation(); window.workspaceDetail?.showTaskResult('${task.id}')"
@@ -4095,7 +4696,9 @@ export class WorkspaceDetailPage {
             <path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/>
           </svg>
         </button>
-        ` : ''}
+        `
+              : ''
+        }
         <button type="button"
                 class="workspace-detail-item-run"
                 onclick="event.stopPropagation(); window.workspaceDetail?.executeTask('${task.id}')"
@@ -4215,12 +4818,15 @@ export class WorkspaceDetailPage {
   buildWorkspaceEntryAgentDefaults(options = {}) {
     const workspaceName = String(this.workspace?.name || '').trim();
     const fallbackAgentName = workspaceName
-      ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
+      ? workspaceName.toLowerCase().endsWith(' manager')
+        ? workspaceName
+        : workspaceName + ' Manager'
       : 'Workspace Manager';
     const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
-    const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
-      + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
-      + 'the request only needs shared context, and break work into tasks for specialists when needed.';
+    const systemPrompt =
+      `You are the workspace manager for "${workspaceName || 'this workspace'}". ` +
+      'Act as the default front door for the workspace: clarify user intent, answer directly when ' +
+      'the request only needs shared context, and break work into tasks for specialists when needed.';
 
     return {
       workspaceId: this.workspaceId,
@@ -4284,25 +4890,33 @@ export class WorkspaceDetailPage {
     await this.populateAddAgentOptions();
 
     if (this.elements.addAgentModal && window.bootstrap) {
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.addAgentModal)
-        : (bootstrap.Modal.getInstance(this.elements.addAgentModal) || new bootstrap.Modal(this.elements.addAgentModal));
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.addAgentModal)
+          : bootstrap.Modal.getInstance(this.elements.addAgentModal) ||
+            new bootstrap.Modal(this.elements.addAgentModal);
       modal.show();
     }
   }
 
   isMissingWorkspaceAgentError(message) {
-    const normalized = String(message || '').trim().toLowerCase();
+    const normalized = String(message || '')
+      .trim()
+      .toLowerCase();
     if (!normalized) return false;
 
-    return normalized.includes('no agent is available in this workspace')
-      || normalized.includes('no agents available in this workspace')
-      || normalized.includes('no agent assigned')
-      || normalized.includes('no agent assigned to step')
-      || normalized.includes('parent task has no agent');
+    return (
+      normalized.includes('no agent is available in this workspace') ||
+      normalized.includes('no agents available in this workspace') ||
+      normalized.includes('no agent assigned') ||
+      normalized.includes('no agent assigned to step') ||
+      normalized.includes('parent task has no agent')
+    );
   }
 
-  async promptAddAgentForExecution(message = 'No agent is available in this workspace. Add one to continue.') {
+  async promptAddAgentForExecution(
+    message = 'No agent is available in this workspace. Add one to continue.'
+  ) {
     if (window.Toast) {
       window.Toast.warning(message);
     }
@@ -4362,9 +4976,9 @@ export class WorkspaceDetailPage {
     this.elements.taskConfirmMeta.innerHTML = '';
 
     items
-      .map((item) => String(item || '').trim())
+      .map(item => String(item || '').trim())
       .filter(Boolean)
-      .forEach((item) => {
+      .forEach(item => {
         const chip = document.createElement('span');
         chip.className = 'workspace-detail-task-confirm-chip';
         chip.textContent = item;
@@ -4375,9 +4989,7 @@ export class WorkspaceDetailPage {
   renderTaskConfirmDetails(items = []) {
     if (!this.elements.taskConfirmDetails) return;
 
-    const normalizedItems = items
-      .map((item) => String(item || '').trim())
-      .filter(Boolean);
+    const normalizedItems = items.map(item => String(item || '').trim()).filter(Boolean);
 
     this.elements.taskConfirmDetails.innerHTML = '';
     if (normalizedItems.length === 0) {
@@ -4409,7 +5021,7 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(items)) return [];
 
     return items
-      .map((item) => {
+      .map(item => {
         if (!item || typeof item !== 'object') return null;
         const title = String(item.title || '').trim();
         if (!title) return null;
@@ -4433,11 +5045,16 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const list = normalizedItems.map((item, index) => {
-      const title = this.escapeHtml(item.title);
-      const detail = item.detail ? `<div class="workspace-detail-task-confirm-sequence-step-detail">${this.escapeHtml(item.detail)}</div>` : '';
-      const tag = item.tag ? `<span class="workspace-detail-task-confirm-sequence-tag">${this.escapeHtml(item.tag)}</span>` : '';
-      return `
+    const list = normalizedItems
+      .map((item, index) => {
+        const title = this.escapeHtml(item.title);
+        const detail = item.detail
+          ? `<div class="workspace-detail-task-confirm-sequence-step-detail">${this.escapeHtml(item.detail)}</div>`
+          : '';
+        const tag = item.tag
+          ? `<span class="workspace-detail-task-confirm-sequence-tag">${this.escapeHtml(item.tag)}</span>`
+          : '';
+        return `
         <div class="workspace-detail-task-confirm-sequence-step">
           <span class="workspace-detail-task-confirm-sequence-index">${index + 1}</span>
           <div class="workspace-detail-task-confirm-sequence-copy">
@@ -4449,7 +5066,8 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     this.elements.taskConfirmSequence.innerHTML = `
       <div class="workspace-detail-task-confirm-sequence-title">Predicted Sequence</div>
@@ -4462,7 +5080,8 @@ export class WorkspaceDetailPage {
     if (!this.elements.taskConfirmModal || !window.bootstrap) return null;
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
       ? bootstrap.Modal.getOrCreateInstance(this.elements.taskConfirmModal)
-      : (bootstrap.Modal.getInstance(this.elements.taskConfirmModal) || new bootstrap.Modal(this.elements.taskConfirmModal));
+      : bootstrap.Modal.getInstance(this.elements.taskConfirmModal) ||
+          new bootstrap.Modal(this.elements.taskConfirmModal);
   }
 
   renderTaskConfirmStepMode(options = {}) {
@@ -4520,11 +5139,16 @@ export class WorkspaceDetailPage {
     const defaultStepThrough = options?.defaultStepThrough === true;
 
     if (!this.elements.taskConfirmModal || !window.bootstrap) {
-      const fallbackSequence = sequenceItems.length > 0
-        ? `Predicted sequence:\n${sequenceItems.map((item, index) => `${index + 1}. ${item.title}${item.detail ? ` - ${item.detail}` : ''}`).join('\n')}`
+      const fallbackSequence =
+        sequenceItems.length > 0
+          ? `Predicted sequence:\n${sequenceItems.map((item, index) => `${index + 1}. ${item.title}${item.detail ? ` - ${item.detail}` : ''}`).join('\n')}`
+          : '';
+      const fallbackMode = allowStepThrough
+        ? `Execution mode: ${defaultStepThrough ? 'step through' : 'automatic'}`
         : '';
-      const fallbackMode = allowStepThrough ? `Execution mode: ${defaultStepThrough ? 'step through' : 'automatic'}` : '';
-      const fallbackText = [message, ...details, fallbackSequence, fallbackMode].filter(Boolean).join('\n\n');
+      const fallbackText = [message, ...details, fallbackSequence, fallbackMode]
+        .filter(Boolean)
+        .join('\n\n');
       return confirm([title, fallbackText].filter(Boolean).join('\n\n'));
     }
 
@@ -4556,7 +5180,7 @@ export class WorkspaceDetailPage {
     this.renderTaskConfirmSequence(sequenceItems);
     this.renderTaskConfirmStepMode({ allowStepThrough, defaultStepThrough });
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       this.pendingTaskConfirm = { resolve, resolved: false };
       const modal = this.getTaskConfirmModalInstance();
       modal?.show();
@@ -4611,14 +5235,19 @@ export class WorkspaceDetailPage {
 
   getTaskAgentSuggestionReasonText(routeData) {
     const reasons = Array.isArray(routeData?.reasons)
-      ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+      ? routeData.reasons
+          .map(reason => String(reason || '').trim())
+          .filter(Boolean)
+          .slice(0, 3)
       : [];
     if (reasons.length === 0) return '';
     return `\n\nWhy this suggestion:\n- ${reasons.join('\n- ')}`;
   }
 
   isLikelyFilesystemIntent(description) {
-    const lower = String(description || '').trim().toLowerCase();
+    const lower = String(description || '')
+      .trim()
+      .toLowerCase();
     if (!lower) return false;
 
     if (this.isReadOnlyFilesystemListingIntent(description)) {
@@ -4640,20 +5269,43 @@ export class WorkspaceDetailPage {
       'filesystem',
       'file management'
     ];
-    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+    if (directPhrases.some(phrase => lower.includes(phrase))) {
       return true;
     }
 
-    const actionSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
-    const nounSignals = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
-    const actionCount = actionSignals.filter((signal) => lower.includes(signal)).length;
-    const nounCount = nounSignals.filter((signal) => lower.includes(signal)).length;
+    const actionSignals = [
+      'move',
+      'copy',
+      'rename',
+      'organize',
+      'organise',
+      'gather',
+      'collect',
+      'sort',
+      'group',
+      'archive'
+    ];
+    const nounSignals = [
+      'file',
+      'files',
+      'folder',
+      'folders',
+      'directory',
+      'directories',
+      'filesystem',
+      'path',
+      'paths'
+    ];
+    const actionCount = actionSignals.filter(signal => lower.includes(signal)).length;
+    const nounCount = nounSignals.filter(signal => lower.includes(signal)).length;
 
     return (actionCount > 0 && nounCount > 0) || nounCount > 1;
   }
 
   isReadOnlyFilesystemListingIntent(description) {
-    const lower = String(description || '').trim().toLowerCase();
+    const lower = String(description || '')
+      .trim()
+      .toLowerCase();
     if (!lower) return false;
 
     const mutationPhrases = [
@@ -4671,14 +5323,35 @@ export class WorkspaceDetailPage {
       'filesystem',
       'file management'
     ];
-    if (mutationPhrases.some((phrase) => lower.includes(phrase))) {
+    if (mutationPhrases.some(phrase => lower.includes(phrase))) {
       return false;
     }
 
-    const mutationSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
-    const mutationNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
-    const actionCount = mutationSignals.filter((signal) => lower.includes(signal)).length;
-    const nounCount = mutationNouns.filter((signal) => lower.includes(signal)).length;
+    const mutationSignals = [
+      'move',
+      'copy',
+      'rename',
+      'organize',
+      'organise',
+      'gather',
+      'collect',
+      'sort',
+      'group',
+      'archive'
+    ];
+    const mutationNouns = [
+      'file',
+      'files',
+      'folder',
+      'folders',
+      'directory',
+      'directories',
+      'filesystem',
+      'path',
+      'paths'
+    ];
+    const actionCount = mutationSignals.filter(signal => lower.includes(signal)).length;
+    const nounCount = mutationNouns.filter(signal => lower.includes(signal)).length;
     if (actionCount > 0 && nounCount > 0) {
       return false;
     }
@@ -4699,14 +5372,22 @@ export class WorkspaceDetailPage {
       'what is in',
       "what's in"
     ];
-    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+    if (directPhrases.some(phrase => lower.includes(phrase))) {
       return true;
     }
 
     const listingSignals = ['list', 'show', 'display'];
-    const listingNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'contents'];
-    const listingVerbCount = listingSignals.filter((signal) => lower.includes(signal)).length;
-    const listingNounCount = listingNouns.filter((signal) => lower.includes(signal)).length;
+    const listingNouns = [
+      'file',
+      'files',
+      'folder',
+      'folders',
+      'directory',
+      'directories',
+      'contents'
+    ];
+    const listingVerbCount = listingSignals.filter(signal => lower.includes(signal)).length;
+    const listingNounCount = listingNouns.filter(signal => lower.includes(signal)).length;
     return listingVerbCount > 0 && listingNounCount > 0;
   }
 
@@ -4723,27 +5404,64 @@ export class WorkspaceDetailPage {
       requirements.push({
         key: TASK_REQUIREMENT_KEYS.FILESYSTEM,
         label: 'File management',
-        reason: 'This task appears to require gathering, moving, renaming, or organizing files and folders.'
+        reason:
+          'This task appears to require gathering, moving, renaming, or organizing files and folders.'
       });
     }
     return requirements;
   }
 
   getTaskRequirementSignals(requirementKey) {
-    switch (String(requirementKey || '').trim().toLowerCase()) {
+    switch (
+      String(requirementKey || '')
+        .trim()
+        .toLowerCase()
+    ) {
       case TASK_REQUIREMENT_KEYS.BROWSER:
         return {
           capabilities: ['browser', 'browser_automation', 'web_search', 'web_fetch'],
-          plugins: ['browser', 'playwright', 'browserbase', 'puppeteer', 'navigate', 'open_url', 'web_fetch', 'web_search'],
+          plugins: [
+            'browser',
+            'playwright',
+            'browserbase',
+            'puppeteer',
+            'navigate',
+            'open_url',
+            'web_fetch',
+            'web_search'
+          ],
           mcp: ['playwright', 'browserbase', 'puppeteer', 'browser'],
           skills: ['browser', 'web', 'playwright', 'navigate', 'website', 'scrape']
         };
       case TASK_REQUIREMENT_KEYS.FILESYSTEM:
         return {
           capabilities: ['file_operations', 'filesystem', 'storage'],
-          plugins: ['filesystem', 'file', 'files', 'folder', 'directory', 'finder', 'shell', 'command', 'os-shell'],
+          plugins: [
+            'filesystem',
+            'file',
+            'files',
+            'folder',
+            'directory',
+            'finder',
+            'shell',
+            'command',
+            'os-shell'
+          ],
           mcp: ['filesystem', 'files', 'file', 'finder', 'directory'],
-          skills: ['file', 'files', 'folder', 'folders', 'directory', 'filesystem', 'finder', 'organize', 'organiser', 'move', 'rename', 'copy']
+          skills: [
+            'file',
+            'files',
+            'folder',
+            'folders',
+            'directory',
+            'filesystem',
+            'finder',
+            'organize',
+            'organiser',
+            'move',
+            'rename',
+            'copy'
+          ]
         };
       default:
         return {
@@ -4756,7 +5474,13 @@ export class WorkspaceDetailPage {
   }
 
   getTaskRequirementSeedDefaults(requirements = []) {
-    const keys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    const keys = new Set(
+      (Array.isArray(requirements) ? requirements : []).map(requirement =>
+        String(requirement?.key || '')
+          .trim()
+          .toLowerCase()
+      )
+    );
     if (keys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
       return { name: 'Folder Organizer', type: 'tool-calling' };
     }
@@ -4768,18 +5492,24 @@ export class WorkspaceDetailPage {
 
   getTaskRequirementMatches(values, signals) {
     const normalizedValues = Array.isArray(values)
-      ? values.map((value) => String(value || '').trim()).filter(Boolean)
+      ? values.map(value => String(value || '').trim()).filter(Boolean)
       : [];
     const normalizedSignals = Array.isArray(signals)
-      ? signals.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+      ? signals
+          .map(value =>
+            String(value || '')
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
       : [];
 
     const matches = [];
     const seen = new Set();
-    normalizedValues.forEach((value) => {
+    normalizedValues.forEach(value => {
       const lower = value.toLowerCase();
       if (!lower) return;
-      if (!normalizedSignals.some((signal) => lower.includes(signal))) return;
+      if (!normalizedSignals.some(signal => lower.includes(signal))) return;
       if (seen.has(lower)) return;
       seen.add(lower);
       matches.push(value);
@@ -4799,7 +5529,11 @@ export class WorkspaceDetailPage {
     ];
 
     return parts
-      .map((value) => String(value || '').trim().toLowerCase())
+      .map(value =>
+        String(value || '')
+          .trim()
+          .toLowerCase()
+      )
       .filter(Boolean)
       .join(' ');
   }
@@ -4807,7 +5541,7 @@ export class WorkspaceDetailPage {
   async getEnabledSkillsForAgent(agentName) {
     const state = await this.loadAgentSkills(agentName, { refreshUI: false });
     if (!state || !Array.isArray(state.skills)) return [];
-    return state.skills.filter((skill) => skill?.enabled !== false && skill?.name);
+    return state.skills.filter(skill => skill?.enabled !== false && skill?.name);
   }
 
   skillSupportsTaskRequirement(skill, requirementKey) {
@@ -4820,7 +5554,7 @@ export class WorkspaceDetailPage {
       return true;
     }
 
-    return signals.skills.some((signal) => skillText.includes(signal));
+    return signals.skills.some(signal => skillText.includes(signal));
   }
 
   getAgentSupportForTaskRequirement(profile, skills, requirement) {
@@ -4832,12 +5566,18 @@ export class WorkspaceDetailPage {
     const reasons = [];
     let score = 0;
 
-    if (requirement.key === TASK_REQUIREMENT_KEYS.BROWSER && this.agentSupportsBrowserAutomation(profile)) {
+    if (
+      requirement.key === TASK_REQUIREMENT_KEYS.BROWSER &&
+      this.agentSupportsBrowserAutomation(profile)
+    ) {
       score += 3;
       reasons.push('has browser automation support');
     }
 
-    const capabilityMatches = this.getTaskRequirementMatches(profile.capabilities, signals.capabilities);
+    const capabilityMatches = this.getTaskRequirementMatches(
+      profile.capabilities,
+      signals.capabilities
+    );
     if (capabilityMatches.length > 0) {
       score += 1;
       reasons.push(`has capability "${capabilityMatches[0]}"`);
@@ -4857,7 +5597,7 @@ export class WorkspaceDetailPage {
     }
 
     const skillMatches = (Array.isArray(skills) ? skills : [])
-      .filter((skill) => this.skillSupportsTaskRequirement(skill, requirement.key))
+      .filter(skill => this.skillSupportsTaskRequirement(skill, requirement.key))
       .slice(0, 2);
     if (skillMatches.length > 0) {
       score += 4;
@@ -4866,8 +5606,10 @@ export class WorkspaceDetailPage {
 
     const dedupedReasons = [];
     const seenReasons = new Set();
-    reasons.forEach((reason) => {
-      const normalized = String(reason || '').trim().toLowerCase();
+    reasons.forEach(reason => {
+      const normalized = String(reason || '')
+        .trim()
+        .toLowerCase();
       if (!normalized || seenReasons.has(normalized)) return;
       seenReasons.add(normalized);
       dedupedReasons.push(reason);
@@ -4898,16 +5640,19 @@ export class WorkspaceDetailPage {
       }
       totalScore += support.score;
       requirementSupport.push({ requirement, support });
-      support.reasons.forEach((reason) => {
-        const key = String(reason || '').trim().toLowerCase();
+      support.reasons.forEach(reason => {
+        const key = String(reason || '')
+          .trim()
+          .toLowerCase();
         if (!key || seenReasons.has(key)) return;
         seenReasons.add(key);
         reasons.push(reason);
       });
     }
 
-    const inWorkspace = this.getWorkspaceAgentNames()
-      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    const inWorkspace = this.getWorkspaceAgentNames().some(
+      name => this.normalizeAgentName(name) === this.normalizeAgentName(agentName)
+    );
     if (inWorkspace) {
       totalScore += 2;
     }
@@ -4931,24 +5676,30 @@ export class WorkspaceDetailPage {
     const workspaceOnly = options?.workspaceOnly === true;
     const candidateNames = workspaceOnly
       ? this.getWorkspaceAgentNames()
-      : Array.from(new Set((this.agentCatalog || []).map((profile) => String(profile?.name || '').trim()).filter(Boolean)));
+      : Array.from(
+          new Set(
+            (this.agentCatalog || [])
+              .map(profile => String(profile?.name || '').trim())
+              .filter(Boolean)
+          )
+        );
 
-    const evaluations = await Promise.all(candidateNames.map(async (name) => {
-      if (this.normalizeAgentName(name) === exclude) return null;
-      return this.evaluateAgentForTaskRequirements(name, requirements);
-    }));
+    const evaluations = await Promise.all(
+      candidateNames.map(async name => {
+        if (this.normalizeAgentName(name) === exclude) return null;
+        return this.evaluateAgentForTaskRequirements(name, requirements);
+      })
+    );
 
-    const ranked = evaluations
-      .filter(Boolean)
-      .sort((left, right) => {
-        if (right.score !== left.score) {
-          return right.score - left.score;
-        }
-        if (left.inWorkspace !== right.inWorkspace) {
-          return left.inWorkspace ? -1 : 1;
-        }
-        return left.agentName.localeCompare(right.agentName, undefined, { sensitivity: 'base' });
-      });
+    const ranked = evaluations.filter(Boolean).sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (left.inWorkspace !== right.inWorkspace) {
+        return left.inWorkspace ? -1 : 1;
+      }
+      return left.agentName.localeCompare(right.agentName, undefined, { sensitivity: 'base' });
+    });
 
     return ranked[0] || null;
   }
@@ -4977,22 +5728,26 @@ export class WorkspaceDetailPage {
           const data = await mcpResult.value.json().catch(() => ({}));
           const servers = Array.isArray(data?.servers) ? data.servers : [];
           catalog.mcpServers = servers
-            .map((server) => ({
+            .map(server => ({
               name: String(server?.name || '').trim()
             }))
-            .filter((server) => server.name);
+            .filter(server => server.name);
         }
 
         if (skillsResult.status === 'fulfilled' && skillsResult.value.ok) {
           const data = await skillsResult.value.json().catch(() => ({}));
           const skills = Array.isArray(data?.skills) ? data.skills : [];
           catalog.skills = skills
-            .map((skill) => ({
+            .map(skill => ({
               name: String(skill?.name || '').trim(),
               description: String(skill?.description || '').trim(),
-              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+              requiredMCPServers: Array.isArray(skill?.required_mcp_servers)
+                ? skill.required_mcp_servers
+                    .map(value => String(value || '').trim())
+                    .filter(Boolean)
+                : []
             }))
-            .filter((skill) => skill.name);
+            .filter(skill => skill.name);
         }
       } catch (error) {
         console.error('Failed to load capability suggestion catalog:', error);
@@ -5007,11 +5762,16 @@ export class WorkspaceDetailPage {
   }
 
   getCapabilitySuggestionsForRequirements(requirements = [], catalog = null) {
-    const sourceCatalog = catalog && typeof catalog === 'object'
-      ? catalog
-      : { mcpServers: [], skills: [] };
+    const sourceCatalog =
+      catalog && typeof catalog === 'object' ? catalog : { mcpServers: [], skills: [] };
     const requirementKeys = Array.isArray(requirements)
-      ? requirements.map((requirement) => String(requirement?.key || '').trim().toLowerCase()).filter(Boolean)
+      ? requirements
+          .map(requirement =>
+            String(requirement?.key || '')
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
       : [];
 
     const matchedMCPServers = [];
@@ -5019,25 +5779,28 @@ export class WorkspaceDetailPage {
     const seenMCPServers = new Set();
     const seenSkills = new Set();
 
-    requirementKeys.forEach((requirementKey) => {
+    requirementKeys.forEach(requirementKey => {
       const signals = this.getTaskRequirementSignals(requirementKey);
 
-      (sourceCatalog.mcpServers || []).forEach((server) => {
+      (sourceCatalog.mcpServers || []).forEach(server => {
         const name = String(server?.name || '').trim();
         const normalized = name.toLowerCase();
         if (!name || seenMCPServers.has(normalized)) return;
-        if (!signals.mcp.some((signal) => normalized.includes(signal))) return;
+        if (!signals.mcp.some(signal => normalized.includes(signal))) return;
         seenMCPServers.add(normalized);
         matchedMCPServers.push(name);
       });
 
-      (sourceCatalog.skills || []).forEach((skill) => {
+      (sourceCatalog.skills || []).forEach(skill => {
         const name = String(skill?.name || '').trim();
         const normalized = name.toLowerCase();
         if (!name || seenSkills.has(normalized)) return;
         const skillText = this.getTaskRequirementSkillText(skill);
-        const requiredMCPServers = Array.isArray(skill?.requiredMCPServers) ? skill.requiredMCPServers : [];
-        const hasRequirementMatch = signals.skills.some((signal) => skillText.includes(signal)) ||
+        const requiredMCPServers = Array.isArray(skill?.requiredMCPServers)
+          ? skill.requiredMCPServers
+          : [];
+        const hasRequirementMatch =
+          signals.skills.some(signal => skillText.includes(signal)) ||
           this.getTaskRequirementMatches(requiredMCPServers, signals.mcp).length > 0;
         if (!hasRequirementMatch) return;
         seenSkills.add(normalized);
@@ -5053,16 +5816,24 @@ export class WorkspaceDetailPage {
 
   buildCapabilityAwareAgentDescription(task, requirements = [], suggestions = {}) {
     const taskLabel = this.getTaskDisplayLabel(task);
-    const details = [
-      `Create an agent that can complete the task "${taskLabel}".`
-    ];
+    const details = [`Create an agent that can complete the task "${taskLabel}".`];
 
-    const requirementKeys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    const requirementKeys = new Set(
+      (Array.isArray(requirements) ? requirements : []).map(requirement =>
+        String(requirement?.key || '')
+          .trim()
+          .toLowerCase()
+      )
+    );
     if (requirementKeys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
-      details.push('It should be able to inspect folders, gather related files, and move or organize them safely.');
+      details.push(
+        'It should be able to inspect folders, gather related files, and move or organize them safely.'
+      );
     }
     if (requirementKeys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
-      details.push('It should be able to open websites and interact with browser pages when needed.');
+      details.push(
+        'It should be able to open websites and interact with browser pages when needed.'
+      );
     }
     if (Array.isArray(suggestions?.mcpServers) && suggestions.mcpServers.length > 0) {
       details.push(`Enable MCP servers such as ${suggestions.mcpServers.join(', ')}.`);
@@ -5093,12 +5864,16 @@ export class WorkspaceDetailPage {
           ? `Assign "${recommendedAgent.agentName}" to this task?`
           : `Add "${recommendedAgent.agentName}" and assign it?`,
         message: alreadyInWorkspace
-          ? `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
-          : `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
+          ? `This task needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
+          : `This task needs ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
         confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
-        metaItems: [taskLabel, recommendedAgent.agentName, alreadyInWorkspace ? 'Capability match' : 'Add to workspace'],
+        metaItems: [
+          taskLabel,
+          recommendedAgent.agentName,
+          alreadyInWorkspace ? 'Capability match' : 'Add to workspace'
+        ],
         details: [
-          ...normalizedRequirements.map((requirement) => requirement.reason),
+          ...normalizedRequirements.map(requirement => requirement.reason),
           ...recommendedAgent.reasons
         ].slice(0, 5),
         sequenceItems: previewSequence
@@ -5116,9 +5891,11 @@ export class WorkspaceDetailPage {
         task.to = recommendedAgent.agentName;
         this.renderTasks();
         if (window.Toast) {
-          window.Toast.success(alreadyInWorkspace
-            ? `Assigned "${recommendedAgent.agentName}" to this task.`
-            : `Added "${recommendedAgent.agentName}" and assigned it to this task.`);
+          window.Toast.success(
+            alreadyInWorkspace
+              ? `Assigned "${recommendedAgent.agentName}" to this task.`
+              : `Added "${recommendedAgent.agentName}" and assigned it to this task.`
+          );
         }
         return { handled: true, agentName: recommendedAgent.agentName };
       } catch (error) {
@@ -5131,20 +5908,27 @@ export class WorkspaceDetailPage {
     }
 
     const catalog = await this.loadCapabilitySuggestionCatalog();
-    const suggestions = this.getCapabilitySuggestionsForRequirements(normalizedRequirements, catalog);
+    const suggestions = this.getCapabilitySuggestionsForRequirements(
+      normalizedRequirements,
+      catalog
+    );
     const defaults = this.getTaskRequirementSeedDefaults(normalizedRequirements);
     const previewSequence = this.getPredictedTaskExecutionSequence(task);
     const createAgent = await this.showTaskConfirmDialog({
       eyebrow: 'Capability Required',
       title: 'Create a capable agent for this task?',
-      message: `No assigned agent advertises ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
+      message: `No assigned agent advertises ${normalizedRequirements.map(requirement => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
       confirmLabel: 'Create Agent',
       cancelLabel: 'Cancel',
       metaItems: [taskLabel, defaults.name, 'Needs MCP or skills'],
       details: [
-        ...normalizedRequirements.map((requirement) => requirement.reason),
-        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
-        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+        ...normalizedRequirements.map(requirement => requirement.reason),
+        suggestions.mcpServers.length > 0
+          ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}`
+          : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0
+          ? `Suggested skills: ${suggestions.skills.join(', ')}`
+          : 'No matching reusable skill is available yet.'
       ],
       sequenceItems: previewSequence
     });
@@ -5155,7 +5939,11 @@ export class WorkspaceDetailPage {
     this.openCreateAgentFlow({
       seedName: defaults.name,
       seedType: defaults.type,
-      autoDescription: this.buildCapabilityAwareAgentDescription(task, normalizedRequirements, suggestions),
+      autoDescription: this.buildCapabilityAwareAgentDescription(
+        task,
+        normalizedRequirements,
+        suggestions
+      ),
       preferAutoConfig: true,
       workspaceId: this.workspaceId,
       taskId: task.id,
@@ -5168,7 +5956,12 @@ export class WorkspaceDetailPage {
   }
 
   async populateAddAgentOptions() {
-    if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
+    if (
+      !this.elements.addAgentSelect ||
+      !this.elements.addAgentSubmitBtn ||
+      !this.elements.addAgentEmpty
+    )
+      return;
 
     if (!Array.isArray(this.agentCatalog) || this.agentCatalog.length === 0) {
       try {
@@ -5177,24 +5970,28 @@ export class WorkspaceDetailPage {
           const data = await response.json();
           const baseAgents = Array.isArray(data?.agents) ? data.agents : [];
           this.agentCatalog = baseAgents
-            .map((agent) => {
+            .map(agent => {
               const name = typeof agent === 'string' ? agent : agent?.name;
               return name ? { name: String(name).trim() } : null;
             })
-            .filter((agent) => agent && agent.name);
-          this.agentIndex = new Map(this.agentCatalog.map((agent) => [this.normalizeAgentName(agent.name), agent]));
+            .filter(agent => agent && agent.name);
+          this.agentIndex = new Map(
+            this.agentCatalog.map(agent => [this.normalizeAgentName(agent.name), agent])
+          );
         }
       } catch (error) {
         console.error('Failed to load fallback agent list:', error);
       }
     }
 
-    const workspaceAgents = new Set(this.getWorkspaceAgentNames().map((name) => this.normalizeAgentName(name)));
+    const workspaceAgents = new Set(
+      this.getWorkspaceAgentNames().map(name => this.normalizeAgentName(name))
+    );
     const allAgents = Array.isArray(this.agentCatalog) ? this.agentCatalog : [];
     const candidates = allAgents
-      .map((agent) => String(agent?.name || '').trim())
+      .map(agent => String(agent?.name || '').trim())
       .filter(Boolean)
-      .filter((name) => !workspaceAgents.has(this.normalizeAgentName(name)));
+      .filter(name => !workspaceAgents.has(this.normalizeAgentName(name)));
 
     if (candidates.length === 0) {
       const hasCatalogAgents = allAgents.length > 0;
@@ -5211,7 +6008,7 @@ export class WorkspaceDetailPage {
     }
 
     this.elements.addAgentSelect.innerHTML = candidates
-      .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
+      .map(name => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
       .join('');
     this.elements.addAgentSelect.disabled = false;
     this.elements.addAgentSubmitBtn.disabled = false;
@@ -5258,10 +6055,7 @@ export class WorkspaceDetailPage {
     }
 
     this.agentOptions = null;
-    await Promise.all([
-      this.loadWorkspace(),
-      this.loadAgentCatalog(true)
-    ]);
+    await Promise.all([this.loadWorkspace(), this.loadAgentCatalog(true)]);
     this.renderAgentGroups();
 
     return normalizedAgentName;
@@ -5278,7 +6072,8 @@ export class WorkspaceDetailPage {
     const originalLabel = submitButton ? submitButton.innerHTML : '';
     if (submitButton) {
       submitButton.disabled = true;
-      submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Adding...';
+      submitButton.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Adding...';
     }
 
     try {
@@ -5299,14 +6094,16 @@ export class WorkspaceDetailPage {
     if (!normalized || !this.workspace) return [];
 
     const instances = Array.isArray(this.workspace.agent_instances)
-      ? this.workspace.agent_instances.filter((instance) => this.normalizeAgentName(instance?.name) === normalized)
+      ? this.workspace.agent_instances.filter(
+          instance => this.normalizeAgentName(instance?.name) === normalized
+        )
       : [];
     if (instances.length > 0) {
       return instances;
     }
 
     const names = Array.isArray(this.workspace.agents) ? this.workspace.agents : [];
-    if (names.some((name) => this.normalizeAgentName(name) === normalized)) {
+    if (names.some(name => this.normalizeAgentName(name) === normalized)) {
       return [{ id: '', name: String(agentName || '').trim(), instance_number: 1, node_id: '' }];
     }
 
@@ -5328,21 +6125,29 @@ export class WorkspaceDetailPage {
     const instances = this.getWorkspaceAgentInstances(normalizedAgentName);
     const instanceCount = instances.length > 0 ? instances.length : 1;
     const taskCount = Array.isArray(this.tasks)
-      ? this.tasks.filter((task) => this.normalizeAgentName(task?.to) === normalizedKey).length
+      ? this.tasks.filter(task => this.normalizeAgentName(task?.to) === normalizedKey).length
       : 0;
     const sessionCount = Array.isArray(this.sessions)
-      ? this.sessions.filter((session) => this.normalizeAgentName(session?.agent_name) === normalizedKey).length
+      ? this.sessions.filter(
+          session => this.normalizeAgentName(session?.agent_name) === normalizedKey
+        ).length
       : 0;
 
     const confirmationLines = [`Remove "${normalizedAgentName}" from this workspace?`];
     if (instanceCount > 1) {
-      confirmationLines.push(`This will remove all ${instanceCount} instances of this agent from the workspace.`);
+      confirmationLines.push(
+        `This will remove all ${instanceCount} instances of this agent from the workspace.`
+      );
     }
     if (taskCount > 0) {
-      confirmationLines.push(`${taskCount} assigned task${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`);
+      confirmationLines.push(
+        `${taskCount} assigned task${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`
+      );
     }
     if (sessionCount > 0) {
-      confirmationLines.push(`${sessionCount} session${sessionCount === 1 ? '' : 's'} will remain in workspace history.`);
+      confirmationLines.push(
+        `${sessionCount} session${sessionCount === 1 ? '' : 's'} will remain in workspace history.`
+      );
     }
 
     if (!window.confirm(confirmationLines.join('\n\n'))) {
@@ -5350,9 +6155,12 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(normalizedAgentName)}`, {
-        method: 'DELETE'
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(normalizedAgentName)}`,
+        {
+          method: 'DELETE'
+        }
+      );
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Failed to remove agent from workspace');
@@ -5362,11 +6170,7 @@ export class WorkspaceDetailPage {
       this.agentSkillsCache.delete(normalizedKey);
       this.agentSkillsPromises.delete(normalizedKey);
 
-      await Promise.all([
-        this.loadWorkspace(),
-        this.loadTasks(),
-        this.loadSessions()
-      ]);
+      await Promise.all([this.loadWorkspace(), this.loadTasks(), this.loadSessions()]);
 
       if (window.Toast) {
         window.Toast.success(
@@ -5386,14 +6190,18 @@ export class WorkspaceDetailPage {
   async suggestAgentSetupForTask(task) {
     if (!task || typeof task !== 'object') return '';
 
-    const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
+    const taskLabel =
+      String(task.description || task.name || task.id || 'this task').trim() || 'this task';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
     const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
       task,
       currentAgent: String(task.to || '').trim()
     });
     if (specialistAction) {
-      const specialistSuggestion = await this.suggestTravelSpecialistSetupForTask(task, specialistAction);
+      const specialistSuggestion = await this.suggestTravelSpecialistSetupForTask(
+        task,
+        specialistAction
+      );
       if (specialistSuggestion.handled) {
         return specialistSuggestion.agentName || '';
       }
@@ -5410,24 +6218,39 @@ export class WorkspaceDetailPage {
     const routeData = await this.fetchTaskAgentSuggestion(task);
     const suggestedAgent = String(routeData?.matched_agent || '').trim();
     const alreadyInWorkspace = suggestedAgent
-      ? this.getWorkspaceAgentNames().some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(suggestedAgent))
+      ? this.getWorkspaceAgentNames().some(
+          name => this.normalizeAgentName(name) === this.normalizeAgentName(suggestedAgent)
+        )
       : false;
 
-    if (suggestedAgent && !this.isSystemAssistantAgentName(suggestedAgent) && routeData?.requires_creation !== true) {
+    if (
+      suggestedAgent &&
+      !this.isSystemAssistantAgentName(suggestedAgent) &&
+      routeData?.requires_creation !== true
+    ) {
       const reasonItems = Array.isArray(routeData?.reasons)
-        ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+        ? routeData.reasons
+            .map(reason => String(reason || '').trim())
+            .filter(Boolean)
+            .slice(0, 3)
         : [];
       const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
         assignedAgent: suggestedAgent
       });
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow: 'Ori Recommendation',
-        title: alreadyInWorkspace ? `Assign "${suggestedAgent}" to this task?` : `Add "${suggestedAgent}" and assign it?`,
+        title: alreadyInWorkspace
+          ? `Assign "${suggestedAgent}" to this task?`
+          : `Add "${suggestedAgent}" and assign it?`,
         message: alreadyInWorkspace
           ? `Ori matched ${taskLabel} to "${suggestedAgent}" and can assign it in one step.`
           : `Ori matched ${taskLabel} to "${suggestedAgent}" and can add it to this workspace before execution.`,
         confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
-        metaItems: [taskLabel, suggestedAgent, alreadyInWorkspace ? 'Ready to assign' : 'Needs workspace add'],
+        metaItems: [
+          taskLabel,
+          suggestedAgent,
+          alreadyInWorkspace ? 'Ready to assign' : 'Needs workspace add'
+        ],
         details: reasonItems,
         sequenceItems: previewSequence
       });
@@ -5444,9 +6267,11 @@ export class WorkspaceDetailPage {
         task.to = suggestedAgent;
         this.renderTasks();
         if (window.Toast) {
-          window.Toast.success(alreadyInWorkspace
-            ? `Assigned "${suggestedAgent}" to this task.`
-            : `Added "${suggestedAgent}" and assigned it to this task.`);
+          window.Toast.success(
+            alreadyInWorkspace
+              ? `Assigned "${suggestedAgent}" to this task.`
+              : `Added "${suggestedAgent}" and assigned it to this task.`
+          );
         }
         return suggestedAgent;
       } catch (error) {
@@ -5459,13 +6284,16 @@ export class WorkspaceDetailPage {
     }
 
     const prefersBrowserAgent = this.isLikelyBrowserAutomationIntent(prompt);
-    const suggestedName = String(routeData?.suggested_agent_name || '').trim() || (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
+    const suggestedName =
+      String(routeData?.suggested_agent_name || '').trim() ||
+      (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
     const suggestedType = String(routeData?.suggested_agent_type || '').trim() || 'tool-calling';
     const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
     if (window.Toast) {
-      const message = routeData?.requires_creation === true
-        ? `Ori suggests creating "${suggestedName}" for this task.`
-        : `No workspace agent matches this task yet. Ori prepared "${suggestedName}" for you.`;
+      const message =
+        routeData?.requires_creation === true
+          ? `Ori suggests creating "${suggestedName}" for this task.`
+          : `No workspace agent matches this task yet. Ori prepared "${suggestedName}" for you.`;
       window.Toast.info(reasonText ? `${message} ${reasonText.replace(/\n+/g, ' ')}` : message);
     }
 
@@ -5490,14 +6318,18 @@ export class WorkspaceDetailPage {
   }
 
   getTaskExecutionMode(task) {
-    const mode = String(task?.execution_mode || '').trim().toLowerCase();
+    const mode = String(task?.execution_mode || '')
+      .trim()
+      .toLowerCase();
     return mode === 'step_through' ? 'step_through' : 'auto';
   }
 
   isTaskAwaitingNextStep(task) {
-    return this.getTaskExecutionMode(task) === 'step_through'
-      && task?.status === 'in_progress'
-      && task?.context?.execution_step_waiting === true;
+    return (
+      this.getTaskExecutionMode(task) === 'step_through' &&
+      task?.status === 'in_progress' &&
+      task?.context?.execution_step_waiting === true
+    );
   }
 
   getTaskStatusPresentation(task) {
@@ -5550,8 +6382,14 @@ export class WorkspaceDetailPage {
 
     if (Array.isArray(subtasks) && subtasks.length > 0) {
       const orderedSubtasks = [...subtasks].sort((a, b) => {
-        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
-        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        const aIndex =
+          Number.isFinite(a?.subtask_index) && a.subtask_index > 0
+            ? a.subtask_index
+            : Number.MAX_SAFE_INTEGER;
+        const bIndex =
+          Number.isFinite(b?.subtask_index) && b.subtask_index > 0
+            ? b.subtask_index
+            : Number.MAX_SAFE_INTEGER;
         if (aIndex !== bIndex) return aIndex - bIndex;
         const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
         const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
@@ -5617,7 +6455,7 @@ export class WorkspaceDetailPage {
   }
 
   showTaskResult(taskId, options = {}) {
-    const task = this.tasks.find((item) => item.id === taskId);
+    const task = this.tasks.find(item => item.id === taskId);
     if (!task) return;
     const closeExecutionModal = Boolean(options?.closeExecutionModal);
 
@@ -5657,21 +6495,29 @@ export class WorkspaceDetailPage {
 
     const openResultModal = () => {
       if (!this.elements.taskResultModal || !window.bootstrap) return;
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
-        : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
+          : bootstrap.Modal.getInstance(this.elements.taskResultModal) ||
+            new bootstrap.Modal(this.elements.taskResultModal);
       modal.show();
     };
 
     if (closeExecutionModal && this.elements.taskExecutionModal && window.bootstrap) {
       const isExecutionModalOpen = this.elements.taskExecutionModal.classList.contains('show');
       if (isExecutionModalOpen) {
-        const executionModal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-          ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
-          : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
-        this.elements.taskExecutionModal.addEventListener('hidden.bs.modal', () => {
-          openResultModal();
-        }, { once: true });
+        const executionModal =
+          typeof bootstrap.Modal.getOrCreateInstance === 'function'
+            ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+            : bootstrap.Modal.getInstance(this.elements.taskExecutionModal) ||
+              new bootstrap.Modal(this.elements.taskExecutionModal);
+        this.elements.taskExecutionModal.addEventListener(
+          'hidden.bs.modal',
+          () => {
+            openResultModal();
+          },
+          { once: true }
+        );
         executionModal.hide();
         return;
       }
@@ -5687,10 +6533,14 @@ export class WorkspaceDetailPage {
     if (!container || !copyEl || !actionsEl) return;
 
     const text = String(resultData?.text || '').trim();
-    const sourceTask = resultData?.sourceTask && typeof resultData.sourceTask === 'object'
-      ? resultData.sourceTask
-      : task;
-    const shouldShow = String(task?.status || '').trim().toLowerCase() === 'completed' && text;
+    const sourceTask =
+      resultData?.sourceTask && typeof resultData.sourceTask === 'object'
+        ? resultData.sourceTask
+        : task;
+    const shouldShow =
+      String(task?.status || '')
+        .trim()
+        .toLowerCase() === 'completed' && text;
     if (!shouldShow) {
       this.currentTaskResultNextSteps = [];
       container.classList.add('d-none');
@@ -5709,12 +6559,14 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    copyEl.textContent = 'Choose the next step to create and run a follow-up task linked to this result.';
-    actionsEl.innerHTML = nextSteps.map((step) => {
-      const buttonLabel = this.currentTaskResultFollowUpPending
-        ? 'Creating follow-up task...'
-        : 'Create follow-up task';
-      return `
+    copyEl.textContent =
+      'Choose the next step to create and run a follow-up task linked to this result.';
+    actionsEl.innerHTML = nextSteps
+      .map(step => {
+        const buttonLabel = this.currentTaskResultFollowUpPending
+          ? 'Creating follow-up task...'
+          : 'Create follow-up task';
+        return `
         <button type="button"
                 class="workspace-detail-task-result-next-step-btn"
                 data-next-step-id="${this.escapeHtml(step.id)}"
@@ -5726,9 +6578,10 @@ export class WorkspaceDetailPage {
           </span>
         </button>
       `;
-    }).join('');
+      })
+      .join('');
 
-    actionsEl.querySelectorAll('[data-next-step-id]').forEach((button) => {
+    actionsEl.querySelectorAll('[data-next-step-id]').forEach(button => {
       button.addEventListener('click', () => {
         const nextStepId = String(button.getAttribute('data-next-step-id') || '').trim();
         if (!nextStepId) return;
@@ -5755,9 +6608,8 @@ export class WorkspaceDetailPage {
   }
 
   buildTaskResultNextStepId(number, label) {
-    const base = this.normalizeTaskResultNextStepToken(label)
-      .replace(/\s+/g, '-')
-      .slice(0, 48) || 'next-step';
+    const base =
+      this.normalizeTaskResultNextStepToken(label).replace(/\s+/g, '-').slice(0, 48) || 'next-step';
     return `result-step-${String(number || '').trim() || 'x'}-${base}`;
   }
 
@@ -5768,7 +6620,7 @@ export class WorkspaceDetailPage {
 
     for (let i = 0; i < lines.length; i += 1) {
       const normalized = this.normalizeTaskResultNextStepToken(lines[i]);
-      if (cues.some((cue) => normalized.includes(cue))) {
+      if (cues.some(cue => normalized.includes(cue))) {
         cueIndex = i;
         break;
       }
@@ -5804,7 +6656,8 @@ export class WorkspaceDetailPage {
   }
 
   buildTaskResultFollowUpTitle(task, step) {
-    const baseTitle = String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+    const baseTitle =
+      String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
     const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
     if (!stepLabel) return baseTitle;
     const combined = `${baseTitle} - ${stepLabel}`;
@@ -5813,8 +6666,12 @@ export class WorkspaceDetailPage {
 
   buildTaskResultFollowUpDetails(task, sourceTask, step) {
     const parts = [];
-    const baseTitle = String(task?.description || task?.name || task?.id || 'Completed task').trim();
-    const sourceTitle = String(sourceTask?.description || sourceTask?.name || sourceTask?.id || '').trim();
+    const baseTitle = String(
+      task?.description || task?.name || task?.id || 'Completed task'
+    ).trim();
+    const sourceTitle = String(
+      sourceTask?.description || sourceTask?.name || sourceTask?.id || ''
+    ).trim();
     const stepNumber = String(step?.number || '').trim();
     const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
 
@@ -5833,9 +6690,9 @@ export class WorkspaceDetailPage {
   async continueTaskFromResult(taskId, sourceTaskId, nextStepId) {
     if (this.currentTaskResultFollowUpPending) return;
 
-    const task = this.tasks.find((item) => item.id === taskId);
-    const sourceTask = this.tasks.find((item) => item.id === sourceTaskId) || task;
-    const nextStep = this.currentTaskResultNextSteps.find((item) => item.id === nextStepId);
+    const task = this.tasks.find(item => item.id === taskId);
+    const sourceTask = this.tasks.find(item => item.id === sourceTaskId) || task;
+    const nextStep = this.currentTaskResultNextSteps.find(item => item.id === nextStepId);
     if (!task || !sourceTask || !nextStep) return;
 
     this.currentTaskResultFollowUpPending = true;
@@ -5900,16 +6757,19 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const stepsHtml = steps.map((step, index) => {
-      const statusKey = String(step.status || task.status || 'pending').trim().toLowerCase();
-      const statusClass = getStatusClass(statusKey);
-      const statusLabel = getDisplayStatus(statusKey);
-      const detail = String(step.detail || '').trim();
-      const defaultOpen = index < 2 ? ' open' : '';
-      const safeTitle = this.escapeHtml(step.title || `Step ${index + 1}`);
-      const safeDetail = detail ? this.escapeHtml(detail) : 'No additional detail.';
+    const stepsHtml = steps
+      .map((step, index) => {
+        const statusKey = String(step.status || task.status || 'pending')
+          .trim()
+          .toLowerCase();
+        const statusClass = getStatusClass(statusKey);
+        const statusLabel = getDisplayStatus(statusKey);
+        const detail = String(step.detail || '').trim();
+        const defaultOpen = index < 2 ? ' open' : '';
+        const safeTitle = this.escapeHtml(step.title || `Step ${index + 1}`);
+        const safeDetail = detail ? this.escapeHtml(detail) : 'No additional detail.';
 
-      return `
+        return `
         <details class="workspace-detail-task-breakdown-step"${defaultOpen}>
           <summary>
             <span class="workspace-detail-task-breakdown-step-title">
@@ -5921,7 +6781,8 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-task-breakdown-step-body">${safeDetail}</div>
         </details>
       `;
-    }).join('');
+      })
+      .join('');
 
     container.innerHTML = `
       <div class="workspace-detail-task-breakdown-title">Execution Breakdown</div>
@@ -5958,12 +6819,16 @@ export class WorkspaceDetailPage {
     }
 
     const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
-    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
+    const maxAttempts = Number(
+      task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0
+    );
     if (attemptsUsed > 0 && maxAttempts > 0) {
       parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
     }
 
-    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
+    const retryFinalOutcome = this.normalizeBreakdownField(
+      task?.context?.execution_retry?.final_outcome
+    );
     if (retryFinalOutcome) {
       parts.push(`Final outcome: ${retryFinalOutcome}`);
     }
@@ -6012,7 +6877,10 @@ export class WorkspaceDetailPage {
 
       return {
         title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
-        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
+        status:
+          String(step?.status || 'pending')
+            .trim()
+            .toLowerCase() || 'pending',
         detail: detailParts.join('\n')
       };
     });
@@ -6024,8 +6892,10 @@ export class WorkspaceDetailPage {
       : [];
     if (!history.length) return [];
 
-    const outcomeToStatus = (outcome) => {
-      const normalized = String(outcome || '').trim().toLowerCase();
+    const outcomeToStatus = outcome => {
+      const normalized = String(outcome || '')
+        .trim()
+        .toLowerCase();
       if (normalized === 'success') return 'completed';
       if (normalized === 'error') return 'failed';
       if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
@@ -6033,8 +6903,12 @@ export class WorkspaceDetailPage {
     };
 
     return history.map((item, index) => {
-      const attemptNumber = Number.isFinite(Number(item?.attempt)) ? Number(item.attempt) : (index + 1);
-      const outcome = String(item?.outcome || '').trim().toLowerCase();
+      const attemptNumber = Number.isFinite(Number(item?.attempt))
+        ? Number(item.attempt)
+        : index + 1;
+      const outcome = String(item?.outcome || '')
+        .trim()
+        .toLowerCase();
       const summary = this.normalizeBreakdownField(item?.summary);
       const createdAt = this.normalizeBreakdownField(item?.created_at);
       const detailParts = [];
@@ -6058,12 +6932,15 @@ export class WorkspaceDetailPage {
     const relevantHistory = includeLatest ? history : history.slice(0, -1);
     if (!relevantHistory.length) return [];
 
-    const startIndex = Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
-      ? Number(options.startIndex)
-      : 1;
+    const startIndex =
+      Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
+        ? Number(options.startIndex)
+        : 1;
 
-    const mapRecordedStatus = (status) => {
-      const normalized = String(status || '').trim().toLowerCase();
+    const mapRecordedStatus = status => {
+      const normalized = String(status || '')
+        .trim()
+        .toLowerCase();
       if (normalized === 'success') return 'completed';
       if (normalized === 'failed') return 'failed';
       if (normalized === 'blocked') return 'blocked';
@@ -6072,7 +6949,9 @@ export class WorkspaceDetailPage {
 
     return relevantHistory.map((item, index) => {
       const recordedAt = this.normalizeBreakdownField(item?.executed_at);
-      const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const rawStatus = String(item?.status || '')
+        .trim()
+        .toLowerCase();
       const summary = this.normalizeBreakdownField(item?.summary);
       const errorText = this.normalizeBreakdownField(item?.error);
       const detailParts = [];
@@ -6096,11 +6975,13 @@ export class WorkspaceDetailPage {
   async fetchLatestSubtasksForParent(parentTaskID) {
     if (!parentTaskID || !this.workspaceId) return [];
     try {
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) return [];
       const payload = await response.json();
       const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
-      return tasks.filter((task) => task?.parent_task_id === parentTaskID);
+      return tasks.filter(task => task?.parent_task_id === parentTaskID);
     } catch (error) {
       console.error('Failed to fetch latest subtasks for breakdown:', error);
       return [];
@@ -6131,23 +7012,26 @@ export class WorkspaceDetailPage {
       return executionSteps;
     }
 
-    const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
-      const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
-      const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
-      if (aIndex !== bIndex) return aIndex - bIndex;
-      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
-      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
-      return aTime - bTime;
-    }) : [];
+    const sortedSubtasks = Array.isArray(subtasks)
+      ? [...subtasks].sort((a, b) => {
+          const aIndex = Number.isFinite(Number(a?.subtask_index))
+            ? Number(a.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          const bIndex = Number.isFinite(Number(b?.subtask_index))
+            ? Number(b.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          if (aIndex !== bIndex) return aIndex - bIndex;
+          const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          return aTime - bTime;
+        })
+      : [];
 
     if (sortedSubtasks.length > 0) {
       return sortedSubtasks.map((subtask, index) => ({
         title: String(subtask.description || subtask.name || `Step ${index + 1}`).trim(),
         status: String(subtask.status || task.status || 'pending').trim(),
-        detail: this.buildTaskExecutionDetail(
-          subtask,
-          String(subtask.details || '').trim()
-        )
+        detail: this.buildTaskExecutionDetail(subtask, String(subtask.details || '').trim())
       }));
     }
 
@@ -6158,7 +7042,7 @@ export class WorkspaceDetailPage {
     if (historicalRunSteps.length > 0) {
       if (retryHistorySteps.length > 0) {
         const currentRunNumber = historicalRunSteps.length + 1;
-        const currentRunSteps = retryHistorySteps.map((step) => ({
+        const currentRunSteps = retryHistorySteps.map(step => ({
           ...step,
           title: `Run ${currentRunNumber} • ${step.title}`
         }));
@@ -6177,23 +7061,32 @@ export class WorkspaceDetailPage {
   getPredictedTaskExecutionSequence(task, subtasks = [], options = {}) {
     if (!task) return [];
 
-    const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
-      const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
-      const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
-      if (aIndex !== bIndex) return aIndex - bIndex;
-      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
-      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
-      return aTime - bTime;
-    }) : [];
+    const sortedSubtasks = Array.isArray(subtasks)
+      ? [...subtasks].sort((a, b) => {
+          const aIndex = Number.isFinite(Number(a?.subtask_index))
+            ? Number(a.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          const bIndex = Number.isFinite(Number(b?.subtask_index))
+            ? Number(b.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          if (aIndex !== bIndex) return aIndex - bIndex;
+          const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          return aTime - bTime;
+        })
+      : [];
 
     if (sortedSubtasks.length > 0) {
-      return sortedSubtasks.map((subtask) => {
+      return sortedSubtasks.map(subtask => {
         const assignedAgent = String(subtask?.to || '').trim();
         return {
-          title: String(subtask?.description || subtask?.name || 'Workflow step').trim() || 'Workflow step',
-          detail: assignedAgent && assignedAgent !== 'unassigned'
-            ? `Assigned to ${assignedAgent}.`
-            : 'Needs an assigned agent before execution.',
+          title:
+            String(subtask?.description || subtask?.name || 'Workflow step').trim() ||
+            'Workflow step',
+          detail:
+            assignedAgent && assignedAgent !== 'unassigned'
+              ? `Assigned to ${assignedAgent}.`
+              : 'Needs an assigned agent before execution.',
           tag: 'Workflow'
         };
       });
@@ -6206,50 +7099,127 @@ export class WorkspaceDetailPage {
     const description = String(task?.description || task?.name || '').trim();
     const lower = description.toLowerCase();
     const requirements = this.inferTaskExecutionRequirements(description);
-    const hasFilesystem = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.FILESYSTEM);
-    const hasBrowser = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
+    const hasFilesystem = requirements.some(
+      requirement => requirement.key === TASK_REQUIREMENT_KEYS.FILESYSTEM
+    );
+    const hasBrowser = requirements.some(
+      requirement => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER
+    );
     const isFilesystemListing = this.isReadOnlyFilesystemListingIntent(description);
     const assignedAgent = String(options?.assignedAgent || '').trim();
-    const agentLabel = assignedAgent && assignedAgent !== 'unassigned' ? assignedAgent : 'the selected agent';
+    const agentLabel =
+      assignedAgent && assignedAgent !== 'unassigned' ? assignedAgent : 'the selected agent';
 
     const toStep = (title, detail = '', tag = '') => ({ title, detail, tag });
 
     if (isFilesystemListing) {
       return [
-        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before inspecting folder contents.`, 'Discovery'),
-        toStep('Inspect the target directory', 'Locate the requested folder and gather its visible file list.', 'Discovery'),
-        toStep('Return the file list', 'Return the concrete file list, or explain clearly if the folder is missing or empty.', 'Summary')
+        toStep(
+          'Check allowed filesystem scope',
+          `Confirm which directories ${agentLabel} can access before inspecting folder contents.`,
+          'Discovery'
+        ),
+        toStep(
+          'Inspect the target directory',
+          'Locate the requested folder and gather its visible file list.',
+          'Discovery'
+        ),
+        toStep(
+          'Return the file list',
+          'Return the concrete file list, or explain clearly if the folder is missing or empty.',
+          'Summary'
+        )
       ];
     }
 
     if (hasFilesystem) {
       return [
-        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before making changes.`, 'Discovery'),
-        toStep('Inspect candidate directories', 'Look through likely source folders for DNM-related material.', 'Discovery'),
-        toStep('Identify DNM-related files', 'Match files by filename, path, and available task context.', 'Analysis'),
-        toStep('Create the DNM folder if needed', 'Prepare the destination folder without overwriting unrelated content.', 'Mutation'),
-        toStep('Move or copy matching files', 'Relocate the selected files into the DNM folder safely.', 'Mutation'),
-        toStep('Verify final folder contents', 'Confirm the destination contains the expected files and note anything skipped.', 'Verify'),
-        toStep('Return a summary', 'List moved files, skipped files, and any follow-up needed.', 'Summary')
+        toStep(
+          'Check allowed filesystem scope',
+          `Confirm which directories ${agentLabel} can access before making changes.`,
+          'Discovery'
+        ),
+        toStep(
+          'Inspect candidate directories',
+          'Look through likely source folders for DNM-related material.',
+          'Discovery'
+        ),
+        toStep(
+          'Identify DNM-related files',
+          'Match files by filename, path, and available task context.',
+          'Analysis'
+        ),
+        toStep(
+          'Create the DNM folder if needed',
+          'Prepare the destination folder without overwriting unrelated content.',
+          'Mutation'
+        ),
+        toStep(
+          'Move or copy matching files',
+          'Relocate the selected files into the DNM folder safely.',
+          'Mutation'
+        ),
+        toStep(
+          'Verify final folder contents',
+          'Confirm the destination contains the expected files and note anything skipped.',
+          'Verify'
+        ),
+        toStep(
+          'Return a summary',
+          'List moved files, skipped files, and any follow-up needed.',
+          'Summary'
+        )
       ];
     }
 
     if (hasBrowser) {
       return [
-        toStep('Check available browser capability', `Confirm ${agentLabel} can open and interact with the required site.`, 'Discovery'),
-        toStep('Open the target page', 'Navigate to the relevant website or URL for this task.', 'Action'),
-        toStep('Inspect the required information or controls', 'Locate the data, form, or interface element needed to complete the task.', 'Analysis'),
-        toStep('Perform the requested browser action', 'Carry out the needed interaction or extraction.', 'Action'),
-        toStep('Verify the outcome', 'Confirm the page state or extracted result matches the task goal.', 'Verify'),
+        toStep(
+          'Check available browser capability',
+          `Confirm ${agentLabel} can open and interact with the required site.`,
+          'Discovery'
+        ),
+        toStep(
+          'Open the target page',
+          'Navigate to the relevant website or URL for this task.',
+          'Action'
+        ),
+        toStep(
+          'Inspect the required information or controls',
+          'Locate the data, form, or interface element needed to complete the task.',
+          'Analysis'
+        ),
+        toStep(
+          'Perform the requested browser action',
+          'Carry out the needed interaction or extraction.',
+          'Action'
+        ),
+        toStep(
+          'Verify the outcome',
+          'Confirm the page state or extracted result matches the task goal.',
+          'Verify'
+        ),
         toStep('Return a summary', 'Report what was done and any follow-up needed.', 'Summary')
       ];
     }
 
     if (lower.includes('summarize') || lower.includes('summary') || lower.includes('review')) {
       return [
-        toStep('Collect the relevant context', 'Gather the information needed to answer the request.', 'Discovery'),
-        toStep('Synthesize the main findings', 'Turn the collected context into a concise result.', 'Analysis'),
-        toStep('Return a summary', 'Present the final result with the most relevant details.', 'Summary')
+        toStep(
+          'Collect the relevant context',
+          'Gather the information needed to answer the request.',
+          'Discovery'
+        ),
+        toStep(
+          'Synthesize the main findings',
+          'Turn the collected context into a concise result.',
+          'Analysis'
+        ),
+        toStep(
+          'Return a summary',
+          'Present the final result with the most relevant details.',
+          'Summary'
+        )
       ];
     }
 
@@ -6257,7 +7227,7 @@ export class WorkspaceDetailPage {
     return fallbackSteps.map((step, index) => ({
       title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
       detail: String(step?.detail || '').trim(),
-      tag: index === 0 ? 'Discovery' : (index === fallbackSteps.length - 1 ? 'Summary' : 'Action')
+      tag: index === 0 ? 'Discovery' : index === fallbackSteps.length - 1 ? 'Summary' : 'Action'
     }));
   }
 
@@ -6268,15 +7238,27 @@ export class WorkspaceDetailPage {
     const toStep = (title, detail = '') => ({ title, detail });
 
     let baseSteps = [];
-    if ((lower.includes('wear') && lower.includes('tomorrow')) || lower.includes('what should i wear')) {
+    if (
+      (lower.includes('wear') && lower.includes('tomorrow')) ||
+      lower.includes('what should i wear')
+    ) {
       baseSteps = [
-        toStep("Checking tomorrow's weather", 'Collect forecast details such as temperature, rain chance, and wind.'),
-        toStep('Recommendation for clothing based on the weather', 'Translate weather conditions into practical outfit guidance.')
+        toStep(
+          "Checking tomorrow's weather",
+          'Collect forecast details such as temperature, rain chance, and wind.'
+        ),
+        toStep(
+          'Recommendation for clothing based on the weather',
+          'Translate weather conditions into practical outfit guidance.'
+        )
       ];
     } else if (lower.includes('weather')) {
       baseSteps = [
         toStep('Checking weather conditions', 'Gather forecast or relevant weather signals.'),
-        toStep('Summarizing weather insight', 'Return a concise recommendation tailored to the request.')
+        toStep(
+          'Summarizing weather insight',
+          'Return a concise recommendation tailored to the request.'
+        )
       ];
     } else {
       baseSteps = [
@@ -6285,7 +7267,10 @@ export class WorkspaceDetailPage {
       ];
     }
 
-    const statusSequence = this.getSyntheticStepStatuses(String(task?.status || 'pending'), baseSteps.length);
+    const statusSequence = this.getSyntheticStepStatuses(
+      String(task?.status || 'pending'),
+      baseSteps.length
+    );
     return baseSteps.map((step, index) => ({
       ...step,
       status: statusSequence[index] || String(task?.status || 'pending')
@@ -6293,14 +7278,18 @@ export class WorkspaceDetailPage {
   }
 
   getSyntheticStepStatuses(status, count) {
-    const normalized = String(status || 'pending').trim().toLowerCase();
+    const normalized = String(status || 'pending')
+      .trim()
+      .toLowerCase();
     if (count <= 0) return [];
 
     if (normalized === 'completed') {
       return Array.from({ length: count }, () => 'completed');
     }
     if (normalized === 'in_progress') {
-      return Array.from({ length: count }, (_value, index) => (index === 0 ? 'in_progress' : 'pending'));
+      return Array.from({ length: count }, (_value, index) =>
+        index === 0 ? 'in_progress' : 'pending'
+      );
     }
     if (normalized === 'failed' || normalized === 'timeout') {
       return Array.from({ length: count }, (_value, index) => {
@@ -6338,12 +7327,15 @@ export class WorkspaceDetailPage {
     const agentName = String(action?.agentName || '').trim();
     if (!storage || !this.workspaceId || !taskId || !agentName) return;
 
-    storage.setItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY, JSON.stringify({
-      workspaceId: this.workspaceId,
-      taskId,
-      agentName,
-      createdAt: Date.now()
-    }));
+    storage.setItem(
+      TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY,
+      JSON.stringify({
+        workspaceId: this.workspaceId,
+        taskId,
+        agentName,
+        createdAt: Date.now()
+      })
+    );
   }
 
   maybeResumePendingAssistSpecialistHandoff() {
@@ -6364,16 +7356,17 @@ export class WorkspaceDetailPage {
     const taskId = String(payload?.taskId || '').trim();
     const agentName = String(payload?.agentName || '').trim();
     const createdAt = Number(payload?.createdAt || 0);
-    const isExpired = !createdAt || (Date.now() - createdAt) > (15 * 60 * 1000);
+    const isExpired = !createdAt || Date.now() - createdAt > 15 * 60 * 1000;
 
     if (!workspaceId || !taskId || !agentName || workspaceId !== this.workspaceId || isExpired) {
       this.clearPendingAssistSpecialistHandoff();
       return;
     }
 
-    const task = this.tasks.find((item) => item?.id === taskId);
-    const inWorkspace = this.getWorkspaceAgentNames()
-      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    const task = this.tasks.find(item => item?.id === taskId);
+    const inWorkspace = this.getWorkspaceAgentNames().some(
+      name => this.normalizeAgentName(name) === this.normalizeAgentName(agentName)
+    );
     if (!task || !inWorkspace) {
       this.clearPendingAssistSpecialistHandoff();
       return;
@@ -6382,8 +7375,10 @@ export class WorkspaceDetailPage {
     this.clearPendingAssistSpecialistHandoff();
     this.openTaskAssistModal(taskId);
     if (this.elements.taskAssistAgent) {
-      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
-        .some((option) => this.normalizeAgentName(option?.value || '') === this.normalizeAgentName(agentName));
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || []).some(
+        option =>
+          this.normalizeAgentName(option?.value || '') === this.normalizeAgentName(agentName)
+      );
       if (hasOption) {
         this.elements.taskAssistAgent.value = agentName;
         this.updateAssistSwitchButtonState();
@@ -6409,14 +7404,14 @@ export class WorkspaceDetailPage {
 
     let bestName = '';
     let bestScore = 0;
-    sourceNames.forEach((sourceName) => {
+    sourceNames.forEach(sourceName => {
       const name = String(sourceName || '').trim();
       if (!name) return;
       const normalized = this.normalizeAgentName(name);
       if (!normalized || normalized === exclude) return;
 
       let score = 0;
-      (config.nameTokens || []).forEach((token) => {
+      (config.nameTokens || []).forEach(token => {
         const normalizedToken = this.normalizeAgentName(token);
         if (normalizedToken && normalized.includes(normalizedToken)) {
           score += normalizedToken.length >= 6 ? 3 : 2;
@@ -6453,16 +7448,23 @@ export class WorkspaceDetailPage {
     const normalized = this.normalizeTaskResultNextStepToken(text);
     if (!normalized) return false;
 
-    const actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    const actionMatch =
+      /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(
+        normalized
+      );
     if (!actionMatch) return false;
 
-    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(
+      normalized
+    );
   }
 
   maybeBuildTravelAssistSpecialistAction(assistContext = {}) {
     const currentAgent = String(assistContext.currentAgent || '').trim();
     const parts = [];
-    const taskText = String(assistContext.task?.description || assistContext.task?.name || '').trim();
+    const taskText = String(
+      assistContext.task?.description || assistContext.task?.name || ''
+    ).trim();
     if (taskText) parts.push(taskText);
     const taskDetails = String(assistContext.task?.details || '').trim();
     if (taskDetails) parts.push(taskDetails);
@@ -6473,7 +7475,7 @@ export class WorkspaceDetailPage {
 
     const workflowStep = assistContext.workflowStep;
     if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices)) {
-      workflowStep.choices.forEach((choice) => {
+      workflowStep.choices.forEach(choice => {
         const label = String(choice?.label || '').trim();
         if (label) parts.push(label);
         const description = String(choice?.description || '').trim();
@@ -6485,13 +7487,31 @@ export class WorkspaceDetailPage {
     if (!combined) return null;
     if (this.isWorkspaceManagerMetaActionText(combined)) return null;
 
-    const travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'day trip', 'day trips', 'museum', 'museums', 'restaurant', 'restaurants', 'nightlife', 'accommodation', 'lodging'];
-    const isTravelContext = travelSignals.some((signal) => combined.includes(this.normalizeTaskResultNextStepToken(signal)));
+    const travelSignals = [
+      'travel',
+      'trip',
+      'itinerary',
+      'hotel',
+      'flight',
+      'vacation',
+      'day trip',
+      'day trips',
+      'museum',
+      'museums',
+      'restaurant',
+      'restaurants',
+      'nightlife',
+      'accommodation',
+      'lodging'
+    ];
+    const isTravelContext = travelSignals.some(signal =>
+      combined.includes(this.normalizeTaskResultNextStepToken(signal))
+    );
     if (!isTravelContext) return null;
 
-    const scoreConfig = (config) => {
+    const scoreConfig = config => {
       let score = 0;
-      (config.scorePhrases || []).forEach((phrase) => {
+      (config.scorePhrases || []).forEach(phrase => {
         const normalizedPhrase = this.normalizeTaskResultNextStepToken(phrase);
         if (!normalizedPhrase || !combined.includes(normalizedPhrase)) return;
         score += normalizedPhrase.includes(' ') ? 3 : 1;
@@ -6501,8 +7521,8 @@ export class WorkspaceDetailPage {
 
     const configs = Object.values(TASK_ASSIST_TRAVEL_SPECIALISTS);
     const ranked = configs
-      .map((config) => ({ config, score: scoreConfig(config) }))
-      .filter((entry) => entry.score > 0)
+      .map(config => ({ config, score: scoreConfig(config) }))
+      .filter(entry => entry.score > 0)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         const order = ['travel_itinerary', 'hotel_booking', 'flight_booking'];
@@ -6513,38 +7533,51 @@ export class WorkspaceDetailPage {
     if (!best?.config) return null;
 
     const config = best.config;
-    const workspaceAgentName = this.findAssistSpecialistAgentName(config, this.getWorkspaceAgentNames(), {
-      excludeAgent: currentAgent
-    });
-    const catalogNames = Array.isArray(this.agentCatalog) ? this.agentCatalog.map((agent) => String(agent?.name || '').trim()).filter(Boolean) : [];
+    const workspaceAgentName = this.findAssistSpecialistAgentName(
+      config,
+      this.getWorkspaceAgentNames(),
+      {
+        excludeAgent: currentAgent
+      }
+    );
+    const catalogNames = Array.isArray(this.agentCatalog)
+      ? this.agentCatalog.map(agent => String(agent?.name || '').trim()).filter(Boolean)
+      : [];
     const catalogAgent = this.findAssistSpecialistAgentName(config, catalogNames, {
       excludeAgent: currentAgent
     });
-    const workspaceAgent = workspaceAgentName && catalogAgent &&
+    const workspaceAgent =
+      workspaceAgentName &&
+      catalogAgent &&
       this.normalizeAgentName(workspaceAgentName) === this.normalizeAgentName(catalogAgent)
-      ? workspaceAgentName
-      : '';
-    if (catalogAgent && this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)) {
+        ? workspaceAgentName
+        : '';
+    if (
+      catalogAgent &&
+      this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)
+    ) {
       return null;
     }
 
     const agentName = workspaceAgent || catalogAgent || config.agentName;
-    const kind = workspaceAgent ? 'switch' : (catalogAgent ? 'add_and_switch' : 'create');
+    const kind = workspaceAgent ? 'switch' : catalogAgent ? 'add_and_switch' : 'create';
     return {
       ...config,
       kind,
       currentAgent,
       agentName,
-      copy: kind === 'switch'
-        ? `"${agentName}" already fits this travel-planning follow-up better than ${currentAgent ? `"${currentAgent}"` : 'the current agent'}.`
-        : kind === 'add_and_switch'
-        ? `"${agentName}" exists already. Add it to this workspace and hand the task off there.`
-        : `This workspace does not have a dedicated travel specialist yet. Create "${agentName}" and use it for this follow-up.`,
-      buttonLabel: kind === 'switch'
-        ? `Switch To ${agentName}`
-        : kind === 'add_and_switch'
-        ? `Add And Switch To ${agentName}`
-        : `Create ${agentName}`
+      copy:
+        kind === 'switch'
+          ? `"${agentName}" already fits this travel-planning follow-up better than ${currentAgent ? `"${currentAgent}"` : 'the current agent'}.`
+          : kind === 'add_and_switch'
+            ? `"${agentName}" exists already. Add it to this workspace and hand the task off there.`
+            : `This workspace does not have a dedicated travel specialist yet. Create "${agentName}" and use it for this follow-up.`,
+      buttonLabel:
+        kind === 'switch'
+          ? `Switch To ${agentName}`
+          : kind === 'add_and_switch'
+            ? `Add And Switch To ${agentName}`
+            : `Create ${agentName}`
     };
   }
 
@@ -6567,7 +7600,11 @@ export class WorkspaceDetailPage {
           : `Assign "${specialistAction.agentName}" to this task?`,
         message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
         confirmLabel: addToWorkspace ? 'Add and Assign' : 'Assign Specialist',
-        metaItems: [taskLabel, specialistAction.agentName, addToWorkspace ? 'Add to workspace' : 'Travel specialist'],
+        metaItems: [
+          taskLabel,
+          specialistAction.agentName,
+          addToWorkspace ? 'Add to workspace' : 'Travel specialist'
+        ],
         details: [
           String(specialistAction.description || '').trim(),
           'Substantive travel work should start with the specialist rather than the workspace manager.'
@@ -6587,9 +7624,11 @@ export class WorkspaceDetailPage {
         task.to = specialistAction.agentName;
         this.renderTasks();
         if (window.Toast) {
-          window.Toast.success(addToWorkspace
-            ? `Added "${specialistAction.agentName}" and assigned it to this task.`
-            : `Assigned "${specialistAction.agentName}" to this task.`);
+          window.Toast.success(
+            addToWorkspace
+              ? `Added "${specialistAction.agentName}" and assigned it to this task.`
+              : `Assigned "${specialistAction.agentName}" to this task.`
+          );
         }
         return { handled: true, agentName: specialistAction.agentName };
       } catch (error) {
@@ -6639,24 +7678,25 @@ export class WorkspaceDetailPage {
   applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
     const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
     if (!normalizedStep || !specialistAction?.agentName) return normalizedStep;
-    if (normalizedStep.stepType !== 'ask_choice' || !Array.isArray(normalizedStep.choices)) return normalizedStep;
+    if (normalizedStep.stepType !== 'ask_choice' || !Array.isArray(normalizedStep.choices))
+      return normalizedStep;
 
     const replacementName = String(specialistAction.agentName || '').trim();
     if (!replacementName) return normalizedStep;
 
-    const rewriteLabel = (label) => {
+    const rewriteLabel = label => {
       const rawLabel = String(label || '').trim();
       if (!rawLabel) return rawLabel;
       if (!/\bworkspace manager\b/i.test(rawLabel)) return rawLabel;
       if (!/\b(delegate|hand off|handoff|assign|planning task)\b/i.test(rawLabel)) return rawLabel;
       return rawLabel
-        .replace(/\bthe workspace manager\b/ig, replacementName)
-        .replace(/\bworkspace manager\b/ig, replacementName);
+        .replace(/\bthe workspace manager\b/gi, replacementName)
+        .replace(/\bworkspace manager\b/gi, replacementName);
     };
 
     return {
       ...normalizedStep,
-      choices: normalizedStep.choices.map((choice) => ({
+      choices: normalizedStep.choices.map(choice => ({
         ...choice,
         label: rewriteLabel(choice.label),
         description: rewriteLabel(choice.description)
@@ -6671,46 +7711,58 @@ export class WorkspaceDetailPage {
     const seen = new Set();
     const options = ['<option value="">Keep current assignment</option>'];
 
-    const addOption = (agentName) => {
+    const addOption = agentName => {
       const normalized = String(agentName || '').trim();
       const key = this.normalizeAgentName(normalized);
       if (!normalized || normalized === 'unassigned' || seen.has(key)) return;
       seen.add(key);
-      const isCurrent = this.normalizeAgentName(normalized) === this.normalizeAgentName(currentAgent);
+      const isCurrent =
+        this.normalizeAgentName(normalized) === this.normalizeAgentName(currentAgent);
       const label = isCurrent ? `${normalized} (current)` : normalized;
-      options.push(`<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(label)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(label)}</option>`
+      );
     };
 
-    this.getWorkspaceAgentNames().forEach((name) => addOption(name));
+    this.getWorkspaceAgentNames().forEach(name => addOption(name));
 
     select.innerHTML = options.join('');
   }
 
   parseAssistActions(value) {
     if (Array.isArray(value)) {
-      return value.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+      return value
+        .map(item =>
+          String(item || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean);
     }
     if (typeof value === 'string') {
-      return value.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+      return value
+        .split(',')
+        .map(item => item.trim().toLowerCase())
+        .filter(Boolean);
     }
     return [];
   }
 
   cleanAssistChoiceText(value) {
-    return this.cleanTaskResultNextStepText(value).replace(/[?!.,;:]+$/g, '').trim();
+    return this.cleanTaskResultNextStepText(value)
+      .replace(/[?!.,;:]+$/g, '')
+      .trim();
   }
 
   buildAssistChoiceId(number, label) {
-    const base = this.normalizeTaskResultNextStepToken(label)
-      .replace(/\s+/g, '-')
-      .slice(0, 48) || 'choice';
+    const base =
+      this.normalizeTaskResultNextStepToken(label).replace(/\s+/g, '-').slice(0, 48) || 'choice';
     return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
   }
 
   buildAssistFieldId(label, index) {
-    const base = this.normalizeTaskResultNextStepToken(label)
-      .replace(/\s+/g, '-')
-      .slice(0, 48) || 'field';
+    const base =
+      this.normalizeTaskResultNextStepToken(label).replace(/\s+/g, '-').slice(0, 48) || 'field';
     return `assist-field-${String(index + 1).trim()}-${base}`;
   }
 
@@ -6720,15 +7772,16 @@ export class WorkspaceDetailPage {
   }
 
   truncateAssistSummaryText(value, maxLength = 190) {
-    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    const normalized = String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!normalized) return '';
     if (normalized.length <= maxLength) return normalized;
 
     const candidate = normalized.slice(0, maxLength - 1);
     const boundary = candidate.lastIndexOf(' ');
-    const trimmed = boundary >= Math.floor(maxLength * 0.6)
-      ? candidate.slice(0, boundary)
-      : candidate;
+    const trimmed =
+      boundary >= Math.floor(maxLength * 0.6) ? candidate.slice(0, boundary) : candidate;
     return `${trimmed.trim()}...`;
   }
 
@@ -6738,7 +7791,7 @@ export class WorkspaceDetailPage {
 
     const paragraphs = raw
       .split(/\n\s*\n/)
-      .map((part) => String(part || '').trim())
+      .map(part => String(part || '').trim())
       .filter(Boolean);
     const firstChunk = paragraphs[0] || raw;
     const normalized = firstChunk.replace(/\s+/g, ' ').trim();
@@ -6750,15 +7803,22 @@ export class WorkspaceDetailPage {
   }
 
   buildAssistKnownSummary(reason, displayResponse) {
-    return this.extractAssistLeadText(displayResponse, 210)
-      || this.truncateAssistSummaryText(reason, 210)
-      || 'The task is paused waiting on your input.';
+    return (
+      this.extractAssistLeadText(displayResponse, 210) ||
+      this.truncateAssistSummaryText(reason, 210) ||
+      'The task is paused waiting on your input.'
+    );
   }
 
   buildAssistNeedsSummary(workflowStep, question) {
-    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0) {
-      const labels = workflowStep.fields.slice(0, 3)
-        .map((field) => this.getAssistFormFieldPrompt(field).replace(/[?]+$/g, '').trim())
+    if (
+      workflowStep?.stepType === 'ask_form' &&
+      Array.isArray(workflowStep.fields) &&
+      workflowStep.fields.length > 0
+    ) {
+      const labels = workflowStep.fields
+        .slice(0, 3)
+        .map(field => this.getAssistFormFieldPrompt(field).replace(/[?]+$/g, '').trim())
         .filter(Boolean);
       const count = workflowStep.fields.length;
       const suffix = count > labels.length ? `, and ${count - labels.length} more` : '';
@@ -6771,7 +7831,11 @@ export class WorkspaceDetailPage {
       return `Answer ${count} question${count === 1 ? '' : 's'} so the task can continue.`;
     }
 
-    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0) {
+    if (
+      workflowStep?.stepType === 'ask_choice' &&
+      Array.isArray(workflowStep.choices) &&
+      workflowStep.choices.length > 0
+    ) {
       return this.truncateAssistSummaryText(
         `Choose 1 of ${workflowStep.choices.length} suggested next steps to unblock the task.`,
         210
@@ -6786,14 +7850,19 @@ export class WorkspaceDetailPage {
   }
 
   buildAssistNextSummary(recommendation, workflowStep, currentAgent = '') {
-    const recommendedText = String(recommendation?.text || '').trim().replace(/^Recommended:\s*/i, '');
+    const recommendedText = String(recommendation?.text || '')
+      .trim()
+      .replace(/^Recommended:\s*/i, '');
     if (recommendedText) {
       return this.truncateAssistSummaryText(recommendedText, 210);
     }
 
     if (workflowStep?.stepType === 'ask_form') {
       return currentAgent
-        ? this.truncateAssistSummaryText(`After you answer, ${currentAgent} continues the task with your details.`, 210)
+        ? this.truncateAssistSummaryText(
+            `After you answer, ${currentAgent} continues the task with your details.`,
+            210
+          )
         : 'After you answer, the task resumes with your details.';
     }
 
@@ -6825,7 +7894,7 @@ export class WorkspaceDetailPage {
   shouldCollapseAssistResponse(fullResponse) {
     const text = String(fullResponse || '').trim();
     if (!text) return false;
-    const lineCount = text.split(/\r?\n/).filter((line) => String(line || '').trim()).length;
+    const lineCount = text.split(/\r?\n/).filter(line => String(line || '').trim()).length;
     return text.length > 420 || lineCount > 8;
   }
 
@@ -6885,15 +7954,21 @@ export class WorkspaceDetailPage {
   toggleAssistResponseExpanded(forceValue = null) {
     const fullText = String(this.elements.taskAssistResponse?.textContent || '').trim();
     if (!this.shouldCollapseAssistResponse(fullText)) return;
-    this.taskAssistResponseExpanded = typeof forceValue === 'boolean'
-      ? forceValue
-      : !this.taskAssistResponseExpanded;
+    this.taskAssistResponseExpanded =
+      typeof forceValue === 'boolean' ? forceValue : !this.taskAssistResponseExpanded;
     this.renderAssistResponseState();
   }
 
   normalizeAssistFieldType(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (normalized === 'textarea' || normalized === 'select' || normalized === 'number' || normalized === 'boolean') {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
+    if (
+      normalized === 'textarea' ||
+      normalized === 'select' ||
+      normalized === 'number' ||
+      normalized === 'boolean'
+    ) {
       return normalized;
     }
     return 'text';
@@ -6901,23 +7976,25 @@ export class WorkspaceDetailPage {
 
   normalizeAssistFieldOptions(options) {
     if (!Array.isArray(options)) return [];
-    return options.map((option) => {
-      if (typeof option === 'string') {
-        const label = String(option || '').trim();
-        if (!label) return null;
-        return { value: label, label, description: '', key: '' };
-      }
+    return options
+      .map(option => {
+        if (typeof option === 'string') {
+          const label = String(option || '').trim();
+          if (!label) return null;
+          return { value: label, label, description: '', key: '' };
+        }
 
-      const label = String(option?.label || option?.value || '').trim();
-      const value = String(option?.value || option?.label || '').trim();
-      if (!label || !value) return null;
-      return {
-        value,
-        label,
-        description: String(option?.description || '').trim(),
-        key: String(option?.key || '').trim()
-      };
-    }).filter(Boolean);
+        const label = String(option?.label || option?.value || '').trim();
+        const value = String(option?.value || option?.label || '').trim();
+        if (!label || !value) return null;
+        return {
+          value,
+          label,
+          description: String(option?.description || '').trim(),
+          key: String(option?.key || '').trim()
+        };
+      })
+      .filter(Boolean);
   }
 
   splitAssistOptionEvidence(label) {
@@ -6947,7 +8024,7 @@ export class WorkspaceDetailPage {
 
     const seen = new Set();
     const evidence = [];
-    options.forEach((option) => {
+    options.forEach(option => {
       const description = String(option?.description || '').trim();
       if (!description) return;
       const key = description.toLowerCase();
@@ -6973,7 +8050,9 @@ export class WorkspaceDetailPage {
   normalizeAssistWorkflowStep(value) {
     if (!value || typeof value !== 'object') return null;
 
-    const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
+    const stepType = String(value.step_type || value.stepType || '')
+      .trim()
+      .toLowerCase();
     let freeTextAllowed = true;
     if (typeof value.free_text_allowed === 'boolean') {
       freeTextAllowed = value.free_text_allowed;
@@ -6983,17 +8062,19 @@ export class WorkspaceDetailPage {
 
     if (stepType === 'ask_choice') {
       const rawChoices = Array.isArray(value.choices) ? value.choices : [];
-      const choices = rawChoices.map((item, index) => {
-        const label = this.cleanAssistChoiceText(item?.label || '');
-        if (!label) return null;
-        const number = String(item?.number || index + 1).trim();
-        return {
-          id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
-          label,
-          number,
-          description: this.cleanAssistChoiceText(item?.description || '')
-        };
-      }).filter(Boolean);
+      const choices = rawChoices
+        .map((item, index) => {
+          const label = this.cleanAssistChoiceText(item?.label || '');
+          if (!label) return null;
+          const number = String(item?.number || index + 1).trim();
+          return {
+            id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+            label,
+            number,
+            description: this.cleanAssistChoiceText(item?.description || '')
+          };
+        })
+        .filter(Boolean);
 
       if (choices.length === 0) return null;
 
@@ -7008,20 +8089,22 @@ export class WorkspaceDetailPage {
 
     if (stepType === 'ask_form') {
       const rawFields = Array.isArray(value.fields) ? value.fields : [];
-      const fields = rawFields.map((item, index) => {
-        const label = String(item?.label || '').trim();
-        if (!label) return null;
-        return {
-          id: String(item?.id || this.buildAssistFieldId(label, index)).trim(),
-          label,
-          description: String(item?.description || '').trim(),
-          evidence: String(item?.evidence || '').trim(),
-          type: this.normalizeAssistFieldType(item?.type),
-          placeholder: String(item?.placeholder || '').trim(),
-          required: item?.required !== false,
-          options: this.normalizeAssistFieldOptions(item?.options)
-        };
-      }).filter(Boolean);
+      const fields = rawFields
+        .map((item, index) => {
+          const label = String(item?.label || '').trim();
+          if (!label) return null;
+          return {
+            id: String(item?.id || this.buildAssistFieldId(label, index)).trim(),
+            label,
+            description: String(item?.description || '').trim(),
+            evidence: String(item?.evidence || '').trim(),
+            type: this.normalizeAssistFieldType(item?.type),
+            placeholder: String(item?.placeholder || '').trim(),
+            required: item?.required !== false,
+            options: this.normalizeAssistFieldOptions(item?.options)
+          };
+        })
+        .filter(Boolean);
 
       if (fields.length === 0) return null;
 
@@ -7083,7 +8166,12 @@ export class WorkspaceDetailPage {
 
         const first = this.cleanAssistChoiceText(match[1]);
         const second = this.cleanAssistChoiceText(match[2]);
-        if (!first || !second || this.normalizeTaskResultNextStepToken(first) === this.normalizeTaskResultNextStepToken(second)) {
+        if (
+          !first ||
+          !second ||
+          this.normalizeTaskResultNextStepToken(first) ===
+            this.normalizeTaskResultNextStepToken(second)
+        ) {
           continue;
         }
 
@@ -7111,7 +8199,7 @@ export class WorkspaceDetailPage {
     const lines = String(text || '').split(/\r?\n/);
     const blocks = [];
 
-    for (let index = 0; index < lines.length;) {
+    for (let index = 0; index < lines.length; ) {
       const questionMatch = String(lines[index] || '').match(/^\s*(\d+)[.)]\s*(.+?)\s*$/);
       if (!questionMatch) {
         index += 1;
@@ -7138,7 +8226,9 @@ export class WorkspaceDetailPage {
           const label = splitOption.label;
           if (!label) continue;
           options.push({
-            key: String(optionMatch[1] || '').trim().toUpperCase(),
+            key: String(optionMatch[1] || '')
+              .trim()
+              .toUpperCase(),
             label,
             description: splitOption.description
           });
@@ -7159,7 +8249,9 @@ export class WorkspaceDetailPage {
         }
 
         const lastOption = options[options.length - 1];
-        const splitOption = this.splitAssistOptionEvidence(`${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim());
+        const splitOption = this.splitAssistOptionEvidence(
+          `${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim()
+        );
         lastOption.label = splitOption.label;
         lastOption.description = splitOption.description || lastOption.description;
       }
@@ -7181,7 +8273,9 @@ export class WorkspaceDetailPage {
   }
 
   extractAssistQuestions(text) {
-    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    const normalized = String(text || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!normalized || !normalized.includes('?')) {
       return [];
     }
@@ -7189,9 +8283,9 @@ export class WorkspaceDetailPage {
     return normalized
       .split('?')
       .slice(0, -1)
-      .map((item) => String(item || '').trim())
-      .filter((item) => item.length >= 5 && item.length <= 220)
-      .map((item) => `${item}?`);
+      .map(item => String(item || '').trim())
+      .filter(item => item.length >= 5 && item.length <= 220)
+      .map(item => `${item}?`);
   }
 
   extractAssistFieldHint(question, fallback = '') {
@@ -7219,7 +8313,10 @@ export class WorkspaceDetailPage {
       options: []
     };
 
-    if (lower.includes('freestanding') && (lower.includes('wall-mounted') || lower.includes('wall mounted'))) {
+    if (
+      lower.includes('freestanding') &&
+      (lower.includes('wall-mounted') || lower.includes('wall mounted'))
+    ) {
       field.id = 'mounting_type';
       field.label = 'Mounting type';
       field.type = 'select';
@@ -7230,10 +8327,18 @@ export class WorkspaceDetailPage {
       return field;
     }
 
-    if (lower.includes('specific room') || lower.includes('which room') || lower.includes('what room') || lower.includes(' room')) {
+    if (
+      lower.includes('specific room') ||
+      lower.includes('which room') ||
+      lower.includes('what room') ||
+      lower.includes(' room')
+    ) {
       field.id = 'room';
       field.label = 'Room';
-      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Bathroom, kitchen, living room');
+      field.placeholder = this.extractAssistFieldHint(
+        rawQuestion,
+        'Bathroom, kitchen, living room'
+      );
       return field;
     }
 
@@ -7260,7 +8365,11 @@ export class WorkspaceDetailPage {
       return field;
     }
 
-    if (lower.includes("what's it holding") || lower.includes('what is it holding') || lower.includes('what will it hold')) {
+    if (
+      lower.includes("what's it holding") ||
+      lower.includes('what is it holding') ||
+      lower.includes('what will it hold')
+    ) {
       field.id = 'intended_load';
       field.label = 'What it will hold';
       field.placeholder = 'Books, decor, kitchen items';
@@ -7289,16 +8398,18 @@ export class WorkspaceDetailPage {
     field.type = 'select';
     field.description = String(block.question || '').trim();
     field.evidence = this.deriveAssistFieldEvidence(block.options);
-    field.options = block.options.map((option, optionIndex) => {
-      const label = String(option?.label || '').trim();
-      if (!label) return null;
-      return {
-        value: label,
-        label,
-        description: String(option?.description || '').trim(),
-        key: String(option?.key || this.getAssistOptionKey(optionIndex)).trim()
-      };
-    }).filter(Boolean);
+    field.options = block.options
+      .map((option, optionIndex) => {
+        const label = String(option?.label || '').trim();
+        if (!label) return null;
+        return {
+          value: label,
+          label,
+          description: String(option?.description || '').trim(),
+          key: String(option?.key || this.getAssistOptionKey(optionIndex)).trim()
+        };
+      })
+      .filter(Boolean);
     return field.options.length >= 2 ? field : null;
   }
 
@@ -7344,7 +8455,9 @@ export class WorkspaceDetailPage {
 
       const questions = this.extractAssistQuestions(value);
       if (questions.length >= 2) {
-        const fields = questions.map((question, index) => this.buildAssistFieldFromQuestion(question, index)).filter(Boolean);
+        const fields = questions
+          .map((question, index) => this.buildAssistFieldFromQuestion(question, index))
+          .filter(Boolean);
         if (fields.length > 0) {
           return {
             stepType: 'ask_form',
@@ -7371,7 +8484,7 @@ export class WorkspaceDetailPage {
     }
 
     const lines = text.split(/\r?\n/);
-    const startIndex = lines.findIndex((line) => /^\s*\d+[.)]\s+/.test(String(line || '')));
+    const startIndex = lines.findIndex(line => /^\s*\d+[.)]\s+/.test(String(line || '')));
     if (startIndex < 0) {
       return text;
     }
@@ -7385,18 +8498,23 @@ export class WorkspaceDetailPage {
     if (!rawResponse) return '';
     if (!rawQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
-    const normalize = (value) => this.cleanTaskResultNextStepText(value)
-      .replace(/[?!.,;:]+$/g, '')
-      .toLowerCase();
+    const normalize = value =>
+      this.cleanTaskResultNextStepText(value)
+        .replace(/[?!.,;:]+$/g, '')
+        .toLowerCase();
 
     const normalizedQuestion = normalize(rawQuestion);
-    if (!normalizedQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
+    if (!normalizedQuestion)
+      return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
     const paragraphs = rawResponse
       .split(/\n\s*\n/)
-      .map((part) => String(part || '').trim())
+      .map(part => String(part || '').trim())
       .filter(Boolean);
-    if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
+    if (
+      paragraphs.length > 0 &&
+      normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion
+    ) {
       paragraphs.pop();
       return this.trimAssistQuestionnaireFromResponse(paragraphs.join('\n\n').trim(), workflowStep);
     }
@@ -7452,7 +8570,12 @@ export class WorkspaceDetailPage {
   }
 
   setAssistChoiceStepUI(normalizedStep) {
-    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList || !Array.isArray(normalizedStep?.choices)) return;
+    if (
+      !this.elements.taskAssistChoiceWrap ||
+      !this.elements.taskAssistChoiceList ||
+      !Array.isArray(normalizedStep?.choices)
+    )
+      return;
 
     if (normalizedStep.choices.length === 0) {
       this.clearAssistChoiceStepUI();
@@ -7460,7 +8583,9 @@ export class WorkspaceDetailPage {
     }
 
     const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
-    this.elements.taskAssistChoiceList.innerHTML = normalizedStep.choices.map((choice) => `
+    this.elements.taskAssistChoiceList.innerHTML = normalizedStep.choices
+      .map(
+        choice => `
       <button
         type="button"
         class="home-assistant-planning-choice${selectedChoiceId === choice.id ? ' is-selected' : ''}"
@@ -7470,21 +8595,25 @@ export class WorkspaceDetailPage {
         <span class="home-assistant-planning-choice-label">${this.escapeHtml(choice.number ? `${choice.number}. ${choice.label}` : choice.label)}</span>
         ${choice.description ? `<span class="home-assistant-planning-choice-hint">${this.escapeHtml(choice.description)}</span>` : ''}
       </button>
-    `).join('');
+    `
+      )
+      .join('');
 
-    this.elements.taskAssistChoiceList.querySelectorAll('[data-assist-choice-id]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
-        if (!choiceId || !this.currentBlockedTask) return;
-        const selectedChoice = normalizedStep.choices.find((choice) => choice.id === choiceId);
-        if (!selectedChoice) return;
-        this.currentBlockedTask.selectedChoiceId = selectedChoice.id;
-        this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
-        this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
-        this.currentBlockedTask.workflowStep = normalizedStep;
-        this.setAssistChoiceStepUI(normalizedStep);
+    this.elements.taskAssistChoiceList
+      .querySelectorAll('[data-assist-choice-id]')
+      .forEach(button => {
+        button.addEventListener('click', () => {
+          const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
+          if (!choiceId || !this.currentBlockedTask) return;
+          const selectedChoice = normalizedStep.choices.find(choice => choice.id === choiceId);
+          if (!selectedChoice) return;
+          this.currentBlockedTask.selectedChoiceId = selectedChoice.id;
+          this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
+          this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
+          this.currentBlockedTask.workflowStep = normalizedStep;
+          this.setAssistChoiceStepUI(normalizedStep);
+        });
       });
-    });
 
     if (this.elements.taskAssistChoiceSummary) {
       const summary = String(normalizedStep.summary || '').trim();
@@ -7520,7 +8649,10 @@ export class WorkspaceDetailPage {
   setAssistFormFieldValue(fieldId, value) {
     if (!this.currentBlockedTask || !fieldId) return;
 
-    if (!this.currentBlockedTask.selectedFieldValues || typeof this.currentBlockedTask.selectedFieldValues !== 'object') {
+    if (
+      !this.currentBlockedTask.selectedFieldValues ||
+      typeof this.currentBlockedTask.selectedFieldValues !== 'object'
+    ) {
       this.currentBlockedTask.selectedFieldValues = {};
     }
 
@@ -7535,53 +8667,69 @@ export class WorkspaceDetailPage {
 
   collectAssistFormFieldValues(step = this.currentBlockedTask?.workflowStep) {
     const normalizedStep = this.normalizeAssistWorkflowStep(step);
-    if (!normalizedStep || normalizedStep.stepType !== 'ask_form' || !Array.isArray(normalizedStep.fields)) {
+    if (
+      !normalizedStep ||
+      normalizedStep.stepType !== 'ask_form' ||
+      !Array.isArray(normalizedStep.fields)
+    ) {
       return [];
     }
 
-    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
-      ? this.currentBlockedTask.selectedFieldValues
-      : {};
+    const selectedValues =
+      this.currentBlockedTask?.selectedFieldValues &&
+      typeof this.currentBlockedTask.selectedFieldValues === 'object'
+        ? this.currentBlockedTask.selectedFieldValues
+        : {};
 
-    return normalizedStep.fields.map((field) => {
-      const id = String(field?.id || '').trim();
-      const label = String(field?.label || '').trim();
-      const value = String(selectedValues[id] || '').trim();
-      if (!id || !value) return null;
-      return { id, label, value };
-    }).filter(Boolean);
+    return normalizedStep.fields
+      .map(field => {
+        const id = String(field?.id || '').trim();
+        const label = String(field?.label || '').trim();
+        const value = String(selectedValues[id] || '').trim();
+        if (!id || !value) return null;
+        return { id, label, value };
+      })
+      .filter(Boolean);
   }
 
   setAssistFormStepUI(normalizedStep) {
-    if (!this.elements.taskAssistFormWrap || !this.elements.taskAssistFormFields || !Array.isArray(normalizedStep?.fields)) return;
+    if (
+      !this.elements.taskAssistFormWrap ||
+      !this.elements.taskAssistFormFields ||
+      !Array.isArray(normalizedStep?.fields)
+    )
+      return;
 
     if (normalizedStep.fields.length === 0) {
       this.clearAssistFormStepUI();
       return;
     }
 
-    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
-      ? this.currentBlockedTask.selectedFieldValues
-      : {};
+    const selectedValues =
+      this.currentBlockedTask?.selectedFieldValues &&
+      typeof this.currentBlockedTask.selectedFieldValues === 'object'
+        ? this.currentBlockedTask.selectedFieldValues
+        : {};
 
-    this.elements.taskAssistFormFields.innerHTML = normalizedStep.fields.map((field, fieldIndex) => {
-      const fieldId = String(field.id || '').trim();
-      const label = String(field.label || '').trim();
-      const description = String(field.description || '').trim();
-      const evidence = String(field.evidence || '').trim();
-      const placeholder = String(field.placeholder || '').trim();
-      const prompt = this.getAssistFormFieldPrompt(field);
-      const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
-      const currentValue = String(selectedValues[fieldId] || '').trim();
-      const value = this.escapeHtml(currentValue);
-      const hint = description
-        && description !== prompt
-        ? `<div class="workspace-detail-task-assist-form-hint">${this.escapeHtml(description)}</div>`
-        : '';
-      const evidenceMarkup = evidence
-        ? `<div class="workspace-detail-task-assist-form-evidence">${this.escapeHtml(evidence)}</div>`
-        : '';
-      const questionIntro = `
+    this.elements.taskAssistFormFields.innerHTML = normalizedStep.fields
+      .map((field, fieldIndex) => {
+        const fieldId = String(field.id || '').trim();
+        const label = String(field.label || '').trim();
+        const description = String(field.description || '').trim();
+        const evidence = String(field.evidence || '').trim();
+        const placeholder = String(field.placeholder || '').trim();
+        const prompt = this.getAssistFormFieldPrompt(field);
+        const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
+        const currentValue = String(selectedValues[fieldId] || '').trim();
+        const value = this.escapeHtml(currentValue);
+        const hint =
+          description && description !== prompt
+            ? `<div class="workspace-detail-task-assist-form-hint">${this.escapeHtml(description)}</div>`
+            : '';
+        const evidenceMarkup = evidence
+          ? `<div class="workspace-detail-task-assist-form-evidence">${this.escapeHtml(evidence)}</div>`
+          : '';
+        const questionIntro = `
         <div class="workspace-detail-task-assist-form-question">
           <span class="workspace-detail-task-assist-form-number">${fieldIndex + 1}</span>
           <div class="workspace-detail-task-assist-form-question-copy">
@@ -7592,26 +8740,27 @@ export class WorkspaceDetailPage {
         </div>
       `;
 
-      if (field.type === 'textarea') {
-        return `
+        if (field.type === 'textarea') {
+          return `
           <div class="workspace-detail-task-assist-form-field">
             ${questionIntro}
             <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
             <textarea id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" rows="3" data-assist-field-id="${this.escapeHtml(fieldId)}" placeholder="${this.escapeHtml(placeholder)}">${value}</textarea>
           </div>
         `;
-      }
+        }
 
-      if (field.type === 'select') {
-        const options = Array.isArray(field.options) ? field.options : [];
-        const optionsMarkup = options.map((option, optionIndex) => {
-          const optionValue = String(option?.value || '').trim();
-          const optionLabel = String(option?.label || option?.value || '').trim();
-          const optionDescription = String(option?.description || '').trim();
-          const optionKey = String(option?.key || '').trim();
-          if (!optionValue || !optionLabel) return '';
-          const checked = currentValue === optionValue ? ' checked' : '';
-          return `
+        if (field.type === 'select') {
+          const options = Array.isArray(field.options) ? field.options : [];
+          const optionsMarkup = options
+            .map((option, optionIndex) => {
+              const optionValue = String(option?.value || '').trim();
+              const optionLabel = String(option?.label || option?.value || '').trim();
+              const optionDescription = String(option?.description || '').trim();
+              const optionKey = String(option?.key || '').trim();
+              if (!optionValue || !optionLabel) return '';
+              const checked = currentValue === optionValue ? ' checked' : '';
+              return `
             <label class="workspace-detail-task-assist-option">
               <input
                 class="workspace-detail-task-assist-option-input"
@@ -7629,9 +8778,10 @@ export class WorkspaceDetailPage {
               </span>
             </label>
           `;
-        }).join('');
+            })
+            .join('');
 
-        return `
+          return `
           <div class="workspace-detail-task-assist-form-field">
             ${questionIntro}
             <div class="workspace-detail-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(prompt || label)}${field.required ? ' (required)' : ''}">
@@ -7639,30 +8789,37 @@ export class WorkspaceDetailPage {
             </div>
           </div>
         `;
-      }
+        }
 
-      const inputType = field.type === 'number' ? 'number' : 'text';
-      return `
+        const inputType = field.type === 'number' ? 'number' : 'text';
+        return `
         <div class="workspace-detail-task-assist-form-field">
           ${questionIntro}
           <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
           <input id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" type="${inputType}" data-assist-field-id="${this.escapeHtml(fieldId)}" value="${value}" placeholder="${this.escapeHtml(placeholder)}">
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
-    this.elements.taskAssistFormFields.querySelectorAll('[data-assist-field-id]').forEach((fieldElement) => {
-      const syncValue = () => {
-        const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
-        if (!fieldId) return;
-        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio' && !fieldElement.checked) {
-          return;
-        }
-        this.setAssistFormFieldValue(fieldId, fieldElement.value);
-      };
-      fieldElement.addEventListener('input', syncValue);
-      fieldElement.addEventListener('change', syncValue);
-    });
+    this.elements.taskAssistFormFields
+      .querySelectorAll('[data-assist-field-id]')
+      .forEach(fieldElement => {
+        const syncValue = () => {
+          const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
+          if (!fieldId) return;
+          if (
+            fieldElement instanceof HTMLInputElement &&
+            fieldElement.type === 'radio' &&
+            !fieldElement.checked
+          ) {
+            return;
+          }
+          this.setAssistFormFieldValue(fieldId, fieldElement.value);
+        };
+        fieldElement.addEventListener('input', syncValue);
+        fieldElement.addEventListener('change', syncValue);
+      });
 
     if (this.elements.taskAssistFormSummary) {
       const summary = String(normalizedStep.summary || '').trim();
@@ -7778,7 +8935,7 @@ export class WorkspaceDetailPage {
       this.elements.taskAssistContinueBtn,
       this.elements.taskAssistSwitchBtn,
       this.elements.taskAssistFailBtn
-    ].forEach((button) => {
+    ].forEach(button => {
       button?.classList.remove('is-recommended');
     });
 
@@ -7795,8 +8952,9 @@ export class WorkspaceDetailPage {
     this.setAssistSpecialistActionUI(recommendation?.specialistAction || null);
 
     if (recommendation?.suggestedAgent && this.elements.taskAssistAgent) {
-      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
-        .some((option) => String(option?.value || '') === recommendation.suggestedAgent);
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || []).some(
+        option => String(option?.value || '') === recommendation.suggestedAgent
+      );
       if (hasOption) {
         this.elements.taskAssistAgent.value = recommendation.suggestedAgent;
       }
@@ -7810,11 +8968,20 @@ export class WorkspaceDetailPage {
     this.updateAssistSwitchButtonState();
   }
 
-  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent, workflowStep = null, assistContext = {}) {
-    const normalizedCode = String(reasonCode || '').trim().toLowerCase();
+  determineAssistRecommendation(
+    reasonCode,
+    suggestedActions,
+    currentAgent,
+    workflowStep = null,
+    assistContext = {}
+  ) {
+    const normalizedCode = String(reasonCode || '')
+      .trim()
+      .toLowerCase();
     const actions = this.parseAssistActions(suggestedActions);
-    const allows = (action) => actions.length === 0 || actions.includes(action);
-    const browserRelated = normalizedCode === 'capability_mismatch' ||
+    const allows = action => actions.length === 0 || actions.includes(action);
+    const browserRelated =
+      normalizedCode === 'capability_mismatch' ||
       normalizedCode === 'capability_refusal' ||
       normalizedCode.includes('capability');
     const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
@@ -7826,23 +8993,34 @@ export class WorkspaceDetailPage {
 
     if (specialistAction) {
       return {
-        action: specialistAction.kind === 'switch' && allows('switch_agent_retry') ? 'switch_agent_retry' : '',
+        action:
+          specialistAction.kind === 'switch' && allows('switch_agent_retry')
+            ? 'switch_agent_retry'
+            : '',
         suggestedAgent: specialistAction.kind === 'switch' ? specialistAction.agentName : '',
         text: this.buildAssistSpecialistActionText(specialistAction),
         specialistAction
       };
     }
 
-    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0 &&
-        allows('continue_with_instruction')) {
+    if (
+      workflowStep?.stepType === 'ask_choice' &&
+      Array.isArray(workflowStep.choices) &&
+      workflowStep.choices.length > 0 &&
+      allows('continue_with_instruction')
+    ) {
       return {
         action: 'continue_with_instruction',
         text: 'Recommended: Choose one of the suggested next steps below or add your own guidance.'
       };
     }
 
-    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0 &&
-        allows('continue_with_instruction')) {
+    if (
+      workflowStep?.stepType === 'ask_form' &&
+      Array.isArray(workflowStep.fields) &&
+      workflowStep.fields.length > 0 &&
+      allows('continue_with_instruction')
+    ) {
       return {
         action: 'continue_with_instruction',
         text: 'Recommended: Answer the questions below and continue.'
@@ -7911,7 +9089,9 @@ export class WorkspaceDetailPage {
     }
 
     const state = {
-      ...(window.history.state && typeof window.history.state === 'object' ? window.history.state : {}),
+      ...(window.history.state && typeof window.history.state === 'object'
+        ? window.history.state
+        : {}),
       blockedTaskId: nextTaskId || null
     };
     if (replace) {
@@ -7969,7 +9149,9 @@ export class WorkspaceDetailPage {
       this.elements.taskAssistPage.hidden = false;
     }
     if (updateRoute) {
-      this.updateBlockedTaskRoute(taskId || this.currentBlockedTask?.taskId || '', { replace: replaceRoute });
+      this.updateBlockedTaskRoute(taskId || this.currentBlockedTask?.taskId || '', {
+        replace: replaceRoute
+      });
     }
     this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
   }
@@ -8010,7 +9192,7 @@ export class WorkspaceDetailPage {
       return false;
     }
 
-    const task = this.tasks.find((item) => item?.id === routeTaskId);
+    const task = this.tasks.find(item => item?.id === routeTaskId);
     if (!task || !this.getTaskStatusPresentation(task).isBlocked) {
       this.closeTaskAssistPage({ updateRoute: true, replaceRoute: true });
       return false;
@@ -8025,20 +9207,33 @@ export class WorkspaceDetailPage {
   }
 
   openTaskAssistModal(taskId, eventData = null, options = {}) {
-    const task = this.tasks.find((item) => item.id === taskId);
+    const task = this.tasks.find(item => item.id === taskId);
     if (!task) return;
 
     const humanLoop = this.getTaskHumanLoop(task) || {};
-    const payload = (eventData && typeof eventData === 'object') ? eventData : {};
-    const payloadHumanLoop = payload.human_loop && typeof payload.human_loop === 'object'
-      ? payload.human_loop
-      : {};
+    const payload = eventData && typeof eventData === 'object' ? eventData : {};
+    const payloadHumanLoop =
+      payload.human_loop && typeof payload.human_loop === 'object' ? payload.human_loop : {};
     const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
-    const reasonCode = String(payload.reason_code || payloadHumanLoop.reason_code || humanLoop.reason_code || '').trim();
-    const suggestedActions = payload.suggested_actions || payloadHumanLoop.suggested_actions || humanLoop.suggested_actions;
-    const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
-    const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
-    const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
+    const reasonCode = String(
+      payload.reason_code || payloadHumanLoop.reason_code || humanLoop.reason_code || ''
+    ).trim();
+    const suggestedActions =
+      payload.suggested_actions ||
+      payloadHumanLoop.suggested_actions ||
+      humanLoop.suggested_actions;
+    const reason = String(
+      payload.reason ||
+        payloadHumanLoop.reason ||
+        humanLoop.reason ||
+        'The assigned agent needs guidance before it can continue.'
+    ).trim();
+    const question = String(
+      payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?'
+    ).trim();
+    const response = String(
+      payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || ''
+    ).trim();
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
     const selectedFieldValues = this.normalizeAssistFieldValues(
@@ -8046,11 +9241,12 @@ export class WorkspaceDetailPage {
     );
 
     const currentAgent = String(task.to || '').trim();
-    const baseWorkflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
-      || this.normalizeAssistWorkflowStep(payloadHumanLoop.workflow_step)
-      || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
-      || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
-      || this.buildAssistWorkflowStepFromText(question, response);
+    const baseWorkflowStep =
+      this.normalizeAssistWorkflowStep(payload.workflow_step) ||
+      this.normalizeAssistWorkflowStep(payloadHumanLoop.workflow_step) ||
+      this.normalizeAssistWorkflowStep(humanLoop.workflow_step) ||
+      this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step) ||
+      this.buildAssistWorkflowStepFromText(question, response);
     const displayResponse = this.getAssistResponseDisplayText(response, question, baseWorkflowStep);
     const recommendation = this.determineAssistRecommendation(
       reasonCode,
@@ -8064,7 +9260,10 @@ export class WorkspaceDetailPage {
         response
       }
     );
-    const workflowStep = this.applyAssistWorkflowSpecialistOverrides(baseWorkflowStep, recommendation?.specialistAction);
+    const workflowStep = this.applyAssistWorkflowSpecialistOverrides(
+      baseWorkflowStep,
+      recommendation?.specialistAction
+    );
     const assistSummary = {
       known: this.buildAssistKnownSummary(reason, displayResponse),
       needs: this.buildAssistNeedsSummary(workflowStep, question),
@@ -8137,26 +9336,34 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
     }
-    if (action === 'switch_agent_retry' &&
-        this.normalizeAgentName(selectedAgent) === this.normalizeAgentName(this.currentBlockedTask.currentAgent)) {
+    if (
+      action === 'switch_agent_retry' &&
+      this.normalizeAgentName(selectedAgent) ===
+        this.normalizeAgentName(this.currentBlockedTask.currentAgent)
+    ) {
       if (window.Toast) window.Toast.error('Select a different agent before switching.');
       return;
     }
-    if (action === 'continue_with_instruction' &&
-        this.currentBlockedTask.workflowStep?.stepType === 'ask_choice' &&
-        !selectedChoiceId &&
-        !message) {
-      if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
+    if (
+      action === 'continue_with_instruction' &&
+      this.currentBlockedTask.workflowStep?.stepType === 'ask_choice' &&
+      !selectedChoiceId &&
+      !message
+    ) {
+      if (window.Toast)
+        window.Toast.warning('Choose a next step or add guidance before continuing.');
       return;
     }
-    if (action === 'continue_with_instruction' &&
-        this.currentBlockedTask.workflowStep?.stepType === 'ask_form') {
+    if (
+      action === 'continue_with_instruction' &&
+      this.currentBlockedTask.workflowStep?.stepType === 'ask_form'
+    ) {
       const requiredFields = Array.isArray(this.currentBlockedTask.workflowStep?.fields)
-        ? this.currentBlockedTask.workflowStep.fields.filter((field) => field?.required !== false)
+        ? this.currentBlockedTask.workflowStep.fields.filter(field => field?.required !== false)
         : [];
-      const missingRequired = requiredFields.filter((field) => {
+      const missingRequired = requiredFields.filter(field => {
         const fieldId = String(field?.id || '').trim();
-        return !fieldValues.some((item) => item.id === fieldId && String(item.value || '').trim());
+        return !fieldValues.some(item => item.id === fieldId && String(item.value || '').trim());
       });
 
       if (missingRequired.length > 0) {
@@ -8165,7 +9372,8 @@ export class WorkspaceDetailPage {
       }
 
       if (fieldValues.length === 0 && !message) {
-        if (window.Toast) window.Toast.warning('Answer at least one question or add guidance before continuing.');
+        if (window.Toast)
+          window.Toast.warning('Answer at least one question or add guidance before continuing.');
         return;
       }
     }
@@ -8182,11 +9390,14 @@ export class WorkspaceDetailPage {
     };
 
     try {
-      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Failed to submit assistance');
@@ -8214,11 +9425,13 @@ export class WorkspaceDetailPage {
 
   getSubtasksForParent(taskId) {
     if (!taskId) return [];
-    return this.tasks.filter((task) => task.parent_task_id === taskId);
+    return this.tasks.filter(task => task.parent_task_id === taskId);
   }
 
   normalizeAgentName(name) {
-    return String(name || '').trim().toLowerCase();
+    return String(name || '')
+      .trim()
+      .toLowerCase();
   }
 
   getWorkspaceAgentNames() {
@@ -8226,7 +9439,7 @@ export class WorkspaceDetailPage {
 
     const seen = new Set();
     const names = [];
-    const add = (name) => {
+    const add = name => {
       const normalized = String(name || '').trim();
       if (!normalized || normalized === 'unassigned') return;
       const key = this.normalizeAgentName(normalized);
@@ -8236,10 +9449,10 @@ export class WorkspaceDetailPage {
     };
 
     if (Array.isArray(this.workspace.agent_instances)) {
-      this.workspace.agent_instances.forEach((instance) => add(instance?.name));
+      this.workspace.agent_instances.forEach(instance => add(instance?.name));
     }
     if (Array.isArray(this.workspace.agents)) {
-      this.workspace.agents.forEach((name) => add(name));
+      this.workspace.agents.forEach(name => add(name));
     }
 
     return names;
@@ -8261,10 +9474,7 @@ export class WorkspaceDetailPage {
     agentName = String(agentName || '').trim();
     if (!agentName) return;
 
-    await Promise.all([
-      this.loadAgentCatalog(true),
-      this.loadProviderCatalog()
-    ]);
+    await Promise.all([this.loadAgentCatalog(true), this.loadProviderCatalog()]);
 
     const profile = this.getAgentProfile(agentName);
     if (!profile) {
@@ -8272,7 +9482,8 @@ export class WorkspaceDetailPage {
       return;
     }
     if (!this.agentAllowsModelEditing(profile)) {
-      if (window.Toast) window.Toast.warning('This agent model cannot be changed from the workspace.');
+      if (window.Toast)
+        window.Toast.warning('This agent model cannot be changed from the workspace.');
       return;
     }
 
@@ -8299,9 +9510,11 @@ export class WorkspaceDetailPage {
     this.updateAgentModelSelectionSummary();
 
     if (this.elements.agentModelModal && window.bootstrap) {
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.agentModelModal)
-        : (bootstrap.Modal.getInstance(this.elements.agentModelModal) || new bootstrap.Modal(this.elements.agentModelModal));
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.agentModelModal)
+          : bootstrap.Modal.getInstance(this.elements.agentModelModal) ||
+            new bootstrap.Modal(this.elements.agentModelModal);
       modal.show();
     }
   }
@@ -8311,7 +9524,10 @@ export class WorkspaceDetailPage {
     const editState = this.activeAgentModelEdit;
     if (!select || !editState) return;
 
-    const normalizedType = String(editState.agentType || 'general').trim().toLowerCase() || 'general';
+    const normalizedType =
+      String(editState.agentType || 'general')
+        .trim()
+        .toLowerCase() || 'general';
     const currentModel = String(editState.currentModel || '').trim();
     const currentProvider = String(editState.currentProvider || '').trim();
 
@@ -8319,24 +9535,29 @@ export class WorkspaceDetailPage {
     let hasOptions = false;
     let selectedFound = false;
 
-    (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach((provider) => {
+    (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach(provider => {
       const group = document.createElement('optgroup');
       group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
       let groupHasOptions = false;
 
       const models = Array.isArray(provider?.models) ? provider.models : [];
-      models.forEach((model) => {
+      models.forEach(model => {
         const value = String(model?.value || '').trim();
         if (!value) return;
 
-        const modelType = String(model?.type || '').trim().toLowerCase();
+        const modelType = String(model?.type || '')
+          .trim()
+          .toLowerCase();
         const include = modelType === normalizedType || value === currentModel;
         if (!include) return;
 
         const option = document.createElement('option');
         option.value = value;
         option.textContent = String(model?.label || value).trim();
-        option.setAttribute('data-provider', String(model?.provider || provider?.name || '').trim());
+        option.setAttribute(
+          'data-provider',
+          String(model?.provider || provider?.name || '').trim()
+        );
         option.setAttribute('data-model-type', modelType);
         if (value === currentModel) {
           option.selected = true;
@@ -8370,7 +9591,8 @@ export class WorkspaceDetailPage {
     }
 
     if (this.elements.agentModelSubmitBtn) {
-      this.elements.agentModelSubmitBtn.disabled = !hasOptions || !String(select.value || '').trim();
+      this.elements.agentModelSubmitBtn.disabled =
+        !hasOptions || !String(select.value || '').trim();
     }
   }
 
@@ -8478,9 +9700,10 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
-    const emailAccount = binding?.email_account && typeof binding.email_account === 'object'
-      ? { ...binding.email_account }
-      : null;
+    const emailAccount =
+      binding?.email_account && typeof binding.email_account === 'object'
+        ? { ...binding.email_account }
+        : null;
 
     return {
       id: String(binding?.id || '').trim(),
@@ -8490,7 +9713,8 @@ export class WorkspaceDetailPage {
       scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
       config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
       emailAccount,
-      emailAccountMissing: binding?.email_account_missing === true || binding?.emailAccountMissing === true,
+      emailAccountMissing:
+        binding?.email_account_missing === true || binding?.emailAccountMissing === true,
       source
     };
   }
@@ -8501,8 +9725,8 @@ export class WorkspaceDetailPage {
     }
 
     return this.workspace.mcp_bindings
-      .map((binding) => this.normalizeWorkspaceMCPBinding(binding, 'workspace'))
-      .filter((binding) => binding.id && binding.serverName);
+      .map(binding => this.normalizeWorkspaceMCPBinding(binding, 'workspace'))
+      .filter(binding => binding.id && binding.serverName);
   }
 
   getWorkspaceMCPBindings(options = {}) {
@@ -8511,17 +9735,17 @@ export class WorkspaceDetailPage {
     const includeDisabled = options.includeDisabled === true;
     const explicitBindings = this.getExplicitWorkspaceMCPBindings();
     const explicitFilesystemExists = explicitBindings.some(
-      (binding) => binding.serverName.toLowerCase() === 'filesystem'
+      binding => binding.serverName.toLowerCase() === 'filesystem'
     );
 
     const visibleExplicitBindings = includeDisabled
       ? explicitBindings
-      : explicitBindings.filter((binding) => binding.enabled);
+      : explicitBindings.filter(binding => binding.enabled);
 
     const directoryRoots = Array.isArray(this.workspace.directory_references)
       ? this.workspace.directory_references
-        .map((reference) => String(reference?.path || '').trim())
-        .filter(Boolean)
+          .map(reference => String(reference?.path || '').trim())
+          .filter(Boolean)
       : [];
 
     if (explicitFilesystemExists || directoryRoots.length === 0) {
@@ -8542,23 +9766,40 @@ export class WorkspaceDetailPage {
   }
 
   getWorkspaceExplicitMCPBinding(bindingId) {
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedBindingId) return null;
-    return this.getExplicitWorkspaceMCPBindings().find(
-      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
-    ) || null;
+    return (
+      this.getExplicitWorkspaceMCPBindings().find(
+        binding =>
+          String(binding?.id || '')
+            .trim()
+            .toLowerCase() === normalizedBindingId
+      ) || null
+    );
   }
 
   getWorkspaceMCPBinding(bindingId, options = {}) {
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedBindingId) return null;
-    return this.getWorkspaceMCPBindings(options).find(
-      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
-    ) || null;
+    return (
+      this.getWorkspaceMCPBindings(options).find(
+        binding =>
+          String(binding?.id || '')
+            .trim()
+            .toLowerCase() === normalizedBindingId
+      ) || null
+    );
   }
 
   isWorkspaceRuntimeMCPServerName(serverName) {
-    return String(serverName || '').trim().toLowerCase().startsWith('ws:');
+    return String(serverName || '')
+      .trim()
+      .toLowerCase()
+      .startsWith('ws:');
   }
 
   async loadAvailableMCPServers(force = false) {
@@ -8579,12 +9820,15 @@ export class WorkspaceDetailPage {
       const data = await response.json();
       const seen = new Set();
       const servers = (Array.isArray(data?.servers) ? data.servers : [])
-        .map((server) => ({
+        .map(server => ({
           name: String(server?.name || '').trim(),
           enabled: server?.enabled !== false
         }))
-        .filter((server) => server.name && server.enabled && !this.isWorkspaceRuntimeMCPServerName(server.name))
-        .filter((server) => {
+        .filter(
+          server =>
+            server.name && server.enabled && !this.isWorkspaceRuntimeMCPServerName(server.name)
+        )
+        .filter(server => {
           const key = server.name.toLowerCase();
           if (seen.has(key)) return false;
           seen.add(key);
@@ -8604,7 +9848,11 @@ export class WorkspaceDetailPage {
   }
 
   isEmailWorkspaceMCPServerName(serverName) {
-    switch (String(serverName || '').trim().toLowerCase()) {
+    switch (
+      String(serverName || '')
+        .trim()
+        .toLowerCase()
+    ) {
       case 'email':
       case 'gmail':
       case 'microsoft-mail':
@@ -8632,16 +9880,21 @@ export class WorkspaceDetailPage {
       emailAddress: String(account.email_address || account.emailAddress || '').trim(),
       displayName: String(account.display_name || account.displayName || '').trim(),
       authType: String(account.auth_type || account.authType || '').trim(),
-      credentials: account.credentials && typeof account.credentials === 'object'
-        ? { ...account.credentials }
-        : (account.credentials_status && typeof account.credentials_status === 'object'
-          ? { ...account.credentials_status }
-          : {})
+      credentials:
+        account.credentials && typeof account.credentials === 'object'
+          ? { ...account.credentials }
+          : account.credentials_status && typeof account.credentials_status === 'object'
+            ? { ...account.credentials_status }
+            : {}
     };
   }
 
   async loadAvailableEmailAccounts(force = false) {
-    if (!force && Array.isArray(this.availableEmailAccounts) && this.availableEmailAccounts.length > 0) {
+    if (
+      !force &&
+      Array.isArray(this.availableEmailAccounts) &&
+      this.availableEmailAccounts.length > 0
+    ) {
       return this.availableEmailAccounts;
     }
     if (!force && this.availableEmailAccountsPromise) {
@@ -8658,9 +9911,9 @@ export class WorkspaceDetailPage {
       const data = await response.json();
       const seen = new Set();
       const accounts = (Array.isArray(data?.accounts) ? data.accounts : [])
-        .map((account) => this.normalizeWorkspaceEmailAccount(account))
-        .filter((account) => account && account.id)
-        .filter((account) => {
+        .map(account => this.normalizeWorkspaceEmailAccount(account))
+        .filter(account => account && account.id)
+        .filter(account => {
           const key = account.id.toLowerCase();
           if (seen.has(key)) return false;
           seen.add(key);
@@ -8684,18 +9937,35 @@ export class WorkspaceDetailPage {
   }
 
   getVisibleWorkspaceEmailAccounts(existingBinding = null) {
-    const workspaceID = String(this.workspaceId || '').trim().toLowerCase();
+    const workspaceID = String(this.workspaceId || '')
+      .trim()
+      .toLowerCase();
     const existingAccount = this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
-    const existingAccountID = String(existingBinding?.config?.account_id || existingAccount?.id || '').trim().toLowerCase();
-    const accounts = Array.isArray(this.availableEmailAccounts) ? [...this.availableEmailAccounts] : [];
-    const filtered = accounts.filter((account) => {
-      const accountWorkspaceID = String(account.workspaceId || '').trim().toLowerCase();
+    const existingAccountID = String(
+      existingBinding?.config?.account_id || existingAccount?.id || ''
+    )
+      .trim()
+      .toLowerCase();
+    const accounts = Array.isArray(this.availableEmailAccounts)
+      ? [...this.availableEmailAccounts]
+      : [];
+    const filtered = accounts.filter(account => {
+      const accountWorkspaceID = String(account.workspaceId || '')
+        .trim()
+        .toLowerCase();
       return !accountWorkspaceID || accountWorkspaceID === workspaceID;
     });
 
-    if (existingAccount && existingAccount.id && !filtered.some((account) => account.id.toLowerCase() === existingAccount.id.toLowerCase())) {
+    if (
+      existingAccount &&
+      existingAccount.id &&
+      !filtered.some(account => account.id.toLowerCase() === existingAccount.id.toLowerCase())
+    ) {
       filtered.unshift(existingAccount);
-    } else if (existingAccountID && !filtered.some((account) => account.id.toLowerCase() === existingAccountID)) {
+    } else if (
+      existingAccountID &&
+      !filtered.some(account => account.id.toLowerCase() === existingAccountID)
+    ) {
       filtered.unshift({
         id: String(existingBinding?.config?.account_id || '').trim(),
         label: String(existingBinding?.config?.account_id || 'Unavailable email account'),
@@ -8722,15 +9992,20 @@ export class WorkspaceDetailPage {
     const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
     const options = ['<option value="">Select an email account</option>'];
 
-    accounts.forEach((account) => {
+    accounts.forEach(account => {
       const id = String(account?.id || '').trim();
       if (!id) return;
 
-      const selected = normalizedSelected && id.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const selected =
+        normalizedSelected && id.toLowerCase() === normalizedSelected.toLowerCase()
+          ? ' selected'
+          : '';
       const accountLabel = account.label || account.emailAddress || id;
       const details = [account.provider, account.emailAddress].filter(Boolean).join(' • ');
       const text = details ? `${accountLabel} (${details})` : accountLabel;
-      options.push(`<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(text)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(text)}</option>`
+      );
     });
 
     this.elements.mcpEmailAccountSelect.innerHTML = options.join('');
@@ -8739,11 +10014,17 @@ export class WorkspaceDetailPage {
     }
 
     if (accounts.length === 0) {
-      this.setWorkspaceMCPEmailAccountHelp('No unlocked email accounts are available. Create one in Vault > Email Accounts.', true);
+      this.setWorkspaceMCPEmailAccountHelp(
+        'No unlocked email accounts are available. Create one in Vault > Email Accounts.',
+        true
+      );
       return;
     }
 
-    this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+    this.setWorkspaceMCPEmailAccountHelp(
+      'Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.',
+      false
+    );
   }
 
   getWorkspaceMCPSelectedEmailActions() {
@@ -8754,22 +10035,28 @@ export class WorkspaceDetailPage {
       ['send', this.elements.mcpEmailActionSend]
     ];
 
-    return mapping
-      .filter(([, element]) => element?.checked)
-      .map(([action]) => action);
+    return mapping.filter(([, element]) => element?.checked).map(([action]) => action);
   }
 
   setWorkspaceMCPEmailActions(actions = []) {
     const selected = new Set(
       (Array.isArray(actions) ? actions : [])
-        .map((action) => String(action || '').trim().toLowerCase())
+        .map(action =>
+          String(action || '')
+            .trim()
+            .toLowerCase()
+        )
         .filter(Boolean)
     );
 
-    if (this.elements.mcpEmailActionRead) this.elements.mcpEmailActionRead.checked = selected.has('read');
-    if (this.elements.mcpEmailActionSearch) this.elements.mcpEmailActionSearch.checked = selected.has('search');
-    if (this.elements.mcpEmailActionDraft) this.elements.mcpEmailActionDraft.checked = selected.has('draft');
-    if (this.elements.mcpEmailActionSend) this.elements.mcpEmailActionSend.checked = selected.has('send');
+    if (this.elements.mcpEmailActionRead)
+      this.elements.mcpEmailActionRead.checked = selected.has('read');
+    if (this.elements.mcpEmailActionSearch)
+      this.elements.mcpEmailActionSearch.checked = selected.has('search');
+    if (this.elements.mcpEmailActionDraft)
+      this.elements.mcpEmailActionDraft.checked = selected.has('draft');
+    if (this.elements.mcpEmailActionSend)
+      this.elements.mcpEmailActionSend.checked = selected.has('send');
     this.handleWorkspaceMCPEmailActionChange();
   }
 
@@ -8780,7 +10067,11 @@ export class WorkspaceDetailPage {
     if (this.elements.mcpEmailSendConfirmWrap) {
       this.elements.mcpEmailSendConfirmWrap.classList.toggle('d-none', !canSend);
     }
-    if (this.elements.mcpEmailSendConfirmInput && canSend && !this.elements.mcpEmailSendConfirmInput.checked) {
+    if (
+      this.elements.mcpEmailSendConfirmInput &&
+      canSend &&
+      !this.elements.mcpEmailSendConfirmInput.checked
+    ) {
       this.elements.mcpEmailSendConfirmInput.checked = true;
     }
   }
@@ -8790,15 +10081,19 @@ export class WorkspaceDetailPage {
 
     const selectedAccountID = String(this.elements.mcpEmailAccountSelect?.value || '').trim();
     const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
-    const account = accounts.find((item) => String(item?.id || '').trim() === selectedAccountID) || this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
+    const account =
+      accounts.find(item => String(item?.id || '').trim() === selectedAccountID) ||
+      this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
 
     if (!selectedAccountID && !account) {
-      this.elements.mcpEmailAccountSummary.textContent = 'Select an email account to review its provider, address, and stored credential status.';
+      this.elements.mcpEmailAccountSummary.textContent =
+        'Select an email account to review its provider, address, and stored credential status.';
       return;
     }
 
     if (!account) {
-      this.elements.mcpEmailAccountSummary.textContent = 'The saved email account is currently unavailable. Unlock the correct vault or choose another account.';
+      this.elements.mcpEmailAccountSummary.textContent =
+        'The saved email account is currently unavailable. Unlock the correct vault or choose another account.';
       return;
     }
 
@@ -8806,7 +10101,8 @@ export class WorkspaceDetailPage {
     const stored = [];
     if (credentialState.has_refresh_token) stored.push('refresh token');
     if (credentialState.has_access_token) stored.push('access token');
-    if (credentialState.has_password) stored.push(account.authType === 'app_password' ? 'app password' : 'password');
+    if (credentialState.has_password)
+      stored.push(account.authType === 'app_password' ? 'app password' : 'password');
     if (credentialState.has_client_id) stored.push('client id');
     if (credentialState.has_client_secret) stored.push('client secret');
 
@@ -8815,11 +10111,14 @@ export class WorkspaceDetailPage {
       account.emailAddress,
       account.provider,
       account.authType
-    ].filter(Boolean).join(' • ');
+    ]
+      .filter(Boolean)
+      .join(' • ');
 
-    this.elements.mcpEmailAccountSummary.textContent = stored.length > 0
-      ? `${summary}. Stored in vault: ${stored.join(', ')}.`
-      : `${summary}. No credential status is currently available.`;
+    this.elements.mcpEmailAccountSummary.textContent =
+      stored.length > 0
+        ? `${summary}. Stored in vault: ${stored.join(', ')}.`
+        : `${summary}. No credential status is currently available.`;
   }
 
   async syncWorkspaceMCPEmailFields(existingBinding = null) {
@@ -8860,17 +10159,25 @@ export class WorkspaceDetailPage {
 
   getWorkspaceAgentAccessEntry(agentInstanceId) {
     const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
-    if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_mcp_access)) {
+    if (
+      !normalizedAgentInstanceId ||
+      !this.workspace ||
+      !Array.isArray(this.workspace.agent_mcp_access)
+    ) {
       return null;
     }
 
-    return this.workspace.agent_mcp_access.find(
-      (entry) => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
-    ) || null;
+    return (
+      this.workspace.agent_mcp_access.find(
+        entry => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
+      ) || null
+    );
   }
 
   getWorkspaceMCPAgentNamesForBinding(bindingId) {
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedBindingId || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
       return [];
     }
@@ -8881,16 +10188,24 @@ export class WorkspaceDetailPage {
 
     const names = [];
     const seen = new Set();
-    this.workspace.agent_instances.forEach((instance) => {
+    this.workspace.agent_instances.forEach(instance => {
       const instanceId = String(instance?.id || '').trim();
       const agentName = String(instance?.name || '').trim();
       if (!instanceId || !agentName) return;
 
-      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceId);
+      const entry = accessEntries.find(
+        item => String(item?.agent_instance_id || '').trim() === instanceId
+      );
       let allowed = true;
       if (entry) {
         const enabledIDs = Array.isArray(entry.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          ? entry.enabled_binding_ids
+              .map(value =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase()
+              )
+              .filter(Boolean)
           : [];
         allowed = enabledIDs.includes(normalizedBindingId);
       }
@@ -8909,25 +10224,31 @@ export class WorkspaceDetailPage {
       return [];
     }
 
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     return this.workspace.agent_instances
-      .map((instance) => {
+      .map(instance => {
         const instanceId = String(instance?.id || '').trim();
         const instanceName = String(instance?.name || '').trim();
         if (!instanceId || !instanceName) return null;
 
         const entry = this.getWorkspaceAgentAccessEntry(instanceId);
         const enabledBindingIds = Array.isArray(entry?.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          ? entry.enabled_binding_ids
+              .map(value =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase()
+              )
+              .filter(Boolean)
           : [];
 
         const instanceNumber = Number(instance?.instance_number || 0);
         const nodeID = String(instance?.node_id || '').trim();
         const label = instanceNumber > 1 ? `${instanceName} #${instanceNumber}` : instanceName;
         const meta = nodeID || 'Workspace agent instance';
-        const checked = entry
-          ? enabledBindingIds.includes(normalizedBindingId)
-          : true;
+        const checked = entry ? enabledBindingIds.includes(normalizedBindingId) : true;
 
         return {
           id: instanceId,
@@ -8940,20 +10261,23 @@ export class WorkspaceDetailPage {
   }
 
   summarizeWorkspaceMCPBindingScope(binding) {
-    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    const serverName = String(binding?.serverName || '')
+      .trim()
+      .toLowerCase();
     const scope = binding?.scope && typeof binding.scope === 'object' ? binding.scope : {};
 
     if (serverName === 'filesystem') {
       const roots = Array.isArray(scope.roots)
-        ? scope.roots.map((value) => String(value || '').trim()).filter(Boolean)
+        ? scope.roots.map(value => String(value || '').trim()).filter(Boolean)
         : [];
       if (roots.length === 0) return 'No roots configured';
       if (roots.length === 1) return `1 root: ${roots[0]}`;
       return `${roots.length} roots`;
     }
 
-    const entries = Object.entries(scope)
-      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    const entries = Object.entries(scope).filter(
+      ([key, value]) => String(key || '').trim() && value !== null && value !== undefined
+    );
     if (entries.length === 0) return '';
 
     const [firstKey, firstValue] = entries[0];
@@ -8968,14 +10292,16 @@ export class WorkspaceDetailPage {
 
   summarizeWorkspaceMCPBindingConfig(binding) {
     const config = binding?.config && typeof binding.config === 'object' ? binding.config : {};
-    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    const serverName = String(binding?.serverName || '')
+      .trim()
+      .toLowerCase();
 
     if (this.isEmailWorkspaceMCPServerName(serverName)) {
       const actions = Array.isArray(config.allowed_actions)
-        ? config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        ? config.allowed_actions.map(action => String(action || '').trim()).filter(Boolean)
         : [];
       const mailboxes = Array.isArray(config.mailboxes)
-        ? config.mailboxes.map((value) => String(value || '').trim()).filter(Boolean)
+        ? config.mailboxes.map(value => String(value || '').trim()).filter(Boolean)
         : [];
       const parts = [];
       if (actions.length > 0) {
@@ -8989,8 +10315,9 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const entries = Object.entries(config)
-      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    const entries = Object.entries(config).filter(
+      ([key, value]) => String(key || '').trim() && value !== null && value !== undefined
+    );
     if (entries.length === 0) return '';
 
     const [firstKey, firstValue] = entries[0];
@@ -9004,7 +10331,9 @@ export class WorkspaceDetailPage {
   }
 
   describeWorkspaceMCPBinding(binding) {
-    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    const serverName = String(binding?.serverName || '')
+      .trim()
+      .toLowerCase();
     if (binding?.enabled === false) {
       return 'Saved on this workspace but currently disabled. Re-enable it to materialize at runtime for agent instances.';
     }
@@ -9030,7 +10359,8 @@ export class WorkspaceDetailPage {
 
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
       ? bootstrap.Modal.getOrCreateInstance(this.elements.mcpModal)
-      : (bootstrap.Modal.getInstance(this.elements.mcpModal) || new bootstrap.Modal(this.elements.mcpModal));
+      : bootstrap.Modal.getInstance(this.elements.mcpModal) ||
+          new bootstrap.Modal(this.elements.mcpModal);
   }
 
   generateWorkspaceMCPBindingId() {
@@ -9058,9 +10388,16 @@ export class WorkspaceDetailPage {
     if (!this.elements.mcpServerSelect) return;
 
     const normalizedSelected = String(selectedServerName || '').trim();
-    const availableServers = Array.isArray(this.availableMCPServers) ? [...this.availableMCPServers] : [];
+    const availableServers = Array.isArray(this.availableMCPServers)
+      ? [...this.availableMCPServers]
+      : [];
     const selectedExists = normalizedSelected
-      ? availableServers.some((server) => String(server?.name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())
+      ? availableServers.some(
+          server =>
+            String(server?.name || '')
+              .trim()
+              .toLowerCase() === normalizedSelected.toLowerCase()
+        )
       : false;
 
     if (normalizedSelected && !selectedExists) {
@@ -9068,14 +10405,19 @@ export class WorkspaceDetailPage {
     }
 
     const options = ['<option value="">Select a connector</option>'];
-    availableServers.forEach((server) => {
+    availableServers.forEach(server => {
       const name = String(server?.name || '').trim();
       if (!name) return;
 
       const unavailable = server?.unavailable === true;
-      const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const selected =
+        normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase()
+          ? ' selected'
+          : '';
       const label = unavailable ? `${name} (currently not globally enabled)` : name;
-      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`
+      );
     });
 
     this.elements.mcpServerSelect.innerHTML = options.join('');
@@ -9085,12 +10427,18 @@ export class WorkspaceDetailPage {
     }
 
     if (availableServers.length === 0) {
-      this.setWorkspaceMCPServerHelp('No globally enabled connectors are available yet. Enable an MCP globally first.', true);
+      this.setWorkspaceMCPServerHelp(
+        'No globally enabled connectors are available yet. Enable an MCP globally first.',
+        true
+      );
       return;
     }
 
     if (normalizedSelected && !selectedExists) {
-      this.setWorkspaceMCPServerHelp(`${normalizedSelected} is not globally enabled right now, but you can still update or remove this workspace binding.`, true);
+      this.setWorkspaceMCPServerHelp(
+        `${normalizedSelected} is not globally enabled right now, but you can still update or remove this workspace binding.`,
+        true
+      );
       return;
     }
 
@@ -9111,7 +10459,9 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.mcpAgentOptions.innerHTML = accessOptions.map((option) => `
+    this.elements.mcpAgentOptions.innerHTML = accessOptions
+      .map(
+        option => `
       <label class="workspace-detail-mcp-agent-option">
         <input type="checkbox" class="form-check-input workspace-detail-mcp-agent-checkbox" value="${this.escapeHtml(option.id)}"${option.checked ? ' checked' : ''}>
         <span class="workspace-detail-mcp-agent-option-copy">
@@ -9119,20 +10469,24 @@ export class WorkspaceDetailPage {
           <span class="workspace-detail-mcp-agent-option-meta">${this.escapeHtml(option.meta)}</span>
         </span>
       </label>
-    `).join('');
+    `
+      )
+      .join('');
     this.updateWorkspaceMCPAgentAccessSummary();
   }
 
   updateWorkspaceMCPAgentAccessSummary() {
     if (!this.elements.mcpAgentAccessSummary || !this.elements.mcpAgentOptions) return;
 
-    const checkboxes = Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox'));
+    const checkboxes = Array.from(
+      this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox')
+    );
     if (checkboxes.length === 0) {
       this.elements.mcpAgentAccessSummary.textContent = 'No agents';
       return;
     }
 
-    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    const selectedCount = checkboxes.filter(checkbox => checkbox.checked).length;
     this.elements.mcpAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
   }
 
@@ -9147,13 +10501,15 @@ export class WorkspaceDetailPage {
       this.elements.mcpServerSelect.innerHTML = '<option value="">Select a connector</option>';
     }
     if (this.elements.mcpAgentOptions) {
-      this.elements.mcpAgentOptions.innerHTML = '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
+      this.elements.mcpAgentOptions.innerHTML =
+        '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
     }
     if (this.elements.mcpModalTitle) {
       this.elements.mcpModalTitle.textContent = 'Add Workspace MCP';
     }
     if (this.elements.mcpModalSubtitle) {
-      this.elements.mcpModalSubtitle.textContent = 'Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.';
+      this.elements.mcpModalSubtitle.textContent =
+        'Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.';
     }
     if (this.elements.mcpEnabledInput) {
       this.elements.mcpEnabledInput.checked = true;
@@ -9174,7 +10530,8 @@ export class WorkspaceDetailPage {
       this.elements.mcpEmailFields.classList.add('d-none');
     }
     if (this.elements.mcpEmailAccountSelect) {
-      this.elements.mcpEmailAccountSelect.innerHTML = '<option value="">Select an email account</option>';
+      this.elements.mcpEmailAccountSelect.innerHTML =
+        '<option value="">Select an email account</option>';
       this.elements.mcpEmailAccountSelect.value = '';
     }
     if (this.elements.mcpEmailMailboxInput) {
@@ -9231,7 +10588,9 @@ export class WorkspaceDetailPage {
 
   async openWorkspaceMCPModal(bindingId = '') {
     const explicitBinding = bindingId ? this.getWorkspaceExplicitMCPBinding(bindingId) : null;
-    const existingBinding = explicitBinding || (bindingId ? this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) : null);
+    const existingBinding =
+      explicitBinding ||
+      (bindingId ? this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) : null);
     if (bindingId && !existingBinding) {
       if (window.Toast) {
         window.Toast.info('That workspace MCP binding is no longer available.');
@@ -9250,46 +10609,53 @@ export class WorkspaceDetailPage {
     }
 
     const isSynthesized = existingBinding?.source === 'synthesized' && !explicitBinding;
-    this.activeWorkspaceMCPMode = explicitBinding ? 'edit' : (isSynthesized ? 'customize' : 'create');
+    this.activeWorkspaceMCPMode = explicitBinding ? 'edit' : isSynthesized ? 'customize' : 'create';
     this.activeWorkspaceMCPBindingId = existingBinding?.id || this.generateWorkspaceMCPBindingId();
     this.populateWorkspaceMCPServerOptions(existingBinding?.serverName || '');
 
     if (this.elements.mcpModalTitle) {
       this.elements.mcpModalTitle.textContent = explicitBinding
         ? 'Edit Workspace MCP'
-        : (isSynthesized ? 'Customize Workspace MCP' : 'Add Workspace MCP');
+        : isSynthesized
+          ? 'Customize Workspace MCP'
+          : 'Add Workspace MCP';
     }
     if (this.elements.mcpModalSubtitle) {
       this.elements.mcpModalSubtitle.textContent = explicitBinding
         ? 'Update this workspace binding, refine its scope, or tighten which agent instances can reach it.'
-        : (isSynthesized
+        : isSynthesized
           ? 'This binding is currently derived from imported directories. Saving here will create an explicit workspace binding that you can edit directly.'
-          : 'Create a new MCP binding for this workspace and decide which agent instances should be able to use it.');
+          : 'Create a new MCP binding for this workspace and decide which agent instances should be able to use it.';
     }
     if (this.elements.mcpAliasInput) {
       this.elements.mcpAliasInput.value = existingBinding?.alias || '';
     }
     if (this.elements.mcpEnabledInput) {
-      this.elements.mcpEnabledInput.checked = existingBinding ? existingBinding.enabled !== false : true;
+      this.elements.mcpEnabledInput.checked = existingBinding
+        ? existingBinding.enabled !== false
+        : true;
     }
     if (this.elements.mcpScopeInput) {
-      const scope = existingBinding?.scope && Object.keys(existingBinding.scope).length > 0
-        ? JSON.stringify(existingBinding.scope, null, 2)
-        : '';
+      const scope =
+        existingBinding?.scope && Object.keys(existingBinding.scope).length > 0
+          ? JSON.stringify(existingBinding.scope, null, 2)
+          : '';
       this.elements.mcpScopeInput.value = scope;
     }
     if (this.elements.mcpConfigInput) {
-      const config = existingBinding?.config && Object.keys(existingBinding.config).length > 0
-        ? JSON.stringify(existingBinding.config, null, 2)
-        : '';
+      const config =
+        existingBinding?.config && Object.keys(existingBinding.config).length > 0
+          ? JSON.stringify(existingBinding.config, null, 2)
+          : '';
       this.elements.mcpConfigInput.value = config;
     }
-    const emailConfig = existingBinding?.config && typeof existingBinding.config === 'object'
-      ? existingBinding.config
-      : {};
+    const emailConfig =
+      existingBinding?.config && typeof existingBinding.config === 'object'
+        ? existingBinding.config
+        : {};
     if (this.elements.mcpEmailMailboxInput) {
       const mailboxes = Array.isArray(emailConfig.mailboxes)
-        ? emailConfig.mailboxes.map((item) => String(item || '').trim()).filter(Boolean)
+        ? emailConfig.mailboxes.map(item => String(item || '').trim()).filter(Boolean)
         : [];
       this.elements.mcpEmailMailboxInput.value = mailboxes.join(', ');
     }
@@ -9299,12 +10665,15 @@ export class WorkspaceDetailPage {
         : ['read', 'search']
     );
     if (this.elements.mcpEmailSendConfirmInput) {
-      this.elements.mcpEmailSendConfirmInput.checked = emailConfig.require_send_confirmation !== false;
+      this.elements.mcpEmailSendConfirmInput.checked =
+        emailConfig.require_send_confirmation !== false;
     }
     if (this.elements.mcpSubmitBtn) {
       this.elements.mcpSubmitBtn.textContent = explicitBinding
         ? 'Save Changes'
-        : (isSynthesized ? 'Customize Binding' : 'Add Binding');
+        : isSynthesized
+          ? 'Customize Binding'
+          : 'Add Binding';
       this.elements.mcpSubmitBtn.disabled = false;
     }
 
@@ -9352,7 +10721,7 @@ export class WorkspaceDetailPage {
   parseWorkspaceMCPEmailMailboxes() {
     return String(this.elements.mcpEmailMailboxInput?.value || '')
       .split(/[\n,]+/)
-      .map((value) => String(value || '').trim())
+      .map(value => String(value || '').trim())
       .filter(Boolean);
   }
 
@@ -9390,8 +10759,10 @@ export class WorkspaceDetailPage {
 
   getWorkspaceMCPSelectedAgentInstanceIDs() {
     if (!this.elements.mcpAgentOptions) return [];
-    return Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox:checked'))
-      .map((checkbox) => String(checkbox.value || '').trim())
+    return Array.from(
+      this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox:checked')
+    )
+      .map(checkbox => String(checkbox.value || '').trim())
       .filter(Boolean);
   }
 
@@ -9399,12 +10770,16 @@ export class WorkspaceDetailPage {
     if (!this.elements.mcpSubmitBtn) return;
     this.elements.mcpSubmitBtn.disabled = isSubmitting;
     this.elements.mcpSubmitBtn.textContent = isSubmitting
-      ? (this.activeWorkspaceMCPMode === 'edit'
+      ? this.activeWorkspaceMCPMode === 'edit'
         ? 'Saving...'
-        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customizing...' : 'Adding...'))
-      : (this.activeWorkspaceMCPMode === 'edit'
+        : this.activeWorkspaceMCPMode === 'customize'
+          ? 'Customizing...'
+          : 'Adding...'
+      : this.activeWorkspaceMCPMode === 'edit'
         ? 'Save Changes'
-        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customize Binding' : 'Add Binding'));
+        : this.activeWorkspaceMCPMode === 'customize'
+          ? 'Customize Binding'
+          : 'Add Binding';
   }
 
   async saveWorkspaceMCPBinding(payload) {
@@ -9428,28 +10803,34 @@ export class WorkspaceDetailPage {
   }
 
   async persistWorkspaceMCPAgentAccess(bindingId, selectedAgentInstanceIds) {
-    if (!this.workspace || !Array.isArray(this.workspace.agent_instances) || this.workspace.agent_instances.length === 0) {
+    if (
+      !this.workspace ||
+      !Array.isArray(this.workspace.agent_instances) ||
+      this.workspace.agent_instances.length === 0
+    ) {
       return;
     }
 
-    const selectedSet = new Set(selectedAgentInstanceIds.map((value) => String(value || '').trim()).filter(Boolean));
+    const selectedSet = new Set(
+      selectedAgentInstanceIds.map(value => String(value || '').trim()).filter(Boolean)
+    );
     const effectiveBindingIds = this.getWorkspaceMCPBindings()
-      .map((binding) => String(binding?.id || '').trim())
+      .map(binding => String(binding?.id || '').trim())
       .filter(Boolean);
     const defaultBindingIds = Array.from(new Set(effectiveBindingIds)).sort();
-    const normalizeIDs = (ids) => Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))).sort();
-    const arraysEqual = (left, right) => (
-      left.length === right.length && left.every((value, index) => value === right[index])
-    );
+    const normalizeIDs = ids =>
+      Array.from(new Set(ids.map(value => String(value || '').trim()).filter(Boolean))).sort();
+    const arraysEqual = (left, right) =>
+      left.length === right.length && left.every((value, index) => value === right[index]);
 
-    const requests = this.workspace.agent_instances.map(async (instance) => {
+    const requests = this.workspace.agent_instances.map(async instance => {
       const instanceId = String(instance?.id || '').trim();
       if (!instanceId) return;
 
       const entry = this.getWorkspaceAgentAccessEntry(instanceId);
       const currentIds = entry
         ? Array.isArray(entry.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim()).filter(Boolean)
+          ? entry.enabled_binding_ids.map(value => String(value || '').trim()).filter(Boolean)
           : []
         : [...defaultBindingIds];
       const allowedSet = new Set(currentIds);
@@ -9507,7 +10888,10 @@ export class WorkspaceDetailPage {
     const alias = String(this.elements.mcpAliasInput?.value || '').trim();
 
     if (!serverName) {
-      this.setWorkspaceMCPServerHelp('Choose a connector before saving this workspace binding.', true);
+      this.setWorkspaceMCPServerHelp(
+        'Choose a connector before saving this workspace binding.',
+        true
+      );
       if (window.Toast) window.Toast.error('Choose a connector');
       return;
     }
@@ -9533,9 +10917,15 @@ export class WorkspaceDetailPage {
     if (this.isEmailWorkspaceMCPServerName(serverName)) {
       try {
         config = this.buildWorkspaceMCPEmailConfig(config);
-        this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+        this.setWorkspaceMCPEmailAccountHelp(
+          'Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.',
+          false
+        );
       } catch (error) {
-        this.setWorkspaceMCPEmailAccountHelp(error.message || 'Email configuration is invalid', true);
+        this.setWorkspaceMCPEmailAccountHelp(
+          error.message || 'Email configuration is invalid',
+          true
+        );
         if (window.Toast) window.Toast.error(error.message || 'Email configuration is invalid');
         return;
       }
@@ -9561,7 +10951,10 @@ export class WorkspaceDetailPage {
 
       await this.saveWorkspaceMCPBinding(payload);
       await this.loadWorkspace();
-      await this.persistWorkspaceMCPAgentAccess(this.activeWorkspaceMCPBindingId, selectedAgentInstanceIds);
+      await this.persistWorkspaceMCPAgentAccess(
+        this.activeWorkspaceMCPBindingId,
+        selectedAgentInstanceIds
+      );
       await this.loadWorkspace();
 
       this.getWorkspaceMCPModalInstance()?.hide();
@@ -9569,7 +10962,9 @@ export class WorkspaceDetailPage {
         window.Toast.success(
           this.activeWorkspaceMCPMode === 'edit'
             ? 'Workspace MCP updated'
-            : (this.activeWorkspaceMCPMode === 'customize' ? 'Workspace MCP customized' : 'Workspace MCP added')
+            : this.activeWorkspaceMCPMode === 'customize'
+              ? 'Workspace MCP customized'
+              : 'Workspace MCP added'
         );
       }
     } catch (error) {
@@ -9584,7 +10979,9 @@ export class WorkspaceDetailPage {
     const binding = this.getWorkspaceExplicitMCPBinding(bindingId);
     if (!binding) {
       if (window.Toast) {
-        window.Toast.info('Synthesized bindings follow workspace directories and are removed by changing directory scope.');
+        window.Toast.info(
+          'Synthesized bindings follow workspace directories and are removed by changing directory scope.'
+        );
       }
       return;
     }
@@ -9609,7 +11006,8 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.success('Workspace MCP removed');
     } catch (error) {
       console.error('Failed to delete workspace MCP binding:', error);
-      if (window.Toast) window.Toast.error(error.message || 'Failed to remove workspace MCP binding');
+      if (window.Toast)
+        window.Toast.error(error.message || 'Failed to remove workspace MCP binding');
     }
   }
 
@@ -9628,33 +11026,38 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.mcpList.innerHTML = bindings.map((binding) => {
-      const serverName = String(binding?.serverName || '').trim() || 'unknown';
-      const emailServer = this.isEmailWorkspaceMCPServerName(serverName);
-      const emailAccount = this.normalizeWorkspaceEmailAccount(binding?.emailAccount);
-      const alias = String(binding?.alias || '').trim();
-      const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
-      const isDisabled = binding?.enabled === false;
-      const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
-      const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
-      const emailActions = Array.isArray(binding?.config?.allowed_actions)
-        ? binding.config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
-        : [];
-      const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
-      const accessSummary = isDisabled
-        ? 'Disabled for this workspace'
-        : agentNames.length > 0
-        ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
-        : (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0
-          ? 'No agent instances currently have access'
-          : 'No agent instances in this workspace');
-      const accessLabel = isDisabled
-        ? 'Agents: unavailable while disabled'
-        : agentNames.length > 0
-        ? `Agents: ${agentNames.join(', ')}`
-        : 'Agents: none';
-      const actions = binding?.source === 'workspace'
-        ? `
+    this.elements.mcpList.innerHTML = bindings
+      .map(binding => {
+        const serverName = String(binding?.serverName || '').trim() || 'unknown';
+        const emailServer = this.isEmailWorkspaceMCPServerName(serverName);
+        const emailAccount = this.normalizeWorkspaceEmailAccount(binding?.emailAccount);
+        const alias = String(binding?.alias || '').trim();
+        const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
+        const isDisabled = binding?.enabled === false;
+        const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
+        const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
+        const emailActions = Array.isArray(binding?.config?.allowed_actions)
+          ? binding.config.allowed_actions
+              .map(action => String(action || '').trim())
+              .filter(Boolean)
+          : [];
+        const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
+        const accessSummary = isDisabled
+          ? 'Disabled for this workspace'
+          : agentNames.length > 0
+            ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
+            : Array.isArray(this.workspace?.agent_instances) &&
+                this.workspace.agent_instances.length > 0
+              ? 'No agent instances currently have access'
+              : 'No agent instances in this workspace';
+        const accessLabel = isDisabled
+          ? 'Agents: unavailable while disabled'
+          : agentNames.length > 0
+            ? `Agents: ${agentNames.join(', ')}`
+            : 'Agents: none';
+        const actions =
+          binding?.source === 'workspace'
+            ? `
           <div class="workspace-detail-mcp-card-actions">
             <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Edit binding" aria-label="Edit binding ${this.escapeHtml(alias || serverName)}">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -9668,8 +11071,8 @@ export class WorkspaceDetailPage {
             </button>
           </div>
         `
-        : (binding?.source === 'synthesized'
-          ? `
+            : binding?.source === 'synthesized'
+              ? `
             <div class="workspace-detail-mcp-card-actions">
               <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Customize binding" aria-label="Customize binding ${this.escapeHtml(alias || serverName)}">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -9678,24 +11081,40 @@ export class WorkspaceDetailPage {
               </button>
             </div>
           `
-          : '')
-        ;
+              : '';
+        const chips = [
+          `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
+          `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+          alias
+            ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>`
+            : '',
+          emailServer && emailAccount?.provider
+            ? `<span class="workspace-detail-mcp-chip provider">${this.escapeHtml(emailAccount.provider)}</span>`
+            : '',
+          emailServer && emailAccount?.emailAddress
+            ? `<span class="workspace-detail-mcp-chip email">${this.escapeHtml(emailAccount.emailAddress)}</span>`
+            : '',
+          emailServer && emailActions.length > 0
+            ? `<span class="workspace-detail-mcp-chip policy">${this.escapeHtml(`Actions: ${emailActions.join(', ')}`)}</span>`
+            : '',
+          emailServer && binding?.config?.require_send_confirmation === true
+            ? '<span class="workspace-detail-mcp-chip policy">Send confirm</span>'
+            : '',
+          emailServer && binding?.emailAccountMissing
+            ? '<span class="workspace-detail-mcp-chip warning">Account unavailable</span>'
+            : '',
+          scopeSummary
+            ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>`
+            : '',
+          configSummary
+            ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>`
+            : '',
+          `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
+        ]
+          .filter(Boolean)
+          .join('');
 
-      const chips = [
-        `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
-        `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
-        alias ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>` : '',
-        emailServer && emailAccount?.provider ? `<span class="workspace-detail-mcp-chip provider">${this.escapeHtml(emailAccount.provider)}</span>` : '',
-        emailServer && emailAccount?.emailAddress ? `<span class="workspace-detail-mcp-chip email">${this.escapeHtml(emailAccount.emailAddress)}</span>` : '',
-        emailServer && emailActions.length > 0 ? `<span class="workspace-detail-mcp-chip policy">${this.escapeHtml(`Actions: ${emailActions.join(', ')}`)}</span>` : '',
-        emailServer && binding?.config?.require_send_confirmation === true ? '<span class="workspace-detail-mcp-chip policy">Send confirm</span>' : '',
-        emailServer && binding?.emailAccountMissing ? '<span class="workspace-detail-mcp-chip warning">Account unavailable</span>' : '',
-        scopeSummary ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>` : '',
-        configSummary ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>` : '',
-        `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
-      ].filter(Boolean).join('');
-
-      return `
+        return `
         <div class="workspace-detail-mcp-card" data-binding-id="${this.escapeHtml(binding.id)}">
           <div class="workspace-detail-mcp-card-top">
             <div class="workspace-detail-mcp-card-top-main">
@@ -9711,7 +11130,8 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-chip-row">${chips}</div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
     this.renderWorkspaceConfigSummary();
   }
 
@@ -9754,12 +11174,14 @@ export class WorkspaceDetailPage {
     return value
       .split('_')
       .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
   }
 
   formatWorkspaceSettingsProfileLabel(profile) {
-    const normalized = String(profile || '').trim().toLowerCase();
+    const normalized = String(profile || '')
+      .trim()
+      .toLowerCase();
     switch (normalized) {
       case 'research':
         return 'Research';
@@ -9772,15 +11194,20 @@ export class WorkspaceDetailPage {
   }
 
   hasNonDefaultWorkspaceSettings() {
-    const current = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const current = this.normalizeWorkspaceSettings(
+      this.workspaceSettings || this.getDefaultWorkspaceSettings()
+    );
     const defaults = this.normalizeWorkspaceSettings(this.getDefaultWorkspaceSettings());
-    return JSON.stringify({
-      workflow: current.workflow,
-      planning: current.planning
-    }) !== JSON.stringify({
-      workflow: defaults.workflow,
-      planning: defaults.planning
-    });
+    return (
+      JSON.stringify({
+        workflow: current.workflow,
+        planning: current.planning
+      }) !==
+      JSON.stringify({
+        workflow: defaults.workflow,
+        planning: defaults.planning
+      })
+    );
   }
 
   shouldDefaultExpandWorkspaceConfig() {
@@ -9801,7 +11228,9 @@ export class WorkspaceDetailPage {
       this.elements.configToggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
     }
     if (this.elements.configToggleLabel) {
-      this.elements.configToggleLabel.textContent = nextExpanded ? 'Hide Configuration' : 'Show Configuration';
+      this.elements.configToggleLabel.textContent = nextExpanded
+        ? 'Hide Configuration'
+        : 'Show Configuration';
     }
 
     if (options.persist !== false) {
@@ -9816,9 +11245,8 @@ export class WorkspaceDetailPage {
     }
 
     const storedPreference = this.readWorkspaceConfigExpandedPreference();
-    const nextExpanded = storedPreference === null
-      ? this.shouldDefaultExpandWorkspaceConfig()
-      : storedPreference;
+    const nextExpanded =
+      storedPreference === null ? this.shouldDefaultExpandWorkspaceConfig() : storedPreference;
 
     this.workspaceConfigPreferenceLoaded = true;
     this.setWorkspaceConfigExpanded(nextExpanded, { persist: false });
@@ -9829,7 +11257,9 @@ export class WorkspaceDetailPage {
   }
 
   renderWorkspaceConfigSummary() {
-    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const settings = this.normalizeWorkspaceSettings(
+      this.workspaceSettings || this.getDefaultWorkspaceSettings()
+    );
     const profile = this.normalizeWorkspaceSettingsProfile(settings.profile);
     const preset = this.deriveWorkspaceSettingsPreset(settings);
     const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
@@ -9872,13 +11302,16 @@ export class WorkspaceDetailPage {
 
   buildWorkspaceSettingsPreset(preset = '', profile = 'general') {
     const normalizedProfile = this.normalizeWorkspaceSettingsProfile(profile);
-    const requestedPreset = String(preset || '').trim().toLowerCase();
+    const requestedPreset = String(preset || '')
+      .trim()
+      .toLowerCase();
     const normalizedPreset = requestedPreset
       ? this.normalizeWorkspaceSettingsPreset(requestedPreset)
       : this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile);
-    const basePreset = normalizedPreset === 'custom'
-      ? this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile)
-      : normalizedPreset;
+    const basePreset =
+      normalizedPreset === 'custom'
+        ? this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile)
+        : normalizedPreset;
     const settings = {
       version: 1,
       profile: normalizedProfile,
@@ -9957,7 +11390,9 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettingsPreset(value) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
     if (['minimal', 'guided', 'planner', 'autonomous', 'custom'].includes(normalized)) {
       return normalized;
     }
@@ -9965,7 +11400,9 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettingsProfile(value) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
     if (this.getWorkspaceSettingsProfiles().includes(normalized)) {
       return normalized;
     }
@@ -9973,8 +11410,11 @@ export class WorkspaceDetailPage {
   }
 
   inferWorkspaceSettingsProfile(settings = {}) {
-    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
-    const explicit = String(raw.profile || '').trim().toLowerCase();
+    const raw =
+      settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const explicit = String(raw.profile || '')
+      .trim()
+      .toLowerCase();
     if (this.getWorkspaceSettingsProfiles().includes(explicit)) {
       return explicit;
     }
@@ -9984,9 +11424,16 @@ export class WorkspaceDetailPage {
       return 'software_project';
     }
 
-    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
-    const planningMode = String(planning.mode || '').trim().toLowerCase();
-    const clarificationMode = String(planning.clarification_mode || '').trim().toLowerCase();
+    const planning =
+      raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning)
+        ? raw.planning
+        : {};
+    const planningMode = String(planning.mode || '')
+      .trim()
+      .toLowerCase();
+    const clarificationMode = String(planning.clarification_mode || '')
+      .trim()
+      .toLowerCase();
     if (planningMode === 'investigation' || clarificationMode === 'deep') {
       return 'research';
     }
@@ -9995,7 +11442,9 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettingsMode(value) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
     if (['direct', 'guided', 'plan_then_execute'].includes(normalized)) {
       return normalized;
     }
@@ -10003,7 +11452,9 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettingsConfirmationMode(value) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
     if (['none', 'always', 'destructive_only'].includes(normalized)) {
       return normalized;
     }
@@ -10011,7 +11462,8 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettings(settings = {}) {
-    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const raw =
+      settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
     const profile = this.inferWorkspaceSettingsProfile(raw);
     const rawPreset = String(raw.preset || '').trim();
     const preset = rawPreset
@@ -10021,30 +11473,57 @@ export class WorkspaceDetailPage {
       preset === 'custom' ? this.getDefaultWorkspaceSettingsPresetForProfile(profile) : preset,
       profile
     );
-    const workflow = raw.workflow && typeof raw.workflow === 'object' && !Array.isArray(raw.workflow) ? raw.workflow : {};
-    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
+    const workflow =
+      raw.workflow && typeof raw.workflow === 'object' && !Array.isArray(raw.workflow)
+        ? raw.workflow
+        : {};
+    const planning =
+      raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning)
+        ? raw.planning
+        : {};
     const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
 
     return {
-      version: Number.isFinite(Number(raw.version)) && Number(raw.version) > 0 ? Number(raw.version) : 1,
+      version:
+        Number.isFinite(Number(raw.version)) && Number(raw.version) > 0 ? Number(raw.version) : 1,
       profile,
       preset,
       workflow: {
         mode: this.normalizeWorkspaceSettingsMode(workflow.mode || base.workflow.mode),
-        require_repo_scan: boolOrDefault(workflow.require_repo_scan, base.workflow.require_repo_scan),
-        save_outputs_as_notes: boolOrDefault(workflow.save_outputs_as_notes, base.workflow.save_outputs_as_notes),
-        sync_plans_to_tasks: boolOrDefault(workflow.sync_plans_to_tasks, base.workflow.sync_plans_to_tasks),
-        ask_before_specialist_handoff: boolOrDefault(workflow.ask_before_specialist_handoff, base.workflow.ask_before_specialist_handoff),
-        confirmation_mode: this.normalizeWorkspaceSettingsConfirmationMode(workflow.confirmation_mode || base.workflow.confirmation_mode)
+        require_repo_scan: boolOrDefault(
+          workflow.require_repo_scan,
+          base.workflow.require_repo_scan
+        ),
+        save_outputs_as_notes: boolOrDefault(
+          workflow.save_outputs_as_notes,
+          base.workflow.save_outputs_as_notes
+        ),
+        sync_plans_to_tasks: boolOrDefault(
+          workflow.sync_plans_to_tasks,
+          base.workflow.sync_plans_to_tasks
+        ),
+        ask_before_specialist_handoff: boolOrDefault(
+          workflow.ask_before_specialist_handoff,
+          base.workflow.ask_before_specialist_handoff
+        ),
+        confirmation_mode: this.normalizeWorkspaceSettingsConfirmationMode(
+          workflow.confirmation_mode || base.workflow.confirmation_mode
+        )
       },
       planning: {
         enabled: boolOrDefault(planning.enabled, base.planning.enabled),
-        mode: this.normalizeWorkspacePlanningConfig({ mode: planning.mode || base.planning.mode }).mode,
+        mode: this.normalizeWorkspacePlanningConfig({ mode: planning.mode || base.planning.mode })
+          .mode,
         write_prd: boolOrDefault(planning.write_prd, base.planning.write_prd),
         write_task_list: boolOrDefault(planning.write_task_list, base.planning.write_task_list),
         tasks_dir: String(planning.tasks_dir || base.planning.tasks_dir || '').trim() || 'tasks',
-        clarification_mode: this.normalizeWorkspacePlanningConfig({ clarification_mode: planning.clarification_mode || base.planning.clarification_mode }).clarification_mode,
-        default_execution_mode: this.normalizeWorkspacePlanningConfig({ default_execution_mode: planning.default_execution_mode || base.planning.default_execution_mode }).default_execution_mode,
+        clarification_mode: this.normalizeWorkspacePlanningConfig({
+          clarification_mode: planning.clarification_mode || base.planning.clarification_mode
+        }).clarification_mode,
+        default_execution_mode: this.normalizeWorkspacePlanningConfig({
+          default_execution_mode:
+            planning.default_execution_mode || base.planning.default_execution_mode
+        }).default_execution_mode,
         require_branch: boolOrDefault(planning.require_branch, base.planning.require_branch)
       },
       updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : ''
@@ -10058,12 +11537,14 @@ export class WorkspaceDetailPage {
       planning: normalized.planning
     });
 
-    const matchingPreset = this.getWorkspaceSettingsPresets().find((preset) => {
+    const matchingPreset = this.getWorkspaceSettingsPresets().find(preset => {
       const candidate = this.buildWorkspaceSettingsPreset(preset, normalized.profile);
-      return JSON.stringify({
-        workflow: candidate.workflow,
-        planning: candidate.planning
-      }) === normalizedSignature;
+      return (
+        JSON.stringify({
+          workflow: candidate.workflow,
+          planning: candidate.planning
+        }) === normalizedSignature
+      );
     });
 
     return matchingPreset || 'custom';
@@ -10134,24 +11615,45 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, settings = {}) {
-    const raw = effectiveBehavior && typeof effectiveBehavior === 'object' && !Array.isArray(effectiveBehavior)
-      ? effectiveBehavior
-      : null;
+    const raw =
+      effectiveBehavior &&
+      typeof effectiveBehavior === 'object' &&
+      !Array.isArray(effectiveBehavior)
+        ? effectiveBehavior
+        : null;
     const fallback = this.buildWorkspaceSettingsEffectiveBehavior(settings);
     if (!raw) {
       return fallback;
     }
 
     return {
-      workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
-      planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning,
+      workflow:
+        raw.workflow && typeof raw.workflow === 'object'
+          ? { ...fallback.workflow, ...raw.workflow }
+          : fallback.workflow,
+      planning:
+        raw.planning && typeof raw.planning === 'object'
+          ? { ...fallback.planning, ...raw.planning }
+          : fallback.planning,
       summary: this.getWorkspaceSettingsSummaryItems({
-        profile: this.normalizeWorkspaceSettingsProfile(raw.profile || settings.profile || fallback.profile),
-        preset: this.normalizeWorkspaceSettingsPreset(raw.preset || settings.preset || fallback.preset),
-        workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
-        planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning
+        profile: this.normalizeWorkspaceSettingsProfile(
+          raw.profile || settings.profile || fallback.profile
+        ),
+        preset: this.normalizeWorkspaceSettingsPreset(
+          raw.preset || settings.preset || fallback.preset
+        ),
+        workflow:
+          raw.workflow && typeof raw.workflow === 'object'
+            ? { ...fallback.workflow, ...raw.workflow }
+            : fallback.workflow,
+        planning:
+          raw.planning && typeof raw.planning === 'object'
+            ? { ...fallback.planning, ...raw.planning }
+            : fallback.planning
       }),
-      managed_skills: Array.isArray(raw.managed_skills) ? raw.managed_skills : fallback.managed_skills
+      managed_skills: Array.isArray(raw.managed_skills)
+        ? raw.managed_skills
+        : fallback.managed_skills
     };
   }
 
@@ -10174,16 +11676,20 @@ export class WorkspaceDetailPage {
       this.elements.settingsPlanEnabledInput.checked = normalized.planning.enabled === true;
     }
     if (this.elements.settingsRequireScanInput) {
-      this.elements.settingsRequireScanInput.checked = normalized.workflow.require_repo_scan === true;
+      this.elements.settingsRequireScanInput.checked =
+        normalized.workflow.require_repo_scan === true;
     }
     if (this.elements.settingsSaveNotesInput) {
-      this.elements.settingsSaveNotesInput.checked = normalized.workflow.save_outputs_as_notes !== false;
+      this.elements.settingsSaveNotesInput.checked =
+        normalized.workflow.save_outputs_as_notes !== false;
     }
     if (this.elements.settingsSyncTasksInput) {
-      this.elements.settingsSyncTasksInput.checked = normalized.workflow.sync_plans_to_tasks === true;
+      this.elements.settingsSyncTasksInput.checked =
+        normalized.workflow.sync_plans_to_tasks === true;
     }
     if (this.elements.settingsAskHandoffInput) {
-      this.elements.settingsAskHandoffInput.checked = normalized.workflow.ask_before_specialist_handoff === true;
+      this.elements.settingsAskHandoffInput.checked =
+        normalized.workflow.ask_before_specialist_handoff === true;
     }
     if (this.elements.settingsPlanningModeInput) {
       this.elements.settingsPlanningModeInput.value = normalized.planning.mode;
@@ -10201,22 +11707,26 @@ export class WorkspaceDetailPage {
       this.elements.settingsWritePRDInput.checked = normalized.planning.write_prd !== false;
     }
     if (this.elements.settingsWriteTaskListInput) {
-      this.elements.settingsWriteTaskListInput.checked = normalized.planning.write_task_list !== false;
+      this.elements.settingsWriteTaskListInput.checked =
+        normalized.planning.write_task_list !== false;
     }
     if (this.elements.settingsRequireBranchInput) {
-      this.elements.settingsRequireBranchInput.checked = normalized.planning.require_branch !== false;
+      this.elements.settingsRequireBranchInput.checked =
+        normalized.planning.require_branch !== false;
     }
   }
 
   buildWorkspaceSettingsFromForm() {
-    const selectedProfile = String(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general').trim();
+    const selectedProfile = String(
+      this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general'
+    ).trim();
     const settings = this.normalizeWorkspaceSettings({
       version: this.workspaceSettings?.version || 1,
       profile: selectedProfile,
       preset: String(
-        this.elements.settingsPresetInput?.value
-        || this.workspaceSettings?.preset
-        || this.getDefaultWorkspaceSettingsPresetForProfile(selectedProfile)
+        this.elements.settingsPresetInput?.value ||
+          this.workspaceSettings?.preset ||
+          this.getDefaultWorkspaceSettingsPresetForProfile(selectedProfile)
       ).trim(),
       workflow: {
         mode: String(this.elements.settingsModeInput?.value || '').trim(),
@@ -10232,8 +11742,12 @@ export class WorkspaceDetailPage {
         write_prd: this.elements.settingsWritePRDInput?.checked !== false,
         write_task_list: this.elements.settingsWriteTaskListInput?.checked !== false,
         tasks_dir: String(this.elements.settingsTasksDirInput?.value || '').trim(),
-        clarification_mode: String(this.elements.settingsClarificationModeInput?.value || '').trim(),
-        default_execution_mode: String(this.elements.settingsExecutionModeInput?.value || '').trim(),
+        clarification_mode: String(
+          this.elements.settingsClarificationModeInput?.value || ''
+        ).trim(),
+        default_execution_mode: String(
+          this.elements.settingsExecutionModeInput?.value || ''
+        ).trim(),
         require_branch: this.elements.settingsRequireBranchInput?.checked !== false
       }
     });
@@ -10244,15 +11758,19 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceSettingsSummary(settings = {}, effectiveBehavior = null) {
     const normalized = this.normalizeWorkspaceSettings(settings);
-    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, normalized);
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(
+      effectiveBehavior,
+      normalized
+    );
 
     if (this.elements.settingsSummary) {
       if (effective.summary.length === 0) {
-        this.elements.settingsSummary.textContent = 'No effective manager behavior summary available.';
+        this.elements.settingsSummary.textContent =
+          'No effective manager behavior summary available.';
       } else {
         this.elements.settingsSummary.innerHTML = `
           <ul class="workspace-detail-settings-summary-list">
-            ${effective.summary.map((item) => `<li>${this.escapeHtml(item)}</li>`).join('')}
+            ${effective.summary.map(item => `<li>${this.escapeHtml(item)}</li>`).join('')}
           </ul>
         `;
       }
@@ -10262,32 +11780,45 @@ export class WorkspaceDetailPage {
       if (!Array.isArray(effective.managed_skills) || effective.managed_skills.length === 0) {
         this.elements.settingsManagedSkills.textContent = 'No settings-managed workflows active.';
       } else {
-        this.elements.settingsManagedSkills.innerHTML = effective.managed_skills.map((skill) => {
-          const skillName = String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
-          const displayName = skillName === 'workspace-planning' ? 'Structured planning' : skillName;
-          const source = String(skill?.source || '').trim() || 'settings';
-          const reason = String(skill?.reason || '').trim();
-          const planningSummary = skillName === 'workspace-planning'
-            ? this.getWorkspacePlanningSummary(skill?.config || this.toWorkspacePlanningSkillConfig(normalized))
-            : '';
-          const detail = skillName === 'workspace-planning'
-            ? planningSummary || 'Controlled by workspace settings'
-            : [source, reason].filter(Boolean).join(' • ');
+        this.elements.settingsManagedSkills.innerHTML = effective.managed_skills
+          .map(skill => {
+            const skillName =
+              String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
+            const displayName =
+              skillName === 'workspace-planning' ? 'Structured planning' : skillName;
+            const source = String(skill?.source || '').trim() || 'settings';
+            const reason = String(skill?.reason || '').trim();
+            const planningSummary =
+              skillName === 'workspace-planning'
+                ? this.getWorkspacePlanningSummary(
+                    skill?.config || this.toWorkspacePlanningSkillConfig(normalized)
+                  )
+                : '';
+            const detail =
+              skillName === 'workspace-planning'
+                ? planningSummary || 'Controlled by workspace settings'
+                : [source, reason].filter(Boolean).join(' • ');
 
-          return `
+            return `
             <div class="workspace-detail-settings-managed-entry">
               <div class="workspace-detail-settings-managed-name">${this.escapeHtml(displayName)}</div>
               <div class="workspace-detail-settings-managed-meta">${this.escapeHtml(detail || 'Managed by workspace settings')}</div>
             </div>
           `;
-        }).join('');
+          })
+          .join('');
       }
     }
   }
 
   renderWorkspaceSettings() {
-    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
-    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(this.workspaceSettingsEffectiveBehavior, settings);
+    const settings = this.normalizeWorkspaceSettings(
+      this.workspaceSettings || this.getDefaultWorkspaceSettings()
+    );
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(
+      this.workspaceSettingsEffectiveBehavior,
+      settings
+    );
 
     this.workspaceSettings = settings;
     this.workspaceSettingsEffectiveBehavior = effective;
@@ -10297,31 +11828,42 @@ export class WorkspaceDetailPage {
   }
 
   handleWorkspaceSettingsPresetChange() {
-    const preset = this.normalizeWorkspaceSettingsPreset(this.elements.settingsPresetInput?.value || 'guided');
-    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general');
+    const preset = this.normalizeWorkspaceSettingsPreset(
+      this.elements.settingsPresetInput?.value || 'guided'
+    );
+    const profile = this.normalizeWorkspaceSettingsProfile(
+      this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general'
+    );
     if (preset === 'custom') {
       this.handleWorkspaceSettingsFieldChange();
       return;
     }
 
     this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
-    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(
+      this.workspaceSettings
+    );
     this.renderWorkspaceSettings();
   }
 
   handleWorkspaceSettingsProfileChange() {
-    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || 'general');
+    const profile = this.normalizeWorkspaceSettingsProfile(
+      this.elements.settingsProfileInput?.value || 'general'
+    );
     const preset = this.getDefaultWorkspaceSettingsPresetForProfile(profile);
 
     this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
-    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(
+      this.workspaceSettings
+    );
     this.renderWorkspaceSettings();
   }
 
   handleWorkspaceSettingsFieldChange() {
     const settings = this.buildWorkspaceSettingsFromForm();
     this.workspaceSettings = settings;
-    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(settings);
+    this.workspaceSettingsEffectiveBehavior =
+      this.buildWorkspaceSettingsEffectiveBehavior(settings);
     this.renderWorkspaceSettings();
   }
 
@@ -10336,11 +11878,14 @@ export class WorkspaceDetailPage {
     this.setWorkspaceSettingsSubmitting(true);
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/settings`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
 
       if (!response.ok) {
         const text = await response.text();
@@ -10378,9 +11923,10 @@ export class WorkspaceDetailPage {
 
     const includeDisabled = options.includeDisabled === true;
     return this.workspace.skill_bindings
-      .map((binding) => {
+      .map(binding => {
         const skillName = String(binding?.skill_name || binding?.skillName || '').trim();
-        const config = binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {};
+        const config =
+          binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {};
         const skillDefinition = this.getAvailableWorkspaceSkill(skillName);
         return {
           id: String(binding?.id || '').trim(),
@@ -10388,29 +11934,44 @@ export class WorkspaceDetailPage {
           enabled: binding?.enabled !== false,
           trusted: binding?.trusted === true,
           config,
-          planningProfile: skillDefinition?.planningProfile === true || this.isWorkspacePlanningConfig(config)
+          planningProfile:
+            skillDefinition?.planningProfile === true || this.isWorkspacePlanningConfig(config)
         };
       })
-      .filter((binding) => binding.id && binding.skillName)
-      .filter((binding) => includeDisabled || binding.enabled);
+      .filter(binding => binding.id && binding.skillName)
+      .filter(binding => includeDisabled || binding.enabled);
   }
 
   getWorkspaceSkillBinding(bindingId) {
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedBindingId) return null;
-    return this.getWorkspaceSkillBindings({ includeDisabled: true }).find(
-      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
-    ) || null;
+    return (
+      this.getWorkspaceSkillBindings({ includeDisabled: true }).find(
+        binding =>
+          String(binding?.id || '')
+            .trim()
+            .toLowerCase() === normalizedBindingId
+      ) || null
+    );
   }
 
   getAvailableWorkspaceSkill(skillName) {
-    const normalizedSkillName = String(skillName || '').trim().toLowerCase();
+    const normalizedSkillName = String(skillName || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedSkillName || !Array.isArray(this.availableSkills)) {
       return null;
     }
-    return this.availableSkills.find(
-      (skill) => String(skill?.name || '').trim().toLowerCase() === normalizedSkillName
-    ) || null;
+    return (
+      this.availableSkills.find(
+        skill =>
+          String(skill?.name || '')
+            .trim()
+            .toLowerCase() === normalizedSkillName
+      ) || null
+    );
   }
 
   getDefaultWorkspacePlanningConfig() {
@@ -10444,7 +12005,7 @@ export class WorkspaceDetailPage {
       'default_execution_mode',
       'require_branch'
     ];
-    return planningKeys.some((key) => Object.prototype.hasOwnProperty.call(config, key));
+    return planningKeys.some(key => Object.prototype.hasOwnProperty.call(config, key));
   }
 
   normalizeWorkspacePlanningConfig(config = {}) {
@@ -10455,14 +12016,20 @@ export class WorkspaceDetailPage {
     };
 
     normalized.profile_type = 'workspace_planning';
-    normalized.mode = ['feature', 'bugfix', 'refactor', 'investigation'].includes(String(normalized.mode || '').trim())
+    normalized.mode = ['feature', 'bugfix', 'refactor', 'investigation'].includes(
+      String(normalized.mode || '').trim()
+    )
       ? String(normalized.mode).trim()
       : defaults.mode;
     normalized.tasks_dir = String(normalized.tasks_dir || '').trim() || defaults.tasks_dir;
-    normalized.clarification_mode = ['minimal', 'standard', 'deep'].includes(String(normalized.clarification_mode || '').trim())
+    normalized.clarification_mode = ['minimal', 'standard', 'deep'].includes(
+      String(normalized.clarification_mode || '').trim()
+    )
       ? String(normalized.clarification_mode).trim()
       : defaults.clarification_mode;
-    normalized.default_execution_mode = ['auto', 'step_through'].includes(String(normalized.default_execution_mode || '').trim())
+    normalized.default_execution_mode = ['auto', 'step_through'].includes(
+      String(normalized.default_execution_mode || '').trim()
+    )
       ? String(normalized.default_execution_mode).trim()
       : defaults.default_execution_mode;
     normalized.write_prd = normalized.write_prd !== false;
@@ -10484,17 +12051,25 @@ export class WorkspaceDetailPage {
 
   getWorkspaceSkillAgentAccessEntry(agentInstanceId) {
     const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
-    if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_skill_access)) {
+    if (
+      !normalizedAgentInstanceId ||
+      !this.workspace ||
+      !Array.isArray(this.workspace.agent_skill_access)
+    ) {
       return null;
     }
 
-    return this.workspace.agent_skill_access.find(
-      (entry) => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
-    ) || null;
+    return (
+      this.workspace.agent_skill_access.find(
+        entry => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
+      ) || null
+    );
   }
 
   getWorkspaceSkillAgentNamesForBinding(bindingId) {
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedBindingId || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
       return [];
     }
@@ -10505,16 +12080,24 @@ export class WorkspaceDetailPage {
 
     const names = [];
     const seen = new Set();
-    this.workspace.agent_instances.forEach((instance) => {
+    this.workspace.agent_instances.forEach(instance => {
       const instanceId = String(instance?.id || '').trim();
       const agentName = String(instance?.name || '').trim();
       if (!instanceId || !agentName) return;
 
-      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceId);
+      const entry = accessEntries.find(
+        item => String(item?.agent_instance_id || '').trim() === instanceId
+      );
       let allowed = true;
       if (entry) {
         const enabledIDs = Array.isArray(entry.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          ? entry.enabled_binding_ids
+              .map(value =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase()
+              )
+              .filter(Boolean)
           : [];
         allowed = enabledIDs.includes(normalizedBindingId);
       }
@@ -10533,25 +12116,31 @@ export class WorkspaceDetailPage {
       return [];
     }
 
-    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    const normalizedBindingId = String(bindingId || '')
+      .trim()
+      .toLowerCase();
     return this.workspace.agent_instances
-      .map((instance) => {
+      .map(instance => {
         const instanceId = String(instance?.id || '').trim();
         const instanceName = String(instance?.name || '').trim();
         if (!instanceId || !instanceName) return null;
 
         const entry = this.getWorkspaceSkillAgentAccessEntry(instanceId);
         const enabledBindingIds = Array.isArray(entry?.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          ? entry.enabled_binding_ids
+              .map(value =>
+                String(value || '')
+                  .trim()
+                  .toLowerCase()
+              )
+              .filter(Boolean)
           : [];
 
         const instanceNumber = Number(instance?.instance_number || 0);
         const nodeID = String(instance?.node_id || '').trim();
         const label = instanceNumber > 1 ? `${instanceName} #${instanceNumber}` : instanceName;
         const meta = nodeID || 'Workspace agent instance';
-        const checked = entry
-          ? enabledBindingIds.includes(normalizedBindingId)
-          : true;
+        const checked = entry ? enabledBindingIds.includes(normalizedBindingId) : true;
 
         return {
           id: instanceId,
@@ -10581,14 +12170,15 @@ export class WorkspaceDetailPage {
       const data = await response.json();
       const seen = new Set();
       const skillsList = (Array.isArray(data?.skills) ? data.skills : [])
-        .map((skill) => ({
+        .map(skill => ({
           name: String(skill?.name || '').trim(),
           description: String(skill?.description || '').trim(),
           enabled: skill?.enabled !== false,
-          planningProfile: skill?.planning_profile === true || skill?.openai_metadata?.planning_profile === true
+          planningProfile:
+            skill?.planning_profile === true || skill?.openai_metadata?.planning_profile === true
         }))
-        .filter((skill) => skill.name)
-        .filter((skill) => {
+        .filter(skill => skill.name)
+        .filter(skill => {
           const key = skill.name.toLowerCase();
           if (seen.has(key)) return false;
           seen.add(key);
@@ -10614,7 +12204,8 @@ export class WorkspaceDetailPage {
 
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
       ? bootstrap.Modal.getOrCreateInstance(this.elements.skillsModal)
-      : (bootstrap.Modal.getInstance(this.elements.skillsModal) || new bootstrap.Modal(this.elements.skillsModal));
+      : bootstrap.Modal.getInstance(this.elements.skillsModal) ||
+          new bootstrap.Modal(this.elements.skillsModal);
   }
 
   generateWorkspaceSkillBindingId() {
@@ -10636,7 +12227,12 @@ export class WorkspaceDetailPage {
     const normalizedSelected = String(selectedSkillName || '').trim();
     const available = Array.isArray(this.availableSkills) ? [...this.availableSkills] : [];
     const selectedExists = normalizedSelected
-      ? available.some((skill) => String(skill?.name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())
+      ? available.some(
+          skill =>
+            String(skill?.name || '')
+              .trim()
+              .toLowerCase() === normalizedSelected.toLowerCase()
+        )
       : false;
 
     if (normalizedSelected && !selectedExists) {
@@ -10644,17 +12240,24 @@ export class WorkspaceDetailPage {
     }
 
     const options = ['<option value="">Select a skill</option>'];
-    available.forEach((skill) => {
+    available.forEach(skill => {
       const name = String(skill?.name || '').trim();
       if (!name) return;
 
       const unavailable = skill?.unavailable === true;
-      const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const selected =
+        normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase()
+          ? ' selected'
+          : '';
       const planning = skill?.planningProfile === true;
       const label = unavailable
         ? `${name} (not currently available)`
-        : (planning ? `${name} (planning profile)` : name);
-      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
+        : planning
+          ? `${name} (planning profile)`
+          : name;
+      options.push(
+        `<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`
+      );
     });
 
     this.elements.skillNameSelect.innerHTML = options.join('');
@@ -10664,12 +12267,18 @@ export class WorkspaceDetailPage {
     }
 
     if (available.length === 0) {
-      this.setWorkspaceSkillNameHelp('No skills are available yet. Create or install skills first.', true);
+      this.setWorkspaceSkillNameHelp(
+        'No skills are available yet. Create or install skills first.',
+        true
+      );
       return;
     }
 
     if (normalizedSelected && !selectedExists) {
-      this.setWorkspaceSkillNameHelp(`${normalizedSelected} is not currently available, but you can still update or remove this workspace binding.`, true);
+      this.setWorkspaceSkillNameHelp(
+        `${normalizedSelected} is not currently available, but you can still update or remove this workspace binding.`,
+        true
+      );
       return;
     }
 
@@ -10690,7 +12299,9 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.skillAgentOptions.innerHTML = accessOptions.map((option) => `
+    this.elements.skillAgentOptions.innerHTML = accessOptions
+      .map(
+        option => `
       <label class="workspace-detail-mcp-agent-option">
         <input type="checkbox" class="form-check-input workspace-detail-skill-agent-checkbox" value="${this.escapeHtml(option.id)}"${option.checked ? ' checked' : ''}>
         <span class="workspace-detail-mcp-agent-option-copy">
@@ -10698,20 +12309,24 @@ export class WorkspaceDetailPage {
           <span class="workspace-detail-mcp-agent-option-meta">${this.escapeHtml(option.meta)}</span>
         </span>
       </label>
-    `).join('');
+    `
+      )
+      .join('');
     this.updateWorkspaceSkillAgentAccessSummary();
   }
 
   updateWorkspaceSkillAgentAccessSummary() {
     if (!this.elements.skillAgentAccessSummary || !this.elements.skillAgentOptions) return;
 
-    const checkboxes = Array.from(this.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox'));
+    const checkboxes = Array.from(
+      this.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox')
+    );
     if (checkboxes.length === 0) {
       this.elements.skillAgentAccessSummary.textContent = 'No agents';
       return;
     }
 
-    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    const selectedCount = checkboxes.filter(checkbox => checkbox.checked).length;
     this.elements.skillAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
   }
 
@@ -10759,7 +12374,10 @@ export class WorkspaceDetailPage {
     const existingBinding = this.activeWorkspaceSkillBindingId
       ? this.getWorkspaceSkillBinding(this.activeWorkspaceSkillBindingId)
       : null;
-    const shouldShowPlanning = this.shouldShowWorkspacePlanningSettings(selectedSkillName, existingBinding?.config || {});
+    const shouldShowPlanning = this.shouldShowWorkspacePlanningSettings(
+      selectedSkillName,
+      existingBinding?.config || {}
+    );
 
     if (this.elements.skillPlanningFields) {
       this.elements.skillPlanningFields.classList.toggle('d-none', !shouldShowPlanning);
@@ -10780,9 +12398,13 @@ export class WorkspaceDetailPage {
       write_prd: this.elements.skillPlanningWritePRDInput?.checked !== false,
       write_task_list: this.elements.skillPlanningWriteTaskListInput?.checked !== false,
       tasks_dir: String(this.elements.skillPlanningTasksDirInput?.value || '').trim(),
-      clarification_mode: String(this.elements.skillPlanningClarificationModeInput?.value || '').trim(),
+      clarification_mode: String(
+        this.elements.skillPlanningClarificationModeInput?.value || ''
+      ).trim(),
       sync_workspace_tasks: this.elements.skillPlanningSyncTasksInput?.checked !== false,
-      default_execution_mode: String(this.elements.skillPlanningDefaultExecutionInput?.value || '').trim(),
+      default_execution_mode: String(
+        this.elements.skillPlanningDefaultExecutionInput?.value || ''
+      ).trim(),
       require_branch: this.elements.skillPlanningRequireBranchInput?.checked !== false
     });
   }
@@ -10798,13 +12420,15 @@ export class WorkspaceDetailPage {
       this.elements.skillNameSelect.innerHTML = '<option value="">Select a skill</option>';
     }
     if (this.elements.skillAgentOptions) {
-      this.elements.skillAgentOptions.innerHTML = '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
+      this.elements.skillAgentOptions.innerHTML =
+        '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
     }
     if (this.elements.skillsModalTitle) {
       this.elements.skillsModalTitle.textContent = 'Add Workspace Skill';
     }
     if (this.elements.skillsModalSubtitle) {
-      this.elements.skillsModalSubtitle.textContent = 'Bind a skill to this workspace, then decide which agent instances can use it here.';
+      this.elements.skillsModalSubtitle.textContent =
+        'Bind a skill to this workspace, then decide which agent instances can use it here.';
     }
     if (this.elements.skillEnabledInput) {
       this.elements.skillEnabledInput.checked = true;
@@ -10864,7 +12488,8 @@ export class WorkspaceDetailPage {
     }
 
     this.activeWorkspaceSkillMode = existingBinding ? 'edit' : 'create';
-    this.activeWorkspaceSkillBindingId = existingBinding?.id || this.generateWorkspaceSkillBindingId();
+    this.activeWorkspaceSkillBindingId =
+      existingBinding?.id || this.generateWorkspaceSkillBindingId();
     this.populateWorkspaceSkillOptions(existingBinding?.skillName || '');
 
     if (this.elements.skillsModalTitle) {
@@ -10878,12 +12503,18 @@ export class WorkspaceDetailPage {
         : 'Bind a skill to this workspace and decide which agent instances should be able to use it.';
     }
     if (this.elements.skillEnabledInput) {
-      this.elements.skillEnabledInput.checked = existingBinding ? existingBinding.enabled !== false : true;
+      this.elements.skillEnabledInput.checked = existingBinding
+        ? existingBinding.enabled !== false
+        : true;
     }
     if (this.elements.skillTrustedInput) {
-      this.elements.skillTrustedInput.checked = existingBinding ? existingBinding.trusted === true : false;
+      this.elements.skillTrustedInput.checked = existingBinding
+        ? existingBinding.trusted === true
+        : false;
     }
-    this.populateWorkspacePlanningSettings(existingBinding?.config || this.getDefaultWorkspacePlanningConfig());
+    this.populateWorkspacePlanningSettings(
+      existingBinding?.config || this.getDefaultWorkspacePlanningConfig()
+    );
     if (this.elements.skillSubmitBtn) {
       this.elements.skillSubmitBtn.textContent = existingBinding ? 'Save Changes' : 'Add Binding';
       this.elements.skillSubmitBtn.disabled = false;
@@ -10896,8 +12527,12 @@ export class WorkspaceDetailPage {
 
   getWorkspaceSkillSelectedAgentInstanceIDs() {
     if (!this.elements.skillAgentOptions) return [];
-    return Array.from(this.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox:checked'))
-      .map((checkbox) => String(checkbox.value || '').trim())
+    return Array.from(
+      this.elements.skillAgentOptions.querySelectorAll(
+        '.workspace-detail-skill-agent-checkbox:checked'
+      )
+    )
+      .map(checkbox => String(checkbox.value || '').trim())
       .filter(Boolean);
   }
 
@@ -10905,8 +12540,12 @@ export class WorkspaceDetailPage {
     if (!this.elements.skillSubmitBtn) return;
     this.elements.skillSubmitBtn.disabled = isSubmitting;
     this.elements.skillSubmitBtn.textContent = isSubmitting
-      ? (this.activeWorkspaceSkillMode === 'edit' ? 'Saving...' : 'Adding...')
-      : (this.activeWorkspaceSkillMode === 'edit' ? 'Save Changes' : 'Add Binding');
+      ? this.activeWorkspaceSkillMode === 'edit'
+        ? 'Saving...'
+        : 'Adding...'
+      : this.activeWorkspaceSkillMode === 'edit'
+        ? 'Save Changes'
+        : 'Add Binding';
   }
 
   async saveWorkspaceSkillBinding(payload) {
@@ -10930,28 +12569,34 @@ export class WorkspaceDetailPage {
   }
 
   async persistWorkspaceSkillAgentAccess(bindingId, selectedAgentInstanceIds) {
-    if (!this.workspace || !Array.isArray(this.workspace.agent_instances) || this.workspace.agent_instances.length === 0) {
+    if (
+      !this.workspace ||
+      !Array.isArray(this.workspace.agent_instances) ||
+      this.workspace.agent_instances.length === 0
+    ) {
       return;
     }
 
-    const selectedSet = new Set(selectedAgentInstanceIds.map((value) => String(value || '').trim()).filter(Boolean));
+    const selectedSet = new Set(
+      selectedAgentInstanceIds.map(value => String(value || '').trim()).filter(Boolean)
+    );
     const effectiveBindingIds = this.getWorkspaceSkillBindings()
-      .map((binding) => String(binding?.id || '').trim())
+      .map(binding => String(binding?.id || '').trim())
       .filter(Boolean);
     const defaultBindingIds = Array.from(new Set(effectiveBindingIds)).sort();
-    const normalizeIDs = (ids) => Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))).sort();
-    const arraysEqual = (left, right) => (
-      left.length === right.length && left.every((value, index) => value === right[index])
-    );
+    const normalizeIDs = ids =>
+      Array.from(new Set(ids.map(value => String(value || '').trim()).filter(Boolean))).sort();
+    const arraysEqual = (left, right) =>
+      left.length === right.length && left.every((value, index) => value === right[index]);
 
-    const requests = this.workspace.agent_instances.map(async (instance) => {
+    const requests = this.workspace.agent_instances.map(async instance => {
       const instanceId = String(instance?.id || '').trim();
       if (!instanceId) return;
 
       const entry = this.getWorkspaceSkillAgentAccessEntry(instanceId);
       const currentIds = entry
         ? Array.isArray(entry.enabled_binding_ids)
-          ? entry.enabled_binding_ids.map((value) => String(value || '').trim()).filter(Boolean)
+          ? entry.enabled_binding_ids.map(value => String(value || '').trim()).filter(Boolean)
           : []
         : [...defaultBindingIds];
       const allowedSet = new Set(currentIds);
@@ -11018,7 +12663,9 @@ export class WorkspaceDetailPage {
 
     try {
       const selectedSkill = this.getAvailableWorkspaceSkill(skillName);
-      const planningProfile = selectedSkill?.planningProfile === true || this.shouldShowWorkspacePlanningSettings(skillName);
+      const planningProfile =
+        selectedSkill?.planningProfile === true ||
+        this.shouldShowWorkspacePlanningSettings(skillName);
       const enabled = this.elements.skillEnabledInput?.checked !== false;
       const trusted = this.elements.skillTrustedInput?.checked === true;
       const selectedAgentInstanceIds = this.getWorkspaceSkillSelectedAgentInstanceIDs();
@@ -11035,7 +12682,10 @@ export class WorkspaceDetailPage {
 
       await this.saveWorkspaceSkillBinding(payload);
       await this.loadWorkspace();
-      await this.persistWorkspaceSkillAgentAccess(this.activeWorkspaceSkillBindingId, selectedAgentInstanceIds);
+      await this.persistWorkspaceSkillAgentAccess(
+        this.activeWorkspaceSkillBindingId,
+        selectedAgentInstanceIds
+      );
       await this.loadWorkspace();
 
       this.getWorkspaceSkillModalInstance()?.hide();
@@ -11048,7 +12698,8 @@ export class WorkspaceDetailPage {
       }
     } catch (error) {
       console.error('Failed to save workspace skill binding:', error);
-      if (window.Toast) window.Toast.error(error.message || 'Failed to save workspace skill binding');
+      if (window.Toast)
+        window.Toast.error(error.message || 'Failed to save workspace skill binding');
     } finally {
       this.setWorkspaceSkillModalSubmitting(false);
     }
@@ -11083,7 +12734,8 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.success('Workspace skill removed');
     } catch (error) {
       console.error('Failed to delete workspace skill binding:', error);
-      if (window.Toast) window.Toast.error(error.message || 'Failed to remove workspace skill binding');
+      if (window.Toast)
+        window.Toast.error(error.message || 'Failed to remove workspace skill binding');
     }
   }
 
@@ -11102,35 +12754,41 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.skillsList.innerHTML = bindings.map((binding) => {
-      const skillName = String(binding?.skillName || '').trim() || 'unknown';
-      const isDisabled = binding?.enabled === false;
-      const isTrusted = binding?.trusted === true;
-      const isPlanning = binding?.planningProfile === true;
-      const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
-      const planningSummary = this.getWorkspacePlanningSummary(binding?.config || {});
-      const accessSummary = isDisabled
-        ? 'Disabled for this workspace'
-        : agentNames.length > 0
-        ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
-        : (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0
-          ? 'No agent instances currently have access'
-          : 'No agent instances in this workspace');
-      const accessLabel = isDisabled
-        ? 'Agents: unavailable while disabled'
-        : agentNames.length > 0
-        ? `Agents: ${agentNames.join(', ')}`
-        : 'Agents: none';
+    this.elements.skillsList.innerHTML = bindings
+      .map(binding => {
+        const skillName = String(binding?.skillName || '').trim() || 'unknown';
+        const isDisabled = binding?.enabled === false;
+        const isTrusted = binding?.trusted === true;
+        const isPlanning = binding?.planningProfile === true;
+        const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
+        const planningSummary = this.getWorkspacePlanningSummary(binding?.config || {});
+        const accessSummary = isDisabled
+          ? 'Disabled for this workspace'
+          : agentNames.length > 0
+            ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
+            : Array.isArray(this.workspace?.agent_instances) &&
+                this.workspace.agent_instances.length > 0
+              ? 'No agent instances currently have access'
+              : 'No agent instances in this workspace';
+        const accessLabel = isDisabled
+          ? 'Agents: unavailable while disabled'
+          : agentNames.length > 0
+            ? `Agents: ${agentNames.join(', ')}`
+            : 'Agents: none';
 
-      const chips = [
-        `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
-        isPlanning ? `<span class="workspace-detail-mcp-chip source">Planning</span>` : '',
-        isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
-        planningSummary ? `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(planningSummary)}</span>` : '',
-        `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
-      ].filter(Boolean).join('');
+        const chips = [
+          `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+          isPlanning ? `<span class="workspace-detail-mcp-chip source">Planning</span>` : '',
+          isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
+          planningSummary
+            ? `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(planningSummary)}</span>`
+            : '',
+          `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
+        ]
+          .filter(Boolean)
+          .join('');
 
-      return `
+        return `
         <div class="workspace-detail-mcp-card" data-skill-binding-id="${this.escapeHtml(binding.id)}">
           <div class="workspace-detail-mcp-card-top">
             <div class="workspace-detail-mcp-card-top-main">
@@ -11156,7 +12814,8 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-chip-row">${chips}</div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
     this.renderWorkspaceConfigSummary();
   }
 
@@ -11168,7 +12827,7 @@ export class WorkspaceDetailPage {
 
     const ids = [];
     const seen = new Set();
-    this.workspace.agent_instances.forEach((instance) => {
+    this.workspace.agent_instances.forEach(instance => {
       if (this.normalizeAgentName(instance?.name) !== normalized) return;
       const id = String(instance?.id || '').trim();
       if (!id || seen.has(id)) return;
@@ -11193,8 +12852,10 @@ export class WorkspaceDetailPage {
       ? this.workspace.agent_mcp_access
       : [];
 
-    const allowedByInstance = instanceIds.map((instanceID) => {
-      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceID);
+    const allowedByInstance = instanceIds.map(instanceID => {
+      const entry = accessEntries.find(
+        item => String(item?.agent_instance_id || '').trim() === instanceID
+      );
       if (!entry) {
         return bindings;
       }
@@ -11204,16 +12865,32 @@ export class WorkspaceDetailPage {
 
       const allowedIDs = new Set(
         entry.enabled_binding_ids
-          .map((value) => String(value || '').trim().toLowerCase())
+          .map(value =>
+            String(value || '')
+              .trim()
+              .toLowerCase()
+          )
           .filter(Boolean)
       );
-      return bindings.filter((binding) => allowedIDs.has(String(binding.id || '').trim().toLowerCase()));
+      return bindings.filter(binding =>
+        allowedIDs.has(
+          String(binding.id || '')
+            .trim()
+            .toLowerCase()
+        )
+      );
     });
 
     const merged = [];
     const seen = new Set();
-    allowedByInstance.flat().forEach((binding) => {
-      const key = String(binding?.id || '').trim().toLowerCase() || String(binding?.serverName || '').trim().toLowerCase();
+    allowedByInstance.flat().forEach(binding => {
+      const key =
+        String(binding?.id || '')
+          .trim()
+          .toLowerCase() ||
+        String(binding?.serverName || '')
+          .trim()
+          .toLowerCase();
       if (!key || seen.has(key)) return;
       seen.add(key);
       merged.push(binding);
@@ -11224,7 +12901,7 @@ export class WorkspaceDetailPage {
   getEffectiveWorkspaceMCPServerNames(agentName) {
     const names = [];
     const seen = new Set();
-    const add = (value) => {
+    const add = value => {
       const name = String(value || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
@@ -11233,7 +12910,9 @@ export class WorkspaceDetailPage {
       names.push(name);
     };
 
-    this.getEffectiveWorkspaceMCPBindingsForAgent(agentName).forEach((binding) => add(binding.serverName));
+    this.getEffectiveWorkspaceMCPBindingsForAgent(agentName).forEach(binding =>
+      add(binding.serverName)
+    );
 
     const profile = this.getAgentProfile(agentName);
     if (Array.isArray(profile?.mcpServers)) {
@@ -11252,7 +12931,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) return;
       const data = await response.json();
       const names = Array.isArray(data?.agents) ? data.agents : [];
-      names.forEach((name) => {
+      names.forEach(name => {
         const trimmed = String(name || '').trim();
         if (trimmed) this.workspaceAgentSnapshots.add(trimmed.toLowerCase());
       });
@@ -11263,7 +12942,9 @@ export class WorkspaceDetailPage {
 
   hasWorkspaceAgentSnapshot(agentName) {
     if (!this.workspaceAgentSnapshots || !this.workspaceAgentSnapshots.size) return false;
-    const key = String(agentName || '').trim().toLowerCase();
+    const key = String(agentName || '')
+      .trim()
+      .toLowerCase();
     if (!key) return false;
     return this.workspaceAgentSnapshots.has(key);
   }
@@ -11289,23 +12970,36 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       const agents = Array.isArray(data?.agents) ? data.agents : [];
-      agents.forEach((agent) => {
+      agents.forEach(agent => {
         const name = String(agent?.name || '').trim();
         if (!name) return;
 
         const profile = {
           name,
           type: String(agent?.type || '').trim(),
-          source: String(agent?.source || 'user').trim().toLowerCase(),
+          source: String(agent?.source || 'user')
+            .trim()
+            .toLowerCase(),
           model: String(agent?.model || '').trim(),
           provider: String(agent?.provider || '').trim(),
-          status: String(agent?.status || '').trim().toLowerCase(),
-          capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          status: String(agent?.status || '')
+            .trim()
+            .toLowerCase(),
+          capabilities: Array.isArray(agent?.capabilities)
+            ? agent.capabilities.map(value => String(value || '').trim()).filter(Boolean)
+            : [],
           allowWebSearch: Boolean(agent?.allow_web_search),
-          enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
-          mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-          evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
-          level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
+          enabledPlugins: Array.isArray(agent?.enabled_plugins)
+            ? agent.enabled_plugins.map(value => String(value || '').trim()).filter(Boolean)
+            : [],
+          mcpServers: Array.isArray(agent?.mcp_servers)
+            ? agent.mcp_servers.map(value => String(value || '').trim()).filter(Boolean)
+            : [],
+          evolution:
+            agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
+          level: Number.isFinite(Number(agent?.evolution?.level))
+            ? Math.max(0, Math.floor(Number(agent.evolution.level)))
+            : 0,
           stage: String(agent?.evolution?.stage || '').trim()
         };
 
@@ -11363,7 +13057,7 @@ export class WorkspaceDetailPage {
   buildAgentOptionsFromCatalog() {
     const options = [{ label: 'Unassigned', value: '' }];
     const seen = new Set();
-    this.agentCatalog.forEach((profile) => {
+    this.agentCatalog.forEach(profile => {
       const name = String(profile?.name || '').trim();
       if (!name) return;
       const key = this.normalizeAgentName(name);
@@ -11379,30 +13073,60 @@ export class WorkspaceDetailPage {
       return false;
     }
 
-    const lowerCapabilities = new Set((profile.capabilities || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean));
-    if (lowerCapabilities.has('browser') || lowerCapabilities.has('browser_automation') || lowerCapabilities.has('web_search') || lowerCapabilities.has('web_fetch')) {
+    const lowerCapabilities = new Set(
+      (profile.capabilities || [])
+        .map(value =>
+          String(value || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    if (
+      lowerCapabilities.has('browser') ||
+      lowerCapabilities.has('browser_automation') ||
+      lowerCapabilities.has('web_search') ||
+      lowerCapabilities.has('web_fetch')
+    ) {
       return true;
     }
 
-    const pluginNames = (profile.enabledPlugins || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    const pluginNames = (profile.enabledPlugins || [])
+      .map(value =>
+        String(value || '')
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean);
     for (const name of pluginNames) {
-      if (name.startsWith('browser') ||
-          name.startsWith('web_fetch') ||
-          name.startsWith('web_search') ||
-          name === 'navigate' ||
-          name === 'open_url' ||
-          name.includes('playwright') ||
-          name.includes('browserbase') ||
-          name.includes('puppeteer')) {
+      if (
+        name.startsWith('browser') ||
+        name.startsWith('web_fetch') ||
+        name.startsWith('web_search') ||
+        name === 'navigate' ||
+        name === 'open_url' ||
+        name.includes('playwright') ||
+        name.includes('browserbase') ||
+        name.includes('puppeteer')
+      ) {
         return true;
       }
     }
 
     const serverNames = this.getEffectiveWorkspaceMCPServerNames(profile.name)
-      .map((value) => String(value || '').trim().toLowerCase())
+      .map(value =>
+        String(value || '')
+          .trim()
+          .toLowerCase()
+      )
       .filter(Boolean);
     for (const name of serverNames) {
-      if (name.includes('playwright') || name.includes('browserbase') || name.includes('puppeteer') || name.includes('browser')) {
+      if (
+        name.includes('playwright') ||
+        name.includes('browserbase') ||
+        name.includes('puppeteer') ||
+        name.includes('browser')
+      ) {
         return true;
       }
     }
@@ -11430,11 +13154,23 @@ export class WorkspaceDetailPage {
   }
 
   isLikelyBrowserAutomationIntent(description) {
-    const lower = String(description || '').trim().toLowerCase();
+    const lower = String(description || '')
+      .trim()
+      .toLowerCase();
     if (!lower) return false;
 
-    const verbs = ['open', 'visit', 'navigate', 'go to', 'browse', 'click', 'fill', 'type', 'extract'];
-    const hasVerb = verbs.some((verb) => lower.includes(verb));
+    const verbs = [
+      'open',
+      'visit',
+      'navigate',
+      'go to',
+      'browse',
+      'click',
+      'fill',
+      'type',
+      'extract'
+    ];
+    const hasVerb = verbs.some(verb => lower.includes(verb));
     if (!hasVerb) return false;
 
     if (lower.includes('http://') || lower.includes('https://') || lower.includes('www.')) {
@@ -11444,7 +13180,7 @@ export class WorkspaceDetailPage {
     const tokens = lower.split(/\s+/);
     for (const token of tokens) {
       const cleaned = token.replace(/^[\s,.;:!?"'`()[\]{}<>]+|[\s,.;:!?"'`()[\]{}<>]+$/g, '');
-      if (!cleaned || cleaned.includes('/') || (cleaned.split('.').length - 1) < 1) continue;
+      if (!cleaned || cleaned.includes('/') || cleaned.split('.').length - 1 < 1) continue;
       const parts = cleaned.split('.');
       const tld = parts[parts.length - 1];
       if (tld.length >= 2 && tld.length <= 12) {
@@ -11468,7 +13204,8 @@ export class WorkspaceDetailPage {
           recommendedAgent: specialistAction.agentName,
           addToWorkspace: specialistAction.kind === 'add_and_switch',
           eyebrow: 'Specialist Handoff',
-          confirmLabel: specialistAction.kind === 'add_and_switch' ? 'Add and Switch' : 'Switch Agent',
+          confirmLabel:
+            specialistAction.kind === 'add_and_switch' ? 'Add and Switch' : 'Switch Agent',
           message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
           details: [
             String(specialistAction.description || '').trim(),
@@ -11505,36 +13242,50 @@ export class WorkspaceDetailPage {
       return { kind: 'none' };
     }
 
-    const currentEvaluation = await this.evaluateAgentForTaskRequirements(currentAgent, requirements);
+    const currentEvaluation = await this.evaluateAgentForTaskRequirements(
+      currentAgent,
+      requirements
+    );
     if (currentEvaluation) {
       return { kind: 'none' };
     }
 
-    const requirementSummary = requirements.map((requirement) => requirement.label.toLowerCase()).join(' and ');
-    const recommendedAgent = await this.findBestAgentForTaskRequirements(requirements, { excludeAgent: currentAgent });
+    const requirementSummary = requirements
+      .map(requirement => requirement.label.toLowerCase())
+      .join(' and ');
+    const recommendedAgent = await this.findBestAgentForTaskRequirements(requirements, {
+      excludeAgent: currentAgent
+    });
     if (recommendedAgent) {
       return {
         kind: 'switch_recommended',
         recommendedAgent: recommendedAgent.agentName,
         message: `"${currentAgent}" likely lacks ${requirementSummary} for this task.`,
         details: [
-          ...requirements.map((requirement) => requirement.reason),
+          ...requirements.map(requirement => requirement.reason),
           ...recommendedAgent.reasons
         ].slice(0, 5)
       };
     }
 
     const capabilityCatalog = await this.loadCapabilitySuggestionCatalog();
-    const suggestions = this.getCapabilitySuggestionsForRequirements(requirements, capabilityCatalog);
+    const suggestions = this.getCapabilitySuggestionsForRequirements(
+      requirements,
+      capabilityCatalog
+    );
     const defaults = this.getTaskRequirementSeedDefaults(requirements);
 
     return {
       kind: 'create_recommended',
       message: `This task likely needs ${requirementSummary}, but "${currentAgent}" does not advertise matching MCP servers, tools, or skills.`,
       details: [
-        ...requirements.map((requirement) => requirement.reason),
-        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
-        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+        ...requirements.map(requirement => requirement.reason),
+        suggestions.mcpServers.length > 0
+          ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}`
+          : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0
+          ? `Suggested skills: ${suggestions.skills.join(', ')}`
+          : 'No matching reusable skill is available yet.'
       ],
       suggestedMCPServers: suggestions.mcpServers,
       suggestedSkills: suggestions.skills,
@@ -11573,7 +13324,10 @@ export class WorkspaceDetailPage {
     if (!badges.length) return '';
 
     const chips = badges
-      .map((badge) => `<span class="workspace-detail-capability-chip ${this.escapeHtml(badge.key)}">${this.escapeHtml(badge.label)}</span>`)
+      .map(
+        badge =>
+          `<span class="workspace-detail-capability-chip ${this.escapeHtml(badge.key)}">${this.escapeHtml(badge.label)}</span>`
+      )
       .join('');
 
     return `<span class="workspace-detail-agent-capabilities">${chips}</span>`;
@@ -11584,7 +13338,9 @@ export class WorkspaceDetailPage {
     if (candidates.length === 0) return '';
 
     if (options.preferBrowser === true) {
-      const browserCandidate = candidates.find((name) => this.agentSupportsBrowserAutomation(this.getAgentProfile(name)));
+      const browserCandidate = candidates.find(name =>
+        this.agentSupportsBrowserAutomation(this.getAgentProfile(name))
+      );
       if (browserCandidate) {
         return browserCandidate;
       }
@@ -11607,15 +13363,21 @@ export class WorkspaceDetailPage {
 
   getTaskExecutionState(task) {
     if (!task || typeof task !== 'object') return 'pending';
-    const status = String(task.status || '').trim().toLowerCase();
-    const humanLoopState = String(task?.context?.human_loop?.state || '').trim().toLowerCase();
+    const status = String(task.status || '')
+      .trim()
+      .toLowerCase();
+    const humanLoopState = String(task?.context?.human_loop?.state || '')
+      .trim()
+      .toLowerCase();
     if (humanLoopState === 'blocked') return 'blocked';
     return status || 'pending';
   }
 
   setExecutionModalStatus(status) {
     if (!this.elements.taskExecutionStatus) return;
-    const safeStatus = String(status || 'pending').trim().toLowerCase();
+    const safeStatus = String(status || 'pending')
+      .trim()
+      .toLowerCase();
     this.elements.taskExecutionStatus.className = `workspace-detail-task-status ${getStatusClass(safeStatus)}`;
     this.elements.taskExecutionStatus.textContent = getDisplayStatus(safeStatus);
   }
@@ -11624,7 +13386,8 @@ export class WorkspaceDetailPage {
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
     if (!this.elements.taskExecutionLog) return;
-    this.elements.taskExecutionLog.innerHTML = '<div class="workspace-detail-task-execution-empty">Execution updates will appear here.</div>';
+    this.elements.taskExecutionLog.innerHTML =
+      '<div class="workspace-detail-task-execution-empty">Execution updates will appear here.</div>';
   }
 
   appendExecutionLog(message, variant = 'info', dedupeKey = '') {
@@ -11635,16 +13398,24 @@ export class WorkspaceDetailPage {
       this.executionLogKeys.add(key);
     }
 
-    const empty = this.elements.taskExecutionLog.querySelector('.workspace-detail-task-execution-empty');
+    const empty = this.elements.taskExecutionLog.querySelector(
+      '.workspace-detail-task-execution-empty'
+    );
     if (empty) empty.remove();
 
     const entry = document.createElement('div');
-    const safeVariant = ['info', 'success', 'warning', 'error'].includes(variant) ? variant : 'info';
+    const safeVariant = ['info', 'success', 'warning', 'error'].includes(variant)
+      ? variant
+      : 'info';
     entry.className = `workspace-detail-task-execution-log-entry ${safeVariant}`;
 
     const timeEl = document.createElement('div');
     timeEl.className = 'workspace-detail-task-execution-log-time';
-    timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    timeEl.textContent = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
 
     const messageEl = document.createElement('div');
     messageEl.className = 'workspace-detail-task-execution-log-message';
@@ -11686,7 +13457,9 @@ export class WorkspaceDetailPage {
   updateTaskExecutionMeta(task) {
     if (!this.elements.taskExecutionMeta || !task) return;
     const answeredBy = this.getAnsweringAgentLabel(task);
-    const updatedAt = formatDate(task.updated_at || task.completed_at || task.started_at || task.created_at);
+    const updatedAt = formatDate(
+      task.updated_at || task.completed_at || task.started_at || task.created_at
+    );
     const retry = task?.context?.execution_retry || {};
     const attemptsUsed = Number(retry.attempts_used || 0);
     const maxAttempts = Number(retry.max_attempts || task?.context?.execution_max_attempts || 0);
@@ -11702,7 +13475,10 @@ export class WorkspaceDetailPage {
 
   updateTaskExecutionControls(task) {
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
-    this.setExecutionNextStepEnabled(awaitingNextStep, awaitingNextStep ? 'Run Next Step' : 'Run Next Step');
+    this.setExecutionNextStepEnabled(
+      awaitingNextStep,
+      awaitingNextStep ? 'Run Next Step' : 'Run Next Step'
+    );
   }
 
   async advanceCurrentExecutionStep() {
@@ -11722,7 +13498,11 @@ export class WorkspaceDetailPage {
         const text = await response.text();
         throw new Error(text || 'Failed to execute the next step');
       }
-      this.appendExecutionLog('Running the next internal step.', 'info', `${this.currentExecutionTaskId}:next-step`);
+      this.appendExecutionLog(
+        'Running the next internal step.',
+        'info',
+        `${this.currentExecutionTaskId}:next-step`
+      );
       await this.startExecutionMonitor(this.currentExecutionTaskId);
       await this.loadTasks();
     } catch (error) {
@@ -11748,9 +13528,11 @@ export class WorkspaceDetailPage {
     this.clearExecutionLog();
     this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
 
-    const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-      ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
-      : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+        : bootstrap.Modal.getInstance(this.elements.taskExecutionModal) ||
+          new bootstrap.Modal(this.elements.taskExecutionModal);
     modal.show();
   }
 
@@ -11782,27 +13564,59 @@ export class WorkspaceDetailPage {
 
         if (state !== this.executionLastStatus) {
           this.executionLastStatus = state;
-          this.appendExecutionLog(`Status changed to ${getDisplayStatus(state)}.`, state === 'failed' ? 'error' : state === 'blocked' ? 'warning' : state === 'completed' ? 'success' : 'info', `${taskId}:status:${state}:${task.updated_at || ''}`);
+          this.appendExecutionLog(
+            `Status changed to ${getDisplayStatus(state)}.`,
+            state === 'failed'
+              ? 'error'
+              : state === 'blocked'
+                ? 'warning'
+                : state === 'completed'
+                  ? 'success'
+                  : 'info',
+            `${taskId}:status:${state}:${task.updated_at || ''}`
+          );
         }
 
         if (this.isTaskAwaitingNextStep(task)) {
           const nextStepIndex = Number(task?.context?.execution_step_waiting_index || 0);
           const nextStep = Array.isArray(task?.execution_steps)
-            ? task.execution_steps.find((step) => Number(step?.index) === nextStepIndex)
+            ? task.execution_steps.find(step => Number(step?.index) === nextStepIndex)
             : null;
           const nextLabel = nextStep?.title ? ` ${nextStep.title}` : '';
-          this.appendExecutionLog(`Paused after the current step. Ready for step ${nextStepIndex || '?'}${nextLabel ? `: ${nextLabel}` : ''}.`, 'info', `${taskId}:waiting:${nextStepIndex}`);
+          this.appendExecutionLog(
+            `Paused after the current step. Ready for step ${nextStepIndex || '?'}${nextLabel ? `: ${nextLabel}` : ''}.`,
+            'info',
+            `${taskId}:waiting:${nextStepIndex}`
+          );
         }
 
-        if (state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'timeout' || state === 'blocked') {
+        if (
+          state === 'completed' ||
+          state === 'failed' ||
+          state === 'cancelled' ||
+          state === 'timeout' ||
+          state === 'blocked'
+        ) {
           this.stopExecutionMonitor();
           this.setExecutionViewResultEnabled(Boolean(task.result || task.error));
           if (state === 'completed') {
-            this.appendExecutionLog('Execution completed successfully.', 'success', `${taskId}:terminal:completed`);
+            this.appendExecutionLog(
+              'Execution completed successfully.',
+              'success',
+              `${taskId}:terminal:completed`
+            );
           } else if (state === 'blocked') {
-            this.appendExecutionLog('Execution paused and requires your input.', 'warning', `${taskId}:terminal:blocked`);
+            this.appendExecutionLog(
+              'Execution paused and requires your input.',
+              'warning',
+              `${taskId}:terminal:blocked`
+            );
           } else {
-            this.appendExecutionLog('Execution ended with an issue.', 'error', `${taskId}:terminal:${state}`);
+            this.appendExecutionLog(
+              'Execution ended with an issue.',
+              'error',
+              `${taskId}:terminal:${state}`
+            );
           }
           await this.loadTasks();
         }
@@ -11816,7 +13630,7 @@ export class WorkspaceDetailPage {
   }
 
   extractRealtimeTaskPayload(event) {
-    const eventData = event && typeof event === 'object' ? (event.data || {}) : {};
+    const eventData = event && typeof event === 'object' ? event.data || {} : {};
     const payload = eventData && typeof eventData.data === 'object' ? eventData.data : eventData;
     const taskId = String(payload?.task_id || eventData?.task_id || '').trim();
     return { taskId, payload };
@@ -11830,7 +13644,11 @@ export class WorkspaceDetailPage {
     switch (event.type) {
       case 'task.started':
         this.setExecutionModalStatus('in_progress');
-        this.appendExecutionLog('Agent started executing this task.', 'info', `${taskId}:evt:started:${payload?.updated_at || ''}`);
+        this.appendExecutionLog(
+          'Agent started executing this task.',
+          'info',
+          `${taskId}:evt:started:${payload?.updated_at || ''}`
+        );
         break;
       case 'task.progress': {
         this.setExecutionModalStatus('in_progress');
@@ -11838,7 +13656,11 @@ export class WorkspaceDetailPage {
         const currentStep = String(progress?.current_step || '').trim();
         const waiting = payload?.waiting_for_next_step === true;
         if (currentStep) {
-          this.appendExecutionLog(currentStep, waiting ? 'success' : 'info', `${taskId}:evt:progress:${currentStep}`);
+          this.appendExecutionLog(
+            currentStep,
+            waiting ? 'success' : 'info',
+            `${taskId}:evt:progress:${currentStep}`
+          );
         }
         break;
       }
@@ -11860,25 +13682,41 @@ export class WorkspaceDetailPage {
       }
       case 'task.blocked':
         this.setExecutionModalStatus('blocked');
-        this.appendExecutionLog(payload?.reason || 'Execution paused and requires your input.', 'warning', `${taskId}:evt:blocked:${payload?.updated_at || ''}`);
+        this.appendExecutionLog(
+          payload?.reason || 'Execution paused and requires your input.',
+          'warning',
+          `${taskId}:evt:blocked:${payload?.updated_at || ''}`
+        );
         this.stopExecutionMonitor();
         this.setExecutionViewResultEnabled(false);
         break;
       case 'task.completed':
         this.setExecutionModalStatus('completed');
-        this.appendExecutionLog('Task completed.', 'success', `${taskId}:evt:completed:${payload?.updated_at || ''}`);
+        this.appendExecutionLog(
+          'Task completed.',
+          'success',
+          `${taskId}:evt:completed:${payload?.updated_at || ''}`
+        );
         this.stopExecutionMonitor();
         this.setExecutionViewResultEnabled(true);
         break;
       case 'task.failed':
         this.setExecutionModalStatus('failed');
-        this.appendExecutionLog(payload?.error || 'Task failed.', 'error', `${taskId}:evt:failed:${payload?.updated_at || ''}`);
+        this.appendExecutionLog(
+          payload?.error || 'Task failed.',
+          'error',
+          `${taskId}:evt:failed:${payload?.updated_at || ''}`
+        );
         this.stopExecutionMonitor();
         this.setExecutionViewResultEnabled(true);
         break;
       case 'task.resumed':
         this.setExecutionModalStatus('in_progress');
-        this.appendExecutionLog('Task resumed after guidance.', 'info', `${taskId}:evt:resumed:${payload?.updated_at || ''}`);
+        this.appendExecutionLog(
+          'Task resumed after guidance.',
+          'info',
+          `${taskId}:evt:resumed:${payload?.updated_at || ''}`
+        );
         this.startExecutionMonitor(taskId);
         break;
     }
@@ -11887,24 +13725,29 @@ export class WorkspaceDetailPage {
   async executeTask(taskId, options = {}) {
     await this.loadAgentCatalog();
 
-    const task = this.tasks.find((item) => item.id === taskId);
+    const task = this.tasks.find(item => item.id === taskId);
     if (!task) return;
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
     const awaitingNextStep = !isParent && this.isTaskAwaitingNextStep(task);
-    const stepAction = String(options?.stepAction || (awaitingNextStep ? 'next' : '')).trim().toLowerCase();
+    const stepAction = String(options?.stepAction || (awaitingNextStep ? 'next' : ''))
+      .trim()
+      .toLowerCase();
     const taskDescription = task.description || task.name || '';
     const taskRequirements = !isParent ? this.inferTaskExecutionRequirements(taskDescription) : [];
-    const isBrowserIntent = taskRequirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
+    const isBrowserIntent = taskRequirements.some(
+      requirement => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER
+    );
 
     if (isParent) {
-      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasUnassigned = subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
       if (hasUnassigned) {
-        if (window.Toast) window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+        if (window.Toast)
+          window.Toast.error('Assign agents to all subtasks before executing this workflow.');
         return;
       }
-      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      const hasRunning = subtasks.some(subtask => subtask.status === 'in_progress');
       if (hasRunning) {
         if (window.Toast) window.Toast.error('A subtask is already running.');
         return;
@@ -11915,11 +13758,10 @@ export class WorkspaceDetailPage {
     }
 
     let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    const getExecutionSequencePreview = (agentName = assignedAgent) => this.getPredictedTaskExecutionSequence(
-      task,
-      isParent ? subtasks : [],
-      { assignedAgent: agentName }
-    );
+    const getExecutionSequencePreview = (agentName = assignedAgent) =>
+      this.getPredictedTaskExecutionSequence(task, isParent ? subtasks : [], {
+        assignedAgent: agentName
+      });
     if (!isParent && !assignedAgent && !awaitingNextStep) {
       if (taskRequirements.length > 0) {
         assignedAgent = await this.suggestAgentSetupForTask(task);
@@ -11934,17 +13776,21 @@ export class WorkspaceDetailPage {
             return;
           }
         } else {
-          const assignAndRun = options.skipConfirm === true
-            ? true
-            : await this.showTaskConfirmDialog({
-              eyebrow: 'Assignment Required',
-              title: `Execute with "${fallbackAgent}"?`,
-              message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
-              confirmLabel: 'Assign and Execute',
-              metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
-              details: ['The task will be updated before dispatch.', 'Live execution updates will appear after confirmation.'],
-              sequenceItems: getExecutionSequencePreview(fallbackAgent)
-            });
+          const assignAndRun =
+            options.skipConfirm === true
+              ? true
+              : await this.showTaskConfirmDialog({
+                  eyebrow: 'Assignment Required',
+                  title: `Execute with "${fallbackAgent}"?`,
+                  message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+                  confirmLabel: 'Assign and Execute',
+                  metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
+                  details: [
+                    'The task will be updated before dispatch.',
+                    'Live execution updates will appear after confirmation.'
+                  ],
+                  sequenceItems: getExecutionSequencePreview(fallbackAgent)
+                });
           if (!assignAndRun) return;
 
           try {
@@ -11974,10 +13820,15 @@ export class WorkspaceDetailPage {
           title: `Switch to "${preflight.recommendedAgent}" before running?`,
           message: preflight.message,
           confirmLabel: preflight.confirmLabel || 'Switch Agent',
-          metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
-          details: Array.isArray(preflight.details) && preflight.details.length > 0
-            ? preflight.details
-            : [`Switching now avoids a likely pause for "${assignedAgent}".`],
+          metaItems: [
+            this.getTaskDisplayLabel(task),
+            preflight.recommendedAgent,
+            'Recommended agent'
+          ],
+          details:
+            Array.isArray(preflight.details) && preflight.details.length > 0
+              ? preflight.details
+              : [`Switching now avoids a likely pause for "${assignedAgent}".`],
           sequenceItems: getExecutionSequencePreview(preflight.recommendedAgent)
         });
         if (switchNow) {
@@ -12018,8 +13869,12 @@ export class WorkspaceDetailPage {
             workspaceId: this.workspaceId,
             taskId: task.id,
             assignTask: true,
-            suggestedMCPServers: Array.isArray(preflight.suggestedMCPServers) ? preflight.suggestedMCPServers : [],
-            suggestedSkills: Array.isArray(preflight.suggestedSkills) ? preflight.suggestedSkills : []
+            suggestedMCPServers: Array.isArray(preflight.suggestedMCPServers)
+              ? preflight.suggestedMCPServers
+              : [],
+            suggestedSkills: Array.isArray(preflight.suggestedSkills)
+              ? preflight.suggestedSkills
+              : []
           });
           return;
         }
@@ -12032,21 +13887,31 @@ export class WorkspaceDetailPage {
     const sequencePreview = getExecutionSequencePreview();
     if (options.skipConfirm !== true) {
       const confirmed = await this.showTaskConfirmDialog({
-        eyebrow: stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Task Launch',
-        title: stepAction === 'next'
-          ? 'Run the next step now?'
-          : isParent ? 'Execute this workflow now?' : 'Execute this task now?',
-        message: stepAction === 'next'
-          ? 'This task is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
-          : isParent
-          ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
-          : `This task will run with "${assignedAgent}".`,
-        confirmLabel: stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Execute Task',
-        metaItems: stepAction === 'next'
-          ? [this.getTaskDisplayLabel(task), assignedAgent, 'Step-through']
-          : isParent
-          ? [this.getTaskDisplayLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
-          : [this.getTaskDisplayLabel(task), assignedAgent, 'Ready to run'],
+        eyebrow:
+          stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Task Launch',
+        title:
+          stepAction === 'next'
+            ? 'Run the next step now?'
+            : isParent
+              ? 'Execute this workflow now?'
+              : 'Execute this task now?',
+        message:
+          stepAction === 'next'
+            ? 'This task is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
+            : isParent
+              ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
+              : `This task will run with "${assignedAgent}".`,
+        confirmLabel:
+          stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Execute Task',
+        metaItems:
+          stepAction === 'next'
+            ? [this.getTaskDisplayLabel(task), assignedAgent, 'Step-through']
+            : isParent
+              ? [
+                  this.getTaskDisplayLabel(task),
+                  `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`
+                ]
+              : [this.getTaskDisplayLabel(task), assignedAgent, 'Ready to run'],
         details: preflightWarning
           ? [preflightWarning, 'Execution updates will appear in the live log after dispatch.']
           : ['Execution updates will appear in the live log after dispatch.'],
@@ -12057,11 +13922,12 @@ export class WorkspaceDetailPage {
       if (!confirmed) return;
     }
 
-    const selectedStepThrough = !isParent && stepAction !== 'next'
-      ? (options.skipConfirm === true
-        ? this.getTaskExecutionMode(task) === 'step_through'
-        : this.consumePendingTaskConfirmStepThroughSelection())
-      : false;
+    const selectedStepThrough =
+      !isParent && stepAction !== 'next'
+        ? options.skipConfirm === true
+          ? this.getTaskExecutionMode(task) === 'step_through'
+          : this.consumePendingTaskConfirmStepThroughSelection()
+        : false;
     if (!isParent && stepAction !== 'next') {
       task.execution_mode = selectedStepThrough ? 'step_through' : 'auto';
     }
@@ -12075,7 +13941,7 @@ export class WorkspaceDetailPage {
         body: JSON.stringify({
           task_id: taskId,
           step_action: stepAction || undefined,
-          execution_mode: isParent ? undefined : (selectedStepThrough ? 'step_through' : 'auto')
+          execution_mode: isParent ? undefined : selectedStepThrough ? 'step_through' : 'auto'
         })
       });
       if (!response.ok) {
@@ -12084,7 +13950,11 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) window.Toast.success('Task started');
-      this.appendExecutionLog('Task dispatched. Waiting for agent updates...', 'info', `${taskId}:dispatched`);
+      this.appendExecutionLog(
+        'Task dispatched. Waiting for agent updates...',
+        'info',
+        `${taskId}:dispatched`
+      );
       await this.loadTasks();
       this.startExecutionMonitor(taskId);
     } catch (error) {
@@ -12092,7 +13962,11 @@ export class WorkspaceDetailPage {
       const message = error && error.message ? error.message : 'Failed to execute task';
       if (this.isMissingWorkspaceAgentError(message)) {
         this.setExecutionModalStatus('blocked');
-        this.appendExecutionLog('No agent is assigned to this workspace yet. Ori is preparing a suggested agent setup.', 'warning', `${taskId}:dispatch-agent-missing`);
+        this.appendExecutionLog(
+          'No agent is assigned to this workspace yet. Ori is preparing a suggested agent setup.',
+          'warning',
+          `${taskId}:dispatch-agent-missing`
+        );
         this.setExecutionViewResultEnabled(false);
 
         if (this.elements.taskExecutionModal && window.bootstrap) {
@@ -12137,7 +14011,12 @@ export class WorkspaceDetailPage {
 
         const task = await response.json();
         const status = task && task.status;
-        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+        if (
+          status === 'completed' ||
+          status === 'failed' ||
+          status === 'cancelled' ||
+          status === 'timeout'
+        ) {
           await this.loadTasks();
           return;
         }
@@ -12241,7 +14120,7 @@ export class WorkspaceDetailPage {
     }
 
     const options = [{ label: 'Unassigned', value: '' }];
-    this.getWorkspaceAgentNames().forEach((name) => {
+    this.getWorkspaceAgentNames().forEach(name => {
       const nodeId = `${name}-node-1`;
       options.push({ label: name, value: `node:${nodeId}` });
     });
@@ -12254,10 +14133,13 @@ export class WorkspaceDetailPage {
     if (!ctx || typeof ctx !== 'object') return [];
     const raw = ctx.kanban_labels;
     if (Array.isArray(raw)) {
-      return raw.map((label) => String(label || '').trim()).filter(Boolean);
+      return raw.map(label => String(label || '').trim()).filter(Boolean);
     }
     if (typeof raw === 'string') {
-      return raw.split(',').map((label) => label.trim()).filter(Boolean);
+      return raw
+        .split(',')
+        .map(label => label.trim())
+        .filter(Boolean);
     }
     return [];
   }
@@ -12268,7 +14150,10 @@ export class WorkspaceDetailPage {
 
   parseLabelsInput(value) {
     if (!value) return [];
-    return value.split(',').map((label) => label.trim()).filter(Boolean);
+    return value
+      .split(',')
+      .map(label => label.trim())
+      .filter(Boolean);
   }
 
   getKanbanDueDate(task) {
@@ -12288,7 +14173,9 @@ export class WorkspaceDetailPage {
 
   formatDueDate(value) {
     if (!value) return '';
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00`)
+      : new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleDateString();
   }
@@ -12309,8 +14196,10 @@ export class WorkspaceDetailPage {
   }
 
   buildAssignmentOptions(selectedValue, selectedLabel) {
-    const options = Array.isArray(this.agentOptions) ? this.agentOptions.slice() : [{ label: 'Unassigned', value: '' }];
-    if (selectedValue && !options.some((opt) => opt.value === selectedValue)) {
+    const options = Array.isArray(this.agentOptions)
+      ? this.agentOptions.slice()
+      : [{ label: 'Unassigned', value: '' }];
+    if (selectedValue && !options.some(opt => opt.value === selectedValue)) {
       options.push({ label: selectedLabel || selectedValue, value: selectedValue });
     }
     return options;
@@ -12325,11 +14214,14 @@ export class WorkspaceDetailPage {
   }
 
   makeColumnId(name, columns) {
-    const existing = new Set((columns || []).map((col) => String(col?.id || '').trim()).filter(Boolean));
-    const base = String(name || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || 'column';
+    const existing = new Set(
+      (columns || []).map(col => String(col?.id || '').trim()).filter(Boolean)
+    );
+    const base =
+      String(name || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '') || 'column';
     let id = base;
     let idx = 1;
     while (existing.has(id)) {
@@ -12348,24 +14240,26 @@ export class WorkspaceDetailPage {
     const columns = this.boardConfig?.columns || [];
 
     if (columns.length === 0) {
-      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach((card) => {
+      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach(card => {
         if (card._editOutsideHandler) {
           document.removeEventListener('click', card._editOutsideHandler);
           card._editOutsideHandler = null;
         }
       });
-      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((addEl) => {
+      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach(addEl => {
         if (addEl._addOutsideHandler) {
           document.removeEventListener('click', addEl._addOutsideHandler);
           addEl._addOutsideHandler = null;
         }
       });
-      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add-column').forEach((addEl) => {
-        if (addEl._addOutsideHandler) {
-          document.removeEventListener('click', addEl._addOutsideHandler);
-          addEl._addOutsideHandler = null;
-        }
-      });
+      this.elements.boardColumns
+        .querySelectorAll('.workspace-detail-board-add-column')
+        .forEach(addEl => {
+          if (addEl._addOutsideHandler) {
+            document.removeEventListener('click', addEl._addOutsideHandler);
+            addEl._addOutsideHandler = null;
+          }
+        });
       this.elements.boardColumns.innerHTML = '';
       this.elements.boardEmpty.style.display = '';
       return;
@@ -12376,28 +14270,31 @@ export class WorkspaceDetailPage {
     // Group tasks by column
     const tasksByColumn = this.groupTasksByColumn(columns);
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach((card) => {
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach(card => {
       if (card._editOutsideHandler) {
         document.removeEventListener('click', card._editOutsideHandler);
         card._editOutsideHandler = null;
       }
     });
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((addEl) => {
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach(addEl => {
       if (addEl._addOutsideHandler) {
         document.removeEventListener('click', addEl._addOutsideHandler);
         addEl._addOutsideHandler = null;
       }
     });
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add-column').forEach((addEl) => {
-      if (addEl._addOutsideHandler) {
-        document.removeEventListener('click', addEl._addOutsideHandler);
-        addEl._addOutsideHandler = null;
-      }
-    });
+    this.elements.boardColumns
+      .querySelectorAll('.workspace-detail-board-add-column')
+      .forEach(addEl => {
+        if (addEl._addOutsideHandler) {
+          document.removeEventListener('click', addEl._addOutsideHandler);
+          addEl._addOutsideHandler = null;
+        }
+      });
 
-    const columnsHtml = columns.map(col => {
-      const columnTasks = tasksByColumn[col.id] || [];
-      return `
+    const columnsHtml = columns
+      .map(col => {
+        const columnTasks = tasksByColumn[col.id] || [];
+        return `
         <div class="workspace-detail-board-column" data-column-id="${col.id}">
           <div class="workspace-detail-board-column-header">
             <div class="workspace-detail-board-column-title-wrap">
@@ -12425,7 +14322,8 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     const addColumnHtml = `
       <div class="workspace-detail-board-add-column">
@@ -12458,20 +14356,24 @@ export class WorkspaceDetailPage {
     const assignmentValue = this.getAssignmentValue(task);
     const assignmentLabel = this.getAssignmentLabel(task);
     const assignmentOptions = this.buildAssignmentOptions(assignmentValue, assignmentLabel);
-    const labelMarkup = labels.length > 0
-      ? `<div class="workspace-detail-board-card-labels">${labels.map((label) => `<span class="workspace-detail-board-card-label">${this.escapeHtml(label)}</span>`).join('')}</div>`
+    const labelMarkup =
+      labels.length > 0
+        ? `<div class="workspace-detail-board-card-labels">${labels.map(label => `<span class="workspace-detail-board-card-label">${this.escapeHtml(label)}</span>`).join('')}</div>`
+        : '';
+    const dueMarkup = dueDate
+      ? `<span class="workspace-detail-board-card-due">Due ${this.escapeHtml(this.formatDueDate(dueDate))}</span>`
       : '';
-    const dueMarkup = dueDate ? `<span class="workspace-detail-board-card-due">Due ${this.escapeHtml(this.formatDueDate(dueDate))}</span>` : '';
-    const assignedMarkup = assignmentLabel && assignmentLabel !== 'Unassigned'
-      ? `<span class="workspace-detail-board-card-assignee">${this.escapeHtml(assignmentLabel)}</span>`
-      : '<span class="workspace-detail-board-card-assignee is-muted">Unassigned</span>';
+    const assignedMarkup =
+      assignmentLabel && assignmentLabel !== 'Unassigned'
+        ? `<span class="workspace-detail-board-card-assignee">${this.escapeHtml(assignmentLabel)}</span>`
+        : '<span class="workspace-detail-board-card-assignee is-muted">Unassigned</span>';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task, 'board');
     const editTitleValue = this.escapeHtml(task.description || task.name || task.id || '');
     const editDetailsValue = this.escapeHtml(task.details || '');
     const editLabelsValue = this.escapeHtml(this.formatLabelsInput(labels));
     const editDueValue = this.escapeHtml(this.normalizeDueInput(dueDate));
     const assignmentOptionsHtml = assignmentOptions
-      .map((opt) => {
+      .map(opt => {
         const selected = opt.value === assignmentValue ? ' selected' : '';
         return `<option value="${this.escapeHtml(opt.value)}"${selected}>${this.escapeHtml(opt.label)}</option>`;
       })
@@ -12525,7 +14427,9 @@ export class WorkspaceDetailPage {
    */
   groupTasksByColumn(columns) {
     const groups = {};
-    columns.forEach(col => { groups[col.id] = []; });
+    columns.forEach(col => {
+      groups[col.id] = [];
+    });
 
     // Only include top-level tasks
     const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
@@ -12610,7 +14514,7 @@ export class WorkspaceDetailPage {
     }
 
     setTimeout(() => {
-      const handler = (evt) => {
+      const handler = evt => {
         if (card.contains(evt.target)) return;
         this.saveBoardCardEdits(card);
       };
@@ -12670,7 +14574,7 @@ export class WorkspaceDetailPage {
     }
 
     const updated = await response.json();
-    const idx = this.tasks.findIndex((t) => t && t.id === taskId);
+    const idx = this.tasks.findIndex(t => t && t.id === taskId);
     if (idx >= 0) {
       this.tasks.splice(idx, 1, { ...this.tasks[idx], ...updated });
     }
@@ -12693,7 +14597,7 @@ export class WorkspaceDetailPage {
     }
 
     const updated = await response.json();
-    const idx = this.tasks.findIndex((t) => t && t.id === taskId);
+    const idx = this.tasks.findIndex(t => t && t.id === taskId);
     if (idx >= 0) {
       const existing = this.tasks[idx];
       const nextContext = { ...(existing.context || {}), ...(updated.context || {}) };
@@ -12745,19 +14649,29 @@ export class WorkspaceDetailPage {
   wireBoardCardEditing() {
     if (!this.elements.boardColumns) return;
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach((card) => {
-      card.addEventListener('click', (e) => {
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach(card => {
+      card.addEventListener('click', e => {
         if (this.boardDidDrag) return;
         if (card.classList.contains('is-editing')) return;
-        if (e.target.closest('.workspace-detail-board-card-edit') || e.target.closest('.workspace-detail-board-card-edit-btn')) return;
-        if (e.target.closest('input') || e.target.closest('textarea') || e.target.closest('select') || e.target.closest('button')) return;
+        if (
+          e.target.closest('.workspace-detail-board-card-edit') ||
+          e.target.closest('.workspace-detail-board-card-edit-btn')
+        )
+          return;
+        if (
+          e.target.closest('input') ||
+          e.target.closest('textarea') ||
+          e.target.closest('select') ||
+          e.target.closest('button')
+        )
+          return;
         const taskId = card.dataset.taskId;
         if (taskId) this.openTask(taskId);
       });
 
       const editBtn = card.querySelector('.workspace-detail-board-card-edit-btn');
       if (editBtn) {
-        editBtn.addEventListener('click', (e) => {
+        editBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           this.enterBoardCardEdit(card);
@@ -12766,12 +14680,12 @@ export class WorkspaceDetailPage {
 
       const editContainer = card.querySelector('.workspace-detail-board-card-edit');
       if (editContainer) {
-        editContainer.addEventListener('click', (e) => e.stopPropagation());
+        editContainer.addEventListener('click', e => e.stopPropagation());
       }
 
       const cancelBtn = card.querySelector('.workspace-detail-board-card-edit-cancel');
       if (cancelBtn) {
-        cancelBtn.addEventListener('click', (e) => {
+        cancelBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           this.exitBoardCardEdit(card, { reset: true });
@@ -12780,17 +14694,19 @@ export class WorkspaceDetailPage {
 
       const saveBtn = card.querySelector('.workspace-detail-board-card-edit-save');
       if (saveBtn) {
-        saveBtn.addEventListener('click', (e) => {
+        saveBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           this.saveBoardCardEdits(card);
         });
       }
 
-      const editFields = card.querySelectorAll('.workspace-detail-board-card-edit input, .workspace-detail-board-card-edit textarea, .workspace-detail-board-card-edit select');
-      editFields.forEach((field) => {
-        field.addEventListener('click', (e) => e.stopPropagation());
-        field.addEventListener('keydown', (e) => {
+      const editFields = card.querySelectorAll(
+        '.workspace-detail-board-card-edit input, .workspace-detail-board-card-edit textarea, .workspace-detail-board-card-edit select'
+      );
+      editFields.forEach(field => {
+        field.addEventListener('click', e => e.stopPropagation());
+        field.addEventListener('keydown', e => {
           if (e.key === 'Escape') {
             e.preventDefault();
             this.exitBoardCardEdit(card, { reset: true });
@@ -12809,95 +14725,99 @@ export class WorkspaceDetailPage {
   wireBoardCardAdd() {
     if (!this.elements.boardColumns) return;
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((container) => {
-      const columnId = container.dataset.columnId || '';
-      const button = container.querySelector('.workspace-detail-board-add-btn');
-      const form = container.querySelector('.workspace-detail-board-add-form');
-      const input = container.querySelector('.workspace-detail-board-add-input');
-      const cancelBtn = container.querySelector('.workspace-detail-board-add-cancel');
-      const submitBtn = container.querySelector('.workspace-detail-board-add-submit');
+    this.elements.boardColumns
+      .querySelectorAll('.workspace-detail-board-add')
+      .forEach(container => {
+        const columnId = container.dataset.columnId || '';
+        const button = container.querySelector('.workspace-detail-board-add-btn');
+        const form = container.querySelector('.workspace-detail-board-add-form');
+        const input = container.querySelector('.workspace-detail-board-add-input');
+        const cancelBtn = container.querySelector('.workspace-detail-board-add-cancel');
+        const submitBtn = container.querySelector('.workspace-detail-board-add-submit');
 
-      if (!button || !form || !input || !cancelBtn || !submitBtn) return;
+        if (!button || !form || !input || !cancelBtn || !submitBtn) return;
 
-      const closeForm = () => {
-        form.setAttribute('hidden', '');
-        button.removeAttribute('hidden');
-        input.value = '';
-        if (container._addOutsideHandler) {
-          document.removeEventListener('click', container._addOutsideHandler);
-          container._addOutsideHandler = null;
-        }
-      };
+        const closeForm = () => {
+          form.setAttribute('hidden', '');
+          button.removeAttribute('hidden');
+          input.value = '';
+          if (container._addOutsideHandler) {
+            document.removeEventListener('click', container._addOutsideHandler);
+            container._addOutsideHandler = null;
+          }
+        };
 
-      const openForm = () => {
-        button.setAttribute('hidden', '');
-        form.removeAttribute('hidden');
-        input.focus();
-        input.select();
-        setTimeout(() => {
-          const handler = (evt) => {
-            if (container.contains(evt.target)) return;
-            closeForm();
-          };
-          container._addOutsideHandler = handler;
-          document.addEventListener('click', handler);
-        }, 0);
-      };
-
-      const submitForm = async () => {
-        const title = input.value.trim();
-        if (!title) {
+        const openForm = () => {
+          button.setAttribute('hidden', '');
+          form.removeAttribute('hidden');
           input.focus();
-          return;
-        }
-        submitBtn.disabled = true;
-        try {
-          await this.createTask(title, '', columnId);
-          closeForm();
-        } catch (error) {
-          console.error('Failed to create task:', error);
-          if (window.Toast) window.Toast.error('Failed to create task');
-        } finally {
-          submitBtn.disabled = false;
-        }
-      };
+          input.select();
+          setTimeout(() => {
+            const handler = evt => {
+              if (container.contains(evt.target)) return;
+              closeForm();
+            };
+            container._addOutsideHandler = handler;
+            document.addEventListener('click', handler);
+          }, 0);
+        };
 
-      button.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openForm();
-      });
+        const submitForm = async () => {
+          const title = input.value.trim();
+          if (!title) {
+            input.focus();
+            return;
+          }
+          submitBtn.disabled = true;
+          try {
+            await this.createTask(title, '', columnId);
+            closeForm();
+          } catch (error) {
+            console.error('Failed to create task:', error);
+            if (window.Toast) window.Toast.error('Failed to create task');
+          } finally {
+            submitBtn.disabled = false;
+          }
+        };
 
-      cancelBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        closeForm();
-      });
-
-      submitBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        submitForm();
-      });
-
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
+        button.addEventListener('click', e => {
           e.preventDefault();
-          closeForm();
-          return;
-        }
-        if (e.key === 'Enter') {
+          e.stopPropagation();
+          openForm();
+        });
+
+        cancelBtn.addEventListener('click', e => {
           e.preventDefault();
+          e.stopPropagation();
+          closeForm();
+        });
+
+        submitBtn.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
           submitForm();
-        }
+        });
+
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeForm();
+            return;
+          }
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submitForm();
+          }
+        });
       });
-    });
   }
 
   wireBoardColumnAdd() {
     if (!this.elements.boardColumns) return;
 
-    const container = this.elements.boardColumns.querySelector('.workspace-detail-board-add-column');
+    const container = this.elements.boardColumns.querySelector(
+      '.workspace-detail-board-add-column'
+    );
     if (!container) return;
 
     const button = container.querySelector('.workspace-detail-board-add-column-btn');
@@ -12924,7 +14844,7 @@ export class WorkspaceDetailPage {
       input.focus();
       input.select();
       setTimeout(() => {
-        const handler = (evt) => {
+        const handler = evt => {
           if (container.contains(evt.target)) return;
           closeForm();
         };
@@ -12941,7 +14861,9 @@ export class WorkspaceDetailPage {
       }
       submitBtn.disabled = true;
       try {
-        const columns = Array.isArray(this.boardConfig?.columns) ? this.boardConfig.columns.slice() : [];
+        const columns = Array.isArray(this.boardConfig?.columns)
+          ? this.boardConfig.columns.slice()
+          : [];
         const id = this.makeColumnId(name, columns);
         const order = this.getNextColumnOrder(columns);
         const next = columns.concat({ id, name, order });
@@ -12956,25 +14878,25 @@ export class WorkspaceDetailPage {
       }
     };
 
-    button.addEventListener('click', (e) => {
+    button.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       openForm();
     });
 
-    cancelBtn.addEventListener('click', (e) => {
+    cancelBtn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       closeForm();
     });
 
-    submitBtn.addEventListener('click', (e) => {
+    submitBtn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       submitForm();
     });
 
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         e.preventDefault();
         closeForm();
@@ -12990,80 +14912,84 @@ export class WorkspaceDetailPage {
   wireBoardColumnRename() {
     if (!this.elements.boardColumns) return;
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-column-header').forEach((headerEl) => {
-      const titleEl = headerEl.querySelector('.workspace-detail-board-column-title');
-      const editBtn = headerEl.querySelector('.workspace-detail-board-column-edit-btn');
-      const titleWrap = headerEl.querySelector('.workspace-detail-board-column-title-wrap');
-      if (!titleEl || !editBtn) return;
+    this.elements.boardColumns
+      .querySelectorAll('.workspace-detail-board-column-header')
+      .forEach(headerEl => {
+        const titleEl = headerEl.querySelector('.workspace-detail-board-column-title');
+        const editBtn = headerEl.querySelector('.workspace-detail-board-column-edit-btn');
+        const titleWrap = headerEl.querySelector('.workspace-detail-board-column-title-wrap');
+        if (!titleEl || !editBtn) return;
 
-      editBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+        editBtn.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
 
-        const columnId = titleEl.dataset.columnId || titleEl.closest('.workspace-detail-board-column')?.dataset.columnId;
-        if (!columnId || !this.boardConfig?.columns) return;
+          const columnId =
+            titleEl.dataset.columnId ||
+            titleEl.closest('.workspace-detail-board-column')?.dataset.columnId;
+          if (!columnId || !this.boardConfig?.columns) return;
 
-        const currentName = titleEl.textContent || '';
+          const currentName = titleEl.textContent || '';
 
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'workspace-detail-board-column-rename-input';
-        input.value = currentName;
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'workspace-detail-board-column-rename-input';
+          input.value = currentName;
 
-        titleEl.style.display = 'none';
-        editBtn.style.display = 'none';
-        if (titleWrap && titleWrap.contains(editBtn)) {
-          titleWrap.insertBefore(input, editBtn);
-        } else {
-          const countEl = headerEl.querySelector('.workspace-detail-board-column-count');
-          if (countEl) {
-            headerEl.insertBefore(input, countEl);
+          titleEl.style.display = 'none';
+          editBtn.style.display = 'none';
+          if (titleWrap && titleWrap.contains(editBtn)) {
+            titleWrap.insertBefore(input, editBtn);
           } else {
-            headerEl.appendChild(input);
-          }
-        }
-        input.focus();
-        input.select();
-
-        const finishRename = async () => {
-          const newName = input.value.trim();
-          input.remove();
-          titleEl.style.display = '';
-          editBtn.style.display = '';
-
-          if (!newName || newName === currentName) return;
-
-          const columns = (this.boardConfig?.columns || []).map((col) => {
-            if (col.id === columnId) {
-              return { ...col, name: newName };
+            const countEl = headerEl.querySelector('.workspace-detail-board-column-count');
+            if (countEl) {
+              headerEl.insertBefore(input, countEl);
+            } else {
+              headerEl.appendChild(input);
             }
-            return col;
+          }
+          input.focus();
+          input.select();
+
+          const finishRename = async () => {
+            const newName = input.value.trim();
+            input.remove();
+            titleEl.style.display = '';
+            editBtn.style.display = '';
+
+            if (!newName || newName === currentName) return;
+
+            const columns = (this.boardConfig?.columns || []).map(col => {
+              if (col.id === columnId) {
+                return { ...col, name: newName };
+              }
+              return col;
+            });
+
+            try {
+              this.boardConfig = await this.saveBoardConfig(columns);
+              titleEl.textContent = newName;
+              if (window.Toast) window.Toast.success('Column renamed');
+            } catch (error) {
+              console.error('Failed to rename column:', error);
+              titleEl.textContent = currentName;
+              if (window.Toast) window.Toast.error('Failed to rename column');
+            }
+          };
+
+          input.addEventListener('blur', finishRename);
+          input.addEventListener('keydown', evt => {
+            if (evt.key === 'Enter') {
+              evt.preventDefault();
+              input.blur();
+            } else if (evt.key === 'Escape') {
+              evt.preventDefault();
+              input.value = currentName;
+              input.blur();
+            }
           });
-
-          try {
-            this.boardConfig = await this.saveBoardConfig(columns);
-            titleEl.textContent = newName;
-            if (window.Toast) window.Toast.success('Column renamed');
-          } catch (error) {
-            console.error('Failed to rename column:', error);
-            titleEl.textContent = currentName;
-            if (window.Toast) window.Toast.error('Failed to rename column');
-          }
-        };
-
-        input.addEventListener('blur', finishRename);
-        input.addEventListener('keydown', (evt) => {
-          if (evt.key === 'Enter') {
-            evt.preventDefault();
-            input.blur();
-          } else if (evt.key === 'Escape') {
-            evt.preventDefault();
-            input.value = currentName;
-            input.blur();
-          }
         });
       });
-    });
   }
 
   wireBoardDragAndDrop() {
@@ -13072,9 +14998,12 @@ export class WorkspaceDetailPage {
     let dragged = null;
     this.boardDidDrag = false;
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach((card) => {
-      card.addEventListener('dragstart', (e) => {
-        if (card.classList.contains('is-editing') || e.target.closest('.workspace-detail-board-card-edit')) {
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-card').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        if (
+          card.classList.contains('is-editing') ||
+          e.target.closest('.workspace-detail-board-card-edit')
+        ) {
           e.preventDefault();
           return;
         }
@@ -13094,31 +15023,35 @@ export class WorkspaceDetailPage {
       });
     });
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-column-body').forEach((colEl) => {
-      colEl.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        colEl.closest('.workspace-detail-board-column')?.classList.add('is-drag-over');
-        e.dataTransfer.dropEffect = 'move';
-      });
-      colEl.addEventListener('dragleave', () => {
-        colEl.closest('.workspace-detail-board-column')?.classList.remove('is-drag-over');
-      });
-      colEl.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        const columnId = colEl.closest('.workspace-detail-board-column')?.dataset.columnId || colEl.dataset.columnId;
-        colEl.closest('.workspace-detail-board-column')?.classList.remove('is-drag-over');
+    this.elements.boardColumns
+      .querySelectorAll('.workspace-detail-board-column-body')
+      .forEach(colEl => {
+        colEl.addEventListener('dragover', e => {
+          e.preventDefault();
+          colEl.closest('.workspace-detail-board-column')?.classList.add('is-drag-over');
+          e.dataTransfer.dropEffect = 'move';
+        });
+        colEl.addEventListener('dragleave', () => {
+          colEl.closest('.workspace-detail-board-column')?.classList.remove('is-drag-over');
+        });
+        colEl.addEventListener('drop', async e => {
+          e.preventDefault();
+          const columnId =
+            colEl.closest('.workspace-detail-board-column')?.dataset.columnId ||
+            colEl.dataset.columnId;
+          colEl.closest('.workspace-detail-board-column')?.classList.remove('is-drag-over');
 
-        const taskId = e.dataTransfer.getData('text/plain') || dragged?.dataset.taskId;
-        if (!taskId || !columnId) return;
+          const taskId = e.dataTransfer.getData('text/plain') || dragged?.dataset.taskId;
+          if (!taskId || !columnId) return;
 
-        try {
-          await this.updateTaskKanbanColumn(taskId, columnId);
-        } catch (error) {
-          console.error('Failed to update kanban column:', error);
-          if (window.Toast) window.Toast.error('Failed to move task');
-        }
+          try {
+            await this.updateTaskKanbanColumn(taskId, columnId);
+          } catch (error) {
+            console.error('Failed to update kanban column:', error);
+            if (window.Toast) window.Toast.error('Failed to move task');
+          }
+        });
       });
-    });
   }
 
   /**
@@ -13152,7 +15085,9 @@ export class WorkspaceDetailPage {
     this.renderSessions();
 
     try {
-      const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) throw new Error('Failed to load sessions');
 
       const data = await response.json();
@@ -13180,22 +15115,27 @@ export class WorkspaceDetailPage {
     if (!this.elements.sessionsList) return;
 
     if (this.sessionsLoading) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-loading">Loading sessions...</div>';
+      this.elements.sessionsList.innerHTML =
+        '<div class="workspace-detail-loading">Loading sessions...</div>';
       return;
     }
 
     if (this.sessionsLoadFailed) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">Failed to load sessions.</div>';
+      this.elements.sessionsList.innerHTML =
+        '<div class="workspace-detail-empty">Failed to load sessions.</div>';
       return;
     }
 
     const sessions = Array.isArray(this.sessions) ? this.sessions : [];
     if (sessions.length === 0) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">No sessions yet.</div>';
+      this.elements.sessionsList.innerHTML =
+        '<div class="workspace-detail-empty">No sessions yet.</div>';
       return;
     }
 
-    this.elements.sessionsList.innerHTML = sessions.map((session) => this.renderSessionItem(session)).join('');
+    this.elements.sessionsList.innerHTML = sessions
+      .map(session => this.renderSessionItem(session))
+      .join('');
   }
 
   /**
@@ -13203,7 +15143,8 @@ export class WorkspaceDetailPage {
    */
   async loadFiles() {
     if (this.elements.filesList) {
-      this.elements.filesList.innerHTML = '<div class="workspace-detail-loading">Loading files...</div>';
+      this.elements.filesList.innerHTML =
+        '<div class="workspace-detail-loading">Loading files...</div>';
     }
     this.filesLoaded = false;
     this.filesLoadFailed = false;
@@ -13223,7 +15164,9 @@ export class WorkspaceDetailPage {
 
       const workspace = await response.json();
       // Filter attachments to only include files (not text content)
-      this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      this.files = (workspace.attachments || []).filter(
+        a => a.file_meta || a.type === 'image' || a.type === 'other'
+      );
       this.filesLoaded = true;
       this.filesLoadFailed = false;
       this.renderFiles();
@@ -13251,32 +15194,52 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.filesList.innerHTML = this.files.map(file => {
-      const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
-      const size = file.file_meta ? file.file_meta.size : null;
-      const isMissing = file.file_meta?.status === 'missing';
-      const metaParts = [];
-      if (size) metaParts.push(this.formatFileSize(size));
-      metaParts.push(formatDate(file.created_at));
-      return `
-        <div class="workspace-detail-item" data-file-id="${file.id}">
-          ${isMissing ? `
-            <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkWorkspaceFile('${file.id}')" title="Choose a replacement file" aria-label="Relink missing file ${this.escapeHtml(title)}">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
-              </svg>
+    this.elements.filesList.innerHTML = this.files
+      .map(file => {
+        const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
+        const size = file.file_meta ? file.file_meta.size : null;
+        const isMissing = file.file_meta?.status === 'missing';
+        const vaultReference = this.normalizeVaultReference(file.vault_reference);
+        const metaParts = [];
+        if (size) metaParts.push(this.formatFileSize(size));
+        metaParts.push(formatDate(file.created_at));
+        const metaText = this.escapeHtml(metaParts.join(' · '));
+        return `
+	        <div class="workspace-detail-item" data-file-id="${file.id}">
+	          ${
+              vaultReference
+                ? `
+	            <button type="button" class="workspace-detail-item-sync" onclick="event.stopPropagation(); window.workspaceDetail?.syncVaultFile('${file.id}', this)" title="Sync to Vault" aria-label="Sync ${this.escapeHtml(title)} to private vault">
+	              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+	                <path d="M12,3L18,9H14V14H10V9H6L12,3M5,18H19V20H5V18Z"/>
+	              </svg>
+	            </button>
+	          `
+                : ''
+            }
+	          ${
+              isMissing
+                ? `
+	            <button type="button" class="workspace-detail-item-run${vaultReference ? ' is-shifted' : ''}" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkWorkspaceFile('${file.id}')" title="Choose a replacement file" aria-label="Relink missing file ${this.escapeHtml(title)}">
+	              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+	                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+	              </svg>
             </button>
-          ` : ''}
+          `
+                : ''
+            }
           <div>
-            <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
-            <div class="workspace-detail-item-meta">
-              ${isMissing ? '<span class="workspace-detail-status-badge is-missing">Missing</span>' : ''}
-              ${this.escapeHtml(metaParts.join(' · '))}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
+	            <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+	            <div class="workspace-detail-item-meta">
+	              ${isMissing ? '<span class="workspace-detail-status-badge is-missing">Missing</span>' : ''}
+	              ${metaText}
+	              ${vaultReference ? this.renderVaultReferenceBadge(vaultReference) : ''}
+	            </div>
+	          </div>
+	        </div>
+	      `;
+      })
+      .join('');
   }
 
   promptRelinkWorkspaceFile(fileId) {
@@ -13285,12 +15248,16 @@ export class WorkspaceDetailPage {
     const input = document.createElement('input');
     input.type = 'file';
     input.style.display = 'none';
-    input.addEventListener('change', async () => {
-      const selected = input.files && input.files[0];
-      input.remove();
-      if (!selected) return;
-      await this.relinkWorkspaceFile(fileId, selected);
-    }, { once: true });
+    input.addEventListener(
+      'change',
+      async () => {
+        const selected = input.files && input.files[0];
+        input.remove();
+        if (!selected) return;
+        await this.relinkWorkspaceFile(fileId, selected);
+      },
+      { once: true }
+    );
 
     document.body.appendChild(input);
     input.click();
@@ -13303,10 +15270,13 @@ export class WorkspaceDetailPage {
     formData.append('file', file);
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(fileId)}/relink`, {
-        method: 'POST',
-        body: formData
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(fileId)}/relink`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.error || payload.message || 'Failed to relink file');
@@ -13324,13 +15294,225 @@ export class WorkspaceDetailPage {
     }
   }
 
+  async responseErrorMessage(response, fallback) {
+    const payload = await response.json().catch(() => ({}));
+    return payload.error || payload.message || fallback;
+  }
+
+  setVaultSyncButtonState(button, isBusy) {
+    if (!button) return;
+    button.disabled = Boolean(isBusy);
+    button.classList.toggle('is-syncing', Boolean(isBusy));
+  }
+
+  async syncVaultFile(fileId, button = null) {
+    const file = this.files.find(item => item.id === fileId);
+    const vaultReference = this.normalizeVaultReference(file?.vault_reference);
+    if (!file || !vaultReference) {
+      if (window.Toast) window.Toast.error('This file is not linked to a private vault entry.');
+      return;
+    }
+
+    const fileMeta = file.file_meta || {};
+    const fileURL = String(fileMeta.url || '').trim();
+    if (!fileURL) {
+      if (window.Toast) window.Toast.error('This workspace file is missing a readable file URL.');
+      return;
+    }
+
+    this.setVaultSyncButtonState(button, true);
+    try {
+      const fileResponse = await fetch(fileURL);
+      if (!fileResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(fileResponse, 'Failed to read workspace file')
+        );
+      }
+
+      const blob = await fileResponse.blob();
+      const filename =
+        fileMeta.name || file.title || vaultReference.attachment_name || 'workspace-file';
+      const formData = new FormData();
+      formData.append('file', blob, filename);
+      if (file.type === 'image' || String(fileMeta.mime || '').startsWith('image/')) {
+        formData.append('kind', 'image');
+      }
+
+      const uploadResponse = await fetch(
+        `/api/vault/records/${encodeURIComponent(vaultReference.record_id)}/attachments`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
+      if (!uploadResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(uploadResponse, 'Failed to sync file to private vault')
+        );
+      }
+
+      const uploadPayload = await uploadResponse.json();
+      const uploadedAttachment = uploadPayload.attachment || {};
+      const previousAttachmentID = vaultReference.attachment_id;
+      const nextReference = this.normalizeVaultReference({
+        ...vaultReference,
+        attachment_id: uploadedAttachment.id || previousAttachmentID,
+        attachment_name: uploadedAttachment.name || filename,
+        last_synced_at: new Date().toISOString()
+      });
+
+      const updateResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(fileId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vault_reference: nextReference })
+        }
+      );
+      if (!updateResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(
+            updateResponse,
+            'File synced, but workspace reference could not be updated'
+          )
+        );
+      }
+
+      if (
+        previousAttachmentID &&
+        uploadedAttachment.id &&
+        previousAttachmentID !== uploadedAttachment.id
+      ) {
+        const deleteResponse = await fetch(
+          `/api/vault/records/${encodeURIComponent(vaultReference.record_id)}/attachments/${encodeURIComponent(previousAttachmentID)}`,
+          {
+            method: 'DELETE'
+          }
+        ).catch(() => null);
+        if (deleteResponse && !deleteResponse.ok && window.Toast) {
+          window.Toast.warning(
+            'Synced a new vault copy, but the previous vault attachment could not be removed.'
+          );
+        }
+      }
+
+      if (window.Toast) window.Toast.success('File synced to private vault');
+      await this.loadFiles();
+    } catch (error) {
+      console.error('Failed to sync workspace file to vault:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to sync file to private vault');
+    } finally {
+      this.setVaultSyncButtonState(button, false);
+    }
+  }
+
+  inferVaultPayloadKey(payload, fallback = '') {
+    if (fallback) return fallback;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      for (const key of ['note', 'content', 'text', 'body', 'value']) {
+        if (Object.prototype.hasOwnProperty.call(payload, key)) {
+          return key;
+        }
+      }
+    }
+    return 'note';
+  }
+
+  async syncVaultNote(noteId, button = null) {
+    const listedNote = this.notes.find(item => item.id === noteId);
+    this.setVaultSyncButtonState(button, true);
+    try {
+      const noteResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes/${encodeURIComponent(noteId)}`
+      );
+      if (!noteResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(noteResponse, 'Failed to load workspace note')
+        );
+      }
+      const note = await noteResponse.json();
+      const vaultReference = this.normalizeVaultReference(
+        note.vault_reference || listedNote?.vault_reference
+      );
+      if (!vaultReference) {
+        throw new Error('This note is not linked to a private vault entry.');
+      }
+
+      const recordResponse = await fetch(
+        `/api/vault/records/${encodeURIComponent(vaultReference.record_id)}`
+      );
+      if (!recordResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(recordResponse, 'Failed to load private vault entry')
+        );
+      }
+      const record = await recordResponse.json();
+      const payload =
+        record &&
+        record.payload &&
+        typeof record.payload === 'object' &&
+        !Array.isArray(record.payload)
+          ? { ...record.payload }
+          : {};
+      delete payload.attachments;
+
+      const payloadKey = this.inferVaultPayloadKey(payload, vaultReference.payload_key);
+      payload[payloadKey] = String(note.content || '');
+
+      const patchResponse = await fetch(
+        `/api/vault/records/${encodeURIComponent(vaultReference.record_id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload })
+        }
+      );
+      if (!patchResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(patchResponse, 'Failed to sync note to private vault')
+        );
+      }
+
+      const nextReference = this.normalizeVaultReference({
+        ...vaultReference,
+        payload_key: payloadKey,
+        last_synced_at: new Date().toISOString()
+      });
+      const updateResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes/${encodeURIComponent(noteId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vault_reference: nextReference })
+        }
+      );
+      if (!updateResponse.ok) {
+        throw new Error(
+          await this.responseErrorMessage(
+            updateResponse,
+            'Note synced, but workspace reference could not be updated'
+          )
+        );
+      }
+
+      if (window.Toast) window.Toast.success('Note synced to private vault');
+      await this.loadNotes();
+    } catch (error) {
+      console.error('Failed to sync workspace note to vault:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to sync note to private vault');
+    } finally {
+      this.setVaultSyncButtonState(button, false);
+    }
+  }
+
   /**
    * Load notes for the workspace
    */
   async loadNotes() {
     this.updateCopyNotesButtonState(true);
     if (this.elements.notesList) {
-      this.elements.notesList.innerHTML = '<div class="workspace-detail-loading">Loading notes...</div>';
+      this.elements.notesList.innerHTML =
+        '<div class="workspace-detail-loading">Loading notes...</div>';
     }
 
     try {
@@ -13367,14 +15549,27 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.notesList.innerHTML = this.notes.map(note => {
-      const title = note.name || note.title || 'Untitled Note';
-      const preview = note.preview || note.content || '';
-      return `
-      <div class="workspace-detail-item" data-note-id="${note.id}">
-        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteNote('${note.id}')" title="Delete note" aria-label="Delete note ${this.escapeHtml(title)}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+    this.elements.notesList.innerHTML = this.notes
+      .map(note => {
+        const title = note.name || note.title || 'Untitled Note';
+        const preview = note.preview || note.content || '';
+        const vaultReference = this.normalizeVaultReference(note.vault_reference);
+        return `
+	      <div class="workspace-detail-item" data-note-id="${note.id}">
+	        ${
+            vaultReference
+              ? `
+	        <button type="button" class="workspace-detail-item-sync" onclick="event.stopPropagation(); window.workspaceDetail?.syncVaultNote('${note.id}', this)" title="Sync to Vault" aria-label="Sync note ${this.escapeHtml(title)} to private vault">
+	          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+	            <path d="M12,3L18,9H14V14H10V9H6L12,3M5,18H19V20H5V18Z"/>
+	          </svg>
+	        </button>
+	        `
+              : ''
+          }
+	        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteNote('${note.id}')" title="Delete note" aria-label="Delete note ${this.escapeHtml(title)}">
+	          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+	            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
         <div class="workspace-detail-item-content"
@@ -13383,14 +15578,16 @@ export class WorkspaceDetailPage {
              aria-label="Open note ${this.escapeHtml(title)}"
              onclick="window.workspaceDetail?.editNote('${note.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.editNote('${note.id}'); }">
-          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
-          <div class="workspace-detail-item-meta">
-            ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '...' : '') : 'Empty note'}
-          </div>
-        </div>
-      </div>
+	          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+	          <div class="workspace-detail-item-meta">
+	            ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '…' : '') : 'Empty note'}
+	            ${vaultReference ? this.renderVaultReferenceBadge(vaultReference) : ''}
+	          </div>
+	        </div>
+	      </div>
     `;
-    }).join('');
+      })
+      .join('');
     this.updateCopyNotesButtonState(false);
   }
 
@@ -13409,7 +15606,8 @@ export class WorkspaceDetailPage {
    */
   async loadDirectories() {
     if (this.elements.directoriesList) {
-      this.elements.directoriesList.innerHTML = '<div class="workspace-detail-loading">Loading directories...</div>';
+      this.elements.directoriesList.innerHTML =
+        '<div class="workspace-detail-loading">Loading directories...</div>';
     }
 
     try {
@@ -13430,41 +15628,51 @@ export class WorkspaceDetailPage {
         if (!this.workspace || typeof this.workspace !== 'object') {
           this.workspace = {};
         }
-        this.workspace.directory_references = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
-        this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings) ? workspace.mcp_bindings : [];
-        this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access) ? workspace.agent_mcp_access : [];
-        this.workspace.primary_directory_id = typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
+        this.workspace.directory_references = Array.isArray(workspace.directory_references)
+          ? workspace.directory_references
+          : [];
+        this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings)
+          ? workspace.mcp_bindings
+          : [];
+        this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access)
+          ? workspace.agent_mcp_access
+          : [];
+        this.workspace.primary_directory_id =
+          typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
       }
 
       const refs = Array.isArray(workspace.directory_references)
-        ? workspace.directory_references.map((ref) => ({
-          id: ref.id,
-          name: ref.name || '',
-          path: ref.path || '',
-          source: 'reference'
-        }))
+        ? workspace.directory_references.map(ref => ({
+            id: ref.id,
+            name: ref.name || '',
+            path: ref.path || '',
+            source: 'reference'
+          }))
         : [];
 
       const attachmentDirs = Array.isArray(workspace.attachments)
         ? workspace.attachments
-          .filter((attachment) => attachment && attachment.type === 'directory')
-          .map((attachment) => ({
-            id: attachment.id,
-            name: attachment.title || attachment.name || '',
-            path: attachment.path || attachment.body || '',
-            source: 'attachment'
-          }))
+            .filter(attachment => attachment && attachment.type === 'directory')
+            .map(attachment => ({
+              id: attachment.id,
+              name: attachment.title || attachment.name || '',
+              path: attachment.path || attachment.body || '',
+              source: 'attachment'
+            }))
         : [];
 
       // De-duplicate by id first, then by normalized path for mixed legacy/new sources.
       const seenById = new Set();
       const seenByPath = new Set();
       this.directories = [];
-      [...refs, ...attachmentDirs].forEach((dir) => {
+      [...refs, ...attachmentDirs].forEach(dir => {
         if (!dir || !dir.id) return;
         if (seenById.has(dir.id)) return;
 
-        const normalizedPath = String(dir.path || '').trim().replace(/[\\/]+$/, '').toLowerCase();
+        const normalizedPath = String(dir.path || '')
+          .trim()
+          .replace(/[\\/]+$/, '')
+          .toLowerCase();
         if (normalizedPath && seenByPath.has(normalizedPath)) {
           return;
         }
@@ -13501,15 +15709,16 @@ export class WorkspaceDetailPage {
     }
 
     const primaryDirectoryId = this.getPrimaryDirectoryId();
-    this.elements.directoriesList.innerHTML = this.directories.map(dir => {
-      const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
-      const path = dir.path || '';
-      const sourceLabel = dir.source === 'reference' ? 'Linked folder' : 'Legacy attachment';
-      const source = dir.source === 'attachment' ? 'attachment' : 'reference';
-      const isPrimary = dir.id === primaryDirectoryId;
-      const roleLabel = isPrimary ? 'Project Folder' : 'Reference';
-      const roleClass = isPrimary ? 'is-primary' : 'is-reference';
-      return `
+    this.elements.directoriesList.innerHTML = this.directories
+      .map(dir => {
+        const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
+        const path = dir.path || '';
+        const sourceLabel = dir.source === 'reference' ? 'Linked folder' : 'Legacy attachment';
+        const source = dir.source === 'attachment' ? 'attachment' : 'reference';
+        const isPrimary = dir.id === primaryDirectoryId;
+        const roleLabel = isPrimary ? 'Project Folder' : 'Reference';
+        const roleClass = isPrimary ? 'is-primary' : 'is-reference';
+        return `
         <div class="workspace-detail-item" data-directory-id="${dir.id}">
           <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="Change linked folder" aria-label="Change linked folder for ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -13542,7 +15751,9 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
             <div class="workspace-detail-item-submeta">
               <span class="workspace-detail-directory-source">${this.escapeHtml(sourceLabel)}</span>
-              ${!isPrimary ? `
+              ${
+                !isPrimary
+                  ? `
                 <button
                   type="button"
                   class="workspace-detail-directory-promote"
@@ -13550,12 +15761,15 @@ export class WorkspaceDetailPage {
                 >
                   Make Project
                 </button>
-              ` : ''}
+              `
+                  : ''
+              }
             </div>
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   getStoredPrimaryDirectoryId() {
@@ -13566,7 +15780,10 @@ export class WorkspaceDetailPage {
 
   getPrimaryDirectoryId() {
     const storedPrimaryDirectoryId = this.getStoredPrimaryDirectoryId();
-    if (storedPrimaryDirectoryId && this.directories.some((dir) => dir.id === storedPrimaryDirectoryId)) {
+    if (
+      storedPrimaryDirectoryId &&
+      this.directories.some(dir => dir.id === storedPrimaryDirectoryId)
+    ) {
       return storedPrimaryDirectoryId;
     }
 
@@ -13594,13 +15811,16 @@ export class WorkspaceDetailPage {
   async deleteDirectory(directoryId, source = 'reference') {
     if (!directoryId) return;
 
-    const confirmed = confirm('Remove this directory from the workspace? The folder on disk will not be deleted.');
+    const confirmed = confirm(
+      'Remove this directory from the workspace? The folder on disk will not be deleted.'
+    );
     if (!confirmed) return;
 
     const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
-    const endpoint = normalizedSource === 'attachment'
-      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
-      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
+    const endpoint =
+      normalizedSource === 'attachment'
+        ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
+        : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
 
     try {
       const deletedWasStoredPrimary = this.getStoredPrimaryDirectoryId() === directoryId;
@@ -13648,7 +15868,7 @@ export class WorkspaceDetailPage {
   async promptRelinkDirectory(directoryId, source = 'reference', triggerButton = null) {
     if (!directoryId) return;
 
-    const directory = this.directories.find((entry) => entry.id === directoryId);
+    const directory = this.directories.find(entry => entry.id === directoryId);
     if (!directory) {
       if (window.Toast) window.Toast.error('Directory not found');
       return;
@@ -13698,7 +15918,9 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) {
-        window.Toast.success(isPrimaryDirectory ? 'Project folder updated' : 'Linked folder updated');
+        window.Toast.success(
+          isPrimaryDirectory ? 'Project folder updated' : 'Linked folder updated'
+        );
       }
       await this.loadDirectories();
     } catch (error) {
@@ -13714,14 +15936,17 @@ export class WorkspaceDetailPage {
 
   async updateDirectoryReference(directoryId, nextPath) {
     const title = this.getDirectoryDisplayName(nextPath);
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: title,
-        path: nextPath
-      })
-    });
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: title,
+          path: nextPath
+        })
+      }
+    );
 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
@@ -13731,14 +15956,17 @@ export class WorkspaceDetailPage {
 
   async updateLegacyDirectoryAttachment(directoryId, nextPath) {
     const title = this.getDirectoryDisplayName(nextPath);
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        body: nextPath
-      })
-    });
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          body: nextPath
+        })
+      }
+    );
 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
@@ -13758,7 +15986,7 @@ export class WorkspaceDetailPage {
     if (!directoryId) return;
 
     const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
-    const directory = this.directories.find((entry) => entry.id === directoryId);
+    const directory = this.directories.find(entry => entry.id === directoryId);
     if (!directory) {
       if (window.Toast) window.Toast.error('Directory not found');
       return;
@@ -13785,7 +16013,8 @@ export class WorkspaceDetailPage {
       this.elements.directoryExplorerSearch.value = '';
     }
     if (this.elements.directoryExplorerTitle) {
-      this.elements.directoryExplorerTitle.textContent = directory.name || directory.path || 'Directory Explorer';
+      this.elements.directoryExplorerTitle.textContent =
+        directory.name || directory.path || 'Directory Explorer';
     }
     if (this.elements.directoryExplorerSubtitle) {
       this.elements.directoryExplorerSubtitle.textContent = directory.path || '';
@@ -13797,7 +16026,11 @@ export class WorkspaceDetailPage {
   }
 
   getDirectoryExplorerModalInstance() {
-    if (!this.elements.directoryExplorerModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+    if (
+      !this.elements.directoryExplorerModal ||
+      typeof bootstrap === 'undefined' ||
+      !bootstrap.Modal
+    ) {
       return null;
     }
 
@@ -13811,7 +16044,8 @@ export class WorkspaceDetailPage {
       this.elements.directoryExplorerTree.innerHTML = `<div class="workspace-directory-tree-empty">${this.escapeHtml(message)}</div>`;
     }
     if (this.elements.directoryExplorerPreview) {
-      this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">Select a file to preview.</div>';
+      this.elements.directoryExplorerPreview.innerHTML =
+        '<div class="workspace-directory-preview-empty">Select a file to preview.</div>';
     }
     if (this.elements.directoryExplorerSummary) {
       this.elements.directoryExplorerSummary.innerHTML = '';
@@ -13836,7 +16070,8 @@ export class WorkspaceDetailPage {
         `;
       }
       if (this.elements.directoryExplorerPreview) {
-        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">Preview unavailable.</div>';
+        this.elements.directoryExplorerPreview.innerHTML =
+          '<div class="workspace-directory-preview-empty">Preview unavailable.</div>';
       }
       return;
     }
@@ -13856,7 +16091,9 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.renderDirectoryExplorerLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
+    this.renderDirectoryExplorerLoading(
+      force ? 'Refreshing directory...' : 'Scanning directory...'
+    );
 
     try {
       const endpoint = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
@@ -13870,8 +16107,10 @@ export class WorkspaceDetailPage {
       if (loadToken !== explorer.loadToken) return;
 
       const normalizedFiles = (Array.isArray(payload.files) ? payload.files : [])
-        .map((item) => {
-          const normalizedPath = this.normalizeRelativePath(item?.relative_path || item?.relativePath || '');
+        .map(item => {
+          const normalizedPath = this.normalizeRelativePath(
+            item?.relative_path || item?.relativePath || ''
+          );
           if (!normalizedPath) return null;
 
           return {
@@ -13902,10 +16141,12 @@ export class WorkspaceDetailPage {
       if (loadToken !== explorer.loadToken) return;
       console.error('Failed to load directory explorer files:', error);
       if (this.elements.directoryExplorerTree) {
-        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">Failed to load directory. Check the folder path and try again.</div>';
+        this.elements.directoryExplorerTree.innerHTML =
+          '<div class="workspace-directory-tree-empty">Failed to load directory. Check the folder path and try again.</div>';
       }
       if (this.elements.directoryExplorerPreview) {
-        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">No preview available.</div>';
+        this.elements.directoryExplorerPreview.innerHTML =
+          '<div class="workspace-directory-preview-empty">No preview available.</div>';
       }
       if (window.Toast) window.Toast.error('Failed to load directory contents');
     }
@@ -13921,7 +16162,7 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const firstFile = explorer.files.find((entry) => !entry.isDir);
+    const firstFile = explorer.files.find(entry => !entry.isDir);
     if (firstFile) {
       explorer.selectedPath = firstFile.path;
       explorer.selectedType = 'file';
@@ -13930,7 +16171,7 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const firstDirectory = explorer.files.find((entry) => entry.isDir);
+    const firstDirectory = explorer.files.find(entry => entry.isDir);
     if (firstDirectory) {
       explorer.selectedPath = firstDirectory.path;
       explorer.selectedType = 'dir';
@@ -13941,7 +16182,10 @@ export class WorkspaceDetailPage {
   }
 
   buildDirectoryExplorerTree(files) {
-    const rootName = this.directoryExplorer.directory?.name || this.directoryExplorer.directory?.path || 'Directory';
+    const rootName =
+      this.directoryExplorer.directory?.name ||
+      this.directoryExplorer.directory?.path ||
+      'Directory';
     const root = {
       type: 'dir',
       name: rootName,
@@ -13953,7 +16197,7 @@ export class WorkspaceDetailPage {
     const nodeIndex = new Map();
     nodeIndex.set('', root);
 
-    const ensureDirectoryNode = (path) => {
+    const ensureDirectoryNode = path => {
       if (nodeIndex.has(path)) {
         return nodeIndex.get(path);
       }
@@ -13979,7 +16223,7 @@ export class WorkspaceDetailPage {
       return node;
     };
 
-    files.forEach((entry) => {
+    files.forEach(entry => {
       const normalizedPath = this.normalizeRelativePath(entry.path);
       if (!normalizedPath) return;
 
@@ -14018,7 +16262,8 @@ export class WorkspaceDetailPage {
     if (!directory) return;
 
     if (this.elements.directoryExplorerTitle) {
-      this.elements.directoryExplorerTitle.textContent = directory.name || directory.path || 'Directory Explorer';
+      this.elements.directoryExplorerTitle.textContent =
+        directory.name || directory.path || 'Directory Explorer';
     }
     if (this.elements.directoryExplorerSubtitle) {
       this.elements.directoryExplorerSubtitle.textContent = directory.path || '';
@@ -14042,10 +16287,12 @@ export class WorkspaceDetailPage {
 
     if (!sourceRoot || !Array.isArray(sourceRoot.children) || sourceRoot.children.length === 0) {
       if (this.elements.directoryExplorerTree) {
-        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">This directory is empty.</div>';
+        this.elements.directoryExplorerTree.innerHTML =
+          '<div class="workspace-directory-tree-empty">This directory is empty.</div>';
       }
       if (this.elements.directoryExplorerPreview) {
-        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">No files to preview yet.</div>';
+        this.elements.directoryExplorerPreview.innerHTML =
+          '<div class="workspace-directory-preview-empty">No files to preview yet.</div>';
       }
       return;
     }
@@ -14055,7 +16302,8 @@ export class WorkspaceDetailPage {
 
     if (this.elements.directoryExplorerTree) {
       if (treeChildren.length === 0) {
-        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">No matches for this search.</div>';
+        this.elements.directoryExplorerTree.innerHTML =
+          '<div class="workspace-directory-tree-empty">No matches for this search.</div>';
       } else {
         this.elements.directoryExplorerTree.innerHTML = `
           <div class="workspace-directory-tree-scroll">
@@ -14072,7 +16320,7 @@ export class WorkspaceDetailPage {
     if (!this.elements.directoryExplorerSummary) return;
 
     const files = this.directoryExplorer.files || [];
-    const folderCount = files.filter((entry) => entry.isDir).length;
+    const folderCount = files.filter(entry => entry.isDir).length;
     const fileCount = files.length - folderCount;
     const selectedNode = this.directoryExplorer.nodeIndex.get(this.directoryExplorer.selectedPath);
     const selectedLabel = selectedNode
@@ -14115,14 +16363,16 @@ export class WorkspaceDetailPage {
       });
     });
 
-    this.elements.directoryExplorerBreadcrumb.innerHTML = crumbs.map((crumb, index) => {
-      const escapedLabel = this.escapeHtml(crumb.label || 'Root');
-      const separator = index === 0 ? '' : '<span class="workspace-directory-crumb-separator">/</span>';
-      if (!crumb.clickable || crumb.active) {
-        return `${separator}<span class="workspace-directory-crumb is-active">${escapedLabel}</span>`;
-      }
+    this.elements.directoryExplorerBreadcrumb.innerHTML = crumbs
+      .map((crumb, index) => {
+        const escapedLabel = this.escapeHtml(crumb.label || 'Root');
+        const separator =
+          index === 0 ? '' : '<span class="workspace-directory-crumb-separator">/</span>';
+        if (!crumb.clickable || crumb.active) {
+          return `${separator}<span class="workspace-directory-crumb is-active">${escapedLabel}</span>`;
+        }
 
-      return `
+        return `
         ${separator}
         <button type="button"
                 class="workspace-directory-crumb"
@@ -14131,19 +16381,25 @@ export class WorkspaceDetailPage {
           ${escapedLabel}
         </button>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   filterDirectoryTree(node, query) {
-    const isMatch = String(node.name || '').toLowerCase().includes(query)
-      || String(node.path || '').toLowerCase().includes(query);
+    const isMatch =
+      String(node.name || '')
+        .toLowerCase()
+        .includes(query) ||
+      String(node.path || '')
+        .toLowerCase()
+        .includes(query);
 
     if (node.type === 'file') {
       return isMatch ? { ...node } : null;
     }
 
     const filteredChildren = (node.children || [])
-      .map((child) => this.filterDirectoryTree(child, query))
+      .map(child => this.filterDirectoryTree(child, query))
       .filter(Boolean);
 
     if (node.path === '' || isMatch || filteredChildren.length > 0) {
@@ -14158,15 +16414,19 @@ export class WorkspaceDetailPage {
 
   renderDirectoryTreeChildren(children, depth, forceExpanded) {
     const sortedChildren = this.getSortedDirectoryChildren(children);
-    return sortedChildren.map((node) => this.renderDirectoryTreeNode(node, depth, forceExpanded)).join('');
+    return sortedChildren
+      .map(node => this.renderDirectoryTreeNode(node, depth, forceExpanded))
+      .join('');
   }
 
   renderDirectoryTreeNode(node, depth, forceExpanded) {
     const encodedPath = this.encodeDataPath(node.path);
     const isDirectory = node.type === 'dir';
-    const isExpanded = isDirectory && (forceExpanded || this.directoryExplorer.expandedPaths.has(node.path));
+    const isExpanded =
+      isDirectory && (forceExpanded || this.directoryExplorer.expandedPaths.has(node.path));
     const isSelected = this.directoryExplorer.selectedPath === node.path;
-    const sizeText = !isDirectory && Number.isFinite(node.size) ? this.formatFileSize(node.size) : '';
+    const sizeText =
+      !isDirectory && Number.isFinite(node.size) ? this.formatFileSize(node.size) : '';
     const modifiedText = node.modTime ? formatDate(node.modTime) : '';
     const metaText = isDirectory
       ? `${(node.children || []).length} item${(node.children || []).length === 1 ? '' : 's'}`
@@ -14190,9 +16450,10 @@ export class WorkspaceDetailPage {
       `
       : '<span class="workspace-directory-tree-spacer"></span>';
 
-    const childrenHtml = isDirectory && isExpanded && Array.isArray(node.children) && node.children.length > 0
-      ? `<div class="workspace-directory-tree-children">${this.renderDirectoryTreeChildren(node.children, depth + 1, forceExpanded)}</div>`
-      : '';
+    const childrenHtml =
+      isDirectory && isExpanded && Array.isArray(node.children) && node.children.length > 0
+        ? `<div class="workspace-directory-tree-children">${this.renderDirectoryTreeChildren(node.children, depth + 1, forceExpanded)}</div>`
+        : '';
 
     return `
       <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''}">
@@ -14219,7 +16480,9 @@ export class WorkspaceDetailPage {
       if (a.type !== b.type) {
         return a.type === 'dir' ? -1 : 1;
       }
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) * direction;
+      return (
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) * direction
+      );
     });
   }
 
@@ -14287,13 +16550,15 @@ export class WorkspaceDetailPage {
 
     const selectedPath = this.directoryExplorer.selectedPath;
     if (!selectedPath) {
-      previewEl.innerHTML = '<div class="workspace-directory-preview-empty">Select a file or folder to inspect.</div>';
+      previewEl.innerHTML =
+        '<div class="workspace-directory-preview-empty">Select a file or folder to inspect.</div>';
       return;
     }
 
     const node = this.directoryExplorer.nodeIndex.get(selectedPath);
     if (!node) {
-      previewEl.innerHTML = '<div class="workspace-directory-preview-empty">Select a valid entry to preview.</div>';
+      previewEl.innerHTML =
+        '<div class="workspace-directory-preview-empty">Select a valid entry to preview.</div>';
       return;
     }
 
@@ -14322,9 +16587,12 @@ export class WorkspaceDetailPage {
         <span class="workspace-directory-pill">${stats.folders} folder${stats.folders === 1 ? '' : 's'}</span>
       </div>
       <div class="workspace-directory-preview-directory-list">
-        ${childItems.length === 0
-      ? '<div class="workspace-directory-preview-empty-inline">Folder is empty.</div>'
-      : childItems.map((child) => `
+        ${
+          childItems.length === 0
+            ? '<div class="workspace-directory-preview-empty-inline">Folder is empty.</div>'
+            : childItems
+                .map(
+                  child => `
             <button type="button"
                     class="workspace-directory-preview-entry"
                     data-action="select-node"
@@ -14333,7 +16601,10 @@ export class WorkspaceDetailPage {
               <span>${this.escapeHtml(child.name)}</span>
               <span>${this.escapeHtml(child.type === 'dir' ? 'Folder' : this.formatFileSize(child.size || 0))}</span>
             </button>
-          `).join('')}
+          `
+                )
+                .join('')
+        }
       </div>
     `;
   }
@@ -14362,7 +16633,9 @@ export class WorkspaceDetailPage {
         preview.contentType || 'Unknown type',
         this.formatFileSize(preview.size || node.size || 0),
         node.modTime ? formatDate(node.modTime) : ''
-      ].filter(Boolean).join(' · ');
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
       if (!preview.text) {
         previewEl.innerHTML = `
@@ -14410,8 +16683,8 @@ export class WorkspaceDetailPage {
     }
 
     const stats = { files: 0, folders: 0 };
-    const walk = (current) => {
-      (current.children || []).forEach((child) => {
+    const walk = current => {
+      (current.children || []).forEach(child => {
         if (child.type === 'dir') {
           stats.folders += 1;
           walk(child);
@@ -14481,21 +16754,56 @@ export class WorkspaceDetailPage {
   isTextPreviewable(relativePath, contentType) {
     const lowerPath = relativePath.toLowerCase();
     const textExtensions = [
-      '.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.xml', '.csv', '.ts', '.tsx',
-      '.js', '.jsx', '.cjs', '.mjs', '.go', '.py', '.java', '.rb', '.php', '.sh', '.zsh',
-      '.bash', '.html', '.htm', '.css', '.scss', '.sass', '.less', '.sql', '.toml', '.ini',
-      '.env', '.gitignore', '.dockerfile', '.makefile', '.conf', '.log'
+      '.txt',
+      '.md',
+      '.markdown',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.xml',
+      '.csv',
+      '.ts',
+      '.tsx',
+      '.js',
+      '.jsx',
+      '.cjs',
+      '.mjs',
+      '.go',
+      '.py',
+      '.java',
+      '.rb',
+      '.php',
+      '.sh',
+      '.zsh',
+      '.bash',
+      '.html',
+      '.htm',
+      '.css',
+      '.scss',
+      '.sass',
+      '.less',
+      '.sql',
+      '.toml',
+      '.ini',
+      '.env',
+      '.gitignore',
+      '.dockerfile',
+      '.makefile',
+      '.conf',
+      '.log'
     ];
 
-    if (textExtensions.some((extension) => lowerPath.endsWith(extension))) {
+    if (textExtensions.some(extension => lowerPath.endsWith(extension))) {
       return true;
     }
 
-    return contentType.startsWith('text/')
-      || contentType.includes('json')
-      || contentType.includes('xml')
-      || contentType.includes('javascript')
-      || contentType.includes('yaml');
+    return (
+      contentType.startsWith('text/') ||
+      contentType.includes('json') ||
+      contentType.includes('xml') ||
+      contentType.includes('javascript') ||
+      contentType.includes('yaml')
+    );
   }
 
   getDirectoryFileEndpoint(directoryId, relativePath) {
@@ -14503,7 +16811,7 @@ export class WorkspaceDetailPage {
     const encodedPath = normalizedPath
       .split('/')
       .filter(Boolean)
-      .map((part) => encodeURIComponent(part))
+      .map(part => encodeURIComponent(part))
       .join('/');
 
     return `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
@@ -14543,7 +16851,7 @@ export class WorkspaceDetailPage {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.expanded_paths)) {
         this.directoryExplorer.expandedPaths = new Set(
-          parsed.expanded_paths.map((path) => this.normalizeRelativePath(path)).filter(Boolean)
+          parsed.expanded_paths.map(path => this.normalizeRelativePath(path)).filter(Boolean)
         );
       }
       if (typeof parsed.selected_path === 'string') {
@@ -14567,7 +16875,10 @@ export class WorkspaceDetailPage {
         selected_path: this.directoryExplorer.selectedPath || '',
         selected_type: this.directoryExplorer.selectedType || ''
       };
-      localStorage.setItem(this.getDirectoryExplorerStateStorageKey(directoryId), JSON.stringify(payload));
+      localStorage.setItem(
+        this.getDirectoryExplorerStateStorageKey(directoryId),
+        JSON.stringify(payload)
+      );
     } catch (error) {
       console.warn('Failed to persist directory explorer state:', error);
     }
@@ -14598,13 +16909,13 @@ export class WorkspaceDetailPage {
     }
     if (buttons.length === 0) return;
 
-    const buttonStates = buttons.map((button) => ({
+    const buttonStates = buttons.map(button => ({
       button,
       disabled: button.disabled,
       innerHTML: button.innerHTML
     }));
 
-    buttons.forEach((button) => {
+    buttons.forEach(button => {
       button.disabled = true;
       if (button.classList.contains('workspace-detail-empty-action')) {
         button.textContent = 'Opening...';
@@ -14648,15 +16959,18 @@ export class WorkspaceDetailPage {
    */
   async addDirectory(path) {
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'directory',
-          path: path,
-          title: path.split('/').pop() || path
-        })
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'directory',
+            path: path,
+            title: path.split('/').pop() || path
+          })
+        }
+      );
 
       if (!response.ok) throw new Error('Failed to add directory');
 
@@ -14674,12 +16988,15 @@ export class WorkspaceDetailPage {
    */
   async loadSchedules() {
     if (this.elements.schedulesList) {
-      this.elements.schedulesList.innerHTML = '<div class="workspace-detail-loading">Loading schedules...</div>';
+      this.elements.schedulesList.innerHTML =
+        '<div class="workspace-detail-loading">Loading schedules...</div>';
     }
 
     try {
       // Schedules are stored as tasks with schedule field
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) {
         this.schedules = [];
         this.renderSchedules();
@@ -14718,15 +17035,17 @@ export class WorkspaceDetailPage {
     if (!this.elements.schedulesList) return;
 
     if (!this.schedules || this.schedules.length === 0) {
-      this.elements.schedulesList.innerHTML = '<div class="workspace-detail-empty">No scheduled tasks yet.</div>';
+      this.elements.schedulesList.innerHTML =
+        '<div class="workspace-detail-empty">No scheduled tasks yet.</div>';
       return;
     }
 
-    this.elements.schedulesList.innerHTML = this.schedules.map(schedule => {
-      const name = schedule.name || schedule.task_description || 'Unnamed Schedule';
-      const status = schedule.enabled ? 'Active' : 'Paused';
-      const statusClass = schedule.enabled ? 'completed' : 'pending';
-      return `
+    this.elements.schedulesList.innerHTML = this.schedules
+      .map(schedule => {
+        const name = schedule.name || schedule.task_description || 'Unnamed Schedule';
+        const status = schedule.enabled ? 'Active' : 'Paused';
+        const statusClass = schedule.enabled ? 'completed' : 'pending';
+        return `
         <div class="workspace-detail-item"
              data-schedule-id="${schedule.id}"
              role="button"
@@ -14743,7 +17062,8 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   /**
@@ -14751,7 +17071,10 @@ export class WorkspaceDetailPage {
    */
   showSchedulesModal() {
     // Use the session manager's scheduled tasks panel if available
-    if (window.sessionManager && typeof window.sessionManager.openScheduledTasksPanel === 'function') {
+    if (
+      window.sessionManager &&
+      typeof window.sessionManager.openScheduledTasksPanel === 'function'
+    ) {
       window.sessionManager.openScheduledTasksPanel(this.workspaceId);
     } else {
       // Just reload the schedules list
@@ -14763,7 +17086,10 @@ export class WorkspaceDetailPage {
    * Open a schedule for viewing/editing
    */
   openSchedule(scheduleId) {
-    if (window.sessionManager && typeof window.sessionManager.showScheduledTaskDetails === 'function') {
+    if (
+      window.sessionManager &&
+      typeof window.sessionManager.showScheduledTaskDetails === 'function'
+    ) {
       const schedule = this.schedules.find(s => s.id === scheduleId);
       if (schedule) {
         window.sessionManager.showScheduledTaskDetails(schedule);
@@ -14776,8 +17102,11 @@ export class WorkspaceDetailPage {
    */
   setupRealtime() {
     // Use existing realtime system if available
-    if (window.workspaceRealtime && typeof window.workspaceRealtime.subscribeToWorkspace === 'function') {
-      window.workspaceRealtime.subscribeToWorkspace(this.workspaceId, (event) => {
+    if (
+      window.workspaceRealtime &&
+      typeof window.workspaceRealtime.subscribeToWorkspace === 'function'
+    ) {
+      window.workspaceRealtime.subscribeToWorkspace(this.workspaceId, event => {
         this.handleRealtimeEvent(event);
       });
     }
@@ -14813,7 +17142,9 @@ export class WorkspaceDetailPage {
       case 'task.resumed': {
         const payload = event?.data?.data || event?.data || {};
         const resumedTaskId = String(payload.task_id || event?.data?.task_id || '').trim();
-        const activeTaskId = String(this.currentBlockedTask?.taskId || this.getBlockedTaskRouteId() || '').trim();
+        const activeTaskId = String(
+          this.currentBlockedTask?.taskId || this.getBlockedTaskRouteId() || ''
+        ).trim();
         this.loadTasks();
         if (activeTaskId && (!resumedTaskId || resumedTaskId === activeTaskId)) {
           this.closeTaskAssistPage({ replaceRoute: true });
@@ -14854,7 +17185,10 @@ export class WorkspaceDetailPage {
           this.loadFiles();
           return;
         }
-        if (typeof action === 'string' && (action.startsWith('mcp_') || action.startsWith('agent_mcp_access_'))) {
+        if (
+          typeof action === 'string' &&
+          (action.startsWith('mcp_') || action.startsWith('agent_mcp_access_'))
+        ) {
           this.loadWorkspace();
         }
         break;
@@ -14948,9 +17282,13 @@ export class WorkspaceDetailPage {
           status: 'pending',
           to: String(options.assignee || '').trim() || undefined,
           assigned_node_id: String(options.assignedNodeId || '').trim() || undefined,
-          input_task_ids: Array.isArray(options.inputTaskIDs) ? options.inputTaskIDs.filter(Boolean) : undefined,
+          input_task_ids: Array.isArray(options.inputTaskIDs)
+            ? options.inputTaskIDs.filter(Boolean)
+            : undefined,
           parent_task_id: String(options.parentTaskID || '').trim() || undefined,
-          subtask_index: Number.isFinite(Number(options.subtaskIndex)) ? Number(options.subtaskIndex) : undefined
+          subtask_index: Number.isFinite(Number(options.subtaskIndex))
+            ? Number(options.subtaskIndex)
+            : undefined
         })
       });
 
@@ -14980,7 +17318,10 @@ export class WorkspaceDetailPage {
    */
   showAddTaskModal() {
     // Use existing task modal controller
-    if (window.taskModalController && typeof window.taskModalController.openForCreate === 'function') {
+    if (
+      window.taskModalController &&
+      typeof window.taskModalController.openForCreate === 'function'
+    ) {
       window.taskModalController.openForCreate(this.workspaceId, '', () => this.loadTasks());
     } else {
       // Fallback to prompt
@@ -15090,7 +17431,11 @@ export class WorkspaceDetailPage {
       agentName = String(encodedAgentName || '').trim();
     }
 
-    if (agentName && window.sessionManager && typeof window.sessionManager.createSessionWithAgentInFolder === 'function') {
+    if (
+      agentName &&
+      window.sessionManager &&
+      typeof window.sessionManager.createSessionWithAgentInFolder === 'function'
+    ) {
       window.sessionManager.createSessionWithAgentInFolder(agentName, this.workspaceId);
       return;
     }
@@ -15208,10 +17553,13 @@ export class WorkspaceDetailPage {
       formData.append('workspace_id', this.workspaceId);
 
       try {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
-          method: 'POST',
-          body: formData
-        });
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`,
+          {
+            method: 'POST',
+            body: formData
+          }
+        );
 
         if (!response.ok) throw new Error('Failed to upload file');
       } catch (error) {
@@ -15231,12 +17579,18 @@ export class WorkspaceDetailPage {
   showNoteModal(note = null) {
     if (note) {
       // Edit existing note
-      if (window.sessionManager && typeof window.sessionManager.openNoteEditorModal === 'function') {
+      if (
+        window.sessionManager &&
+        typeof window.sessionManager.openNoteEditorModal === 'function'
+      ) {
         window.sessionManager.openNoteEditorModal(note);
       }
     } else {
       // Create new note
-      if (window.sessionManager && typeof window.sessionManager.openNoteCreateModal === 'function') {
+      if (
+        window.sessionManager &&
+        typeof window.sessionManager.openNoteCreateModal === 'function'
+      ) {
         window.sessionManager.openNoteCreateModal(this.workspaceId);
       }
     }
@@ -15255,16 +17609,23 @@ export class WorkspaceDetailPage {
   /**
    * Create a quick note from content (for quick input)
    */
-  async createNote(title, content, noteId = null) {
+  async createNote(title, content, noteId = null, options = {}) {
     try {
       const url = noteId
         ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes/${encodeURIComponent(noteId)}`
         : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`;
+      const body = { name: title, content };
+      const vaultReference = this.normalizeVaultReference(
+        options.vaultReference || options.vault_reference
+      );
+      if (vaultReference) {
+        body.vault_reference = vaultReference;
+      }
 
       const response = await fetch(url, {
         method: noteId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: title, content })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) throw new Error('Failed to save note');
@@ -15326,35 +17687,43 @@ export class WorkspaceDetailPage {
 
     this.updateCopyNotesButtonState(true);
     try {
-      const sections = await Promise.all(this.notes.map(async (note, index) => {
-        const noteId = String(note?.id || '').trim();
-        const title = String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
-        let content = '';
+      const sections = await Promise.all(
+        this.notes.map(async (note, index) => {
+          const noteId = String(note?.id || '').trim();
+          const title =
+            String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
+          let content = '';
 
-        if (noteId) {
-          try {
-            const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
-            if (response.ok) {
-              const detail = await response.json();
-              content = String(detail?.content || detail?.preview || '').trim();
+          if (noteId) {
+            try {
+              const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+              if (response.ok) {
+                const detail = await response.json();
+                content = String(detail?.content || detail?.preview || '').trim();
+              }
+            } catch (error) {
+              console.error('Failed to load note content for copy:', error);
             }
-          } catch (error) {
-            console.error('Failed to load note content for copy:', error);
           }
-        }
 
-        if (!content) {
-          content = String(note?.content || note?.preview || '').trim();
-        }
+          if (!content) {
+            content = String(note?.content || note?.preview || '').trim();
+          }
 
-        return `# ${title}\n${content || '(empty note)'}`;
-      }));
+          return `# ${title}\n${content || '(empty note)'}`;
+        })
+      );
 
       await this.writeClipboardText(sections.join('\n\n---\n\n'));
       if (typeof window.notifyToast === 'function') {
-        window.notifyToast(`Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`, 'success');
+        window.notifyToast(
+          `Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`,
+          'success'
+        );
       } else if (window.Toast) {
-        window.Toast.success(`Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`);
+        window.Toast.success(
+          `Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`
+        );
       }
     } catch (error) {
       console.error('Failed to copy notes:', error);

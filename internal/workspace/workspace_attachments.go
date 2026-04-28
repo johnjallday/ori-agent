@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // AddAttachment adds an attachment node to the workspace
@@ -22,6 +23,7 @@ func (w *Workspace) AddAttachment(att Attachment) error {
 	if att.ID == "" {
 		att.ID = uuid.New().String()
 	}
+	att.VaultRef = vaultref.Normalize(att.VaultRef)
 	now := time.Now()
 	if att.CreatedAt.IsZero() {
 		att.CreatedAt = now
@@ -41,6 +43,7 @@ func (w *Workspace) UpdateAttachment(att Attachment) error {
 
 	for i := range w.Attachments {
 		if w.Attachments[i].ID == att.ID {
+			att.VaultRef = vaultref.Normalize(att.VaultRef)
 			att.UpdatedAt = time.Now()
 			att.WorkspaceID = w.ID
 			w.Attachments[i] = att

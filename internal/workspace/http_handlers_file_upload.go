@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 const (
@@ -73,6 +74,10 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		title = filename
 	}
 	notes := r.FormValue("notes")
+	vaultRef, ok := parseWorkspaceUploadVaultReference(w, r.FormValue("vault_reference"))
+	if !ok {
+		return
+	}
 
 	// Get the workspace
 	workspace, err := h.store.Get(workspaceID)
@@ -97,6 +102,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		Body:        notes,
 		Type:        inferTypeFromMime(storedFile.MimeType),
 		File:        buildWorkspaceOwnedAttachmentFileMeta(workspaceID, *storedFile, ""),
+		VaultRef:    vaultRef,
 		X:           0,
 		Y:           0,
 		CreatedAt:   time.Now(),
@@ -145,6 +151,19 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
+}
+
+func parseWorkspaceUploadVaultReference(w http.ResponseWriter, raw string) (*vaultref.Reference, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, true
+	}
+	var ref vaultref.Reference
+	if err := json.Unmarshal([]byte(raw), &ref); err != nil {
+		orihttp.BadRequest(w, "Invalid vault reference")
+		return nil, false
+	}
+	return vaultref.Normalize(&ref), true
 }
 
 // ServeFile handles GET /api/workspaces/:id/files/:filename

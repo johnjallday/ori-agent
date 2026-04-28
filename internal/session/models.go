@@ -28,6 +28,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // MessageRole indicates whether a message is from the user or assistant.
@@ -359,6 +361,9 @@ type WorkspaceNote struct {
 	// Content is the markdown content of the note.
 	Content string `json:"content"`
 
+	// VaultRef records the private vault source when this note was imported.
+	VaultRef *vaultref.Reference `json:"vault_reference,omitempty"`
+
 	// CreatedAt is when the note was created.
 	CreatedAt time.Time `json:"created_at"`
 
@@ -369,12 +374,13 @@ type WorkspaceNote struct {
 // WorkspaceNoteListItem is a lightweight representation of a note for list views.
 // It omits the full content to reduce payload size.
 type WorkspaceNoteListItem struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Name        string    `json:"name"`
-	Preview     string    `json:"preview,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string              `json:"id"`
+	WorkspaceID string              `json:"workspace_id"`
+	Name        string              `json:"name"`
+	Preview     string              `json:"preview,omitempty"`
+	VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 // NoteSearchResult contains a note with search match context.

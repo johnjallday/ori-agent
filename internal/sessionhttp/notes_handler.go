@@ -11,6 +11,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // HandleNotes routes requests to /api/notes.
@@ -155,8 +156,9 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 // createNoteInWorkspace handles POST /api/workspaces/{id}/notes.
 func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	var req struct {
-		Name    string `json:"name"`
-		Content string `json:"content"`
+		Name     string              `json:"name"`
+		Content  string              `json:"content"`
+		VaultRef *vaultref.Reference `json:"vault_reference,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -184,6 +186,7 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 		WorkspaceID: workspaceID,
 		Name:        req.Name,
 		Content:     req.Content,
+		VaultRef:    vaultref.Normalize(req.VaultRef),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -241,9 +244,10 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	var req struct {
-		Name        *string `json:"name,omitempty"`
-		Content     *string `json:"content,omitempty"`
-		WorkspaceID *string `json:"workspace_id,omitempty"`
+		Name        *string             `json:"name,omitempty"`
+		Content     *string             `json:"content,omitempty"`
+		WorkspaceID *string             `json:"workspace_id,omitempty"`
+		VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -262,6 +266,9 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if req.WorkspaceID != nil {
 		note.WorkspaceID = *req.WorkspaceID
+	}
+	if req.VaultRef != nil {
+		note.VaultRef = vaultref.Normalize(req.VaultRef)
 	}
 	note.UpdatedAt = time.Now()
 

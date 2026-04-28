@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // WorkspaceStatus represents the current state of a workspace
@@ -135,6 +136,7 @@ type Attachment struct {
 	Color       string              `json:"color,omitempty"`
 	LinkURL     string              `json:"link_url,omitempty"`
 	File        *AttachmentFileMeta `json:"file_meta,omitempty"`
+	VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
 	X           float64             `json:"x"`
 	Y           float64             `json:"y"`
 	CreatedAt   time.Time           `json:"created_at"`

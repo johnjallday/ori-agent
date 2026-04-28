@@ -10,18 +10,20 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // CreateAttachmentRequest represents the request to create an attachment
 type CreateAttachmentRequest struct {
-	Title   string              `json:"title"`
-	Body    string              `json:"body"`
-	Type    AttachmentType      `json:"type"`
-	Color   string              `json:"color"`
-	LinkURL string              `json:"link_url"`
-	File    *AttachmentFileMeta `json:"file_meta"`
-	X       float64             `json:"x"`
-	Y       float64             `json:"y"`
+	Title    string              `json:"title"`
+	Body     string              `json:"body"`
+	Type     AttachmentType      `json:"type"`
+	Color    string              `json:"color"`
+	LinkURL  string              `json:"link_url"`
+	File     *AttachmentFileMeta `json:"file_meta"`
+	VaultRef *vaultref.Reference `json:"vault_reference"`
+	X        float64             `json:"x"`
+	Y        float64             `json:"y"`
 }
 
 // inferAttachmentType picks a sensible type when not provided by the client.
@@ -108,6 +110,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		Color:       req.Color,
 		LinkURL:     req.LinkURL,
 		File:        sanitizeAttachmentFileMeta(workspaceID, req.File),
+		VaultRef:    vaultref.Normalize(req.VaultRef),
 		X:           req.X,
 		Y:           req.Y,
 		CreatedAt:   time.Now(),
@@ -177,14 +180,15 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	attachmentID := parts[2]
 
 	var req struct {
-		Title   *string             `json:"title,omitempty"`
-		Body    *string             `json:"body,omitempty"`
-		Type    *AttachmentType     `json:"type,omitempty"`
-		Color   *string             `json:"color,omitempty"`
-		LinkURL *string             `json:"link_url,omitempty"`
-		File    *AttachmentFileMeta `json:"file_meta,omitempty"`
-		X       *float64            `json:"x,omitempty"`
-		Y       *float64            `json:"y,omitempty"`
+		Title    *string             `json:"title,omitempty"`
+		Body     *string             `json:"body,omitempty"`
+		Type     *AttachmentType     `json:"type,omitempty"`
+		Color    *string             `json:"color,omitempty"`
+		LinkURL  *string             `json:"link_url,omitempty"`
+		File     *AttachmentFileMeta `json:"file_meta,omitempty"`
+		VaultRef *vaultref.Reference `json:"vault_reference,omitempty"`
+		X        *float64            `json:"x,omitempty"`
+		Y        *float64            `json:"y,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -233,6 +237,9 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.File != nil {
 		attachment.File = sanitizeAttachmentFileMeta(workspaceID, req.File)
+	}
+	if req.VaultRef != nil {
+		attachment.VaultRef = vaultref.Normalize(req.VaultRef)
 	}
 	if req.X != nil {
 		attachment.X = *req.X
