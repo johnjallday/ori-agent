@@ -363,6 +363,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
+			ApplyTaskResultMetadata(updatedTask, result)
 			RecordTaskExecution(updatedTask, "success", result, startedAt, completedAt.Sub(startedAt))
 
 			// Automatically store result if agent is connected to a store node

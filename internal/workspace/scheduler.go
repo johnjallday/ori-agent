@@ -238,6 +238,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 	// Reset task state for re-execution
 	task.Status = TaskStatusAssigned
 	task.Result = ""
+	ApplyTaskResultMetadata(task, "")
 	task.Error = ""
 	task.Progress = nil
 	task.StartedAt = nil
@@ -398,6 +399,7 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 	// Reset task state for rerun and queue it for the executor
 	targetTask.Status = TaskStatusAssigned
 	targetTask.Result = ""
+	ApplyTaskResultMetadata(targetTask, "")
 	targetTask.Error = ""
 	targetTask.Progress = nil
 	targetTask.StartedAt = nil

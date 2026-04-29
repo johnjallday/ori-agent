@@ -2,6 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -292,6 +293,309 @@ func TestExtractTaskIDForDelete(t *testing.T) {
 		got := extractTaskIDForDelete(req)
 		if got != "task-query-3" {
 			t.Fatalf("expected task-query-3, got %q", got)
+		}
+	})
+}
+
+func TestTasksPathHandler_PreviewTaskResult(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Brand Kit"})
+	ws.ID = "workspace-result-preview"
+
+	task := workspace.Task{
+		ID:          "task-result-preview",
+		WorkspaceID: ws.ID,
+		Description: "Generate a brand kit implementation plan",
+		To:          "Ori",
+		Status:      workspace.TaskStatusCompleted,
+		Result: `## Final Summary: Brand Kit Task List
+
+### 1.0 Research
+- [ ] 1.1 Review the brandkit note
+- [ ] 1.2 Identify gaps @researcher
+`,
+	}
+	workspace.ApplyTaskResultMetadata(&task, task.Result)
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-result-preview/result/preview", nil)
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp taskResultPreviewResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success || resp.SourceTaskID != task.ID || resp.WorkspaceID != ws.ID {
+		t.Fatalf("unexpected preview response: %#v", resp)
+	}
+	if resp.ResultType != workspace.TaskResultTypeTaskList {
+		t.Fatalf("expected task_list result type, got %q", resp.ResultType)
+	}
+	if resp.ItemCount != 2 {
+		t.Fatalf("expected 2 task-list items, got %d", resp.ItemCount)
+	}
+	if resp.TaskList == nil || resp.TaskList.Groups[0].Items[1].Assignee != "researcher" {
+		t.Fatalf("expected parsed task list with assignee, got %#v", resp.TaskList)
+	}
+}
+
+func TestTasksPathHandler_PromoteTaskResult(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Brand Kit"})
+	ws.ID = "workspace-result-promote"
+
+	task := workspace.Task{
+		ID:             "task-result-promote",
+		WorkspaceID:    ws.ID,
+		Description:    "Generate a brand kit implementation plan",
+		To:             "Ori",
+		AssignedNodeID: "Ori-node-1",
+		Priority:       2,
+		Status:         workspace.TaskStatusCompleted,
+		Result: `## Final Summary: Brand Kit Task List
+
+### 1.0 Research
+- [ ] 1.1 Review the brandkit note
+- [ ] 1.2 Identify gaps @researcher
+`,
+	}
+	workspace.ApplyTaskResultMetadata(&task, task.Result)
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-result-promote/promote-result", nil)
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp promoteTaskResultResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success || resp.ParentTask == nil {
+		t.Fatalf("unexpected promote response: %#v", resp)
+	}
+	if len(resp.Subtasks) != 2 {
+		t.Fatalf("expected 2 subtasks, got %#v", resp.Subtasks)
+	}
+	if resp.ParentTask.Description != "Brand Kit Task List" {
+		t.Fatalf("expected cleaned parent title, got %q", resp.ParentTask.Description)
+	}
+	if resp.ParentTask.OrchestrationMode != workspace.TaskOrchestrationModeSequential {
+		t.Fatalf("expected sequential parent task, got %q", resp.ParentTask.OrchestrationMode)
+	}
+	if resp.Subtasks[0].ParentTaskID != resp.ParentTask.ID || resp.Subtasks[0].SubtaskIndex != 1 {
+		t.Fatalf("expected first subtask to attach to parent with index 1, got %#v", resp.Subtasks[0])
+	}
+	if resp.Subtasks[0].Description != "Review the brandkit note" {
+		t.Fatalf("expected cleaned subtask description, got %q", resp.Subtasks[0].Description)
+	}
+	if resp.Subtasks[1].To != "researcher" {
+		t.Fatalf("expected explicit assignee researcher, got %q", resp.Subtasks[1].To)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	if len(savedWS.Tasks) != 4 {
+		t.Fatalf("expected source task, parent, and 2 subtasks, got %d tasks", len(savedWS.Tasks))
+	}
+	if !savedWS.HasAgent("Ori") || !savedWS.HasAgent("researcher") {
+		t.Fatalf("expected promotion to ensure task assignees exist, got agents=%v instances=%#v", savedWS.Agents, savedWS.AgentInstances)
+	}
+}
+
+func TestTasksPathHandler_PromoteTaskResultPreservesGroups(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Brand Kit"})
+	ws.ID = "workspace-result-promote-groups"
+
+	task := workspace.Task{
+		ID:          "task-result-promote-groups",
+		WorkspaceID: ws.ID,
+		Description: "Generate a grouped brand kit implementation plan",
+		To:          "Ori",
+		Status:      workspace.TaskStatusCompleted,
+		Result: `## Brand Kit → Task List: johnj
+
+**1.0 Brand Identity Foundation**
+- [ ] 1.1 Finalize handle format rules
+- [ ] 1.2 Lock positioning line
+
+**2.0 Visual Identity**
+- [ ] 2.1 Lock color palette
+- [ ] 2.2 Lock typography
+`,
+	}
+	workspace.ApplyTaskResultMetadata(&task, task.Result)
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-result-promote-groups/promote-result", nil)
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp promoteTaskResultResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ParentTask == nil {
+		t.Fatal("expected parent task")
+	}
+	if len(resp.Subtasks) != 6 {
+		t.Fatalf("expected 2 group tasks and 4 leaf subtasks, got %#v", resp.Subtasks)
+	}
+
+	groupOne := resp.Subtasks[0]
+	groupTwo := resp.Subtasks[3]
+	if groupOne.ParentTaskID != resp.ParentTask.ID || groupOne.SubtaskIndex != 1 {
+		t.Fatalf("expected first group to attach to parent at index 1, got %#v", groupOne)
+	}
+	if groupOne.Description != "1.0 Brand Identity Foundation" {
+		t.Fatalf("expected numbered group title, got %q", groupOne.Description)
+	}
+	if groupOne.OrchestrationMode != workspace.TaskOrchestrationModeSequential {
+		t.Fatalf("expected group task to be sequential, got %q", groupOne.OrchestrationMode)
+	}
+	if groupTwo.ParentTaskID != resp.ParentTask.ID || groupTwo.SubtaskIndex != 2 {
+		t.Fatalf("expected second group to attach to parent at index 2, got %#v", groupTwo)
+	}
+	if groupTwo.Description != "2.0 Visual Identity" {
+		t.Fatalf("expected second numbered group title, got %q", groupTwo.Description)
+	}
+	if resp.Subtasks[1].ParentTaskID != groupOne.ID || resp.Subtasks[1].SubtaskIndex != 1 {
+		t.Fatalf("expected first leaf subtask under first group, got %#v", resp.Subtasks[1])
+	}
+	if resp.Subtasks[4].ParentTaskID != groupTwo.ID || resp.Subtasks[4].SubtaskIndex != 1 {
+		t.Fatalf("expected first leaf subtask under second group, got %#v", resp.Subtasks[4])
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	if len(savedWS.Tasks) != 8 {
+		t.Fatalf("expected source task, parent, 2 group tasks, and 4 leaf subtasks, got %d tasks", len(savedWS.Tasks))
+	}
+}
+
+func TestTasksPathHandler_PreviewTaskResultRejectsPlainMarkdown(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Notes"})
+	ws.ID = "workspace-result-plain"
+
+	task := workspace.Task{
+		ID:          "task-result-plain",
+		WorkspaceID: ws.ID,
+		Description: "Summarize notes",
+		To:          "Ori",
+		Status:      workspace.TaskStatusCompleted,
+		Result:      "This is a plain markdown result without checklist items.",
+	}
+	workspace.ApplyTaskResultMetadata(&task, task.Result)
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-result-plain/result/preview", nil)
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTasksPathHandler_PromoteTaskResultRejectsInvalidInputs(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	t.Run("missing task", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/missing/promote-result", nil)
+		rec := httptest.NewRecorder()
+
+		handler.TasksPathHandler(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("non-promotable result", func(t *testing.T) {
+		ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Notes"})
+		ws.ID = "workspace-result-promote-invalid"
+		task := workspace.Task{
+			ID:          "task-result-promote-invalid",
+			WorkspaceID: ws.ID,
+			Description: "Summarize notes",
+			To:          "Ori",
+			Status:      workspace.TaskStatusCompleted,
+			Result:      "This is a plain markdown result without checklist items.",
+		}
+		workspace.ApplyTaskResultMetadata(&task, task.Result)
+		if err := ws.AddTask(task); err != nil {
+			t.Fatalf("failed to add task: %v", err)
+		}
+		if err := store.Save(ws); err != nil {
+			t.Fatalf("failed to save workspace: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-result-promote-invalid/promote-result", nil)
+		rec := httptest.NewRecorder()
+
+		handler.TasksPathHandler(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("expected status 422, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }

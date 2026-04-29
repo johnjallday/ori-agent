@@ -994,6 +994,8 @@ func extractTaskIDForDelete(r *http.Request) string {
 // - POST /api/orchestration/tasks/{id}/complete -> CompleteTaskHandler
 // - POST /api/orchestration/tasks/{id}/cancel -> CancelTaskHandler
 // - POST /api/orchestration/tasks/{id}/save-result -> SaveTaskResult (via workspace handler)
+// - POST /api/orchestration/tasks/{id}/result/preview -> Preview typed task result
+// - POST /api/orchestration/tasks/{id}/promote-result -> Promote task-list result into subtasks
 func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1015,6 +1017,18 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /save-result endpoint
 	if strings.HasSuffix(path, "/save-result") {
 		th.handleSaveTaskResult(w, r)
+		return
+	}
+
+	// Check if this is a /result/preview endpoint
+	if strings.HasSuffix(path, "/result/preview") {
+		th.handlePreviewTaskResult(w, r)
+		return
+	}
+
+	// Check if this is a /promote-result endpoint
+	if strings.HasSuffix(path, "/promote-result") {
+		th.handlePromoteTaskResult(w, r)
 		return
 	}
 
@@ -1078,6 +1092,7 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 			ws.Tasks[i].CompletedAt = &now
 			ws.Tasks[i].Error = "Cancelled by user"
 			ws.Tasks[i].Result = ""
+			workspace.ApplyTaskResultMetadata(&ws.Tasks[i], "")
 			break
 		}
 	}

@@ -181,6 +181,7 @@ func resetParentSubtaskForExecution(task *workspace.Task) bool {
 
 	if strings.TrimSpace(task.Result) != "" {
 		task.Result = ""
+		workspace.ApplyTaskResultMetadata(task, "")
 		changed = true
 	}
 	if strings.TrimSpace(task.Error) != "" {

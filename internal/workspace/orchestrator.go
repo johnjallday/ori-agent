@@ -309,6 +309,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	task.Status = TaskStatusCompleted
 	task.CompletedAt = &completed
 	task.Result = result
+	ApplyTaskResultMetadata(&task, result)
 	if err := workspace.UpdateTask(task); err != nil {
 		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
 	}

@@ -725,6 +725,9 @@ export class WorkspaceTaskPage {
     this.resultNoteSaving = false;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
+    this.resultPromotionPending = false;
+    this.resultPromotionSubmitting = false;
+    this.resultPromotionDraft = null;
     this.elements = {};
   }
 
@@ -763,8 +766,14 @@ export class WorkspaceTaskPage {
       outputCard: document.getElementById('workspace-task-output-card'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
+      outputPromoteBtn: document.getElementById('workspace-task-output-promote'),
       outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
+      resultPromoteModal: document.getElementById('workspace-task-result-promote-modal'),
+      resultPromoteTitleInput: document.getElementById('workspace-task-result-promote-title'),
+      resultPromoteMeta: document.getElementById('workspace-task-result-promote-meta'),
+      resultPromoteGroups: document.getElementById('workspace-task-result-promote-groups'),
+      resultPromoteSubmitBtn: document.getElementById('workspace-task-result-promote-submit'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
       workflowAddStepBtn: document.getElementById('workspace-task-workflow-add-step'),
@@ -815,6 +824,12 @@ export class WorkspaceTaskPage {
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.elements.outputPromoteBtn?.addEventListener('click', () => this.previewResultPromotion());
+    this.elements.resultPromoteSubmitBtn?.addEventListener('click', () => this.submitResultPromotion());
+    this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.resultPromotionSubmitting) return;
+      this.resultPromotionDraft = null;
+    });
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
@@ -2292,6 +2307,250 @@ export class WorkspaceTaskPage {
       }
       this.elements.outputSaveNoteBtn.disabled = !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
       this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
+    }
+
+    if (this.elements.outputPromoteBtn) {
+      const canPromote = this.canPromoteResultToWorkflow();
+      const label = this.elements.outputPromoteBtn.querySelector('span');
+      if (label) {
+        label.textContent = this.resultPromotionPending
+          ? 'Preparing...'
+          : this.resultPromotionSubmitting
+            ? 'Creating...'
+            : 'Create Workflow Task';
+      }
+      this.elements.outputPromoteBtn.hidden = !canPromote;
+      this.elements.outputPromoteBtn.disabled =
+        !canPromote || this.resultPromotionPending || this.resultPromotionSubmitting;
+    }
+  }
+
+  canPromoteResultToWorkflow(task = this.task) {
+    if (!task || typeof task !== 'object') return false;
+    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (!normalizeResultText(task.result).trim()) return false;
+    if (String(task.error || '').trim()) return false;
+
+    const resultType = String(task.result_type || '').trim().toLowerCase();
+    if (resultType === 'task_list') return true;
+
+    const structuredResult = task.structured_result;
+    if (
+      structuredResult &&
+      typeof structuredResult === 'object' &&
+      Array.isArray(structuredResult.groups) &&
+      structuredResult.groups.some((group) => Array.isArray(group?.items) && group.items.length > 0)
+    ) {
+      return true;
+    }
+
+    return /^\s*[-*]\s+\[[ xX]\]\s+.+$/m.test(normalizeResultText(task.result));
+  }
+
+  countTaskListItems(taskList) {
+    if (!taskList || !Array.isArray(taskList.groups)) return 0;
+    return taskList.groups.reduce((count, group) => (
+      count + (Array.isArray(group?.items) ? group.items.length : 0)
+    ), 0);
+  }
+
+  formatTaskListGroupPreviewTitle(title, groupIndex) {
+    const fallbackTitle = `Group ${groupIndex + 1}`;
+    const value = String(title || fallbackTitle).trim() || fallbackTitle;
+    const normalized = value.toLowerCase();
+    if (normalized === 'tasks' || normalized === 'task list') return value;
+    if (/^\d+\.0\.?\s+/.test(value)) return value;
+    return `${groupIndex + 1}.0 ${value}`;
+  }
+
+  cloneTaskList(taskList) {
+    if (!taskList || typeof taskList !== 'object') return null;
+    try {
+      return JSON.parse(JSON.stringify(taskList));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async previewResultPromotion() {
+    if (this.resultPromotionPending || this.resultPromotionSubmitting || !this.task?.id) return;
+
+    this.resultPromotionPending = true;
+    this.updateResultActionButtons(this.getCurrentResultText(), true);
+
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.task.id)}/result/preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.message || 'This result is not a task list yet.');
+      }
+
+      const taskList = payload?.task_list;
+      if (!taskList || this.countTaskListItems(taskList) < 1) {
+        throw new Error('This result does not include subtasks to create.');
+      }
+
+      this.resultPromotionDraft = this.cloneTaskList(taskList);
+      this.renderResultPromotionPreview(this.resultPromotionDraft);
+      this.openResultPromotionModal();
+    } catch (error) {
+      console.error('Failed to preview result promotion:', error);
+      this.notify('error', error?.message || 'Failed to prepare workflow task');
+    } finally {
+      this.resultPromotionPending = false;
+      this.updateResultActionButtons(this.getCurrentResultText(), true);
+    }
+  }
+
+  openResultPromotionModal() {
+    if (!this.elements.resultPromoteModal || typeof bootstrap === 'undefined') return;
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.resultPromoteModal)
+        : bootstrap.Modal.getInstance(this.elements.resultPromoteModal) ||
+          new bootstrap.Modal(this.elements.resultPromoteModal);
+    modal.show();
+  }
+
+  setResultPromotionSubmitState(isSubmitting) {
+    this.resultPromotionSubmitting = Boolean(isSubmitting);
+    if (this.elements.resultPromoteSubmitBtn) {
+      this.elements.resultPromoteSubmitBtn.disabled = this.resultPromotionSubmitting;
+      this.elements.resultPromoteSubmitBtn.textContent = this.resultPromotionSubmitting ? 'Creating...' : 'Create';
+    }
+    this.updateResultActionButtons(this.getCurrentResultText(), true);
+  }
+
+  renderResultPromotionPreview(taskList) {
+    if (
+      !taskList ||
+      !this.elements.resultPromoteTitleInput ||
+      !this.elements.resultPromoteMeta ||
+      !this.elements.resultPromoteGroups
+    ) {
+      return;
+    }
+
+    const itemCount = this.countTaskListItems(taskList);
+    this.elements.resultPromoteTitleInput.value = String(
+      taskList.parent_title || this.getTaskDisplayLabel() || 'Workflow task'
+    ).trim();
+    this.elements.resultPromoteMeta.textContent = `${itemCount} subtask${itemCount === 1 ? '' : 's'}`;
+
+    const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
+    this.elements.resultPromoteGroups.innerHTML = groups.map((group, groupIndex) => {
+      const title = String(group?.title || `Group ${groupIndex + 1}`).trim();
+      const displayTitle = this.formatTaskListGroupPreviewTitle(title, groupIndex);
+      const items = Array.isArray(group?.items) ? group.items : [];
+      const itemMarkup = items.map((item, itemIndex) => {
+        const itemTitle = String(item?.title || '').trim();
+        const assignee = String(item?.assignee || '').trim();
+        return `
+          <label class="workspace-task-result-promote-item">
+            <span class="workspace-task-result-promote-index">${groupIndex + 1}.${itemIndex + 1}</span>
+            <input type="text"
+                   class="form-control form-control-sm workspace-task-result-promote-input"
+                   data-group-index="${groupIndex}"
+                   data-item-index="${itemIndex}"
+                   value="${this.escapeHtml(itemTitle)}">
+            ${assignee ? `<span class="workspace-task-result-promote-assignee">@${this.escapeHtml(assignee)}</span>` : ''}
+          </label>
+        `;
+      }).join('');
+
+      return `
+        <section class="workspace-task-result-promote-group">
+          <div class="workspace-task-result-promote-group-title">${this.escapeHtml(displayTitle)}</div>
+          <div class="workspace-task-result-promote-items">${itemMarkup}</div>
+        </section>
+      `;
+    }).join('');
+  }
+
+  collectResultPromotionDraft() {
+    const draft = this.cloneTaskList(this.resultPromotionDraft);
+    if (!draft) return null;
+
+    draft.parent_title = String(this.elements.resultPromoteTitleInput?.value || '').trim();
+    this.elements.resultPromoteGroups?.querySelectorAll('[data-group-index][data-item-index]').forEach((input) => {
+      const groupIndex = Number(input.getAttribute('data-group-index'));
+      const itemIndex = Number(input.getAttribute('data-item-index'));
+      if (!Number.isInteger(groupIndex) || !Number.isInteger(itemIndex)) return;
+      const item = draft.groups?.[groupIndex]?.items?.[itemIndex];
+      if (!item) return;
+      item.title = String(input.value || '').trim();
+    });
+
+    return draft;
+  }
+
+  validateResultPromotionDraft(taskList) {
+    if (!taskList || typeof taskList !== 'object') return 'Task list preview is unavailable.';
+    if (!String(taskList.parent_title || '').trim()) return 'Parent task title is required.';
+    if (this.countTaskListItems(taskList) < 1) return 'At least one subtask is required.';
+
+    const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
+    for (const group of groups) {
+      const items = Array.isArray(group?.items) ? group.items : [];
+      for (const item of items) {
+        if (!String(item?.title || '').trim()) return 'Every subtask needs a title.';
+      }
+    }
+
+    return '';
+  }
+
+  async submitResultPromotion() {
+    if (this.resultPromotionSubmitting || !this.task?.id) return;
+
+    const taskList = this.collectResultPromotionDraft();
+    const validationError = this.validateResultPromotionDraft(taskList);
+    if (validationError) {
+      this.notify('error', validationError);
+      return;
+    }
+
+    this.setResultPromotionSubmitState(true);
+
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.task.id)}/promote-result`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_list: taskList })
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.message || 'Failed to create workflow task');
+      }
+
+      const subtaskCount = this.countTaskListItems(taskList);
+      this.notify('success', `Created workflow task with ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`);
+
+      if (this.elements.resultPromoteModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.resultPromoteModal)?.hide();
+      }
+
+      const parentTaskId = String(payload?.parent_task?.id || '').trim();
+      if (parentTaskId) {
+        window.location.href = this.getTaskHref(parentTaskId);
+        return;
+      }
+
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to promote task result:', error);
+      this.notify('error', error?.message || 'Failed to create workflow task');
+    } finally {
+      this.setResultPromotionSubmitState(false);
     }
   }
 

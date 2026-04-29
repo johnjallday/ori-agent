@@ -157,22 +157,24 @@ type AgentMessage struct {
 
 // Task represents a delegated task within a workspace
 type Task struct {
-	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"workspace_id"`
-	From           string                 `json:"from"`
-	To             string                 `json:"to"`
-	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
-	Description    string                 `json:"description"`
-	Details        string                 `json:"details,omitempty"`
-	Priority       int                    `json:"priority"`
-	Context        map[string]interface{} `json:"context"`
-	Timeout        time.Duration          `json:"timeout"`
-	Status         TaskStatus             `json:"status"`
-	Result         string                 `json:"result,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-	Progress       *TaskProgress          `json:"progress,omitempty"`
-	ExecutionMode  TaskExecutionMode      `json:"execution_mode,omitempty"`
-	ExecutionSteps []TaskExecutionStep    `json:"execution_steps,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	From             string                 `json:"from"`
+	To               string                 `json:"to"`
+	AssignedNodeID   string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	Description      string                 `json:"description"`
+	Details          string                 `json:"details,omitempty"`
+	Priority         int                    `json:"priority"`
+	Context          map[string]interface{} `json:"context"`
+	Timeout          time.Duration          `json:"timeout"`
+	Status           TaskStatus             `json:"status"`
+	Result           string                 `json:"result,omitempty"`
+	ResultType       TaskResultType         `json:"result_type,omitempty"`
+	StructuredResult map[string]interface{} `json:"structured_result,omitempty"`
+	Error            string                 `json:"error,omitempty"`
+	Progress         *TaskProgress          `json:"progress,omitempty"`
+	ExecutionMode    TaskExecutionMode      `json:"execution_mode,omitempty"`
+	ExecutionSteps   []TaskExecutionStep    `json:"execution_steps,omitempty"`
 	// OrchestrationMode controls how parent tasks execute their subtasks.
 	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
 	// ResultCombinationMode controls how a parent task combines subtask outputs.
