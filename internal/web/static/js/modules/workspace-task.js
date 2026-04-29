@@ -1295,7 +1295,7 @@ export class WorkspaceTaskPage {
   }
 
   getSubtasks() {
-    return this.tasks.filter((item) => String(item?.parent_task_id || '').trim() === String(this.task?.id || ''));
+    return this.getChildTasks(this.task?.id || '');
   }
 
   getInputTasks() {
@@ -1827,8 +1827,8 @@ export class WorkspaceTaskPage {
     `).join('');
   }
 
-  getOrderedSteps() {
-    return this.getSubtasks().sort((a, b) => {
+  sortWorkflowTasks(tasks) {
+    return [...tasks].sort((a, b) => {
       const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
       const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
       if (aIndex !== bIndex) return aIndex - bIndex;
@@ -1837,6 +1837,34 @@ export class WorkspaceTaskPage {
       if (aTime !== bTime) return aTime - bTime;
       return String(a?.id || '').localeCompare(String(b?.id || ''));
     });
+  }
+
+  getChildTasks(parentTaskId) {
+    const id = String(parentTaskId || '').trim();
+    if (!id) return [];
+    return this.sortWorkflowTasks(
+      this.tasks.filter((item) => String(item?.parent_task_id || '').trim() === id)
+    );
+  }
+
+  getOrderedSteps() {
+    return this.getSubtasks();
+  }
+
+  getWorkflowDescendantTasks(parentTaskId, visited = new Set()) {
+    const id = String(parentTaskId || '').trim();
+    if (!id || visited.has(id)) return [];
+    visited.add(id);
+
+    const children = this.getChildTasks(id);
+    const out = [];
+    children.forEach((child) => {
+      const childId = String(child?.id || '').trim();
+      if (!childId || visited.has(childId)) return;
+      out.push(child);
+      out.push(...this.getWorkflowDescendantTasks(childId, visited));
+    });
+    return out;
   }
 
   hasResultForSteps() {
@@ -1866,8 +1894,9 @@ export class WorkspaceTaskPage {
       this.elements.workflowActions.hidden = !hasSteps;
     }
     if (this.elements.workflowRunAllBtn) {
-      const anyRunning = steps.some((step) => String(step?.status || '') === 'in_progress');
-      const anyUnassigned = steps.some((step) => {
+      const visibleSteps = this.getWorkflowDescendantTasks(this.task?.id || '');
+      const anyRunning = visibleSteps.some((step) => String(step?.status || '') === 'in_progress');
+      const anyUnassigned = visibleSteps.some((step) => {
         const assignee = String(step?.to || '').trim();
         const assigned = Boolean(assignee) && assignee !== 'unassigned';
         const completed = getStatusClass(step?.status) === 'completed';
@@ -1912,12 +1941,50 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.workflowSteps.innerHTML = steps
-      .map((step, index) => this.renderStepRow(step, index + 1))
+      .map((step, index) => this.renderStepTree(step, index + 1, { visited: new Set() }))
       .join('');
     this.bindStepRowEvents();
   }
 
-  renderStepRow(step, fallbackNumber) {
+  renderStepTree(step, fallbackNumber, options = {}) {
+    const stepId = String(step?.id || '').trim();
+    const visited = options.visited instanceof Set ? options.visited : new Set();
+    if (!stepId || visited.has(stepId)) {
+      return this.renderStepRow(step, fallbackNumber, options);
+    }
+
+    visited.add(stepId);
+    const localNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
+      ? step.subtask_index
+      : fallbackNumber;
+    const numberLabel = options.parentNumber
+      ? `${options.parentNumber}.${localNumber}`
+      : String(localNumber);
+    const children = this.getChildTasks(stepId).filter((child) => {
+      const childId = String(child?.id || '').trim();
+      return childId && !visited.has(childId);
+    });
+    const childMarkup = children.length
+      ? `<div class="workspace-task-workflow-substeps">
+          ${children
+            .map((child, childIndex) => this.renderStepTree(child, childIndex + 1, {
+              visited,
+              depth: (options.depth || 0) + 1,
+              parentNumber: numberLabel
+            }))
+            .join('')}
+        </div>`
+      : '';
+
+    return this.renderStepRow(step, fallbackNumber, {
+      ...options,
+      childCount: children.length,
+      childMarkup,
+      numberLabel
+    });
+  }
+
+  renderStepRow(step, fallbackNumber, options = {}) {
     const stepId = String(step?.id || '');
     const status = getStatusClass(step?.status);
     const isRunning = status === 'in_progress';
@@ -1927,13 +1994,19 @@ export class WorkspaceTaskPage {
     const stepNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
       ? step.subtask_index
       : fallbackNumber;
+    const numberLabel = String(options.numberLabel || stepNumber);
     const title = String(step?.description || step?.name || `Step ${stepNumber}`).trim() || `Step ${stepNumber}`;
     const agentName = String(step?.to || '').trim();
     const isAssigned = agentName && agentName !== 'unassigned';
     const result = normalizeResultText(step?.result).trim();
     const error = String(step?.error || '').trim();
+    const childCount = Number.isFinite(options.childCount) ? options.childCount : 0;
+    const childMarkup = String(options.childMarkup || '');
+    const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 0;
 
     const classes = ['workspace-task-workflow-step'];
+    if (depth > 0) classes.push('is-nested');
+    if (childCount > 0) classes.push('has-substeps');
     if (isRunning) classes.push('is-running');
     if (isCompleted) classes.push('is-completed');
     if (isFailed) classes.push('is-failed');
@@ -1978,10 +2051,11 @@ export class WorkspaceTaskPage {
           <button type="button"
                   class="workspace-task-workflow-step-check"
                   data-action="complete-step"
+                  data-step-action-id="${this.escapeHtml(stepId)}"
                   ${isRunning || isCompleted ? 'disabled' : ''}
                   aria-label="${this.escapeHtml(checkTitle)}"
                   title="${this.escapeHtml(checkTitle)}">
-            <span class="workspace-task-workflow-step-check-number">${stepNumber}</span>
+            <span class="workspace-task-workflow-step-check-number">${this.escapeHtml(numberLabel)}</span>
             <span class="workspace-task-workflow-step-check-icon" aria-hidden="true">✓</span>
           </button>
         </div>
@@ -1992,6 +2066,7 @@ export class WorkspaceTaskPage {
               <button type="button"
                       class="modern-btn ${actionButtonClass} workspace-task-workflow-step-action-btn"
                       data-action="${this.escapeHtml(actionName)}"
+                      data-step-action-id="${this.escapeHtml(stepId)}"
                       ${actionDisabled ? 'disabled' : ''}
                       title="${this.escapeHtml(actionTitle)}">
                 ${actionLabel}
@@ -1999,6 +2074,7 @@ export class WorkspaceTaskPage {
               <button type="button"
                       class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
                       data-action="delete-step"
+                      data-step-action-id="${this.escapeHtml(stepId)}"
                       title="Remove this step">×</button>
             </div>
           </div>
@@ -2007,8 +2083,10 @@ export class WorkspaceTaskPage {
             <span class="workspace-task-workflow-step-agent">
               <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Manual')}</span>
             </span>
+            ${childCount > 0 ? `<span class="workspace-task-workflow-step-count">${childCount} subtask${childCount === 1 ? '' : 's'}</span>` : ''}
           </div>
           ${resultBlock}
+          ${childMarkup}
         </div>
       </article>
     `;
@@ -2016,26 +2094,21 @@ export class WorkspaceTaskPage {
 
   bindStepRowEvents() {
     if (!this.elements.workflowSteps) return;
-    this.elements.workflowSteps.querySelectorAll('[data-step-id]').forEach((row) => {
-      const stepId = row.getAttribute('data-step-id');
+    this.elements.workflowSteps.querySelectorAll('[data-step-action-id][data-action]').forEach((button) => {
+      const stepId = button.getAttribute('data-step-action-id');
       if (!stepId) return;
-      row.querySelector('[data-action="run-step"]')?.addEventListener('click', (event) => {
+      button.addEventListener('click', (event) => {
         event.preventDefault();
-        this.handleRunStep(stepId);
-      });
-      row.querySelector('[data-action="cancel-step"]')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        this.handleCancelStep(stepId);
-      });
-      row.querySelectorAll('[data-action="complete-step"]').forEach((button) => {
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
+        const action = button.getAttribute('data-action');
+        if (action === 'run-step') {
+          this.handleRunStep(stepId);
+        } else if (action === 'cancel-step') {
+          this.handleCancelStep(stepId);
+        } else if (action === 'complete-step') {
           this.handleCompleteStep(stepId);
-        });
-      });
-      row.querySelector('[data-action="delete-step"]')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        this.handleDeleteStep(stepId);
+        } else if (action === 'delete-step') {
+          this.handleDeleteStep(stepId);
+        }
       });
     });
   }

@@ -1333,6 +1333,22 @@
       background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
     }
 
+    .workspace-task-workflow-step.has-substeps {
+      padding-bottom: 0.9rem;
+    }
+
+    .workspace-task-workflow-step.is-nested {
+      padding: 0.55rem 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .workspace-task-workflow-step.is-nested + .workspace-task-workflow-step.is-nested {
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+    }
+
     .workspace-task-workflow-rail {
       display: flex;
       flex-direction: column;
@@ -1410,6 +1426,15 @@
       color: #94a3b8;
     }
 
+    .workspace-task-workflow-step.is-nested .workspace-task-workflow-step-check {
+      width: auto;
+      min-width: 2.45rem;
+      height: 1.65rem;
+      padding: 0 0.45rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+    }
+
     @keyframes workspace-task-workflow-pulse {
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.08); }
@@ -1437,6 +1462,11 @@
       font-weight: 700;
       font-size: 0.95rem;
       line-height: 1.4;
+    }
+
+    .workspace-task-workflow-step.is-nested .workspace-task-workflow-step-title {
+      font-size: 0.88rem;
+      font-weight: 650;
     }
 
     .workspace-task-workflow-step-actions {
@@ -1504,6 +1534,26 @@
     .workspace-task-workflow-step-agent-name {
       font-weight: 700;
       color: var(--text-primary);
+    }
+
+    .workspace-task-workflow-step-count {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.16rem 0.48rem;
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: color-mix(in srgb, var(--primary-color) 72%, var(--text-primary));
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-workflow-substeps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin-top: 0.65rem;
+      padding-left: 0.95rem;
+      border-left: 1px solid color-mix(in srgb, var(--primary-color) 24%, transparent);
     }
 
     .workspace-task-workflow-step-result {
@@ -2633,6 +2683,27 @@
 
       .workspace-task-related-link {
         min-width: 100%;
+      }
+
+      .workspace-task-workflow-step {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace-task-workflow-rail {
+        align-items: flex-start;
+      }
+
+      .workspace-task-workflow-step-header {
+        align-items: stretch;
+      }
+
+      .workspace-task-workflow-step-actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .workspace-task-workflow-substeps {
+        padding-left: 0.65rem;
       }
 
       .workspace-task-respond-trigger {
