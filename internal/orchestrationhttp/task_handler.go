@@ -248,9 +248,24 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if workspaceID != "" {
-		// List tasks for workspace
-		tasks := th.communicator.ListTasks(workspaceID)
-		stats := th.communicator.GetTaskStats(workspaceID)
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			logger.Error("Failed to get workspace", logger.Fields{"error": err, "workspace_id": workspaceID})
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
+			return
+		}
+		if result, err := workspace.ImportTaskMarkdownFromStore(th.workspaceStore, ws); err != nil {
+			logger.Warn("Failed to import task markdown before listing tasks", logger.Fields{"workspace_id": workspaceID, "error": err})
+		} else if result != nil {
+			workspace.LogTaskMarkdownWarnings(workspaceID, result.Warnings)
+			if result.Changed {
+				if saveErr := th.workspaceStore.Save(ws); saveErr != nil {
+					logger.Warn("Failed to save workspace after task markdown import", logger.Fields{"workspace_id": workspaceID, "error": saveErr})
+				}
+			}
+		}
+		tasks := ws.Tasks
+		stats := ws.GetTaskStats()
 
 		orihttp.WriteJSON(w, map[string]interface{}{
 			"tasks": tasks,

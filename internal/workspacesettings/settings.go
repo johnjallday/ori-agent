@@ -3,6 +3,7 @@ package workspacesettings
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -10,12 +11,13 @@ import (
 const SharedDataKey = "workspace_settings"
 
 type Settings struct {
-	Version   int              `json:"version"`
-	Profile   string           `json:"profile,omitempty"`
-	Preset    string           `json:"preset,omitempty"`
-	Workflow  WorkflowSettings `json:"workflow"`
-	Planning  PlanningSettings `json:"planning"`
-	UpdatedAt time.Time        `json:"updated_at,omitempty"`
+	Version      int                  `json:"version"`
+	Profile      string               `json:"profile,omitempty"`
+	Preset       string               `json:"preset,omitempty"`
+	Workflow     WorkflowSettings     `json:"workflow"`
+	Planning     PlanningSettings     `json:"planning"`
+	TaskMarkdown TaskMarkdownSettings `json:"task_markdown"`
+	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
 }
 
 type WorkflowSettings struct {
@@ -36,6 +38,12 @@ type PlanningSettings struct {
 	ClarificationMode    string `json:"clarification_mode,omitempty"`
 	DefaultExecutionMode string `json:"default_execution_mode,omitempty"`
 	RequireBranch        bool   `json:"require_branch"`
+}
+
+type TaskMarkdownSettings struct {
+	Enabled            bool   `json:"enabled"`
+	Path               string `json:"path,omitempty"`
+	GenerateAgentViews bool   `json:"generate_agent_views"`
 }
 
 type EffectiveBehavior struct {
@@ -95,6 +103,11 @@ func PresetDefaultsForProfile(profile, preset string) Settings {
 			ClarificationMode:    "standard",
 			DefaultExecutionMode: "step_through",
 			RequireBranch:        true,
+		},
+		TaskMarkdown: TaskMarkdownSettings{
+			Enabled:            false,
+			Path:               "tasks.md",
+			GenerateAgentViews: true,
 		},
 	}
 
@@ -223,6 +236,7 @@ func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 		fmt.Sprintf("Save useful outputs as workspace notes: %t", settings.Workflow.SaveOutputsAsNotes),
 		fmt.Sprintf("Ask before specialist handoff: %t", settings.Workflow.AskBeforeSpecialistHandoff),
 		fmt.Sprintf("Structured planning workflow: %s", boolLabel(settings.Planning.Enabled)),
+		fmt.Sprintf("Markdown task sync: %s", boolLabel(settings.TaskMarkdown.Enabled)),
 	}
 	if settings.Planning.Enabled {
 		summary = append(summary, fmt.Sprintf("Planning style: %s", settings.Planning.Mode))
@@ -232,6 +246,9 @@ func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 	}
 	if settings.Workflow.RequireRepoScan {
 		summary = append(summary, "Repo scan required before code work")
+	}
+	if settings.TaskMarkdown.Enabled {
+		summary = append(summary, fmt.Sprintf("Markdown task map: %s", settings.TaskMarkdown.Path))
 	}
 
 	behavior := EffectiveBehavior{
@@ -336,6 +353,22 @@ func decode(raw interface{}) Settings {
 		if value, ok := boolValue(planningMap["require_branch"]); ok {
 			decoded.Planning.RequireBranch = value
 		}
+	}
+
+	taskMarkdownMap := mapValue(rawMap["task_markdown"])
+	if taskMarkdownMap != nil {
+		if value, ok := boolValue(taskMarkdownMap["enabled"]); ok {
+			decoded.TaskMarkdown.Enabled = value
+		}
+		if value := normalizeTaskMarkdownPath(stringValue(taskMarkdownMap["path"])); value != "" {
+			decoded.TaskMarkdown.Path = value
+		}
+		if value, ok := boolValue(taskMarkdownMap["generate_agent_views"]); ok {
+			decoded.TaskMarkdown.GenerateAgentViews = value
+		}
+	}
+	if decoded.TaskMarkdown.Path == "" {
+		decoded.TaskMarkdown.Path = "tasks.md"
 	}
 
 	decoded.Profile = normalizeProfile(decoded.Profile)
@@ -609,4 +642,35 @@ func normalizeDefaultExecutionMode(value string) string {
 	default:
 		return "step_through"
 	}
+}
+
+func normalizeTaskMarkdownPath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "tasks.md"
+	}
+	cleaned := filepath.Clean(filepath.ToSlash(trimmed))
+	if cleaned == "." || cleaned == "/" {
+		return "tasks.md"
+	}
+	return cleaned
+}
+
+func ValidateTaskMarkdownPath(value string) error {
+	cleaned := normalizeTaskMarkdownPath(value)
+	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "/") {
+		return fmt.Errorf("task markdown path must be relative")
+	}
+	for _, part := range strings.Split(cleaned, "/") {
+		if part == ".." {
+			return fmt.Errorf("task markdown path cannot contain parent directory references")
+		}
+	}
+	if strings.HasSuffix(cleaned, "/") {
+		return fmt.Errorf("task markdown path must be a file")
+	}
+	if !strings.HasSuffix(strings.ToLower(cleaned), ".md") {
+		return fmt.Errorf("task markdown path must end in .md")
+	}
+	return nil
 }

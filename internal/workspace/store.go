@@ -247,6 +247,13 @@ func (s *FileStore) Save(ws *Workspace) error {
 		})
 	}
 
+	if err := syncTaskMarkdownFilesToFolderIfEnabled(folderPath, freshWS); err != nil {
+		logger.Warn("Failed to sync workspace tasks markdown", logger.Fields{
+			"workspace_id": ws.ID,
+			"error":        err,
+		})
+	}
+
 	return nil
 }
 
@@ -309,6 +316,13 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 			FolderPath: folderPath,
 			ParentID:   ws.ParentID,
 			UpdatedAt:  ws.UpdatedAt,
+		})
+	}
+
+	if err := syncTaskMarkdownFilesToFolderIfEnabled(folderPath, freshWS); err != nil {
+		logger.Warn("Failed to sync workspace tasks markdown", logger.Fields{
+			"workspace_id": ws.ID,
+			"error":        err,
 		})
 	}
 

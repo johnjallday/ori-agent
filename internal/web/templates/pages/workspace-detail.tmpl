@@ -476,6 +476,40 @@
                         </div>
                       </div>
                       <div class="col-12">
+                        <div class="workspace-detail-settings-advanced">
+                          <div class="workspace-detail-settings-advanced-title">Markdown Task Sync</div>
+                          <div class="workspace-detail-settings-advanced-copy">
+                            Sync the workspace task map to an Obsidian-friendly Markdown file. Task details, schedules, execution, and results stay in Ori's task detail page.
+                          </div>
+                          <div class="row g-3">
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-task-markdown-enabled">
+                                <label class="form-check-label" for="workspace-detail-settings-task-markdown-enabled">Sync workspace tasks to Markdown</label>
+                              </div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-task-markdown-agent-views">
+                                <label class="form-check-label" for="workspace-detail-settings-task-markdown-agent-views">Generate agent task views</label>
+                              </div>
+                            </div>
+                            <div class="col-md-8">
+                              <label for="workspace-detail-settings-task-markdown-path" class="form-label">Markdown task map path</label>
+                              <input id="workspace-detail-settings-task-markdown-path" type="text" class="form-control" maxlength="160" placeholder="tasks.md">
+                              <div class="workspace-detail-settings-field-hint">
+                                Relative to the workspace folder. Use a Markdown file path such as <code>tasks.md</code> or <code>planning/tasks.md</code>.
+                              </div>
+                            </div>
+                            <div class="col-md-4">
+                              <label class="form-label" for="workspace-detail-settings-task-markdown-refresh">Manual import</label>
+                              <button id="workspace-detail-settings-task-markdown-refresh" class="btn btn-outline-secondary w-100" type="button">Import Now</button>
+                              <div id="workspace-detail-settings-task-markdown-status" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-12">
                         <div class="workspace-detail-settings-managed-card">
                           <div class="workspace-detail-settings-summary-title">Structured Workflows</div>
                           <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed workflows active.</div>

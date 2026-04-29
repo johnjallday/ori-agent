@@ -97,3 +97,64 @@ func TestHandleWorkspaceSettings_PatchPersistsSettings(t *testing.T) {
 		t.Fatal("expected planner preset to enable planning")
 	}
 }
+
+func TestHandleWorkspaceSettings_PatchPersistsTaskMarkdownSettings(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	workspaceID := createTestWorkspace(t, handler, "Markdown Tasks Workspace")
+
+	body := `{
+		"task_markdown": {
+			"enabled": true,
+			"path": "planning/tasks.md",
+			"generate_agent_views": false
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+workspaceID+"/settings", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	workspace, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+
+	settings := workspacesettings.Extract(workspace.SharedData)
+	if !settings.TaskMarkdown.Enabled {
+		t.Fatal("expected task markdown sync enabled")
+	}
+	if settings.TaskMarkdown.Path != "planning/tasks.md" {
+		t.Fatalf("expected planning/tasks.md path, got %q", settings.TaskMarkdown.Path)
+	}
+	if settings.TaskMarkdown.GenerateAgentViews {
+		t.Fatal("expected generated agent views disabled")
+	}
+}
+
+func TestHandleWorkspaceSettings_RejectsInvalidTaskMarkdownPath(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	workspaceID := createTestWorkspace(t, handler, "Invalid Markdown Tasks Workspace")
+
+	body := `{
+		"task_markdown": {
+			"enabled": true,
+			"path": "../tasks.md"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+workspaceID+"/settings", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}

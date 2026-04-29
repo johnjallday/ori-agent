@@ -16,6 +16,15 @@ func TestExtractReturnsDefaultsWhenMissing(t *testing.T) {
 	if settings.Planning.Enabled {
 		t.Fatal("expected planning to be disabled by default")
 	}
+	if settings.TaskMarkdown.Enabled {
+		t.Fatal("expected task markdown sync to be disabled by default")
+	}
+	if settings.TaskMarkdown.Path != "tasks.md" {
+		t.Fatalf("expected default task markdown path tasks.md, got %q", settings.TaskMarkdown.Path)
+	}
+	if !settings.TaskMarkdown.GenerateAgentViews {
+		t.Fatal("expected generated agent task views to be enabled by default")
+	}
 }
 
 func TestProfileDefaultsForSoftwareProjectUsePlannerPreset(t *testing.T) {
@@ -65,6 +74,42 @@ func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
 	raw := ExtractRaw(updatedSharedData)
 	if rawPreset := raw["preset"]; rawPreset != "planner" {
 		t.Fatalf("expected raw preset planner, got %#v", rawPreset)
+	}
+}
+
+func TestApplyPatchPersistsTaskMarkdownSettings(t *testing.T) {
+	_, settings := ApplyPatch(nil, map[string]interface{}{
+		"task_markdown": map[string]interface{}{
+			"enabled":              true,
+			"path":                 "workspace/tasks.md",
+			"generate_agent_views": false,
+		},
+	})
+
+	if !settings.TaskMarkdown.Enabled {
+		t.Fatal("expected task markdown sync enabled")
+	}
+	if settings.TaskMarkdown.Path != "workspace/tasks.md" {
+		t.Fatalf("expected workspace/tasks.md path, got %q", settings.TaskMarkdown.Path)
+	}
+	if settings.TaskMarkdown.GenerateAgentViews {
+		t.Fatal("expected generated agent views disabled")
+	}
+}
+
+func TestValidateTaskMarkdownPath(t *testing.T) {
+	valid := []string{"tasks.md", "tasks/tasks.md", "planning/workspace-tasks.md"}
+	for _, path := range valid {
+		if err := ValidateTaskMarkdownPath(path); err != nil {
+			t.Fatalf("expected %q valid, got %v", path, err)
+		}
+	}
+
+	invalid := []string{"/tmp/tasks.md", "../tasks.md", "tasks.json"}
+	for _, path := range invalid {
+		if err := ValidateTaskMarkdownPath(path); err == nil {
+			t.Fatalf("expected %q invalid", path)
+		}
 	}
 }
 

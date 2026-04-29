@@ -238,6 +238,7 @@ export class WorkspaceDetailPage {
     this.activeWorkspaceSkillMode = 'create';
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    this.workspaceTaskMarkdownStatus = null;
     this.workspaceIntentReviewPlan = null;
     this.workspaceIntentReviewLoading = false;
     this.workspaceIntentApplyLoading = false;
@@ -1840,6 +1841,21 @@ export class WorkspaceDetailPage {
       settingsRequireBranchInput: document.getElementById(
         'workspace-detail-settings-require-branch'
       ),
+      settingsTaskMarkdownEnabledInput: document.getElementById(
+        'workspace-detail-settings-task-markdown-enabled'
+      ),
+      settingsTaskMarkdownPathInput: document.getElementById(
+        'workspace-detail-settings-task-markdown-path'
+      ),
+      settingsTaskMarkdownAgentViewsInput: document.getElementById(
+        'workspace-detail-settings-task-markdown-agent-views'
+      ),
+      settingsTaskMarkdownRefreshBtn: document.getElementById(
+        'workspace-detail-settings-task-markdown-refresh'
+      ),
+      settingsTaskMarkdownStatus: document.getElementById(
+        'workspace-detail-settings-task-markdown-status'
+      ),
       settingsSaveBtn: document.getElementById('workspace-detail-settings-save'),
       skillsModal: document.getElementById('workspace-detail-skills-modal'),
       skillsForm: document.getElementById('workspace-detail-skills-form'),
@@ -2016,10 +2032,19 @@ export class WorkspaceDetailPage {
       this.elements.settingsExecutionModeInput,
       this.elements.settingsWritePRDInput,
       this.elements.settingsWriteTaskListInput,
-      this.elements.settingsRequireBranchInput
+      this.elements.settingsRequireBranchInput,
+      this.elements.settingsTaskMarkdownEnabledInput,
+      this.elements.settingsTaskMarkdownPathInput,
+      this.elements.settingsTaskMarkdownAgentViewsInput
     ].forEach(input => {
       input?.addEventListener('change', () => this.handleWorkspaceSettingsFieldChange());
     });
+    this.elements.settingsTaskMarkdownPathInput?.addEventListener('input', () =>
+      this.handleWorkspaceSettingsFieldChange()
+    );
+    this.elements.settingsTaskMarkdownRefreshBtn?.addEventListener('click', () =>
+      this.importWorkspaceTaskMarkdownNow()
+    );
 
     // Skill buttons
     this.elements.addSkillBtn?.addEventListener('click', () => this.openWorkspaceSkillModal());
@@ -2489,6 +2514,11 @@ export class WorkspaceDetailPage {
         this.workspace?.workspace_settings_effective_behavior,
         this.workspaceSettings
       );
+      this.workspaceTaskMarkdownStatus =
+        this.workspace?.task_markdown_status &&
+        typeof this.workspace.task_markdown_status === 'object'
+          ? this.workspace.task_markdown_status
+          : null;
       if (
         window.OriAskRouting &&
         typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
@@ -11337,6 +11367,11 @@ export class WorkspaceDetailPage {
         clarification_mode: 'standard',
         default_execution_mode: 'step_through',
         require_branch: true
+      },
+      task_markdown: {
+        enabled: false,
+        path: 'tasks.md',
+        generate_agent_views: true
       }
     };
 
@@ -11485,6 +11520,10 @@ export class WorkspaceDetailPage {
       raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning)
         ? raw.planning
         : {};
+    const taskMarkdown =
+      raw.task_markdown && typeof raw.task_markdown === 'object' && !Array.isArray(raw.task_markdown)
+        ? raw.task_markdown
+        : {};
     const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
 
     return {
@@ -11530,6 +11569,17 @@ export class WorkspaceDetailPage {
         }).default_execution_mode,
         require_branch: boolOrDefault(planning.require_branch, base.planning.require_branch)
       },
+      task_markdown: {
+        enabled: boolOrDefault(taskMarkdown.enabled, base.task_markdown.enabled),
+        path:
+          String(taskMarkdown.path || base.task_markdown.path || '')
+            .trim()
+            .replace(/^\/+/, '') || 'tasks.md',
+        generate_agent_views: boolOrDefault(
+          taskMarkdown.generate_agent_views,
+          base.task_markdown.generate_agent_views
+        )
+      },
       updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : ''
     };
   }
@@ -11538,7 +11588,8 @@ export class WorkspaceDetailPage {
     const normalized = this.normalizeWorkspaceSettings(settings);
     const normalizedSignature = JSON.stringify({
       workflow: normalized.workflow,
-      planning: normalized.planning
+      planning: normalized.planning,
+      task_markdown: normalized.task_markdown
     });
 
     const matchingPreset = this.getWorkspaceSettingsPresets().find(preset => {
@@ -11546,7 +11597,8 @@ export class WorkspaceDetailPage {
       return (
         JSON.stringify({
           workflow: candidate.workflow,
-          planning: candidate.planning
+          planning: candidate.planning,
+          task_markdown: candidate.task_markdown
         }) === normalizedSignature
       );
     });
@@ -11574,6 +11626,7 @@ export class WorkspaceDetailPage {
     const effective = {
       workflow: { ...normalized.workflow },
       planning: { ...normalized.planning },
+      task_markdown: { ...normalized.task_markdown },
       summary: this.getWorkspaceSettingsSummaryItems(normalized),
       managed_skills: []
     };
@@ -11602,7 +11655,8 @@ export class WorkspaceDetailPage {
       `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
       `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
       `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
-      `Structured planning workflow: ${normalized.planning.enabled ? 'enabled' : 'disabled'}`
+      `Structured planning workflow: ${normalized.planning.enabled ? 'enabled' : 'disabled'}`,
+      `Markdown task sync: ${normalized.task_markdown.enabled ? 'enabled' : 'disabled'}`
     ];
 
     if (normalized.planning.enabled) {
@@ -11613,6 +11667,9 @@ export class WorkspaceDetailPage {
     }
     if (normalized.workflow.require_repo_scan) {
       summary.push('Repo scan required before code work');
+    }
+    if (normalized.task_markdown.enabled) {
+      summary.push(`Markdown task map: ${normalized.task_markdown.path}`);
     }
 
     return summary;
@@ -11639,6 +11696,10 @@ export class WorkspaceDetailPage {
         raw.planning && typeof raw.planning === 'object'
           ? { ...fallback.planning, ...raw.planning }
           : fallback.planning,
+      task_markdown:
+        raw.task_markdown && typeof raw.task_markdown === 'object'
+          ? { ...fallback.task_markdown, ...raw.task_markdown }
+          : fallback.task_markdown,
       summary: this.getWorkspaceSettingsSummaryItems({
         profile: this.normalizeWorkspaceSettingsProfile(
           raw.profile || settings.profile || fallback.profile
@@ -11653,7 +11714,11 @@ export class WorkspaceDetailPage {
         planning:
           raw.planning && typeof raw.planning === 'object'
             ? { ...fallback.planning, ...raw.planning }
-            : fallback.planning
+            : fallback.planning,
+        task_markdown:
+          raw.task_markdown && typeof raw.task_markdown === 'object'
+            ? { ...fallback.task_markdown, ...raw.task_markdown }
+            : fallback.task_markdown
       }),
       managed_skills: Array.isArray(raw.managed_skills)
         ? raw.managed_skills
@@ -11718,6 +11783,58 @@ export class WorkspaceDetailPage {
       this.elements.settingsRequireBranchInput.checked =
         normalized.planning.require_branch !== false;
     }
+    if (this.elements.settingsTaskMarkdownEnabledInput) {
+      this.elements.settingsTaskMarkdownEnabledInput.checked =
+        normalized.task_markdown.enabled === true;
+    }
+    if (this.elements.settingsTaskMarkdownPathInput) {
+      this.elements.settingsTaskMarkdownPathInput.value = normalized.task_markdown.path;
+    }
+    if (this.elements.settingsTaskMarkdownAgentViewsInput) {
+      this.elements.settingsTaskMarkdownAgentViewsInput.checked =
+        normalized.task_markdown.generate_agent_views !== false;
+    }
+    if (this.elements.settingsTaskMarkdownStatus) {
+      this.elements.settingsTaskMarkdownStatus.textContent = this.getTaskMarkdownStatusText(
+        normalized
+      );
+    }
+  }
+
+  getTaskMarkdownStatusText(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    if (!normalized.task_markdown.enabled) {
+      return 'Disabled';
+    }
+    const status =
+      this.workspaceTaskMarkdownStatus &&
+      typeof this.workspaceTaskMarkdownStatus === 'object' &&
+      String(this.workspaceTaskMarkdownStatus.path || '') === normalized.task_markdown.path
+        ? this.workspaceTaskMarkdownStatus
+        : null;
+    if (!status) {
+      return `Syncs ${normalized.task_markdown.path}`;
+    }
+    const state = String(status.status || '').trim();
+    const warningCount = Number(status.warning_count || 0);
+    const warningCopy =
+      warningCount > 0 ? `, ${warningCount} warning${warningCount === 1 ? '' : 's'}` : '';
+    if (state === 'ready') {
+      const when = status.last_sync_time
+        ? `Last sync ${formatDate(status.last_sync_time)}`
+        : 'Ready';
+      return `${when}${warningCopy}`;
+    }
+    if (state === 'missing') {
+      return `Pending first write${warningCopy}`;
+    }
+    if (state === 'invalid_path') {
+      return `Invalid path${warningCopy}`;
+    }
+    if (state === 'unavailable') {
+      return `Workspace folder unavailable${warningCopy}`;
+    }
+    return `Syncs ${normalized.task_markdown.path}${warningCopy}`;
   }
 
   buildWorkspaceSettingsFromForm() {
@@ -11753,6 +11870,12 @@ export class WorkspaceDetailPage {
           this.elements.settingsExecutionModeInput?.value || ''
         ).trim(),
         require_branch: this.elements.settingsRequireBranchInput?.checked !== false
+      },
+      task_markdown: {
+        enabled: this.elements.settingsTaskMarkdownEnabledInput?.checked === true,
+        path: String(this.elements.settingsTaskMarkdownPathInput?.value || '').trim(),
+        generate_agent_views:
+          this.elements.settingsTaskMarkdownAgentViewsInput?.checked !== false
       }
     });
 
@@ -11902,6 +12025,10 @@ export class WorkspaceDetailPage {
         data?.effective_behavior,
         this.workspaceSettings
       );
+      this.workspaceTaskMarkdownStatus =
+        data?.task_markdown_status && typeof data.task_markdown_status === 'object'
+          ? data.task_markdown_status
+          : null;
       this.renderWorkspaceSettings();
       await this.loadWorkspace();
 
@@ -11915,6 +12042,39 @@ export class WorkspaceDetailPage {
       }
     } finally {
       this.setWorkspaceSettingsSubmitting(false);
+    }
+  }
+
+  async importWorkspaceTaskMarkdownNow() {
+    if (this.elements.settingsTaskMarkdownRefreshBtn) {
+      this.elements.settingsTaskMarkdownRefreshBtn.disabled = true;
+      this.elements.settingsTaskMarkdownRefreshBtn.textContent = 'Importing...';
+    }
+    if (this.elements.settingsTaskMarkdownStatus) {
+      this.elements.settingsTaskMarkdownStatus.textContent = 'Importing Markdown task map...';
+    }
+
+    try {
+      await this.loadTasks();
+      if (this.elements.settingsTaskMarkdownStatus) {
+        this.elements.settingsTaskMarkdownStatus.textContent = 'Imported task map and refreshed tasks.';
+      }
+      if (window.Toast) {
+        window.Toast.success('Markdown tasks imported');
+      }
+    } catch (error) {
+      console.error('Failed to import Markdown tasks:', error);
+      if (this.elements.settingsTaskMarkdownStatus) {
+        this.elements.settingsTaskMarkdownStatus.textContent = 'Import failed';
+      }
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to import Markdown tasks');
+      }
+    } finally {
+      if (this.elements.settingsTaskMarkdownRefreshBtn) {
+        this.elements.settingsTaskMarkdownRefreshBtn.disabled = false;
+        this.elements.settingsTaskMarkdownRefreshBtn.textContent = 'Import Now';
+      }
     }
   }
 
