@@ -89,7 +89,7 @@ func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
 
 	sessionStore := &mockWorkspaceSnapshotSessionStore{
 		notes: []session.WorkspaceNoteListItem{
-			{Name: "Launch Plan", Preview: "Launch checklist and milestones"},
+			{ID: "note-1", Name: "Launch Plan", Preview: "Launch checklist and milestones"},
 		},
 		sessions: []session.SessionListItem{
 			{Title: "Sprint sync", AgentName: "Ori", UpdatedAt: now},
@@ -109,7 +109,7 @@ func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
 		`- Agents (2): Ori, Reviewer`,
 		"Counts: total=3, pending=1, in_progress=1, completed=1",
 		`Open task: [pending] "Prepare release brief" -> "Ori"`,
-		`Note: "Launch Plan" - "Launch checklist and milestones"`,
+		`Note: id="note-1" name="Launch Plan" preview="Launch checklist and milestones"`,
 		`File: "spec.md" (type="doc", mime="text/markdown")`,
 		`Directory: "repo" path="/tmp/repo"`,
 		`Session: "Sprint sync" agent="Ori" updated_at="2026-03-08T10:00:00Z"`,
@@ -240,6 +240,7 @@ func TestBuildWorkspaceSnapshotPrompt_TruncatesAndCapsItems(t *testing.T) {
 	sessionStore := &mockWorkspaceSnapshotSessionStore{}
 	for i := 1; i <= 6; i++ {
 		sessionStore.notes = append(sessionStore.notes, session.WorkspaceNoteListItem{
+			ID:      "note-" + string(rune('0'+i)),
 			Name:    "Note " + string(rune('0'+i)),
 			Preview: strings.Repeat("B", workspaceSnapshotPreviewLimit+10),
 		})

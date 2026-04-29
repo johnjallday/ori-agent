@@ -12,6 +12,7 @@ import (
 )
 
 type TaskPromptNoteSummary struct {
+	ID      string
 	Name    string
 	Preview string
 }
@@ -48,6 +49,8 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	prompt.WriteString("unless the task explicitly asks about code, the repository, or the filesystem. ")
 	prompt.WriteString("Use the workspace snapshot in the prompt as the source of truth for workspace-summary requests. ")
 	prompt.WriteString("If the available workspace data is limited, say that directly instead of substituting repository/worktree context. ")
+	prompt.WriteString("The workspace snapshot below shows note ids and truncated previews (~160 chars). When a task asks to review, summarize, transform, or create tasks from a note, you must call the workspace_notes tool with the note's id to read the full content before answering instead of relying on the preview or asking the user to paste it. ")
+	prompt.WriteString("Use workspace_tasks, workspace_sessions, workspace_files, and workspace_directories the same way to read full workspace state on demand. ")
 	prompt.WriteString("If you use tools, continue reasoning from the tool results until you can either complete the requested step or explain exactly what is still blocked. ")
 	prompt.WriteString("If a task asks for file or folder contents, directory listings, or filesystem state, you must verify the answer with filesystem tools before responding. ")
 	prompt.WriteString("Do not answer filesystem listing tasks from the workspace snapshot, prior attempt summaries, or assumptions alone. ")
@@ -163,7 +166,8 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 		lines = append(lines, "", fmt.Sprintf("### Workspace Notes (%d)", len(notes)), "")
 		for _, note := range limitTaskPromptNotes(notes, taskPromptMaxNotes) {
 			lines = append(lines, fmt.Sprintf(
-				"- Note: %q - %q",
+				"- Note: id=%q name=%q preview=%q",
+				sanitizeTaskPromptText(note.ID, taskPromptTextLimit),
 				sanitizeTaskPromptText(note.Name, taskPromptTextLimit),
 				sanitizeTaskPromptText(note.Preview, taskPromptPreviewLimit),
 			))
