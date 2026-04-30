@@ -178,7 +178,7 @@
       systems: getElement('folderSystemsInput')?.value || '',
       capabilities: getElement('folderCapabilitiesInput')?.value || '',
       context: getElement('folderContextInput')?.value || '',
-      importEnabled: Boolean(getElement('folderImportToggle')?.checked),
+      importEnabled: isImportEnabled(),
       importPath: getElement('folderImportPathInput')?.value || ''
     });
   }
@@ -197,16 +197,27 @@
     return JSON.stringify(payload);
   }
 
+  function isImportEnabled() {
+    const toggle = getElement('folderImportToggle');
+    if (toggle) {
+      return Boolean(toggle.checked);
+    }
+    return String(getElement('addFolderModal')?.dataset.importMode || '') === 'true';
+  }
+
   function getBaseActionLabel() {
-    const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
-    return importEnabled ? 'Review Import Setup' : 'Review Setup';
+    return isImportEnabled() ? 'Review Import Setup' : 'Review Setup';
+  }
+
+  function getCommitActionLabel() {
+    return isImportEnabled() ? 'Import Folder' : 'Create Workspace';
   }
 
   function refreshPrimaryActionLabel() {
     const createBtn = getCreateButton();
     if (!createBtn || state.applying) return;
 
-    createBtn.textContent = state.reviewedFingerprint ? 'Create Workspace' : getBaseActionLabel();
+    createBtn.textContent = state.reviewedFingerprint ? getCommitActionLabel() : getBaseActionLabel();
   }
 
   function setReviewVisibility(visible) {
@@ -230,7 +241,7 @@
     if (content) content.hidden = isLoading;
     if (createBtn && !state.applying) {
       createBtn.disabled = isLoading;
-      createBtn.textContent = isLoading ? 'Reviewing...' : (state.reviewedFingerprint ? 'Create Workspace' : getBaseActionLabel());
+      createBtn.textContent = isLoading ? 'Reviewing...' : (state.reviewedFingerprint ? getCommitActionLabel() : getBaseActionLabel());
     }
     if (backBtn) backBtn.disabled = isLoading;
   }
@@ -1503,7 +1514,7 @@
       state.applying = false;
       if (createBtn) {
         createBtn.disabled = false;
-        createBtn.textContent = 'Create Workspace';
+        createBtn.textContent = getCommitActionLabel();
       }
       if (backBtn) backBtn.disabled = false;
     }

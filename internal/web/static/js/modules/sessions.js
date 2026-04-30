@@ -247,7 +247,7 @@ const sessionManager = {
     proceedDuplicateBtn?.addEventListener('click', () => {
       this.importAllowDuplicate = true;
       this.emitImportDuplicateActionTelemetry('override_confirmed', importPathInput?.value || '');
-      this.showToast('Duplicate override enabled. Click Create to continue.', 'warning');
+      this.showToast('Duplicate override enabled. Click Import Folder to continue.', 'warning');
     });
 
     // Folder color options
@@ -259,9 +259,25 @@ const sessionManager = {
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
-    addFolderModal?.addEventListener('show.bs.modal', () => {
+    addFolderModal?.addEventListener('show.bs.modal', (event) => {
+      const trigger = event?.relatedTarget || null;
+      const pendingImportMode = String(addFolderModal.dataset.pendingImportMode || '') === 'true';
+      const triggerImportMode = String(trigger?.dataset?.workspaceImportMode || '') === 'true';
+      const importMode = trigger ? triggerImportMode : pendingImportMode;
+      const entryPoint = String(
+        trigger?.dataset?.workspaceEntryPoint ||
+        addFolderModal.dataset.pendingEntryPoint ||
+        ''
+      ).trim();
+
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
-      this.importEntryPoint = 'workspace_hub_create';
+      this.importEntryPoint = entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
+      if (importMode) {
+        this.setImportModeEnabled(true);
+      }
+
+      delete addFolderModal.dataset.pendingImportMode;
+      delete addFolderModal.dataset.pendingEntryPoint;
     });
 
     // Save tags button
@@ -2952,6 +2968,26 @@ const sessionManager = {
 
   setImportModeEnabled(enabled) {
     this.importModeEnabled = Boolean(enabled);
+    const modal = document.getElementById('addFolderModal');
+    if (modal) {
+      modal.dataset.importMode = this.importModeEnabled ? 'true' : 'false';
+    }
+
+    const importToggle = document.getElementById('folderImportToggle');
+    if (importToggle) {
+      importToggle.checked = this.importModeEnabled;
+    }
+
+    const title = document.getElementById('folderModalTitle');
+    if (title) {
+      title.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
+    }
+
+    const card = document.getElementById('folderImportCard');
+    if (card) {
+      card.hidden = !this.importModeEnabled;
+    }
+
     const section = document.getElementById('folderImportSection');
     if (section) {
       section.hidden = !this.importModeEnabled;
@@ -2962,7 +2998,7 @@ const sessionManager = {
       if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
         window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
       } else {
-        createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+        createBtn.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
       }
     }
 
@@ -3233,7 +3269,7 @@ const sessionManager = {
     const importPathInput = document.getElementById('folderImportPathInput');
     const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
 
-    const importEnabled = Boolean(importToggle?.checked);
+    const importEnabled = this.importModeEnabled || Boolean(importToggle?.checked);
     const importPath = importPathInput?.value?.trim() || '';
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
@@ -4193,9 +4229,22 @@ const sessionManager = {
   },
 
   // Show add folder modal
-  showAddWorkspaceModal() {
-    const modal = new bootstrap.Modal(document.getElementById('addFolderModal'));
+  showAddWorkspaceModal(options = {}) {
+    const modalElement = document.getElementById('addFolderModal');
+    if (!modalElement) return;
+
+    modalElement.dataset.pendingImportMode = options.importMode ? 'true' : 'false';
+    modalElement.dataset.pendingEntryPoint = String(
+      options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
+    );
+
+    const modal = new bootstrap.Modal(modalElement);
     modal.show();
+  },
+
+  // Show import workspace modal
+  showImportWorkspaceModal() {
+    this.showAddWorkspaceModal({ importMode: true, entryPoint: 'workspace_hub_import' });
   },
 
   // Show session info modal

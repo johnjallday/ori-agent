@@ -41,11 +41,17 @@
           </div>
         </div>
         <div class="launcher-actions">
-          <button id="launcherCreateWorkspaceBtn" class="modern-btn modern-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal">
+          <button id="launcherCreateWorkspaceBtn" class="modern-btn modern-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="workspace_hub_create">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
-            Create
+            Create Workspace
+          </button>
+          <button id="launcherImportFolderBtn" class="modern-btn modern-btn-secondary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="workspace_hub_import">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
+              <path d="M19,20H5V4H7V18H19V20M18,8L15,11V9H10V7H15V5L18,8Z"/>
+            </svg>
+            Import Folder
           </button>
           <button id="launcherRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-icon" type="button" title="Refresh" aria-label="Refresh workspaces">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
