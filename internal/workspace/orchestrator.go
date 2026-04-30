@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -18,9 +17,10 @@ import (
 // Orchestrator manages autonomous task delegation and agent coordination
 type Orchestrator struct {
 	workspaceStore Store
-	agentStore     store.Store // For loading agents and their tools
-	llmProvider    LLMProvider // For intelligent task breakdown
-	eventBus       *EventBus   // For real-time updates
+	agentStore     store.Store  // For loading agents and their tools
+	llmProvider    LLMProvider  // For intelligent task breakdown
+	eventBus       *EventBus    // For real-time updates
+	taskHandler    taskExecutor // For single-task LLM execution (delegated)
 }
 
 // LLMProvider interface for calling AI models
@@ -32,6 +32,14 @@ type LLMProvider interface {
 	ChatWithMessages(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.ChatResponse, error)
 }
 
+// taskExecutor describes the single-task LLM execution surface the orchestrator
+// delegates to. LLMTaskHandler.ExecuteTask satisfies this interface; it owns
+// MCP/workspace tool loading and the multi-turn tool-call loop, so the
+// orchestrator does not duplicate that work.
+type taskExecutor interface {
+	ExecuteTask(ctx context.Context, agentName string, task Task) (string, error)
+}
+
 // NewOrchestrator creates a new orchestrator
 func NewOrchestrator(workspaceStore Store, agentStore store.Store, llmProvider LLMProvider, eventBus *EventBus) *Orchestrator {
 	return &Orchestrator{
@@ -40,6 +48,12 @@ func NewOrchestrator(workspaceStore Store, agentStore store.Store, llmProvider L
 		llmProvider:    llmProvider,
 		eventBus:       eventBus,
 	}
+}
+
+// SetTaskHandler wires the task executor used for single-task LLM execution.
+// Must be called before ExecuteTask, otherwise ExecuteTask returns an error.
+func (o *Orchestrator) SetTaskHandler(h taskExecutor) {
+	o.taskHandler = h
 }
 
 // ExecuteMission starts autonomous execution of a mission
@@ -206,7 +220,10 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID
 	})
 }
 
-// ExecuteTask executes a single task by delegating to an agent
+// ExecuteTask executes a single task by delegating to an agent.
+// LLM execution (tool loading, model/provider selection, tool-call loop) is
+// delegated to the LLMTaskHandler wired via SetTaskHandler; the orchestrator
+// owns workspace state, message events, and task lifecycle bookkeeping.
 func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task Task) error {
 	logger.Debug("[Orchestrator] Executing task : (assigned to: )", logger.Fields{"task_id": task.ID, "description": task.Description, "to": task.To})
 
@@ -278,8 +295,17 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		"content": message.Content,
 	})
 
-	// Execute task using LLM provider
-	result, err := o.executeTaskWithLLM(ctx, task)
+	// Execute task using the wired task handler. Tool loading (MCP + workspace),
+	// the multi-turn tool-call loop, and provider/model selection all live in
+	// LLMTaskHandler — the orchestrator does not duplicate that work.
+	// A missing handler is treated as a task failure (rather than an early
+	// return) so the workspace state and lifecycle events stay consistent.
+	var result string
+	if o.taskHandler == nil {
+		err = fmt.Errorf("orchestrator: task handler not configured (call SetTaskHandler before ExecuteTask)")
+	} else {
+		result, err = o.taskHandler.ExecuteTask(ctx, task.To, task)
+	}
 
 	completed := time.Now()
 	if err != nil {
@@ -325,147 +351,6 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	})
 
 	return nil
-}
-
-// executeTaskWithLLM executes a task using the LLM provider.
-//
-// TODO: Tool support was lost in commit 672e8a3b ("Remove plugin system entirely
-// in favor of MCP and skills") — the loop that populated `tools` from plugin
-// definitions was removed but never re-implemented for MCP/skills. Tasks routed
-// through this path currently run without their agent's tools. Re-wire tool
-// loading via MCP/skills (see internal/mcp and internal/skills) before relying
-// on this path for tool-using tasks.
-func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (string, error) {
-	if o.llmProvider == nil {
-		return "", fmt.Errorf("LLM provider not configured")
-	}
-
-	logger.Debug("[Orchestrator] Executing task with LLM", logger.Fields{"task_id": task.ID, "description": task.Description, "assigned_to": task.To})
-
-	// Resolve the agent. Tools are not loaded here — see the TODO on this
-	// function's doc comment.
-	var tools []llm.Tool
-	var ag *agent.Agent
-	if o.agentStore != nil && task.To != "" {
-		var ok bool
-		ag, ok = o.agentStore.GetAgent(task.To)
-		if ok && ag != nil {
-			logger.Debug("[Orchestrator] Loaded agent", logger.Fields{"agent": task.To})
-		} else {
-			logger.Warn("[Orchestrator] Agent not found, executing without tools", logger.Fields{"agent": task.To})
-		}
-	}
-
-	// Create system prompt with agent role.
-	systemPrompt := fmt.Sprintf(
-		"You are %s, an AI agent in a multi-agent workspace. You have been assigned a task. "+
-			"Please complete the task to the best of your ability and provide a clear result.",
-		task.To,
-	)
-
-	// Build user message with task description and formatted context
-	taskPrompt := fmt.Sprintf("# Task Assignment\n\n%s\n\n", task.Description)
-
-	// Format input task results if available
-	if inputResults, ok := task.Context["input_task_results"]; ok {
-		if resultsMap, ok := inputResults.(map[string]string); ok && len(resultsMap) > 0 {
-			taskPrompt += "## Input from Previous Tasks\n\n"
-			for taskID, result := range resultsMap {
-				taskPrompt += fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result)
-			}
-		}
-	}
-
-	// Include other context fields
-	hasOtherContext := false
-	for key := range task.Context {
-		if key != "input_task_results" {
-			hasOtherContext = true
-			break
-		}
-	}
-
-	if hasOtherContext {
-		taskPrompt += "## Additional Context\n\n"
-		for key, value := range task.Context {
-			if key != "input_task_results" {
-				taskPrompt += fmt.Sprintf("- **%s**: %v\n", key, value)
-			}
-		}
-		taskPrompt += "\n"
-	}
-
-	taskPrompt += "Please complete this task. If you have tools available, use them to accomplish the task rather than providing general information."
-
-	// Call LLM with timeout and tools
-	llmCtx, cancel := context.WithTimeout(ctx, 60*time.Second) // Longer timeout for tool execution
-	defer cancel()
-
-	resp, err := o.llmProvider.ChatWithTools(llmCtx, systemPrompt, taskPrompt, tools)
-	if err != nil {
-		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
-			return "", fmt.Errorf("%s", friendlyMsg)
-		}
-		return "", fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	// Check if LLM wants to call tools
-	if len(resp.ToolCalls) > 0 && ag != nil {
-		logger.Debug("[Orchestrator] LLM requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
-		return o.executeToolCallsAndContinue(llmCtx, ag, systemPrompt, taskPrompt, tools, resp)
-	}
-
-	result := resp.Content
-	logger.Info("[Orchestrator] Task completed with result", logger.Fields{"result_length": len(result)})
-
-	return result, nil
-}
-
-// executeToolCallsAndContinue executes tool calls and continues the conversation
-func (o *Orchestrator) executeToolCallsAndContinue(ctx context.Context, ag *agent.Agent, systemPrompt, taskPrompt string, tools []llm.Tool, resp *llm.ChatResponse) (string, error) {
-	maxIterations := 5 // Prevent infinite loops
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: taskPrompt},
-		{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls},
-	}
-
-	for iteration := 0; iteration < maxIterations && len(resp.ToolCalls) > 0; iteration++ {
-		logger.Debug("[Orchestrator] Executing tool calls", logger.Fields{"iteration": iteration, "tool_count": len(resp.ToolCalls)})
-
-		// Execute each tool call
-		for _, toolCall := range resp.ToolCalls {
-			toolResult := o.executeToolCall(ctx, ag, toolCall)
-			messages = append(messages, llm.Message{
-				Role:       "tool",
-				Content:    toolResult,
-				ToolCallID: toolCall.ID,
-			})
-			logger.Debug("[Orchestrator] Tool call executed", logger.Fields{"tool": toolCall.Name, "result_length": len(toolResult)})
-		}
-
-		// Continue conversation with tool results using full message history
-		var err error
-		resp, err = o.llmProvider.ChatWithMessages(ctx, messages, tools)
-		if err != nil {
-			return "", fmt.Errorf("LLM continuation failed: %w", err)
-		}
-
-		// Add assistant response to messages
-		messages = append(messages, llm.Message{
-			Role:      "assistant",
-			Content:   resp.Content,
-			ToolCalls: resp.ToolCalls,
-		})
-	}
-
-	return resp.Content, nil
-}
-
-// executeToolCall executes a single tool call and returns the result.
-// Tool execution is handled via MCP; this is a fallback that reports the tool as not found.
-func (o *Orchestrator) executeToolCall(ctx context.Context, ag *agent.Agent, toolCall llm.ToolCall) string {
-	return fmt.Sprintf("Error: Tool '%s' not found (plugins deprecated, use MCP)", toolCall.Name)
 }
 
 // formatAgentCapabilities formats agent list with capabilities.

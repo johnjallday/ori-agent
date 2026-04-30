@@ -158,29 +158,29 @@ func (b *ServerBuilder) initializeEventSystem() error {
 
 // initializeTaskExecution creates task handler, executor, step executor, and scheduler.
 func (b *ServerBuilder) initializeTaskExecution() error {
-	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
-	taskHandler.SetEventBus(b.eventBus)
-	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
+	b.taskHandler.SetEventBus(b.eventBus)
+	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
 	if b.skillsManager != nil {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
-	taskHandler.SetRuntimeResolver(runtimeResolver)
+	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {
-		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+		b.taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
-		taskHandler.SetWorkspaceToolFactory(fn)
+		b.taskHandler.SetWorkspaceToolFactory(fn)
 	}
 
-	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskHandler, workspace.ExecutorConfig{
+	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, b.taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
 	b.taskExecutor.SetEventBus(b.eventBus)
 
-	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskHandler, workspace.StepExecutorConfig{
+	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, b.taskHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
@@ -259,6 +259,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() error {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	if b.taskHandler != nil {
+		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
+	}
 	if verbose {
 		logger.Info("Workspace orchestrator initialized", logger.Fields{})
 	}
