@@ -80,26 +80,3 @@ func ReadWorkspaceAgentFromFolder(workspaceFolder, agentName string) (*agent.Age
 func WriteWorkspaceAgentToFolder(workspaceFolder, agentName string, ag *agent.Agent) error {
 	return writeWorkspaceAgent(workspaceFolder, agentName, ag)
 }
-
-// listWorkspaceAgents returns the slugs of all agents snapshotted in the workspace folder.
-func listWorkspaceAgents(workspaceFolder string) ([]string, error) {
-	root := filepath.Join(workspaceFolder, WorkspaceAgentsDir)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list workspace agents: %w", err)
-	}
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(root, e.Name(), WorkspaceAgentConfigFile)); err != nil {
-			continue
-		}
-		out = append(out, e.Name())
-	}
-	return out, nil
-}

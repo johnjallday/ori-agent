@@ -53,7 +53,7 @@ func (s *AgentSnapshotStore) snapshotReferencedAgents(ws *Workspace) {
 		if !ok || globalAgent == nil {
 			continue
 		}
-		if err := s.Store.SaveWorkspaceAgent(ws.ID, name, globalAgent); err != nil {
+		if err := s.SaveWorkspaceAgent(ws.ID, name, globalAgent); err != nil {
 			logger.Warn("Failed to snapshot workspace-local agent", logger.Fields{
 				"workspace_id": ws.ID,
 				"agent":        name,

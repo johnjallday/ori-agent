@@ -2702,7 +2702,7 @@
       event.dataTransfer.setData('text/plain', recordID);
       try {
         event.dataTransfer.setData('application/x-ori-vault-record', recordID);
-      } catch (_) {}
+      } catch (_) { /* non-standard MIME type may be rejected in some browsers */ }
     }
 
     const record = recordByID(recordID);
@@ -4371,7 +4371,7 @@
       }
       try {
         header.releasePointerCapture(dragState.pointerId);
-      } catch (_) {}
+      } catch (_) { /* pointer capture release may fail if already released */ }
       dragState = null;
       header.classList.remove('is-dragging-modal');
     }

@@ -139,7 +139,7 @@ func TestImportTaskMarkdownFromStore_UpdatesStatusAndPreservesRuntimeFields(t *t
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ws := &Workspace{
 		ID:         "workspace-1",
@@ -220,7 +220,7 @@ func TestImportTaskMarkdownFromStore_WarnsWhenWorkspaceAndMarkdownChanged(t *tes
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ws := &Workspace{
 		ID:         "workspace-1",
@@ -335,7 +335,7 @@ func TestFileStoreSave_SyncsTaskMarkdownAcrossTaskLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ws := &Workspace{
 		ID:         "workspace-1",
