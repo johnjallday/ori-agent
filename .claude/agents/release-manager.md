@@ -61,29 +61,32 @@ If the pre-release check reports errors, you MUST fix them automatically:
 **IMPORTANT**: Since this project uses git worktrees, you CANNOT use `git switch main` because main is already checked out in another worktree.
 
 Instead, use this worktree-safe approach:
-1. First, determine the main worktree location by running: `git worktree list`
-2. The main worktree is typically at `/Users/jjdev/Projects/ori/ori-agent` (the parent without `/worktrees/`)
-3. Use `git -C <main-worktree-path>` to run commands in the main worktree:
+1. **Derive the main worktree path once and reuse it** for the rest of the workflow. Do NOT hardcode the path:
    ```bash
-   # Pull latest main and merge dev
-   git -C /Users/jjdev/Projects/ori/ori-agent pull origin main
-   git -C /Users/jjdev/Projects/ori/ori-agent merge origin/dev -m "Merge dev into main for vX.Y.Z release"
-   # Push main
-   git -C /Users/jjdev/Projects/ori/ori-agent push origin main
+   MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')
+   echo "$MAIN_WT"  # Verify before proceeding; abort if empty
+   ```
+   Use `$MAIN_WT` in every `git -C` invocation below and in Steps 6–8.
+
+2. Run the merge in the main worktree:
+   ```bash
+   git -C "$MAIN_WT" pull origin main
+   git -C "$MAIN_WT" merge origin/dev -m "Merge dev into main for vX.Y.Z release"
+   git -C "$MAIN_WT" push origin main
    ```
 
-4. **Handle merge conflicts** (common in go.mod/go.sum):
-   - If merge fails with conflicts, check which files: `git -C <path> diff --name-only --diff-filter=U`
+3. **Handle merge conflicts** (common in go.mod/go.sum):
+   - If merge fails with conflicts, check which files: `git -C "$MAIN_WT" diff --name-only --diff-filter=U`
    - For go.mod/go.sum conflicts, accept dev version and tidy:
      ```bash
-     git -C <path> checkout --theirs go.mod go.sum
-     git -C <path> add go.mod go.sum
-     cd <path> && go mod tidy && git add go.mod go.sum
-     git -C <path> commit -m "Merge dev into main for vX.Y.Z release"
+     git -C "$MAIN_WT" checkout --theirs go.mod go.sum
+     (cd "$MAIN_WT" && go mod tidy)
+     git -C "$MAIN_WT" add go.mod go.sum
+     git -C "$MAIN_WT" commit -m "Merge dev into main for vX.Y.Z release"
      ```
    - For other conflicts, analyze and resolve appropriately
 
-5. Confirm the merge and push were successful
+4. Confirm the merge and push were successful
 
 ### Step 6: Verify GitHub Smoke Tests
 
@@ -146,15 +149,16 @@ After pushing to main, you MUST verify that GitHub CI smoke tests pass before th
       # Push to dev
       git push origin dev
 
-      # Merge to main using worktree-safe approach
-      git -C /Users/jjdev/Projects/ori/ori-agent pull origin main
-      git -C /Users/jjdev/Projects/ori/ori-agent merge origin/dev -m "fix(ci): <description>"
-      git -C /Users/jjdev/Projects/ori/ori-agent push origin main
+      # Merge to main using $MAIN_WT derived in Step 5
+      git -C "$MAIN_WT" pull origin main
+      git -C "$MAIN_WT" merge origin/dev -m "fix(ci): <description>"
+      git -C "$MAIN_WT" push origin main
       ```
 
    e. **Wait for new CI run and verify**:
+      - Use `gh run watch <run-id> --exit-status` to block until the run finishes (preferred over polling loops)
       - Repeat from step 1 until smoke tests pass
-      - Maximum 3 fix iterations before asking user for help
+      - Track iteration count for this step; stop after 3 attempts and ask the user for guidance
 
 5. **Only after smoke tests pass**: Proceed to Step 7
 
@@ -162,10 +166,10 @@ After pushing to main, you MUST verify that GitHub CI smoke tests pass before th
 
 Once smoke tests pass on main, create the tag and GitHub release automatically.
 
-1. **Create and push the git tag** (using the main worktree):
+1. **Create and push the git tag** (using `$MAIN_WT` from Step 5):
    ```bash
-   git -C /Users/jjdev/Projects/ori/ori-agent tag vX.Y.Z
-   git -C /Users/jjdev/Projects/ori/ori-agent push origin vX.Y.Z
+   git -C "$MAIN_WT" tag vX.Y.Z
+   git -C "$MAIN_WT" push origin vX.Y.Z
    ```
 
 2. **Wait for the release CI workflow to start** (the tag push triggers the release build):
@@ -192,12 +196,60 @@ Once smoke tests pass on main, create the tag and GitHub release automatically.
 5. **If release workflow FAILS**: Analyze logs and fix (same approach as Step 6), then re-tag:
    ```bash
    # Delete the failed tag and re-push after fixing
-   git -C /Users/jjdev/Projects/ori/ori-agent tag -d vX.Y.Z
-   git -C /Users/jjdev/Projects/ori/ori-agent push origin :refs/tags/vX.Y.Z
+   git -C "$MAIN_WT" tag -d vX.Y.Z
+   git -C "$MAIN_WT" push origin :refs/tags/vX.Y.Z
    # ... fix, commit, push to main, then re-tag
    ```
 
-6. **Report completion** with the GitHub release URL
+6. **Report completion** with the GitHub release URL, then proceed to Step 8.
+
+### Step 8: Prune Old Releases
+
+Once the new release is published, clean up older GitHub releases and tags so the release page stays focused. This step is **destructive and visible to anyone watching the repo**, so it requires explicit user confirmation.
+
+**Retention policy** (default): keep the **10 most recent published releases**, always delete leftover **drafts** older than the latest published release, and always preserve any release whose tag ends in `.0.0` or matches a `MAJOR.0.0` pattern (reserved for future minor/major bumps).
+
+1. **List all releases and classify them**:
+   ```bash
+   # All releases, newest first, with draft/prerelease flags
+   gh release list --limit 200 \
+     --json tagName,isDraft,isPrerelease,publishedAt,isLatest
+   ```
+
+2. **Build the deletion list** by applying the retention policy:
+   - Sort published, non-draft releases by `publishedAt` descending; mark everything past index 10 for deletion
+   - Mark every draft whose `publishedAt` is older than the latest published release for deletion
+   - **Re-include** anything matching `^v\d+\.\d+\.0$` or `^v\d+\.0\.0$` — never auto-prune those
+   - **Never** delete the release just published in Step 7
+
+3. **Show the user the deletion list and ask for confirmation**. Format:
+   ```
+   Pruning plan (keep last 10 + .0 minors):
+     DELETE  v0.0.42  (draft, duplicate of published v0.0.42)
+     DELETE  v0.0.42  (published 2026-01-14)
+     DELETE  v0.0.43  (published 2026-01-17)
+     ...
+     KEEP    v0.0.51..v0.0.60 (10 most recent)
+   Confirm prune? (yes / no / edit)
+   ```
+   Wait for an explicit `yes` before deleting anything. If the user says `edit`, ask which specific tags to keep or remove and rebuild the list.
+
+4. **Delete each release and its tag** (one at a time so a failure doesn't cascade):
+   ```bash
+   gh release delete <tag> --cleanup-tag --yes
+   ```
+   `--cleanup-tag` removes both the GitHub release and the underlying git tag in a single call. If a tag exists without a release, fall back to:
+   ```bash
+   git -C "$MAIN_WT" push origin :refs/tags/<tag>
+   git -C "$MAIN_WT" tag -d <tag>
+   ```
+
+5. **Report what was pruned**: list each deleted tag and confirm the new total release count.
+
+6. **Skip pruning automatically** if any of these are true (report and stop):
+   - Fewer than 10 published releases exist
+   - The user declined confirmation
+   - A `gh release delete` call fails — stop and surface the error rather than continuing
 
 ## Important Guidelines
 
@@ -239,15 +291,18 @@ Once smoke tests pass on main, create the tag and GitHub release automatically.
 
 ## Scope Limitations
 
-Your responsibility ends after the GitHub release is published. Do NOT:
-- Deploy or publish anything beyond the GitHub release
-
 You ARE responsible for:
 - Fixing CI failures that occur after pushing to main
 - Ensuring smoke tests pass before tagging
 - Creating the git tag and pushing it
 - Monitoring the release workflow run
 - Creating the GitHub release once the release workflow passes
+- Pruning old releases per the retention policy in Step 8 (with user confirmation)
+
+Do NOT:
+- Deploy or publish anything beyond the GitHub release
+- Prune releases without user confirmation, or delete the release just published
+- Touch tags outside the pruning policy (e.g., `vX.0.0` markers must always be kept)
 
 ## Output Format
 
