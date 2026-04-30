@@ -173,7 +173,8 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 		lines = append(lines, "", fmt.Sprintf("Notes (%d):", len(notes)))
 		for _, note := range limitWorkspaceNotes(notes, workspaceSnapshotMaxNotes) {
 			lines = append(lines, fmt.Sprintf(
-				"- Note: %q - %q",
+				"- Note: id=%q name=%q preview=%q",
+				sanitizeWorkspaceSnapshotText(note.ID, workspaceSnapshotTextLimit),
 				sanitizeWorkspaceSnapshotText(note.Name, workspaceSnapshotTextLimit),
 				sanitizeWorkspaceSnapshotText(note.Preview, workspaceSnapshotPreviewLimit),
 			))

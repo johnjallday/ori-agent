@@ -28,8 +28,8 @@ func TestOpenAIProviderMetadata(t *testing.T) {
 	if !caps.SupportsTools {
 		t.Error("Expected OpenAI to support tools")
 	}
-	if !caps.SupportsStreaming {
-		t.Error("Expected OpenAI to support streaming")
+	if caps.SupportsStreaming {
+		t.Error("OpenAI streaming is unimplemented; capability should be false")
 	}
 	if !caps.SupportsSystemPrompt {
 		t.Error("Expected OpenAI to support system prompts")

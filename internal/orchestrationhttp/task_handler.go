@@ -248,9 +248,24 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if workspaceID != "" {
-		// List tasks for workspace
-		tasks := th.communicator.ListTasks(workspaceID)
-		stats := th.communicator.GetTaskStats(workspaceID)
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			logger.Error("Failed to get workspace", logger.Fields{"error": err, "workspace_id": workspaceID})
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
+			return
+		}
+		if result, err := workspace.ImportTaskMarkdownFromStore(th.workspaceStore, ws); err != nil {
+			logger.Warn("Failed to import task markdown before listing tasks", logger.Fields{"workspace_id": workspaceID, "error": err})
+		} else if result != nil {
+			workspace.LogTaskMarkdownWarnings(workspaceID, result.Warnings)
+			if result.Changed {
+				if saveErr := th.workspaceStore.Save(ws); saveErr != nil {
+					logger.Warn("Failed to save workspace after task markdown import", logger.Fields{"workspace_id": workspaceID, "error": saveErr})
+				}
+			}
+		}
+		tasks := ws.Tasks
+		stats := ws.GetTaskStats()
 
 		orihttp.WriteJSON(w, map[string]interface{}{
 			"tasks": tasks,
@@ -979,6 +994,8 @@ func extractTaskIDForDelete(r *http.Request) string {
 // - POST /api/orchestration/tasks/{id}/complete -> CompleteTaskHandler
 // - POST /api/orchestration/tasks/{id}/cancel -> CancelTaskHandler
 // - POST /api/orchestration/tasks/{id}/save-result -> SaveTaskResult (via workspace handler)
+// - POST /api/orchestration/tasks/{id}/result/preview -> Preview typed task result
+// - POST /api/orchestration/tasks/{id}/promote-result -> Promote task-list result into subtasks
 func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1000,6 +1017,18 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /save-result endpoint
 	if strings.HasSuffix(path, "/save-result") {
 		th.handleSaveTaskResult(w, r)
+		return
+	}
+
+	// Check if this is a /result/preview endpoint
+	if strings.HasSuffix(path, "/result/preview") {
+		th.handlePreviewTaskResult(w, r)
+		return
+	}
+
+	// Check if this is a /promote-result endpoint
+	if strings.HasSuffix(path, "/promote-result") {
+		th.handlePromoteTaskResult(w, r)
 		return
 	}
 
@@ -1063,6 +1092,7 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 			ws.Tasks[i].CompletedAt = &now
 			ws.Tasks[i].Error = "Cancelled by user"
 			ws.Tasks[i].Result = ""
+			workspace.ApplyTaskResultMetadata(&ws.Tasks[i], "")
 			break
 		}
 	}

@@ -614,6 +614,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		// Reset task state for rerun
 		targetTask.Status = workspace.TaskStatusInProgress
 		targetTask.Result = ""
+		workspace.ApplyTaskResultMetadata(targetTask, "")
 		targetTask.Error = ""
 		targetTask.Progress = nil
 		targetTask.StartedAt = &now
@@ -696,6 +697,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
 					task.Status = workspace.TaskStatusCompleted
 					task.Result = result
+					workspace.ApplyTaskResultMetadata(task, result)
 					completedAt := time.Now()
 					task.CompletedAt = &completedAt
 					_ = ws.UpdateTask(*task)

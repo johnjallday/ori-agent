@@ -725,6 +725,9 @@ export class WorkspaceTaskPage {
     this.resultNoteSaving = false;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
+    this.resultPromotionPending = false;
+    this.resultPromotionSubmitting = false;
+    this.resultPromotionDraft = null;
     this.elements = {};
   }
 
@@ -763,8 +766,14 @@ export class WorkspaceTaskPage {
       outputCard: document.getElementById('workspace-task-output-card'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
+      outputPromoteBtn: document.getElementById('workspace-task-output-promote'),
       outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
+      resultPromoteModal: document.getElementById('workspace-task-result-promote-modal'),
+      resultPromoteTitleInput: document.getElementById('workspace-task-result-promote-title'),
+      resultPromoteMeta: document.getElementById('workspace-task-result-promote-meta'),
+      resultPromoteGroups: document.getElementById('workspace-task-result-promote-groups'),
+      resultPromoteSubmitBtn: document.getElementById('workspace-task-result-promote-submit'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
       workflowAddStepBtn: document.getElementById('workspace-task-workflow-add-step'),
@@ -815,6 +824,12 @@ export class WorkspaceTaskPage {
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.elements.outputPromoteBtn?.addEventListener('click', () => this.previewResultPromotion());
+    this.elements.resultPromoteSubmitBtn?.addEventListener('click', () => this.submitResultPromotion());
+    this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.resultPromotionSubmitting) return;
+      this.resultPromotionDraft = null;
+    });
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
@@ -1280,7 +1295,7 @@ export class WorkspaceTaskPage {
   }
 
   getSubtasks() {
-    return this.tasks.filter((item) => String(item?.parent_task_id || '').trim() === String(this.task?.id || ''));
+    return this.getChildTasks(this.task?.id || '');
   }
 
   getInputTasks() {
@@ -1812,8 +1827,8 @@ export class WorkspaceTaskPage {
     `).join('');
   }
 
-  getOrderedSteps() {
-    return this.getSubtasks().sort((a, b) => {
+  sortWorkflowTasks(tasks) {
+    return [...tasks].sort((a, b) => {
       const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
       const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
       if (aIndex !== bIndex) return aIndex - bIndex;
@@ -1822,6 +1837,34 @@ export class WorkspaceTaskPage {
       if (aTime !== bTime) return aTime - bTime;
       return String(a?.id || '').localeCompare(String(b?.id || ''));
     });
+  }
+
+  getChildTasks(parentTaskId) {
+    const id = String(parentTaskId || '').trim();
+    if (!id) return [];
+    return this.sortWorkflowTasks(
+      this.tasks.filter((item) => String(item?.parent_task_id || '').trim() === id)
+    );
+  }
+
+  getOrderedSteps() {
+    return this.getSubtasks();
+  }
+
+  getWorkflowDescendantTasks(parentTaskId, visited = new Set()) {
+    const id = String(parentTaskId || '').trim();
+    if (!id || visited.has(id)) return [];
+    visited.add(id);
+
+    const children = this.getChildTasks(id);
+    const out = [];
+    children.forEach((child) => {
+      const childId = String(child?.id || '').trim();
+      if (!childId || visited.has(childId)) return;
+      out.push(child);
+      out.push(...this.getWorkflowDescendantTasks(childId, visited));
+    });
+    return out;
   }
 
   hasResultForSteps() {
@@ -1851,8 +1894,9 @@ export class WorkspaceTaskPage {
       this.elements.workflowActions.hidden = !hasSteps;
     }
     if (this.elements.workflowRunAllBtn) {
-      const anyRunning = steps.some((step) => String(step?.status || '') === 'in_progress');
-      const anyUnassigned = steps.some((step) => {
+      const visibleSteps = this.getWorkflowDescendantTasks(this.task?.id || '');
+      const anyRunning = visibleSteps.some((step) => String(step?.status || '') === 'in_progress');
+      const anyUnassigned = visibleSteps.some((step) => {
         const assignee = String(step?.to || '').trim();
         const assigned = Boolean(assignee) && assignee !== 'unassigned';
         const completed = getStatusClass(step?.status) === 'completed';
@@ -1897,12 +1941,50 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.workflowSteps.innerHTML = steps
-      .map((step, index) => this.renderStepRow(step, index + 1))
+      .map((step, index) => this.renderStepTree(step, index + 1, { visited: new Set() }))
       .join('');
     this.bindStepRowEvents();
   }
 
-  renderStepRow(step, fallbackNumber) {
+  renderStepTree(step, fallbackNumber, options = {}) {
+    const stepId = String(step?.id || '').trim();
+    const visited = options.visited instanceof Set ? options.visited : new Set();
+    if (!stepId || visited.has(stepId)) {
+      return this.renderStepRow(step, fallbackNumber, options);
+    }
+
+    visited.add(stepId);
+    const localNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
+      ? step.subtask_index
+      : fallbackNumber;
+    const numberLabel = options.parentNumber
+      ? `${options.parentNumber}.${localNumber}`
+      : String(localNumber);
+    const children = this.getChildTasks(stepId).filter((child) => {
+      const childId = String(child?.id || '').trim();
+      return childId && !visited.has(childId);
+    });
+    const childMarkup = children.length
+      ? `<div class="workspace-task-workflow-substeps">
+          ${children
+            .map((child, childIndex) => this.renderStepTree(child, childIndex + 1, {
+              visited,
+              depth: (options.depth || 0) + 1,
+              parentNumber: numberLabel
+            }))
+            .join('')}
+        </div>`
+      : '';
+
+    return this.renderStepRow(step, fallbackNumber, {
+      ...options,
+      childCount: children.length,
+      childMarkup,
+      numberLabel
+    });
+  }
+
+  renderStepRow(step, fallbackNumber, options = {}) {
     const stepId = String(step?.id || '');
     const status = getStatusClass(step?.status);
     const isRunning = status === 'in_progress';
@@ -1912,13 +1994,19 @@ export class WorkspaceTaskPage {
     const stepNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
       ? step.subtask_index
       : fallbackNumber;
+    const numberLabel = String(options.numberLabel || stepNumber);
     const title = String(step?.description || step?.name || `Step ${stepNumber}`).trim() || `Step ${stepNumber}`;
     const agentName = String(step?.to || '').trim();
     const isAssigned = agentName && agentName !== 'unassigned';
     const result = normalizeResultText(step?.result).trim();
     const error = String(step?.error || '').trim();
+    const childCount = Number.isFinite(options.childCount) ? options.childCount : 0;
+    const childMarkup = String(options.childMarkup || '');
+    const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 0;
 
     const classes = ['workspace-task-workflow-step'];
+    if (depth > 0) classes.push('is-nested');
+    if (childCount > 0) classes.push('has-substeps');
     if (isRunning) classes.push('is-running');
     if (isCompleted) classes.push('is-completed');
     if (isFailed) classes.push('is-failed');
@@ -1963,10 +2051,11 @@ export class WorkspaceTaskPage {
           <button type="button"
                   class="workspace-task-workflow-step-check"
                   data-action="complete-step"
+                  data-step-action-id="${this.escapeHtml(stepId)}"
                   ${isRunning || isCompleted ? 'disabled' : ''}
                   aria-label="${this.escapeHtml(checkTitle)}"
                   title="${this.escapeHtml(checkTitle)}">
-            <span class="workspace-task-workflow-step-check-number">${stepNumber}</span>
+            <span class="workspace-task-workflow-step-check-number">${this.escapeHtml(numberLabel)}</span>
             <span class="workspace-task-workflow-step-check-icon" aria-hidden="true">✓</span>
           </button>
         </div>
@@ -1977,6 +2066,7 @@ export class WorkspaceTaskPage {
               <button type="button"
                       class="modern-btn ${actionButtonClass} workspace-task-workflow-step-action-btn"
                       data-action="${this.escapeHtml(actionName)}"
+                      data-step-action-id="${this.escapeHtml(stepId)}"
                       ${actionDisabled ? 'disabled' : ''}
                       title="${this.escapeHtml(actionTitle)}">
                 ${actionLabel}
@@ -1984,6 +2074,7 @@ export class WorkspaceTaskPage {
               <button type="button"
                       class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
                       data-action="delete-step"
+                      data-step-action-id="${this.escapeHtml(stepId)}"
                       title="Remove this step">×</button>
             </div>
           </div>
@@ -1992,8 +2083,10 @@ export class WorkspaceTaskPage {
             <span class="workspace-task-workflow-step-agent">
               <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Manual')}</span>
             </span>
+            ${childCount > 0 ? `<span class="workspace-task-workflow-step-count">${childCount} subtask${childCount === 1 ? '' : 's'}</span>` : ''}
           </div>
           ${resultBlock}
+          ${childMarkup}
         </div>
       </article>
     `;
@@ -2001,26 +2094,21 @@ export class WorkspaceTaskPage {
 
   bindStepRowEvents() {
     if (!this.elements.workflowSteps) return;
-    this.elements.workflowSteps.querySelectorAll('[data-step-id]').forEach((row) => {
-      const stepId = row.getAttribute('data-step-id');
+    this.elements.workflowSteps.querySelectorAll('[data-step-action-id][data-action]').forEach((button) => {
+      const stepId = button.getAttribute('data-step-action-id');
       if (!stepId) return;
-      row.querySelector('[data-action="run-step"]')?.addEventListener('click', (event) => {
+      button.addEventListener('click', (event) => {
         event.preventDefault();
-        this.handleRunStep(stepId);
-      });
-      row.querySelector('[data-action="cancel-step"]')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        this.handleCancelStep(stepId);
-      });
-      row.querySelectorAll('[data-action="complete-step"]').forEach((button) => {
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
+        const action = button.getAttribute('data-action');
+        if (action === 'run-step') {
+          this.handleRunStep(stepId);
+        } else if (action === 'cancel-step') {
+          this.handleCancelStep(stepId);
+        } else if (action === 'complete-step') {
           this.handleCompleteStep(stepId);
-        });
-      });
-      row.querySelector('[data-action="delete-step"]')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        this.handleDeleteStep(stepId);
+        } else if (action === 'delete-step') {
+          this.handleDeleteStep(stepId);
+        }
       });
     });
   }
@@ -2292,6 +2380,250 @@ export class WorkspaceTaskPage {
       }
       this.elements.outputSaveNoteBtn.disabled = !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
       this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
+    }
+
+    if (this.elements.outputPromoteBtn) {
+      const canPromote = this.canPromoteResultToWorkflow();
+      const label = this.elements.outputPromoteBtn.querySelector('span');
+      if (label) {
+        label.textContent = this.resultPromotionPending
+          ? 'Preparing...'
+          : this.resultPromotionSubmitting
+            ? 'Creating...'
+            : 'Create Workflow Task';
+      }
+      this.elements.outputPromoteBtn.hidden = !canPromote;
+      this.elements.outputPromoteBtn.disabled =
+        !canPromote || this.resultPromotionPending || this.resultPromotionSubmitting;
+    }
+  }
+
+  canPromoteResultToWorkflow(task = this.task) {
+    if (!task || typeof task !== 'object') return false;
+    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (!normalizeResultText(task.result).trim()) return false;
+    if (String(task.error || '').trim()) return false;
+
+    const resultType = String(task.result_type || '').trim().toLowerCase();
+    if (resultType === 'task_list') return true;
+
+    const structuredResult = task.structured_result;
+    if (
+      structuredResult &&
+      typeof structuredResult === 'object' &&
+      Array.isArray(structuredResult.groups) &&
+      structuredResult.groups.some((group) => Array.isArray(group?.items) && group.items.length > 0)
+    ) {
+      return true;
+    }
+
+    return /^\s*[-*]\s+\[[ xX]\]\s+.+$/m.test(normalizeResultText(task.result));
+  }
+
+  countTaskListItems(taskList) {
+    if (!taskList || !Array.isArray(taskList.groups)) return 0;
+    return taskList.groups.reduce((count, group) => (
+      count + (Array.isArray(group?.items) ? group.items.length : 0)
+    ), 0);
+  }
+
+  formatTaskListGroupPreviewTitle(title, groupIndex) {
+    const fallbackTitle = `Group ${groupIndex + 1}`;
+    const value = String(title || fallbackTitle).trim() || fallbackTitle;
+    const normalized = value.toLowerCase();
+    if (normalized === 'tasks' || normalized === 'task list') return value;
+    if (/^\d+\.0\.?\s+/.test(value)) return value;
+    return `${groupIndex + 1}.0 ${value}`;
+  }
+
+  cloneTaskList(taskList) {
+    if (!taskList || typeof taskList !== 'object') return null;
+    try {
+      return JSON.parse(JSON.stringify(taskList));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async previewResultPromotion() {
+    if (this.resultPromotionPending || this.resultPromotionSubmitting || !this.task?.id) return;
+
+    this.resultPromotionPending = true;
+    this.updateResultActionButtons(this.getCurrentResultText(), true);
+
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.task.id)}/result/preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.message || 'This result is not a task list yet.');
+      }
+
+      const taskList = payload?.task_list;
+      if (!taskList || this.countTaskListItems(taskList) < 1) {
+        throw new Error('This result does not include subtasks to create.');
+      }
+
+      this.resultPromotionDraft = this.cloneTaskList(taskList);
+      this.renderResultPromotionPreview(this.resultPromotionDraft);
+      this.openResultPromotionModal();
+    } catch (error) {
+      console.error('Failed to preview result promotion:', error);
+      this.notify('error', error?.message || 'Failed to prepare workflow task');
+    } finally {
+      this.resultPromotionPending = false;
+      this.updateResultActionButtons(this.getCurrentResultText(), true);
+    }
+  }
+
+  openResultPromotionModal() {
+    if (!this.elements.resultPromoteModal || typeof bootstrap === 'undefined') return;
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.resultPromoteModal)
+        : bootstrap.Modal.getInstance(this.elements.resultPromoteModal) ||
+          new bootstrap.Modal(this.elements.resultPromoteModal);
+    modal.show();
+  }
+
+  setResultPromotionSubmitState(isSubmitting) {
+    this.resultPromotionSubmitting = Boolean(isSubmitting);
+    if (this.elements.resultPromoteSubmitBtn) {
+      this.elements.resultPromoteSubmitBtn.disabled = this.resultPromotionSubmitting;
+      this.elements.resultPromoteSubmitBtn.textContent = this.resultPromotionSubmitting ? 'Creating...' : 'Create';
+    }
+    this.updateResultActionButtons(this.getCurrentResultText(), true);
+  }
+
+  renderResultPromotionPreview(taskList) {
+    if (
+      !taskList ||
+      !this.elements.resultPromoteTitleInput ||
+      !this.elements.resultPromoteMeta ||
+      !this.elements.resultPromoteGroups
+    ) {
+      return;
+    }
+
+    const itemCount = this.countTaskListItems(taskList);
+    this.elements.resultPromoteTitleInput.value = String(
+      taskList.parent_title || this.getTaskDisplayLabel() || 'Workflow task'
+    ).trim();
+    this.elements.resultPromoteMeta.textContent = `${itemCount} subtask${itemCount === 1 ? '' : 's'}`;
+
+    const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
+    this.elements.resultPromoteGroups.innerHTML = groups.map((group, groupIndex) => {
+      const title = String(group?.title || `Group ${groupIndex + 1}`).trim();
+      const displayTitle = this.formatTaskListGroupPreviewTitle(title, groupIndex);
+      const items = Array.isArray(group?.items) ? group.items : [];
+      const itemMarkup = items.map((item, itemIndex) => {
+        const itemTitle = String(item?.title || '').trim();
+        const assignee = String(item?.assignee || '').trim();
+        return `
+          <label class="workspace-task-result-promote-item">
+            <span class="workspace-task-result-promote-index">${groupIndex + 1}.${itemIndex + 1}</span>
+            <input type="text"
+                   class="form-control form-control-sm workspace-task-result-promote-input"
+                   data-group-index="${groupIndex}"
+                   data-item-index="${itemIndex}"
+                   value="${this.escapeHtml(itemTitle)}">
+            ${assignee ? `<span class="workspace-task-result-promote-assignee">@${this.escapeHtml(assignee)}</span>` : ''}
+          </label>
+        `;
+      }).join('');
+
+      return `
+        <section class="workspace-task-result-promote-group">
+          <div class="workspace-task-result-promote-group-title">${this.escapeHtml(displayTitle)}</div>
+          <div class="workspace-task-result-promote-items">${itemMarkup}</div>
+        </section>
+      `;
+    }).join('');
+  }
+
+  collectResultPromotionDraft() {
+    const draft = this.cloneTaskList(this.resultPromotionDraft);
+    if (!draft) return null;
+
+    draft.parent_title = String(this.elements.resultPromoteTitleInput?.value || '').trim();
+    this.elements.resultPromoteGroups?.querySelectorAll('[data-group-index][data-item-index]').forEach((input) => {
+      const groupIndex = Number(input.getAttribute('data-group-index'));
+      const itemIndex = Number(input.getAttribute('data-item-index'));
+      if (!Number.isInteger(groupIndex) || !Number.isInteger(itemIndex)) return;
+      const item = draft.groups?.[groupIndex]?.items?.[itemIndex];
+      if (!item) return;
+      item.title = String(input.value || '').trim();
+    });
+
+    return draft;
+  }
+
+  validateResultPromotionDraft(taskList) {
+    if (!taskList || typeof taskList !== 'object') return 'Task list preview is unavailable.';
+    if (!String(taskList.parent_title || '').trim()) return 'Parent task title is required.';
+    if (this.countTaskListItems(taskList) < 1) return 'At least one subtask is required.';
+
+    const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
+    for (const group of groups) {
+      const items = Array.isArray(group?.items) ? group.items : [];
+      for (const item of items) {
+        if (!String(item?.title || '').trim()) return 'Every subtask needs a title.';
+      }
+    }
+
+    return '';
+  }
+
+  async submitResultPromotion() {
+    if (this.resultPromotionSubmitting || !this.task?.id) return;
+
+    const taskList = this.collectResultPromotionDraft();
+    const validationError = this.validateResultPromotionDraft(taskList);
+    if (validationError) {
+      this.notify('error', validationError);
+      return;
+    }
+
+    this.setResultPromotionSubmitState(true);
+
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.task.id)}/promote-result`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_list: taskList })
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.message || 'Failed to create workflow task');
+      }
+
+      const subtaskCount = this.countTaskListItems(taskList);
+      this.notify('success', `Created workflow task with ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`);
+
+      if (this.elements.resultPromoteModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.resultPromoteModal)?.hide();
+      }
+
+      const parentTaskId = String(payload?.parent_task?.id || '').trim();
+      if (parentTaskId) {
+        window.location.href = this.getTaskHref(parentTaskId);
+        return;
+      }
+
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to promote task result:', error);
+      this.notify('error', error?.message || 'Failed to create workflow task');
+    } finally {
+      this.setResultPromotionSubmitState(false);
     }
   }
 

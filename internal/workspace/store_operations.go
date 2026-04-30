@@ -204,7 +204,6 @@ func WriteToStore(node *StoreNode, filePath, data string) error {
 	}
 
 	// Write based on mode
-	var writeErr error
 	if node.WriteMode == "append" {
 		// Append mode: open file in append mode, create if doesn't exist
 		f, err := os.OpenFile(finalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -230,10 +229,6 @@ func WriteToStore(node *StoreNode, filePath, data string) error {
 			_ = os.Remove(tempPath) // Clean up temp file on error
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
-	}
-
-	if writeErr != nil {
-		return writeErr
 	}
 
 	// Update node stats

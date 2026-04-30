@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 // WorkspaceStatus represents the current state of a workspace
@@ -67,6 +68,7 @@ type Workspace struct {
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
+	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
 	CreatedAt            time.Time                   `json:"created_at"`
 	UpdatedAt            time.Time                   `json:"updated_at"`
 	mu                   sync.RWMutex                `json:"-"`
@@ -134,6 +136,7 @@ type Attachment struct {
 	Color       string              `json:"color,omitempty"`
 	LinkURL     string              `json:"link_url,omitempty"`
 	File        *AttachmentFileMeta `json:"file_meta,omitempty"`
+	VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
 	X           float64             `json:"x"`
 	Y           float64             `json:"y"`
 	CreatedAt   time.Time           `json:"created_at"`
@@ -154,22 +157,24 @@ type AgentMessage struct {
 
 // Task represents a delegated task within a workspace
 type Task struct {
-	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"workspace_id"`
-	From           string                 `json:"from"`
-	To             string                 `json:"to"`
-	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
-	Description    string                 `json:"description"`
-	Details        string                 `json:"details,omitempty"`
-	Priority       int                    `json:"priority"`
-	Context        map[string]interface{} `json:"context"`
-	Timeout        time.Duration          `json:"timeout"`
-	Status         TaskStatus             `json:"status"`
-	Result         string                 `json:"result,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-	Progress       *TaskProgress          `json:"progress,omitempty"`
-	ExecutionMode  TaskExecutionMode      `json:"execution_mode,omitempty"`
-	ExecutionSteps []TaskExecutionStep    `json:"execution_steps,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	From             string                 `json:"from"`
+	To               string                 `json:"to"`
+	AssignedNodeID   string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	Description      string                 `json:"description"`
+	Details          string                 `json:"details,omitempty"`
+	Priority         int                    `json:"priority"`
+	Context          map[string]interface{} `json:"context"`
+	Timeout          time.Duration          `json:"timeout"`
+	Status           TaskStatus             `json:"status"`
+	Result           string                 `json:"result,omitempty"`
+	ResultType       TaskResultType         `json:"result_type,omitempty"`
+	StructuredResult map[string]interface{} `json:"structured_result,omitempty"`
+	Error            string                 `json:"error,omitempty"`
+	Progress         *TaskProgress          `json:"progress,omitempty"`
+	ExecutionMode    TaskExecutionMode      `json:"execution_mode,omitempty"`
+	ExecutionSteps   []TaskExecutionStep    `json:"execution_steps,omitempty"`
 	// OrchestrationMode controls how parent tasks execute their subtasks.
 	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
 	// ResultCombinationMode controls how a parent task combines subtask outputs.

@@ -75,7 +75,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		t.Fatalf("Failed to create plugin cache dir: %v", err)
 	}
 
-	serverCmd := startTestServer(t, serverCtx, port, agentStorePath, workspaceDir, pluginCacheDir)
+	serverCmd := startTestServer(t, serverCtx, port, tempDir, agentStorePath, workspaceDir, pluginCacheDir)
 
 	// Wait for server to be ready with longer timeout
 	if err := waitForServer(serverURL, 15*time.Second); err != nil {
@@ -580,7 +580,7 @@ func (tc *TestContext) cleanupAll() {
 	}
 }
 
-func startTestServer(t *testing.T, ctx context.Context, port string, agentStorePath string, workspaceDir string, pluginCacheDir string) *exec.Cmd {
+func startTestServer(t *testing.T, ctx context.Context, port string, dataDir string, agentStorePath string, workspaceDir string, pluginCacheDir string) *exec.Cmd {
 	t.Helper()
 
 	// Get absolute paths for project root and server binary
@@ -597,6 +597,7 @@ func startTestServer(t *testing.T, ctx context.Context, port string, agentStoreP
 	cmd := exec.CommandContext(ctx, serverBinary)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%s", port),
+		fmt.Sprintf("ORI_DATA_DIR=%s", dataDir),
 		fmt.Sprintf("AGENT_STORE_PATH=%s", agentStorePath),
 		fmt.Sprintf("WORKSPACE_DIR=%s", workspaceDir),
 		fmt.Sprintf("PLUGIN_CACHE_DIR=%s", pluginCacheDir),

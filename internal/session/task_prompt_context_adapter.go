@@ -26,6 +26,7 @@ func (a *WorkspaceTaskContextAdapter) ListNotesByWorkspace(ctx context.Context, 
 	items := make([]workspace.TaskPromptNoteSummary, len(notes))
 	for i, note := range notes {
 		items[i] = workspace.TaskPromptNoteSummary{
+			ID:      note.ID,
 			Name:    note.Name,
 			Preview: note.Preview,
 		}

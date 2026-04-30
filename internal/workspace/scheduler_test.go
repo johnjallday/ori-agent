@@ -78,6 +78,10 @@ func TestValidateCronExpression(t *testing.T) {
 func TestCalculateNextRun_Cron(t *testing.T) {
 	// Use a fixed reference time for consistent testing
 	refTime := time.Date(2025, 12, 4, 10, 30, 0, 0, time.UTC) // Thursday, Dec 4, 2025 at 10:30 AM
+	// Pin "now" to refTime so catch-up logic does not skip ahead.
+	prevNow := nowFunc
+	nowFunc = func() time.Time { return refTime }
+	t.Cleanup(func() { nowFunc = prevNow })
 
 	tests := []struct {
 		name           string
@@ -335,6 +339,10 @@ func TestCalculateNextRun_RelativeDelay_WithMaxRuns(t *testing.T) {
 // TestCalculateNextRun_ExistingScheduleTypes tests that existing schedule types still work
 func TestCalculateNextRun_ExistingScheduleTypes(t *testing.T) {
 	refTime := time.Date(2025, 12, 4, 10, 30, 0, 0, time.UTC) // Thursday
+	// Pin "now" to refTime so catch-up logic does not skip ahead.
+	prevNow := nowFunc
+	nowFunc = func() time.Time { return refTime }
+	t.Cleanup(func() { nowFunc = prevNow })
 
 	t.Run("once schedule", func(t *testing.T) {
 		config := ScheduleConfig{

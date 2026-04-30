@@ -42,6 +42,13 @@
                   Orchestration Skills
                 </a>
 
+                <a id="open-diagnostics-btn" href="#" class="modern-btn modern-btn-secondary" title="Workspace diagnostics and health">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M9,2V8H5V14H1V20H7V18H17V20H23V14H19V8H15V2H9M11,4H13V12H11V4M7,10H17V12H7V10M3,16H5V18H3V16M19,16H21V18H19V16Z"/>
+                  </svg>
+                  Diagnostics
+                </a>
+
                 <!-- Open Canvas Button -->
                 <a id="open-canvas-btn" href="#" class="modern-btn modern-btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -163,37 +170,7 @@
             </div>
           </div>
 
-          <div class="modern-card workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
-            <div class="workspace-detail-health-header">
-              <div>
-                <div class="workspace-detail-health-kicker">Workspace Health</div>
-                <h2 class="workspace-detail-health-title">Missing agents and broken file links</h2>
-                <p id="workspace-detail-health-summary" class="workspace-detail-health-summary">
-                  Checking workspace agent references and linked files...
-                </p>
-              </div>
-              <div class="workspace-detail-health-controls">
-                <span id="workspace-detail-health-badge" class="workspace-detail-health-badge is-checking">Checking</span>
-                <button id="workspace-detail-health-refresh" class="workspace-detail-panel-btn" type="button" title="Run workspace health check">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                  </svg>
-                  <span id="workspace-detail-health-refresh-label">Run Health Check</span>
-                </button>
-                <button id="workspace-detail-ui-smoke-test" class="workspace-detail-panel-btn" type="button" title="Run UI smoke test">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M9,3H15V5H19A2,2 0 0,1 21,7V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V7A2,2 0 0,1 5,5H9V3M11,5H13V3H11V5M5,7V19H19V7H5M8,10.5L10.5,13L16,9L17.2,10.6L10.3,15.7L6.8,12.2L8,10.5Z"/>
-                  </svg>
-                  <span id="workspace-detail-ui-smoke-test-label">Run UI Smoke Test</span>
-                </button>
-              </div>
-            </div>
-            <div id="workspace-detail-health-meta" class="workspace-detail-health-meta"></div>
-            <div id="workspace-detail-health-list" class="workspace-detail-health-list">
-              <div class="workspace-detail-empty">Checking workspace health...</div>
-            </div>
-            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none"></div>
-          </div>
+          <!-- Workspace Health moved to /workspaces/{id}/diagnostics -->
 
           <!-- Workspace Configuration -->
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
@@ -494,6 +471,40 @@
                                 <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-branch" checked>
                                 <label class="form-check-label" for="workspace-detail-settings-require-branch">Require a feature branch before implementation</label>
                               </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-advanced">
+                          <div class="workspace-detail-settings-advanced-title">Markdown Task Sync</div>
+                          <div class="workspace-detail-settings-advanced-copy">
+                            Sync the workspace task map to an Obsidian-friendly Markdown file. Task details, schedules, execution, and results stay in Ori's task detail page.
+                          </div>
+                          <div class="row g-3">
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-task-markdown-enabled">
+                                <label class="form-check-label" for="workspace-detail-settings-task-markdown-enabled">Sync workspace tasks to Markdown</label>
+                              </div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-task-markdown-agent-views">
+                                <label class="form-check-label" for="workspace-detail-settings-task-markdown-agent-views">Generate agent task views</label>
+                              </div>
+                            </div>
+                            <div class="col-md-8">
+                              <label for="workspace-detail-settings-task-markdown-path" class="form-label">Markdown task map path</label>
+                              <input id="workspace-detail-settings-task-markdown-path" type="text" class="form-control" maxlength="160" placeholder="tasks.md">
+                              <div class="workspace-detail-settings-field-hint">
+                                Relative to the workspace folder. Use a Markdown file path such as <code>tasks.md</code> or <code>planning/tasks.md</code>.
+                              </div>
+                            </div>
+                            <div class="col-md-4">
+                              <label class="form-label" for="workspace-detail-settings-task-markdown-refresh">Manual import</label>
+                              <button id="workspace-detail-settings-task-markdown-refresh" class="btn btn-outline-secondary w-100" type="button">Import Now</button>
+                              <div id="workspace-detail-settings-task-markdown-status" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
                             </div>
                           </div>
                         </div>
@@ -1293,6 +1304,33 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
           <button type="button" class="btn btn-primary" id="workspace-detail-task-result-copy">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Result Promotion Modal -->
+  <div class="modal fade" id="workspace-detail-task-result-promote-modal" tabindex="-1" aria-labelledby="workspace-detail-task-result-promote-heading" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="workspace-detail-task-modal-heading">
+            <h5 class="modal-title" id="workspace-detail-task-result-promote-heading">Create Workflow Task</h5>
+            <div id="workspace-detail-task-result-promote-meta" class="workspace-detail-task-result-meta"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-detail-task-result-promote-field">
+            <label for="workspace-detail-task-result-promote-title" class="form-label">Parent Task</label>
+            <input type="text" class="form-control" id="workspace-detail-task-result-promote-title" autocomplete="off">
+          </div>
+          <div class="workspace-detail-task-result-promote-subtasks-label">Subtasks</div>
+          <div id="workspace-detail-task-result-promote-groups" class="workspace-detail-task-result-promote-groups"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="workspace-detail-task-result-promote-submit">Create</button>
         </div>
       </div>
     </div>
@@ -3815,10 +3853,11 @@
       outline-offset: 2px;
     }
 
-    .workspace-detail-item-result,
-    .workspace-detail-item-change,
-    .workspace-detail-item-run,
-    .workspace-detail-item-delete {
+	    .workspace-detail-item-result,
+	    .workspace-detail-item-change,
+	    .workspace-detail-item-sync,
+	    .workspace-detail-item-run,
+	    .workspace-detail-item-delete {
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
@@ -3865,27 +3904,50 @@
       opacity: 1;
     }
 
-    .workspace-detail-item-run {
-      right: 2rem;
-      color: var(--primary-color);
-      opacity: 0.85;
-    }
+	    .workspace-detail-item-run {
+	      right: 2rem;
+	      color: var(--primary-color);
+	      opacity: 0.85;
+	    }
 
-    .workspace-detail-item-run:hover {
-      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.15);
-      color: var(--primary-color);
-      opacity: 1;
-    }
+	    .workspace-detail-item-run.is-shifted {
+	      right: 3.6rem;
+	    }
 
-    .workspace-detail-item-run:disabled {
-      opacity: 0.35;
-      cursor: not-allowed;
-      pointer-events: none;
-    }
+	    .workspace-detail-item-run:hover {
+	      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.15);
+	      color: var(--primary-color);
+	      opacity: 1;
+	    }
 
-    .workspace-detail-item-delete {
-      right: 0.4rem;
-      color: var(--text-muted);
+	    .workspace-detail-item-run:disabled {
+	      opacity: 0.35;
+	      cursor: not-allowed;
+	      pointer-events: none;
+	    }
+
+	    .workspace-detail-item-sync {
+	      right: 2rem;
+	      color: #0f766e;
+	      opacity: 0.9;
+	    }
+
+	    .workspace-detail-item-sync:hover {
+	      background: rgba(15, 118, 110, 0.14);
+	      color: #0f766e;
+	      opacity: 1;
+	    }
+
+	    .workspace-detail-item-sync:disabled,
+	    .workspace-detail-item-sync.is-syncing {
+	      cursor: wait;
+	      opacity: 0.48;
+	      pointer-events: none;
+	    }
+
+	    .workspace-detail-item-delete {
+	      right: 0.4rem;
+	      color: var(--text-muted);
       opacity: 0;
     }
 
@@ -3897,10 +3959,30 @@
       opacity: 1;
     }
 
-    .workspace-detail-item-delete:hover {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
-    }
+	    .workspace-detail-item-delete:hover {
+	      background: rgba(239, 68, 68, 0.15);
+	      color: #ef4444;
+	    }
+
+	    .workspace-detail-vault-reference-badge {
+	      display: inline-flex;
+	      align-items: center;
+	      padding: 0.08rem 0.42rem;
+	      margin-left: 0.35rem;
+	      border-radius: 999px;
+	      border: 1px solid rgba(15, 118, 110, 0.28);
+	      background: rgba(15, 118, 110, 0.1);
+	      color: #0f766e;
+	      font-size: 0.68rem;
+	      font-weight: 700;
+	      text-transform: uppercase;
+	      vertical-align: middle;
+	    }
+
+	    .workspace-detail-vault-reference-label {
+	      margin-left: 0.35rem;
+	      color: var(--text-secondary);
+	    }
 
     .workspace-detail-task-result-meta {
       font-size: 0.75rem;
@@ -4126,6 +4208,87 @@
       font-size: 0.74rem;
       line-height: 1.4;
       color: var(--text-secondary);
+    }
+
+    .workspace-detail-task-result-promote-field {
+      display: grid;
+      gap: 0.35rem;
+      margin-bottom: 0.95rem;
+    }
+
+    .workspace-detail-task-result-promote-subtasks-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.55rem;
+    }
+
+    .workspace-detail-task-result-promote-groups {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .workspace-detail-task-result-promote-group {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      padding: 0.7rem;
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .workspace-detail-task-result-promote-group-title {
+      color: var(--text-primary);
+      font-size: 0.86rem;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .workspace-detail-task-result-promote-items {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .workspace-detail-task-result-promote-item {
+      display: grid;
+      grid-template-columns: 2.7rem minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0;
+    }
+
+    .workspace-detail-task-result-promote-index {
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    .workspace-detail-task-result-promote-input {
+      min-width: 0;
+    }
+
+    .workspace-detail-task-result-promote-assignee {
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 600;
+      max-width: 9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 640px) {
+      .workspace-detail-task-result-promote-item {
+        grid-template-columns: 2.4rem minmax(0, 1fr);
+      }
+
+      .workspace-detail-task-result-promote-assignee {
+        grid-column: 2;
+        max-width: 100%;
+      }
     }
 
     .workspace-detail-task-confirm-dialog {
@@ -6759,6 +6922,21 @@
       font-size: 0.875rem;
       resize: vertical;
       min-height: 2.5em;
+    }
+
+    /* Vault drop target on workspace panels */
+    #workspace-detail-files-panel.is-vault-drop-target,
+    #workspace-detail-notes-panel.is-vault-drop-target {
+      outline: 2px dashed var(--bs-primary, #f59e0b);
+      outline-offset: -4px;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+      transition: outline-color 120ms ease, box-shadow 120ms ease;
+    }
+    .vault-modal-attachment-card[draggable="true"] {
+      cursor: grab;
+    }
+    .vault-modal-attachment-card.is-dragging {
+      opacity: 0.55;
     }
   </style>
 

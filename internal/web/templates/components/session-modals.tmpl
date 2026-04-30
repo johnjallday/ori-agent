@@ -198,18 +198,28 @@
             </svg>
             <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title">
           </div>
-          <div id="noteWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
-            <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tertiary); border-radius: 4px;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-              </svg>
-              <span id="noteWorkspaceName"></span>
-              <button type="button" id="noteWorkspaceChange" style="background: none; border: none; padding: 0 4px; cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;" title="Change workspace">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+            <div id="noteWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
+              <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tertiary); border-radius: 4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
                 </svg>
-              </button>
-            </span>
+                <span id="noteWorkspaceName"></span>
+                <button type="button" id="noteWorkspaceChange" style="background: none; border: none; padding: 0 4px; cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;" title="Change workspace">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                  </svg>
+                </button>
+              </span>
+            </div>
+            <div id="noteVaultReferenceBadge" style="display: none; font-size: 0.75rem;">
+              <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: rgba(15, 118, 110, 0.12); border: 1px solid rgba(15, 118, 110, 0.28); color: #0f766e; border-radius: 4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,2L20,6V12C20,16.42 17.21,20.44 13.11,21.93L12,22.33L10.89,21.93C6.79,20.44 4,16.42 4,12V6L12,2M12,4.18L6,7V12C6,15.53 8.13,18.76 11.24,20.07L12,20.38L12.76,20.07C15.87,18.76 18,15.53 18,12V7L12,4.18Z"/>
+                </svg>
+                <span id="noteVaultReferenceName"></span>
+              </span>
+            </div>
           </div>
           <div id="noteWorkspaceSelector" style="display: none; font-size: 0.8rem;">
             <select id="noteWorkspaceSelect" class="modern-input w-100" style="padding: 4px 8px; font-size: 0.75rem; cursor: pointer;">

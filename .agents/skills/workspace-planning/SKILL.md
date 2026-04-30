@@ -29,3 +29,10 @@ Use this skill for planning-heavy requests inside a workspace. Treat it as a pla
 - For PRDs: use the repo PRD workflow, save to `/tasks/prd-[feature-name].md`, and stop after drafting unless the user asks to continue.
 - For task lists: use the repo task-list workflow, save to `/tasks/tasks-[feature-name].md`, pause after parent tasks when required, and keep progress checkboxes updated during implementation.
 - For execution-ready plans: prefer short parent tasks with actionable sub-tasks and clear file references.
+
+## Task-List Results
+
+- When a task result is meant to become executable work, format it as Markdown with a clear task-list heading and checkbox items.
+- Use headings for parent/group names and checklist lines for actionable subtasks, for example `- [ ] 1.1 Define scope`.
+- Keep caveats, summaries, and rationale outside checklist lines so only actionable work becomes subtasks.
+- Add assignees at the end of a checklist item with `@agent-name` only when the assignee is intentional.

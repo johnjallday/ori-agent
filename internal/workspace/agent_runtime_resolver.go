@@ -102,8 +102,24 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		return nil, fmt.Errorf("agent runtime resolver is not configured")
 	}
 
-	baseAgent, ok := r.agentStore.GetAgent(agentName)
-	if !ok || baseAgent == nil {
+	var baseAgent *agent.Agent
+	if strings.TrimSpace(workspaceID) != "" && r.workspaceStore != nil {
+		if local, ok, err := r.workspaceStore.GetWorkspaceAgent(workspaceID, agentName); err != nil {
+			logger.Warn("workspace-local agent lookup failed; falling back to global agent store", logger.Fields{
+				"workspace_id": workspaceID,
+				"agent":        agentName,
+				"error":        err.Error(),
+			})
+		} else if ok && local != nil {
+			baseAgent = local
+		}
+	}
+	if baseAgent == nil {
+		if globalAgent, ok := r.agentStore.GetAgent(agentName); ok && globalAgent != nil {
+			baseAgent = globalAgent
+		}
+	}
+	if baseAgent == nil {
 		return nil, fmt.Errorf("agent %s not found", agentName)
 	}
 

@@ -44,19 +44,25 @@ func classifyContextError(err error) string {
 
 // LLMTaskHandler executes tasks using the LLM system
 type LLMTaskHandler struct {
-	agentStore      store.Store
-	llmFactory      *llm.Factory
-	workspaceStore  Store // Added to access workspace attachments
-	contextStore    taskPromptContextStore
-	eventBus        *EventBus // Optional event bus for publishing execution events
-	mcpRegistry     mcpRegistry
-	runtimeResolver *AgentRuntimeResolver
+	agentStore       store.Store
+	llmFactory       *llm.Factory
+	workspaceStore   Store // Added to access workspace attachments
+	contextStore     taskPromptContextStore
+	eventBus         *EventBus // Optional event bus for publishing execution events
+	mcpRegistry      mcpRegistry
+	runtimeResolver  *AgentRuntimeResolver
+	workspaceToolsFn WorkspaceToolFactory
 }
 
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]toolapi.Tool, error)
 	StartServer(string) error
 }
+
+// WorkspaceToolFactory returns workspace-scoped tools (notes, tasks, sessions, files, etc.)
+// for use during task execution. Tools are constructed per workspace so the agent can
+// read and update workspace state without forcing the user to paste it into the prompt.
+type WorkspaceToolFactory func(workspaceID string) []toolapi.Tool
 
 type resolvedTaskAgent struct {
 	*agent.Agent
@@ -104,6 +110,13 @@ func (h *LLMTaskHandler) SetRuntimeResolver(resolver *AgentRuntimeResolver) {
 // SetContextStore configures optional workspace note/session summaries for task prompts.
 func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 	h.contextStore = store
+}
+
+// SetWorkspaceToolFactory wires workspace-scoped tools (notes, tasks, sessions, files)
+// into task execution. Without this, task agents only see the truncated workspace
+// snapshot embedded in the prompt and cannot fetch full note content on demand.
+func (h *LLMTaskHandler) SetWorkspaceToolFactory(fn WorkspaceToolFactory) {
+	h.workspaceToolsFn = fn
 }
 
 // ExecuteTask executes a task by sending it to the agent's LLM
@@ -162,8 +175,8 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
-	// Convert agent tools (plugins + MCP) to LLM format
-	tools := h.convertAgentToolsToLLMTools(ag)
+	// Convert agent tools (MCP + workspace) to LLM format
+	tools := h.convertAgentToolsToLLMTools(ag, task)
 
 	// Call the LLM
 	return h.executeTaskConversation(ctx, provider, providerName, modelName, ag, agentName, task, messages, tools)
@@ -813,25 +826,24 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	return "openai"
 }
 
-// convertAgentToolsToLLMTools converts MCP tools into LLM tools.
-func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent) []llm.Tool {
+// convertAgentToolsToLLMTools converts MCP and workspace tools into LLM tools.
+func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent, task Task) []llm.Tool {
 	var tools []llm.Tool
 	seen := make(map[string]struct{})
 
-	for _, mcpTool := range h.getAgentMCPTools(ag) {
-		if mcpTool == nil {
-			continue
+	appendTool := func(t toolapi.Tool) {
+		if t == nil {
+			return
 		}
-		def := mcpTool.Definition()
+		def := t.Definition()
 		name := strings.ToLower(strings.TrimSpace(def.Name))
 		if name == "" {
-			continue
+			return
 		}
 		if _, exists := seen[name]; exists {
-			continue
+			return
 		}
 		seen[name] = struct{}{}
-
 		tools = append(tools, llm.Tool{
 			Name:        def.Name,
 			Description: def.Description,
@@ -839,7 +851,25 @@ func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent) []ll
 		})
 	}
 
+	for _, mcpTool := range h.getAgentMCPTools(ag) {
+		appendTool(mcpTool)
+	}
+	for _, wsTool := range h.getWorkspaceTools(task) {
+		appendTool(wsTool)
+	}
+
 	return tools
+}
+
+func (h *LLMTaskHandler) getWorkspaceTools(task Task) []toolapi.Tool {
+	if h == nil || h.workspaceToolsFn == nil {
+		return nil
+	}
+	workspaceID := strings.TrimSpace(task.WorkspaceID)
+	if workspaceID == "" {
+		return nil
+	}
+	return h.workspaceToolsFn(workspaceID)
 }
 
 // toolCallResult represents the result of a tool call
@@ -873,7 +903,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 		h.eventBus.Publish(event)
 	}
 
-	tool, found := h.findTool(ag, toolCall.Name)
+	tool, found := h.findTool(ag, task, toolCall.Name)
 
 	if !found || tool == nil {
 		result := toolCallResult{
@@ -930,7 +960,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 	}
 }
 
-func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (toolapi.Tool, bool) {
+func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName string) (toolapi.Tool, bool) {
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
@@ -943,6 +973,16 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (toola
 		name := strings.ToLower(strings.TrimSpace(mcpTool.Definition().Name))
 		if name == target {
 			return mcpTool, true
+		}
+	}
+
+	for _, wsTool := range h.getWorkspaceTools(task) {
+		if wsTool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(wsTool.Definition().Name))
+		if name == target {
+			return wsTool, true
 		}
 	}
 

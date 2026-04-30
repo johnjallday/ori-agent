@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 13
+const schemaVersion = 14
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -91,6 +91,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration012VaultCatalogOnly(ctx)
 	case 13:
 		return db.migration013RemoveLegacyVaultCatalogRows(ctx)
+	case 14:
+		return db.migration014WorkspaceNoteVaultReferences(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -290,15 +292,16 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 	}
 
 	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS workspace_notes (
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			name TEXT NOT NULL,
-			content TEXT DEFAULT '',
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL,
-			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-		)
+			CREATE TABLE IF NOT EXISTS workspace_notes (
+				id TEXT PRIMARY KEY,
+				workspace_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				content TEXT DEFAULT '',
+				vault_reference_json TEXT DEFAULT '',
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+			)
 	`); err != nil {
 		return fmt.Errorf("failed to create workspace_notes table: %w", err)
 	}
@@ -867,6 +870,34 @@ func (db *DB) migration013RemoveLegacyVaultCatalogRows(ctx context.Context) erro
 	}
 
 	return tx.Commit()
+}
+
+func (db *DB) migration014WorkspaceNoteVaultReferences(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_notes")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspace_notes ADD COLUMN vault_reference_json TEXT DEFAULT ''
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace note vault reference column: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) tableExists(ctx context.Context, tableName string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+	`, tableName).Scan(&count); err != nil {
+		return false, fmt.Errorf("failed to check table %s: %w", tableName, err)
+	}
+	return count > 0, nil
 }
 
 func isDuplicateColumnError(err error) bool {

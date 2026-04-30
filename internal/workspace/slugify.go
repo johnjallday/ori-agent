@@ -18,6 +18,14 @@ const (
 	// NotesDir is the subdirectory for workspace notes stored as markdown files.
 	NotesDir = "notes"
 
+	// WorkspaceAgentsDir is the subdirectory for workspace-local agent snapshots.
+	// Each agent lives at <workspace>/agents/<agent-name>/config.json.
+	WorkspaceAgentsDir = "agents"
+
+	// WorkspaceAgentConfigFile is the per-agent snapshot filename inside a
+	// workspace's agents directory.
+	WorkspaceAgentConfigFile = "config.json"
+
 	// SubWorkspacesDir is the subdirectory for nested child workspaces.
 	SubWorkspacesDir = "sub-workspaces"
 

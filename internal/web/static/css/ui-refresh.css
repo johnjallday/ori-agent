@@ -410,7 +410,9 @@ body::after {
   background:
     radial-gradient(circle at top, rgba(250, 205, 132, 0.2), transparent 58%),
     linear-gradient(180deg, rgba(255, 248, 236, 0.96), rgba(243, 224, 192, 0.92)) !important;
-  box-shadow: 0 10px 22px rgba(95, 53, 14, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 10px 22px rgba(95, 53, 14, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .ori-navbar-vault-icon {
@@ -456,7 +458,9 @@ body::after {
   background:
     radial-gradient(circle at top, rgba(215, 155, 89, 0.22), transparent 58%),
     linear-gradient(180deg, rgba(44, 54, 75, 0.96), rgba(31, 39, 56, 0.96)) !important;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 [data-bs-theme="dark"] .ori-navbar-vault-count,
@@ -489,6 +493,56 @@ body::after {
   background:
     radial-gradient(circle at left top, rgba(255, 214, 153, 0.18), transparent 35%),
     linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(247, 237, 218, 0.95));
+  cursor: grab;
+  user-select: none;
+}
+
+.vault-modal-header.is-dragging-modal {
+  cursor: grabbing;
+}
+
+.vault-modal-header .vault-modal-close,
+.vault-modal-header button {
+  cursor: pointer;
+}
+
+.vault-modal-dialog {
+  pointer-events: auto;
+  resize: both;
+  overflow: auto;
+  min-width: 520px;
+  min-height: 400px;
+  max-width: min(96vw, 1600px);
+  max-height: 95vh;
+}
+
+.vault-modal-dialog.is-floating {
+  margin: 0 !important;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.vault-modal-content {
+  height: 100%;
+}
+
+/* Allow drag/drop events to pass through the vault modal so vault items
+   can be dropped onto workspace panels rendered behind it. */
+body[data-vault-attachment-dragging="true"] #vaultModal,
+body[data-vault-record-dragging="true"] #vaultModal,
+body[data-vault-record-dragging="true"] .modal-backdrop,
+body[data-vault-attachment-dragging="true"] .modal-backdrop {
+  pointer-events: none;
+}
+body[data-vault-attachment-dragging="true"]
+  #vaultModal
+  .vault-modal-attachment-card[data-drag-attachment="true"] {
+  pointer-events: auto;
+}
+body[data-vault-record-dragging="true"] #vaultModal .vault-modal-folder-tree,
+body[data-vault-record-dragging="true"] #vaultModal .vault-modal-folder-tree * {
+  pointer-events: auto;
 }
 
 .vault-modal-title-group {
@@ -506,8 +560,7 @@ body::after {
   width: 3.2rem;
   height: 3.2rem;
   border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 244, 218, 0.98), rgba(237, 210, 168, 0.96));
+  background: linear-gradient(180deg, rgba(255, 244, 218, 0.98), rgba(237, 210, 168, 0.96));
   border: 1px solid rgba(177, 124, 74, 0.28);
   color: #8f5322;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
@@ -560,8 +613,7 @@ body::after {
 
 .vault-modal-body {
   padding: 1rem 1.25rem 1.15rem;
-  background:
-    linear-gradient(180deg, rgba(255, 250, 242, 0.92), rgba(243, 231, 211, 0.78));
+  background: linear-gradient(180deg, rgba(255, 250, 242, 0.92), rgba(243, 231, 211, 0.78));
 }
 
 .vault-modal-alert {
@@ -700,7 +752,9 @@ body::after {
   background:
     radial-gradient(circle at top right, rgba(255, 231, 198, 0.42), transparent 48%),
     linear-gradient(180deg, rgba(255, 254, 250, 0.88), rgba(247, 236, 219, 0.9));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 16px 34px rgba(156, 105, 63, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    0 16px 34px rgba(156, 105, 63, 0.08);
 }
 
 .vault-modal-vault-stack-title {
@@ -741,7 +795,11 @@ body::after {
   background: rgba(255, 255, 255, 0.72);
   color: var(--text-primary);
   overflow: hidden;
-  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease;
 }
 
 .vault-modal-vault-pill:hover {
@@ -807,7 +865,10 @@ body::after {
   justify-content: center;
   background: rgba(54, 43, 31, 0.08);
   color: var(--primary-color);
-  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
 }
 
 .vault-modal-vault-pill-icon:hover {
@@ -932,7 +993,11 @@ body::after {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .vault-modal-tab:hover:not(:disabled) {
@@ -1036,7 +1101,9 @@ body::after {
 .vault-modal-textarea {
   min-height: 11.5rem;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
   font-size: 0.84rem;
 }
 
@@ -1220,10 +1287,12 @@ body::after {
   border: 1px solid rgba(173, 132, 88, 0.2);
   border-bottom: none;
   border-radius: 14px 14px 0 0;
-  background:
-    linear-gradient(180deg, rgba(255, 247, 232, 0.94), rgba(246, 231, 204, 0.9));
+  background: linear-gradient(180deg, rgba(255, 247, 232, 0.94), rgba(246, 231, 204, 0.9));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease;
 }
 
 .vault-modal-folder-vault-tab-wrap:hover {
@@ -1233,8 +1302,7 @@ body::after {
 
 .vault-modal-folder-vault-tab-wrap.is-active {
   border-color: rgba(196, 128, 73, 0.34);
-  background:
-    linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(255, 244, 222, 0.94));
+  background: linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(255, 244, 222, 0.94));
 }
 
 .vault-modal-folder-vault-tab {
@@ -1278,7 +1346,9 @@ body::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
 }
 
 .vault-modal-folder-vault-tab-icon:hover {
@@ -1477,7 +1547,11 @@ body::after {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+  transition:
+    opacity 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
   margin-right: 0.18rem;
 }
 
@@ -1648,7 +1722,10 @@ body::after {
   color: var(--text-primary);
   text-align: left;
   padding: 0.55rem 0.65rem;
-  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    transform 0.16s ease;
 }
 
 .vault-modal-preview-file[draggable="true"] {
@@ -1728,7 +1805,11 @@ body::after {
   border: 1px solid rgba(170, 127, 81, 0.18);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.66);
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
 }
 
 .vault-modal-record-card:hover {
@@ -1924,7 +2005,9 @@ body::after {
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
   font-size: 0.82rem;
   line-height: 1.5;
   transition: filter 0.18s ease;
@@ -1942,8 +2025,7 @@ body::after {
   gap: 0.75rem;
   padding: 1rem 1.25rem 1.15rem;
   border-top: 1px solid rgba(171, 126, 82, 0.22);
-  background:
-    linear-gradient(180deg, rgba(251, 246, 236, 0.96), rgba(243, 230, 208, 0.94));
+  background: linear-gradient(180deg, rgba(251, 246, 236, 0.96), rgba(243, 230, 208, 0.94));
 }
 
 .vault-modal-footer.is-empty {
@@ -2073,8 +2155,7 @@ body::after {
 .dark-mode .vault-modal-header,
 .dark-mode .vault-modal-body,
 .dark-mode .vault-modal-footer {
-  background:
-    linear-gradient(180deg, rgba(30, 37, 53, 0.96), rgba(20, 26, 39, 0.94));
+  background: linear-gradient(180deg, rgba(30, 37, 53, 0.96), rgba(20, 26, 39, 0.94));
   border-color: rgba(209, 171, 126, 0.16);
 }
 
@@ -2200,7 +2281,9 @@ body::after {
   background:
     radial-gradient(circle at top right, rgba(233, 174, 106, 0.16), transparent 46%),
     linear-gradient(180deg, rgba(41, 49, 67, 0.92), rgba(25, 31, 44, 0.94));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 30px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 16px 30px rgba(0, 0, 0, 0.22);
 }
 
 [data-bs-theme="dark"] .vault-modal-vault-pill.is-active,
@@ -2236,8 +2319,7 @@ body::after {
 [data-bs-theme="dark"] .vault-modal-folder-vault-tab-wrap,
 .dark-mode .vault-modal-folder-vault-tab-wrap {
   border-color: rgba(209, 171, 126, 0.18);
-  background:
-    linear-gradient(180deg, rgba(47, 56, 75, 0.95), rgba(34, 42, 60, 0.94));
+  background: linear-gradient(180deg, rgba(47, 56, 75, 0.95), rgba(34, 42, 60, 0.94));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -2259,8 +2341,7 @@ body::after {
 [data-bs-theme="dark"] .vault-modal-folder-vault-tab-wrap.is-active,
 .dark-mode .vault-modal-folder-vault-tab-wrap.is-active {
   border-color: rgba(244, 188, 119, 0.34);
-  background:
-    linear-gradient(180deg, rgba(64, 75, 97, 0.98), rgba(43, 53, 73, 0.96));
+  background: linear-gradient(180deg, rgba(64, 75, 97, 0.98), rgba(43, 53, 73, 0.96));
 }
 
 [data-bs-theme="dark"] .vault-modal-folder-vault-tab.is-active,
@@ -2360,7 +2441,10 @@ body::after {
   background: rgba(215, 155, 89, 0.12);
 }
 
-[data-bs-theme="dark"] .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main,
+[data-bs-theme="dark"]
+  .vault-modal-folder-node.is-selected
+  > .vault-modal-folder-row
+  .vault-modal-folder-main,
 .dark-mode .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main {
   background: linear-gradient(90deg, rgba(215, 155, 89, 0.18), rgba(70, 86, 114, 0.18));
   border-color: rgba(220, 173, 115, 0.28);

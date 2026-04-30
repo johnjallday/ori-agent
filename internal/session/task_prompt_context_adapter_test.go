@@ -54,6 +54,9 @@ func TestWorkspaceTaskContextAdapter_ListsWorkspaceNotesAndSessions(t *testing.T
 	if notes[0].Name != "Beta" {
 		t.Fatalf("expected newest note first, got %q", notes[0].Name)
 	}
+	if notes[0].ID != "note-2" {
+		t.Fatalf("expected note id to be preserved, got %q", notes[0].ID)
+	}
 
 	sessions, total, err := adapter.ListSessionsByWorkspace(ctx, "ws-1", 1)
 	if err != nil {

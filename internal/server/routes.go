@@ -662,6 +662,11 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
+	if strings.HasSuffix(path, "/agent-snapshots") {
+		s.Handlers.Workspace.ListAgentSnapshots(w, r)
+		return true
+	}
+
 	if strings.Contains(path, "/tasks") {
 		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)

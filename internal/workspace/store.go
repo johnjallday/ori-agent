@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -32,6 +33,15 @@ type Store interface {
 
 	// GetFilesPath returns the path for storing files for a workspace
 	GetFilesPath(workspaceID string) string
+
+	// GetWorkspaceAgent returns a workspace-local agent snapshot if one exists
+	// at <workspace>/agents/<slug>/config.json. The bool is false when the
+	// workspace has no snapshot for the named agent.
+	GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error)
+
+	// SaveWorkspaceAgent writes an agent snapshot into the workspace folder so
+	// the workspace becomes self-contained for export/import.
+	SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error
 }
 
 // FileStore implements Store using folder-based persistence.
@@ -115,6 +125,20 @@ func (s *FileStore) Save(ws *Workspace) error {
 		ws.FolderSlug = Slugify(ws.Name)
 	}
 
+	// Stale-write detection: if the in-memory cache holds a newer version
+	// than the workspace being saved, a concurrent writer beat us to it and
+	// our update is overwriting their change. Log a warning so the issue is
+	// observable; full CAS rejection requires caller-side retry logic.
+	if cached, ok := s.cache[ws.ID]; ok && cached.Version > ws.Version {
+		logger.Warn("possible lost write: saving workspace over a newer cached version",
+			logger.Fields{
+				"workspace_id":     ws.ID,
+				"incoming_version": ws.Version,
+				"cached_version":   cached.Version,
+			})
+	}
+	ws.Version++
+
 	// Determine the parent directory for this workspace
 	parentDir := s.basePath
 	if ws.ParentID != "" {
@@ -188,7 +212,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 
 	// Write workspace.json inside the folder
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -220,6 +244,13 @@ func (s *FileStore) Save(ws *Workspace) error {
 			FolderPath: relPath,
 			ParentID:   ws.ParentID,
 			UpdatedAt:  ws.UpdatedAt,
+		})
+	}
+
+	if err := syncTaskMarkdownFilesToFolderIfEnabled(folderPath, freshWS); err != nil {
+		logger.Warn("Failed to sync workspace tasks markdown", logger.Fields{
+			"workspace_id": ws.ID,
+			"error":        err,
 		})
 	}
 
@@ -260,7 +291,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -285,6 +316,13 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 			FolderPath: folderPath,
 			ParentID:   ws.ParentID,
 			UpdatedAt:  ws.UpdatedAt,
+		})
+	}
+
+	if err := syncTaskMarkdownFilesToFolderIfEnabled(folderPath, freshWS); err != nil {
+		logger.Warn("Failed to sync workspace tasks markdown", logger.Fields{
+			"workspace_id": ws.ID,
+			"error":        err,
 		})
 	}
 
@@ -349,7 +387,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -384,6 +422,36 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	return nil
 }
 
+// atomicWriteFile writes data to path via a temp file + rename so a crash
+// mid-write cannot leave a truncated/corrupt file behind.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -406,9 +474,12 @@ func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
 		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
 		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
 		if err != nil {
-			// Fall back to the candidate even if stat fails; the create path will
-			// validate it again before writing to disk.
-			return candidate
+			// Stat failed for a reason other than NotExist (permissions, I/O).
+			// Returning the candidate would risk a collision the caller cannot
+			// detect — skip and try the next suffix instead.
+			logger.Warn("slug suffix stat failed, trying next",
+				logger.Fields{"parent": parentDir, "candidate": candidate, "error": err})
+			continue
 		}
 		if !existsOnDisk {
 			return candidate
@@ -485,14 +556,15 @@ func (s *FileStore) BasePath() string {
 	return s.basePath
 }
 
-// Get retrieves a workspace by ID
+// Get retrieves a workspace by ID. Returns a deep clone so callers may safely
+// mutate the result without affecting the cache or other concurrent callers.
 func (s *FileStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
 
 	// Check cache first
 	if ws, ok := s.cache[id]; ok {
 		s.mu.RUnlock()
-		return ws, nil
+		return cloneWorkspaceForRebind(ws)
 	}
 
 	// Check if we know the slug for this ID
@@ -509,7 +581,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 
 	// Double-check cache after acquiring write lock
 	if ws, ok := s.cache[id]; ok {
-		return ws, nil
+		return cloneWorkspaceForRebind(ws)
 	}
 
 	folderPath := s.resolveFolder(slug)
@@ -543,7 +615,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	// Update cache
 	s.cache[id] = ws
 
-	return ws, nil
+	return cloneWorkspaceForRebind(ws)
 }
 
 // List returns all workspace IDs from the in-memory cache.
@@ -989,6 +1061,25 @@ func (s *FileStore) Close() error {
 	return nil
 }
 
+// GetWorkspaceAgent returns a workspace-local agent snapshot, or (nil, false, nil)
+// when the workspace has no snapshot for the named agent.
+func (s *FileStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	folder, err := s.GetFolderPath(workspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	return readWorkspaceAgent(folder, agentName)
+}
+
+// SaveWorkspaceAgent writes an agent snapshot inside the workspace folder.
+func (s *FileStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	folder, err := s.GetFolderPath(workspaceID)
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceAgent(folder, agentName, ag)
+}
+
 // GetIndex returns the global workspace index (may be nil).
 func (s *FileStore) GetIndex() *Index {
 	return s.index
@@ -1026,7 +1117,7 @@ func (s *FileStore) persistWorkspaceLocked(ws *Workspace) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(s.resolveFolder(relPath), WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 	return nil
@@ -1069,7 +1160,7 @@ func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
 		logger.Error("failed to serialize migrated workspace", logger.Fields{"err": err, "workspace_id": ws.ID})
 		return
 	}
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 		return
 	}
@@ -1111,10 +1202,23 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 
 		ws, err := FromJSON(data)
 		if err != nil {
-			logger.Warn("Failed to deserialize workspace file, skipping", logger.Fields{
-				"file":  configPath,
-				"error": err.Error(),
-			})
+			// Quarantine the corrupt file so it isn't silently skipped on
+			// every subsequent boot. The renamed file remains for forensic
+			// recovery; the workspace will surface as unregistered.
+			quarantinePath := fmt.Sprintf("%s.corrupt-%d", configPath, time.Now().UnixNano())
+			if renameErr := os.Rename(configPath, quarantinePath); renameErr != nil {
+				logger.Error("Failed to quarantine corrupt workspace file", logger.Fields{
+					"file":         configPath,
+					"parse_error":  err.Error(),
+					"rename_error": renameErr.Error(),
+				})
+			} else {
+				logger.Error("Quarantined corrupt workspace file", logger.Fields{
+					"file":           configPath,
+					"quarantined_to": quarantinePath,
+					"parse_error":    err.Error(),
+				})
+			}
 			continue
 		}
 
@@ -1153,6 +1257,7 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 // InMemoryStore implements Store using in-memory storage (for testing)
 type InMemoryStore struct {
 	workspaces map[string]*Workspace
+	agents     map[string]map[string]*agent.Agent // workspaceID → agentName → snapshot
 	mu         sync.RWMutex
 }
 
@@ -1160,10 +1265,52 @@ type InMemoryStore struct {
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		workspaces: make(map[string]*Workspace),
+		agents:     make(map[string]map[string]*agent.Agent),
 	}
 }
 
-// Save stores a workspace in memory
+// GetWorkspaceAgent returns an in-memory snapshot of a workspace-local agent.
+func (s *InMemoryStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	byName, ok := s.agents[workspaceID]
+	if !ok {
+		return nil, false, nil
+	}
+	ag, ok := byName[strings.ToLower(strings.TrimSpace(agentName))]
+	if !ok {
+		return nil, false, nil
+	}
+	return ag, true, nil
+}
+
+// SaveWorkspaceAgent stores an in-memory snapshot of a workspace-local agent.
+func (s *InMemoryStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	if ag == nil {
+		return errors.New("nil agent")
+	}
+	key := strings.ToLower(strings.TrimSpace(agentName))
+	if key == "" {
+		return errors.New("agent name is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byName, ok := s.agents[workspaceID]
+	if !ok {
+		byName = make(map[string]*agent.Agent)
+		s.agents[workspaceID] = byName
+	}
+	byName[key] = ag
+	return nil
+}
+
+// Save stores a workspace in memory.
+//
+// Note: unlike FileStore, InMemoryStore stores the caller's *Workspace pointer
+// directly rather than a clone. Several existing tests rely on inserting
+// workspaces with Go-typed map values (e.g. []string in Scope) that would
+// otherwise be flattened to []interface{} by the JSON-based clone helper.
+// Tests that need clone semantics should use FileStore.
 func (s *InMemoryStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1172,7 +1319,7 @@ func (s *InMemoryStore) Save(ws *Workspace) error {
 	return nil
 }
 
-// Get retrieves a workspace by ID
+// Get retrieves a workspace by ID.
 func (s *InMemoryStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/invopop/jsonschema"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
@@ -28,9 +29,17 @@ func isReasoningModel(model string) bool {
 
 // OpenAIProvider implements the Provider interface for OpenAI
 type OpenAIProvider struct {
+	mu         sync.RWMutex
 	client     openai.Client
 	apiKey     string
 	httpClient *http.Client
+}
+
+// snapshot returns the current client and api key under read lock.
+func (p *OpenAIProvider) snapshot() (openai.Client, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.client, p.apiKey
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -62,9 +71,13 @@ func (p *OpenAIProvider) Type() ProviderType {
 	return ProviderTypeCloud
 }
 
-// Capabilities returns OpenAI's capabilities
+// Capabilities returns OpenAI's capabilities. Streaming is currently
+// unimplemented, so the cloud-default `true` is overridden here to keep
+// the advertised surface honest.
 func (p *OpenAIProvider) Capabilities() ProviderCapabilities {
-	return CloudProviderCapabilities(128000) // GPT-4o context window
+	caps := CloudProviderCapabilities(128000) // GPT-4o context window
+	caps.SupportsStreaming = false
+	return caps
 }
 
 // ValidateConfig validates the OpenAI configuration
@@ -83,7 +96,8 @@ func (p *OpenAIProvider) DefaultModels() []string {
 
 // Chat sends a chat completion request to OpenAI
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	if p.apiKey == "" {
+	client, apiKey := p.snapshot()
+	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required (set OPENAI_API_KEY or configure it in settings)")
 	}
 
@@ -119,7 +133,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Make API call
-	completion, err := p.client.Chat.Completions.New(ctx, params)
+	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("openai api error: %w", err)
 	}
@@ -160,7 +174,8 @@ func GenerateSchema[T any]() interface{} {
 
 // ChatWithStructuredOutput sends a chat request with structured output format
 func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
-	if p.apiKey == "" {
+	client, apiKey := p.snapshot()
+	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required")
 	}
 
@@ -195,7 +210,7 @@ func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req Struc
 	}
 
 	// Make API call
-	completion, err := p.client.Chat.Completions.New(ctx, params)
+	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("openai api error: %w", err)
 	}
@@ -352,11 +367,14 @@ func convertOpenAIChatCompletion(providerName string, completion *openai.ChatCom
 
 // UpdateClient updates the OpenAI client with a new API key
 func (p *OpenAIProvider) UpdateClient(apiKey string) {
-	if apiKey != "" {
-		p.apiKey = apiKey
-		p.client = openai.NewClient(
-			option.WithAPIKey(apiKey),
-			option.WithHTTPClient(p.httpClient),
-		)
+	if apiKey == "" {
+		return
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.apiKey = apiKey
+	p.client = openai.NewClient(
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(p.httpClient),
+	)
 }

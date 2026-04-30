@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 type providerStub struct {
@@ -45,6 +46,22 @@ func newTestTaskHandler(providerNames ...string) *LLMTaskHandler {
 		factory.Register(providerName, &providerStub{name: providerName})
 	}
 	return &LLMTaskHandler{llmFactory: factory}
+}
+
+type taskHandlerToolStub struct {
+	name string
+}
+
+func (t taskHandlerToolStub) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
+		Name:        t.name,
+		Description: "test tool",
+		Parameters:  map[string]interface{}{"type": "object"},
+	}
+}
+
+func (t taskHandlerToolStub) Call(_ context.Context, _ string) (string, error) {
+	return `{"ok":true}`, nil
 }
 
 func TestGetProviderForAgent_UsesConfiguredProvider(t *testing.T) {
@@ -116,5 +133,26 @@ func TestNormalizeModelForProvider_ClaudeAliases(t *testing.T) {
 
 	if got := handler.normalizeModelForProvider("claude", "opus"); got != "claude-3-opus-latest" {
 		t.Fatalf("expected claude opus alias mapping, got %q", got)
+	}
+}
+
+func TestConvertAgentToolsToLLMTools_IncludesWorkspaceTools(t *testing.T) {
+	handler := newTestTaskHandler("openai")
+	handler.SetWorkspaceToolFactory(func(workspaceID string) []toolapi.Tool {
+		if workspaceID != "workspace-1" {
+			t.Fatalf("expected workspace-1, got %q", workspaceID)
+		}
+		return []toolapi.Tool{taskHandlerToolStub{name: "workspace_notes"}}
+	})
+
+	task := Task{WorkspaceID: "workspace-1"}
+	tools := handler.convertAgentToolsToLLMTools(&resolvedTaskAgent{}, task)
+	if len(tools) != 1 || tools[0].Name != "workspace_notes" {
+		t.Fatalf("expected workspace_notes tool, got %#v", tools)
+	}
+
+	tool, ok := handler.findTool(&resolvedTaskAgent{}, task, "workspace_notes")
+	if !ok || tool == nil || tool.Definition().Name != "workspace_notes" {
+		t.Fatalf("expected findTool to resolve workspace_notes, got ok=%t tool=%#v", ok, tool)
 	}
 }

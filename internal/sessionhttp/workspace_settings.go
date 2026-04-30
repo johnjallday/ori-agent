@@ -6,6 +6,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
@@ -35,9 +36,10 @@ func (h *Handler) getWorkspaceSettings(w http.ResponseWriter, r *http.Request, i
 	settings := workspacesettings.Extract(workspace.SharedData)
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	orihttp.WriteJSON(w, map[string]interface{}{
-		"workspace_id":       workspace.ID,
-		"settings":           settings,
-		"effective_behavior": effective,
+		"workspace_id":         workspace.ID,
+		"settings":             settings,
+		"effective_behavior":   effective,
+		"task_markdown_status": h.taskMarkdownSyncStatus(workspace.ID, settings),
 	})
 }
 
@@ -59,6 +61,10 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 	}
 
 	sharedData, settings := workspacesettings.ApplyPatch(workspace.SharedData, patch)
+	if err := workspacesettings.ValidateTaskMarkdownPath(settings.TaskMarkdown.Path); err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
 	workspace.SharedData = sharedData
 	workspace.UpdatedAt = settings.UpdatedAt
 
@@ -80,11 +86,16 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":            true,
-		"workspace_id":       workspace.ID,
-		"settings":           settings,
-		"effective_behavior": effective,
+		"success":              true,
+		"workspace_id":         workspace.ID,
+		"settings":             settings,
+		"effective_behavior":   effective,
+		"task_markdown_status": h.taskMarkdownSyncStatus(workspace.ID, settings),
 	}); encErr != nil {
 		logger.Error("Failed to encode workspace settings response", logger.Fields{"error": encErr})
 	}
+}
+
+func (h *Handler) taskMarkdownSyncStatus(workspaceID string, settings workspacesettings.Settings) map[string]interface{} {
+	return agentworkspace.TaskMarkdownStatusForSettings(h.workspaceStore, workspaceID, settings.TaskMarkdown)
 }

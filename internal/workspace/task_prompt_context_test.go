@@ -77,7 +77,7 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 		workspaceStore: wsStore,
 		contextStore: &mockTaskPromptContextStore{
 			notes: []TaskPromptNoteSummary{
-				{Name: "Workspace note", Preview: "Summary of active work"},
+				{ID: "note-1", Name: "Workspace note", Preview: "Summary of active work"},
 			},
 			sessions: []TaskPromptSessionSummary{
 				{Title: "Daily sync", AgentName: "Ori", UpdatedAt: now},
@@ -104,7 +104,7 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 		`Open task: [pending] "summarize workspace" -> "Ori" (priority 1)`,
 		`File: "plan.md" (type="doc", mime="text/markdown")`,
 		`Directory: "amr" path="/Users/jjdev/Projects/amr"`,
-		`Note: "Workspace note" - "Summary of active work"`,
+		`Note: id="note-1" name="Workspace note" preview="Summary of active work"`,
 		`Session: "Daily sync" agent="Ori" updated_at="2026-03-08T10:00:00Z"`,
 		"Do not replace it with repository or worktree assumptions",
 	} {
@@ -169,6 +169,7 @@ func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T
 		"workspace as the collaborative workspace data provided in the prompt",
 		"not the server's current working directory, git checkout, or repository state",
 		"Use the workspace snapshot in the prompt as the source of truth",
+		"must call the workspace_notes tool with the note's id to read the full content",
 		"must verify the answer with filesystem tools before responding",
 		"Do not answer filesystem listing tasks from the workspace snapshot",
 		"return the list directly instead of asking whether the user wants to see it",

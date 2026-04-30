@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -26,9 +27,17 @@ var claudeModelDefaults = map[string]int64{
 
 // ClaudeProvider implements the Provider interface for Anthropic's Claude
 type ClaudeProvider struct {
+	mu         sync.RWMutex
 	client     anthropic.Client
 	apiKey     string
 	httpClient *http.Client
+}
+
+// snapshot returns the current client and api key under read lock.
+func (p *ClaudeProvider) snapshot() (anthropic.Client, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.client, p.apiKey
 }
 
 // NewClaudeProvider creates a new Claude provider
@@ -60,9 +69,13 @@ func (p *ClaudeProvider) Type() ProviderType {
 	return ProviderTypeCloud
 }
 
-// Capabilities returns Claude's capabilities
+// Capabilities returns Claude's capabilities. Streaming is currently
+// unimplemented, so the cloud-default `true` is overridden here to keep
+// the advertised surface honest.
 func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
-	return CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
+	caps := CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
+	caps.SupportsStreaming = false
+	return caps
 }
 
 // ValidateConfig validates the Claude configuration
@@ -122,7 +135,8 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Make API call
-	message, err := p.client.Messages.New(ctx, params)
+	client, _ := p.snapshot()
+	message, err := client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("claude api error: %w", err)
 	}
@@ -278,12 +292,17 @@ func (p *ClaudeProvider) convertResponse(message *anthropic.Message) *ChatRespon
 
 // UpdateClient updates the Claude client with a new API key
 func (p *ClaudeProvider) UpdateClient(apiKey string) {
-	if apiKey != "" {
-		p.apiKey = apiKey
-		p.httpClient = NewHTTPClient(DefaultCloudTimeout)
-		p.client = anthropic.NewClient(
-			option.WithHTTPClient(p.httpClient),
-			option.WithAPIKey(apiKey),
-		)
+	if apiKey == "" {
+		return
 	}
+	httpClient := NewHTTPClient(DefaultCloudTimeout)
+	client := anthropic.NewClient(
+		option.WithHTTPClient(httpClient),
+		option.WithAPIKey(apiKey),
+	)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.apiKey = apiKey
+	p.httpClient = httpClient
+	p.client = client
 }

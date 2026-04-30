@@ -8,15 +8,40 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// buildWorkspaceToolFactory returns a factory that exposes workspace-scoped
+// context tools (notes, tasks, sessions, files, directories) to the task
+// executor. Without these tools, task agents only see the truncated workspace
+// snapshot embedded in the prompt and cannot fetch full note content on demand.
+//
+// Returns nil when the session store is unavailable; callers should treat a
+// nil factory as "no workspace tools" and fall back to snapshot-only context.
+func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFactory {
+	if b.sessionStore == nil {
+		return nil
+	}
+	sessionStore := b.sessionStore
+	workspaceStore := b.workspaceStore
+	fileStore := b.workspaceFileStore
+	return func(workspaceID string) []toolapi.Tool {
+		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
+		if fileStore != nil {
+			provider.SetFileStore(fileStore)
+		}
+		return provider.Tools()
+	}
+}
 
 // initializeWorkspaceStore creates the workspace storage system.
 // Uses the session HybridStore as the underlying storage via an adapter,
@@ -83,6 +108,17 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 	}
 
+	// Wrap with AgentSnapshotStore so that every workspace Save() also writes
+	// workspace-local snapshots of any referenced agent that exists in the
+	// global agent registry. The snapshots make a workspace folder
+	// self-contained for export/import.
+	if b.st != nil {
+		ws = workspace.NewAgentSnapshotStore(ws, b.st)
+		// One-shot migration: snapshot referenced agents for every workspace
+		// already on disk so existing workspaces self-heal on next startup.
+		workspace.SnapshotAllWorkspaces(ws, b.st)
+	}
+
 	b.workspaceStore = ws
 
 	// Set workspace store on chat handler (uses SyncStore when available)
@@ -134,6 +170,9 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
+	if fn := b.buildWorkspaceToolFactory(); fn != nil {
+		taskHandler.SetWorkspaceToolFactory(fn)
+	}
 
 	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
@@ -176,6 +215,9 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+	}
+	if fn := b.buildWorkspaceToolFactory(); fn != nil {
+		taskHandler.SetWorkspaceToolFactory(fn)
 	}
 
 	// Create session store adapter for orchestration handler

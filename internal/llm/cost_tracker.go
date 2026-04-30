@@ -9,7 +9,18 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
+
+// isLocalProvider reports whether the provider runs locally and should not
+// be billed via the curated pricing fallback.
+func isLocalProvider(provider string) bool {
+	switch provider {
+	case "ollama", "lmstudio", "mlx_lm":
+		return true
+	}
+	return false
+}
 
 // PricingModel defines the cost structure for a model
 type PricingModel struct {
@@ -87,6 +98,13 @@ type CostTracker struct {
 	mu            sync.RWMutex
 	dataFile      string
 	maxRecords    int // Maximum records to keep in memory
+
+	// saveCh signals the writer goroutine that records have changed.
+	// Buffered (size 1) so concurrent TrackUsage calls coalesce into a
+	// single subsequent write, eliminating interleaved/torn writes.
+	saveCh   chan struct{}
+	stopCh   chan struct{}
+	saveDone chan struct{}
 }
 
 // NewCostTracker creates a new cost tracker
@@ -96,6 +114,9 @@ func NewCostTracker(dataDir string) *CostTracker {
 		records:       make([]UsageRecord, 0),
 		dataFile:      filepath.Join(dataDir, "usage_records.json"),
 		maxRecords:    10000, // Keep last 10k records in memory
+		saveCh:        make(chan struct{}, 1),
+		stopCh:        make(chan struct{}),
+		saveDone:      make(chan struct{}),
 	}
 
 	// Initialize default pricing models
@@ -104,7 +125,53 @@ func NewCostTracker(dataDir string) *CostTracker {
 	// Load existing records
 	_ = ct.loadRecords() // Ignore error on init, will retry later
 
+	go ct.saveLoop()
+
 	return ct
+}
+
+// Close stops the background writer goroutine after flushing any pending save.
+func (ct *CostTracker) Close() {
+	select {
+	case <-ct.stopCh:
+		return
+	default:
+	}
+	close(ct.stopCh)
+	<-ct.saveDone
+}
+
+// saveLoop is the single writer goroutine. It coalesces save signals so that
+// bursts of TrackUsage calls produce one subsequent write rather than N
+// racing writes.
+func (ct *CostTracker) saveLoop() {
+	defer close(ct.saveDone)
+	for {
+		select {
+		case <-ct.stopCh:
+			// Flush one final time if a save is pending
+			select {
+			case <-ct.saveCh:
+				ct.persistSnapshot()
+			default:
+			}
+			return
+		case <-ct.saveCh:
+			ct.persistSnapshot()
+		}
+	}
+}
+
+// persistSnapshot snapshots records under read lock and writes to disk.
+func (ct *CostTracker) persistSnapshot() {
+	ct.mu.RLock()
+	snapshot := make([]UsageRecord, len(ct.records))
+	copy(snapshot, ct.records)
+	ct.mu.RUnlock()
+
+	if err := ct.saveRecordsCopy(snapshot); err != nil {
+		logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
+	}
 }
 
 // initializePricingModels sets up default pricing for supported models
@@ -229,16 +296,12 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 		ct.records = ct.records[len(ct.records)-ct.maxRecords:]
 	}
 
-	// Make a copy of records for async save to avoid race condition
-	recordsCopy := make([]UsageRecord, len(ct.records))
-	copy(recordsCopy, ct.records)
-
-	// Save asynchronously with copied data
-	go func() {
-		if err := ct.saveRecordsCopy(recordsCopy); err != nil {
-			logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
-		}
-	}()
+	// Signal the writer goroutine. Non-blocking: if a save is already
+	// queued, this call coalesces into it.
+	select {
+	case ct.saveCh <- struct{}{}:
+	default:
+	}
 
 	return nil
 }
@@ -248,6 +311,17 @@ func (ct *CostTracker) calculateCost(provider, model string, usage Usage) (float
 	// Try exact match first
 	key := fmt.Sprintf("%s:%s", provider, model)
 	pm, found := ct.pricingModels[key]
+
+	// Fall back to the curated modelinfo pricing data (covers OpenAI, Gemini,
+	// and many Claude variants the static seed doesn't list). Skip this for
+	// known-free local providers so we don't accidentally bill ollama runs.
+	if !found && !isLocalProvider(provider) {
+		if mp := modelinfo.GetPricing(model); mp != nil {
+			return float64(usage.PromptTokens)*mp.InputPer1M/1_000_000.0 +
+					float64(usage.CompletionTokens)*mp.OutputPer1M/1_000_000.0,
+				"USD"
+		}
+	}
 
 	if !found {
 		// Try provider-level default
@@ -329,15 +403,19 @@ func (ct *CostTracker) GetStats(start, end time.Time) UsageStats {
 		}
 	}
 
-	// Get recent records (last 50)
-	recentStart := len(ct.records) - 50
-	if recentStart < 0 {
-		recentStart = 0
-	}
-	for i := recentStart; i < len(ct.records); i++ {
-		if ct.records[i].Timestamp.After(start) && ct.records[i].Timestamp.Before(end) {
-			stats.RecentRecords = append(stats.RecentRecords, ct.records[i])
+	// Recent records: take the last 50 records that fall within the range.
+	// Walk the records list in reverse so we can stop once we have 50 hits;
+	// then reverse the slice to restore chronological order.
+	const maxRecent = 50
+	for i := len(ct.records) - 1; i >= 0 && len(stats.RecentRecords) < maxRecent; i-- {
+		r := ct.records[i]
+		if r.Timestamp.Before(start) || r.Timestamp.After(end) {
+			continue
 		}
+		stats.RecentRecords = append(stats.RecentRecords, r)
+	}
+	for i, j := 0, len(stats.RecentRecords)-1; i < j; i, j = i+1, j-1 {
+		stats.RecentRecords[i], stats.RecentRecords[j] = stats.RecentRecords[j], stats.RecentRecords[i]
 	}
 
 	return stats
@@ -393,9 +471,25 @@ func (ct *CostTracker) saveRecordsCopy(records []UsageRecord) error {
 		return fmt.Errorf("failed to marshal records: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(ct.dataFile, data, 0644); err != nil {
+	// Atomic write: temp file + rename. Avoids leaving a truncated/corrupt
+	// file on crash mid-write.
+	tmp, err := os.CreateTemp(dir, "usage_records-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to write records: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, ct.dataFile); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	return nil
@@ -417,8 +511,24 @@ func (ct *CostTracker) loadRecords() error {
 		return fmt.Errorf("failed to read records: %w", err)
 	}
 
-	// Unmarshal records
+	// Unmarshal records. On parse failure, quarantine the corrupt file so
+	// the next save does not silently overwrite the only copy of history.
 	if err := json.Unmarshal(data, &ct.records); err != nil {
+		ct.records = nil
+		quarantinePath := fmt.Sprintf("%s.corrupt-%d", ct.dataFile, time.Now().UnixNano())
+		if renameErr := os.Rename(ct.dataFile, quarantinePath); renameErr != nil {
+			logger.Error("Failed to quarantine corrupt usage records", logger.Fields{
+				"file":         ct.dataFile,
+				"parse_error":  err.Error(),
+				"rename_error": renameErr.Error(),
+			})
+		} else {
+			logger.Error("Quarantined corrupt usage records", logger.Fields{
+				"file":           ct.dataFile,
+				"quarantined_to": quarantinePath,
+				"parse_error":    err.Error(),
+			})
+		}
 		return fmt.Errorf("failed to unmarshal records: %w", err)
 	}
 

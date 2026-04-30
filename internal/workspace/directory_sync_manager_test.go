@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
 )
 
 type directorySyncTestStore struct {
@@ -49,6 +51,14 @@ func (s *directorySyncTestStore) ListActive() ([]*Workspace, error) {
 
 func (s *directorySyncTestStore) GetFilesPath(workspaceID string) string {
 	return filepath.Join("workspaces", workspaceID, "files")
+}
+
+func (s *directorySyncTestStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	return nil, false, nil
+}
+
+func (s *directorySyncTestStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	return nil
 }
 
 func TestDirectorySyncManagerEmitsWorkspaceUpdatedEvent(t *testing.T) {

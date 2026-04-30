@@ -200,6 +200,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		logger.Info("Rerunning completed task", logger.Fields{"task_id": req.TaskID})
 		foundTask.Status = workspace.TaskStatusPending
 		foundTask.Result = ""
+		workspace.ApplyTaskResultMetadata(foundTask, "")
 		foundTask.Error = ""
 		foundTask.StartedAt = nil
 		foundTask.CompletedAt = nil
@@ -399,6 +400,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.Status = workspace.TaskStatusFailed
 		task.CompletedAt = &now
 		task.Result = ""
+		workspace.ApplyTaskResultMetadata(task, "")
 		if msg := strings.TrimSpace(req.Message); msg != "" {
 			task.Error = fmt.Sprintf("Marked as failed by user: %s", msg)
 		} else {
@@ -418,6 +420,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.ApplyTaskResultMetadata(task, "")
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	case "retry", "continue_with_instruction":
@@ -426,6 +429,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.ApplyTaskResultMetadata(task, "")
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	default:
@@ -550,6 +554,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	parentTask.StartedAt = &startedAt
 	parentTask.CompletedAt = nil
 	parentTask.Result = ""
+	workspace.ApplyTaskResultMetadata(parentTask, "")
 	parentTask.Error = ""
 
 	if err := ws.UpdateTask(*parentTask); err != nil {
@@ -646,6 +651,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			parentTask.Status = workspace.TaskStatusCancelled
 			parentTask.Error = "Cancelled by user"
 			parentTask.Result = ""
+			workspace.ApplyTaskResultMetadata(parentTask, "")
 			if th.eventBus != nil {
 				th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-cancelled", map[string]interface{}{
 					"task_id": parentTask.ID,
@@ -657,6 +663,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			parentTask.Status = workspace.TaskStatusFailed
 			parentTask.Error = execErr.Error()
 			parentTask.Result = ""
+			workspace.ApplyTaskResultMetadata(parentTask, "")
 
 			if th.eventBus != nil {
 				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
@@ -673,6 +680,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		logger.Info("Task sequence completed successfully", logger.Fields{"task_id": parentTaskID})
 		parentTask.Status = workspace.TaskStatusCompleted
 		parentTask.Result = lastResult
+		workspace.ApplyTaskResultMetadata(parentTask, lastResult)
 		parentTask.Error = ""
 
 		if th.eventBus != nil {
@@ -734,6 +742,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		task.StartedAt = &now
 	}
 	task.Result = ""
+	workspace.ApplyTaskResultMetadata(task, "")
 	task.Error = ""
 	if task.Context == nil {
 		task.Context = map[string]interface{}{}
@@ -858,6 +867,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 			task.Status = workspace.TaskStatusCompleted
 			task.Result = result
+			workspace.ApplyTaskResultMetadata(task, result)
 			task.Error = ""
 			startedAt := completedAt
 			if task.StartedAt != nil && !task.StartedAt.IsZero() {
@@ -917,6 +927,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	task.CompletedAt = nil
 	task.Error = ""
 	task.Result = ""
+	workspace.ApplyTaskResultMetadata(task, "")
 	startedAt := now
 	if task.StartedAt != nil && !task.StartedAt.IsZero() {
 		startedAt = *task.StartedAt
@@ -2440,6 +2451,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 			logger.Info("Input task completed successfully", logger.Fields{"input_task_id": inputTaskID})
 			inputTask.Status = workspace.TaskStatusCompleted
 			inputTask.Result = result
+			workspace.ApplyTaskResultMetadata(inputTask, result)
 		}
 
 		// Save updated task
