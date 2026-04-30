@@ -108,6 +108,7 @@ type ServerBuilder struct {
 	updateMgr             *updatemanager.Manager
 	workspaceStore        workspace.Store
 	workspaceFileStore    *workspace.FileStore
+	taskHandler           *workspace.LLMTaskHandler
 	taskExecutor          *workspace.TaskExecutor
 	stepExecutor          *workspace.StepExecutor
 	taskScheduler         *workspace.TaskScheduler
