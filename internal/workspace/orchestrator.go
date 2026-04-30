@@ -327,7 +327,14 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	return nil
 }
 
-// executeTaskWithLLM executes a task using the LLM provider with tool support
+// executeTaskWithLLM executes a task using the LLM provider.
+//
+// TODO: Tool support was lost in commit 672e8a3b ("Remove plugin system entirely
+// in favor of MCP and skills") — the loop that populated `tools` from plugin
+// definitions was removed but never re-implemented for MCP/skills. Tasks routed
+// through this path currently run without their agent's tools. Re-wire tool
+// loading via MCP/skills (see internal/mcp and internal/skills) before relying
+// on this path for tool-using tasks.
 func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (string, error) {
 	if o.llmProvider == nil {
 		return "", fmt.Errorf("LLM provider not configured")
@@ -335,7 +342,8 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 
 	logger.Debug("[Orchestrator] Executing task with LLM", logger.Fields{"task_id": task.ID, "description": task.Description, "assigned_to": task.To})
 
-	// Load the agent to get its tools
+	// Resolve the agent. Tools are not loaded here — see the TODO on this
+	// function's doc comment.
 	var tools []llm.Tool
 	var ag *agent.Agent
 	if o.agentStore != nil && task.To != "" {
@@ -348,22 +356,12 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 		}
 	}
 
-	// Create system prompt with agent role and tool guidance
+	// Create system prompt with agent role.
 	systemPrompt := fmt.Sprintf(
 		"You are %s, an AI agent in a multi-agent workspace. You have been assigned a task. "+
 			"Please complete the task to the best of your ability and provide a clear result.",
 		task.To,
 	)
-
-	// Add tool guidance if tools are available
-	if len(tools) > 0 {
-		var toolNames []string
-		for _, t := range tools {
-			toolNames = append(toolNames, t.Name)
-		}
-		systemPrompt += fmt.Sprintf(" You have access to the following tools: %s. Use them when appropriate to complete your task.",
-			fmt.Sprintf("%v", toolNames))
-	}
 
 	// Build user message with task description and formatted context
 	taskPrompt := fmt.Sprintf("# Task Assignment\n\n%s\n\n", task.Description)
