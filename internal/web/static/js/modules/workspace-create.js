@@ -158,6 +158,26 @@ function setImportMode(enabled) {
     clearDuplicateWarning();
   }
 
+  const modal = document.getElementById('addFolderModal');
+  if (modal) {
+    modal.dataset.importMode = workspaceCreateState.importMode ? 'true' : 'false';
+  }
+
+  const importToggle = document.getElementById('folderImportToggle');
+  if (importToggle) {
+    importToggle.checked = workspaceCreateState.importMode;
+  }
+
+  const title = document.getElementById('folderModalTitle');
+  if (title) {
+    title.textContent = workspaceCreateState.importMode ? 'Import Folder' : 'Create Workspace';
+  }
+
+  const card = document.getElementById('folderImportCard');
+  if (card) {
+    card.hidden = !workspaceCreateState.importMode;
+  }
+
   const section = document.getElementById('folderImportSection');
   if (section) {
     section.hidden = !workspaceCreateState.importMode;
@@ -443,7 +463,7 @@ async function createWorkspace() {
   const workspacePreset = presetSelect?.value?.trim() || 'general';
   const parentId = parentSelect?.value?.trim() || '';
   const color = colorBtn?.dataset.color || '';
-  const importEnabled = Boolean(importToggle?.checked);
+  const importEnabled = workspaceCreateState.importMode || Boolean(importToggle?.checked);
   const importPath = importPathInput?.value?.trim() || '';
 
   if (!name && !importEnabled) {
@@ -705,7 +725,7 @@ function initializeWorkspaceCreationListeners() {
       workspaceCreateState.allowDuplicateImport = true;
       emitDuplicateOutcomeTelemetry('override_confirmed', importPathInput?.value || '');
       if (typeof window.showToast === 'function') {
-        window.showToast('Duplicate override enabled. Click Create to continue.', 'warning');
+        window.showToast('Duplicate override enabled. Click Import Folder to continue.', 'warning');
       }
     });
   }

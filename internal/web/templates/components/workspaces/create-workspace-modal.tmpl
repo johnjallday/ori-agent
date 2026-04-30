@@ -1,10 +1,10 @@
 {{define "components/workspaces/create-workspace-modal.tmpl"}}
-<!-- Create Workspace Modal -->
+<!-- Create/Import Workspace Modal -->
 <div class="modal fade workspace-create-modal" id="addFolderModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable workspace-create-modal-dialog">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-        <h6 class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
+        <h6 id="folderModalTitle" class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body workspace-create-modal-body">
@@ -38,14 +38,14 @@
               <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
             </div>
 
-            <div class="workspace-setup-card mb-2">
-              <div class="workspace-setup-header">
-                <label for="folderImportToggle" class="workspace-setup-title">Import from Existing Folder</label>
-                <div class="form-check form-switch m-0">
-                  <input class="form-check-input" type="checkbox" id="folderImportToggle" role="switch" aria-label="Import from existing folder">
+            <input type="checkbox" id="folderImportToggle" hidden aria-hidden="true" tabindex="-1">
+            <div id="folderImportCard" class="workspace-setup-card mb-2" hidden>
+              <div class="workspace-setup-header" style="align-items: flex-start;">
+                <div>
+                  <div class="workspace-setup-title">Import Folder</div>
+                  <p class="workspace-setup-help mb-0">Link a local folder so this workspace starts with real project context.</p>
                 </div>
               </div>
-              <p class="workspace-setup-help mb-2">Link a local folder so this workspace starts with real project context.</p>
 
               <div id="folderImportSection" hidden>
                 <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
