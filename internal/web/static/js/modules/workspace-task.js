@@ -728,6 +728,20 @@ export class WorkspaceTaskPage {
     this.resultPromotionPending = false;
     this.resultPromotionSubmitting = false;
     this.resultPromotionDraft = null;
+    this.resultResearchPendingSectionId = '';
+    this.resultResearchDraft = null;
+    this.resultResearchSubmitting = false;
+    this.resultSectionMenu = null;
+    this.boundResultSectionMenuDocumentClick = (event) => {
+      if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
+      this.closeResultSectionMenu();
+    };
+    this.boundResultSectionMenuKeydown = (event) => {
+      if (event.key === 'Escape') {
+        this.closeResultSectionMenu();
+      }
+    };
+    this.boundResultSectionMenuScroll = () => this.closeResultSectionMenu();
     this.elements = {};
   }
 
@@ -774,6 +788,16 @@ export class WorkspaceTaskPage {
       resultPromoteMeta: document.getElementById('workspace-task-result-promote-meta'),
       resultPromoteGroups: document.getElementById('workspace-task-result-promote-groups'),
       resultPromoteSubmitBtn: document.getElementById('workspace-task-result-promote-submit'),
+      resultResearchModal: document.getElementById('workspace-task-result-research-modal'),
+      resultResearchSectionMeta: document.getElementById('workspace-task-result-research-section-meta'),
+      resultResearchTitleInput: document.getElementById('workspace-task-result-research-title'),
+      resultResearchAgentSelect: document.getElementById('workspace-task-result-research-agent'),
+      resultResearchDetailsInput: document.getElementById('workspace-task-result-research-details'),
+      resultResearchSectionInput: document.getElementById('workspace-task-result-research-section-text'),
+      resultResearchLinkInput: document.getElementById('workspace-task-result-research-link-source'),
+      resultResearchRunInput: document.getElementById('workspace-task-result-research-run-now'),
+      resultResearchOpenInput: document.getElementById('workspace-task-result-research-open-after-create'),
+      resultResearchSubmitBtn: document.getElementById('workspace-task-result-research-submit'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
       workflowAddStepBtn: document.getElementById('workspace-task-workflow-add-step'),
@@ -829,6 +853,12 @@ export class WorkspaceTaskPage {
     this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
       if (this.resultPromotionSubmitting) return;
       this.resultPromotionDraft = null;
+    });
+    this.elements.resultResearchSubmitBtn?.addEventListener('click', () => this.submitResultResearchDraft());
+    this.elements.resultResearchRunInput?.addEventListener('change', () => this.updateResultResearchSubmitLabel());
+    this.elements.resultResearchModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.resultResearchSubmitting) return;
+      this.resultResearchDraft = null;
     });
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
@@ -2322,11 +2352,504 @@ export class WorkspaceTaskPage {
     return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
   }
 
+  getResultHeadingLevel(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return 0;
+    const match = String(node.tagName || '').match(/^H([1-6])$/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  pickResultSectionHeadingLevel(headings) {
+    const counts = new Map();
+    headings.forEach((heading) => {
+      const level = this.getResultHeadingLevel(heading);
+      if (!level) return;
+      counts.set(level, (counts.get(level) || 0) + 1);
+    });
+
+    const repeatedLevels = Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([level]) => level)
+      .sort((a, b) => a - b);
+    if (repeatedLevels.length > 0) return repeatedLevels[0];
+
+    const levels = Array.from(counts.keys()).sort((a, b) => a - b);
+    if (levels.length > 1 && counts.get(levels[0]) === 1) return levels[1];
+    return levels[0] || 0;
+  }
+
+  buildResultSectionId(title, index) {
+    const slug = String(title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 56);
+    return `result-section-${index}-${slug || 'section'}`;
+  }
+
+  getResultSectionTitle(section) {
+    const explicit = String(section?.dataset?.resultSectionTitle || '').trim();
+    if (explicit) return explicit;
+    const heading = section?.querySelector?.('h1, h2, h3, h4, h5, h6');
+    return String(heading?.textContent || '').replace(/\s+/g, ' ').trim() || 'Result section';
+  }
+
+  getResultSectionText(section) {
+    const content = section?.querySelector?.('.workspace-task-result-section-content') || section;
+    return String(content?.innerText || '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  updateResultSectionResearchButton(section, state = {}) {
+    const button = section?.querySelector?.('[data-action="research-result-section"]');
+    if (!button) return;
+
+    const createdTaskId = String(state.createdTaskId || section.dataset.followUpTaskId || '').trim();
+    const isPending = Boolean(state.pending);
+    const icon = button.querySelector('i');
+    const label = button.querySelector('.visually-hidden');
+
+    button.disabled = isPending;
+    button.classList.toggle('is-pending', isPending);
+    button.classList.toggle('has-follow-up', Boolean(createdTaskId));
+    button.dataset.tooltip = isPending
+      ? 'Creating research task...'
+      : createdTaskId
+        ? 'Open research follow-up'
+        : 'Draft research follow-up';
+    button.setAttribute('aria-label', button.dataset.tooltip);
+    button.title = button.dataset.tooltip;
+
+    if (icon) {
+      icon.className = isPending
+        ? 'bi bi-arrow-repeat'
+        : createdTaskId
+          ? 'bi bi-box-arrow-up-right'
+          : 'bi bi-search';
+    }
+    if (label) {
+      label.textContent = button.dataset.tooltip;
+    }
+  }
+
+  createResultSectionAction(section) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'workspace-task-result-section-action';
+    button.dataset.action = 'research-result-section';
+    button.dataset.tooltip = 'Draft research follow-up';
+    button.title = button.dataset.tooltip;
+    button.setAttribute('aria-label', button.dataset.tooltip);
+    button.innerHTML = '<i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Draft research follow-up</span>';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.handleResearchResultSection(section);
+    });
+    return button;
+  }
+
+  enhanceResultSections() {
+    this.closeResultSectionMenu();
+    const prose = this.elements.output?.querySelector?.('.workspace-task-page-prose');
+    if (!prose) return;
+
+    const headings = Array.from(prose.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    if (headings.length === 0) return;
+
+    const sectionHeadingLevel = this.pickResultSectionHeadingLevel(headings);
+    if (!sectionHeadingLevel) return;
+
+    const nodes = Array.from(prose.childNodes);
+    let currentSection = null;
+    let currentSectionBody = null;
+    let sectionIndex = 0;
+
+    nodes.forEach((node) => {
+      const headingLevel = this.getResultHeadingLevel(node);
+      const startsSection = headingLevel > 0 && headingLevel <= sectionHeadingLevel;
+
+      if (startsSection) {
+        sectionIndex += 1;
+        const title = String(node.textContent || '').replace(/\s+/g, ' ').trim() || `Section ${sectionIndex}`;
+        const section = document.createElement('section');
+        section.className = 'workspace-task-result-section';
+        section.dataset.resultSectionId = this.buildResultSectionId(title, sectionIndex);
+        section.dataset.resultSectionTitle = title;
+        section.setAttribute('aria-label', `Result section: ${title}`);
+
+        const body = document.createElement('div');
+        body.className = 'workspace-task-result-section-content';
+
+        section.appendChild(this.createResultSectionAction(section));
+        section.appendChild(body);
+        prose.insertBefore(section, node);
+
+        currentSection = section;
+        currentSectionBody = body;
+      }
+
+      if (currentSectionBody) {
+        currentSectionBody.appendChild(node);
+      }
+    });
+
+    const sections = Array.from(prose.querySelectorAll('.workspace-task-result-section'));
+    if (sections.length === 0) return;
+
+    prose.classList.add('is-sectioned');
+    sections.forEach((section) => {
+      section.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        this.showResultSectionMenu(section, event.clientX, event.clientY);
+      });
+    });
+  }
+
+  closeResultSectionMenu() {
+    if (this.resultSectionMenu) {
+      this.resultSectionMenu.remove();
+      this.resultSectionMenu = null;
+    }
+    document.removeEventListener('click', this.boundResultSectionMenuDocumentClick, true);
+    document.removeEventListener('keydown', this.boundResultSectionMenuKeydown, true);
+    window.removeEventListener('scroll', this.boundResultSectionMenuScroll, true);
+  }
+
+  showResultSectionMenu(section, clientX, clientY) {
+    this.closeResultSectionMenu();
+
+    const title = this.getResultSectionTitle(section);
+    const menu = document.createElement('div');
+    menu.className = 'workspace-task-result-section-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', `Actions for ${title}`);
+    menu.innerHTML = `
+      <div class="workspace-task-result-section-menu-title">${this.escapeHtml(summarizeText(title, 72))}</div>
+      <button type="button" class="workspace-task-result-section-menu-item" data-action="research-result-section" role="menuitem">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <span>Draft research task</span>
+      </button>
+      <button type="button" class="workspace-task-result-section-menu-item" data-action="copy-result-section" role="menuitem">
+        <i class="bi bi-clipboard" aria-hidden="true"></i>
+        <span>Copy section</span>
+      </button>
+    `;
+
+    document.body.appendChild(menu);
+    const viewportPadding = 10;
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(clientX, viewportPadding),
+      Math.max(viewportPadding, window.innerWidth - menuRect.width - viewportPadding)
+    );
+    const top = Math.min(
+      Math.max(clientY, viewportPadding),
+      Math.max(viewportPadding, window.innerHeight - menuRect.height - viewportPadding)
+    );
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    menu.querySelector('[data-action="research-result-section"]')?.addEventListener('click', () => {
+      this.closeResultSectionMenu();
+      void this.handleResearchResultSection(section);
+    });
+    menu.querySelector('[data-action="copy-result-section"]')?.addEventListener('click', () => {
+      this.closeResultSectionMenu();
+      void this.copyResultSection(section);
+    });
+
+    this.resultSectionMenu = menu;
+    setTimeout(() => {
+      document.addEventListener('click', this.boundResultSectionMenuDocumentClick, true);
+      document.addEventListener('keydown', this.boundResultSectionMenuKeydown, true);
+      window.addEventListener('scroll', this.boundResultSectionMenuScroll, true);
+    }, 0);
+  }
+
+  buildResultResearchTitle(sectionTitle) {
+    const title = String(sectionTitle || 'Result section').replace(/\s+/g, ' ').trim() || 'Result section';
+    const combined = `Research further: ${title}`;
+    return combined.length > 160 ? `${combined.slice(0, 157).trim()}...` : combined;
+  }
+
+  buildResultResearchDetails(sectionTitle) {
+    const sourceTitle = this.getTaskDisplayLabel();
+    return [
+      `Follow-up research created from completed task: ${sourceTitle}`,
+      `Selected result section: ${sectionTitle}`,
+      `Source task: ${this.task?.id || this.taskId}`,
+      '',
+      'Use the linked task result as context, but focus the answer on this selected section.',
+      'Research it more deeply, add practical criteria and tradeoffs, and include citations when web research is available.'
+    ].join('\n');
+  }
+
+  buildResultResearchDraft(section, sectionTitle, sectionText) {
+    const currentAgent = String(this.task?.to || '').trim();
+    return {
+      sectionId: String(section?.dataset?.resultSectionId || '').trim(),
+      sectionTitle,
+      sourceTaskId: String(this.task?.id || this.taskId || '').trim(),
+      title: this.buildResultResearchTitle(sectionTitle),
+      agent: currentAgent && currentAgent !== 'unassigned' ? currentAgent : '',
+      details: this.buildResultResearchDetails(sectionTitle),
+      sectionText,
+      linkSource: true,
+      runNow: true,
+      openAfterCreate: true
+    };
+  }
+
+  renderResultResearchAgentOptions(selectedAgent = '') {
+    if (!this.elements.resultResearchAgentSelect) return;
+
+    const normalizedSelected = String(selectedAgent || '').trim();
+    const options = ['<option value="">Unassigned manual task</option>'];
+    const names = this.getAssignableAgentNames(normalizedSelected);
+    if (normalizedSelected && !names.some((name) => String(name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())) {
+      options.push(`<option value="${this.escapeHtml(normalizedSelected)}" selected>${this.escapeHtml(`${normalizedSelected} (Current)`)}</option>`);
+    }
+    names.forEach((agentName) => {
+      const normalized = String(agentName || '').trim();
+      if (!normalized) return;
+      options.push(`<option value="${this.escapeHtml(normalized)}" ${normalized.toLowerCase() === normalizedSelected.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(normalized)}</option>`);
+    });
+    this.elements.resultResearchAgentSelect.innerHTML = options.join('');
+  }
+
+  populateResultResearchModal(draft) {
+    if (!draft) return;
+
+    if (this.elements.resultResearchSectionMeta) {
+      const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+      const sectionLabel = summarizeText(draft.sectionTitle, 90);
+      this.elements.resultResearchSectionMeta.textContent = `${sectionLabel} • from ${taskLabel}`;
+    }
+    if (this.elements.resultResearchTitleInput) {
+      this.elements.resultResearchTitleInput.value = draft.title;
+    }
+    this.renderResultResearchAgentOptions(draft.agent);
+    if (this.elements.resultResearchDetailsInput) {
+      this.elements.resultResearchDetailsInput.value = draft.details;
+    }
+    if (this.elements.resultResearchSectionInput) {
+      this.elements.resultResearchSectionInput.value = draft.sectionText;
+    }
+    if (this.elements.resultResearchLinkInput) {
+      this.elements.resultResearchLinkInput.checked = draft.linkSource !== false;
+    }
+    if (this.elements.resultResearchRunInput) {
+      this.elements.resultResearchRunInput.checked = draft.runNow !== false;
+    }
+    if (this.elements.resultResearchOpenInput) {
+      this.elements.resultResearchOpenInput.checked = draft.openAfterCreate !== false;
+    }
+    this.setResultResearchSubmitting(false);
+    this.updateResultResearchSubmitLabel();
+  }
+
+  openResultResearchModal(draft) {
+    if (!this.elements.resultResearchModal || typeof bootstrap === 'undefined') return;
+
+    this.resultResearchDraft = draft;
+    this.populateResultResearchModal(draft);
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.resultResearchModal)
+        : bootstrap.Modal.getInstance(this.elements.resultResearchModal) ||
+          new bootstrap.Modal(this.elements.resultResearchModal);
+    modal.show();
+    setTimeout(() => {
+      this.elements.resultResearchTitleInput?.focus();
+      this.elements.resultResearchTitleInput?.select();
+    }, 120);
+  }
+
+  collectResultResearchDraft() {
+    const draft = { ...(this.resultResearchDraft || {}) };
+    draft.title = String(this.elements.resultResearchTitleInput?.value || '').trim();
+    draft.agent = String(this.elements.resultResearchAgentSelect?.value || '').trim();
+    draft.details = String(this.elements.resultResearchDetailsInput?.value || '').trim();
+    draft.sectionText = String(this.elements.resultResearchSectionInput?.value || '').trim();
+    draft.linkSource = this.elements.resultResearchLinkInput?.checked !== false;
+    draft.runNow = this.elements.resultResearchRunInput?.checked !== false;
+    draft.openAfterCreate = this.elements.resultResearchOpenInput?.checked !== false;
+    return draft;
+  }
+
+  validateResultResearchDraft(draft) {
+    if (!draft || typeof draft !== 'object') return 'Research draft is unavailable.';
+    if (!String(draft.title || '').trim()) return 'Task title is required.';
+    if (!String(draft.details || '').trim()) return 'Instructions are required.';
+    if (!String(draft.sectionText || '').trim()) return 'Selected section text is required.';
+    if (draft.runNow && !String(draft.agent || '').trim()) return 'Choose an agent before running now, or turn off Run immediately.';
+    return '';
+  }
+
+  buildResultResearchPayload(draft) {
+    const details = [
+      String(draft.details || '').trim(),
+      '',
+      'Selected section text:',
+      String(draft.sectionText || '').trim()
+    ].join('\n').trim();
+    const payload = {
+      workspace_id: this.workspaceId,
+      description: draft.title,
+      details,
+      priority: Number.isFinite(this.task?.priority) ? this.task.priority : 3,
+      to: draft.agent || undefined,
+      input_task_ids: draft.linkSource ? [draft.sourceTaskId || this.task?.id || this.taskId].filter(Boolean) : []
+    };
+
+    const currentAgent = String(this.task?.to || '').trim();
+    const currentAssignedNode = String(this.task?.assigned_node_id || '').trim();
+    if (currentAssignedNode && draft.agent && draft.agent.toLowerCase() === currentAgent.toLowerCase()) {
+      payload.assigned_node_id = currentAssignedNode;
+    }
+
+    return payload;
+  }
+
+  async createResultResearchTask(draft) {
+    const payload = this.buildResultResearchPayload(draft);
+
+    const response = await fetch('/api/orchestration/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || data?.message || 'Failed to create research task');
+    }
+
+    const createdTask = data.task || data;
+    if (!createdTask?.id) {
+      throw new Error('Research task was created without an id');
+    }
+
+    if (!draft.runNow) {
+      return createdTask;
+    }
+
+    const executeResponse = await fetch('/api/orchestration/tasks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: createdTask.id })
+    });
+    if (!executeResponse.ok) {
+      const text = await executeResponse.text();
+      throw new Error(text || 'Research task was created but could not be started');
+    }
+
+    return createdTask;
+  }
+
+  setResultResearchSubmitting(isSubmitting) {
+    this.resultResearchSubmitting = Boolean(isSubmitting);
+    if (this.elements.resultResearchSubmitBtn) {
+      this.elements.resultResearchSubmitBtn.disabled = this.resultResearchSubmitting;
+      this.elements.resultResearchSubmitBtn.innerHTML = this.resultResearchSubmitting
+        ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Creating...</span>'
+        : this.getResultResearchSubmitMarkup();
+    }
+  }
+
+  getResultResearchSubmitMarkup() {
+    const runNow = this.elements.resultResearchRunInput?.checked !== false;
+    return runNow
+      ? '<i class="bi bi-send" aria-hidden="true"></i><span>Create & Run</span>'
+      : '<i class="bi bi-plus-circle" aria-hidden="true"></i><span>Create Draft</span>';
+  }
+
+  updateResultResearchSubmitLabel() {
+    if (!this.elements.resultResearchSubmitBtn || this.resultResearchSubmitting) return;
+    this.elements.resultResearchSubmitBtn.innerHTML = this.getResultResearchSubmitMarkup();
+  }
+
+  async handleResearchResultSection(section) {
+    const sectionId = String(section?.dataset?.resultSectionId || '').trim();
+    if (!section || !sectionId || this.resultResearchSubmitting) return;
+
+    const existingFollowUpId = String(section.dataset.followUpTaskId || '').trim();
+    if (existingFollowUpId) {
+      window.location.href = this.getTaskHref(existingFollowUpId);
+      return;
+    }
+
+    const sectionTitle = this.getResultSectionTitle(section);
+    const sectionText = this.getResultSectionText(section);
+    if (!sectionText) {
+      this.notify('warning', 'No section text is available to research.');
+      return;
+    }
+
+    const draft = this.buildResultResearchDraft(section, sectionTitle, sectionText);
+    this.openResultResearchModal(draft);
+  }
+
+  async submitResultResearchDraft() {
+    if (this.resultResearchSubmitting) return;
+
+    const draft = this.collectResultResearchDraft();
+    const validationError = this.validateResultResearchDraft(draft);
+    if (validationError) {
+      this.notify('warning', validationError);
+      return;
+    }
+
+    const section = draft.sectionId
+      ? Array.from(this.elements.output?.querySelectorAll?.('[data-result-section-id]') || [])
+        .find((item) => String(item?.dataset?.resultSectionId || '') === String(draft.sectionId))
+      : null;
+
+    this.resultResearchPendingSectionId = String(draft.sectionId || '').trim();
+    this.setResultResearchSubmitting(true);
+    this.updateResultSectionResearchButton(section, { pending: true });
+
+    try {
+      const createdTask = await this.createResultResearchTask(draft);
+      const createdTaskId = String(createdTask?.id || '').trim();
+      if (section && createdTaskId) {
+        section.dataset.followUpTaskId = createdTaskId;
+      }
+      section?.classList.add('has-follow-up');
+      this.updateResultSectionResearchButton(section, { createdTaskId });
+      this.notify('success', draft.runNow ? 'Research follow-up started' : 'Research follow-up created');
+      if (this.elements.resultResearchModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.resultResearchModal)?.hide();
+      }
+      if (draft.openAfterCreate && createdTaskId) {
+        window.location.href = this.getTaskHref(createdTaskId);
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to start result section research:', error);
+      this.notify('error', error?.message || 'Failed to start research follow-up');
+      this.updateResultSectionResearchButton(section);
+    } finally {
+      this.resultResearchPendingSectionId = '';
+      this.setResultResearchSubmitting(false);
+    }
+  }
+
+  async copyResultSection(section) {
+    const sectionText = this.getResultSectionText(section);
+    if (!sectionText) {
+      this.notify('warning', 'No section text is available to copy.');
+      return;
+    }
+    await this.copyToClipboard(sectionText, 'Section copied');
+  }
+
   renderOutput() {
     if (!this.elements.output || !this.elements.outputCard) return;
 
     const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
+    this.closeResultSectionMenu();
 
     if (!result && !error) {
       this.elements.outputCard.hidden = true;
@@ -2359,6 +2882,7 @@ export class WorkspaceTaskPage {
 
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
+    this.enhanceResultSections();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
   }
