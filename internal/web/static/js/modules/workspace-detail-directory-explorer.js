@@ -400,6 +400,18 @@ export class WorkspaceDirectoryExplorer {
     if (!directory) return;
 
     const elements = this.host.elements;
+
+    // Capture which tree button (if any) currently has focus. innerHTML rewrite
+    // below will destroy it; we restore focus to the equivalent new button so
+    // arrow-key navigation keeps working across re-renders.
+    const treeEl = elements.directoryExplorerTree;
+    const focusedNode = treeEl && treeEl.contains(document.activeElement)
+      ? document.activeElement.closest('[data-path]')
+      : null;
+    const focusedPath = focusedNode
+      ? this.decodeDataPath(focusedNode.dataset.path || '')
+      : null;
+
     if (elements.directoryExplorerTitle) {
       elements.directoryExplorerTitle.textContent =
         directory.name || directory.path || 'Directory Explorer';
@@ -449,6 +461,16 @@ export class WorkspaceDirectoryExplorer {
             ${this.renderTreeChildren(treeChildren, 0, hasSearch)}
           </div>
         `;
+      }
+
+      // Restore focus to the equivalent button if the user was navigating the tree.
+      // Falls through silently when the previously focused path no longer exists
+      // (e.g. user collapsed an ancestor folder).
+      if (focusedPath) {
+        const restoreTarget = elements.directoryExplorerTree.querySelector(
+          `[data-action="select-node"][data-path="${this.encodeDataPath(focusedPath)}"]`
+        );
+        if (restoreTarget) restoreTarget.focus({ preventScroll: true });
       }
     }
 
