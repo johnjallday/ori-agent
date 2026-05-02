@@ -82,7 +82,30 @@ export class WorkspaceDirectoryExplorer {
     elements.directoryExplorerTree?.addEventListener('keydown', event => {
       const nodeButton = event.target.closest('[data-action="select-node"]');
       if (!nodeButton) return;
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const isVerticalArrow = event.key === 'ArrowUp' || event.key === 'ArrowDown';
+      const isHorizontalArrow = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      if (!isVerticalArrow && !isHorizontalArrow) return;
+
+      if (isVerticalArrow) {
+        event.preventDefault();
+        const buttons = Array.from(
+          elements.directoryExplorerTree.querySelectorAll('[data-action="select-node"]')
+        );
+        const currentIndex = buttons.indexOf(nodeButton);
+        if (currentIndex === -1) return;
+        const nextIndex = event.key === 'ArrowDown'
+          ? Math.min(currentIndex + 1, buttons.length - 1)
+          : Math.max(currentIndex - 1, 0);
+        if (nextIndex === currentIndex) return;
+        const target = buttons[nextIndex];
+        const targetPath = this.decodeDataPath(target.dataset.path);
+        const targetType = target.dataset.type || 'file';
+        // Focus the target before triggering the re-render so render()'s
+        // focus-restore logic captures and re-applies the new path, not the old.
+        target.focus({ preventScroll: false });
+        this.selectNode(targetPath, targetType);
+        return;
+      }
 
       const path = this.decodeDataPath(nodeButton.dataset.path);
       const type = nodeButton.dataset.type || 'file';
