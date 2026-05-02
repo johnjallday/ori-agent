@@ -1264,8 +1264,8 @@ function appendMessageToUI(message, isUser = false, isError = false, routeMeta =
     const tableContent = tryRenderJsonTable(message);
     if (tableContent) {
       messageBody.innerHTML = tableContent;
-    } else if (typeof marked !== 'undefined') {
-      messageBody.innerHTML = marked.parse(message);
+    } else if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+      messageBody.innerHTML = DOMPurify.sanitize(marked.parse(message));
     } else {
       messageBody.textContent = message;
     }

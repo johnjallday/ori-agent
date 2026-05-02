@@ -2316,8 +2316,9 @@ export class WorkspaceTaskPage {
     if (this.isStructuredData(text)) {
       return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
     }
-    if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-      return `<div class="workspace-task-page-prose">${marked.parse(text)}</div>`;
+    if (typeof marked !== 'undefined' && typeof marked.parse === 'function' && typeof DOMPurify !== 'undefined') {
+      const safeHtml = DOMPurify.sanitize(marked.parse(text));
+      return `<div class="workspace-task-page-prose">${safeHtml}</div>`;
     }
     return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
   }

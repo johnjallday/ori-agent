@@ -1666,6 +1666,8 @@ export class WorkspaceDetailPage {
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
       homeAssistantQuickNotesBtn: document.getElementById('homeAssistantQuickNotes'),
       homeAssistantQuickReviewBtn: document.getElementById('homeAssistantQuickReview'),
+      homeAssistantConfigureTaskBtn: document.getElementById('homeAssistantConfigureTaskBtn'),
+      homeAssistantInput: document.getElementById('homeAssistantInput'),
 
       // View toggle
       viewListBtn: document.getElementById('workspace-detail-view-list'),
@@ -1959,6 +1961,51 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
+
+    // "Open task editor" icon button: opens the task modal in auto mode with whatever
+    // text is currently in the entry-prompt input, so users can review/configure before saving.
+    this.elements.homeAssistantConfigureTaskBtn?.addEventListener('click', () => {
+      if (!window.taskModalController || typeof window.taskModalController.openForCreate !== 'function') {
+        console.warn('Task modal controller not available');
+        return;
+      }
+      const input = this.elements.homeAssistantInput;
+      const description = String(input?.value || '').trim();
+      window.taskModalController.openForCreate(this.workspaceId, description, () => {
+        if (input) input.value = '';
+        this.loadTasks?.();
+        this.loadSchedules?.();
+      }, {
+        forceAutoMode: true,
+        prefillAutoDescription: description,
+      });
+    });
+
+    // Quick "Create Description" button: route multiline /note templates to the note modal
+    // instead of stuffing markdown (with newlines) into the single-line entry input where it
+    // collapses to garbage.
+    this.elements.homeAssistantQuickNotesBtn?.addEventListener('click', (event) => {
+      const button = event.currentTarget;
+      const prompt = button?.getAttribute('data-home-prompt') || '';
+      if (!prompt.startsWith('/note ') || !prompt.includes('\n')) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      const body = prompt.slice('/note '.length);
+      const lines = body.split('\n');
+      let title = '';
+      let content = body;
+      if (lines[0]?.startsWith('# ')) {
+        title = lines[0].slice(2).trim();
+        content = lines.slice(1).join('\n').replace(/^\n+/, '');
+      }
+      this.showNoteModal();
+      window.requestAnimationFrame(() => {
+        const titleInput = document.getElementById('noteNameInput');
+        const contentInput = document.getElementById('noteContentInput');
+        if (titleInput && title) titleInput.value = title;
+        if (contentInput) contentInput.value = content;
+      });
+    }, true);
 
     // Directory buttons
     this.elements.addDirectoryBtn?.addEventListener('click', () =>
@@ -2609,6 +2656,8 @@ export class WorkspaceDetailPage {
     const agents = this.workspace.agent_instances || [];
     if (this.elements.agentCount) {
       this.elements.agentCount.textContent = agents.length;
+      this.elements.agentCount.setAttribute('aria-busy', 'false');
+      this.elements.agentCount.setAttribute('aria-label', `${agents.length} agents`);
     }
 
     // Load children workspaces from tree API
@@ -3771,6 +3820,8 @@ export class WorkspaceDetailPage {
 
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
+        this.elements.taskCount.setAttribute('aria-busy', 'false');
+        this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tasks`);
       }
       this.refreshHomeAssistantQuickPrompts();
     }
@@ -15622,6 +15673,8 @@ export class WorkspaceDetailPage {
 
       if (this.elements.sessionCount) {
         this.elements.sessionCount.textContent = this.sessions.length;
+        this.elements.sessionCount.setAttribute('aria-busy', 'false');
+        this.elements.sessionCount.setAttribute('aria-label', `${this.sessions.length} sessions`);
       }
       this.refreshHomeAssistantQuickPrompts();
     }

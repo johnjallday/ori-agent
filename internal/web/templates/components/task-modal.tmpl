@@ -200,11 +200,11 @@
         <div class="task-modal-field" style="flex: 1;">
           <label for="taskModalPriority" class="task-modal-label">Priority</label>
           <select id="taskModalPriority" class="task-modal-input" style="cursor: pointer;">
-            <option value="1">1 - Highest</option>
-            <option value="2">2 - High</option>
-            <option value="3" selected>3 - Medium</option>
-            <option value="4">4 - Low</option>
-            <option value="5">5 - Lowest</option>
+            <option value="1">▲▲  1 — Highest</option>
+            <option value="2">▲    2 — High</option>
+            <option value="3" selected>●    3 — Medium</option>
+            <option value="4">▼    4 — Low</option>
+            <option value="5">▼▼  5 — Lowest</option>
           </select>
         </div>
         <div class="task-modal-field" style="flex: 2;">
@@ -398,6 +398,7 @@
     <div class="task-modal-footer">
       <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskModalCancel">Cancel</button>
       <button type="button" class="task-modal-btn task-modal-btn-save" id="taskModalSave">
+        <span class="task-modal-btn-spinner" aria-hidden="true"></span>
         <span id="taskModalSaveText">Save Task</span>
       </button>
     </div>

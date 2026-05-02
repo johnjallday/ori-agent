@@ -3349,11 +3349,35 @@ body.task-modal-open {
   background: var(--primary-color, #3b82f6);
   border: 1px solid var(--primary-color, #3b82f6);
   color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .task-modal-btn-save:hover {
   background: var(--primary-hover, #2563eb);
   border-color: var(--primary-hover, #2563eb);
+}
+
+.task-modal-btn-save .task-modal-btn-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: white;
+  animation: taskModalSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.task-modal-btn-save.is-saving .task-modal-btn-spinner {
+  display: inline-block;
+}
+
+.task-modal-btn-save.is-saving {
+  cursor: wait;
+  opacity: 0.85;
 }
 
 .task-modal-btn-browse {

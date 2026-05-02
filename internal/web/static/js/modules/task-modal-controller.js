@@ -650,7 +650,9 @@ class TaskModalController {
       ? createOptions.draftMainInputRefs.filter((value) => String(value || '').trim() !== '')
       : [];
     const draftAssignmentValue = String(createOptions.draftAssignmentValue || '').trim();
-    const shouldForceManualMode = Boolean(
+    const shouldForceAutoMode = Boolean(createOptions.forceAutoMode);
+    const prefillAutoDescription = String(createOptions.prefillAutoDescription || '');
+    const shouldForceManualMode = !shouldForceAutoMode && Boolean(
       createOptions.forceManualMode ||
       draftSubtasks.length > 0 ||
       draftMainInputRefs.length > 0 ||
@@ -704,9 +706,9 @@ class TaskModalController {
       this.handleModeChange('manual');
     }
 
-    // Clear auto description textarea
+    // Clear or prefill auto description textarea
     const autoDescription = document.getElementById('taskAutoDescription');
-    if (autoDescription) autoDescription.value = '';
+    if (autoDescription) autoDescription.value = prefillAutoDescription;
 
     // Clear/prefill form
     const descriptionInput = document.getElementById('taskModalDescription');
@@ -1365,7 +1367,10 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
-    if (saveButton) saveButton.disabled = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.classList.add('is-saving');
+    }
     if (saveText) saveText.textContent = this.editingTaskId ? 'Saving...' : 'Creating...';
 
     try {
@@ -1626,7 +1631,10 @@ class TaskModalController {
       this.showToast(error.message || 'Failed to save task', 'error');
     } finally {
       this.isSaving = false;
-      if (saveButton) saveButton.disabled = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.classList.remove('is-saving');
+      }
       if (saveText) saveText.textContent = originalText || 'Save Task';
     }
   }
@@ -1661,7 +1669,10 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
-    if (saveButton) saveButton.disabled = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.classList.add('is-saving');
+    }
     if (saveText) saveText.textContent = 'Parsing...';
 
     try {
@@ -1883,7 +1894,10 @@ class TaskModalController {
       this.isSaving = false;
       this.hideProgress();
       // Restore button state
-      if (saveButton) saveButton.disabled = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.classList.remove('is-saving');
+      }
       if (saveText) saveText.textContent = originalText || 'Create Task';
     }
   }
@@ -1916,7 +1930,10 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
-    if (saveButton) saveButton.disabled = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.classList.add('is-saving');
+    }
     if (saveText) saveText.textContent = 'Updating...';
 
     try {
@@ -2036,7 +2053,10 @@ class TaskModalController {
       this.isSaving = false;
       this.hideProgress();
       // Restore button state
-      if (saveButton) saveButton.disabled = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.classList.remove('is-saving');
+      }
       if (saveText) saveText.textContent = originalText || 'Update Task';
     }
   }
