@@ -603,7 +603,7 @@ func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) b
 		if name == "" {
 			continue
 		}
-		if strings.Contains(name, "playwright") || strings.Contains(name, "browserbase") || strings.Contains(name, "puppeteer") || strings.Contains(name, "browser") {
+		if name == "fetch" || strings.Contains(name, "playwright") || strings.Contains(name, "browserbase") || strings.Contains(name, "puppeteer") || strings.Contains(name, "browser") {
 			return true
 		}
 	}
@@ -616,6 +616,7 @@ func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) b
 		if strings.HasPrefix(name, "browser") ||
 			strings.HasPrefix(name, "web_fetch") ||
 			strings.HasPrefix(name, "web_search") ||
+			name == "fetch" ||
 			name == "navigate" ||
 			name == "open_url" {
 			return true

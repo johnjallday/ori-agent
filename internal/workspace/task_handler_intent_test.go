@@ -1,6 +1,10 @@
 package workspace
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+)
 
 func TestIsLikelyBrowserAutomationIntent_DoesNotMatchFilesystemStepPromptWithFileExtensions(t *testing.T) {
 	description := `Complete internal execution step 2 of 7 for this task.
@@ -54,5 +58,17 @@ func TestTaskRequiresBrowserAutomation_UsesOverallDescriptionForStructuredBrowse
 
 	if !taskRequiresBrowserAutomation(task) {
 		t.Fatalf("expected structured browser step to require browser automation")
+	}
+}
+
+func TestAgentSupportsBrowserAutomation_RecognizesFetchMCP(t *testing.T) {
+	h := &LLMTaskHandler{}
+	ag := &resolvedTaskAgent{
+		Agent:      &agent.Agent{},
+		MCPServers: []string{"fetch"},
+	}
+
+	if !h.agentSupportsBrowserAutomation(ag) {
+		t.Fatalf("expected agent with fetch MCP to be considered browser-capable for URL tasks")
 	}
 }
