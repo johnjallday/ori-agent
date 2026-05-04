@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,8 @@ const (
 	braveSearchURL      = "https://api.search.brave.com/res/v1/web/search"
 	utilityDefaultUA    = "ori-agent/utility-tools"
 )
+
+var pollenComBaseURL = "https://www.pollen.com"
 
 // URLSafetyPolicy controls URL-level access restrictions.
 type URLSafetyPolicy struct {
@@ -179,11 +182,47 @@ func (a *DuckDuckGoWebSearchAdapter) WebSearch(ctx context.Context, req WebSearc
 		})
 	}
 
+	source := "duckduckgo.com"
+	if len(results) == 0 {
+		if fallbackResults := a.pollenComSearchFallback(ctx, query); len(fallbackResults) > 0 {
+			results = append(results, fallbackResults...)
+			source = "pollen.com"
+		}
+	}
+
 	return WebSearchResponse{
 		Query:   query,
 		Results: results,
-		Source:  "duckduckgo.com",
+		Source:  source,
 	}, nil
+}
+
+func (a *DuckDuckGoWebSearchAdapter) pollenComSearchFallback(ctx context.Context, query string) []WebSearchResult {
+	if a == nil || a.HTTPClient == nil || !queryLooksLikePollenForecast(query) {
+		return nil
+	}
+
+	locationQuery := extractPollenLocationQuery(query)
+	if locationQuery == "" {
+		return nil
+	}
+
+	location, err := fetchPollenComLocation(ctx, a.HTTPClient, locationQuery)
+	if err != nil || location.ID == "" {
+		return nil
+	}
+
+	forecast, forecastErr := fetchPollenComCurrentForecast(ctx, a.HTTPClient, location.ID)
+	snippet := fmt.Sprintf("Current allergy forecast for %s from Pollen.com.", location.Value)
+	if forecastErr == nil {
+		snippet = summarizePollenComForecast(forecast)
+	}
+
+	return []WebSearchResult{{
+		Title:   fmt.Sprintf("Current Pollen Allergy Forecast for %s (%s) | Pollen.com", location.Value, location.ID),
+		URL:     buildPollenComForecastURL(location.ID),
+		Snippet: snippet,
+	}}
 }
 
 func flattenDuckDuckGoItems(items []duckDuckGoItem) []duckDuckGoItem {
@@ -200,6 +239,279 @@ func flattenDuckDuckGoItems(items []duckDuckGoItem) []duckDuckGoItem {
 	}
 	visit(items)
 	return out
+}
+
+type pollenComLocationSearchResponse struct {
+	Locations []pollenComLocation `json:"Locations"`
+}
+
+type pollenComLocation struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+type pollenComTrigger struct {
+	Name      string `json:"Name"`
+	Genus     string `json:"Genus"`
+	PlantType string `json:"PlantType"`
+}
+
+type pollenComForecastPeriodData struct {
+	Type     string             `json:"Type"`
+	Index    float64            `json:"Index"`
+	Triggers []pollenComTrigger `json:"Triggers"`
+}
+
+type pollenComForecastResponse struct {
+	Type         string `json:"Type"`
+	ForecastDate string `json:"ForecastDate"`
+	Location     struct {
+		ZIP             string                        `json:"ZIP"`
+		City            string                        `json:"City"`
+		State           string                        `json:"State"`
+		DisplayLocation string                        `json:"DisplayLocation"`
+		Periods         []pollenComForecastPeriodData `json:"periods"`
+	} `json:"Location"`
+}
+
+func queryLooksLikePollenForecast(query string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	if normalized == "" {
+		return false
+	}
+	if strings.Contains(normalized, "site:") &&
+		!strings.Contains(normalized, "site:pollen.com") &&
+		!strings.Contains(normalized, "pollen.com") {
+		return false
+	}
+	return strings.Contains(normalized, "pollen") ||
+		strings.Contains(normalized, "allergy forecast") ||
+		strings.Contains(normalized, "allergy report")
+}
+
+func extractPollenLocationQuery(query string) string {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	if normalized == "" {
+		return ""
+	}
+
+	zip := regexp.MustCompile(`\b\d{5}\b`).FindString(normalized)
+	if zip != "" {
+		return zip
+	}
+
+	if strings.Contains(normalized, "nyc") ||
+		strings.Contains(normalized, "new york city") ||
+		strings.Contains(normalized, "new york, ny") ||
+		strings.Contains(normalized, "new york ny") ||
+		strings.Contains(normalized, "new york") {
+		return "New York"
+	}
+
+	cleaned := normalized
+	replacements := []string{
+		"site:pollen.com",
+		"pollen.com",
+		"current",
+		"today",
+		"tomorrow",
+		"forecast",
+		"pollen",
+		"allergy",
+		"allergies",
+		"report",
+		"count",
+		"index",
+		"levels",
+		"level",
+		"near",
+		"for",
+		"in",
+	}
+	for _, replacement := range replacements {
+		cleaned = strings.ReplaceAll(cleaned, replacement, " ")
+	}
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	if cleaned == "" {
+		return ""
+	}
+	return cleaned
+}
+
+func fetchPollenComLocation(ctx context.Context, client *http.Client, locationQuery string) (pollenComLocation, error) {
+	base, err := url.Parse(pollenComBaseURL)
+	if err != nil {
+		return pollenComLocation{}, fmt.Errorf("invalid pollen.com base URL: %w", err)
+	}
+	locationURL := *base
+	locationURL.Path = "/api/LocationSearch"
+	values := locationURL.Query()
+	values.Set("q", locationQuery)
+	locationURL.RawQuery = values.Encode()
+
+	body, _, _, err := doUtilityHTTPGetWithHeaders(ctx, client, &locationURL, utilityDefaultUA, 1<<20, map[string]string{
+		"Referer": buildPollenComReferer(""),
+	})
+	if err != nil {
+		return pollenComLocation{}, err
+	}
+
+	var payload pollenComLocationSearchResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return pollenComLocation{}, fmt.Errorf("failed to parse pollen.com location response: %w", err)
+	}
+	if len(payload.Locations) == 0 {
+		return pollenComLocation{}, nil
+	}
+	return payload.Locations[0], nil
+}
+
+func fetchPollenComCurrentForecast(ctx context.Context, client *http.Client, zip string) (pollenComForecastResponse, error) {
+	base, err := url.Parse(pollenComBaseURL)
+	if err != nil {
+		return pollenComForecastResponse{}, fmt.Errorf("invalid pollen.com base URL: %w", err)
+	}
+	forecastURL := *base
+	forecastURL.Path = "/api/forecast/current/pollen/" + strings.TrimSpace(zip)
+
+	body, _, _, err := doUtilityHTTPGetWithHeaders(ctx, client, &forecastURL, utilityDefaultUA, 1<<20, map[string]string{
+		"Referer": buildPollenComForecastURL(zip),
+	})
+	if err != nil {
+		return pollenComForecastResponse{}, err
+	}
+
+	var payload pollenComForecastResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return pollenComForecastResponse{}, fmt.Errorf("failed to parse pollen.com forecast response: %w", err)
+	}
+	return payload, nil
+}
+
+func buildPollenComForecastURL(zip string) string {
+	base := strings.TrimRight(pollenComBaseURL, "/")
+	return base + "/forecast/current/pollen/" + strings.TrimSpace(zip)
+}
+
+func buildPollenComAPIURL(zip string) string {
+	base := strings.TrimRight(pollenComBaseURL, "/")
+	return base + "/api/forecast/current/pollen/" + strings.TrimSpace(zip)
+}
+
+func buildPollenComReferer(path string) string {
+	base := strings.TrimRight(pollenComBaseURL, "/")
+	if strings.TrimSpace(path) == "" {
+		return base + "/"
+	}
+	return base + path
+}
+
+func summarizePollenComForecast(forecast pollenComForecastResponse) string {
+	location := strings.TrimSpace(forecast.Location.DisplayLocation)
+	if location == "" {
+		location = strings.TrimSpace(strings.Join([]string{forecast.Location.City, forecast.Location.State}, ", "))
+	}
+	today := pollenComForecastPeriod(forecast, "Today")
+	parts := []string{}
+	if location != "" {
+		parts = append(parts, "Current allergy forecast for "+location)
+	}
+	if forecast.ForecastDate != "" {
+		parts = append(parts, "forecast date "+strings.TrimSpace(forecast.ForecastDate))
+	}
+	if today.Type != "" {
+		parts = append(parts, fmt.Sprintf("today's pollen index %.1f (%s)", today.Index, pollenIndexLabel(today.Index)))
+		if allergens := pollenComTriggerSummary(today.Triggers); allergens != "" {
+			parts = append(parts, "top allergens: "+allergens)
+		}
+	}
+	if len(parts) == 0 {
+		return "Current allergy forecast from Pollen.com."
+	}
+	return strings.Join(parts, "; ") + "."
+}
+
+func pollenComStructuredForecastText(forecast pollenComForecastResponse, apiURL string) string {
+	var builder strings.Builder
+	builder.WriteString("Pollen.com structured forecast:\n")
+	if forecast.ForecastDate != "" {
+		builder.WriteString("- Forecast date: ")
+		builder.WriteString(strings.TrimSpace(forecast.ForecastDate))
+		builder.WriteString("\n")
+	}
+	location := strings.TrimSpace(forecast.Location.DisplayLocation)
+	if location == "" {
+		location = strings.TrimSpace(strings.Join([]string{forecast.Location.City, forecast.Location.State}, ", "))
+	}
+	if location != "" || forecast.Location.ZIP != "" {
+		builder.WriteString("- Location: ")
+		builder.WriteString(location)
+		if forecast.Location.ZIP != "" {
+			builder.WriteString(" (")
+			builder.WriteString(forecast.Location.ZIP)
+			builder.WriteString(")")
+		}
+		builder.WriteString("\n")
+	}
+	for _, period := range forecast.Location.Periods {
+		if strings.TrimSpace(period.Type) == "" {
+			continue
+		}
+		builder.WriteString("- ")
+		builder.WriteString(period.Type)
+		builder.WriteString(": ")
+		builder.WriteString(fmt.Sprintf("%.1f (%s)", period.Index, pollenIndexLabel(period.Index)))
+		if allergens := pollenComTriggerSummary(period.Triggers); allergens != "" {
+			builder.WriteString("; top allergens: ")
+			builder.WriteString(allergens)
+		}
+		builder.WriteString("\n")
+	}
+	if apiURL != "" {
+		builder.WriteString("- API source: ")
+		builder.WriteString(apiURL)
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func pollenComForecastPeriod(forecast pollenComForecastResponse, periodType string) pollenComForecastPeriodData {
+	for _, period := range forecast.Location.Periods {
+		if strings.EqualFold(strings.TrimSpace(period.Type), periodType) {
+			return period
+		}
+	}
+	return pollenComForecastPeriodData{}
+}
+
+func pollenComTriggerSummary(triggers []pollenComTrigger) string {
+	parts := make([]string, 0, len(triggers))
+	for _, trigger := range triggers {
+		name := strings.TrimSpace(trigger.Name)
+		if name == "" {
+			continue
+		}
+		genus := strings.TrimSpace(trigger.Genus)
+		if genus != "" {
+			name += " (" + genus + ")"
+		}
+		parts = append(parts, name)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func pollenIndexLabel(index float64) string {
+	switch {
+	case index <= 2.4:
+		return "low"
+	case index <= 4.8:
+		return "low-medium"
+	case index <= 7.2:
+		return "medium"
+	case index <= 9.6:
+		return "medium-high"
+	default:
+		return "high"
+	}
 }
 
 // BraveWebSearchAdapter provides web search via Brave Search API.
@@ -356,6 +668,14 @@ func (a *HTTPWebFetchAdapter) WebFetch(ctx context.Context, req WebFetchRequest)
 	} else {
 		content = normalizeWhitespace(string(body))
 	}
+
+	if enriched := a.enrichPollenComForecast(ctx, finalURL); enriched != "" {
+		if content != "" {
+			content = enriched + "\n\nPage text:\n" + content
+		} else {
+			content = enriched
+		}
+	}
 	content = truncateRunes(content, 4000)
 
 	return WebFetchResponse{
@@ -365,6 +685,56 @@ func (a *HTTPWebFetchAdapter) WebFetch(ctx context.Context, req WebFetchRequest)
 		Summary: summarizeText(content, 600),
 		Source:  finalURL.Hostname(),
 	}, nil
+}
+
+func (a *HTTPWebFetchAdapter) enrichPollenComForecast(ctx context.Context, fetchedURL *url.URL) string {
+	if a == nil || a.HTTPClient == nil || fetchedURL == nil {
+		return ""
+	}
+	zip := pollenComForecastZipFromURL(fetchedURL)
+	if zip == "" {
+		return ""
+	}
+	if !urlMatchesPollenComBase(fetchedURL) {
+		return ""
+	}
+
+	forecast, err := fetchPollenComCurrentForecast(ctx, a.HTTPClient, zip)
+	if err != nil {
+		return ""
+	}
+	return pollenComStructuredForecastText(forecast, buildPollenComAPIURL(zip))
+}
+
+func pollenComForecastZipFromURL(target *url.URL) string {
+	if target == nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if len(parts) != 4 {
+		return ""
+	}
+	if !strings.EqualFold(parts[0], "forecast") ||
+		!strings.EqualFold(parts[1], "current") ||
+		!strings.EqualFold(parts[2], "pollen") {
+		return ""
+	}
+	zip := strings.TrimSpace(parts[3])
+	if regexp.MustCompile(`^\d{5}$`).MatchString(zip) {
+		return zip
+	}
+	return ""
+}
+
+func urlMatchesPollenComBase(target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	base, err := url.Parse(pollenComBaseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(target.Hostname(), base.Hostname())
 }
 
 // -----------------------------------------------------------------------------
@@ -600,6 +970,10 @@ func (a *SimpleBrowserAutomationAdapter) extractText(selector string) (BrowserRe
 // -----------------------------------------------------------------------------
 
 func doUtilityHTTPGet(ctx context.Context, client *http.Client, targetURL *url.URL, userAgent string, maxBytes int64) ([]byte, string, *url.URL, error) {
+	return doUtilityHTTPGetWithHeaders(ctx, client, targetURL, userAgent, maxBytes, nil)
+}
+
+func doUtilityHTTPGetWithHeaders(ctx context.Context, client *http.Client, targetURL *url.URL, userAgent string, maxBytes int64, headers map[string]string) ([]byte, string, *url.URL, error) {
 	if client == nil {
 		return nil, "", nil, fmt.Errorf("%w: http client unavailable", ErrUtilityProviderUnavailable)
 	}
@@ -616,6 +990,14 @@ func doUtilityHTTPGet(ctx context.Context, client *http.Client, targetURL *url.U
 	}
 	if strings.TrimSpace(userAgent) != "" {
 		req.Header.Set("User-Agent", userAgent)
+	}
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		req.Header.Set(key, value)
 	}
 
 	resp, err := client.Do(req)

@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	blockedEnumeratedChoicePattern = regexp.MustCompile(`^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$`)
+	blockedEnumeratedChoicePattern = regexp.MustCompile(`(?i)^\s*(?:[-*]\s*)?(?:(\d+)[.)]|option\s+([a-z])[:.)-]?|([a-z])[.)])\s*(.+)$`)
 	blockedQuestionPromptPattern   = regexp.MustCompile(`^\s*(\d+)[.)]\s*(.+?)\s*$`)
 	blockedLetteredOptionPattern   = regexp.MustCompile(`^\s*(?:[-*]\s*)?([A-Z])[.)]\s*(.+)$`)
 	blockedMarkdownLinkPattern     = regexp.MustCompile(`\[(.*?)\]\((.*?)\)`)
@@ -923,7 +923,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	now := time.Now()
-	task.Status = workspace.TaskStatusPending
+	task.Status = workspace.TaskStatusWaitingForChoice
 	task.CompletedAt = nil
 	task.Error = ""
 	task.Result = ""
@@ -994,7 +994,7 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 	}
 
 	humanLoop := map[string]interface{}{
-		"state":       "blocked",
+		"state":       "waiting_for_choice",
 		"block_id":    blockID,
 		"reason_code": blockedErrReasonCode(blockedErr),
 		"updated_at":  time.Now().UTC().Format(time.RFC3339),
@@ -1012,8 +1012,8 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
 			humanLoop["agent_response"] = raw
 		}
-		if blockedErr.WorkflowStep != nil && (len(blockedErr.WorkflowStep.Choices) > 0 || len(blockedErr.WorkflowStep.Fields) > 0) {
-			humanLoop["workflow_step"] = blockedErr.WorkflowStep
+		if workflowStep := workspace.PrepareTaskBlockedWorkflowStep(blockedErr.WorkflowStep, blockedErrReasonCode(blockedErr)); workflowStep != nil && (len(workflowStep.Choices) > 0 || len(workflowStep.Fields) > 0) {
+			humanLoop["workflow_step"] = workflowStep
 		}
 	}
 	for key, value := range extra {
@@ -1230,6 +1230,21 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				"created_at": time.Now().UTC().Format(time.RFC3339),
 			})
 			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+			return "", blockedErr
+		}
+
+		if blockedErr := classifyInvalidTaskCompletionResponse(currentTask, result); blockedErr != nil {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "invalid_result",
+				"summary":    summarizeExecutionText(blockedErr.Reason),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "invalid_result")
 			return "", blockedErr
 		}
 
@@ -1469,6 +1484,9 @@ func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
 		}
 		return "Previous attempt returned an unverified filesystem listing. You must use a filesystem tool to verify the folder contents before answering. If you locate the named folder inside a parent directory, call a filesystem tool on that folder itself instead of stopping at the parent listing. Do not answer from the workspace snapshot, prior summaries, or assumptions alone. Call a filesystem verification tool first, then return only the verified file list."
 	}
+	if task != nil && (trimmedOutcome == "invalid_result" || trimmedOutcome == "needs_input") && taskLooksForFreshPublicInformation(task.Description) {
+		return "Previous attempt did not produce a valid final answer for this public-information task. Do not ask the user what to do next unless all reasonable public sources are truly blocked. Use web_search first instead of guessing direct source URLs. If search results are empty, broaden the query, remove site-specific filters, and try multiple public sources instead of stopping. Verify that any fetched source page matches the requested location before using it. If a source says no locations found or shows a different city/ZIP, discard it and search for another source. Do not return raw Tool Results; synthesize a concise answer with source names or URLs."
+	}
 
 	return fmt.Sprintf(
 		"Previous attempt was '%s'. Continue autonomously with reasonable assumptions and provide a concrete best-effort result. Only ask for user confirmation if absolutely necessary.",
@@ -1618,6 +1636,15 @@ func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedErro
 		"filesystem access enabled",
 		"may not be loaded or configured in the current agent context",
 		"may need the appropriate file-reading tools configured",
+		"blocked by robots.txt",
+		"robots.txt / network restrictions",
+		"network restrictions",
+		"no html content is available",
+		"provide raw html",
+		"paste the html",
+		"attach a snapshot",
+		"alternative data source",
+		"access remains blocked",
 	}
 
 	if containsAnyExecutionMarker(normalized, explicitMarkers) {
@@ -1642,6 +1669,9 @@ func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedErro
 		"file-reading",
 		"weather data",
 		"real-time weather",
+		"html content",
+		"web page",
+		"source page",
 		"available in this context",
 		"agent context",
 	}
@@ -1656,6 +1686,10 @@ func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedErro
 		"neither of which can",
 		"configured to complete this task",
 		"loaded or configured",
+		"provide raw html",
+		"paste the html",
+		"alternative data source",
+		"fill in data later",
 	}
 
 	if containsAnyExecutionMarker(normalized, accessMarkers) &&
@@ -1676,6 +1710,15 @@ func containsAnyExecutionMarker(value string, markers []string) bool {
 	return false
 }
 
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
 	return &workspace.TaskBlockedError{
 		ReasonCode: "tool_access_unavailable",
@@ -1689,6 +1732,215 @@ func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
 		},
 		RawResponse: strings.TrimSpace(result),
 	}
+}
+
+func classifyInvalidTaskCompletionResponse(task workspace.Task, result string) *workspace.TaskBlockedError {
+	trimmed := strings.TrimSpace(result)
+	normalized := strings.ToLower(trimmed)
+	if normalized == "" {
+		return nil
+	}
+
+	if taskLooksForFreshPublicInformation(task.Description) && responseLooksLikeTaskStatusSummary(normalized) {
+		return &workspace.TaskBlockedError{
+			ReasonCode: "invalid_status_summary",
+			Reason:     "The agent summarized the task status instead of answering the current public-information request.",
+			Question:   "Retry this task with web search/source fallback, provide another source, or switch agents?",
+			SuggestedActions: []string{
+				"retry",
+				"continue_with_instruction",
+				"switch_agent_retry",
+				"mark_failed",
+			},
+			RawResponse: trimmed,
+		}
+	}
+
+	if taskLooksForFreshPublicInformation(task.Description) {
+		if responseLooksLikeRawToolSummary(normalized) {
+			if responseLooksLikeEmptyWebSearchToolSummary(normalized) {
+				return &workspace.TaskBlockedError{
+					ReasonCode: "empty_web_search_results",
+					Reason:     "The web search returned no results and the agent did not broaden the search or synthesize an answer.",
+					Question:   "Retry this task with a broader search across public sources?",
+					SuggestedActions: []string{
+						"retry",
+						"continue_with_instruction",
+						"switch_agent_retry",
+						"mark_failed",
+					},
+					RawResponse: trimmed,
+				}
+			}
+			return &workspace.TaskBlockedError{
+				ReasonCode: "tool_only_result",
+				Reason:     "The agent returned raw tool output instead of a final answer.",
+				Question:   "Retry this task and require the agent to synthesize the tool result into an answer?",
+				SuggestedActions: []string{
+					"retry",
+					"continue_with_instruction",
+					"switch_agent_retry",
+					"mark_failed",
+				},
+				RawResponse: trimmed,
+			}
+		}
+
+		if reason := publicInfoLocationMismatchReason(task.Description, normalized); reason != "" {
+			return &workspace.TaskBlockedError{
+				ReasonCode: "location_mismatch",
+				Reason:     reason,
+				Question:   "Retry with web search first and only use sources that match the requested location?",
+				SuggestedActions: []string{
+					"retry",
+					"continue_with_instruction",
+					"switch_agent_retry",
+					"mark_failed",
+				},
+				RawResponse: trimmed,
+			}
+		}
+	}
+
+	if taskAllowsPlaceholderOutput(task.Description) {
+		return nil
+	}
+
+	if responseLooksLikePlaceholderResult(normalized) {
+		return &workspace.TaskBlockedError{
+			ReasonCode: "placeholder_result",
+			Reason:     "The task returned a placeholder result instead of the requested answer.",
+			Question:   "Retry this task, provide missing source content, or switch agents?",
+			SuggestedActions: []string{
+				"retry",
+				"continue_with_instruction",
+				"switch_agent_retry",
+				"mark_failed",
+			},
+			RawResponse: trimmed,
+		}
+	}
+
+	return nil
+}
+
+func taskLooksForFreshPublicInformation(description string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(description))
+	if normalized == "" {
+		return false
+	}
+
+	markers := []string{
+		"today",
+		"current",
+		"latest",
+		"recent",
+		"now",
+		"weather",
+		"forecast",
+		"pollen",
+		"air quality",
+		"price",
+		"stock",
+		"score",
+		"news",
+		"flight",
+		"hotel",
+	}
+	return containsAnyExecutionMarker(normalized, markers)
+}
+
+func responseLooksLikeTaskStatusSummary(normalized string) bool {
+	markers := []string{
+		"current status for task",
+		"status: in_progress",
+		"status: completed",
+		"what happened so far",
+		"what you'll likely want next",
+	}
+	return containsAnyExecutionMarker(normalized, markers) &&
+		(strings.Contains(normalized, "task ") || strings.Contains(normalized, "status:"))
+}
+
+func responseLooksLikeRawToolSummary(normalized string) bool {
+	return strings.HasPrefix(strings.TrimSpace(normalized), "tool results:")
+}
+
+func responseLooksLikeEmptyWebSearchToolSummary(normalized string) bool {
+	if !strings.Contains(normalized, "web_search") {
+		return false
+	}
+	compacted := strings.NewReplacer(" ", "", "\n", "", "\t", "", "\r", "").Replace(normalized)
+	return strings.Contains(compacted, `"results":[]`) ||
+		strings.Contains(compacted, `"results":null`) ||
+		strings.Contains(normalized, "no search results") ||
+		strings.Contains(normalized, "no results found")
+}
+
+func publicInfoLocationMismatchReason(description, normalizedResult string) string {
+	if strings.Contains(normalizedResult, "no locations found") {
+		return "The source page did not resolve the requested location."
+	}
+
+	requestedZip := firstFiveDigitToken(description)
+	resultZip := firstFiveDigitToken(normalizedResult)
+	if requestedZip != "" && resultZip != "" && requestedZip != resultZip {
+		return fmt.Sprintf("The source page used ZIP %s, but the task requested ZIP %s.", resultZip, requestedZip)
+	}
+
+	normalizedDescription := strings.ToLower(strings.TrimSpace(description))
+	if requestsNYCLocation(normalizedDescription) && resultMentionsNonNYCLocation(normalizedResult) {
+		return "The source page appears to be for Austin, TX, but the task requested NYC."
+	}
+
+	return ""
+}
+
+func firstFiveDigitToken(value string) string {
+	re := regexp.MustCompile(`\b\d{5}\b`)
+	return re.FindString(value)
+}
+
+func requestsNYCLocation(normalizedDescription string) bool {
+	return strings.Contains(normalizedDescription, "nyc") ||
+		strings.Contains(normalizedDescription, "new york city") ||
+		strings.Contains(normalizedDescription, "new york, ny") ||
+		strings.Contains(normalizedDescription, "new york")
+}
+
+func resultMentionsNonNYCLocation(normalizedResult string) bool {
+	return strings.Contains(normalizedResult, "austin, tx") ||
+		strings.Contains(normalizedResult, "austin tx") ||
+		strings.Contains(normalizedResult, "/73344") ||
+		strings.Contains(normalizedResult, "(73344)")
+}
+
+func taskAllowsPlaceholderOutput(description string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(description))
+	if normalized == "" {
+		return false
+	}
+	markers := []string{
+		"placeholder",
+		"template",
+		"draft",
+		"boilerplate",
+		"tbd",
+	}
+	return containsAnyExecutionMarker(normalized, markers)
+}
+
+func responseLooksLikePlaceholderResult(normalized string) bool {
+	if strings.Contains(normalized, "fill in data later") || strings.Contains(normalized, "fill in later") {
+		return true
+	}
+	if strings.Contains(normalized, "placeholder") && (strings.Contains(normalized, "tbd") || strings.Contains(normalized, "...")) {
+		return true
+	}
+	if strings.Contains(normalized, "|") && (strings.Contains(normalized, "| tbd") || strings.Contains(normalized, " tbd |") || strings.Contains(normalized, "| ...") || strings.Contains(normalized, " ... |")) {
+		return true
+	}
+	return false
 }
 
 func classifyFilesystemListingVerificationFailure(task workspace.Task, result string, evidence taskExecutionEvidence) *workspace.TaskBlockedError {
@@ -1825,6 +2077,17 @@ func responseNeedsUserInput(result string) bool {
 		"could you please confirm",
 		"please confirm if",
 		"provide additional directions",
+		"recommended next steps",
+		"choose one",
+		"choose an option",
+		"choose one of the following",
+		"tell me which option",
+		"which option to take",
+		"just say",
+		"what would you like me to do next",
+		"how you'd like to proceed",
+		"how you’d like to proceed",
+		"like to proceed",
 	}
 	for _, marker := range highConfidenceMarkers {
 		if strings.Contains(normalized, marker) {
@@ -1843,6 +2106,10 @@ func responseNeedsUserInput(result string) bool {
 		"i don't have direct access",
 		"i do not have direct access",
 		"located somewhere else",
+	}
+
+	if strings.Contains(normalized, "option a") && strings.Contains(normalized, "option b") {
+		return true
 	}
 
 	matches := 0
@@ -1934,9 +2201,10 @@ func extractEnumeratedClarificationWorkflowStep(result string) *workspace.TaskBl
 
 	for _, line := range lines {
 		match := blockedEnumeratedChoicePattern.FindStringSubmatch(line)
-		if len(match) == 3 {
-			number := strings.TrimSpace(match[1])
-			label := cleanBlockedChoiceText(match[2])
+		if len(match) == 5 {
+			number := strings.TrimSpace(firstNonEmptyString(match[1], match[2], match[3]))
+			number = strings.ToUpper(number)
+			label := cleanBlockedChoiceText(match[4])
 			if label == "" {
 				continue
 			}
@@ -1964,6 +2232,7 @@ func extractEnumeratedClarificationWorkflowStep(result string) *workspace.TaskBl
 	if len(choices) < 2 {
 		return nil
 	}
+	markRecommendedBlockedChoices(result, choices)
 
 	return &workspace.TaskBlockedWorkflowStep{
 		StepType:        "ask_choice",
@@ -2014,6 +2283,54 @@ func extractInlineClarificationWorkflowStep(result string) *workspace.TaskBlocke
 		}
 	}
 	return nil
+}
+
+func markRecommendedBlockedChoices(result string, choices []workspace.TaskBlockedChoice) {
+	recommendedNumbers := extractRecommendedChoiceNumbers(result)
+	for index := range choices {
+		label, labelRecommended := stripRecommendedChoiceMarker(choices[index].Label)
+		if label != "" {
+			choices[index].Label = label
+		}
+		number := strings.ToUpper(strings.TrimSpace(choices[index].Number))
+		if labelRecommended || recommendedNumbers[number] {
+			choices[index].Recommended = true
+		}
+	}
+}
+
+func extractRecommendedChoiceNumbers(result string) map[string]bool {
+	recommended := map[string]bool{}
+	lines := strings.Split(result, "\n")
+	optionPattern := regexp.MustCompile(`(?i)\boption\s+([a-z0-9]+)\b|\b([a-z])[.)]\b`)
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "recommend") && !strings.Contains(lower, "by default") {
+			continue
+		}
+		for _, match := range optionPattern.FindAllStringSubmatch(line, -1) {
+			if len(match) < 3 {
+				continue
+			}
+			number := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(match[1], match[2])))
+			if number != "" {
+				recommended[number] = true
+			}
+		}
+	}
+	return recommended
+}
+
+func stripRecommendedChoiceMarker(label string) (string, bool) {
+	cleaned := cleanBlockedChoiceText(label)
+	if cleaned == "" {
+		return "", false
+	}
+	recommendedPattern := regexp.MustCompile(`(?i)\s*[\[(]recommended[\])]\s*`)
+	recommended := recommendedPattern.MatchString(cleaned)
+	cleaned = recommendedPattern.ReplaceAllString(cleaned, " ")
+	cleaned = cleanBlockedChoiceText(cleaned)
+	return cleaned, recommended
 }
 
 func extractClarificationQuestionBlocks(result string) []clarificationQuestionBlock {

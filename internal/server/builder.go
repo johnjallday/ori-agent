@@ -98,36 +98,38 @@ type ServerBuilder struct {
 	server *Server
 
 	// Internal fields populated during initialization
-	clientFactory         *client.Factory
-	llmFactory            *llm.Factory
-	st                    store.Store
-	agentStorePath        string
-	configManager         *config.Manager
-	privateServicesClient privateservices.Client
-	templateRenderer      *web.TemplateRenderer
-	updateMgr             *updatemanager.Manager
-	workspaceStore        workspace.Store
-	workspaceFileStore    *workspace.FileStore
-	taskHandler           *workspace.LLMTaskHandler
-	taskExecutor          *workspace.TaskExecutor
-	stepExecutor          *workspace.StepExecutor
-	taskScheduler         *workspace.TaskScheduler
-	eventBus              *workspace.EventBus
-	notificationService   *workspace.NotificationService
-	directorySyncManager  *workspace.DirectorySyncManager
-	workspaceOrchestrator *workspace.Orchestrator
-	costTracker           *llm.CostTracker
-	mcpRegistry           *mcp.Registry
-	mcpConfigManager      *mcp.ConfigManager
-	locationManager       *location.Manager
-	onboardingMgr         *onboarding.Manager
-	gateway               *gateway.Service
-	evolutionService      *evolution.Service
+	clientFactory            *client.Factory
+	llmFactory               *llm.Factory
+	st                       store.Store
+	agentStorePath           string
+	configManager            *config.Manager
+	privateServicesClient    privateservices.Client
+	templateRenderer         *web.TemplateRenderer
+	updateMgr                *updatemanager.Manager
+	workspaceStore           workspace.Store
+	workspaceFileStore       *workspace.FileStore
+	taskHandler              *workspace.LLMTaskHandler
+	orchestrationTaskHandler *workspace.LLMTaskHandler
+	taskExecutor             *workspace.TaskExecutor
+	stepExecutor             *workspace.StepExecutor
+	taskScheduler            *workspace.TaskScheduler
+	eventBus                 *workspace.EventBus
+	notificationService      *workspace.NotificationService
+	directorySyncManager     *workspace.DirectorySyncManager
+	workspaceOrchestrator    *workspace.Orchestrator
+	costTracker              *llm.CostTracker
+	mcpRegistry              *mcp.Registry
+	mcpConfigManager         *mcp.ConfigManager
+	locationManager          *location.Manager
+	onboardingMgr            *onboarding.Manager
+	gateway                  *gateway.Service
+	evolutionService         *evolution.Service
 
 	// Handlers
 	activityLogger         *agenthttp.ActivityLogger
 	settingsHandler        *settingshttp.Handler
 	chatHandler            *chathttp.Handler
+	utilityToolRegistry    *chathttp.UtilityToolRegistry
 	onboardingHandler      *onboardinghttp.Handler
 	deviceHandler          *devicehttp.Handler
 	orchestrationHandler   *orchestrationhttp.Handler

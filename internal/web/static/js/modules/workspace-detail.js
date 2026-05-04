@@ -44,6 +44,7 @@ function getStatusClass(status) {
     completed: 'completed',
     failed: 'failed',
     blocked: 'blocked',
+    waiting_for_choice: 'blocked',
     cancelled: 'pending',
     timeout: 'failed'
   };
@@ -62,6 +63,7 @@ function getDisplayStatus(status) {
     completed: 'Completed',
     failed: 'Failed',
     blocked: 'Blocked',
+    waiting_for_choice: 'Waiting for Choice',
     cancelled: 'Cancelled',
     timeout: 'Timed Out'
   };
@@ -3792,7 +3794,7 @@ export class WorkspaceDetailPage {
       isParent && subtasks.some(subtask => subtask.status === 'in_progress');
     const canExecute = isParent
       ? parentSubtaskCount > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-      : task.status !== 'in_progress' || awaitingNextStep;
+      : !statusInfo.isBlocked && (task.status !== 'in_progress' || awaitingNextStep);
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
@@ -5533,11 +5535,12 @@ export class WorkspaceDetailPage {
     }
 
     const humanLoop = this.getTaskHumanLoop(task);
-    if (humanLoop && String(humanLoop.state || '').toLowerCase() === 'blocked') {
+    const humanLoopState = String(humanLoop?.state || '').toLowerCase();
+    if (humanLoop && (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || task?.status === 'waiting_for_choice')) {
       const reason = String(humanLoop.reason || '').trim();
       return {
         className: 'blocked',
-        label: 'Needs Input',
+        label: task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice' ? 'Waiting for Choice' : 'Needs Input',
         isBlocked: true,
         reason
       };
@@ -10649,7 +10652,7 @@ export class WorkspaceDetailPage {
     const humanLoopState = String(task?.context?.human_loop?.state || '')
       .trim()
       .toLowerCase();
-    if (humanLoopState === 'blocked') return 'blocked';
+    if (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || status === 'waiting_for_choice') return 'waiting_for_choice';
     return status || 'pending';
   }
 

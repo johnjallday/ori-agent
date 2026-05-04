@@ -42,7 +42,7 @@ function getStatusClass(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'completed') return 'completed';
   if (normalized === 'in_progress') return 'in_progress';
-  if (normalized === 'blocked') return 'blocked';
+  if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
   if (normalized === 'cancelled') return 'cancelled';
   if (normalized === 'failed' || normalized === 'timeout') return 'failed';
   return 'pending';
@@ -54,6 +54,7 @@ function getDisplayStatus(status) {
     pending: 'Pending',
     assigned: 'Assigned',
     in_progress: 'In Progress',
+    waiting_for_choice: 'Waiting for Choice',
     completed: 'Completed',
     failed: 'Failed',
     blocked: 'Blocked',
@@ -805,6 +806,8 @@ export class WorkspaceTaskPage {
       workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
       workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
       workflowSteps: document.getElementById('workspace-task-workflow-steps'),
+      traceCard: document.getElementById('workspace-task-trace-card'),
+      trace: document.getElementById('workspace-task-trace'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
       stepsCard: document.getElementById('workspace-task-steps-card'),
@@ -1128,14 +1131,18 @@ export class WorkspaceTaskPage {
 
   getTaskStatusPresentation(task = this.task) {
     const humanLoop = this.getTaskHumanLoop(task);
-    const blocked = String(task?.status || '').trim().toLowerCase() === 'blocked' ||
-      String(humanLoop?.state || '').trim().toLowerCase() === 'blocked' ||
+    const status = String(task?.status || '').trim().toLowerCase();
+    const humanLoopState = String(humanLoop?.state || '').trim().toLowerCase();
+    const waiting = status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice';
+    const blocked = status === 'blocked' ||
+      waiting ||
+      humanLoopState === 'blocked' ||
       Boolean(humanLoop?.reason) ||
       Boolean(humanLoop?.question);
 
     return {
       isBlocked: blocked,
-      label: blocked ? 'Blocked' : getDisplayStatus(task?.status),
+      label: waiting ? 'Waiting for Choice' : (blocked ? 'Needs Input' : getDisplayStatus(task?.status)),
       className: blocked ? 'blocked' : getStatusClass(task?.status),
       reason: String(humanLoop?.reason || '').trim()
     };
@@ -1181,7 +1188,8 @@ export class WorkspaceTaskPage {
             id,
             label,
             description: String(choice?.description || '').trim(),
-            number: String(choice?.number || '').trim()
+            number: String(choice?.number || '').trim(),
+            recommended: choice?.recommended === true
           };
         })
         .filter(Boolean);
@@ -1351,6 +1359,7 @@ export class WorkspaceTaskPage {
     this.renderRelationships();
     this.renderWorkflow();
     this.renderOutput();
+    this.renderTrace();
     this.renderSchedule();
     this.renderExecutionSteps();
     this.renderContext();
@@ -1692,7 +1701,7 @@ export class WorkspaceTaskPage {
 
     const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
     const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
-    const statusOptions = ['pending', 'assigned', 'in_progress', 'completed', 'failed', 'blocked', 'cancelled'];
+    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'blocked', 'cancelled'];
     const agentNames = this.getAssignableAgentNames(currentAgent);
 
     const snapshotItems = [
@@ -3580,6 +3589,74 @@ export class WorkspaceTaskPage {
     this.elements.schedule.innerHTML = statsHtml + historyHtml;
   }
 
+  renderTrace() {
+    if (!this.elements.trace || !this.elements.traceCard) return;
+
+    const entries = this.buildTraceEntries();
+    if (entries.length === 0) {
+      this.elements.traceCard.hidden = true;
+      this.elements.trace.innerHTML = '';
+      return;
+    }
+
+    this.elements.traceCard.hidden = false;
+    this.elements.trace.innerHTML = entries.slice(0, 8).map((entry) => `
+      <div class="workspace-task-trace-item">
+        <div class="workspace-task-trace-status">${this.escapeHtml(entry.status)}</div>
+        <div>
+          <div class="workspace-task-trace-summary">${this.escapeHtml(entry.summary)}</div>
+          ${entry.meta ? `<div class="workspace-task-trace-meta">${this.escapeHtml(entry.meta)}</div>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  buildTraceEntries() {
+    const entries = [];
+    const retry = this.task?.context?.execution_retry;
+    const retryHistory = Array.isArray(retry?.history) ? retry.history : [];
+    retryHistory.forEach((attempt) => {
+      const status = String(attempt?.outcome || 'attempt').trim() || 'attempt';
+      const summary = summarizeText(attempt?.summary || '', 420);
+      if (!summary) return;
+      const attemptNumber = Number(attempt?.attempt) || 0;
+      const createdAt = formatDateTime(attempt?.created_at);
+      const metaParts = [];
+      if (attemptNumber > 0) metaParts.push(`Attempt ${attemptNumber}`);
+      if (createdAt !== '—') metaParts.push(createdAt);
+      entries.push({
+        status: status.replace(/_/g, ' '),
+        summary,
+        meta: metaParts.join(' • ')
+      });
+    });
+
+    const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
+    history.slice(-4).reverse().forEach((run) => {
+      const summary = summarizeText(run?.summary || run?.error || '', 420);
+      if (!summary) return;
+      const status = String(run?.status || 'run').trim() || 'run';
+      const executedAt = formatDateTime(run?.executed_at);
+      const durationMs = Number(run?.duration) || 0;
+      const metaParts = [];
+      if (executedAt !== '—') metaParts.push(executedAt);
+      if (durationMs > 0) metaParts.push(`${Math.round(durationMs / 1000)}s`);
+      entries.push({
+        status: status.replace(/_/g, ' '),
+        summary,
+        meta: metaParts.join(' • ')
+      });
+    });
+
+    const seen = new Set();
+    return entries.filter((entry) => {
+      const key = `${entry.status}:${entry.summary}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   renderExecutionSteps() {
     if (!this.elements.steps || !this.elements.stepsCard) return;
 
@@ -3869,6 +3946,7 @@ export class WorkspaceTaskPage {
               <span class="workspace-task-assist-option-key">${this.escapeHtml(choice.number || String.fromCharCode(65 + (index % 26)))}</span>
               <span class="workspace-task-assist-option-copy">
                 <span class="workspace-task-assist-option-label">${this.escapeHtml(choice.label)}</span>
+                ${choice.recommended ? '<span class="workspace-task-assist-option-badge">Recommended</span>' : ''}
                 ${choice.description ? `<span class="workspace-task-assist-option-description">${this.escapeHtml(choice.description)}</span>` : ''}
               </span>
             </span>

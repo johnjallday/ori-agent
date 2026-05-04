@@ -221,13 +221,14 @@ type ResultStorageConfig struct {
 type TaskStatus string
 
 const (
-	TaskStatusPending    TaskStatus = "pending"
-	TaskStatusAssigned   TaskStatus = "assigned"
-	TaskStatusInProgress TaskStatus = "in_progress"
-	TaskStatusCompleted  TaskStatus = "completed"
-	TaskStatusFailed     TaskStatus = "failed"
-	TaskStatusCancelled  TaskStatus = "cancelled"
-	TaskStatusTimeout    TaskStatus = "timeout"
+	TaskStatusPending          TaskStatus = "pending"
+	TaskStatusAssigned         TaskStatus = "assigned"
+	TaskStatusInProgress       TaskStatus = "in_progress"
+	TaskStatusWaitingForChoice TaskStatus = "waiting_for_choice"
+	TaskStatusCompleted        TaskStatus = "completed"
+	TaskStatusFailed           TaskStatus = "failed"
+	TaskStatusCancelled        TaskStatus = "cancelled"
+	TaskStatusTimeout          TaskStatus = "timeout"
 )
 
 // TaskProgress tracks the execution progress of a task
@@ -495,7 +496,7 @@ type CreateWorkspaceParams struct {
 // AgentStats holds statistics for a single agent
 type AgentStats struct {
 	Name            string    `json:"name"`
-	Status          string    `json:"status"` // "idle", "active", "busy", "error", "queued"
+	Status          string    `json:"status"` // "idle", "active", "busy", "error", "queued", "waiting"
 	CurrentTasks    []string  `json:"current_tasks"`
 	QueuedTasks     []string  `json:"queued_tasks"`
 	CompletedTasks  int       `json:"completed_tasks"`

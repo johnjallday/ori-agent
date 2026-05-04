@@ -161,6 +161,7 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
+	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
 	if b.skillsManager != nil {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
@@ -212,6 +213,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
@@ -219,6 +221,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
 		taskHandler.SetWorkspaceToolFactory(fn)
 	}
+	b.orchestrationTaskHandler = taskHandler
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore

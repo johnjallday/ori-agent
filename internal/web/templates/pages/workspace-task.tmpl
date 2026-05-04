@@ -195,6 +195,16 @@
               <div id="workspace-task-output"></div>
             </section>
 
+            <section id="workspace-task-trace-card" class="workspace-task-page-card" hidden>
+              <div class="workspace-task-page-card-header">
+                <div>
+                  <div class="workspace-task-page-card-kicker">Trace</div>
+                  <h2>How Ori got this</h2>
+                </div>
+              </div>
+              <div id="workspace-task-trace" class="workspace-task-trace-list"></div>
+            </section>
+
             <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
               <div class="workspace-task-page-card-header">
                 <div>
@@ -2462,6 +2472,22 @@
       line-height: 1.45;
     }
 
+    .workspace-task-assist-option-badge {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      margin-top: 0.22rem;
+      padding: 0.12rem 0.42rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--accent-gold, #d3a94f) 42%, transparent);
+      background: color-mix(in srgb, var(--accent-gold, #d3a94f) 14%, transparent);
+      color: color-mix(in srgb, var(--accent-gold, #d3a94f) 86%, var(--text-primary));
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
     .workspace-task-assist-option-description {
       display: block;
       margin-top: 0.2rem;
@@ -2716,6 +2742,44 @@
       display: flex;
       flex-direction: column;
       gap: 0.85rem;
+    }
+
+    .workspace-task-trace-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .workspace-task-trace-item {
+      display: grid;
+      grid-template-columns: minmax(86px, auto) 1fr;
+      gap: 0.8rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-trace-status {
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-trace-summary {
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-trace-meta {
+      margin-top: 0.18rem;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
     }
 
     .workspace-task-schedule-stats {

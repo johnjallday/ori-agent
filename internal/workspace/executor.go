@@ -338,8 +338,6 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		if err != nil {
 			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "err": err})
-			updatedTask.Status = TaskStatusFailed
-			updatedTask.Error = err.Error()
 			executionStatus := "failed"
 			executionSummary := err.Error()
 			if blockedErr, ok := AsTaskBlockedError(err); ok {
@@ -348,16 +346,32 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 				if strings.TrimSpace(blockedErr.RawResponse) != "" {
 					executionSummary = blockedErr.RawResponse
 				}
+				updatedTask.CompletedAt = nil
+				updatedTask.Status = TaskStatusWaitingForChoice
+				updatedTask.Error = ""
+				updatedTask.Result = ""
+				ApplyTaskResultMetadata(updatedTask, "")
+				applyExecutorTaskBlockedContext(updatedTask, blockedErr)
+			} else {
+				updatedTask.Status = TaskStatusFailed
+				updatedTask.Error = err.Error()
 			}
 			RecordTaskExecution(updatedTask, executionStatus, executionSummary, startedAt, completedAt.Sub(startedAt))
 
-			// Publish task failed event
 			if te.eventBus != nil {
-				event := NewTaskEvent(EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
-					"description": task.Description,
-					"error":       err.Error(),
-				})
-				te.eventBus.Publish(event)
+				if blockedErr, ok := AsTaskBlockedError(err); ok {
+					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, ws.ID, task.ID, task.To, map[string]interface{}{
+						"description": task.Description,
+						"human_loop":  updatedTask.Context["human_loop"],
+						"status":      updatedTask.Status,
+						"error":       blockedErr.Error(),
+					}))
+				} else {
+					te.eventBus.Publish(NewTaskEvent(EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+						"description": task.Description,
+						"error":       err.Error(),
+					}))
+				}
 			}
 		} else {
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
@@ -397,6 +411,50 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			te.eventBus.Publish(event)
 		}
 	}()
+}
+
+func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
+	if task == nil {
+		return
+	}
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+
+	blockID := fmt.Sprintf("blk_%d", time.Now().UnixNano())
+	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+		if prior, ok := existing["block_id"].(string); ok && strings.TrimSpace(prior) != "" {
+			blockID = strings.TrimSpace(prior)
+		}
+	}
+
+	humanLoop := map[string]interface{}{
+		"state":       "waiting_for_choice",
+		"block_id":    blockID,
+		"reason_code": "blocked",
+		"updated_at":  time.Now().UTC().Format(time.RFC3339),
+	}
+	if blockedErr != nil {
+		if reasonCode := strings.TrimSpace(blockedErr.ReasonCode); reasonCode != "" {
+			humanLoop["reason_code"] = reasonCode
+		}
+		if reason := strings.TrimSpace(blockedErr.Reason); reason != "" {
+			humanLoop["reason"] = reason
+		}
+		if question := strings.TrimSpace(blockedErr.Question); question != "" {
+			humanLoop["question"] = question
+		}
+		if len(blockedErr.SuggestedActions) > 0 {
+			humanLoop["suggested_actions"] = blockedErr.SuggestedActions
+		}
+		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
+			humanLoop["agent_response"] = raw
+		}
+		if workflowStep := PrepareTaskBlockedWorkflowStep(blockedErr.WorkflowStep, blockedErr.ReasonCode); workflowStep != nil && (len(workflowStep.Choices) > 0 || len(workflowStep.Fields) > 0) {
+			humanLoop["workflow_step"] = workflowStep
+		}
+	}
+	task.Context["human_loop"] = humanLoop
 }
 
 // AutoStoreResult automatically stores task result based on:
