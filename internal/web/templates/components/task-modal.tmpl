@@ -263,6 +263,7 @@
             <option value="weekly">Weekly</option>
             <option value="interval">Interval (every X minutes/hours)</option>
             <option value="once">Once (at specific time)</option>
+            <option value="cron">Advanced cron</option>
           </select>
         </div>
         <div id="taskModalScheduleTimeField" class="task-modal-field" style="margin-bottom: 12px;">
@@ -295,6 +296,10 @@
         <div id="taskModalScheduleOnceField" class="task-modal-field" style="margin-bottom: 0; display: none;">
           <label for="taskModalScheduleDatetime" class="task-modal-label" style="font-size: 0.8rem;">Execute At</label>
           <input type="datetime-local" id="taskModalScheduleDatetime" class="task-modal-input">
+        </div>
+        <div id="taskModalScheduleCronField" class="task-modal-field" style="margin-bottom: 0; display: none;">
+          <label for="taskModalScheduleCron" class="task-modal-label" style="font-size: 0.8rem;">Cron Expression</label>
+          <input type="text" id="taskModalScheduleCron" class="task-modal-input" placeholder="0 9 * * *" autocomplete="off">
         </div>
       </div>
       <!-- Auto-save Results Section -->

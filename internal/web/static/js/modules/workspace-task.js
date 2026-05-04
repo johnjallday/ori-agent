@@ -733,6 +733,7 @@ export class WorkspaceTaskPage {
     this.resultResearchDraft = null;
     this.resultResearchSubmitting = false;
     this.resultSectionMenu = null;
+    this.scheduleSubmitting = false;
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -810,6 +811,29 @@ export class WorkspaceTaskPage {
       trace: document.getElementById('workspace-task-trace'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
+      scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
+      scheduleModal: document.getElementById('workspace-task-schedule-modal'),
+      scheduleModalHeading: document.getElementById('workspace-task-schedule-heading'),
+      scheduleModalMeta: document.getElementById('workspace-task-schedule-modal-meta'),
+      scheduleError: document.getElementById('workspace-task-schedule-error'),
+      scheduleEnabledInput: document.getElementById('workspace-task-schedule-enabled'),
+      scheduleNameInput: document.getElementById('workspace-task-schedule-name'),
+      scheduleTypeInput: document.getElementById('workspace-task-schedule-type'),
+      scheduleTimeField: document.getElementById('workspace-task-schedule-time-field'),
+      scheduleTimeLabel: document.getElementById('workspace-task-schedule-time-label'),
+      scheduleTimeInput: document.getElementById('workspace-task-schedule-time'),
+      scheduleDayField: document.getElementById('workspace-task-schedule-day-field'),
+      scheduleDayInput: document.getElementById('workspace-task-schedule-day'),
+      scheduleIntervalField: document.getElementById('workspace-task-schedule-interval-field'),
+      scheduleIntervalValueInput: document.getElementById('workspace-task-schedule-interval-value'),
+      scheduleIntervalUnitInput: document.getElementById('workspace-task-schedule-interval-unit'),
+      scheduleOnceField: document.getElementById('workspace-task-schedule-once-field'),
+      scheduleOnceInput: document.getElementById('workspace-task-schedule-once'),
+      scheduleCronField: document.getElementById('workspace-task-schedule-cron-field'),
+      scheduleCronInput: document.getElementById('workspace-task-schedule-cron'),
+      schedulePreview: document.getElementById('workspace-task-schedule-preview'),
+      scheduleSubmitBtn: document.getElementById('workspace-task-schedule-submit'),
+      scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
       stepsCard: document.getElementById('workspace-task-steps-card'),
       steps: document.getElementById('workspace-task-steps'),
       contextCard: document.getElementById('workspace-task-context-card'),
@@ -867,6 +891,23 @@ export class WorkspaceTaskPage {
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
+    this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
+    this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
+    [
+      this.elements.scheduleEnabledInput,
+      this.elements.scheduleNameInput,
+      this.elements.scheduleTimeInput,
+      this.elements.scheduleDayInput,
+      this.elements.scheduleIntervalValueInput,
+      this.elements.scheduleIntervalUnitInput,
+      this.elements.scheduleOnceInput,
+      this.elements.scheduleCronInput
+    ].forEach((element) => {
+      element?.addEventListener('input', () => this.updateSchedulePreview());
+      element?.addEventListener('change', () => this.updateSchedulePreview());
+    });
+    this.elements.scheduleSubmitBtn?.addEventListener('click', () => this.saveSchedule());
+    this.elements.scheduleRemoveBtn?.addEventListener('click', () => this.removeSchedule());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -1399,6 +1440,8 @@ export class WorkspaceTaskPage {
     const status = String(this.task?.status || '').trim().toLowerCase();
     const hasAgent = Boolean(this.task?.to);
     const buttons = [];
+    const hasSchedule = Boolean(this.task?.schedule);
+    const scheduleLabel = hasSchedule ? 'Edit Schedule' : 'Schedule';
 
     if (status === 'pending' && hasAgent) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
@@ -1418,6 +1461,10 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
+    buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="schedule">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19M7,10H12V15H7V10Z"/></svg>${this.escapeHtml(scheduleLabel)}
+    </button>`);
+
     this.elements.heroActions.innerHTML = buttons.join('');
 
     this.elements.heroActions.querySelectorAll('[data-action]').forEach((btn) => {
@@ -1425,6 +1472,7 @@ export class WorkspaceTaskPage {
         const action = btn.dataset.action;
         if (action === 'execute') this.executeTask();
         if (action === 'complete') this.completeTask();
+        if (action === 'schedule') this.openScheduleModal();
       });
     });
   }
@@ -3529,15 +3577,384 @@ export class WorkspaceTaskPage {
     }
   }
 
+  openScheduleModal() {
+    if (!this.elements.scheduleModal || typeof bootstrap === 'undefined') {
+      this.notify('error', 'Schedule editor is not available.');
+      return;
+    }
+
+    this.populateScheduleModal();
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.scheduleModal)
+        : bootstrap.Modal.getInstance(this.elements.scheduleModal) ||
+          new bootstrap.Modal(this.elements.scheduleModal);
+    modal.show();
+  }
+
+  populateScheduleModal() {
+    const schedule = this.task?.schedule || null;
+    const hasSchedule = Boolean(schedule);
+    const scheduleType = this.inferScheduleFormType(schedule);
+    const weekdayCron = this.parseWeekdayCron(schedule?.cron_expr || '');
+
+    this.setScheduleError('');
+
+    if (this.elements.scheduleModalHeading) {
+      this.elements.scheduleModalHeading.textContent = hasSchedule ? 'Edit Repeat Schedule' : 'Repeat Task';
+    }
+    if (this.elements.scheduleModalMeta) {
+      const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+      this.elements.scheduleModalMeta.textContent = `Runs "${taskLabel}" again on a schedule. The task keeps its history and latest output updates after each run.`;
+    }
+    if (this.elements.scheduleEnabledInput) {
+      this.elements.scheduleEnabledInput.checked = hasSchedule ? Boolean(this.task?.schedule_enabled) : true;
+    }
+    if (this.elements.scheduleNameInput) {
+      this.elements.scheduleNameInput.value = this.task?.schedule_name || '';
+    }
+    if (this.elements.scheduleTypeInput) {
+      this.elements.scheduleTypeInput.value = scheduleType;
+    }
+    if (this.elements.scheduleTimeInput) {
+      this.elements.scheduleTimeInput.value =
+        weekdayCron?.time ||
+        schedule?.time ||
+        schedule?.time_of_day ||
+        '09:00';
+    }
+    if (this.elements.scheduleDayInput) {
+      const day = Number(schedule?.day_of_week);
+      this.elements.scheduleDayInput.value = Number.isInteger(day) && day >= 0 && day <= 6 ? String(day) : '1';
+    }
+    this.populateScheduleIntervalFields(this.getScheduleIntervalMinutes(schedule) || 60);
+    if (this.elements.scheduleOnceInput) {
+      this.elements.scheduleOnceInput.value = this.formatLocalDatetimeInput(schedule?.run_at || schedule?.execute_at || '');
+    }
+    if (this.elements.scheduleCronInput) {
+      this.elements.scheduleCronInput.value = schedule?.cron_expr || '0 9 * * *';
+    }
+    if (this.elements.scheduleRemoveBtn) {
+      this.elements.scheduleRemoveBtn.hidden = !hasSchedule;
+    }
+
+    this.updateScheduleModalFields();
+  }
+
+  updateScheduleModalFields() {
+    const type = this.elements.scheduleTypeInput?.value || 'daily';
+    const showTime = type === 'daily' || type === 'weekdays' || type === 'weekly';
+
+    if (this.elements.scheduleTimeField) this.elements.scheduleTimeField.hidden = !showTime;
+    if (this.elements.scheduleDayField) this.elements.scheduleDayField.hidden = type !== 'weekly';
+    if (this.elements.scheduleIntervalField) this.elements.scheduleIntervalField.hidden = type !== 'interval';
+    if (this.elements.scheduleOnceField) this.elements.scheduleOnceField.hidden = type !== 'once';
+    if (this.elements.scheduleCronField) this.elements.scheduleCronField.hidden = type !== 'cron';
+    if (this.elements.scheduleTimeLabel) {
+      this.elements.scheduleTimeLabel.textContent = type === 'weekdays' ? 'Weekday time' : 'Time of day';
+    }
+
+    this.updateSchedulePreview();
+  }
+
+  updateSchedulePreview() {
+    if (!this.elements.schedulePreview) return;
+
+    try {
+      const payload = this.buildScheduleUpdatePayload({ validate: false });
+      const summary = this.describeSchedule(payload.schedule);
+      this.elements.schedulePreview.textContent = payload.schedule_enabled
+        ? `This existing task will run ${summary}.`
+        : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
+    } catch (_error) {
+      this.elements.schedulePreview.textContent = 'Complete the schedule fields to preview the run cadence.';
+    }
+  }
+
+  buildScheduleUpdatePayload({ validate = true } = {}) {
+    const type = this.elements.scheduleTypeInput?.value || 'daily';
+    const enabled = Boolean(this.elements.scheduleEnabledInput?.checked);
+    const scheduleName = String(this.elements.scheduleNameInput?.value || '').trim();
+    const schedule = { type };
+
+    const assignee = String(this.task?.to || '').trim();
+    if (enabled && validate && (!assignee || assignee === 'unassigned')) {
+      throw new Error('Assign this task to an agent before enabling a schedule.');
+    }
+
+    const requireTime = () => {
+      const value = String(this.elements.scheduleTimeInput?.value || '').trim();
+      if (validate && !value) throw new Error('Choose a time for this schedule.');
+      return value || '09:00';
+    };
+
+    switch (type) {
+      case 'daily':
+        schedule.time = requireTime();
+        break;
+      case 'weekdays':
+        schedule.type = 'cron';
+        schedule.cron_expr = this.buildWeekdayCron(requireTime());
+        break;
+      case 'weekly':
+        schedule.time = requireTime();
+        schedule.day_of_week = Number.parseInt(this.elements.scheduleDayInput?.value || '1', 10);
+        if (validate && (Number.isNaN(schedule.day_of_week) || schedule.day_of_week < 0 || schedule.day_of_week > 6)) {
+          throw new Error('Choose a valid weekday.');
+        }
+        break;
+      case 'interval': {
+        const rawValue = Number.parseInt(this.elements.scheduleIntervalValueInput?.value || '1', 10);
+        if (validate && (!Number.isFinite(rawValue) || rawValue < 1)) {
+          throw new Error('Interval must be at least 1.');
+        }
+        const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 1;
+        const unit = this.elements.scheduleIntervalUnitInput?.value || 'hours';
+        let minutes = value;
+        if (unit === 'hours') minutes = value * 60;
+        if (unit === 'days') minutes = value * 1440;
+        schedule.interval_minutes = minutes;
+        break;
+      }
+      case 'once': {
+        const runAt = String(this.elements.scheduleOnceInput?.value || '').trim();
+        if (validate && !runAt) {
+          throw new Error('Choose when this task should run.');
+        }
+        schedule.run_at = runAt;
+        break;
+      }
+      case 'cron': {
+        const cronExpr = String(this.elements.scheduleCronInput?.value || '').replace(/\s+/g, ' ').trim();
+        if (validate && cronExpr.split(' ').filter(Boolean).length !== 5) {
+          throw new Error('Cron schedules must use 5 fields: minute hour day month weekday.');
+        }
+        schedule.cron_expr = cronExpr || '0 9 * * *';
+        break;
+      }
+      default:
+        throw new Error('Choose a valid repeat option.');
+    }
+
+    return {
+      schedule,
+      schedule_enabled: enabled,
+      schedule_name: scheduleName
+    };
+  }
+
+  async saveSchedule() {
+    if (this.scheduleSubmitting) return;
+
+    let payload;
+    try {
+      payload = this.buildScheduleUpdatePayload({ validate: true });
+      this.setScheduleError('');
+    } catch (error) {
+      this.setScheduleError(error?.message || 'Check the schedule fields and try again.');
+      return;
+    }
+
+    this.scheduleSubmitting = true;
+    const submitBtn = this.elements.scheduleSubmitBtn;
+    const submitText = submitBtn?.querySelector('span');
+    const originalText = submitText?.textContent || 'Save Schedule';
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Saving...';
+
+    try {
+      await this.updateTaskFields(payload);
+      if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
+      }
+      this.notify('success', payload.schedule_enabled ? 'Schedule saved' : 'Schedule paused');
+    } catch (error) {
+      console.error('Failed to save schedule:', error);
+      this.setScheduleError(error?.message || 'Failed to save schedule.');
+    } finally {
+      this.scheduleSubmitting = false;
+      if (submitBtn) submitBtn.disabled = false;
+      if (submitText) submitText.textContent = originalText;
+    }
+  }
+
+  async removeSchedule() {
+    if (this.scheduleSubmitting || !this.task?.schedule) return;
+    if (!window.confirm('Remove this recurring schedule from the task?')) return;
+
+    this.scheduleSubmitting = true;
+    const removeBtn = this.elements.scheduleRemoveBtn;
+    if (removeBtn) removeBtn.disabled = true;
+
+    try {
+      await this.updateTaskFields({
+        schedule: null,
+        schedule_enabled: false,
+        schedule_name: ''
+      });
+      if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
+      }
+      this.notify('success', 'Schedule removed');
+    } catch (error) {
+      console.error('Failed to remove schedule:', error);
+      this.setScheduleError(error?.message || 'Failed to remove schedule.');
+    } finally {
+      this.scheduleSubmitting = false;
+      if (removeBtn) removeBtn.disabled = false;
+    }
+  }
+
+  setScheduleError(message = '') {
+    if (!this.elements.scheduleError) return;
+    const normalized = String(message || '').trim();
+    this.elements.scheduleError.textContent = normalized;
+    this.elements.scheduleError.hidden = !normalized;
+  }
+
+  inferScheduleFormType(schedule) {
+    const type = String(schedule?.type || '').trim().toLowerCase();
+    if (type === 'cron' && this.parseWeekdayCron(schedule?.cron_expr || '')) return 'weekdays';
+    if (['daily', 'weekly', 'interval', 'once', 'cron'].includes(type)) return type;
+    return 'daily';
+  }
+
+  parseWeekdayCron(cronExpr) {
+    const match = String(cronExpr || '').trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(?:1-5|mon-fri)$/i);
+    if (!match) return null;
+
+    const minute = Number.parseInt(match[1], 10);
+    const hour = Number.parseInt(match[2], 10);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+
+    return {
+      hour,
+      minute,
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    };
+  }
+
+  buildWeekdayCron(timeValue) {
+    const [hourPart, minutePart] = String(timeValue || '09:00').split(':');
+    const hour = Number.parseInt(hourPart, 10);
+    const minute = Number.parseInt(minutePart, 10);
+    return `${Number.isInteger(minute) ? minute : 0} ${Number.isInteger(hour) ? hour : 9} * * 1-5`;
+  }
+
+  getScheduleIntervalMinutes(schedule) {
+    if (!schedule) return 0;
+    const direct = Number(schedule.interval_minutes);
+    if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
+
+    const interval = schedule.interval;
+    if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) {
+      return interval > 1000000 ? Math.max(1, Math.round(interval / 60000000000)) : Math.round(interval);
+    }
+    if (typeof interval === 'string') {
+      const numeric = Number.parseFloat(interval);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric > 1000000 ? Math.max(1, Math.round(numeric / 60000000000)) : Math.round(numeric);
+      }
+    }
+    return 0;
+  }
+
+  populateScheduleIntervalFields(minutes) {
+    const normalized = Number.isFinite(minutes) && minutes > 0 ? minutes : 60;
+    let value = normalized;
+    let unit = 'minutes';
+
+    if (normalized >= 1440 && normalized % 1440 === 0) {
+      value = normalized / 1440;
+      unit = 'days';
+    } else if (normalized >= 60 && normalized % 60 === 0) {
+      value = normalized / 60;
+      unit = 'hours';
+    }
+
+    if (this.elements.scheduleIntervalValueInput) {
+      this.elements.scheduleIntervalValueInput.value = String(value);
+    }
+    if (this.elements.scheduleIntervalUnitInput) {
+      this.elements.scheduleIntervalUnitInput.value = unit;
+    }
+  }
+
+  formatLocalDatetimeInput(value) {
+    if (!value) return '';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const pad = (number) => String(number).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate())
+    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  formatTimeOfDay(value) {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return String(value || '9:00 AM');
+
+    const date = new Date();
+    date.setHours(Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), 0, 0);
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  formatDayOfWeek(value) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const index = Number.parseInt(value, 10);
+    return days[index] || 'Monday';
+  }
+
+  describeSchedule(schedule) {
+    const type = String(schedule?.type || '').trim().toLowerCase();
+    switch (type) {
+      case 'daily':
+        return `daily at ${this.formatTimeOfDay(schedule?.time || schedule?.time_of_day || '09:00')}`;
+      case 'weekly':
+        return `weekly on ${this.formatDayOfWeek(schedule?.day_of_week)} at ${this.formatTimeOfDay(schedule?.time || schedule?.time_of_day || '09:00')}`;
+      case 'interval':
+        return `every ${this.formatIntervalMinutes(this.getScheduleIntervalMinutes(schedule) || Number(schedule?.interval_minutes) || 60)}`;
+      case 'once':
+        return `once at ${formatDateTime(schedule?.run_at || schedule?.execute_at)}`;
+      case 'cron': {
+        const weekday = this.parseWeekdayCron(schedule?.cron_expr || '');
+        if (weekday) return `weekdays at ${this.formatTimeOfDay(weekday.time)}`;
+        return `on cron "${schedule?.cron_expr || '0 9 * * *'}"`;
+      }
+      default:
+        return 'on a saved schedule';
+    }
+  }
+
+  formatIntervalMinutes(minutes) {
+    const normalized = Math.max(1, Number.parseInt(minutes, 10) || 1);
+    if (normalized >= 1440 && normalized % 1440 === 0) {
+      const days = normalized / 1440;
+      return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    if (normalized >= 60 && normalized % 60 === 0) {
+      const hours = normalized / 60;
+      return `${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+    return `${normalized} minute${normalized === 1 ? '' : 's'}`;
+  }
+
   renderSchedule() {
     if (!this.elements.schedule || !this.elements.scheduleCard) return;
 
-    const isScheduled = this.task?.schedule_enabled || this.task?.schedule;
+    const hasSchedule = Boolean(this.task?.schedule);
+    const scheduleEnabled = hasSchedule && Boolean(this.task?.schedule_enabled);
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
 
-    if (!isScheduled && history.length === 0 && executionCount === 0) {
+    if (!hasSchedule && history.length === 0 && executionCount === 0) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
       return;
@@ -3566,6 +3983,21 @@ export class WorkspaceTaskPage {
       </div>
     `;
 
+    const bannerHtml = hasSchedule ? `
+      <div class="workspace-task-schedule-banner" data-state="${scheduleEnabled ? 'enabled' : 'paused'}">
+        <div class="workspace-task-schedule-banner-icon">
+          <i class="bi ${scheduleEnabled ? 'bi-calendar-check' : 'bi-pause-circle'}" aria-hidden="true"></i>
+        </div>
+        <div>
+          <div class="workspace-task-schedule-banner-title">${this.escapeHtml(scheduleEnabled ? 'Scheduled' : 'Schedule paused')}</div>
+          <div class="workspace-task-schedule-banner-copy">
+            ${this.escapeHtml(this.describeSchedule(this.task.schedule))}
+            ${scheduleEnabled && this.task?.next_run ? ` · Next run ${this.escapeHtml(formatDateTime(this.task.next_run))}` : ''}
+          </div>
+        </div>
+      </div>
+    ` : '';
+
     let historyHtml = '';
     if (history.length > 0) {
       const recentRuns = history.slice(-10).reverse();
@@ -3586,7 +4018,7 @@ export class WorkspaceTaskPage {
       `;
     }
 
-    this.elements.schedule.innerHTML = statsHtml + historyHtml;
+    this.elements.schedule.innerHTML = bannerHtml + statsHtml + historyHtml;
   }
 
   renderTrace() {
