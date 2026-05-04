@@ -935,6 +935,77 @@
       white-space: nowrap;
     }
 
+    .workspace-task-result-research-meta {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.45;
+      margin-top: 0.18rem;
+    }
+
+    .workspace-task-result-research-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.62fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .workspace-task-result-research-main,
+    .workspace-task-result-research-side {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .workspace-task-result-research-field {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-result-research-field .form-label {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-result-research-field textarea {
+      line-height: 1.55;
+      resize: vertical;
+    }
+
+    .workspace-task-result-research-switches {
+      display: grid;
+      gap: 0.6rem;
+      padding: 0.85rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+    }
+
+    .workspace-task-result-research-check {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 650;
+      line-height: 1.4;
+    }
+
+    .workspace-task-result-research-check input {
+      margin-top: 0.16rem;
+      flex: 0 0 auto;
+    }
+
+    .workspace-task-result-research-section-preview {
+      min-height: 18rem;
+      max-height: 32rem;
+      font-size: 0.88rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
     .workspace-task-overview-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1108,6 +1179,169 @@
     .workspace-task-page-prose pre code {
       padding: 0;
       background: none;
+    }
+
+    .workspace-task-page-prose.is-sectioned {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .workspace-task-result-section {
+      position: relative;
+      margin: 0.1rem 0;
+      padding: 0.62rem 0.7rem 0.62rem 3rem;
+      border: 1px solid transparent;
+      border-radius: 16px;
+      transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .workspace-task-result-section:hover,
+    .workspace-task-result-section:focus-within {
+      border-color: color-mix(in srgb, var(--primary-color) 26%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+      box-shadow: inset 3px 0 0 color-mix(in srgb, var(--primary-color) 58%, transparent);
+    }
+
+    .workspace-task-result-section.has-follow-up {
+      border-color: color-mix(in srgb, #16a34a 22%, var(--border-color));
+      background: color-mix(in srgb, #16a34a 5%, transparent);
+    }
+
+    .workspace-task-result-section-content > :first-child {
+      margin-top: 0;
+    }
+
+    .workspace-task-result-section-content > :last-child {
+      margin-bottom: 0;
+    }
+
+    .workspace-task-result-section-action {
+      position: absolute;
+      left: 0.62rem;
+      top: 0.75rem;
+      z-index: 2;
+      width: 2rem;
+      height: 2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      color: var(--primary-color);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+      opacity: 0;
+      transform: translateX(-0.25rem);
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-result-section:hover .workspace-task-result-section-action,
+    .workspace-task-result-section:focus-within .workspace-task-result-section-action,
+    .workspace-task-result-section-action:focus-visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .workspace-task-result-section-action:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 48%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-primary));
+    }
+
+    .workspace-task-result-section-action:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 52%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-result-section-action:disabled {
+      cursor: wait;
+      opacity: 1;
+    }
+
+    .workspace-task-result-section-action.is-pending i {
+      animation: workspace-task-result-spin 0.9s linear infinite;
+    }
+
+    .workspace-task-result-section-action.has-follow-up {
+      border-color: color-mix(in srgb, #16a34a 34%, var(--border-color));
+      background: color-mix(in srgb, #16a34a 11%, var(--bg-primary));
+      color: #15803d;
+    }
+
+    .workspace-task-result-section-action::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: calc(100% + 0.45rem);
+      top: 50%;
+      max-width: 14rem;
+      padding: 0.38rem 0.52rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+      color: var(--text-primary);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+      font-size: 0.76rem;
+      font-weight: 700;
+      line-height: 1.25;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-50%) translateX(-0.2rem);
+      transition: opacity 0.12s ease, transform 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .workspace-task-result-section-action:hover::after,
+    .workspace-task-result-section-action:focus-visible::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    @keyframes workspace-task-result-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .workspace-task-result-section-menu {
+      position: fixed;
+      z-index: 10070;
+      width: min(17rem, calc(100vw - 1.25rem));
+      padding: 0.45rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+      box-shadow: 0 18px 42px rgba(15, 23, 42, 0.22);
+    }
+
+    .workspace-task-result-section-menu-title {
+      padding: 0.45rem 0.55rem 0.35rem;
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-result-section-menu-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.62rem 0.6rem;
+      border: none;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.86rem;
+      font-weight: 700;
+      line-height: 1.25;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workspace-task-result-section-menu-item:hover,
+    .workspace-task-result-section-menu-item:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: var(--primary-color);
+      outline: none;
     }
 
     .workspace-task-page-text-button {
@@ -2681,6 +2915,21 @@
         text-align: left;
       }
 
+      .workspace-task-result-section {
+        padding: 2.95rem 0.72rem 0.72rem;
+      }
+
+      .workspace-task-result-section-action {
+        left: 0.72rem;
+        top: 0.68rem;
+        opacity: 1;
+        transform: none;
+      }
+
+      .workspace-task-result-section-action::after {
+        display: none;
+      }
+
       .workspace-task-result-promote-item {
         grid-template-columns: 2.4rem minmax(0, 1fr);
       }
@@ -2688,6 +2937,15 @@
       .workspace-task-result-promote-assignee {
         grid-column: 2;
         max-width: 100%;
+      }
+
+      .workspace-task-result-research-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace-task-result-research-section-preview {
+        min-height: 13rem;
+        max-height: 22rem;
       }
 
       .workspace-task-overview-grid {
@@ -2779,6 +3037,65 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary" id="workspace-task-result-promote-submit">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="workspace-task-result-research-modal" tabindex="-1" aria-labelledby="workspace-task-result-research-heading" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title" id="workspace-task-result-research-heading">Research Follow-up</h5>
+            <div id="workspace-task-result-research-section-meta" class="workspace-task-result-research-meta"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-task-result-research-grid">
+            <div class="workspace-task-result-research-main">
+              <div class="workspace-task-result-research-field">
+                <label for="workspace-task-result-research-title" class="form-label">Task title</label>
+                <input type="text" class="form-control" id="workspace-task-result-research-title" autocomplete="off">
+              </div>
+              <div class="workspace-task-result-research-field">
+                <label for="workspace-task-result-research-agent" class="form-label">Agent</label>
+                <select id="workspace-task-result-research-agent" class="form-select"></select>
+              </div>
+              <div class="workspace-task-result-research-field">
+                <label for="workspace-task-result-research-details" class="form-label">Instructions</label>
+                <textarea class="form-control" id="workspace-task-result-research-details" rows="11"></textarea>
+              </div>
+            </div>
+            <aside class="workspace-task-result-research-side">
+              <div class="workspace-task-result-research-switches">
+                <label class="workspace-task-result-research-check" for="workspace-task-result-research-link-source">
+                  <input type="checkbox" id="workspace-task-result-research-link-source" checked>
+                  <span>Link original result as input context</span>
+                </label>
+                <label class="workspace-task-result-research-check" for="workspace-task-result-research-run-now">
+                  <input type="checkbox" id="workspace-task-result-research-run-now" checked>
+                  <span>Run immediately</span>
+                </label>
+                <label class="workspace-task-result-research-check" for="workspace-task-result-research-open-after-create">
+                  <input type="checkbox" id="workspace-task-result-research-open-after-create" checked>
+                  <span>Open follow-up task after creation</span>
+                </label>
+              </div>
+              <div class="workspace-task-result-research-field">
+                <label for="workspace-task-result-research-section-text" class="form-label">Selected section</label>
+                <textarea class="form-control workspace-task-result-research-section-preview" id="workspace-task-result-research-section-text" rows="16"></textarea>
+              </div>
+            </aside>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2" id="workspace-task-result-research-submit">
+            <i class="bi bi-send" aria-hidden="true"></i>
+            <span>Create & Run</span>
+          </button>
         </div>
       </div>
     </div>
