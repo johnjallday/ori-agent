@@ -214,11 +214,21 @@
             <section id="workspace-task-trace-card" class="workspace-task-page-card" hidden>
               <div class="workspace-task-page-card-header">
                 <div>
-                  <div class="workspace-task-page-card-kicker">Trace</div>
-                  <h2>How Ori got this</h2>
+                  <div class="workspace-task-page-card-kicker">Execution Breakdown</div>
+                  <h2>Runs and outcomes</h2>
                 </div>
               </div>
-              <div id="workspace-task-trace" class="workspace-task-trace-list"></div>
+              <div id="workspace-task-trace" class="workspace-task-breakdown-list"></div>
+            </section>
+
+            <section id="workspace-task-execution-trace-card" class="workspace-task-page-card" hidden>
+              <div class="workspace-task-page-card-header">
+                <div>
+                  <div class="workspace-task-page-card-kicker">Execution Trace</div>
+                  <h2>Tool calls and step events</h2>
+                </div>
+              </div>
+              <div id="workspace-task-execution-trace" class="workspace-task-trace-list"></div>
             </section>
 
             <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
@@ -2969,6 +2979,74 @@
       margin-top: 0.18rem;
       color: var(--text-secondary);
       font-size: 0.78rem;
+    }
+
+    .workspace-task-breakdown-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .workspace-task-breakdown-step {
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      overflow: hidden;
+    }
+
+    .workspace-task-breakdown-step summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      list-style: none;
+      cursor: pointer;
+      padding: 0.7rem 0.85rem;
+      user-select: none;
+    }
+
+    .workspace-task-breakdown-step summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-breakdown-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      min-width: 0;
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 800;
+    }
+
+    .workspace-task-breakdown-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 1.45rem;
+      height: 1.45rem;
+      border-radius: 999px;
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+      color: var(--primary-color);
+      font-size: 0.74rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .workspace-task-breakdown-label {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-breakdown-body {
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      padding: 0.72rem 0.85rem 0.85rem;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .workspace-task-schedule-stats {

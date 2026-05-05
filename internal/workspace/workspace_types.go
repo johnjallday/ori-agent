@@ -175,6 +175,7 @@ type Task struct {
 	Progress         *TaskProgress          `json:"progress,omitempty"`
 	ExecutionMode    TaskExecutionMode      `json:"execution_mode,omitempty"`
 	ExecutionSteps   []TaskExecutionStep    `json:"execution_steps,omitempty"`
+	ExecutionTrace   []TaskExecutionTrace   `json:"execution_trace,omitempty"`
 	// OrchestrationMode controls how parent tasks execute their subtasks.
 	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
 	// ResultCombinationMode controls how a parent task combines subtask outputs.
@@ -315,6 +316,17 @@ type TaskExecutionStep struct {
 	Error       string                  `json:"error,omitempty"`
 	StartedAt   *time.Time              `json:"started_at,omitempty"`
 	CompletedAt *time.Time              `json:"completed_at,omitempty"`
+}
+
+// TaskExecutionTrace represents a persisted execution event for a task run.
+type TaskExecutionTrace struct {
+	Type      string    `json:"type"`
+	Status    string    `json:"status,omitempty"`
+	Title     string    `json:"title,omitempty"`
+	Summary   string    `json:"summary,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	Source    string    `json:"source,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // ScheduleType represents the type of schedule

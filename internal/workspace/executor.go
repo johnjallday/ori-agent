@@ -393,6 +393,10 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			}
 		}
 
+		if te.eventBus != nil {
+			RecordTaskExecutionTraceFromEventBus(updatedTask, te.eventBus, ws.ID, task.ID, startedAt, completedAt)
+		}
+
 		// Save updated task
 		if err := ws.UpdateTask(*updatedTask); err != nil {
 			logger.Error("Failed to update task", logger.Fields{"task_id": updatedTask.ID, "error": err})

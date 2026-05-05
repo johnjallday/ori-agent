@@ -912,6 +912,23 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			"task_id": task.ID,
 			"status":  task.Status,
 		}))
+
+		traceStartedAt := time.Now()
+		if task.StartedAt != nil && !task.StartedAt.IsZero() {
+			traceStartedAt = *task.StartedAt
+		}
+		traceCompletedAt := time.Now()
+		if task.CompletedAt != nil && !task.CompletedAt.IsZero() {
+			traceCompletedAt = *task.CompletedAt
+		}
+		workspace.RecordTaskExecutionTraceFromEventBus(task, th.eventBus, ws.ID, task.ID, traceStartedAt, traceCompletedAt)
+		if len(task.ExecutionTrace) > 0 {
+			if err := ws.UpdateTask(*task); err != nil {
+				logger.Error("Failed to persist task execution trace", logger.Fields{"task_id": task.ID, "error": err})
+			} else if err := th.workspaceStore.Save(ws); err != nil {
+				logger.Error("Failed to save task execution trace", logger.Fields{"task_id": task.ID, "error": err})
+			}
+		}
 	}
 
 	return result, execErr
@@ -960,6 +977,15 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 			"task_id": task.ID,
 			"status":  task.Status,
 		}))
+
+		workspace.RecordTaskExecutionTraceFromEventBus(task, th.eventBus, ws.ID, task.ID, startedAt, now)
+		if len(task.ExecutionTrace) > 0 {
+			if err := ws.UpdateTask(*task); err != nil {
+				logger.Error("Failed to persist blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
+			} else if err := th.workspaceStore.Save(ws); err != nil {
+				logger.Error("Failed to save blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
+			}
+		}
 	}
 
 	logger.Warn("Task blocked awaiting user assistance", logger.Fields{
