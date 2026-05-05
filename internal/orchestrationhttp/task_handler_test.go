@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -669,8 +670,8 @@ func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 		Description: "Plan Lisbon trip",
 		To:          "Ori",
 		Status:      workspace.TaskStatusPending,
-		Context: map[string]interface{}{
-			"human_loop": map[string]interface{}{
+		Context: map[string]any{
+			"human_loop": map[string]any{
 				"state": "blocked",
 			},
 		},
@@ -721,6 +722,87 @@ func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 	}
 }
 
+func TestHandleAssistTask_ContinuePersistsChoiceAndResumesSameTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Pollen"})
+	ws.ID = "workspace-choice-resume"
+
+	task := workspace.Task{
+		ID:          "task-choice-resume",
+		WorkspaceID: ws.ID,
+		Description: "check pollen count in NYC",
+		To:          "Ori",
+		Status:      workspace.TaskStatusWaitingForChoice,
+		Context: map[string]any{
+			"human_loop": map[string]any{
+				"state":    "waiting_for_choice",
+				"block_id": "block-1",
+				"workflow_step": &workspace.TaskBlockedWorkflowStep{
+					StepType: "ask_choice",
+					Choices: []workspace.TaskBlockedChoice{
+						{ID: "alternate-source", Label: "Use an alternative data source", Number: "C"},
+					},
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	stub := &stubWorkspaceTaskExecutor{result: "NYC pollen is high. Source: Example Pollen"}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+		taskHandler:    stub,
+	}
+
+	body := `{"action":"continue_with_instruction","block_id":"block-1","choice_id":"alternate-source","choice_label":"Use an alternative data source","choice_number":"C","message":"Prefer a no-key public source."}`
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-choice-resume/assist", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.handleAssistTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		savedWS, err := store.Get(ws.ID)
+		if err != nil {
+			t.Fatalf("failed to reload workspace: %v", err)
+		}
+		savedTask, err := savedWS.GetTask(task.ID)
+		if err != nil {
+			t.Fatalf("failed to reload task: %v", err)
+		}
+		if savedTask.Status == workspace.TaskStatusCompleted {
+			if savedTask.ID != task.ID {
+				t.Fatalf("expected same task to resume, got %q", savedTask.ID)
+			}
+			if _, ok := savedTask.Context["user_assist_choice"].(*workspace.TaskBlockedChoice); !ok {
+				t.Fatalf("expected user_assist_choice to survive resume, got %T", savedTask.Context["user_assist_choice"])
+			}
+			if _, hasHumanLoop := savedTask.Context["human_loop"]; hasHumanLoop {
+				t.Fatal("expected human_loop to be cleared after resumed execution starts")
+			}
+			if stub.calls.Load() == 0 {
+				t.Fatal("expected task handler to be called during resume")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for resumed task completion, last status %q", savedTask.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
@@ -732,8 +814,8 @@ func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
 		Description: "Plan shelf build",
 		To:          "Ori",
 		Status:      workspace.TaskStatusPending,
-		Context: map[string]interface{}{
-			"human_loop": map[string]interface{}{
+		Context: map[string]any{
+			"human_loop": map[string]any{
 				"state": "blocked",
 				"workflow_step": &workspace.TaskBlockedWorkflowStep{
 					StepType: "ask_form",

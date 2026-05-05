@@ -466,7 +466,9 @@ function showAttachmentDetails(att) {
   const typeLabel = (att.type || 'other').toUpperCase();
   const fileMeta = att.file || att.file_meta;
   const bodyHtml = att.body
-    ? (window.marked ? window.marked.parse(att.body) : `<pre style="white-space: pre-wrap; margin:0;">${escapeHTML(att.body)}</pre>`)
+    ? ((window.marked && window.DOMPurify)
+        ? window.DOMPurify.sanitize(window.marked.parse(att.body))
+        : `<pre style="white-space: pre-wrap; margin:0;">${escapeHTML(att.body)}</pre>`)
     : '<div class="text-muted" style="font-size: 0.85rem;">No body</div>';
 
   const linkHtml = att.link_url

@@ -60,7 +60,8 @@ const appGlobals = {
   web3SettingsManager: 'readonly',
   module: 'readonly',
   require: 'readonly',
-  exports: 'readonly'
+  exports: 'readonly',
+  DOMPurify: 'readonly'
 };
 
 export default defineConfig([
@@ -128,6 +129,10 @@ export default defineConfig([
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',
       'internal/web/static/js/modules/workspace-detail.js',
+      'internal/web/static/js/modules/workspace-detail-directory-explorer.js',
+      'internal/web/static/js/modules/workspace-detail-file-modal.js',
+      'internal/web/static/js/modules/workspace-detail-mcp.js',
+      'internal/web/static/js/modules/workspace-detail-skills.js',
       'internal/web/static/js/modules/workspace-task.js'
     ],
     languageOptions: {

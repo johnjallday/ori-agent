@@ -95,8 +95,7 @@ func referencedAgentNames(ws *Workspace) []string {
 
 // SnapshotAllWorkspaces walks the workspace store once and snapshots referenced
 // agents for every workspace. Intended as a one-shot startup migration so
-// existing workspaces self-heal even when their entry agent has been removed
-// from the global registry.
+// existing workspaces become self-contained after startup.
 func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 	if workspaces == nil || agents == nil {
 		return
@@ -125,6 +124,48 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 	}
 	if migrated > 0 {
 		logger.Info("Workspace agent snapshots migrated", logger.Fields{"workspaces": migrated})
+	}
+}
+
+// RestoreAllWorkspaceAgents walks the workspace store once and restores any
+// workspace-local agent snapshots into the global agent registry when the
+// importing/running environment does not already have those agents.
+func RestoreAllWorkspaceAgents(workspaces Store, agents store.Store) {
+	if workspaces == nil || agents == nil {
+		return
+	}
+	ids, err := workspaces.List()
+	if err != nil {
+		logger.Warn("workspace agent restore: list workspaces failed", logger.Fields{"error": err.Error()})
+		return
+	}
+
+	restoredWorkspaces := 0
+	restoredAgents := 0
+	for _, id := range ids {
+		ws, err := workspaces.Get(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		registered, err := RestoreWorkspaceAgents(workspaces, ws, agents)
+		if err != nil {
+			logger.Warn("workspace agent restore: restore failed", logger.Fields{
+				"workspace_id": id,
+				"error":        err.Error(),
+			})
+			continue
+		}
+		if len(registered) > 0 {
+			restoredWorkspaces++
+			restoredAgents += len(registered)
+		}
+	}
+
+	if restoredAgents > 0 {
+		logger.Info("Workspace agent snapshots restored", logger.Fields{
+			"workspaces": restoredWorkspaces,
+			"agents":     restoredAgents,
+		})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,25 @@ Could you please confirm if the "DNM" folder is located somewhere else or provid
 			response: "   ",
 			want:     true,
 		},
+		{
+			name: "option menu",
+			response: `Recommended next steps (choose one):
+- Option A: Retry fetch now
+- Option B: Provide raw HTML or a snapshot
+- Option C: Use an alternative data source`,
+			want: true,
+		},
+		{
+			name: "asks what to do next after failed public source lookup",
+			response: `I attempted to fetch a current pollen count for New York City using public sources, but I’m not seeing any live results available in this session.
+
+What would you like me to do next?
+- I can keep trying with more sources.
+- If you have a preferred source, tell me and I’ll pull from that.
+
+Please tell me how you'd like to proceed.`,
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -54,6 +74,225 @@ Could you please confirm if the "DNM" folder is located somewhere else or provid
 				t.Fatalf("responseNeedsUserInput() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyToolAccessBlockedResponse_RobotsNetworkBlocked(t *testing.T) {
+	result := `A NYC pollen data fetch attempt was made from AccuWeather, but the fetch was blocked by robots.txt / network restrictions.
+No HTML content is available locally to parse.`
+
+	blockedErr := classifyToolAccessBlockedResponse(result)
+	if blockedErr == nil {
+		t.Fatal("expected robots/network blocked response to be classified as blocked")
+	}
+	if blockedErr.ReasonCode != "tool_access_unavailable" {
+		t.Fatalf("expected tool_access_unavailable reason, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestExtractClarificationWorkflowStep_ParsesOptionMenu(t *testing.T) {
+	result := `Recommended next steps (choose one):
+- Option A: Retry fetch now
+- Option B: Provide raw HTML or a snapshot
+- Option C: Use an alternative data source
+- Option D: Draft with placeholders now`
+
+	step := extractClarificationWorkflowStep(result)
+	if step == nil {
+		t.Fatal("expected workflow step")
+	}
+	if step.StepType != "ask_choice" {
+		t.Fatalf("expected ask_choice step, got %q", step.StepType)
+	}
+	if len(step.Choices) != 4 {
+		t.Fatalf("expected 4 choices, got %d: %#v", len(step.Choices), step.Choices)
+	}
+	if step.Choices[0].Number != "A" || step.Choices[0].Label != "Retry fetch now" {
+		t.Fatalf("unexpected first choice: %#v", step.Choices[0])
+	}
+}
+
+func TestExtractClarificationWorkflowStep_MarksRecommendedOption(t *testing.T) {
+	result := `Recommended next steps (choose one):
+- Option A: Retry fetch now
+- Option B: Provide raw HTML or a snapshot
+
+If you'd like, I can start with Option A by default.`
+
+	step := extractClarificationWorkflowStep(result)
+	if step == nil || len(step.Choices) != 2 {
+		t.Fatalf("expected 2 choices, got %#v", step)
+	}
+	if !step.Choices[0].Recommended {
+		t.Fatalf("expected first choice to be recommended: %#v", step.Choices[0])
+	}
+	if step.Choices[1].Recommended {
+		t.Fatalf("did not expect second choice to be recommended: %#v", step.Choices[1])
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_StatusSummaryForPublicInfo(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count in NYC"}
+	result := `Here’s the current status for Task 026ba8ef:
+- Status: in_progress
+- What happened so far: fetch was blocked.
+- What you’ll likely want next: retry.`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected status summary to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "invalid_status_summary" {
+		t.Fatalf("expected invalid_status_summary, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_PlaceholderTable(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count in NYC"}
+	result := `# NYC Pollen
+| Allergen | Level |
+|---|---|
+| Tree Pollen | TBD |
+| Grass Pollen | TBD |`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected placeholder table to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "placeholder_result" {
+		t.Fatalf("expected placeholder_result, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_RawToolResultsForPublicInfo(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count in NYC"}
+	result := `Tool Results:
+- web_fetch: {"url":"https://www.pollen.com/forecast/current/pollen/73344?dnsz=1","title":"Current Pollen Allergy Forecast for Austin, TX (73344) | Pollen.com"}`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected raw tool result to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "tool_only_result" {
+		t.Fatalf("expected tool_only_result, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_EmptyWebSearchResultsForPublicInfo(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count in NYC"}
+	result := `Tool Results:
+- web_search: {"query":"site:pollen.com New York pollen count","results":[],"source":"duckduckgo.com"}`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected empty web search result to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "empty_web_search_results" {
+		t.Fatalf("expected empty_web_search_results, got %q", blockedErr.ReasonCode)
+	}
+	if !strings.Contains(blockedErr.Question, "broader search") {
+		t.Fatalf("expected broader-search question, got %q", blockedErr.Question)
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_LocationMismatchForNYC(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count in NYC"}
+	result := `Current Pollen Allergy Forecast for Austin, TX (73344) | Pollen.com
+No locations found
+Current Allergy Report for Austin, TX`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected wrong-location result to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "location_mismatch" {
+		t.Fatalf("expected location_mismatch, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestClassifyInvalidTaskCompletionResponse_ZipMismatch(t *testing.T) {
+	task := workspace.Task{Description: "check pollen count for 10021"}
+	result := `Current Pollen Allergy Forecast for Austin, TX (73344) | Pollen.com`
+
+	blockedErr := classifyInvalidTaskCompletionResponse(task, result)
+	if blockedErr == nil {
+		t.Fatal("expected zip mismatch to be classified as invalid completion")
+	}
+	if blockedErr.ReasonCode != "location_mismatch" {
+		t.Fatalf("expected location_mismatch, got %q", blockedErr.ReasonCode)
+	}
+}
+
+func TestMarkTaskBlockedSetsWaitingForChoice(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Pollen"})
+	ws.ID = "workspace-waiting-choice"
+	task := workspace.Task{
+		ID:          "task-waiting-choice",
+		WorkspaceID: ws.ID,
+		Description: "check pollen count in NYC",
+		To:          "Ori",
+		Status:      workspace.TaskStatusInProgress,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+	taskRef, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+
+	handler := &TaskHandler{workspaceStore: store}
+	blockedErr := &workspace.TaskBlockedError{
+		ReasonCode: "needs_user_confirmation",
+		Reason:     "Choose a source fallback.",
+		Question:   "Which source should Ori try next?",
+		WorkflowStep: &workspace.TaskBlockedWorkflowStep{
+			StepType: "ask_choice",
+			Choices: []workspace.TaskBlockedChoice{
+				{ID: "retry", Label: "Retry fetch", Number: "A"},
+				{ID: "alternate", Label: "Use alternate source", Number: "B"},
+			},
+		},
+	}
+
+	if err := handler.markTaskBlocked(ws, taskRef, blockedErr, true, nil); err != nil {
+		t.Fatalf("markTaskBlocked failed: %v", err)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if savedTask.Status != workspace.TaskStatusWaitingForChoice {
+		t.Fatalf("expected waiting_for_choice status, got %q", savedTask.Status)
+	}
+	humanLoop, ok := savedTask.Context["human_loop"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected human_loop map, got %T", savedTask.Context["human_loop"])
+	}
+	if humanLoop["state"] != "waiting_for_choice" {
+		t.Fatalf("expected waiting human loop state, got %#v", humanLoop["state"])
+	}
+	if humanLoop["workflow_step"] == nil {
+		t.Fatal("expected workflow_step to be persisted")
+	}
+	workflowStep, ok := humanLoop["workflow_step"].(*workspace.TaskBlockedWorkflowStep)
+	if !ok {
+		t.Fatalf("expected workflow_step type, got %T", humanLoop["workflow_step"])
+	}
+	if len(workflowStep.Choices) != 3 {
+		t.Fatalf("expected let Ori decide choice to be added, got %#v", workflowStep.Choices)
+	}
+	if workflowStep.Choices[2].ID != "ori_decide" {
+		t.Fatalf("expected final choice to let Ori decide, got %#v", workflowStep.Choices[2])
 	}
 }
 
@@ -71,28 +310,28 @@ func TestResolveTaskExecutionAttempts(t *testing.T) {
 		{
 			name: "string override",
 			task: &workspace.Task{
-				Context: map[string]interface{}{"max_attempts": "4"},
+				Context: map[string]any{"max_attempts": "4"},
 			},
 			want: 4,
 		},
 		{
 			name: "float override",
 			task: &workspace.Task{
-				Context: map[string]interface{}{"retry_attempts": 2.0},
+				Context: map[string]any{"retry_attempts": 2.0},
 			},
 			want: 2,
 		},
 		{
 			name: "clamped to max",
 			task: &workspace.Task{
-				Context: map[string]interface{}{"execution_max_attempts": 20},
+				Context: map[string]any{"execution_max_attempts": 20},
 			},
 			want: maxTaskExecutionAttempts,
 		},
 		{
 			name: "invalid keeps default",
 			task: &workspace.Task{
-				Context: map[string]interface{}{"max_attempts": "invalid"},
+				Context: map[string]any{"max_attempts": "invalid"},
 			},
 			want: defaultTaskExecutionAttempts,
 		},
@@ -235,10 +474,10 @@ A few quick questions:
 func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedListing(t *testing.T) {
 	task := &workspace.Task{
 		Description: "Get list of files in DNM folder",
-		Context:     map[string]interface{}{},
+		Context:     map[string]any{},
 	}
 
-	history := []map[string]interface{}{
+	history := []map[string]any{
 		{
 			"attempt": 1,
 			"outcome": "unverified",
@@ -264,10 +503,10 @@ func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedList
 func TestApplyIterationContext_RequiresDirectFileListAfterIncompleteListing(t *testing.T) {
 	task := &workspace.Task{
 		Description: "Get list of files in DNM folder",
-		Context:     map[string]interface{}{},
+		Context:     map[string]any{},
 	}
 
-	history := []map[string]interface{}{
+	history := []map[string]any{
 		{
 			"attempt": 1,
 			"outcome": "incomplete",
@@ -332,11 +571,11 @@ To walk you through the directory, I'd need you to either share the directory li
 type stubWorkspaceTaskExecutor struct {
 	result string
 	err    error
-	calls  int
+	calls  atomic.Int32
 }
 
 func (s *stubWorkspaceTaskExecutor) ExecuteTask(_ context.Context, _ string, _ workspace.Task) (string, error) {
-	s.calls++
+	s.calls.Add(1)
 	return s.result, s.err
 }
 
@@ -407,7 +646,7 @@ type stubEventingTaskExecutor struct {
 func (s *stubEventingTaskExecutor) ExecuteTask(_ context.Context, agentName string, task workspace.Task) (string, error) {
 	s.calls++
 	if s.eventBus != nil && strings.TrimSpace(s.toolName) != "" {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"tool_name": s.toolName,
 			"success":   s.success,
 		}
@@ -449,7 +688,7 @@ func (s *stubSequenceEventingTaskExecutor) ExecuteTask(_ context.Context, agentN
 	step := s.steps[index]
 
 	if s.eventBus != nil && strings.TrimSpace(step.toolName) != "" {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"tool_name": step.toolName,
 			"success":   step.success,
 		}
@@ -475,7 +714,7 @@ To walk you through the directory, I'd need you to either share the directory li
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "walk me through the amr directory",
-		Context:     map[string]interface{}{},
+		Context:     map[string]any{},
 	}
 
 	_, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
@@ -486,11 +725,11 @@ To walk you through the directory, I'd need you to either share the directory li
 	if blockedErr.ReasonCode != "tool_access_unavailable" {
 		t.Fatalf("expected tool_access_unavailable, got %q", blockedErr.ReasonCode)
 	}
-	if stub.calls != 1 {
-		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	if stub.calls.Load() != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls.Load())
 	}
 
-	retryData, ok := task.Context["execution_retry"].(map[string]interface{})
+	retryData, ok := task.Context["execution_retry"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected execution_retry context to be recorded")
 	}
@@ -518,7 +757,7 @@ func TestExecuteTaskIteratively_BlocksUnverifiedFilesystemListingResult(t *testi
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "Give me list of files in DNM folder",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"max_attempts": 1,
 		},
 	}
@@ -555,7 +794,7 @@ func TestExecuteTaskIteratively_AllowsVerifiedFilesystemListingResult(t *testing
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "Give me list of files in DNM folder",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"max_attempts": 1,
 		},
 	}
@@ -601,7 +840,7 @@ func TestExecuteTaskIteratively_RetriesIncompleteFilesystemListingAnswer(t *test
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "Get list of files in DNM folder",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"max_attempts": 2,
 		},
 	}
@@ -617,7 +856,7 @@ func TestExecuteTaskIteratively_RetriesIncompleteFilesystemListingAnswer(t *test
 		t.Fatalf("expected two execution attempts, got %d", stub.calls)
 	}
 
-	retryData, ok := task.Context["execution_retry"].(map[string]interface{})
+	retryData, ok := task.Context["execution_retry"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected execution_retry context to be recorded")
 	}
@@ -640,7 +879,7 @@ func TestExecuteTaskIteratively_RetriesInvalidStructuredOutput(t *testing.T) {
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "Return a release summary",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"max_attempts": 2,
 		},
 		OutputSchema: &workspace.TaskOutputSchema{
@@ -663,7 +902,7 @@ func TestExecuteTaskIteratively_RetriesInvalidStructuredOutput(t *testing.T) {
 	if stub.calls != 2 {
 		t.Fatalf("expected two attempts, got %d", stub.calls)
 	}
-	structuredOutput, ok := task.Context["structured_output"].(map[string]interface{})
+	structuredOutput, ok := task.Context["structured_output"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected parsed structured output in task context, got %#v", task.Context["structured_output"])
 	}
@@ -681,7 +920,7 @@ func TestExecuteTaskIteratively_BlocksWhenStructuredOutputRemainsInvalid(t *test
 		WorkspaceID: ws.ID,
 		To:          "Ori",
 		Description: "Return a release summary",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"max_attempts": 1,
 		},
 		OutputSchema: &workspace.TaskOutputSchema{
@@ -699,8 +938,8 @@ func TestExecuteTaskIteratively_BlocksWhenStructuredOutputRemainsInvalid(t *test
 	if blockedErr.ReasonCode != "structured_output_invalid" {
 		t.Fatalf("expected structured_output_invalid, got %q", blockedErr.ReasonCode)
 	}
-	if stub.calls != 1 {
-		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	if stub.calls.Load() != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls.Load())
 	}
 }
 
@@ -770,11 +1009,11 @@ func TestExecuteParentTaskSequence_UsesGraphExecutionAndStructuredAggregation(t 
 		t.Fatalf("unexpected graph execution order %q, want %q", got, want)
 	}
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(updatedParent.Result), &payload); err != nil {
 		t.Fatalf("expected structured parent result, got %v", err)
 	}
-	finalOutputs, ok := payload["final_step_outputs"].([]interface{})
+	finalOutputs, ok := payload["final_step_outputs"].([]any)
 	if !ok {
 		t.Fatalf("expected final_step_outputs array, got %#v", payload["final_step_outputs"])
 	}
@@ -965,7 +1204,7 @@ func TestExecuteTaskWithDependencies_StepThroughPausesAfterFirstStructuredStep(t
 		To:            "Ori",
 		Description:   "Gather DNM related files into DNM folder",
 		ExecutionMode: workspace.TaskExecutionModeStepThrough,
-		Context:       map[string]interface{}{},
+		Context:       map[string]any{},
 	}
 	if err := ws.AddTask(task); err != nil {
 		t.Fatalf("failed to add task: %v", err)
@@ -1033,7 +1272,7 @@ func TestExecuteTaskWithDependencies_CompletesStaleListingPlanFromExistingResult
 		To:            "Ori",
 		Description:   "Give me list of files in DNM folder",
 		ExecutionMode: workspace.TaskExecutionModeStepThrough,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"execution_step_waiting":       true,
 			"execution_step_waiting_index": 4,
 		},
@@ -1096,7 +1335,7 @@ func TestExecuteTaskWithDependencies_AutoRunsStructuredStepsToCompletion(t *test
 		To:            "Ori",
 		Description:   "Gather DNM related files into DNM folder",
 		ExecutionMode: workspace.TaskExecutionModeAuto,
-		Context:       map[string]interface{}{},
+		Context:       map[string]any{},
 	}
 	if err := ws.AddTask(task); err != nil {
 		t.Fatalf("failed to add task: %v", err)

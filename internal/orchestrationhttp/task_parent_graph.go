@@ -83,7 +83,7 @@ func buildParentTaskGraphPlan(subtasks []workspace.Task) (*parentTaskGraphPlan, 
 	}, nil
 }
 
-func (th *TaskHandler) executeParentTaskGraph(ws *workspace.Workspace, parentTask *workspace.Task, subtasks []workspace.Task) (string, string, error) {
+func (th *TaskHandler) executeParentTaskGraph(ws *workspace.Workspace, subtasks []workspace.Task) (string, string, error) {
 	plan, err := buildParentTaskGraphPlan(subtasks)
 	if err != nil {
 		return "", "", err
@@ -174,7 +174,7 @@ func resetParentSubtaskForExecution(task *workspace.Task) bool {
 
 	changed := false
 	switch task.Status {
-	case workspace.TaskStatusCompleted, workspace.TaskStatusFailed, workspace.TaskStatusCancelled, workspace.TaskStatusTimeout:
+	case workspace.TaskStatusCompleted, workspace.TaskStatusFailed, workspace.TaskStatusCancelled, workspace.TaskStatusTimeout, workspace.TaskStatusWaitingForChoice:
 		task.Status = workspace.TaskStatusPending
 		changed = true
 	}

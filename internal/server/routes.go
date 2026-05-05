@@ -522,9 +522,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 		// Legacy folder routes (redirect to workspace routes)
 		mux.HandleFunc("/api/folders/", func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-			// Check if this is a workspace notes request
-			if strings.Contains(path, "/notes") {
+			// Check if this is a workspace notes request: /api/folders/{id}/notes[/...]
+			// Match only when "notes" is the second path segment so that linked-directory
+			// file paths with a "notes/" subfolder don't get misrouted here.
+			trimmed := strings.TrimPrefix(r.URL.Path, "/api/folders/")
+			parts := strings.Split(trimmed, "/")
+			if len(parts) >= 2 && parts[1] == "notes" {
 				s.Handlers.Session.HandleWorkspaceNotes(w, r)
 				return
 			}
@@ -627,8 +630,13 @@ func (s *Server) handleWorkspaceCollectionAPI(w http.ResponseWriter, r *http.Req
 func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Check if this is a workspace notes request.
-	if strings.Contains(path, "/notes") {
+	// Check if this is a workspace notes request: /api/workspaces/{id}/notes[/...].
+	// Match only when "notes" is the second path segment so that linked-directory
+	// file paths with a "notes/" subfolder (e.g. /directories/{id}/files/notes/foo.md)
+	// don't get misrouted to the notes handler and rejected as "Invalid path".
+	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) >= 2 && parts[1] == "notes" {
 		s.Handlers.Session.HandleWorkspaceNotes(w, r)
 		return
 	}

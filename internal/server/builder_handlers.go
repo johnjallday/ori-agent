@@ -61,7 +61,14 @@ func (b *ServerBuilder) initializeHandlers() error {
 
 	applyUtilitySettings := func() {
 		cfg := b.configManager.Get()
-		b.chatHandler.SetUtilityToolRegistry(buildUtilityToolRegistry(cfg.Utility))
+		b.utilityToolRegistry = buildUtilityToolRegistry(cfg.Utility)
+		b.chatHandler.SetUtilityToolRegistry(b.utilityToolRegistry)
+		if b.taskHandler != nil {
+			b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+		}
+		if b.orchestrationTaskHandler != nil {
+			b.orchestrationTaskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+		}
 		b.chatHandler.SetBrowserMCPPreference(cfg.Utility.BrowserControlProvider)
 		b.syncPlaywrightBrowserSettings(cfg.Utility)
 	}

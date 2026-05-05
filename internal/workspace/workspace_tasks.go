@@ -180,15 +180,16 @@ func (w *Workspace) GetTaskStats() map[string]int {
 	defer w.mu.RUnlock()
 
 	stats := map[string]int{
-		"total":       len(w.Tasks),
-		"pending":     0,
-		"assigned":    0,
-		"in_progress": 0,
-		"completed":   0,
-		"failed":      0,
-		"cancelled":   0,
-		"timeout":     0,
-		"scheduled":   0,
+		"total":              len(w.Tasks),
+		"pending":            0,
+		"assigned":           0,
+		"in_progress":        0,
+		"waiting_for_choice": 0,
+		"completed":          0,
+		"failed":             0,
+		"cancelled":          0,
+		"timeout":            0,
+		"scheduled":          0,
 	}
 
 	for _, task := range w.Tasks {
@@ -199,6 +200,8 @@ func (w *Workspace) GetTaskStats() map[string]int {
 			stats["assigned"]++
 		case TaskStatusInProgress:
 			stats["in_progress"]++
+		case TaskStatusWaitingForChoice:
+			stats["waiting_for_choice"]++
 		case TaskStatusCompleted:
 			stats["completed"]++
 		case TaskStatusFailed:

@@ -220,11 +220,12 @@ window.manualRetryConnection = async function() {
  */
 async function loadWorkspaces(options = {}) {
   const { showLoading = false } = options;
+  const isInitialLoad = showLoading || !hasLoadedWorkspaces;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
   try {
-    if (showLoading || !hasLoadedWorkspaces) {
+    if (isInitialLoad) {
       renderWorkspacesLoadingState();
     }
 
@@ -243,6 +244,7 @@ async function loadWorkspaces(options = {}) {
 
     if (data.error) {
       console.error('Server error:', data.error);
+      if (isInitialLoad) renderWorkspacesErrorState();
       handleConnectionFailure();
       return;
     }
@@ -263,6 +265,8 @@ async function loadWorkspaces(options = {}) {
     }
 
     console.error('Error loading workspaces:', error);
+
+    if (isInitialLoad) renderWorkspacesErrorState();
 
     // Check if it's a network error (server offline)
     if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
@@ -303,6 +307,42 @@ function renderWorkspacesLoadingState() {
     `).join('');
 
   grid.innerHTML = skeletons;
+}
+
+function renderWorkspacesErrorState() {
+  const grid = document.getElementById('workspaces-grid');
+  if (!grid) return;
+  grid.innerHTML = `
+        <div class="col-12">
+            <div class="workspace-empty-card modern-card" role="alert">
+                <div class="workspace-empty-content">
+                    <span class="modern-badge badge-warning workspace-empty-badge">Connection issue</span>
+                    <h3 class="workspace-empty-title">Couldn't load workspaces</h3>
+                    <p class="workspace-empty-description">
+                        Something went wrong reaching the server. Check that the agent is running and try again.
+                    </p>
+                    <div class="d-flex gap-2 justify-content-center mt-3">
+                        <button type="button" class="btn btn-primary" data-action="workspaces-retry">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                                <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                            </svg>
+                            Retry
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+  const retryBtn = grid.querySelector('[data-action="workspaces-retry"]');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => {
+      if (typeof window.manualRetryConnection === 'function') {
+        window.manualRetryConnection();
+      } else {
+        loadWorkspaces({ showLoading: true });
+      }
+    });
+  }
 }
 
 function renderWorkspacesEmptyState() {

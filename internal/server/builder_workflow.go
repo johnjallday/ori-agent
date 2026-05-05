@@ -113,10 +113,18 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// global agent registry. The snapshots make a workspace folder
 	// self-contained for export/import.
 	if b.st != nil {
+		if fileStore != nil {
+			workspace.RestoreAllWorkspaceAgents(fileStore, b.st)
+		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)
-		// One-shot migration: snapshot referenced agents for every workspace
-		// already on disk so existing workspaces self-heal on next startup.
+		// One-shot startup repair: restore imported workspace-local agent
+		// snapshots into this environment, then refresh snapshots for globally
+		// available agents referenced by primary or folder-only workspaces.
+		workspace.RestoreAllWorkspaceAgents(ws, b.st)
 		workspace.SnapshotAllWorkspaces(ws, b.st)
+		if fileStore != nil {
+			workspace.SnapshotAllWorkspaces(fileStore, b.st)
+		}
 	}
 
 	b.workspaceStore = ws
@@ -158,29 +166,30 @@ func (b *ServerBuilder) initializeEventSystem() error {
 
 // initializeTaskExecution creates task handler, executor, step executor, and scheduler.
 func (b *ServerBuilder) initializeTaskExecution() error {
-	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
-	taskHandler.SetEventBus(b.eventBus)
-	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
+	b.taskHandler.SetEventBus(b.eventBus)
+	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
+	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
 	if b.skillsManager != nil {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
-	taskHandler.SetRuntimeResolver(runtimeResolver)
+	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {
-		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+		b.taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
-		taskHandler.SetWorkspaceToolFactory(fn)
+		b.taskHandler.SetWorkspaceToolFactory(fn)
 	}
 
-	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskHandler, workspace.ExecutorConfig{
+	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, b.taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
 	b.taskExecutor.SetEventBus(b.eventBus)
 
-	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskHandler, workspace.StepExecutorConfig{
+	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, b.taskHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
@@ -212,6 +221,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
@@ -219,6 +229,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
 		taskHandler.SetWorkspaceToolFactory(fn)
 	}
+	b.orchestrationTaskHandler = taskHandler
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore
@@ -259,6 +270,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() error {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	if b.taskHandler != nil {
+		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
+	}
 	if verbose {
 		logger.Info("Workspace orchestrator initialized", logger.Fields{})
 	}

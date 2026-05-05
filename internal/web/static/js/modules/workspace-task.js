@@ -40,11 +40,11 @@ function formatDateTime(dateString) {
 
 function getStatusClass(status) {
   const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'completed') return 'completed';
+  if (normalized === 'completed' || normalized === 'success') return 'completed';
   if (normalized === 'in_progress') return 'in_progress';
-  if (normalized === 'blocked') return 'blocked';
+  if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
   if (normalized === 'cancelled') return 'cancelled';
-  if (normalized === 'failed' || normalized === 'timeout') return 'failed';
+  if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout') return 'failed';
   return 'pending';
 }
 
@@ -54,6 +54,7 @@ function getDisplayStatus(status) {
     pending: 'Pending',
     assigned: 'Assigned',
     in_progress: 'In Progress',
+    waiting_for_choice: 'Waiting for Choice',
     completed: 'Completed',
     failed: 'Failed',
     blocked: 'Blocked',
@@ -85,6 +86,89 @@ function normalizeResultText(value) {
   } catch (_error) {
     return String(value);
   }
+}
+
+const TASK_SKILL_RESULT_CONTEXT_MAX_CHARS = 2600;
+const TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS = 1200;
+const TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS = 6200;
+
+function stripSkillUnsafeMarkup(value) {
+  return String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function trimTaskSkillText(value, maxLength = 900) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || normalized.length <= maxLength) return normalized;
+
+  const candidate = normalized.slice(0, maxLength - 1);
+  const boundary = candidate.lastIndexOf(' ');
+  const trimmed = boundary >= Math.floor(maxLength * 0.55)
+    ? candidate.slice(0, boundary)
+    : candidate;
+  return `${trimmed.trim()}...`;
+}
+
+function buildTaskSkillNameSlug(value) {
+  let slug = stripSkillUnsafeMarkup(value)
+    .toLowerCase()
+    .replace(/anthropic/g, 'provider')
+    .replace(/claude/g, 'assistant')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  if (!slug) slug = 'task-skill';
+  if (slug.length > 64) {
+    slug = slug.slice(0, 64).replace(/-+$/g, '');
+  }
+  return slug || 'task-skill';
+}
+
+function extractGeneratedSkillPrompt(raw) {
+  let text = String(raw || '').trim();
+  if (!text) return '';
+
+  if (text.startsWith('```')) {
+    text = text.replace(/^```[a-zA-Z0-9_-]*\s*/u, '');
+    text = text.replace(/\s*```$/u, '').trim();
+  }
+
+  const lower = text.toLowerCase();
+  if (lower.startsWith('prompt:')) {
+    text = text.slice('prompt:'.length).trim();
+  }
+
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+
+  return text;
+}
+
+function stringifyTraceValue(value, maxLength = 900) {
+  if (value === undefined || value === null) return '';
+
+  let text = '';
+  if (typeof value === 'string') {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2);
+    } catch (_error) {
+      text = String(value);
+    }
+  }
+
+  return trimTaskSkillText(text, maxLength);
+}
+
+function getTaskEventData(event) {
+  const data = event?.data;
+  if (data?.data && typeof data.data === 'object') return data.data;
+  return data && typeof data === 'object' ? data : {};
 }
 
 const assistQuestionPromptPattern = /^\s*(?:[-*]\s*)?(?:\d+)[.)]\s*(.+?)\s*$/;
@@ -713,6 +797,7 @@ export class WorkspaceTaskPage {
     this.workspace = null;
     this.task = null;
     this.tasks = [];
+    this.taskEvents = [];
     this.availableAgents = [];
     this.currentBlockedTask = null;
     this.taskAssistResponseExpanded = false;
@@ -721,6 +806,7 @@ export class WorkspaceTaskPage {
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
+    this.detailsEditInProgress = false;
     this.workflowDraftPending = false;
     this.resultNoteSaving = false;
     this.savedResultNote = null;
@@ -728,6 +814,25 @@ export class WorkspaceTaskPage {
     this.resultPromotionPending = false;
     this.resultPromotionSubmitting = false;
     this.resultPromotionDraft = null;
+    this.resultResearchPendingSectionId = '';
+    this.resultResearchDraft = null;
+    this.resultResearchSubmitting = false;
+    this.skillDraftGenerating = false;
+    this.skillDraftSubmitting = false;
+    this.skillDraftAbortController = null;
+    this.skillDraftRequestId = 0;
+    this.resultSectionMenu = null;
+    this.scheduleSubmitting = false;
+    this.boundResultSectionMenuDocumentClick = (event) => {
+      if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
+      this.closeResultSectionMenu();
+    };
+    this.boundResultSectionMenuKeydown = (event) => {
+      if (event.key === 'Escape') {
+        this.closeResultSectionMenu();
+      }
+    };
+    this.boundResultSectionMenuScroll = () => this.closeResultSectionMenu();
     this.elements = {};
   }
 
@@ -753,6 +858,7 @@ export class WorkspaceTaskPage {
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
       subtitle: document.getElementById('workspace-task-subtitle'),
+      detailsEditBtn: document.getElementById('workspace-task-details-edit'),
       status: document.getElementById('workspace-task-status'),
       heroActions: document.getElementById('workspace-task-hero-actions'),
       heroPriority: document.getElementById('workspace-task-hero-priority'),
@@ -766,14 +872,34 @@ export class WorkspaceTaskPage {
       outputCard: document.getElementById('workspace-task-output-card'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
+      outputCreateSkillBtn: document.getElementById('workspace-task-output-create-skill'),
       outputPromoteBtn: document.getElementById('workspace-task-output-promote'),
       outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
+      skillModal: document.getElementById('workspace-task-skill-modal'),
+      skillMeta: document.getElementById('workspace-task-skill-meta'),
+      skillError: document.getElementById('workspace-task-skill-error'),
+      skillAgentInput: document.getElementById('workspace-task-skill-agent'),
+      skillNameInput: document.getElementById('workspace-task-skill-name'),
+      skillDescriptionInput: document.getElementById('workspace-task-skill-description'),
+      skillPromptInput: document.getElementById('workspace-task-skill-prompt'),
+      skillGenerateBtn: document.getElementById('workspace-task-skill-generate'),
+      skillSubmitBtn: document.getElementById('workspace-task-skill-submit'),
       resultPromoteModal: document.getElementById('workspace-task-result-promote-modal'),
       resultPromoteTitleInput: document.getElementById('workspace-task-result-promote-title'),
       resultPromoteMeta: document.getElementById('workspace-task-result-promote-meta'),
       resultPromoteGroups: document.getElementById('workspace-task-result-promote-groups'),
       resultPromoteSubmitBtn: document.getElementById('workspace-task-result-promote-submit'),
+      resultResearchModal: document.getElementById('workspace-task-result-research-modal'),
+      resultResearchSectionMeta: document.getElementById('workspace-task-result-research-section-meta'),
+      resultResearchTitleInput: document.getElementById('workspace-task-result-research-title'),
+      resultResearchAgentSelect: document.getElementById('workspace-task-result-research-agent'),
+      resultResearchDetailsInput: document.getElementById('workspace-task-result-research-details'),
+      resultResearchSectionInput: document.getElementById('workspace-task-result-research-section-text'),
+      resultResearchLinkInput: document.getElementById('workspace-task-result-research-link-source'),
+      resultResearchRunInput: document.getElementById('workspace-task-result-research-run-now'),
+      resultResearchOpenInput: document.getElementById('workspace-task-result-research-open-after-create'),
+      resultResearchSubmitBtn: document.getElementById('workspace-task-result-research-submit'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
       workflowAddStepBtn: document.getElementById('workspace-task-workflow-add-step'),
@@ -781,8 +907,35 @@ export class WorkspaceTaskPage {
       workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
       workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
       workflowSteps: document.getElementById('workspace-task-workflow-steps'),
+      traceCard: document.getElementById('workspace-task-trace-card'),
+      trace: document.getElementById('workspace-task-trace'),
+      executionTraceCard: document.getElementById('workspace-task-execution-trace-card'),
+      executionTrace: document.getElementById('workspace-task-execution-trace'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
+      scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
+      scheduleModal: document.getElementById('workspace-task-schedule-modal'),
+      scheduleModalHeading: document.getElementById('workspace-task-schedule-heading'),
+      scheduleModalMeta: document.getElementById('workspace-task-schedule-modal-meta'),
+      scheduleError: document.getElementById('workspace-task-schedule-error'),
+      scheduleEnabledInput: document.getElementById('workspace-task-schedule-enabled'),
+      scheduleNameInput: document.getElementById('workspace-task-schedule-name'),
+      scheduleTypeInput: document.getElementById('workspace-task-schedule-type'),
+      scheduleTimeField: document.getElementById('workspace-task-schedule-time-field'),
+      scheduleTimeLabel: document.getElementById('workspace-task-schedule-time-label'),
+      scheduleTimeInput: document.getElementById('workspace-task-schedule-time'),
+      scheduleDayField: document.getElementById('workspace-task-schedule-day-field'),
+      scheduleDayInput: document.getElementById('workspace-task-schedule-day'),
+      scheduleIntervalField: document.getElementById('workspace-task-schedule-interval-field'),
+      scheduleIntervalValueInput: document.getElementById('workspace-task-schedule-interval-value'),
+      scheduleIntervalUnitInput: document.getElementById('workspace-task-schedule-interval-unit'),
+      scheduleOnceField: document.getElementById('workspace-task-schedule-once-field'),
+      scheduleOnceInput: document.getElementById('workspace-task-schedule-once'),
+      scheduleCronField: document.getElementById('workspace-task-schedule-cron-field'),
+      scheduleCronInput: document.getElementById('workspace-task-schedule-cron'),
+      schedulePreview: document.getElementById('workspace-task-schedule-preview'),
+      scheduleSubmitBtn: document.getElementById('workspace-task-schedule-submit'),
+      scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
       stepsCard: document.getElementById('workspace-task-steps-card'),
       steps: document.getElementById('workspace-task-steps'),
       contextCard: document.getElementById('workspace-task-context-card'),
@@ -819,21 +972,58 @@ export class WorkspaceTaskPage {
   bindEvents() {
     this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
+    this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
+    this.elements.subtitle?.addEventListener('dblclick', () => this.startHeroDetailsEdit());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.elements.outputCreateSkillBtn?.addEventListener('click', () => this.openSkillDraftModal());
     this.elements.outputPromoteBtn?.addEventListener('click', () => this.previewResultPromotion());
+    this.elements.skillGenerateBtn?.addEventListener('click', () => this.generateSkillPromptFromTask(true));
+    this.elements.skillSubmitBtn?.addEventListener('click', () => this.submitTaskSkillDraft());
+    this.elements.skillModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.skillDraftSubmitting) return;
+      if (this.skillDraftAbortController) {
+        this.skillDraftAbortController.abort();
+        this.skillDraftAbortController = null;
+      }
+      this.skillDraftGenerating = false;
+      this.updateSkillDraftButtons();
+    });
     this.elements.resultPromoteSubmitBtn?.addEventListener('click', () => this.submitResultPromotion());
     this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
       if (this.resultPromotionSubmitting) return;
       this.resultPromotionDraft = null;
     });
+    this.elements.resultResearchSubmitBtn?.addEventListener('click', () => this.submitResultResearchDraft());
+    this.elements.resultResearchRunInput?.addEventListener('change', () => this.updateResultResearchSubmitLabel());
+    this.elements.resultResearchModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.resultResearchSubmitting) return;
+      this.resultResearchDraft = null;
+    });
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
+    this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
+    this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
+    [
+      this.elements.scheduleEnabledInput,
+      this.elements.scheduleNameInput,
+      this.elements.scheduleTimeInput,
+      this.elements.scheduleDayInput,
+      this.elements.scheduleIntervalValueInput,
+      this.elements.scheduleIntervalUnitInput,
+      this.elements.scheduleOnceInput,
+      this.elements.scheduleCronInput
+    ].forEach((element) => {
+      element?.addEventListener('input', () => this.updateSchedulePreview());
+      element?.addEventListener('change', () => this.updateSchedulePreview());
+    });
+    this.elements.scheduleSubmitBtn?.addEventListener('click', () => this.saveSchedule());
+    this.elements.scheduleRemoveBtn?.addEventListener('click', () => this.removeSchedule());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -854,15 +1044,17 @@ export class WorkspaceTaskPage {
     this.setAlert('');
 
     try {
-      const [workspace, taskResponse, agents] = await Promise.all([
+      const [workspace, taskResponse, agents, taskEvents] = await Promise.all([
         this.fetchWorkspace(),
         this.fetchTask(),
-        this.fetchAgents().catch(() => [])
+        this.fetchAgents().catch(() => []),
+        this.fetchTaskEvents().catch(() => [])
       ]);
 
       this.workspace = workspace || null;
       this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
       this.availableAgents = Array.isArray(agents) ? agents : [];
+      this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
 
       const workspaceTask = this.tasks.find((item) => String(item?.id || '') === this.taskId) || null;
       this.task = taskResponse || workspaceTask;
@@ -910,6 +1102,19 @@ export class WorkspaceTaskPage {
 
     const payload = await response.json();
     return Array.isArray(payload?.agents) ? payload.agents : [];
+  }
+
+  async fetchTaskEvents() {
+    const params = new URLSearchParams({
+      workspace_id: this.workspaceId,
+      task_id: this.taskId,
+      limit: '200'
+    });
+    const response = await fetch(`/api/orchestration/events?${params.toString()}`);
+    if (!response.ok) return [];
+
+    const payload = await response.json().catch(() => ({}));
+    return Array.isArray(payload?.events) ? payload.events : [];
   }
 
   setupRealtime() {
@@ -1054,6 +1259,103 @@ export class WorkspaceTaskPage {
     });
   }
 
+  startHeroDetailsEdit() {
+    if (this.detailsEditInProgress || !this.elements.subtitle) return;
+
+    const subtitle = this.elements.subtitle;
+    const editButton = this.elements.detailsEditBtn;
+    const subtitleRow = subtitle.closest('.workspace-task-page-subtitle-row') || subtitle.parentElement;
+    const currentValue = String(this.task?.details || '').trim();
+
+    this.detailsEditInProgress = true;
+
+    const editorWrap = document.createElement('div');
+    editorWrap.className = 'workspace-task-page-subtitle-input-wrap';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'workspace-task-page-subtitle-input';
+    textarea.rows = 4;
+    textarea.value = currentValue;
+    textarea.placeholder = 'Add source preferences, constraints, context, or anything the agent should know before running this task.';
+    textarea.setAttribute('aria-label', 'Edit additional task details');
+
+    const editActions = document.createElement('div');
+    editActions.className = 'workspace-task-page-title-edit-actions';
+    editActions.innerHTML = `
+      <button type="button" class="workspace-task-page-edit-save" aria-label="Save additional details">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing additional details">Cancel</button>
+      <span class="workspace-task-page-edit-hint">Cmd/Ctrl+Enter to save, Esc to cancel</span>
+    `;
+
+    editorWrap.appendChild(textarea);
+    editorWrap.appendChild(editActions);
+
+    subtitle.style.display = 'none';
+    if (editButton) editButton.style.display = 'none';
+    subtitle.insertAdjacentElement('afterend', editorWrap);
+
+    const syncHeight = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.max(textarea.scrollHeight, 120)}px`;
+    };
+
+    syncHeight();
+    textarea.focus();
+    textarea.select();
+
+    const finishEdit = async (save) => {
+      if (!this.detailsEditInProgress) return;
+      this.detailsEditInProgress = false;
+
+      const nextValue = textarea.value.trim();
+      editorWrap.remove();
+      subtitle.style.display = '';
+      if (editButton) editButton.style.display = '';
+      if (subtitleRow) subtitleRow.classList.remove('is-editing');
+
+      if (!save || nextValue === currentValue) {
+        return;
+      }
+
+      try {
+        await this.updateTaskFields({ details: nextValue });
+        this.notify('success', nextValue ? 'Additional details updated' : 'Additional details cleared');
+      } catch (error) {
+        console.error('Failed to update task details:', error);
+        this.notify('error', error?.message || 'Failed to update additional details');
+      }
+    };
+
+    if (subtitleRow) subtitleRow.classList.add('is-editing');
+
+    editActions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(true);
+    });
+    editActions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(false);
+    });
+
+    textarea.addEventListener('input', syncHeight);
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finishEdit(false);
+        return;
+      }
+
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        finishEdit(true);
+      }
+    });
+    textarea.addEventListener('blur', (event) => {
+      if (editActions.contains(event.relatedTarget)) return;
+      finishEdit(true);
+    });
+  }
+
   async updateTaskFields(patch) {
     const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.taskId)}`, {
       method: 'PATCH',
@@ -1098,14 +1400,18 @@ export class WorkspaceTaskPage {
 
   getTaskStatusPresentation(task = this.task) {
     const humanLoop = this.getTaskHumanLoop(task);
-    const blocked = String(task?.status || '').trim().toLowerCase() === 'blocked' ||
-      String(humanLoop?.state || '').trim().toLowerCase() === 'blocked' ||
+    const status = String(task?.status || '').trim().toLowerCase();
+    const humanLoopState = String(humanLoop?.state || '').trim().toLowerCase();
+    const waiting = status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice';
+    const blocked = status === 'blocked' ||
+      waiting ||
+      humanLoopState === 'blocked' ||
       Boolean(humanLoop?.reason) ||
       Boolean(humanLoop?.question);
 
     return {
       isBlocked: blocked,
-      label: blocked ? 'Blocked' : getDisplayStatus(task?.status),
+      label: waiting ? 'Waiting for Choice' : (blocked ? 'Needs Input' : getDisplayStatus(task?.status)),
       className: blocked ? 'blocked' : getStatusClass(task?.status),
       reason: String(humanLoop?.reason || '').trim()
     };
@@ -1151,7 +1457,8 @@ export class WorkspaceTaskPage {
             id,
             label,
             description: String(choice?.description || '').trim(),
-            number: String(choice?.number || '').trim()
+            number: String(choice?.number || '').trim(),
+            recommended: choice?.recommended === true
           };
         })
         .filter(Boolean);
@@ -1321,6 +1628,8 @@ export class WorkspaceTaskPage {
     this.renderRelationships();
     this.renderWorkflow();
     this.renderOutput();
+    this.renderExecutionBreakdown();
+    this.renderExecutionTrace();
     this.renderSchedule();
     this.renderExecutionSteps();
     this.renderContext();
@@ -1360,6 +1669,8 @@ export class WorkspaceTaskPage {
     const status = String(this.task?.status || '').trim().toLowerCase();
     const hasAgent = Boolean(this.task?.to);
     const buttons = [];
+    const hasSchedule = Boolean(this.task?.schedule);
+    const scheduleLabel = hasSchedule ? 'Edit Schedule' : 'Schedule';
 
     if (status === 'pending' && hasAgent) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
@@ -1373,11 +1684,21 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
+    if (this.canCreateSkillFromTask()) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="create-skill">
+        <i class="bi bi-magic" aria-hidden="true"></i>Create Skill
+      </button>`);
+    }
+
     if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
       </button>`);
     }
+
+    buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="schedule">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19M7,10H12V15H7V10Z"/></svg>${this.escapeHtml(scheduleLabel)}
+    </button>`);
 
     this.elements.heroActions.innerHTML = buttons.join('');
 
@@ -1386,6 +1707,8 @@ export class WorkspaceTaskPage {
         const action = btn.dataset.action;
         if (action === 'execute') this.executeTask();
         if (action === 'complete') this.completeTask();
+        if (action === 'schedule') this.openScheduleModal();
+        if (action === 'create-skill') this.openSkillDraftModal();
       });
     });
   }
@@ -1603,12 +1926,15 @@ export class WorkspaceTaskPage {
   }
 
   startDetailsEdit(triggerBtn) {
+    if (this.detailsEditInProgress) return;
+
     const article = triggerBtn.closest('.workspace-task-overview-item');
     if (!article) return;
 
     const valueEl = article.querySelector('.workspace-task-overview-value');
     if (!valueEl) return;
 
+    this.detailsEditInProgress = true;
     const currentValue = String(this.task?.details || '').trim();
     const textarea = document.createElement('textarea');
     textarea.className = 'form-control workspace-task-overview-edit-textarea';
@@ -1630,6 +1956,9 @@ export class WorkspaceTaskPage {
     textarea.focus();
 
     const finish = async (save) => {
+      if (!this.detailsEditInProgress) return;
+      this.detailsEditInProgress = false;
+
       const nextValue = textarea.value.trim();
       textarea.remove();
       actions.remove();
@@ -1662,7 +1991,7 @@ export class WorkspaceTaskPage {
 
     const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
     const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
-    const statusOptions = ['pending', 'assigned', 'in_progress', 'completed', 'failed', 'blocked', 'cancelled'];
+    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'blocked', 'cancelled'];
     const agentNames = this.getAssignableAgentNames(currentAgent);
 
     const snapshotItems = [
@@ -2316,10 +2645,503 @@ export class WorkspaceTaskPage {
     if (this.isStructuredData(text)) {
       return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
     }
-    if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-      return `<div class="workspace-task-page-prose">${marked.parse(text)}</div>`;
+    if (typeof marked !== 'undefined' && typeof marked.parse === 'function' && typeof DOMPurify !== 'undefined') {
+      const safeHtml = DOMPurify.sanitize(marked.parse(text));
+      return `<div class="workspace-task-page-prose">${safeHtml}</div>`;
     }
     return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
+  }
+
+  getResultHeadingLevel(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return 0;
+    const match = String(node.tagName || '').match(/^H([1-6])$/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  pickResultSectionHeadingLevel(headings) {
+    const counts = new Map();
+    headings.forEach((heading) => {
+      const level = this.getResultHeadingLevel(heading);
+      if (!level) return;
+      counts.set(level, (counts.get(level) || 0) + 1);
+    });
+
+    const repeatedLevels = Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([level]) => level)
+      .sort((a, b) => a - b);
+    if (repeatedLevels.length > 0) return repeatedLevels[0];
+
+    const levels = Array.from(counts.keys()).sort((a, b) => a - b);
+    if (levels.length > 1 && counts.get(levels[0]) === 1) return levels[1];
+    return levels[0] || 0;
+  }
+
+  buildResultSectionId(title, index) {
+    const slug = String(title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 56);
+    return `result-section-${index}-${slug || 'section'}`;
+  }
+
+  getResultSectionTitle(section) {
+    const explicit = String(section?.dataset?.resultSectionTitle || '').trim();
+    if (explicit) return explicit;
+    const heading = section?.querySelector?.('h1, h2, h3, h4, h5, h6');
+    return String(heading?.textContent || '').replace(/\s+/g, ' ').trim() || 'Result section';
+  }
+
+  getResultSectionText(section) {
+    const content = section?.querySelector?.('.workspace-task-result-section-content') || section;
+    return String(content?.innerText || '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  updateResultSectionResearchButton(section, state = {}) {
+    const button = section?.querySelector?.('[data-action="research-result-section"]');
+    if (!button) return;
+
+    const createdTaskId = String(state.createdTaskId || section.dataset.followUpTaskId || '').trim();
+    const isPending = Boolean(state.pending);
+    const icon = button.querySelector('i');
+    const label = button.querySelector('.visually-hidden');
+
+    button.disabled = isPending;
+    button.classList.toggle('is-pending', isPending);
+    button.classList.toggle('has-follow-up', Boolean(createdTaskId));
+    button.dataset.tooltip = isPending
+      ? 'Creating research task...'
+      : createdTaskId
+        ? 'Open research follow-up'
+        : 'Draft research follow-up';
+    button.setAttribute('aria-label', button.dataset.tooltip);
+    button.title = button.dataset.tooltip;
+
+    if (icon) {
+      icon.className = isPending
+        ? 'bi bi-arrow-repeat'
+        : createdTaskId
+          ? 'bi bi-box-arrow-up-right'
+          : 'bi bi-search';
+    }
+    if (label) {
+      label.textContent = button.dataset.tooltip;
+    }
+  }
+
+  createResultSectionAction(section) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'workspace-task-result-section-action';
+    button.dataset.action = 'research-result-section';
+    button.dataset.tooltip = 'Draft research follow-up';
+    button.title = button.dataset.tooltip;
+    button.setAttribute('aria-label', button.dataset.tooltip);
+    button.innerHTML = '<i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Draft research follow-up</span>';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.handleResearchResultSection(section);
+    });
+    return button;
+  }
+
+  enhanceResultSections() {
+    this.closeResultSectionMenu();
+    const prose = this.elements.output?.querySelector?.('.workspace-task-page-prose');
+    if (!prose) return;
+
+    const headings = Array.from(prose.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    if (headings.length === 0) return;
+
+    const sectionHeadingLevel = this.pickResultSectionHeadingLevel(headings);
+    if (!sectionHeadingLevel) return;
+
+    const nodes = Array.from(prose.childNodes);
+    let _currentSection = null;
+    let currentSectionBody = null;
+    let sectionIndex = 0;
+
+    nodes.forEach((node) => {
+      const headingLevel = this.getResultHeadingLevel(node);
+      const startsSection = headingLevel > 0 && headingLevel <= sectionHeadingLevel;
+
+      if (startsSection) {
+        sectionIndex += 1;
+        const title = String(node.textContent || '').replace(/\s+/g, ' ').trim() || `Section ${sectionIndex}`;
+        const section = document.createElement('section');
+        section.className = 'workspace-task-result-section';
+        section.dataset.resultSectionId = this.buildResultSectionId(title, sectionIndex);
+        section.dataset.resultSectionTitle = title;
+        section.setAttribute('aria-label', `Result section: ${title}`);
+
+        const body = document.createElement('div');
+        body.className = 'workspace-task-result-section-content';
+
+        section.appendChild(this.createResultSectionAction(section));
+        section.appendChild(body);
+        prose.insertBefore(section, node);
+
+        _currentSection = section;
+        currentSectionBody = body;
+      }
+
+      if (currentSectionBody) {
+        currentSectionBody.appendChild(node);
+      }
+    });
+
+    const sections = Array.from(prose.querySelectorAll('.workspace-task-result-section'));
+    if (sections.length === 0) return;
+
+    prose.classList.add('is-sectioned');
+    sections.forEach((section) => {
+      section.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        this.showResultSectionMenu(section, event.clientX, event.clientY);
+      });
+    });
+  }
+
+  closeResultSectionMenu() {
+    if (this.resultSectionMenu) {
+      this.resultSectionMenu.remove();
+      this.resultSectionMenu = null;
+    }
+    document.removeEventListener('click', this.boundResultSectionMenuDocumentClick, true);
+    document.removeEventListener('keydown', this.boundResultSectionMenuKeydown, true);
+    window.removeEventListener('scroll', this.boundResultSectionMenuScroll, true);
+  }
+
+  showResultSectionMenu(section, clientX, clientY) {
+    this.closeResultSectionMenu();
+
+    const title = this.getResultSectionTitle(section);
+    const menu = document.createElement('div');
+    menu.className = 'workspace-task-result-section-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', `Actions for ${title}`);
+    menu.innerHTML = `
+      <div class="workspace-task-result-section-menu-title">${this.escapeHtml(summarizeText(title, 72))}</div>
+      <button type="button" class="workspace-task-result-section-menu-item" data-action="research-result-section" role="menuitem">
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <span>Draft research task</span>
+      </button>
+      <button type="button" class="workspace-task-result-section-menu-item" data-action="copy-result-section" role="menuitem">
+        <i class="bi bi-clipboard" aria-hidden="true"></i>
+        <span>Copy section</span>
+      </button>
+    `;
+
+    document.body.appendChild(menu);
+    const viewportPadding = 10;
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(clientX, viewportPadding),
+      Math.max(viewportPadding, window.innerWidth - menuRect.width - viewportPadding)
+    );
+    const top = Math.min(
+      Math.max(clientY, viewportPadding),
+      Math.max(viewportPadding, window.innerHeight - menuRect.height - viewportPadding)
+    );
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    menu.querySelector('[data-action="research-result-section"]')?.addEventListener('click', () => {
+      this.closeResultSectionMenu();
+      void this.handleResearchResultSection(section);
+    });
+    menu.querySelector('[data-action="copy-result-section"]')?.addEventListener('click', () => {
+      this.closeResultSectionMenu();
+      void this.copyResultSection(section);
+    });
+
+    this.resultSectionMenu = menu;
+    setTimeout(() => {
+      document.addEventListener('click', this.boundResultSectionMenuDocumentClick, true);
+      document.addEventListener('keydown', this.boundResultSectionMenuKeydown, true);
+      window.addEventListener('scroll', this.boundResultSectionMenuScroll, true);
+    }, 0);
+  }
+
+  buildResultResearchTitle(sectionTitle) {
+    const title = String(sectionTitle || 'Result section').replace(/\s+/g, ' ').trim() || 'Result section';
+    const combined = `Research further: ${title}`;
+    return combined.length > 160 ? `${combined.slice(0, 157).trim()}...` : combined;
+  }
+
+  buildResultResearchDetails(sectionTitle) {
+    const sourceTitle = this.getTaskDisplayLabel();
+    return [
+      `Follow-up research created from completed task: ${sourceTitle}`,
+      `Selected result section: ${sectionTitle}`,
+      `Source task: ${this.task?.id || this.taskId}`,
+      '',
+      'Use the linked task result as context, but focus the answer on this selected section.',
+      'Research it more deeply, add practical criteria and tradeoffs, and include citations when web research is available.'
+    ].join('\n');
+  }
+
+  buildResultResearchDraft(section, sectionTitle, sectionText) {
+    const currentAgent = String(this.task?.to || '').trim();
+    return {
+      sectionId: String(section?.dataset?.resultSectionId || '').trim(),
+      sectionTitle,
+      sourceTaskId: String(this.task?.id || this.taskId || '').trim(),
+      title: this.buildResultResearchTitle(sectionTitle),
+      agent: currentAgent && currentAgent !== 'unassigned' ? currentAgent : '',
+      details: this.buildResultResearchDetails(sectionTitle),
+      sectionText,
+      linkSource: true,
+      runNow: true,
+      openAfterCreate: true
+    };
+  }
+
+  renderResultResearchAgentOptions(selectedAgent = '') {
+    if (!this.elements.resultResearchAgentSelect) return;
+
+    const normalizedSelected = String(selectedAgent || '').trim();
+    const options = ['<option value="">Unassigned manual task</option>'];
+    const names = this.getAssignableAgentNames(normalizedSelected);
+    if (normalizedSelected && !names.some((name) => String(name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())) {
+      options.push(`<option value="${this.escapeHtml(normalizedSelected)}" selected>${this.escapeHtml(`${normalizedSelected} (Current)`)}</option>`);
+    }
+    names.forEach((agentName) => {
+      const normalized = String(agentName || '').trim();
+      if (!normalized) return;
+      options.push(`<option value="${this.escapeHtml(normalized)}" ${normalized.toLowerCase() === normalizedSelected.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(normalized)}</option>`);
+    });
+    this.elements.resultResearchAgentSelect.innerHTML = options.join('');
+  }
+
+  populateResultResearchModal(draft) {
+    if (!draft) return;
+
+    if (this.elements.resultResearchSectionMeta) {
+      const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+      const sectionLabel = summarizeText(draft.sectionTitle, 90);
+      this.elements.resultResearchSectionMeta.textContent = `${sectionLabel} • from ${taskLabel}`;
+    }
+    if (this.elements.resultResearchTitleInput) {
+      this.elements.resultResearchTitleInput.value = draft.title;
+    }
+    this.renderResultResearchAgentOptions(draft.agent);
+    if (this.elements.resultResearchDetailsInput) {
+      this.elements.resultResearchDetailsInput.value = draft.details;
+    }
+    if (this.elements.resultResearchSectionInput) {
+      this.elements.resultResearchSectionInput.value = draft.sectionText;
+    }
+    if (this.elements.resultResearchLinkInput) {
+      this.elements.resultResearchLinkInput.checked = draft.linkSource !== false;
+    }
+    if (this.elements.resultResearchRunInput) {
+      this.elements.resultResearchRunInput.checked = draft.runNow !== false;
+    }
+    if (this.elements.resultResearchOpenInput) {
+      this.elements.resultResearchOpenInput.checked = draft.openAfterCreate !== false;
+    }
+    this.setResultResearchSubmitting(false);
+    this.updateResultResearchSubmitLabel();
+  }
+
+  openResultResearchModal(draft) {
+    if (!this.elements.resultResearchModal || typeof bootstrap === 'undefined') return;
+
+    this.resultResearchDraft = draft;
+    this.populateResultResearchModal(draft);
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.resultResearchModal)
+        : bootstrap.Modal.getInstance(this.elements.resultResearchModal) ||
+          new bootstrap.Modal(this.elements.resultResearchModal);
+    modal.show();
+    setTimeout(() => {
+      this.elements.resultResearchTitleInput?.focus();
+      this.elements.resultResearchTitleInput?.select();
+    }, 120);
+  }
+
+  collectResultResearchDraft() {
+    const draft = { ...(this.resultResearchDraft || {}) };
+    draft.title = String(this.elements.resultResearchTitleInput?.value || '').trim();
+    draft.agent = String(this.elements.resultResearchAgentSelect?.value || '').trim();
+    draft.details = String(this.elements.resultResearchDetailsInput?.value || '').trim();
+    draft.sectionText = String(this.elements.resultResearchSectionInput?.value || '').trim();
+    draft.linkSource = this.elements.resultResearchLinkInput?.checked !== false;
+    draft.runNow = this.elements.resultResearchRunInput?.checked !== false;
+    draft.openAfterCreate = this.elements.resultResearchOpenInput?.checked !== false;
+    return draft;
+  }
+
+  validateResultResearchDraft(draft) {
+    if (!draft || typeof draft !== 'object') return 'Research draft is unavailable.';
+    if (!String(draft.title || '').trim()) return 'Task title is required.';
+    if (!String(draft.details || '').trim()) return 'Instructions are required.';
+    if (!String(draft.sectionText || '').trim()) return 'Selected section text is required.';
+    if (draft.runNow && !String(draft.agent || '').trim()) return 'Choose an agent before running now, or turn off Run immediately.';
+    return '';
+  }
+
+  buildResultResearchPayload(draft) {
+    const details = [
+      String(draft.details || '').trim(),
+      '',
+      'Selected section text:',
+      String(draft.sectionText || '').trim()
+    ].join('\n').trim();
+    const payload = {
+      workspace_id: this.workspaceId,
+      description: draft.title,
+      details,
+      priority: Number.isFinite(this.task?.priority) ? this.task.priority : 3,
+      to: draft.agent || undefined,
+      input_task_ids: draft.linkSource ? [draft.sourceTaskId || this.task?.id || this.taskId].filter(Boolean) : []
+    };
+
+    const currentAgent = String(this.task?.to || '').trim();
+    const currentAssignedNode = String(this.task?.assigned_node_id || '').trim();
+    if (currentAssignedNode && draft.agent && draft.agent.toLowerCase() === currentAgent.toLowerCase()) {
+      payload.assigned_node_id = currentAssignedNode;
+    }
+
+    return payload;
+  }
+
+  async createResultResearchTask(draft) {
+    const payload = this.buildResultResearchPayload(draft);
+
+    const response = await fetch('/api/orchestration/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || data?.message || 'Failed to create research task');
+    }
+
+    const createdTask = data.task || data;
+    if (!createdTask?.id) {
+      throw new Error('Research task was created without an id');
+    }
+
+    if (!draft.runNow) {
+      return createdTask;
+    }
+
+    const executeResponse = await fetch('/api/orchestration/tasks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: createdTask.id })
+    });
+    if (!executeResponse.ok) {
+      const text = await executeResponse.text();
+      throw new Error(text || 'Research task was created but could not be started');
+    }
+
+    return createdTask;
+  }
+
+  setResultResearchSubmitting(isSubmitting) {
+    this.resultResearchSubmitting = Boolean(isSubmitting);
+    if (this.elements.resultResearchSubmitBtn) {
+      this.elements.resultResearchSubmitBtn.disabled = this.resultResearchSubmitting;
+      this.elements.resultResearchSubmitBtn.innerHTML = this.resultResearchSubmitting
+        ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Creating...</span>'
+        : this.getResultResearchSubmitMarkup();
+    }
+  }
+
+  getResultResearchSubmitMarkup() {
+    const runNow = this.elements.resultResearchRunInput?.checked !== false;
+    return runNow
+      ? '<i class="bi bi-send" aria-hidden="true"></i><span>Create & Run</span>'
+      : '<i class="bi bi-plus-circle" aria-hidden="true"></i><span>Create Draft</span>';
+  }
+
+  updateResultResearchSubmitLabel() {
+    if (!this.elements.resultResearchSubmitBtn || this.resultResearchSubmitting) return;
+    this.elements.resultResearchSubmitBtn.innerHTML = this.getResultResearchSubmitMarkup();
+  }
+
+  async handleResearchResultSection(section) {
+    const sectionId = String(section?.dataset?.resultSectionId || '').trim();
+    if (!section || !sectionId || this.resultResearchSubmitting) return;
+
+    const existingFollowUpId = String(section.dataset.followUpTaskId || '').trim();
+    if (existingFollowUpId) {
+      window.location.href = this.getTaskHref(existingFollowUpId);
+      return;
+    }
+
+    const sectionTitle = this.getResultSectionTitle(section);
+    const sectionText = this.getResultSectionText(section);
+    if (!sectionText) {
+      this.notify('warning', 'No section text is available to research.');
+      return;
+    }
+
+    const draft = this.buildResultResearchDraft(section, sectionTitle, sectionText);
+    this.openResultResearchModal(draft);
+  }
+
+  async submitResultResearchDraft() {
+    if (this.resultResearchSubmitting) return;
+
+    const draft = this.collectResultResearchDraft();
+    const validationError = this.validateResultResearchDraft(draft);
+    if (validationError) {
+      this.notify('warning', validationError);
+      return;
+    }
+
+    const section = draft.sectionId
+      ? Array.from(this.elements.output?.querySelectorAll?.('[data-result-section-id]') || [])
+        .find((item) => String(item?.dataset?.resultSectionId || '') === String(draft.sectionId))
+      : null;
+
+    this.resultResearchPendingSectionId = String(draft.sectionId || '').trim();
+    this.setResultResearchSubmitting(true);
+    this.updateResultSectionResearchButton(section, { pending: true });
+
+    try {
+      const createdTask = await this.createResultResearchTask(draft);
+      const createdTaskId = String(createdTask?.id || '').trim();
+      if (section && createdTaskId) {
+        section.dataset.followUpTaskId = createdTaskId;
+      }
+      section?.classList.add('has-follow-up');
+      this.updateResultSectionResearchButton(section, { createdTaskId });
+      this.notify('success', draft.runNow ? 'Research follow-up started' : 'Research follow-up created');
+      if (this.elements.resultResearchModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.resultResearchModal)?.hide();
+      }
+      if (draft.openAfterCreate && createdTaskId) {
+        window.location.href = this.getTaskHref(createdTaskId);
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to start result section research:', error);
+      this.notify('error', error?.message || 'Failed to start research follow-up');
+      this.updateResultSectionResearchButton(section);
+    } finally {
+      this.resultResearchPendingSectionId = '';
+      this.setResultResearchSubmitting(false);
+    }
+  }
+
+  async copyResultSection(section) {
+    const sectionText = this.getResultSectionText(section);
+    if (!sectionText) {
+      this.notify('warning', 'No section text is available to copy.');
+      return;
+    }
+    await this.copyToClipboard(sectionText, 'Section copied');
   }
 
   renderOutput() {
@@ -2327,6 +3149,7 @@ export class WorkspaceTaskPage {
 
     const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
+    this.closeResultSectionMenu();
 
     if (!result && !error) {
       this.elements.outputCard.hidden = true;
@@ -2359,6 +3182,7 @@ export class WorkspaceTaskPage {
 
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
+    this.enhanceResultSections();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
   }
@@ -2380,6 +3204,20 @@ export class WorkspaceTaskPage {
       }
       this.elements.outputSaveNoteBtn.disabled = !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
       this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
+    }
+
+    if (this.elements.outputCreateSkillBtn) {
+      const canCreateSkill = this.canCreateSkillFromTask();
+      const label = this.elements.outputCreateSkillBtn.querySelector('span');
+      if (label) {
+        label.textContent = this.skillDraftGenerating
+          ? 'Drafting...'
+          : this.skillDraftSubmitting
+            ? 'Creating...'
+            : 'Create Skill';
+      }
+      this.elements.outputCreateSkillBtn.hidden = !canCreateSkill;
+      this.elements.outputCreateSkillBtn.disabled = !canCreateSkill || this.skillDraftGenerating || this.skillDraftSubmitting;
     }
 
     if (this.elements.outputPromoteBtn) {
@@ -2660,6 +3498,14 @@ export class WorkspaceTaskPage {
     return this.getCurrentResultText() || String(this.task?.error || '').trim();
   }
 
+  canCreateSkillFromTask(task = this.task) {
+    if (!task || typeof task !== 'object') return false;
+    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (!String(task.to || '').trim()) return false;
+    if (String(task.error || '').trim()) return false;
+    return Boolean(normalizeResultText(task.result).trim());
+  }
+
   async copyCurrentResult() {
     const outputText = this.getCurrentOutputText();
     if (!outputText) {
@@ -2668,6 +3514,284 @@ export class WorkspaceTaskPage {
     }
 
     await this.copyToClipboard(outputText, 'Result copied');
+  }
+
+  setSkillDraftError(message) {
+    if (!this.elements.skillError) return;
+
+    const text = String(message || '').trim();
+    this.elements.skillError.hidden = !text;
+    this.elements.skillError.textContent = text;
+  }
+
+  updateSkillDraftButtons() {
+    const busy = this.skillDraftGenerating || this.skillDraftSubmitting;
+    if (this.elements.skillGenerateBtn) {
+      const label = this.elements.skillGenerateBtn.querySelector('span');
+      if (label) label.textContent = this.skillDraftGenerating ? 'Generating...' : 'Regenerate With AI';
+      this.elements.skillGenerateBtn.disabled = busy;
+    }
+    if (this.elements.skillSubmitBtn) {
+      const label = this.elements.skillSubmitBtn.querySelector('span');
+      if (label) label.textContent = this.skillDraftSubmitting ? 'Creating...' : 'Create Skill';
+      this.elements.skillSubmitBtn.disabled = busy;
+    }
+
+    const resultText = this.getCurrentResultText();
+    this.updateResultActionButtons(resultText, Boolean(resultText));
+  }
+
+  getTaskSkillAgentName() {
+    return String(this.task?.to || '').trim();
+  }
+
+  buildTaskSkillDefaultName() {
+    return buildTaskSkillNameSlug(this.getTaskDisplayLabel());
+  }
+
+  buildTaskSkillSavedDescription() {
+    const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed task';
+    const details = stripSkillUnsafeMarkup(this.task?.details || '');
+    const result = stripSkillUnsafeMarkup(this.getCurrentResultText());
+    const parts = [`Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`];
+
+    if (details) {
+      parts.push(`Use when: ${trimTaskSkillText(details, 360)}.`);
+    } else if (result) {
+      parts.push(`Produces results like: ${trimTaskSkillText(result, 360)}.`);
+    }
+
+    return trimTaskSkillText(parts.join(' ').replace(/\s+/g, ' ').trim(), 900);
+  }
+
+  buildTaskSkillGenerationDescription(name, savedDescription) {
+    const taskTitle = this.getTaskDisplayLabel();
+    const taskDetails = String(this.task?.details || '').trim();
+    const resultText = this.getCurrentResultText();
+    const assistMessage = String(this.task?.context?.user_assist_message || '').trim();
+    const completedAt = formatDateTime(this.task?.completed_at);
+    const agentName = this.getTaskSkillAgentName();
+    const workspaceName = String(this.workspace?.name || '').trim();
+
+    const lines = [
+      'Create a reusable Ori Agent skill from this successful task.',
+      'The skill should let the assigned agent repeat the workflow with less user instruction next time.',
+      'Prefer public pages, browser-readable sources, local context, and fallback source strategies before asking users for API keys.',
+      'Generalize the workflow; do not include task IDs, run-specific timestamps, localhost URLs, or one-off troubleshooting notes unless they are broadly useful.',
+      `Proposed skill name: ${name}`,
+      `Saved skill description: ${savedDescription}`
+    ];
+
+    if (workspaceName) lines.push(`Workspace: ${workspaceName}`);
+    if (agentName) lines.push(`Assigned agent: ${agentName}`);
+    if (completedAt !== '—') lines.push(`Completed: ${completedAt}`);
+    if (taskTitle) lines.push(`Original task title: ${taskTitle}`);
+    if (taskDetails) {
+      lines.push('', 'Original task details:', trimTaskSkillText(taskDetails, TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS));
+    }
+    if (assistMessage) {
+      lines.push('', 'User clarification collected during the task:', trimTaskSkillText(assistMessage, 900));
+    }
+    if (resultText) {
+      lines.push('', 'Successful result excerpt:', trimTaskSkillText(resultText, TASK_SKILL_RESULT_CONTEXT_MAX_CHARS));
+    }
+
+    lines.push(
+      '',
+      'Write the skill prompt as operational guidance for future runs. Include source selection, verification expectations, fallback behavior, and the expected final response format when inferable from the result.'
+    );
+
+    return trimTaskSkillText(lines.join('\n'), TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS);
+  }
+
+  populateSkillDraftModal() {
+    const agentName = this.getTaskSkillAgentName();
+    const skillName = this.buildTaskSkillDefaultName();
+    const description = this.buildTaskSkillSavedDescription();
+    const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+
+    this.setSkillDraftError('');
+    if (this.elements.skillMeta) {
+      this.elements.skillMeta.textContent = `Drafts a reusable skill for "${agentName}" from "${taskLabel}".`;
+    }
+    if (this.elements.skillAgentInput) {
+      this.elements.skillAgentInput.value = agentName;
+    }
+    if (this.elements.skillNameInput) {
+      this.elements.skillNameInput.value = skillName;
+    }
+    if (this.elements.skillDescriptionInput) {
+      this.elements.skillDescriptionInput.value = description;
+    }
+    if (this.elements.skillPromptInput) {
+      this.elements.skillPromptInput.value = '';
+    }
+    this.updateSkillDraftButtons();
+  }
+
+  openSkillDraftModal() {
+    if (!this.canCreateSkillFromTask()) {
+      this.notify('warning', 'Only completed tasks with a successful result and assigned agent can become skills.');
+      return;
+    }
+    if (!this.elements.skillModal || typeof bootstrap === 'undefined') {
+      this.notify('error', 'Skill editor is not available.');
+      return;
+    }
+
+    this.populateSkillDraftModal();
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.skillModal)
+        : bootstrap.Modal.getInstance(this.elements.skillModal) ||
+          new bootstrap.Modal(this.elements.skillModal);
+    modal.show();
+    setTimeout(() => {
+      this.elements.skillNameInput?.focus();
+      this.elements.skillNameInput?.select();
+    }, 120);
+    this.generateSkillPromptFromTask(false);
+  }
+
+  async generateSkillPromptFromTask(force = false) {
+    if (this.skillDraftGenerating || this.skillDraftSubmitting) return;
+
+    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
+    const rawName = String(this.elements.skillNameInput?.value || this.buildTaskSkillDefaultName()).trim();
+    const skillName = buildTaskSkillNameSlug(rawName);
+    const savedDescription = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || this.buildTaskSkillSavedDescription()), 1024);
+
+    if (!agentName || !skillName || !savedDescription) {
+      this.setSkillDraftError('Skill name, description, and agent are required.');
+      return;
+    }
+
+    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
+    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = savedDescription;
+
+    const currentPrompt = String(this.elements.skillPromptInput?.value || '').trim();
+    if (force && currentPrompt && currentPrompt !== 'Generating prompt...') {
+      const confirmed = window.confirm('Replace the current prompt with a newly generated one?');
+      if (!confirmed) return;
+    }
+
+    if (this.skillDraftAbortController) {
+      this.skillDraftAbortController.abort();
+    }
+
+    const controller = new AbortController();
+    this.skillDraftAbortController = controller;
+    const requestId = ++this.skillDraftRequestId;
+    this.skillDraftGenerating = true;
+    this.setSkillDraftError('');
+    if (this.elements.skillPromptInput) {
+      this.elements.skillPromptInput.value = 'Generating prompt...';
+    }
+    this.updateSkillDraftButtons();
+
+    try {
+      const response = await fetch('/api/skills/generate-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: agentName,
+          name: skillName,
+          description: this.buildTaskSkillGenerationDescription(skillName, savedDescription),
+        }),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (requestId !== this.skillDraftRequestId) return;
+
+      const details = typeof data?.details === 'string' ? data.details.trim() : '';
+      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to generate skill prompt.';
+      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
+
+      const generated = extractGeneratedSkillPrompt(data?.prompt || '');
+      if (!generated) throw new Error('Assistant returned an empty skill prompt.');
+
+      if (this.elements.skillPromptInput) {
+        this.elements.skillPromptInput.value = generated;
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.error('Failed to generate task skill prompt:', error);
+      if (requestId !== this.skillDraftRequestId) return;
+
+      if (this.elements.skillPromptInput) {
+        this.elements.skillPromptInput.value = currentPrompt === 'Generating prompt...' ? '' : currentPrompt;
+      }
+      this.setSkillDraftError(error?.message || 'Failed to generate skill prompt.');
+    } finally {
+      if (requestId === this.skillDraftRequestId) {
+        this.skillDraftGenerating = false;
+        this.skillDraftAbortController = null;
+        this.updateSkillDraftButtons();
+      }
+    }
+  }
+
+  async submitTaskSkillDraft() {
+    if (this.skillDraftSubmitting) return;
+
+    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
+    const rawSkillName = String(this.elements.skillNameInput?.value || '').trim();
+    const skillName = rawSkillName ? buildTaskSkillNameSlug(rawSkillName) : '';
+    const description = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || ''), 1024);
+    const prompt = String(this.elements.skillPromptInput?.value || '').replace(/\r\n/g, '\n').trim();
+
+    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
+    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = description;
+
+    if (!agentName) {
+      this.setSkillDraftError('Agent is required.');
+      return;
+    }
+    if (!skillName) {
+      this.setSkillDraftError('Skill name is required.');
+      return;
+    }
+    if (!description) {
+      this.setSkillDraftError('Description is required.');
+      return;
+    }
+    if (!prompt || prompt === 'Generating prompt...') {
+      this.setSkillDraftError('Wait for the AI draft to finish or enter a skill prompt manually.');
+      return;
+    }
+
+    this.skillDraftSubmitting = true;
+    this.setSkillDraftError('');
+    this.updateSkillDraftButtons();
+
+    try {
+      const response = await fetch('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: agentName,
+          name: skillName,
+          description,
+          prompt,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const details = typeof data?.details === 'string' ? data.details.trim() : '';
+      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to create skill.';
+      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
+
+      if (this.elements.skillModal && typeof bootstrap !== 'undefined') {
+        const modal = bootstrap.Modal.getInstance(this.elements.skillModal);
+        modal?.hide();
+      }
+      this.notify('success', `Skill "${skillName}" created for ${agentName}`);
+    } catch (error) {
+      console.error('Failed to create skill from task:', error);
+      this.setSkillDraftError(error?.message || 'Failed to create skill.');
+    } finally {
+      this.skillDraftSubmitting = false;
+      this.updateSkillDraftButtons();
+    }
   }
 
   buildResultNoteTitle(resultText) {
@@ -2995,15 +4119,384 @@ export class WorkspaceTaskPage {
     }
   }
 
+  openScheduleModal() {
+    if (!this.elements.scheduleModal || typeof bootstrap === 'undefined') {
+      this.notify('error', 'Schedule editor is not available.');
+      return;
+    }
+
+    this.populateScheduleModal();
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.scheduleModal)
+        : bootstrap.Modal.getInstance(this.elements.scheduleModal) ||
+          new bootstrap.Modal(this.elements.scheduleModal);
+    modal.show();
+  }
+
+  populateScheduleModal() {
+    const schedule = this.task?.schedule || null;
+    const hasSchedule = Boolean(schedule);
+    const scheduleType = this.inferScheduleFormType(schedule);
+    const weekdayCron = this.parseWeekdayCron(schedule?.cron_expr || '');
+
+    this.setScheduleError('');
+
+    if (this.elements.scheduleModalHeading) {
+      this.elements.scheduleModalHeading.textContent = hasSchedule ? 'Edit Repeat Schedule' : 'Repeat Task';
+    }
+    if (this.elements.scheduleModalMeta) {
+      const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+      this.elements.scheduleModalMeta.textContent = `Runs "${taskLabel}" again on a schedule. The task keeps its history and latest output updates after each run.`;
+    }
+    if (this.elements.scheduleEnabledInput) {
+      this.elements.scheduleEnabledInput.checked = hasSchedule ? Boolean(this.task?.schedule_enabled) : true;
+    }
+    if (this.elements.scheduleNameInput) {
+      this.elements.scheduleNameInput.value = this.task?.schedule_name || '';
+    }
+    if (this.elements.scheduleTypeInput) {
+      this.elements.scheduleTypeInput.value = scheduleType;
+    }
+    if (this.elements.scheduleTimeInput) {
+      this.elements.scheduleTimeInput.value =
+        weekdayCron?.time ||
+        schedule?.time ||
+        schedule?.time_of_day ||
+        '09:00';
+    }
+    if (this.elements.scheduleDayInput) {
+      const day = Number(schedule?.day_of_week);
+      this.elements.scheduleDayInput.value = Number.isInteger(day) && day >= 0 && day <= 6 ? String(day) : '1';
+    }
+    this.populateScheduleIntervalFields(this.getScheduleIntervalMinutes(schedule) || 60);
+    if (this.elements.scheduleOnceInput) {
+      this.elements.scheduleOnceInput.value = this.formatLocalDatetimeInput(schedule?.run_at || schedule?.execute_at || '');
+    }
+    if (this.elements.scheduleCronInput) {
+      this.elements.scheduleCronInput.value = schedule?.cron_expr || '0 9 * * *';
+    }
+    if (this.elements.scheduleRemoveBtn) {
+      this.elements.scheduleRemoveBtn.hidden = !hasSchedule;
+    }
+
+    this.updateScheduleModalFields();
+  }
+
+  updateScheduleModalFields() {
+    const type = this.elements.scheduleTypeInput?.value || 'daily';
+    const showTime = type === 'daily' || type === 'weekdays' || type === 'weekly';
+
+    if (this.elements.scheduleTimeField) this.elements.scheduleTimeField.hidden = !showTime;
+    if (this.elements.scheduleDayField) this.elements.scheduleDayField.hidden = type !== 'weekly';
+    if (this.elements.scheduleIntervalField) this.elements.scheduleIntervalField.hidden = type !== 'interval';
+    if (this.elements.scheduleOnceField) this.elements.scheduleOnceField.hidden = type !== 'once';
+    if (this.elements.scheduleCronField) this.elements.scheduleCronField.hidden = type !== 'cron';
+    if (this.elements.scheduleTimeLabel) {
+      this.elements.scheduleTimeLabel.textContent = type === 'weekdays' ? 'Weekday time' : 'Time of day';
+    }
+
+    this.updateSchedulePreview();
+  }
+
+  updateSchedulePreview() {
+    if (!this.elements.schedulePreview) return;
+
+    try {
+      const payload = this.buildScheduleUpdatePayload({ validate: false });
+      const summary = this.describeSchedule(payload.schedule);
+      this.elements.schedulePreview.textContent = payload.schedule_enabled
+        ? `This existing task will run ${summary}.`
+        : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
+    } catch (_error) {
+      this.elements.schedulePreview.textContent = 'Complete the schedule fields to preview the run cadence.';
+    }
+  }
+
+  buildScheduleUpdatePayload({ validate = true } = {}) {
+    const type = this.elements.scheduleTypeInput?.value || 'daily';
+    const enabled = Boolean(this.elements.scheduleEnabledInput?.checked);
+    const scheduleName = String(this.elements.scheduleNameInput?.value || '').trim();
+    const schedule = { type };
+
+    const assignee = String(this.task?.to || '').trim();
+    if (enabled && validate && (!assignee || assignee === 'unassigned')) {
+      throw new Error('Assign this task to an agent before enabling a schedule.');
+    }
+
+    const requireTime = () => {
+      const value = String(this.elements.scheduleTimeInput?.value || '').trim();
+      if (validate && !value) throw new Error('Choose a time for this schedule.');
+      return value || '09:00';
+    };
+
+    switch (type) {
+      case 'daily':
+        schedule.time = requireTime();
+        break;
+      case 'weekdays':
+        schedule.type = 'cron';
+        schedule.cron_expr = this.buildWeekdayCron(requireTime());
+        break;
+      case 'weekly':
+        schedule.time = requireTime();
+        schedule.day_of_week = Number.parseInt(this.elements.scheduleDayInput?.value || '1', 10);
+        if (validate && (Number.isNaN(schedule.day_of_week) || schedule.day_of_week < 0 || schedule.day_of_week > 6)) {
+          throw new Error('Choose a valid weekday.');
+        }
+        break;
+      case 'interval': {
+        const rawValue = Number.parseInt(this.elements.scheduleIntervalValueInput?.value || '1', 10);
+        if (validate && (!Number.isFinite(rawValue) || rawValue < 1)) {
+          throw new Error('Interval must be at least 1.');
+        }
+        const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 1;
+        const unit = this.elements.scheduleIntervalUnitInput?.value || 'hours';
+        let minutes = value;
+        if (unit === 'hours') minutes = value * 60;
+        if (unit === 'days') minutes = value * 1440;
+        schedule.interval_minutes = minutes;
+        break;
+      }
+      case 'once': {
+        const runAt = String(this.elements.scheduleOnceInput?.value || '').trim();
+        if (validate && !runAt) {
+          throw new Error('Choose when this task should run.');
+        }
+        schedule.run_at = runAt;
+        break;
+      }
+      case 'cron': {
+        const cronExpr = String(this.elements.scheduleCronInput?.value || '').replace(/\s+/g, ' ').trim();
+        if (validate && cronExpr.split(' ').filter(Boolean).length !== 5) {
+          throw new Error('Cron schedules must use 5 fields: minute hour day month weekday.');
+        }
+        schedule.cron_expr = cronExpr || '0 9 * * *';
+        break;
+      }
+      default:
+        throw new Error('Choose a valid repeat option.');
+    }
+
+    return {
+      schedule,
+      schedule_enabled: enabled,
+      schedule_name: scheduleName
+    };
+  }
+
+  async saveSchedule() {
+    if (this.scheduleSubmitting) return;
+
+    let payload;
+    try {
+      payload = this.buildScheduleUpdatePayload({ validate: true });
+      this.setScheduleError('');
+    } catch (error) {
+      this.setScheduleError(error?.message || 'Check the schedule fields and try again.');
+      return;
+    }
+
+    this.scheduleSubmitting = true;
+    const submitBtn = this.elements.scheduleSubmitBtn;
+    const submitText = submitBtn?.querySelector('span');
+    const originalText = submitText?.textContent || 'Save Schedule';
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Saving...';
+
+    try {
+      await this.updateTaskFields(payload);
+      if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
+      }
+      this.notify('success', payload.schedule_enabled ? 'Schedule saved' : 'Schedule paused');
+    } catch (error) {
+      console.error('Failed to save schedule:', error);
+      this.setScheduleError(error?.message || 'Failed to save schedule.');
+    } finally {
+      this.scheduleSubmitting = false;
+      if (submitBtn) submitBtn.disabled = false;
+      if (submitText) submitText.textContent = originalText;
+    }
+  }
+
+  async removeSchedule() {
+    if (this.scheduleSubmitting || !this.task?.schedule) return;
+    if (!window.confirm('Remove this recurring schedule from the task?')) return;
+
+    this.scheduleSubmitting = true;
+    const removeBtn = this.elements.scheduleRemoveBtn;
+    if (removeBtn) removeBtn.disabled = true;
+
+    try {
+      await this.updateTaskFields({
+        schedule: null,
+        schedule_enabled: false,
+        schedule_name: ''
+      });
+      if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
+      }
+      this.notify('success', 'Schedule removed');
+    } catch (error) {
+      console.error('Failed to remove schedule:', error);
+      this.setScheduleError(error?.message || 'Failed to remove schedule.');
+    } finally {
+      this.scheduleSubmitting = false;
+      if (removeBtn) removeBtn.disabled = false;
+    }
+  }
+
+  setScheduleError(message = '') {
+    if (!this.elements.scheduleError) return;
+    const normalized = String(message || '').trim();
+    this.elements.scheduleError.textContent = normalized;
+    this.elements.scheduleError.hidden = !normalized;
+  }
+
+  inferScheduleFormType(schedule) {
+    const type = String(schedule?.type || '').trim().toLowerCase();
+    if (type === 'cron' && this.parseWeekdayCron(schedule?.cron_expr || '')) return 'weekdays';
+    if (['daily', 'weekly', 'interval', 'once', 'cron'].includes(type)) return type;
+    return 'daily';
+  }
+
+  parseWeekdayCron(cronExpr) {
+    const match = String(cronExpr || '').trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(?:1-5|mon-fri)$/i);
+    if (!match) return null;
+
+    const minute = Number.parseInt(match[1], 10);
+    const hour = Number.parseInt(match[2], 10);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+
+    return {
+      hour,
+      minute,
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    };
+  }
+
+  buildWeekdayCron(timeValue) {
+    const [hourPart, minutePart] = String(timeValue || '09:00').split(':');
+    const hour = Number.parseInt(hourPart, 10);
+    const minute = Number.parseInt(minutePart, 10);
+    return `${Number.isInteger(minute) ? minute : 0} ${Number.isInteger(hour) ? hour : 9} * * 1-5`;
+  }
+
+  getScheduleIntervalMinutes(schedule) {
+    if (!schedule) return 0;
+    const direct = Number(schedule.interval_minutes);
+    if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
+
+    const interval = schedule.interval;
+    if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) {
+      return interval > 1000000 ? Math.max(1, Math.round(interval / 60000000000)) : Math.round(interval);
+    }
+    if (typeof interval === 'string') {
+      const numeric = Number.parseFloat(interval);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric > 1000000 ? Math.max(1, Math.round(numeric / 60000000000)) : Math.round(numeric);
+      }
+    }
+    return 0;
+  }
+
+  populateScheduleIntervalFields(minutes) {
+    const normalized = Number.isFinite(minutes) && minutes > 0 ? minutes : 60;
+    let value = normalized;
+    let unit = 'minutes';
+
+    if (normalized >= 1440 && normalized % 1440 === 0) {
+      value = normalized / 1440;
+      unit = 'days';
+    } else if (normalized >= 60 && normalized % 60 === 0) {
+      value = normalized / 60;
+      unit = 'hours';
+    }
+
+    if (this.elements.scheduleIntervalValueInput) {
+      this.elements.scheduleIntervalValueInput.value = String(value);
+    }
+    if (this.elements.scheduleIntervalUnitInput) {
+      this.elements.scheduleIntervalUnitInput.value = unit;
+    }
+  }
+
+  formatLocalDatetimeInput(value) {
+    if (!value) return '';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const pad = (number) => String(number).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate())
+    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  formatTimeOfDay(value) {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return String(value || '9:00 AM');
+
+    const date = new Date();
+    date.setHours(Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), 0, 0);
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  formatDayOfWeek(value) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const index = Number.parseInt(value, 10);
+    return days[index] || 'Monday';
+  }
+
+  describeSchedule(schedule) {
+    const type = String(schedule?.type || '').trim().toLowerCase();
+    switch (type) {
+      case 'daily':
+        return `daily at ${this.formatTimeOfDay(schedule?.time || schedule?.time_of_day || '09:00')}`;
+      case 'weekly':
+        return `weekly on ${this.formatDayOfWeek(schedule?.day_of_week)} at ${this.formatTimeOfDay(schedule?.time || schedule?.time_of_day || '09:00')}`;
+      case 'interval':
+        return `every ${this.formatIntervalMinutes(this.getScheduleIntervalMinutes(schedule) || Number(schedule?.interval_minutes) || 60)}`;
+      case 'once':
+        return `once at ${formatDateTime(schedule?.run_at || schedule?.execute_at)}`;
+      case 'cron': {
+        const weekday = this.parseWeekdayCron(schedule?.cron_expr || '');
+        if (weekday) return `weekdays at ${this.formatTimeOfDay(weekday.time)}`;
+        return `on cron "${schedule?.cron_expr || '0 9 * * *'}"`;
+      }
+      default:
+        return 'on a saved schedule';
+    }
+  }
+
+  formatIntervalMinutes(minutes) {
+    const normalized = Math.max(1, Number.parseInt(minutes, 10) || 1);
+    if (normalized >= 1440 && normalized % 1440 === 0) {
+      const days = normalized / 1440;
+      return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    if (normalized >= 60 && normalized % 60 === 0) {
+      const hours = normalized / 60;
+      return `${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+    return `${normalized} minute${normalized === 1 ? '' : 's'}`;
+  }
+
   renderSchedule() {
     if (!this.elements.schedule || !this.elements.scheduleCard) return;
 
-    const isScheduled = this.task?.schedule_enabled || this.task?.schedule;
+    const hasSchedule = Boolean(this.task?.schedule);
+    const scheduleEnabled = hasSchedule && Boolean(this.task?.schedule_enabled);
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
 
-    if (!isScheduled && history.length === 0 && executionCount === 0) {
+    if (!hasSchedule && history.length === 0 && executionCount === 0) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
       return;
@@ -3032,6 +4525,21 @@ export class WorkspaceTaskPage {
       </div>
     `;
 
+    const bannerHtml = hasSchedule ? `
+      <div class="workspace-task-schedule-banner" data-state="${scheduleEnabled ? 'enabled' : 'paused'}">
+        <div class="workspace-task-schedule-banner-icon">
+          <i class="bi ${scheduleEnabled ? 'bi-calendar-check' : 'bi-pause-circle'}" aria-hidden="true"></i>
+        </div>
+        <div>
+          <div class="workspace-task-schedule-banner-title">${this.escapeHtml(scheduleEnabled ? 'Scheduled' : 'Schedule paused')}</div>
+          <div class="workspace-task-schedule-banner-copy">
+            ${this.escapeHtml(this.describeSchedule(this.task.schedule))}
+            ${scheduleEnabled && this.task?.next_run ? ` · Next run ${this.escapeHtml(formatDateTime(this.task.next_run))}` : ''}
+          </div>
+        </div>
+      </div>
+    ` : '';
+
     let historyHtml = '';
     if (history.length > 0) {
       const recentRuns = history.slice(-10).reverse();
@@ -3052,7 +4560,511 @@ export class WorkspaceTaskPage {
       `;
     }
 
-    this.elements.schedule.innerHTML = statsHtml + historyHtml;
+    this.elements.schedule.innerHTML = bannerHtml + statsHtml + historyHtml;
+  }
+
+  renderExecutionBreakdown() {
+    if (!this.elements.trace || !this.elements.traceCard) return;
+
+    const steps = this.getExecutionBreakdownSteps(this.task, this.getSubtasks());
+    if (steps.length === 0) {
+      this.elements.traceCard.hidden = true;
+      this.elements.trace.innerHTML = '';
+      return;
+    }
+
+    this.elements.traceCard.hidden = false;
+    this.elements.trace.innerHTML = steps.map((step, index) => {
+      const statusKey = String(step?.status || this.task?.status || 'pending').trim().toLowerCase();
+      const statusClass = getStatusClass(statusKey);
+      const detail = String(step?.detail || '').trim();
+      const defaultOpen = index < 2 ? ' open' : '';
+      const title = String(step?.title || `Run ${index + 1}`).trim() || `Run ${index + 1}`;
+
+      return `
+        <details class="workspace-task-breakdown-step"${defaultOpen}>
+          <summary>
+            <span class="workspace-task-breakdown-title">
+              <span class="workspace-task-breakdown-index">${index + 1}</span>
+              <span class="workspace-task-breakdown-label">${this.escapeHtml(title)}</span>
+            </span>
+            <span class="workspace-task-step-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(statusClass))}</span>
+          </summary>
+          <div class="workspace-task-breakdown-body">${detail ? this.escapeHtml(detail) : 'No additional detail.'}</div>
+        </details>
+      `;
+    }).join('');
+  }
+
+  renderRunHistory() {
+    this.renderExecutionBreakdown();
+  }
+
+  getExecutionBreakdownSteps(task, subtasks = []) {
+    if (!task) return [];
+
+    const executionSteps = this.getExecutionStepBreakdownSteps(task);
+    if (executionSteps.length > 0) {
+      return executionSteps;
+    }
+
+    const sortedSubtasks = Array.isArray(subtasks)
+      ? [...subtasks].sort((a, b) => {
+          const aIndex = Number.isFinite(Number(a?.subtask_index))
+            ? Number(a.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          const bIndex = Number.isFinite(Number(b?.subtask_index))
+            ? Number(b.subtask_index)
+            : Number.MAX_SAFE_INTEGER;
+          if (aIndex !== bIndex) return aIndex - bIndex;
+          const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          return aTime - bTime;
+        })
+      : [];
+
+    if (sortedSubtasks.length > 0) {
+      return sortedSubtasks.map((subtask, index) => ({
+        title: String(subtask?.description || subtask?.name || `Step ${index + 1}`).trim(),
+        status: String(subtask?.status || task?.status || 'pending').trim(),
+        detail: this.buildExecutionBreakdownDetail(subtask, String(subtask?.details || '').trim())
+      }));
+    }
+
+    const retryHistorySteps = this.getRetryHistoryBreakdownSteps(task);
+    const historicalRunSteps = this.getExecutionHistoryBreakdownSteps(task, {
+      includeLatest: retryHistorySteps.length === 0
+    });
+    if (historicalRunSteps.length > 0) {
+      if (retryHistorySteps.length > 0) {
+        const currentRunNumber = historicalRunSteps.length + 1;
+        const currentRunSteps = retryHistorySteps.map((step) => ({
+          ...step,
+          title: `Run ${currentRunNumber} • ${step.title}`
+        }));
+        return [...historicalRunSteps, ...currentRunSteps];
+      }
+      return historicalRunSteps;
+    }
+
+    if (retryHistorySteps.length > 0) {
+      return retryHistorySteps;
+    }
+
+    return this.inferSyntheticBreakdownSteps(task);
+  }
+
+  getExecutionStepBreakdownSteps(task) {
+    const steps = Array.isArray(task?.execution_steps) ? task.execution_steps : [];
+    if (!steps.length) return [];
+
+    return steps.map((step, index) => {
+      const detailParts = [];
+      const detail = this.normalizeBreakdownField(step?.detail);
+      const result = this.normalizeBreakdownField(step?.result);
+      const errorText = this.normalizeBreakdownField(step?.error);
+      const startedAt = this.normalizeBreakdownField(step?.started_at);
+      const completedAt = this.normalizeBreakdownField(step?.completed_at);
+      const tag = this.normalizeBreakdownField(step?.tag);
+
+      if (detail) detailParts.push(detail);
+      if (tag) detailParts.push(`Type: ${tag}`);
+      if (startedAt) detailParts.push(`Started: ${formatDateTime(startedAt)}`);
+      if (completedAt) detailParts.push(`Completed: ${formatDateTime(completedAt)}`);
+      if (result) detailParts.push(`Result: ${this.truncateBreakdownText(result, 360)}`);
+      if (errorText) detailParts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+
+      return {
+        title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  getRetryHistoryBreakdownSteps(task) {
+    const history = Array.isArray(task?.context?.execution_retry?.history)
+      ? task.context.execution_retry.history
+      : [];
+    if (!history.length) return [];
+
+    const outcomeToStatus = (outcome) => {
+      const normalized = String(outcome || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'error' || normalized === 'failed') return 'failed';
+      if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
+      return 'pending';
+    };
+
+    return history.map((item, index) => {
+      const attemptNumber = Number.isFinite(Number(item?.attempt))
+        ? Number(item.attempt)
+        : index + 1;
+      const outcome = String(item?.outcome || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const createdAt = this.normalizeBreakdownField(item?.created_at);
+      const detailParts = [];
+
+      if (createdAt) detailParts.push(`Recorded at: ${_formatRelativeDate(createdAt)}`);
+      if (outcome) detailParts.push(`Outcome: ${outcome.replace(/_/g, ' ')}`);
+      if (summary) detailParts.push(this.truncateBreakdownText(summary, 520));
+
+      return {
+        title: `Attempt ${attemptNumber}`,
+        status: outcomeToStatus(outcome),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  getExecutionHistoryBreakdownSteps(task, options = {}) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    if (!history.length) return [];
+
+    const includeLatest = options.includeLatest !== false;
+    const relevantHistory = includeLatest ? history : history.slice(0, -1);
+    if (!relevantHistory.length) return [];
+
+    const startIndex =
+      Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
+        ? Number(options.startIndex)
+        : 1;
+
+    const mapRecordedStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'failed' || normalized === 'error') return 'failed';
+      if (normalized === 'blocked') return 'blocked';
+      return normalized || 'pending';
+    };
+
+    return relevantHistory.map((item, index) => {
+      const recordedAt = this.normalizeBreakdownField(item?.executed_at);
+      const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const errorText = this.normalizeBreakdownField(item?.error);
+      const durationMs = Number(item?.duration) || 0;
+      const detailParts = [];
+
+      if (recordedAt) detailParts.push(`Recorded at: ${_formatRelativeDate(recordedAt)}`);
+      if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
+      if (durationMs > 0) detailParts.push(`Duration: ${Math.round(durationMs / 1000)}s`);
+      if (summary) {
+        detailParts.push(this.truncateBreakdownText(summary, 520));
+      } else if (errorText) {
+        detailParts.push(this.truncateBreakdownText(errorText, 520));
+      }
+
+      return {
+        title: `Run ${startIndex + index}`,
+        status: mapRecordedStatus(rawStatus),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  buildExecutionBreakdownDetail(task, fallbackDetail = '') {
+    const parts = [];
+    const initialDetail = this.normalizeBreakdownField(fallbackDetail);
+    if (initialDetail) parts.push(initialDetail);
+
+    const currentStep = this.normalizeBreakdownField(task?.progress?.current_step);
+    if (currentStep) parts.push(`Execution: ${currentStep}`);
+
+    const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
+    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
+    if (attemptsUsed > 0 && maxAttempts > 0) {
+      parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
+    }
+
+    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
+    if (retryFinalOutcome) parts.push(`Final outcome: ${retryFinalOutcome}`);
+
+    const blockedReason = this.normalizeBreakdownField(task?.context?.human_loop?.reason);
+    const blockedQuestion = this.normalizeBreakdownField(task?.context?.human_loop?.question);
+    if (blockedReason) parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
+    if (blockedQuestion) parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
+
+    const errorText = this.normalizeBreakdownField(task?.error);
+    if (errorText) parts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+
+    const resultText = this.normalizeBreakdownField(task?.result);
+    if (resultText) parts.push(`Result: ${this.truncateBreakdownText(resultText, 360)}`);
+
+    return parts.join('\n');
+  }
+
+  inferSyntheticBreakdownSteps(task) {
+    const description = String(task?.description || '').trim();
+    const lower = description.toLowerCase();
+    const toStep = (title, detail = '') => ({ title, detail });
+
+    let baseSteps = [];
+    if ((lower.includes('wear') && lower.includes('tomorrow')) || lower.includes('what should i wear')) {
+      baseSteps = [
+        toStep("Checking tomorrow's weather", 'Collect forecast details such as temperature, rain chance, and wind.'),
+        toStep('Recommendation for clothing based on the weather', 'Translate weather conditions into practical outfit guidance.')
+      ];
+    } else if (lower.includes('weather')) {
+      baseSteps = [
+        toStep('Checking weather conditions', 'Gather forecast or relevant weather signals.'),
+        toStep('Summarizing weather insight', 'Return a concise recommendation tailored to the request.')
+      ];
+    } else {
+      baseSteps = [
+        toStep('Understanding the request', 'Clarify intent and constraints from task context.'),
+        toStep('Producing final recommendation', 'Generate the final answer with clear reasoning.')
+      ];
+    }
+
+    const statusSequence = this.getSyntheticStepStatuses(String(task?.status || 'pending'), baseSteps.length);
+    return baseSteps.map((step, index) => ({
+      ...step,
+      status: statusSequence[index] || String(task?.status || 'pending')
+    }));
+  }
+
+  getSyntheticStepStatuses(status, count) {
+    const normalized = String(status || 'pending').trim().toLowerCase();
+    if (count <= 0) return [];
+    if (normalized === 'completed') return Array.from({ length: count }, () => 'completed');
+    if (normalized === 'in_progress') {
+      return Array.from({ length: count }, (_value, index) => index === 0 ? 'in_progress' : 'pending');
+    }
+    if (normalized === 'failed' || normalized === 'timeout') {
+      return Array.from({ length: count }, (_value, index) => index < Math.max(0, count - 1) ? 'completed' : 'failed');
+    }
+    if (normalized === 'blocked') {
+      return Array.from({ length: count }, (_value, index) => {
+        if (index === 0) return 'completed';
+        if (index === 1) return 'blocked';
+        return 'pending';
+      });
+    }
+    return Array.from({ length: count }, () => 'pending');
+  }
+
+  normalizeBreakdownField(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value, null, 2).trim();
+    } catch (_error) {
+      return String(value).trim();
+    }
+  }
+
+  truncateBreakdownText(text, maxLength = 220) {
+    const normalized = this.normalizeBreakdownField(text);
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength).trim()}...`;
+  }
+
+  renderExecutionTrace() {
+    if (!this.elements.executionTrace || !this.elements.executionTraceCard) return;
+
+    const entries = this.buildExecutionTraceEntries();
+    if (entries.length === 0) {
+      if (!this.hasExecutionActivity()) {
+        this.elements.executionTraceCard.hidden = true;
+        this.elements.executionTrace.innerHTML = '';
+        return;
+      }
+
+      this.elements.executionTraceCard.hidden = false;
+      this.elements.executionTrace.innerHTML = `
+        <div class="workspace-task-trace-item">
+          <div class="workspace-task-trace-status">not captured</div>
+          <div>
+            <div class="workspace-task-trace-summary">No detailed execution trace was captured for this run.</div>
+            <div class="workspace-task-trace-meta">Re-run this task after the trace update is deployed to capture tool calls, progress events, and terminal status here.</div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    this.elements.executionTraceCard.hidden = false;
+    this.elements.executionTrace.innerHTML = entries.slice(0, 32).map((entry) => `
+      <div class="workspace-task-trace-item">
+        <div class="workspace-task-trace-status">${this.escapeHtml(entry.status)}</div>
+        <div>
+          <div class="workspace-task-trace-summary">${this.escapeHtml(entry.summary)}</div>
+          ${entry.meta ? `<div class="workspace-task-trace-meta">${this.escapeHtml(entry.meta)}</div>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  buildExecutionTraceEntries() {
+    const persistedEntries = this.normalizePersistedExecutionTrace();
+    if (persistedEntries.length > 0) {
+      return persistedEntries;
+    }
+
+    const eventEntries = this.buildExecutionTraceEntriesFromEvents();
+    if (eventEntries.length > 0) {
+      return eventEntries;
+    }
+
+    return this.buildExecutionTraceEntriesFromSteps();
+  }
+
+  hasExecutionActivity() {
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    if (status && status !== 'pending' && status !== 'assigned') return true;
+    if (this.task?.started_at || this.task?.completed_at) return true;
+    if (Array.isArray(this.task?.execution_history) && this.task.execution_history.length > 0) return true;
+    if (this.task?.context?.execution_retry) return true;
+    return false;
+  }
+
+  normalizePersistedExecutionTrace() {
+    const trace = Array.isArray(this.task?.execution_trace) ? this.task.execution_trace : [];
+    return trace
+      .map((entry) => {
+        const status = String(entry?.status || entry?.type || 'event').trim().replace(/_/g, ' ') || 'event';
+        const title = String(entry?.title || '').trim();
+        const detail = stringifyTraceValue(entry?.detail || entry?.summary || '', 1200);
+        const timestamp = formatDateTime(entry?.timestamp || entry?.created_at);
+        const source = String(entry?.source || '').trim();
+        const meta = [timestamp !== '—' ? timestamp : '', source].filter(Boolean).join(' • ');
+        const summary = [title, detail].filter(Boolean).join(detail && title ? '\n' : '');
+        if (!summary) return null;
+        return { status, summary, meta };
+      })
+      .filter(Boolean);
+  }
+
+  buildExecutionTraceEntriesFromEvents() {
+    return this.getCurrentTaskEvents()
+      .map((event) => this.formatExecutionTraceEvent(event))
+      .filter(Boolean);
+  }
+
+  getCurrentTaskEvents() {
+    const events = Array.isArray(this.taskEvents) ? this.taskEvents : [];
+    const taskId = String(this.taskId || '').trim();
+    return events
+      .filter((event) => {
+        const eventTaskId = this.getEventTaskId(event);
+        return eventTaskId && eventTaskId === taskId;
+      })
+      .sort((left, right) => {
+        const leftTime = new Date(left?.timestamp || left?.created_at || 0).getTime();
+        const rightTime = new Date(right?.timestamp || right?.created_at || 0).getTime();
+        return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0);
+      });
+  }
+
+  getEventTaskId(event) {
+    const data = getTaskEventData(event);
+    return String(data?.task_id || data?.id || data?.task?.id || '').trim();
+  }
+
+  formatExecutionTraceEvent(event) {
+    const type = String(event?.type || '').trim();
+    const data = getTaskEventData(event);
+    const toolName = String(data?.tool_name || '').trim();
+    const timestamp = formatDateTime(event?.timestamp || data?.updated_at);
+    const source = String(data?.agent || event?.source || '').trim();
+    const meta = [timestamp !== '—' ? timestamp : '', source].filter(Boolean).join(' • ');
+
+    switch (type) {
+      case 'task.started':
+        return {
+          status: 'started',
+          summary: stringifyTraceValue(data?.description || 'Task execution started.', 700),
+          meta: [meta, data?.manual ? 'manual run' : ''].filter(Boolean).join(' • ')
+        };
+      case 'task.progress': {
+        const progress = data?.progress || {};
+        const currentStep = String(progress?.current_step || data?.step_title || '').trim();
+        const waiting = data?.waiting_for_next_step === true;
+        return {
+          status: waiting ? 'waiting' : 'progress',
+          summary: stringifyTraceValue(currentStep || 'Task progress updated.', 900),
+          meta
+        };
+      }
+      case 'task.thinking':
+        return {
+          status: 'thinking',
+          summary: stringifyTraceValue(data?.message || data?.summary || 'Agent is analyzing the task.', 900),
+          meta
+        };
+      case 'task.tool_call': {
+        const args = stringifyTraceValue(data?.arguments, 900);
+        return {
+          status: 'tool call',
+          summary: [`Calling ${toolName || 'tool'}`, args ? `Arguments:\n${args}` : ''].filter(Boolean).join('\n'),
+          meta
+        };
+      }
+      case 'task.tool_result': {
+        const success = data?.success !== false;
+        const detail = success
+          ? stringifyTraceValue(data?.result_preview || 'Tool completed successfully.', 1000)
+          : stringifyTraceValue(data?.error || 'Tool failed.', 1000);
+        return {
+          status: success ? 'tool result' : 'tool error',
+          summary: [`${success ? 'Completed' : 'Failed'} ${toolName || 'tool'}`, detail].filter(Boolean).join('\n'),
+          meta
+        };
+      }
+      case 'task.completed':
+        return {
+          status: 'completed',
+          summary: stringifyTraceValue(data?.result || data?.description || 'Task completed.', 1000),
+          meta
+        };
+      case 'task.failed':
+        return {
+          status: 'failed',
+          summary: stringifyTraceValue(data?.error || 'Task failed.', 1000),
+          meta
+        };
+      case 'task.blocked':
+        return {
+          status: 'blocked',
+          summary: stringifyTraceValue(data?.reason || data?.agent_response || 'Task paused for user input.', 1000),
+          meta
+        };
+      case 'task.resumed':
+        return {
+          status: 'resumed',
+          summary: stringifyTraceValue(data?.message || 'Task resumed after user guidance.', 700),
+          meta
+        };
+      default:
+        if (!type.startsWith('task.')) return null;
+        return {
+          status: type.replace(/^task\./, '').replace(/_/g, ' '),
+          summary: stringifyTraceValue(data?.summary || data?.description || type, 900),
+          meta
+        };
+    }
+  }
+
+  buildExecutionTraceEntriesFromSteps() {
+    const steps = Array.isArray(this.task?.execution_steps) ? this.task.execution_steps : [];
+    return steps.map((step, index) => {
+      const status = String(step?.status || 'step').trim().replace(/_/g, ' ') || 'step';
+      const title = String(step?.title || `Step ${index + 1}`).trim();
+      const detail = String(step?.detail || '').trim();
+      const result = stringifyTraceValue(step?.result || step?.error || '', 900);
+      const startedAt = formatDateTime(step?.started_at);
+      const completedAt = formatDateTime(step?.completed_at);
+      const meta = [
+        startedAt !== '—' ? `Started ${startedAt}` : '',
+        completedAt !== '—' ? `Completed ${completedAt}` : '',
+        step?.tag ? String(step.tag).trim() : ''
+      ].filter(Boolean).join(' • ');
+      const summary = [title, detail, result].filter(Boolean).join('\n');
+      return summary ? { status, summary, meta } : null;
+    }).filter(Boolean);
   }
 
   renderExecutionSteps() {
@@ -3344,6 +5356,7 @@ export class WorkspaceTaskPage {
               <span class="workspace-task-assist-option-key">${this.escapeHtml(choice.number || String.fromCharCode(65 + (index % 26)))}</span>
               <span class="workspace-task-assist-option-copy">
                 <span class="workspace-task-assist-option-label">${this.escapeHtml(choice.label)}</span>
+                ${choice.recommended ? '<span class="workspace-task-assist-option-badge">Recommended</span>' : ''}
                 ${choice.description ? `<span class="workspace-task-assist-option-description">${this.escapeHtml(choice.description)}</span>` : ''}
               </span>
             </span>

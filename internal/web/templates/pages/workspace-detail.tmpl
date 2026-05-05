@@ -83,6 +83,14 @@
                      aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Create Task</button>
+              <button id="homeAssistantConfigureTaskBtn" type="button" class="modern-btn modern-btn-secondary"
+                      title="Open task editor (review details, agent, schedule before saving)"
+                      aria-label="Open task editor"
+                      style="padding: 6px 10px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M3 17v2h6v-2H3M3 5v2h10V5H3M13 21v-2h8v-2h-8v-2h-2v6h2M7 9v2H3v2h4v2h2V9H7M21 13v-2H11v2h10M15 9h2V7h4V5h-4V3h-2v6Z"/>
+                </svg>
+              </button>
             </form>
             <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap align-items-center gap-2 px-2 pt-2">
               <span class="home-assistant-quick-label mb-0">Quick Actions</span>
@@ -95,7 +103,7 @@
                 Unblock Tasks
               </button>
               <button id="homeAssistantQuickNotes" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
-                      data-home-prompt="/note # Workspace Description\n## Description\n- \n## Apps and Systems\n- \n## Key Files or Context\n- \n## Special Capabilities or Workflows\n- ">
+                      data-home-prompt="">
                 Create Description
               </button>
               <button id="homeAssistantQuickReview" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
@@ -128,15 +136,15 @@
               </div>
               <div class="d-flex align-items-center gap-3">
                 <div class="text-center">
-                  <div id="workspace-agent-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div id="workspace-agent-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);" aria-busy="true" aria-label="Agents (loading)">—</div>
                   <div style="font-size: 0.75rem; color: var(--text-secondary);">Agents</div>
                 </div>
                 <div class="text-center">
-                  <div id="workspace-task-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div id="workspace-task-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);" aria-busy="true" aria-label="Tasks (loading)">—</div>
                   <div style="font-size: 0.75rem; color: var(--text-secondary);">Tasks</div>
                 </div>
                 <div class="text-center">
-                  <div id="workspace-session-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div id="workspace-session-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);" aria-busy="true" aria-label="Sessions (loading)">—</div>
                   <div style="font-size: 0.75rem; color: var(--text-secondary);">Sessions</div>
                 </div>
               </div>
@@ -6866,12 +6874,15 @@
       color: var(--text-secondary);
       border-radius: var(--radius-sm, 4px);
       cursor: pointer;
-      opacity: 0;
+      opacity: 0.5;
       transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
       flex-shrink: 0;
     }
 
-    .workspace-editable-field:hover .workspace-edit-btn {
+    .workspace-editable-field:hover .workspace-edit-btn,
+    .workspace-edit-btn:hover,
+    .workspace-edit-btn:focus,
+    .workspace-edit-btn:focus-visible {
       opacity: 1;
     }
 
@@ -6880,10 +6891,15 @@
       color: var(--primary-color);
     }
 
-    .workspace-edit-btn:focus {
-      opacity: 1;
+    .workspace-edit-btn:focus-visible {
       outline: none;
       box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+    }
+
+    @media (hover: none) {
+      .workspace-edit-btn {
+        opacity: 1;
+      }
     }
 
     /* Inline editable elements */
@@ -6943,6 +6959,7 @@
   <!-- Core Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 
   <!-- Theme Manager (load early) -->
   <script src="/js/modules/themeManager.js"></script>

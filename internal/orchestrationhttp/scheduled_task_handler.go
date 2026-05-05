@@ -182,17 +182,17 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 
 	switch r.Method {
 	case http.MethodGet:
-		th.handleGetScheduledTask(w, r, id)
+		th.handleGetScheduledTask(w, id)
 	case http.MethodPut:
 		th.handleUpdateScheduledTask(w, r, id)
 	case http.MethodDelete:
-		th.handleDeleteScheduledTask(w, r, id)
+		th.handleDeleteScheduledTask(w, id)
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
 }
 
-func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, id string) {
 	// Find the scheduled task across all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
@@ -312,7 +312,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
-func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, id string) {
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})

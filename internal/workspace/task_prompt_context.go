@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -51,6 +50,7 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	prompt.WriteString("If the available workspace data is limited, say that directly instead of substituting repository/worktree context. ")
 	prompt.WriteString("The workspace snapshot below shows note ids and truncated previews (~160 chars). When a task asks to review, summarize, transform, or create tasks from a note, you must call the workspace_notes tool with the note's id to read the full content before answering instead of relying on the preview or asking the user to paste it. ")
 	prompt.WriteString("Use workspace_tasks, workspace_sessions, workspace_files, and workspace_directories the same way to read full workspace state on demand. ")
+	prompt.WriteString("For fresh public-information tasks such as today's weather, pollen, prices, scores, news, or other current facts, use web_search first when available, then read relevant source pages with web_fetch or browser as needed. Do not guess direct source URLs for location-specific facts; verify that fetched pages match the requested city, region, or ZIP before using them. If search results are empty, broaden the query, remove site-specific filters, and try multiple public sources instead of stopping. Do not return raw Tool Results as the final answer. Do not answer those tasks from prior blocked attempts or workspace task-status summaries unless the user explicitly asks for task status. Include source names or URLs and visible dates when available. ")
 	prompt.WriteString("If you use tools, continue reasoning from the tool results until you can either complete the requested step or explain exactly what is still blocked. ")
 	prompt.WriteString("If a task asks for file or folder contents, directory listings, or filesystem state, you must verify the answer with filesystem tools before responding. ")
 	prompt.WriteString("Do not answer filesystem listing tasks from the workspace snapshot, prior attempt summaries, or assumptions alone. ")
@@ -127,7 +127,10 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 	stats := ws.GetTaskStats()
 	lines = append(lines, "", "### Workspace Tasks", "")
 	lines = append(lines, fmt.Sprintf("- Counts: %s", buildTaskPromptTaskCountsSummary(stats)))
-	for _, wsTask := range collectTaskPromptTasks(ws.Tasks, taskPromptMaxTasks) {
+	if taskPromptLooksForFreshPublicInformation(task.Description) {
+		lines = append(lines, "- Fresh public-information task: unrelated prior task summaries are omitted unless they are explicit inputs.")
+	}
+	for _, wsTask := range collectTaskPromptTasksForPrompt(ws.Tasks, task, taskPromptMaxTasks) {
 		lines = append(lines, fmt.Sprintf(
 			"- Open task: [%s] %q -> %q (priority %d)",
 			sanitizeTaskPromptText(string(wsTask.Status), taskPromptTextLimit),
@@ -234,7 +237,7 @@ func buildTaskPromptTaskCountsSummary(stats map[string]int) string {
 	}
 
 	parts := []string{fmt.Sprintf("total=%d", stats["total"])}
-	for _, key := range []string{"pending", "assigned", "in_progress", "completed", "failed", "cancelled", "timeout", "scheduled"} {
+	for _, key := range []string{"pending", "assigned", "in_progress", "waiting_for_choice", "completed", "failed", "cancelled", "timeout", "scheduled"} {
 		if count := stats[key]; count > 0 {
 			parts = append(parts, fmt.Sprintf("%s=%d", key, count))
 		}
@@ -242,15 +245,28 @@ func buildTaskPromptTaskCountsSummary(stats map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-func collectTaskPromptTasks(tasks []Task, limit int) []Task {
+func collectTaskPromptTasksForPrompt(tasks []Task, current Task, limit int) []Task {
 	if limit <= 0 || len(tasks) == 0 {
 		return nil
 	}
 
+	publicInfoTask := taskPromptLooksForFreshPublicInformation(current.Description)
+	inputTaskIDs := make(map[string]struct{}, len(current.InputTaskIDs))
+	for _, id := range current.InputTaskIDs {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			inputTaskIDs[trimmed] = struct{}{}
+		}
+	}
+
 	openTasks := make([]Task, 0, min(limit, len(tasks)))
 	for _, task := range tasks {
+		if publicInfoTask && strings.TrimSpace(task.ID) != strings.TrimSpace(current.ID) {
+			if _, explicitInput := inputTaskIDs[strings.TrimSpace(task.ID)]; !explicitInput {
+				continue
+			}
+		}
 		switch task.Status {
-		case TaskStatusPending, TaskStatusAssigned, TaskStatusInProgress:
+		case TaskStatusPending, TaskStatusAssigned, TaskStatusInProgress, TaskStatusWaitingForChoice:
 			openTasks = append(openTasks, task)
 			if len(openTasks) == limit {
 				return openTasks
@@ -259,6 +275,35 @@ func collectTaskPromptTasks(tasks []Task, limit int) []Task {
 	}
 
 	return openTasks
+}
+
+func taskPromptLooksForFreshPublicInformation(description string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(description))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"today",
+		"current",
+		"latest",
+		"recent",
+		"now",
+		"weather",
+		"forecast",
+		"pollen",
+		"air quality",
+		"price",
+		"stock",
+		"score",
+		"news",
+		"flight",
+		"hotel",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func taskPromptAssignee(task Task) string {
@@ -362,18 +407,18 @@ func sanitizeTaskPromptText(value string, maxLen int) string {
 }
 
 // buildTaskPrompt creates a prompt for the task
-func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *agent.Agent) string {
+func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("# Task Assignment\n\n")
 	prompt.WriteString("You have been assigned a task in a collaborative workspace.\n\n")
-	prompt.WriteString(fmt.Sprintf("**Task ID**: %s\n", task.ID))
-	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
-	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))
+	fmt.Fprintf(&prompt, "**Task ID**: %s\n", task.ID)
+	fmt.Fprintf(&prompt, "**From**: %s\n", task.From)
+	fmt.Fprintf(&prompt, "**Priority**: %d/5\n\n", task.Priority)
 
 	// Process task description with placeholder substitution
 	processedDescription := h.substitutePlaceholders(task)
-	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
+	fmt.Fprintf(&prompt, "## Task Description\n\n%s\n\n", processedDescription)
 
 	if details := strings.TrimSpace(task.Details); details != "" {
 		prompt.WriteString("## Task Details\n\n")
@@ -392,12 +437,12 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 		prompt.WriteString("## Attached Files\n\n")
 		prompt.WriteString("The following files are attached to this task:\n\n")
 		for _, att := range attachmentContents {
-			prompt.WriteString(fmt.Sprintf("### %s\n\n", att.Title))
+			fmt.Fprintf(&prompt, "### %s\n\n", att.Title)
 			if att.FilePath != "" {
-				prompt.WriteString(fmt.Sprintf("**File**: `%s`\n\n", att.FilePath))
+				fmt.Fprintf(&prompt, "**File**: `%s`\n\n", att.FilePath)
 			}
 			if att.Body != "" {
-				prompt.WriteString(fmt.Sprintf("**Note**: %s\n\n", att.Body))
+				fmt.Fprintf(&prompt, "**Note**: %s\n\n", att.Body)
 			}
 			if att.Content != "" {
 				prompt.WriteString("**Content**:\n```\n")
@@ -410,7 +455,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	// Handle input task results specially for better formatting
 	inputTaskResults, hasInputResults := task.Context["input_task_results"]
 	if hasInputResults {
-		h.formatInputResults(&prompt, task, inputTaskResults)
+		h.formatInputResults(&prompt, inputTaskResults)
 	}
 
 	// Include other context fields
@@ -427,7 +472,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 			prompt.WriteString("## Additional Context\n\n")
 			for key, value := range task.Context {
 				if key != "input_task_results" {
-					prompt.WriteString(fmt.Sprintf("- **%s**: %v\n", key, value))
+					fmt.Fprintf(&prompt, "- **%s**: %v\n", key, value)
 				}
 			}
 			prompt.WriteString("\n")
@@ -441,7 +486,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	}
 
 	if task.Timeout > 0 {
-		prompt.WriteString(fmt.Sprintf("**Time Limit**: %v\n\n", task.Timeout))
+		fmt.Fprintf(&prompt, "**Time Limit**: %v\n\n", task.Timeout)
 	}
 
 	prompt.WriteString("Please complete this task to the best of your ability. ")

@@ -17,7 +17,8 @@
     "marked": "readonly",
     "hljs": "readonly",
     "mermaid": "readonly",
-    "FormValidation": "readonly"
+    "FormValidation": "readonly",
+    "DOMPurify": "readonly"
   },
   "rules": {
     "no-unused-vars": ["warn", {
@@ -46,6 +47,12 @@
       "files": ["internal/web/static/js/utils/*.js"],
       "rules": {
         "no-unused-vars": "off"
+      }
+    },
+    {
+      "files": ["internal/web/static/js/modules/*.js"],
+      "parserOptions": {
+        "sourceType": "module"
       }
     }
   ],
