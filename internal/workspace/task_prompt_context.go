@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -408,18 +407,18 @@ func sanitizeTaskPromptText(value string, maxLen int) string {
 }
 
 // buildTaskPrompt creates a prompt for the task
-func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *agent.Agent) string {
+func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("# Task Assignment\n\n")
 	prompt.WriteString("You have been assigned a task in a collaborative workspace.\n\n")
-	prompt.WriteString(fmt.Sprintf("**Task ID**: %s\n", task.ID))
-	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
-	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))
+	fmt.Fprintf(&prompt, "**Task ID**: %s\n", task.ID)
+	fmt.Fprintf(&prompt, "**From**: %s\n", task.From)
+	fmt.Fprintf(&prompt, "**Priority**: %d/5\n\n", task.Priority)
 
 	// Process task description with placeholder substitution
 	processedDescription := h.substitutePlaceholders(task)
-	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
+	fmt.Fprintf(&prompt, "## Task Description\n\n%s\n\n", processedDescription)
 
 	if details := strings.TrimSpace(task.Details); details != "" {
 		prompt.WriteString("## Task Details\n\n")
@@ -438,12 +437,12 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 		prompt.WriteString("## Attached Files\n\n")
 		prompt.WriteString("The following files are attached to this task:\n\n")
 		for _, att := range attachmentContents {
-			prompt.WriteString(fmt.Sprintf("### %s\n\n", att.Title))
+			fmt.Fprintf(&prompt, "### %s\n\n", att.Title)
 			if att.FilePath != "" {
-				prompt.WriteString(fmt.Sprintf("**File**: `%s`\n\n", att.FilePath))
+				fmt.Fprintf(&prompt, "**File**: `%s`\n\n", att.FilePath)
 			}
 			if att.Body != "" {
-				prompt.WriteString(fmt.Sprintf("**Note**: %s\n\n", att.Body))
+				fmt.Fprintf(&prompt, "**Note**: %s\n\n", att.Body)
 			}
 			if att.Content != "" {
 				prompt.WriteString("**Content**:\n```\n")
@@ -456,7 +455,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	// Handle input task results specially for better formatting
 	inputTaskResults, hasInputResults := task.Context["input_task_results"]
 	if hasInputResults {
-		h.formatInputResults(&prompt, task, inputTaskResults)
+		h.formatInputResults(&prompt, inputTaskResults)
 	}
 
 	// Include other context fields
@@ -473,7 +472,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 			prompt.WriteString("## Additional Context\n\n")
 			for key, value := range task.Context {
 				if key != "input_task_results" {
-					prompt.WriteString(fmt.Sprintf("- **%s**: %v\n", key, value))
+					fmt.Fprintf(&prompt, "- **%s**: %v\n", key, value)
 				}
 			}
 			prompt.WriteString("\n")
@@ -487,7 +486,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	}
 
 	if task.Timeout > 0 {
-		prompt.WriteString(fmt.Sprintf("**Time Limit**: %v\n\n", task.Timeout))
+		fmt.Fprintf(&prompt, "**Time Limit**: %v\n\n", task.Timeout)
 	}
 
 	prompt.WriteString("Please complete this task to the best of your ability. ")

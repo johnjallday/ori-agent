@@ -387,7 +387,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		case StepTypeTask:
 			result, execErr = se.executeTaskStep(ctx, ws, step)
 		case StepTypeAggregate:
-			result, execErr = se.executeAggregateStep(ctx, ws, workflow, step)
+			result, execErr = se.executeAggregateStep(workflow, step)
 		default:
 			execErr = fmt.Errorf("unsupported step type: %s", step.Type)
 		}
@@ -486,7 +486,7 @@ func (se *StepExecutor) executeTaskStep(ctx context.Context, ws *Workspace, step
 }
 
 // executeAggregateStep aggregates results from previous steps
-func (se *StepExecutor) executeAggregateStep(ctx context.Context, ws *Workspace, workflow *Workflow, step *WorkflowStep) (string, error) {
+func (se *StepExecutor) executeAggregateStep(workflow *Workflow, step *WorkflowStep) (string, error) {
 	if len(step.DependsOn) == 0 {
 		return "", fmt.Errorf("aggregate step has no dependencies")
 	}

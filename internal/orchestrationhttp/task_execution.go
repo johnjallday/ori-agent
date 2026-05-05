@@ -584,7 +584,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	var blockedSubtaskID string
 
 	if shouldUseGraphParentExecution(parentTask, subtasks) {
-		lastResult, blockedSubtaskID, execErr = th.executeParentTaskGraph(ws, parentTask, subtasks)
+		lastResult, blockedSubtaskID, execErr = th.executeParentTaskGraph(ws, subtasks)
 		if execErr != nil {
 			errors.As(execErr, &blockedErr)
 		}

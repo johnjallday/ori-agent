@@ -180,7 +180,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	// Build the prompt for the task
-	prompt := h.buildTaskPrompt(ctx, task, ag.Agent)
+	prompt := h.buildTaskPrompt(ctx, task)
 
 	// Prepare messages
 	messages := []llm.Message{
@@ -881,7 +881,7 @@ func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent 
 }
 
 // formatInputResults formats input task results based on the combination mode
-func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, inputTaskResults interface{}) {
+func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, inputTaskResults interface{}) {
 	resultsMap, ok := inputTaskResults.(map[string]string)
 	if !ok {
 		return

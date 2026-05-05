@@ -93,7 +93,7 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 		To:          "Ori",
 		Description: "summarize workspace",
 		Priority:    1,
-	}, nil)
+	})
 
 	for _, want := range []string{
 		"## Workspace Snapshot",
@@ -126,7 +126,7 @@ func TestBuildTaskPrompt_WithoutWorkspaceSnapshotWhenWorkspaceUnavailable(t *tes
 		From:        "jj",
 		Description: "summarize workspace",
 		Priority:    1,
-	}, nil)
+	})
 
 	if strings.Contains(prompt, "## Workspace Snapshot") {
 		t.Fatalf("expected prompt to omit workspace snapshot, got %q", prompt)
@@ -149,8 +149,8 @@ func TestBuildTaskPrompt_FreshPublicInfoOmitsUnrelatedPriorTaskSummaries(t *test
 			Description: "check pollen count in NYC",
 			To:          "Ori",
 			Status:      TaskStatusWaitingForChoice,
-			Context: map[string]interface{}{
-				"human_loop": map[string]interface{}{
+			Context: map[string]any{
+				"human_loop": map[string]any{
 					"reason": "AccuWeather was blocked by robots.txt.",
 				},
 			},
@@ -180,7 +180,7 @@ func TestBuildTaskPrompt_FreshPublicInfoOmitsUnrelatedPriorTaskSummaries(t *test
 		To:           "Ori",
 		Description:  "check today's pollen count in NYC",
 		InputTaskIDs: []string{"explicit-input"},
-	}, nil)
+	})
 
 	if strings.Contains(prompt, `Open task: [waiting_for_choice] "check pollen count in NYC"`) {
 		t.Fatalf("expected unrelated old pollen task to be omitted, got %q", prompt)
@@ -205,7 +205,7 @@ func TestBuildTaskPrompt_IncludesTaskDetails(t *testing.T) {
 		Description: "plan the trip",
 		Details:     "Original request:\nplan a trip in Lisbon\n\nPlanning intake:\n- Travel dates: 5/11 arrival, 5/14 departure",
 		Priority:    1,
-	}, nil)
+	})
 
 	for _, want := range []string{
 		"## Task Description",

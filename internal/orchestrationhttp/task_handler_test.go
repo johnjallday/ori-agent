@@ -670,8 +670,8 @@ func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 		Description: "Plan Lisbon trip",
 		To:          "Ori",
 		Status:      workspace.TaskStatusPending,
-		Context: map[string]interface{}{
-			"human_loop": map[string]interface{}{
+		Context: map[string]any{
+			"human_loop": map[string]any{
 				"state": "blocked",
 			},
 		},
@@ -733,8 +733,8 @@ func TestHandleAssistTask_ContinuePersistsChoiceAndResumesSameTask(t *testing.T)
 		Description: "check pollen count in NYC",
 		To:          "Ori",
 		Status:      workspace.TaskStatusWaitingForChoice,
-		Context: map[string]interface{}{
-			"human_loop": map[string]interface{}{
+		Context: map[string]any{
+			"human_loop": map[string]any{
 				"state":    "waiting_for_choice",
 				"block_id": "block-1",
 				"workflow_step": &workspace.TaskBlockedWorkflowStep{
@@ -814,8 +814,8 @@ func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
 		Description: "Plan shelf build",
 		To:          "Ori",
 		Status:      workspace.TaskStatusPending,
-		Context: map[string]interface{}{
-			"human_loop": map[string]interface{}{
+		Context: map[string]any{
+			"human_loop": map[string]any{
 				"state": "blocked",
 				"workflow_step": &workspace.TaskBlockedWorkflowStep{
 					StepType: "ask_form",
