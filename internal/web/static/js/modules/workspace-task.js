@@ -88,6 +88,66 @@ function normalizeResultText(value) {
   }
 }
 
+const TASK_SKILL_RESULT_CONTEXT_MAX_CHARS = 2600;
+const TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS = 1200;
+const TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS = 6200;
+
+function stripSkillUnsafeMarkup(value) {
+  return String(value ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function trimTaskSkillText(value, maxLength = 900) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || normalized.length <= maxLength) return normalized;
+
+  const candidate = normalized.slice(0, maxLength - 1);
+  const boundary = candidate.lastIndexOf(' ');
+  const trimmed = boundary >= Math.floor(maxLength * 0.55)
+    ? candidate.slice(0, boundary)
+    : candidate;
+  return `${trimmed.trim()}...`;
+}
+
+function buildTaskSkillNameSlug(value) {
+  let slug = stripSkillUnsafeMarkup(value)
+    .toLowerCase()
+    .replace(/anthropic/g, 'provider')
+    .replace(/claude/g, 'assistant')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  if (!slug) slug = 'task-skill';
+  if (slug.length > 64) {
+    slug = slug.slice(0, 64).replace(/-+$/g, '');
+  }
+  return slug || 'task-skill';
+}
+
+function extractGeneratedSkillPrompt(raw) {
+  let text = String(raw || '').trim();
+  if (!text) return '';
+
+  if (text.startsWith('```')) {
+    text = text.replace(/^```[a-zA-Z0-9_-]*\s*/u, '');
+    text = text.replace(/\s*```$/u, '').trim();
+  }
+
+  const lower = text.toLowerCase();
+  if (lower.startsWith('prompt:')) {
+    text = text.slice('prompt:'.length).trim();
+  }
+
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+
+  return text;
+}
+
 const assistQuestionPromptPattern = /^\s*(?:[-*]\s*)?(?:\d+)[.)]\s*(.+?)\s*$/;
 const assistLetteredOptionPattern = /^\s*(?:[-*]\s*)?([A-Z])[.)]\s*(.+)$/;
 
@@ -733,6 +793,10 @@ export class WorkspaceTaskPage {
     this.resultResearchPendingSectionId = '';
     this.resultResearchDraft = null;
     this.resultResearchSubmitting = false;
+    this.skillDraftGenerating = false;
+    this.skillDraftSubmitting = false;
+    this.skillDraftAbortController = null;
+    this.skillDraftRequestId = 0;
     this.resultSectionMenu = null;
     this.scheduleSubmitting = false;
     this.boundResultSectionMenuDocumentClick = (event) => {
@@ -784,9 +848,19 @@ export class WorkspaceTaskPage {
       outputCard: document.getElementById('workspace-task-output-card'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
+      outputCreateSkillBtn: document.getElementById('workspace-task-output-create-skill'),
       outputPromoteBtn: document.getElementById('workspace-task-output-promote'),
       outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
+      skillModal: document.getElementById('workspace-task-skill-modal'),
+      skillMeta: document.getElementById('workspace-task-skill-meta'),
+      skillError: document.getElementById('workspace-task-skill-error'),
+      skillAgentInput: document.getElementById('workspace-task-skill-agent'),
+      skillNameInput: document.getElementById('workspace-task-skill-name'),
+      skillDescriptionInput: document.getElementById('workspace-task-skill-description'),
+      skillPromptInput: document.getElementById('workspace-task-skill-prompt'),
+      skillGenerateBtn: document.getElementById('workspace-task-skill-generate'),
+      skillSubmitBtn: document.getElementById('workspace-task-skill-submit'),
       resultPromoteModal: document.getElementById('workspace-task-result-promote-modal'),
       resultPromoteTitleInput: document.getElementById('workspace-task-result-promote-title'),
       resultPromoteMeta: document.getElementById('workspace-task-result-promote-meta'),
@@ -879,7 +953,19 @@ export class WorkspaceTaskPage {
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.elements.outputCreateSkillBtn?.addEventListener('click', () => this.openSkillDraftModal());
     this.elements.outputPromoteBtn?.addEventListener('click', () => this.previewResultPromotion());
+    this.elements.skillGenerateBtn?.addEventListener('click', () => this.generateSkillPromptFromTask(true));
+    this.elements.skillSubmitBtn?.addEventListener('click', () => this.submitTaskSkillDraft());
+    this.elements.skillModal?.addEventListener('hidden.bs.modal', () => {
+      if (this.skillDraftSubmitting) return;
+      if (this.skillDraftAbortController) {
+        this.skillDraftAbortController.abort();
+        this.skillDraftAbortController = null;
+      }
+      this.skillDraftGenerating = false;
+      this.updateSkillDraftButtons();
+    });
     this.elements.resultPromoteSubmitBtn?.addEventListener('click', () => this.submitResultPromotion());
     this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
       if (this.resultPromotionSubmitting) return;
@@ -1556,6 +1642,12 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
+    if (this.canCreateSkillFromTask()) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="create-skill">
+        <i class="bi bi-magic" aria-hidden="true"></i>Create Skill
+      </button>`);
+    }
+
     if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
@@ -1574,6 +1666,7 @@ export class WorkspaceTaskPage {
         if (action === 'execute') this.executeTask();
         if (action === 'complete') this.completeTask();
         if (action === 'schedule') this.openScheduleModal();
+        if (action === 'create-skill') this.openSkillDraftModal();
       });
     });
   }
@@ -3071,6 +3164,20 @@ export class WorkspaceTaskPage {
       this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
     }
 
+    if (this.elements.outputCreateSkillBtn) {
+      const canCreateSkill = this.canCreateSkillFromTask();
+      const label = this.elements.outputCreateSkillBtn.querySelector('span');
+      if (label) {
+        label.textContent = this.skillDraftGenerating
+          ? 'Drafting...'
+          : this.skillDraftSubmitting
+            ? 'Creating...'
+            : 'Create Skill';
+      }
+      this.elements.outputCreateSkillBtn.hidden = !canCreateSkill;
+      this.elements.outputCreateSkillBtn.disabled = !canCreateSkill || this.skillDraftGenerating || this.skillDraftSubmitting;
+    }
+
     if (this.elements.outputPromoteBtn) {
       const canPromote = this.canPromoteResultToWorkflow();
       const label = this.elements.outputPromoteBtn.querySelector('span');
@@ -3349,6 +3456,14 @@ export class WorkspaceTaskPage {
     return this.getCurrentResultText() || String(this.task?.error || '').trim();
   }
 
+  canCreateSkillFromTask(task = this.task) {
+    if (!task || typeof task !== 'object') return false;
+    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (!String(task.to || '').trim()) return false;
+    if (String(task.error || '').trim()) return false;
+    return Boolean(normalizeResultText(task.result).trim());
+  }
+
   async copyCurrentResult() {
     const outputText = this.getCurrentOutputText();
     if (!outputText) {
@@ -3357,6 +3472,284 @@ export class WorkspaceTaskPage {
     }
 
     await this.copyToClipboard(outputText, 'Result copied');
+  }
+
+  setSkillDraftError(message) {
+    if (!this.elements.skillError) return;
+
+    const text = String(message || '').trim();
+    this.elements.skillError.hidden = !text;
+    this.elements.skillError.textContent = text;
+  }
+
+  updateSkillDraftButtons() {
+    const busy = this.skillDraftGenerating || this.skillDraftSubmitting;
+    if (this.elements.skillGenerateBtn) {
+      const label = this.elements.skillGenerateBtn.querySelector('span');
+      if (label) label.textContent = this.skillDraftGenerating ? 'Generating...' : 'Regenerate With AI';
+      this.elements.skillGenerateBtn.disabled = busy;
+    }
+    if (this.elements.skillSubmitBtn) {
+      const label = this.elements.skillSubmitBtn.querySelector('span');
+      if (label) label.textContent = this.skillDraftSubmitting ? 'Creating...' : 'Create Skill';
+      this.elements.skillSubmitBtn.disabled = busy;
+    }
+
+    const resultText = this.getCurrentResultText();
+    this.updateResultActionButtons(resultText, Boolean(resultText));
+  }
+
+  getTaskSkillAgentName() {
+    return String(this.task?.to || '').trim();
+  }
+
+  buildTaskSkillDefaultName() {
+    return buildTaskSkillNameSlug(this.getTaskDisplayLabel());
+  }
+
+  buildTaskSkillSavedDescription() {
+    const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed task';
+    const details = stripSkillUnsafeMarkup(this.task?.details || '');
+    const result = stripSkillUnsafeMarkup(this.getCurrentResultText());
+    const parts = [`Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`];
+
+    if (details) {
+      parts.push(`Use when: ${trimTaskSkillText(details, 360)}.`);
+    } else if (result) {
+      parts.push(`Produces results like: ${trimTaskSkillText(result, 360)}.`);
+    }
+
+    return trimTaskSkillText(parts.join(' ').replace(/\s+/g, ' ').trim(), 900);
+  }
+
+  buildTaskSkillGenerationDescription(name, savedDescription) {
+    const taskTitle = this.getTaskDisplayLabel();
+    const taskDetails = String(this.task?.details || '').trim();
+    const resultText = this.getCurrentResultText();
+    const assistMessage = String(this.task?.context?.user_assist_message || '').trim();
+    const completedAt = formatDateTime(this.task?.completed_at);
+    const agentName = this.getTaskSkillAgentName();
+    const workspaceName = String(this.workspace?.name || '').trim();
+
+    const lines = [
+      'Create a reusable Ori Agent skill from this successful task.',
+      'The skill should let the assigned agent repeat the workflow with less user instruction next time.',
+      'Prefer public pages, browser-readable sources, local context, and fallback source strategies before asking users for API keys.',
+      'Generalize the workflow; do not include task IDs, run-specific timestamps, localhost URLs, or one-off troubleshooting notes unless they are broadly useful.',
+      `Proposed skill name: ${name}`,
+      `Saved skill description: ${savedDescription}`
+    ];
+
+    if (workspaceName) lines.push(`Workspace: ${workspaceName}`);
+    if (agentName) lines.push(`Assigned agent: ${agentName}`);
+    if (completedAt !== '—') lines.push(`Completed: ${completedAt}`);
+    if (taskTitle) lines.push(`Original task title: ${taskTitle}`);
+    if (taskDetails) {
+      lines.push('', 'Original task details:', trimTaskSkillText(taskDetails, TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS));
+    }
+    if (assistMessage) {
+      lines.push('', 'User clarification collected during the task:', trimTaskSkillText(assistMessage, 900));
+    }
+    if (resultText) {
+      lines.push('', 'Successful result excerpt:', trimTaskSkillText(resultText, TASK_SKILL_RESULT_CONTEXT_MAX_CHARS));
+    }
+
+    lines.push(
+      '',
+      'Write the skill prompt as operational guidance for future runs. Include source selection, verification expectations, fallback behavior, and the expected final response format when inferable from the result.'
+    );
+
+    return trimTaskSkillText(lines.join('\n'), TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS);
+  }
+
+  populateSkillDraftModal() {
+    const agentName = this.getTaskSkillAgentName();
+    const skillName = this.buildTaskSkillDefaultName();
+    const description = this.buildTaskSkillSavedDescription();
+    const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
+
+    this.setSkillDraftError('');
+    if (this.elements.skillMeta) {
+      this.elements.skillMeta.textContent = `Drafts a reusable skill for "${agentName}" from "${taskLabel}".`;
+    }
+    if (this.elements.skillAgentInput) {
+      this.elements.skillAgentInput.value = agentName;
+    }
+    if (this.elements.skillNameInput) {
+      this.elements.skillNameInput.value = skillName;
+    }
+    if (this.elements.skillDescriptionInput) {
+      this.elements.skillDescriptionInput.value = description;
+    }
+    if (this.elements.skillPromptInput) {
+      this.elements.skillPromptInput.value = '';
+    }
+    this.updateSkillDraftButtons();
+  }
+
+  openSkillDraftModal() {
+    if (!this.canCreateSkillFromTask()) {
+      this.notify('warning', 'Only completed tasks with a successful result and assigned agent can become skills.');
+      return;
+    }
+    if (!this.elements.skillModal || typeof bootstrap === 'undefined') {
+      this.notify('error', 'Skill editor is not available.');
+      return;
+    }
+
+    this.populateSkillDraftModal();
+    const modal =
+      typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.skillModal)
+        : bootstrap.Modal.getInstance(this.elements.skillModal) ||
+          new bootstrap.Modal(this.elements.skillModal);
+    modal.show();
+    setTimeout(() => {
+      this.elements.skillNameInput?.focus();
+      this.elements.skillNameInput?.select();
+    }, 120);
+    this.generateSkillPromptFromTask(false);
+  }
+
+  async generateSkillPromptFromTask(force = false) {
+    if (this.skillDraftGenerating || this.skillDraftSubmitting) return;
+
+    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
+    const rawName = String(this.elements.skillNameInput?.value || this.buildTaskSkillDefaultName()).trim();
+    const skillName = buildTaskSkillNameSlug(rawName);
+    const savedDescription = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || this.buildTaskSkillSavedDescription()), 1024);
+
+    if (!agentName || !skillName || !savedDescription) {
+      this.setSkillDraftError('Skill name, description, and agent are required.');
+      return;
+    }
+
+    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
+    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = savedDescription;
+
+    const currentPrompt = String(this.elements.skillPromptInput?.value || '').trim();
+    if (force && currentPrompt && currentPrompt !== 'Generating prompt...') {
+      const confirmed = window.confirm('Replace the current prompt with a newly generated one?');
+      if (!confirmed) return;
+    }
+
+    if (this.skillDraftAbortController) {
+      this.skillDraftAbortController.abort();
+    }
+
+    const controller = new AbortController();
+    this.skillDraftAbortController = controller;
+    const requestId = ++this.skillDraftRequestId;
+    this.skillDraftGenerating = true;
+    this.setSkillDraftError('');
+    if (this.elements.skillPromptInput) {
+      this.elements.skillPromptInput.value = 'Generating prompt...';
+    }
+    this.updateSkillDraftButtons();
+
+    try {
+      const response = await fetch('/api/skills/generate-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: agentName,
+          name: skillName,
+          description: this.buildTaskSkillGenerationDescription(skillName, savedDescription),
+        }),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (requestId !== this.skillDraftRequestId) return;
+
+      const details = typeof data?.details === 'string' ? data.details.trim() : '';
+      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to generate skill prompt.';
+      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
+
+      const generated = extractGeneratedSkillPrompt(data?.prompt || '');
+      if (!generated) throw new Error('Assistant returned an empty skill prompt.');
+
+      if (this.elements.skillPromptInput) {
+        this.elements.skillPromptInput.value = generated;
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.error('Failed to generate task skill prompt:', error);
+      if (requestId !== this.skillDraftRequestId) return;
+
+      if (this.elements.skillPromptInput) {
+        this.elements.skillPromptInput.value = currentPrompt === 'Generating prompt...' ? '' : currentPrompt;
+      }
+      this.setSkillDraftError(error?.message || 'Failed to generate skill prompt.');
+    } finally {
+      if (requestId === this.skillDraftRequestId) {
+        this.skillDraftGenerating = false;
+        this.skillDraftAbortController = null;
+        this.updateSkillDraftButtons();
+      }
+    }
+  }
+
+  async submitTaskSkillDraft() {
+    if (this.skillDraftSubmitting) return;
+
+    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
+    const rawSkillName = String(this.elements.skillNameInput?.value || '').trim();
+    const skillName = rawSkillName ? buildTaskSkillNameSlug(rawSkillName) : '';
+    const description = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || ''), 1024);
+    const prompt = String(this.elements.skillPromptInput?.value || '').replace(/\r\n/g, '\n').trim();
+
+    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
+    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = description;
+
+    if (!agentName) {
+      this.setSkillDraftError('Agent is required.');
+      return;
+    }
+    if (!skillName) {
+      this.setSkillDraftError('Skill name is required.');
+      return;
+    }
+    if (!description) {
+      this.setSkillDraftError('Description is required.');
+      return;
+    }
+    if (!prompt || prompt === 'Generating prompt...') {
+      this.setSkillDraftError('Wait for the AI draft to finish or enter a skill prompt manually.');
+      return;
+    }
+
+    this.skillDraftSubmitting = true;
+    this.setSkillDraftError('');
+    this.updateSkillDraftButtons();
+
+    try {
+      const response = await fetch('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: agentName,
+          name: skillName,
+          description,
+          prompt,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      const details = typeof data?.details === 'string' ? data.details.trim() : '';
+      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to create skill.';
+      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
+
+      if (this.elements.skillModal && typeof bootstrap !== 'undefined') {
+        const modal = bootstrap.Modal.getInstance(this.elements.skillModal);
+        modal?.hide();
+      }
+      this.notify('success', `Skill "${skillName}" created for ${agentName}`);
+    } catch (error) {
+      console.error('Failed to create skill from task:', error);
+      this.setSkillDraftError(error?.message || 'Failed to create skill.');
+    } finally {
+      this.skillDraftSubmitting = false;
+      this.updateSkillDraftButtons();
+    }
   }
 
   buildResultNoteTitle(resultText) {

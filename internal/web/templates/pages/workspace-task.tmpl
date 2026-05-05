@@ -197,6 +197,10 @@
                     <i class="bi bi-journal-plus" aria-hidden="true"></i>
                     <span>Save as Note</span>
                   </button>
+                  <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
+                    <i class="bi bi-magic" aria-hidden="true"></i>
+                    <span>Create Skill</span>
+                  </button>
                   <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
                     <i class="bi bi-diagram-3" aria-hidden="true"></i>
                     <span>Create Workflow Task</span>
@@ -1022,6 +1026,63 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .workspace-task-skill-meta {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.45;
+      margin-top: 0.18rem;
+    }
+
+    .workspace-task-skill-alert {
+      padding: 0.75rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid rgba(194, 59, 59, 0.24);
+      background: rgba(194, 59, 59, 0.1);
+      color: #c23b3b;
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-bottom: 0.9rem;
+    }
+
+    .workspace-task-skill-form {
+      display: grid;
+      gap: 0.95rem;
+    }
+
+    .workspace-task-skill-grid {
+      display: grid;
+      gap: 0.85rem;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+
+    .workspace-task-skill-field {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-skill-field .form-label {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-skill-prompt-row {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .workspace-task-skill-help {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.45;
+      margin: 0;
     }
 
     .workspace-task-result-research-meta {
@@ -3226,6 +3287,15 @@
         max-width: 100%;
       }
 
+      .workspace-task-skill-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace-task-skill-prompt-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
       .workspace-task-result-research-grid {
         grid-template-columns: 1fr;
       }
@@ -3427,6 +3497,59 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary" id="workspace-task-result-promote-submit">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="workspace-task-skill-modal" tabindex="-1" aria-labelledby="workspace-task-skill-heading" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title" id="workspace-task-skill-heading">Create Skill From Task</h5>
+            <div id="workspace-task-skill-meta" class="workspace-task-skill-meta"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="workspace-task-skill-error" class="workspace-task-skill-alert" hidden></div>
+          <div class="workspace-task-skill-form">
+            <div class="workspace-task-skill-grid">
+              <div class="workspace-task-skill-field">
+                <label for="workspace-task-skill-agent" class="form-label">Agent</label>
+                <input type="text" class="form-control" id="workspace-task-skill-agent" readonly>
+              </div>
+              <div class="workspace-task-skill-field">
+                <label for="workspace-task-skill-name" class="form-label">Skill name</label>
+                <input type="text" class="form-control" id="workspace-task-skill-name" autocomplete="off" maxlength="64" placeholder="check-pollen-count">
+              </div>
+            </div>
+
+            <div class="workspace-task-skill-field">
+              <label for="workspace-task-skill-description" class="form-label">Description</label>
+              <input type="text" class="form-control" id="workspace-task-skill-description" autocomplete="off" maxlength="1024">
+            </div>
+
+            <div class="workspace-task-skill-field">
+              <div class="workspace-task-skill-prompt-row">
+                <label for="workspace-task-skill-prompt" class="form-label">Generated prompt</label>
+                <button type="button" id="workspace-task-skill-generate" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-2">
+                  <i class="bi bi-stars" aria-hidden="true"></i>
+                  <span>Regenerate With AI</span>
+                </button>
+              </div>
+              <textarea class="form-control" id="workspace-task-skill-prompt" rows="14" spellcheck="false"></textarea>
+              <p class="workspace-task-skill-help">Review the prompt before saving. The new skill is enabled for this agent immediately.</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2" id="workspace-task-skill-submit">
+            <i class="bi bi-magic" aria-hidden="true"></i>
+            <span>Create Skill</span>
+          </button>
         </div>
       </div>
     </div>
