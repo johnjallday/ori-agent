@@ -722,6 +722,7 @@ export class WorkspaceTaskPage {
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
+    this.detailsEditInProgress = false;
     this.workflowDraftPending = false;
     this.resultNoteSaving = false;
     this.savedResultNote = null;
@@ -769,6 +770,7 @@ export class WorkspaceTaskPage {
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
       subtitle: document.getElementById('workspace-task-subtitle'),
+      detailsEditBtn: document.getElementById('workspace-task-details-edit'),
       status: document.getElementById('workspace-task-status'),
       heroActions: document.getElementById('workspace-task-hero-actions'),
       heroPriority: document.getElementById('workspace-task-hero-priority'),
@@ -870,6 +872,8 @@ export class WorkspaceTaskPage {
   bindEvents() {
     this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
+    this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
+    this.elements.subtitle?.addEventListener('dblclick', () => this.startHeroDetailsEdit());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
@@ -1124,6 +1128,103 @@ export class WorkspaceTaskPage {
     });
     input.addEventListener('blur', (e) => {
       if (editActions.contains(e.relatedTarget)) return;
+      finishEdit(true);
+    });
+  }
+
+  startHeroDetailsEdit() {
+    if (this.detailsEditInProgress || !this.elements.subtitle) return;
+
+    const subtitle = this.elements.subtitle;
+    const editButton = this.elements.detailsEditBtn;
+    const subtitleRow = subtitle.closest('.workspace-task-page-subtitle-row') || subtitle.parentElement;
+    const currentValue = String(this.task?.details || '').trim();
+
+    this.detailsEditInProgress = true;
+
+    const editorWrap = document.createElement('div');
+    editorWrap.className = 'workspace-task-page-subtitle-input-wrap';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'workspace-task-page-subtitle-input';
+    textarea.rows = 4;
+    textarea.value = currentValue;
+    textarea.placeholder = 'Add source preferences, constraints, context, or anything the agent should know before running this task.';
+    textarea.setAttribute('aria-label', 'Edit additional task details');
+
+    const editActions = document.createElement('div');
+    editActions.className = 'workspace-task-page-title-edit-actions';
+    editActions.innerHTML = `
+      <button type="button" class="workspace-task-page-edit-save" aria-label="Save additional details">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing additional details">Cancel</button>
+      <span class="workspace-task-page-edit-hint">Cmd/Ctrl+Enter to save, Esc to cancel</span>
+    `;
+
+    editorWrap.appendChild(textarea);
+    editorWrap.appendChild(editActions);
+
+    subtitle.style.display = 'none';
+    if (editButton) editButton.style.display = 'none';
+    subtitle.insertAdjacentElement('afterend', editorWrap);
+
+    const syncHeight = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.max(textarea.scrollHeight, 120)}px`;
+    };
+
+    syncHeight();
+    textarea.focus();
+    textarea.select();
+
+    const finishEdit = async (save) => {
+      if (!this.detailsEditInProgress) return;
+      this.detailsEditInProgress = false;
+
+      const nextValue = textarea.value.trim();
+      editorWrap.remove();
+      subtitle.style.display = '';
+      if (editButton) editButton.style.display = '';
+      if (subtitleRow) subtitleRow.classList.remove('is-editing');
+
+      if (!save || nextValue === currentValue) {
+        return;
+      }
+
+      try {
+        await this.updateTaskFields({ details: nextValue });
+        this.notify('success', nextValue ? 'Additional details updated' : 'Additional details cleared');
+      } catch (error) {
+        console.error('Failed to update task details:', error);
+        this.notify('error', error?.message || 'Failed to update additional details');
+      }
+    };
+
+    if (subtitleRow) subtitleRow.classList.add('is-editing');
+
+    editActions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(true);
+    });
+    editActions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(false);
+    });
+
+    textarea.addEventListener('input', syncHeight);
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finishEdit(false);
+        return;
+      }
+
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        finishEdit(true);
+      }
+    });
+    textarea.addEventListener('blur', (event) => {
+      if (editActions.contains(event.relatedTarget)) return;
       finishEdit(true);
     });
   }
@@ -1690,12 +1791,15 @@ export class WorkspaceTaskPage {
   }
 
   startDetailsEdit(triggerBtn) {
+    if (this.detailsEditInProgress) return;
+
     const article = triggerBtn.closest('.workspace-task-overview-item');
     if (!article) return;
 
     const valueEl = article.querySelector('.workspace-task-overview-value');
     if (!valueEl) return;
 
+    this.detailsEditInProgress = true;
     const currentValue = String(this.task?.details || '').trim();
     const textarea = document.createElement('textarea');
     textarea.className = 'form-control workspace-task-overview-edit-textarea';
@@ -1717,6 +1821,9 @@ export class WorkspaceTaskPage {
     textarea.focus();
 
     const finish = async (save) => {
+      if (!this.detailsEditInProgress) return;
+      this.detailsEditInProgress = false;
+
       const nextValue = textarea.value.trim();
       textarea.remove();
       actions.remove();

@@ -74,7 +74,19 @@
                 </button>
               </div>
             </div>
-            <p id="workspace-task-subtitle" class="workspace-task-page-subtitle">Pulling task context, agent assignment, and response state.</p>
+            <div class="workspace-task-page-subtitle-row">
+              <p id="workspace-task-subtitle" class="workspace-task-page-subtitle">Pulling task context, agent assignment, and response state.</p>
+              <button
+                type="button"
+                id="workspace-task-details-edit"
+                class="workspace-task-page-subtitle-edit"
+                aria-label="Edit additional task details"
+                title="Edit additional task details">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                </svg>
+              </button>
+            </div>
           </div>
           <div class="workspace-task-page-hero-meta">
             <span id="workspace-task-status" class="workspace-task-page-status" data-state="pending">Pending</span>
@@ -550,12 +562,75 @@
       border-bottom-color: color-mix(in srgb, var(--primary-color) 88%, transparent);
     }
 
-    .workspace-task-page-subtitle {
+    .workspace-task-page-subtitle-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
       max-width: 68ch;
       margin: 0.9rem 0 0;
+    }
+
+    .workspace-task-page-subtitle {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin: 0;
       color: var(--text-secondary);
       font-size: 1rem;
       line-height: 1.65;
+    }
+
+    .workspace-task-page-subtitle-edit {
+      flex: 0 0 auto;
+      width: 1.9rem;
+      height: 1.9rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 0.08rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+    }
+
+    .workspace-task-page-subtitle-edit:hover {
+      color: var(--primary-color);
+      border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+      transform: translateY(-1px);
+    }
+
+    .workspace-task-page-subtitle-edit:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-page-subtitle-input-wrap {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .workspace-task-page-subtitle-input {
+      width: 100%;
+      min-height: 7.5rem;
+      padding: 0.78rem 0.9rem;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      color: var(--text-primary);
+      font-size: 0.98rem;
+      line-height: 1.6;
+      resize: vertical;
+      box-shadow: 0 10px 24px color-mix(in srgb, var(--primary-color) 8%, transparent);
+    }
+
+    .workspace-task-page-subtitle-input:focus {
+      outline: none;
+      border-color: color-mix(in srgb, var(--primary-color) 72%, var(--border-color));
     }
 
     .workspace-task-page-hero-meta {
