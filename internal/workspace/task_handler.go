@@ -219,6 +219,10 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		}
 	}
 
+	if localAgent, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
+		return &resolvedTaskAgent{Agent: localAgent}, nil
+	}
+
 	ag, ok := h.agentStore.GetAgent(normalizedAgentName)
 	if !ok {
 		if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
@@ -227,6 +231,28 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		return nil, fmt.Errorf("agent %s not found", normalizedAgentName)
 	}
 	return &resolvedTaskAgent{Agent: ag}, nil
+}
+
+func (h *LLMTaskHandler) getWorkspaceLocalAgentSnapshot(workspaceID, agentName string) (*agent.Agent, bool) {
+	if h == nil || h.workspaceStore == nil {
+		return nil, false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	agentName = strings.TrimSpace(agentName)
+	if workspaceID == "" || agentName == "" {
+		return nil, false
+	}
+
+	local, ok, err := h.workspaceStore.GetWorkspaceAgent(workspaceID, agentName)
+	if err != nil {
+		logger.Warn("workspace-local task agent lookup failed", logger.Fields{
+			"workspace_id": workspaceID,
+			"agent":        agentName,
+			"error":        err.Error(),
+		})
+		return nil, false
+	}
+	return local, ok && local != nil
 }
 
 func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string, task Task) *TaskBlockedError {
@@ -240,6 +266,10 @@ func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string,
 	}
 
 	if existing, ok := h.agentStore.GetAgent(normalizedAgentName); ok && existing != nil {
+		return nil
+	}
+
+	if _, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
 		return nil
 	}
 

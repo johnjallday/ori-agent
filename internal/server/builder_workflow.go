@@ -113,10 +113,18 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// global agent registry. The snapshots make a workspace folder
 	// self-contained for export/import.
 	if b.st != nil {
+		if fileStore != nil {
+			workspace.RestoreAllWorkspaceAgents(fileStore, b.st)
+		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)
-		// One-shot migration: snapshot referenced agents for every workspace
-		// already on disk so existing workspaces self-heal on next startup.
+		// One-shot startup repair: restore imported workspace-local agent
+		// snapshots into this environment, then refresh snapshots for globally
+		// available agents referenced by primary or folder-only workspaces.
+		workspace.RestoreAllWorkspaceAgents(ws, b.st)
 		workspace.SnapshotAllWorkspaces(ws, b.st)
+		if fileStore != nil {
+			workspace.SnapshotAllWorkspaces(fileStore, b.st)
+		}
 	}
 
 	b.workspaceStore = ws

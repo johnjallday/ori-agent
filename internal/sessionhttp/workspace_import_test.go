@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -147,6 +148,11 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(exportRoot, agentworkspace.WorkspaceConfigFile), rootData, 0644); err != nil {
 		t.Fatalf("failed to write root workspace.json: %v", err)
 	}
+	rootAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	rootAgent.Settings.Model = "imported-trip-model"
+	if err := agentworkspace.WriteWorkspaceAgentToFolder(exportRoot, "Trip Manager", rootAgent); err != nil {
+		t.Fatalf("failed to write root workspace agent snapshot: %v", err)
+	}
 
 	childWorkspace := &agentworkspace.Workspace{
 		ID:         "ws-imported-madrid",
@@ -174,6 +180,11 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(childDir, agentworkspace.WorkspaceConfigFile), childData, 0644); err != nil {
 		t.Fatalf("failed to write child workspace.json: %v", err)
+	}
+	childAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	childAgent.Settings.Model = "imported-madrid-model"
+	if err := agentworkspace.WriteWorkspaceAgentToFolder(childDir, "Madrid Planner", childAgent); err != nil {
+		t.Fatalf("failed to write child workspace agent snapshot: %v", err)
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{
@@ -216,6 +227,9 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if _, ok := restoredRoot.SharedData["folder_import"]; ok {
 		t.Fatalf("expected restored workspace to avoid folder_import metadata, got %#v", restoredRoot.SharedData["folder_import"])
 	}
+	if got, ok := handler.agentStore.GetAgent("Trip Manager"); !ok || got == nil || got.Settings.Model != "imported-trip-model" {
+		t.Fatalf("expected Trip Manager snapshot restored into agent store, ok=%v agent=%#v", ok, got)
+	}
 
 	restoredChild, err := handler.store.GetWorkspace(context.Background(), childWorkspace.ID)
 	if err != nil {
@@ -232,6 +246,9 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 	if got := currentWorkspaceEntryAgentName(restoredChild); got != "Madrid Planner" {
 		t.Fatalf("expected restored child entry agent Madrid Planner, got %q", got)
+	}
+	if got, ok := handler.agentStore.GetAgent("Madrid Planner"); !ok || got == nil || got.Settings.Model != "imported-madrid-model" {
+		t.Fatalf("expected Madrid Planner snapshot restored into agent store, ok=%v agent=%#v", ok, got)
 	}
 }
 
