@@ -52,11 +52,18 @@ type LLMTaskHandler struct {
 	mcpRegistry      mcpRegistry
 	runtimeResolver  *AgentRuntimeResolver
 	workspaceToolsFn WorkspaceToolFactory
+	utilityTools     UtilityToolProvider
 }
 
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]toolapi.Tool, error)
 	StartServer(string) error
+}
+
+// UtilityToolProvider exposes native utility tools (time, weather, web search,
+// browser, etc.) to task execution without coupling workspace to chathttp.
+type UtilityToolProvider interface {
+	GetTool(string) (toolapi.Tool, bool)
 }
 
 // WorkspaceToolFactory returns workspace-scoped tools (notes, tasks, sessions, files, etc.)
@@ -69,13 +76,18 @@ type resolvedTaskAgent struct {
 	MCPServers []string
 }
 
-const maxTaskToolRounds = 6
+const (
+	maxTaskToolRounds          = 6
+	maxTaskToolResultFollowups = 1
+)
 
 var (
 	browserIntentWordPattern = regexp.MustCompile(`\b(open|visit|navigate|browse|click|fill|type|extract)\b`)
 	browserIntentGoToPattern = regexp.MustCompile(`\bgo\s+to\b`)
 	browserDomainPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+$`)
 )
+
+var taskUtilityToolNames = []string{"time", "weather", "air_quality", "web_search", "web_fetch", "browser"}
 
 var browserLikeFileExtensions = map[string]struct{}{
 	"app": {}, "csv": {}, "doc": {}, "docx": {}, "gif": {}, "go": {}, "gz": {}, "heic": {}, "jpeg": {}, "jpg": {},
@@ -117,6 +129,12 @@ func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 // snapshot embedded in the prompt and cannot fetch full note content on demand.
 func (h *LLMTaskHandler) SetWorkspaceToolFactory(fn WorkspaceToolFactory) {
 	h.workspaceToolsFn = fn
+}
+
+// SetUtilityToolProvider wires native utility tools into task execution. Web
+// tools are still filtered per assigned-agent settings.
+func (h *LLMTaskHandler) SetUtilityToolProvider(provider UtilityToolProvider) {
+	h.utilityTools = provider
 }
 
 // ExecuteTask executes a task by sending it to the agent's LLM
@@ -201,6 +219,10 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		}
 	}
 
+	if localAgent, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
+		return &resolvedTaskAgent{Agent: localAgent}, nil
+	}
+
 	ag, ok := h.agentStore.GetAgent(normalizedAgentName)
 	if !ok {
 		if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
@@ -209,6 +231,28 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		return nil, fmt.Errorf("agent %s not found", normalizedAgentName)
 	}
 	return &resolvedTaskAgent{Agent: ag}, nil
+}
+
+func (h *LLMTaskHandler) getWorkspaceLocalAgentSnapshot(workspaceID, agentName string) (*agent.Agent, bool) {
+	if h == nil || h.workspaceStore == nil {
+		return nil, false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	agentName = strings.TrimSpace(agentName)
+	if workspaceID == "" || agentName == "" {
+		return nil, false
+	}
+
+	local, ok, err := h.workspaceStore.GetWorkspaceAgent(workspaceID, agentName)
+	if err != nil {
+		logger.Warn("workspace-local task agent lookup failed", logger.Fields{
+			"workspace_id": workspaceID,
+			"agent":        agentName,
+			"error":        err.Error(),
+		})
+		return nil, false
+	}
+	return local, ok && local != nil
 }
 
 func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string, task Task) *TaskBlockedError {
@@ -222,6 +266,10 @@ func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string,
 	}
 
 	if existing, ok := h.agentStore.GetAgent(normalizedAgentName); ok && existing != nil {
+		return nil
+	}
+
+	if _, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
 		return nil
 	}
 
@@ -309,6 +357,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 ) (string, error) {
 	conversation := append([]llm.Message(nil), messages...)
 	var lastToolSummary string
+	toolResultFollowups := 0
 
 	for round := 0; round < maxTaskToolRounds; round++ {
 		resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -328,7 +377,12 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Content) == "" {
 				if strings.TrimSpace(lastToolSummary) != "" {
-					return lastToolSummary, nil
+					if toolResultFollowups < maxTaskToolResultFollowups {
+						toolResultFollowups++
+						conversation = append(conversation, llm.NewUserMessage(buildToolResultFollowupPrompt(task)))
+						continue
+					}
+					return "", buildToolOnlyBlockedError(lastToolSummary)
 				}
 				return "Task completed (no output)", nil
 			}
@@ -379,10 +433,61 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	}
 
 	if strings.TrimSpace(lastToolSummary) != "" {
-		return lastToolSummary, nil
+		return "", buildToolOnlyBlockedError(lastToolSummary)
 	}
 
 	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", maxTaskToolRounds)
+}
+
+func buildToolResultFollowupPrompt(task Task) string {
+	var prompt strings.Builder
+	prompt.WriteString("The previous tool result is not a final answer. Continue from the tool result and return a concise answer to the task. ")
+	prompt.WriteString("Do not return raw Tool Results. If a search result is empty, too narrow, wrong-location, or source-specific, broaden the search instead of stopping. ")
+	prompt.WriteString("Do not restrict search to one website unless the user explicitly asked for that source. ")
+	prompt.WriteString("For public-information tasks, verify the source matches the requested city, region, ZIP, and date when available; discard sources that show a different location or no location. ")
+	prompt.WriteString("If you still cannot complete the task after trying reasonable source discovery, explain the specific blocker and what source or permission is missing.")
+	if strings.TrimSpace(task.Description) != "" {
+		prompt.WriteString("\n\nTask: ")
+		prompt.WriteString(strings.TrimSpace(task.Description))
+	}
+	return prompt.String()
+}
+
+func buildToolOnlyBlockedError(rawResponse string) *TaskBlockedError {
+	trimmed := strings.TrimSpace(rawResponse)
+	reasonCode := "tool_only_result"
+	reason := "The agent returned raw tool output instead of a final answer."
+	question := "Retry this task and require the agent to synthesize the tool result into an answer?"
+	if toolSummaryLooksLikeEmptyWebSearch(trimmed) {
+		reasonCode = "empty_web_search_results"
+		reason = "The web search returned no results and the agent did not broaden the search or synthesize an answer."
+		question = "Retry this task with a broader search across public sources?"
+	}
+
+	return &TaskBlockedError{
+		ReasonCode: reasonCode,
+		Reason:     reason,
+		Question:   question,
+		SuggestedActions: []string{
+			"retry",
+			"continue_with_instruction",
+			"switch_agent_retry",
+			"mark_failed",
+		},
+		RawResponse: trimmed,
+	}
+}
+
+func toolSummaryLooksLikeEmptyWebSearch(summary string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(summary))
+	if !strings.Contains(normalized, "web_search") {
+		return false
+	}
+	compacted := strings.NewReplacer(" ", "", "\n", "", "\t", "", "\r", "").Replace(normalized)
+	return strings.Contains(compacted, `"results":[]`) ||
+		strings.Contains(compacted, `"results":null`) ||
+		strings.Contains(normalized, "no search results") ||
+		strings.Contains(normalized, "no results found")
 }
 
 func buildToolResultsSummary(content string, toolResults []toolCallResult) string {
@@ -604,6 +709,16 @@ func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) b
 			continue
 		}
 		if strings.Contains(name, "playwright") || strings.Contains(name, "browserbase") || strings.Contains(name, "puppeteer") || strings.Contains(name, "browser") {
+			return true
+		}
+	}
+
+	for _, tool := range h.getAgentUtilityTools(ag) {
+		if tool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(tool.Definition().Name))
+		if name == "web_search" || name == "web_fetch" || name == "browser" {
 			return true
 		}
 	}
@@ -854,6 +969,9 @@ func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent, task
 	for _, mcpTool := range h.getAgentMCPTools(ag) {
 		appendTool(mcpTool)
 	}
+	for _, utilityTool := range h.getAgentUtilityTools(ag) {
+		appendTool(utilityTool)
+	}
 	for _, wsTool := range h.getWorkspaceTools(task) {
 		appendTool(wsTool)
 	}
@@ -870,6 +988,34 @@ func (h *LLMTaskHandler) getWorkspaceTools(task Task) []toolapi.Tool {
 		return nil
 	}
 	return h.workspaceToolsFn(workspaceID)
+}
+
+func (h *LLMTaskHandler) getAgentUtilityTools(ag *resolvedTaskAgent) []toolapi.Tool {
+	if h == nil || h.utilityTools == nil || ag == nil || ag.Agent == nil {
+		return nil
+	}
+
+	allowWeb := ag.Settings.IsWebSearchAllowed()
+	tools := make([]toolapi.Tool, 0, len(taskUtilityToolNames))
+	for _, name := range taskUtilityToolNames {
+		if isWebUtilityToolNameForTask(name) && !allowWeb {
+			continue
+		}
+		tool, ok := h.utilityTools.GetTool(name)
+		if ok && tool != nil {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
+}
+
+func isWebUtilityToolNameForTask(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "web_search", "web_fetch", "browser":
+		return true
+	default:
+		return false
+	}
 }
 
 // toolCallResult represents the result of a tool call
@@ -964,6 +1110,16 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName str
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
+	}
+
+	for _, utilityTool := range h.getAgentUtilityTools(ag) {
+		if utilityTool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(utilityTool.Definition().Name))
+		if name == target {
+			return utilityTool, true
+		}
 	}
 
 	for _, mcpTool := range h.getAgentMCPTools(ag) {

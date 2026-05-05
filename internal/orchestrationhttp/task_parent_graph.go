@@ -174,7 +174,7 @@ func resetParentSubtaskForExecution(task *workspace.Task) bool {
 
 	changed := false
 	switch task.Status {
-	case workspace.TaskStatusCompleted, workspace.TaskStatusFailed, workspace.TaskStatusCancelled, workspace.TaskStatusTimeout:
+	case workspace.TaskStatusCompleted, workspace.TaskStatusFailed, workspace.TaskStatusCancelled, workspace.TaskStatusTimeout, workspace.TaskStatusWaitingForChoice:
 		task.Status = workspace.TaskStatusPending
 		changed = true
 	}

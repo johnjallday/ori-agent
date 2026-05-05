@@ -1,6 +1,11 @@
 package workspace
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
+)
 
 func TestIsLikelyBrowserAutomationIntent_DoesNotMatchFilesystemStepPromptWithFileExtensions(t *testing.T) {
 	description := `Complete internal execution step 2 of 7 for this task.
@@ -54,5 +59,29 @@ func TestTaskRequiresBrowserAutomation_UsesOverallDescriptionForStructuredBrowse
 
 	if !taskRequiresBrowserAutomation(task) {
 		t.Fatalf("expected structured browser step to require browser automation")
+	}
+}
+
+func TestAgentSupportsBrowserAutomation_DoesNotTreatRawFetchAsBrowserAutomation(t *testing.T) {
+	h := &LLMTaskHandler{}
+	ag := &resolvedTaskAgent{
+		Agent:      &agent.Agent{},
+		MCPServers: []string{"fetch"},
+	}
+
+	if h.agentSupportsBrowserAutomation(ag) {
+		t.Fatalf("expected raw fetch MCP not to be considered browser automation for URL tasks")
+	}
+}
+
+func TestAgentSupportsBrowserAutomation_RecognizesUtilityWebTools(t *testing.T) {
+	h := &LLMTaskHandler{}
+	h.SetUtilityToolProvider(taskUtilityProviderStub{tools: map[string]toolapi.Tool{
+		"web_search": taskHandlerToolStub{name: "web_search"},
+	}})
+	ag := &resolvedTaskAgent{Agent: &agent.Agent{}}
+
+	if !h.agentSupportsBrowserAutomation(ag) {
+		t.Fatalf("expected native web_search utility to satisfy browser/web capability")
 	}
 }

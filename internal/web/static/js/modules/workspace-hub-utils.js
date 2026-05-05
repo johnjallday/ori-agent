@@ -152,6 +152,7 @@
     const statuses = subtasks.map((subtask) => subtask.status || 'pending');
     if (statuses.some((status) => status === 'in_progress')) return 'in_progress';
     if (statuses.some((status) => status === 'failed')) return 'failed';
+    if (statuses.some((status) => status === 'waiting_for_choice')) return 'waiting_for_choice';
     if (statuses.some((status) => status === 'timeout')) return 'timeout';
     if (statuses.some((status) => status === 'cancelled')) return 'cancelled';
     if (statuses.every((status) => status === 'completed')) return 'completed';

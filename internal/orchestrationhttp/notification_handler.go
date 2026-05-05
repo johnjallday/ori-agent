@@ -3,8 +3,9 @@ package orchestrationhttp
 import (
 	"encoding/json"
 	"fmt"
-
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -196,7 +197,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 }
 
 // EventHistoryHandler retrieves event history
-// GET /api/orchestration/events?workspace_id=<id>&limit=<n>&since=<timestamp>
+// GET /api/orchestration/events?workspace_id=<id>&task_id=<id>&limit=<n>&since=<timestamp>
 func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -210,11 +211,37 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
 	sinceStr := r.URL.Query().Get("since")
 	limit := 100 // Default limit
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 {
+			orihttp.BadRequest(w, "invalid limit")
+			return
+		}
+		if parsed > 500 {
+			parsed = 500
+		}
+		limit = parsed
+	}
 
 	var events []workspace.Event
+	eventFilter := func(event workspace.Event) bool {
+		if workspaceID != "" && event.WorkspaceID != workspaceID {
+			return false
+		}
+		if taskID != "" {
+			if event.Data == nil {
+				return false
+			}
+			if strings.TrimSpace(fmt.Sprint(event.Data["task_id"])) != taskID {
+				return false
+			}
+		}
+		return true
+	}
 
 	if sinceStr != "" {
 		// Get events since timestamp
@@ -223,10 +250,11 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 			orihttp.BadRequest(w, "invalid since timestamp (use RFC3339)")
 			return
 		}
-		events = nh.eventBus.GetEventsSince(since, limit)
-	} else if workspaceID != "" {
-		// Get events for workspace
-		events = nh.eventBus.GetWorkspaceHistory(workspaceID, limit)
+		events = nh.eventBus.GetHistory(func(event workspace.Event) bool {
+			return event.Timestamp.After(since) && eventFilter(event)
+		}, limit)
+	} else if workspaceID != "" || taskID != "" {
+		events = nh.eventBus.GetHistory(eventFilter, limit)
 	} else {
 		// Get general event history
 		events = nh.eventBus.GetHistory(nil, limit)

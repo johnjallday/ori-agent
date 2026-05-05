@@ -136,6 +136,66 @@ func TestBuildTaskPrompt_WithoutWorkspaceSnapshotWhenWorkspaceUnavailable(t *tes
 	}
 }
 
+func TestBuildTaskPrompt_FreshPublicInfoOmitsUnrelatedPriorTaskSummaries(t *testing.T) {
+	wsStore := NewInMemoryStore()
+	ws := NewWorkspace(CreateWorkspaceParams{
+		Name:   "pollen",
+		Agents: []string{"Ori"},
+	})
+	ws.ID = "workspace-pollen"
+	ws.Tasks = []Task{
+		{
+			ID:          "old-pollen",
+			Description: "check pollen count in NYC",
+			To:          "Ori",
+			Status:      TaskStatusWaitingForChoice,
+			Context: map[string]interface{}{
+				"human_loop": map[string]interface{}{
+					"reason": "AccuWeather was blocked by robots.txt.",
+				},
+			},
+		},
+		{
+			ID:          "new-pollen",
+			Description: "check today's pollen count in NYC",
+			To:          "Ori",
+			Status:      TaskStatusInProgress,
+		},
+		{
+			ID:          "explicit-input",
+			Description: "source preference note",
+			To:          "Ori",
+			Status:      TaskStatusPending,
+		},
+	}
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &LLMTaskHandler{workspaceStore: wsStore}
+	prompt := handler.buildTaskPrompt(context.Background(), Task{
+		ID:           "new-pollen",
+		WorkspaceID:  ws.ID,
+		From:         "jj",
+		To:           "Ori",
+		Description:  "check today's pollen count in NYC",
+		InputTaskIDs: []string{"explicit-input"},
+	}, nil)
+
+	if strings.Contains(prompt, `Open task: [waiting_for_choice] "check pollen count in NYC"`) {
+		t.Fatalf("expected unrelated old pollen task to be omitted, got %q", prompt)
+	}
+	if !strings.Contains(prompt, `Open task: [in_progress] "check today's pollen count in NYC"`) {
+		t.Fatalf("expected current task to remain in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, `Open task: [pending] "source preference note"`) {
+		t.Fatalf("expected explicit input task to remain in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "unrelated prior task summaries are omitted") {
+		t.Fatalf("expected public-info omission note, got %q", prompt)
+	}
+}
+
 func TestBuildTaskPrompt_IncludesTaskDetails(t *testing.T) {
 	handler := &LLMTaskHandler{}
 
@@ -174,6 +234,12 @@ func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T
 		"Do not answer filesystem listing tasks from the workspace snapshot",
 		"return the list directly instead of asking whether the user wants to see it",
 		"inspect that exact target after locating it instead of stopping at the parent directory",
+		"use web_search first when available",
+		"verify that fetched pages match the requested city, region, or ZIP",
+		"If search results are empty, broaden the query",
+		"Do not return raw Tool Results as the final answer",
+		"Do not answer those tasks from prior blocked attempts or workspace task-status summaries",
+		"Include source names or URLs and visible dates when available",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected system prompt to contain %q, got %q", want, prompt)

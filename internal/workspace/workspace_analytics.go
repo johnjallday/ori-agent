@@ -65,6 +65,12 @@ func (w *Workspace) GetAgentStats() map[string]AgentStats {
 				agentStat.Status = "queued"
 			}
 
+		case TaskStatusWaitingForChoice:
+			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
+			if agentStat.Status == "idle" || agentStat.Status == "queued" {
+				agentStat.Status = "waiting"
+			}
+
 		case TaskStatusCompleted:
 			agentStat.CompletedTasks++
 			agentStat.TotalExecutions++
@@ -136,7 +142,7 @@ func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
 					firstStartTime = *task.StartedAt
 				}
 			}
-		case "pending":
+		case "pending", "assigned", "waiting_for_choice":
 			progress.PendingTasks++
 		case "failed":
 			progress.FailedTasks++
@@ -228,7 +234,7 @@ func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
 			}
 			agentStat.TotalExecutions++
 
-		case "pending":
+		case "pending", "assigned":
 			agentStat.QueuedTasks = append(agentStat.QueuedTasks, task.ID)
 			// Set status to queued if not already active
 			switch agentStat.Status {
@@ -236,6 +242,12 @@ func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
 				agentStat.Status = "queued"
 			case "active":
 				agentStat.Status = "busy" // Active with queued tasks
+			}
+
+		case "waiting_for_choice":
+			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
+			if agentStat.Status == "idle" || agentStat.Status == "queued" {
+				agentStat.Status = "waiting"
 			}
 
 		case "completed":

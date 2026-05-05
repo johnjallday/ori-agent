@@ -9,6 +9,12 @@
 
   const { formatDate, buildTaskHierarchy, getDisplayStatus, getDisplayResult, computeTaskStats } = window.WorkspaceHubUtils;
 
+  function formatTaskStatusLabel(status) {
+    const normalized = String(status || 'pending').trim().toLowerCase();
+    if (normalized === 'waiting_for_choice') return 'waiting for choice';
+    return normalized.replace(/_/g, ' ');
+  }
+
   /**
    * Get subtasks for a parent task ID
    * @param {string} taskId - Parent task ID
@@ -495,7 +501,7 @@
 
     const renderTaskCard = (task, { isParent = false, isSubtask = false, subtasks = [], stepNumber = null, parentId = '' } = {}) => {
       const status = isParent ? getDisplayStatus(task, subtasks) : (task.status || 'pending');
-      const statusLabel = status.replace('_', ' ');
+      const statusLabel = formatTaskStatusLabel(status);
       const scheduleLabel = isParent
         ? 'Workflow container'
         : task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
@@ -510,13 +516,14 @@
       const hasRunningSubtasks = isParent && subtasks.some((s) => s.status === 'in_progress');
       const canExecute = isParent
         ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-        : status !== 'in_progress';
+        : status !== 'in_progress' && status !== 'waiting_for_choice';
       const executeLabel = status === 'completed' || status === 'failed' ? 'Re-run' : (isParent ? 'Run All' : 'Execute');
       const executeTitle = isParent
         ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
           : hasRunningSubtasks ? 'A subtask is already running'
             : executeLabel === 'Re-run' ? 'Re-run workflow' : 'Execute workflow now'
         : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
+          : status === 'waiting_for_choice' ? 'Open the task to choose the next step'
           : status === 'in_progress' ? 'Task is already running'
             : executeLabel === 'Re-run' ? 'Re-execute task' : 'Execute task now';
       const executeAriaLabel = isParent

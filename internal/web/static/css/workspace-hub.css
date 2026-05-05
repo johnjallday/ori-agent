@@ -1429,6 +1429,12 @@
   border-color: rgba(234, 179, 8, 0.4);
 }
 
+.hub-task-status.status-waiting_for_choice {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.42);
+}
+
 .hub-task-meta {
   display: flex;
   justify-content: space-between;

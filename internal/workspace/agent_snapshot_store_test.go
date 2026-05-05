@@ -161,6 +161,55 @@ func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 	}
 }
 
+func TestRestoreAllWorkspaceAgents_RestoresSnapshotsFromLoadedFileStore(t *testing.T) {
+	dir := t.TempDir()
+	fileStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := &Workspace{
+		ID:         "ws-pollen",
+		Name:       "Pollen",
+		FolderSlug: "pollen",
+		Agents:     []string{"Pollen Manager"},
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Pollen Manager",
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "pollen-manager-1", Name: "Pollen Manager", NodeID: "pollen-manager-node-1", EntryPoint: true},
+		},
+	}
+	if err := fileStore.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+	manager := &agent.Agent{Type: agent.TypeToolCalling}
+	manager.Settings.Model = "imported-pollen-model"
+	if err := fileStore.SaveWorkspaceAgent(ws.ID, "Pollen Manager", manager); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+	if err := fileStore.Close(); err != nil {
+		t.Fatalf("close file store: %v", err)
+	}
+
+	loadedStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("reload file store: %v", err)
+	}
+	defer func() { _ = loadedStore.Close() }()
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+
+	RestoreAllWorkspaceAgents(loadedStore, agents)
+
+	got, ok := agents.GetAgent("Pollen Manager")
+	if !ok || got == nil {
+		t.Fatalf("expected Pollen Manager restored into global store, ok=%v", ok)
+	}
+	if got.Settings.Model != "imported-pollen-model" {
+		t.Fatalf("expected restored model imported-pollen-model, got %q", got.Settings.Model)
+	}
+}
+
 func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 	primary := NewInMemoryStore()
 	imported := &agent.Agent{Type: agent.TypeToolCalling}

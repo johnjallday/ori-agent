@@ -2071,12 +2071,14 @@ class TaskModalController {
     const dayField = document.getElementById('taskModalScheduleDayField');
     const intervalField = document.getElementById('taskModalScheduleIntervalField');
     const onceField = document.getElementById('taskModalScheduleOnceField');
+    const cronField = document.getElementById('taskModalScheduleCronField');
 
     // Hide all
     if (timeField) timeField.style.display = 'none';
     if (dayField) dayField.style.display = 'none';
     if (intervalField) intervalField.style.display = 'none';
     if (onceField) onceField.style.display = 'none';
+    if (cronField) cronField.style.display = 'none';
 
     // Show relevant fields
     switch (scheduleType) {
@@ -2092,6 +2094,9 @@ class TaskModalController {
         break;
       case 'once':
         if (onceField) onceField.style.display = 'block';
+        break;
+      case 'cron':
+        if (cronField) cronField.style.display = 'block';
         break;
     }
   }
@@ -2109,6 +2114,7 @@ class TaskModalController {
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
+    const scheduleCron = document.getElementById('taskModalScheduleCron');
 
     if (enabledCheckbox) enabledCheckbox.checked = false;
     if (scheduleFields) scheduleFields.style.display = 'none';
@@ -2119,6 +2125,7 @@ class TaskModalController {
     if (scheduleIntervalValue) scheduleIntervalValue.value = '1';
     if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'hours';
     if (scheduleDatetime) scheduleDatetime.value = '';
+    if (scheduleCron) scheduleCron.value = '0 9 * * *';
 
     this.updateScheduleTypeFields();
   }
@@ -2136,9 +2143,10 @@ class TaskModalController {
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
+    const scheduleCron = document.getElementById('taskModalScheduleCron');
 
-    if (task.schedule_enabled && task.schedule) {
-      if (enabledCheckbox) enabledCheckbox.checked = true;
+    if (task.schedule) {
+      if (enabledCheckbox) enabledCheckbox.checked = Boolean(task.schedule_enabled);
       if (scheduleFields) scheduleFields.style.display = 'block';
       if (scheduleName) scheduleName.value = task.schedule_name || '';
       if (scheduleType) scheduleType.value = task.schedule.type || 'interval';
@@ -2149,8 +2157,9 @@ class TaskModalController {
       if (schedule.time_of_day && scheduleTime) scheduleTime.value = schedule.time_of_day;
       if (schedule.day_of_week != null && scheduleDay) scheduleDay.value = schedule.day_of_week;
 
-      if (schedule.interval_minutes) {
-        const minutes = schedule.interval_minutes;
+      const intervalMinutes = this.getScheduleIntervalMinutes(schedule);
+      if (intervalMinutes) {
+        const minutes = intervalMinutes;
         if (minutes >= 1440 && minutes % 1440 === 0) {
           if (scheduleIntervalValue) scheduleIntervalValue.value = minutes / 1440;
           if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'days';
@@ -2169,6 +2178,9 @@ class TaskModalController {
       if (schedule.execute_at && scheduleDatetime) {
         scheduleDatetime.value = this.formatLocalDatetimeInput(schedule.execute_at);
       }
+      if (schedule.cron_expr && scheduleCron) {
+        scheduleCron.value = schedule.cron_expr;
+      }
 
       this.updateScheduleTypeFields();
     } else {
@@ -2181,7 +2193,17 @@ class TaskModalController {
    */
   getScheduleData() {
     const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
-    if (!enabledCheckbox?.checked) {
+    const scheduleFields = document.getElementById('taskModalScheduleFields');
+    const scheduleFieldsVisible = scheduleFields && scheduleFields.style.display !== 'none';
+    const scheduleEnabled = Boolean(enabledCheckbox?.checked);
+    if (!scheduleEnabled && !scheduleFieldsVisible) {
+      if (this.currentTask?.schedule) {
+        return {
+          schedule: this.currentTask.schedule,
+          schedule_enabled: false,
+          schedule_name: this.currentTask.schedule_name || ''
+        };
+      }
       return { schedule_enabled: false };
     }
 
@@ -2196,7 +2218,7 @@ class TaskModalController {
         break;
       case 'weekly':
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
-        schedule.day_of_week = document.getElementById('taskModalScheduleDay')?.value || 'monday';
+        schedule.day_of_week = Number.parseInt(document.getElementById('taskModalScheduleDay')?.value || '1', 10);
         break;
       case 'interval': {
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
@@ -2217,11 +2239,14 @@ class TaskModalController {
         }
         break;
       }
+      case 'cron':
+        schedule.cron_expr = document.getElementById('taskModalScheduleCron')?.value?.trim() || '0 9 * * *';
+        break;
     }
 
     return {
       schedule,
-      schedule_enabled: true,
+      schedule_enabled: scheduleEnabled,
       schedule_name: scheduleName
     };
   }
@@ -2253,6 +2278,26 @@ class TaskModalController {
         if (defaultPathDisplay) defaultPathDisplay.style.display = 'block';
         break;
     }
+  }
+
+  getScheduleIntervalMinutes(schedule) {
+    if (!schedule) return 0;
+
+    const direct = Number(schedule.interval_minutes);
+    if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
+
+    const interval = schedule.interval;
+    if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) {
+      return interval > 1000000 ? Math.max(1, Math.round(interval / 60000000000)) : Math.round(interval);
+    }
+    if (typeof interval === 'string') {
+      const numeric = Number.parseFloat(interval);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric > 1000000 ? Math.max(1, Math.round(numeric / 60000000000)) : Math.round(numeric);
+      }
+    }
+
+    return 0;
   }
 
   formatLocalDatetimeInput(value) {
@@ -3074,7 +3119,7 @@ class TaskModalController {
     if (total <= 0) return {};
     const isFirst = index === 0;
     if (isFirst) {
-      if (scheduleData?.schedule_enabled) {
+      if (scheduleData?.schedule || scheduleData?.schedule_enabled) {
         return scheduleData;
       }
       return forUpdate ? { schedule: null, schedule_enabled: false, schedule_name: '' } : {};

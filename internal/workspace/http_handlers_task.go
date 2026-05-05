@@ -136,6 +136,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Description            *string           `json:"description,omitempty"`
+		Details                *string           `json:"details,omitempty"`
 		To                     *string           `json:"to,omitempty"`
 		From                   *string           `json:"from,omitempty"`
 		InputTaskIDs           *[]string         `json:"input_task_ids,omitempty"`
@@ -166,6 +167,9 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			// Update only provided fields (allowing explicit empty values)
 			if req.Description != nil {
 				workspace.Tasks[i].Description = *req.Description
+			}
+			if req.Details != nil {
+				workspace.Tasks[i].Details = *req.Details
 			}
 			if req.To != nil {
 				workspace.Tasks[i].To = *req.To
