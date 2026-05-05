@@ -45,8 +45,8 @@ func TestResolveExecutionAgent_UsesWorkspaceSnapshotWhenGlobalMissing(t *testing
 	if resolved == nil || resolved.Agent == nil {
 		t.Fatal("expected resolved agent, got nil")
 	}
-	if resolved.Agent.Settings.Model != "workspace-local-model" {
-		t.Fatalf("expected workspace-local model, got %q", resolved.Agent.Settings.Model)
+	if resolved.Settings.Model != "workspace-local-model" {
+		t.Fatalf("expected workspace-local model, got %q", resolved.Settings.Model)
 	}
 }
 

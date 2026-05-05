@@ -2761,7 +2761,7 @@ export class WorkspaceTaskPage {
     if (!sectionHeadingLevel) return;
 
     const nodes = Array.from(prose.childNodes);
-    let currentSection = null;
+    let _currentSection = null;
     let currentSectionBody = null;
     let sectionIndex = 0;
 
@@ -2785,7 +2785,7 @@ export class WorkspaceTaskPage {
         section.appendChild(body);
         prose.insertBefore(section, node);
 
-        currentSection = section;
+        _currentSection = section;
         currentSectionBody = body;
       }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -570,11 +571,11 @@ To walk you through the directory, I'd need you to either share the directory li
 type stubWorkspaceTaskExecutor struct {
 	result string
 	err    error
-	calls  int
+	calls  atomic.Int32
 }
 
 func (s *stubWorkspaceTaskExecutor) ExecuteTask(_ context.Context, _ string, _ workspace.Task) (string, error) {
-	s.calls++
+	s.calls.Add(1)
 	return s.result, s.err
 }
 
@@ -724,8 +725,8 @@ To walk you through the directory, I'd need you to either share the directory li
 	if blockedErr.ReasonCode != "tool_access_unavailable" {
 		t.Fatalf("expected tool_access_unavailable, got %q", blockedErr.ReasonCode)
 	}
-	if stub.calls != 1 {
-		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	if stub.calls.Load() != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls.Load())
 	}
 
 	retryData, ok := task.Context["execution_retry"].(map[string]interface{})
@@ -937,8 +938,8 @@ func TestExecuteTaskIteratively_BlocksWhenStructuredOutputRemainsInvalid(t *test
 	if blockedErr.ReasonCode != "structured_output_invalid" {
 		t.Fatalf("expected structured_output_invalid, got %q", blockedErr.ReasonCode)
 	}
-	if stub.calls != 1 {
-		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	if stub.calls.Load() != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls.Load())
 	}
 }
 

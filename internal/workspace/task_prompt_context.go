@@ -246,10 +246,6 @@ func buildTaskPromptTaskCountsSummary(stats map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-func collectTaskPromptTasks(tasks []Task, limit int) []Task {
-	return collectTaskPromptTasksForPrompt(tasks, Task{}, limit)
-}
-
 func collectTaskPromptTasksForPrompt(tasks []Task, current Task, limit int) []Task {
 	if limit <= 0 || len(tasks) == 0 {
 		return nil

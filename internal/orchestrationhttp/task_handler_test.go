@@ -791,7 +791,7 @@ func TestHandleAssistTask_ContinuePersistsChoiceAndResumesSameTask(t *testing.T)
 			if _, hasHumanLoop := savedTask.Context["human_loop"]; hasHumanLoop {
 				t.Fatal("expected human_loop to be cleared after resumed execution starts")
 			}
-			if stub.calls == 0 {
+			if stub.calls.Load() == 0 {
 				t.Fatal("expected task handler to be called during resume")
 			}
 			return
