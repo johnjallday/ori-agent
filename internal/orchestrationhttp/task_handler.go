@@ -143,6 +143,34 @@ func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
 	return config
 }
 
+func normalizeTaskSleepPolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "skip", "run_once_on_wake":
+		return strings.ToLower(strings.TrimSpace(policy))
+	default:
+		return "run_once_on_wake"
+	}
+}
+
+func normalizeWakeFallbackPolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "run_on_next_wake", "skip":
+		return strings.ToLower(strings.TrimSpace(policy))
+	default:
+		return "run_on_next_wake"
+	}
+}
+
+func normalizeWakeLeadMinutes(minutes int) int {
+	if minutes <= 0 {
+		return 5
+	}
+	if minutes > 120 {
+		return 120
+	}
+	return minutes
+}
+
 // TaskHandler manages task and scheduled task operations
 type TaskHandler struct {
 	workspaceStore workspace.Store
@@ -308,6 +336,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Schedule               json.RawMessage                `json:"schedule"`
 		ScheduleEnabled        bool                           `json:"schedule_enabled"`
 		ScheduleName           string                         `json:"schedule_name"`
+		SleepPolicy            string                         `json:"sleep_policy"`
+		WakeMacEnabled         bool                           `json:"wake_mac_enabled"`
+		WakeLeadMinutes        int                            `json:"wake_lead_minutes"`
+		WakeFallbackPolicy     string                         `json:"wake_fallback_policy"`
 		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	}
 
@@ -360,6 +392,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Schedule:               schedule,
 		ScheduleEnabled:        req.ScheduleEnabled,
 		ScheduleName:           req.ScheduleName,
+		SleepPolicy:            normalizeTaskSleepPolicy(req.SleepPolicy),
+		WakeMacEnabled:         req.WakeMacEnabled,
+		WakeLeadMinutes:        normalizeWakeLeadMinutes(req.WakeLeadMinutes),
+		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
 	}
 
@@ -372,6 +408,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		// Calculate NextRun - pass zero time since task has never run
 		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Time{})
 		task.NextRun = nextRun
+	} else if task.WakeMacEnabled {
+		task.WakeMacEnabled = false
 	}
 
 	// Auto-add agent to workspace if not already present
@@ -472,6 +510,10 @@ type taskUpdateRequest struct {
 	Schedule               json.RawMessage                `json:"schedule"`
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
 	ScheduleName           *string                        `json:"schedule_name"`
+	SleepPolicy            *string                        `json:"sleep_policy"`
+	WakeMacEnabled         *bool                          `json:"wake_mac_enabled"`
+	WakeLeadMinutes        *int                           `json:"wake_lead_minutes"`
+	WakeFallbackPolicy     *string                        `json:"wake_fallback_policy"`
 	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	KanbanColumnID         *string                        `json:"kanban_column_id"`
 	KanbanLabels           []string                       `json:"kanban_labels"`
@@ -489,7 +531,8 @@ func (r *taskUpdateRequest) hasFieldUpdates() bool {
 
 // hasScheduleUpdates returns true if the request contains schedule-related updates
 func (r *taskUpdateRequest) hasScheduleUpdates(schedule *workspace.ScheduleConfig, clearSchedule bool) bool {
-	return schedule != nil || clearSchedule || r.ScheduleEnabled != nil || r.ScheduleName != nil
+	return schedule != nil || clearSchedule || r.ScheduleEnabled != nil || r.ScheduleName != nil ||
+		r.SleepPolicy != nil || r.WakeMacEnabled != nil || r.WakeLeadMinutes != nil || r.WakeFallbackPolicy != nil
 }
 
 // applyBasicFieldUpdates applies description, details, input connections, parent, and subtask updates
@@ -606,6 +649,10 @@ func (th *TaskHandler) applyScheduleUpdates(task *workspace.Task, req *taskUpdat
 		task.Schedule = nil
 		task.ScheduleEnabled = false
 		task.ScheduleName = ""
+		task.SleepPolicy = ""
+		task.WakeMacEnabled = false
+		task.WakeLeadMinutes = 0
+		task.WakeFallback = ""
 		task.NextRun = nil
 		logger.Debug("Cleared task schedule", logger.Fields{"task_id": req.TaskID})
 	}
@@ -632,6 +679,22 @@ func (th *TaskHandler) applyScheduleUpdates(task *workspace.Task, req *taskUpdat
 
 	if req.ScheduleName != nil {
 		task.ScheduleName = *req.ScheduleName
+	}
+	if req.SleepPolicy != nil {
+		task.SleepPolicy = normalizeTaskSleepPolicy(*req.SleepPolicy)
+	}
+	if req.WakeMacEnabled != nil {
+		task.WakeMacEnabled = *req.WakeMacEnabled
+	}
+	if req.WakeLeadMinutes != nil {
+		task.WakeLeadMinutes = normalizeWakeLeadMinutes(*req.WakeLeadMinutes)
+	}
+	if req.WakeFallbackPolicy != nil {
+		task.WakeFallback = normalizeWakeFallbackPolicy(*req.WakeFallbackPolicy)
+	}
+
+	if task.WakeMacEnabled && (task.Schedule == nil || !task.ScheduleEnabled) {
+		task.WakeMacEnabled = false
 	}
 
 	return ""
@@ -687,6 +750,18 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.ScheduleName != nil {
 		eventData["schedule_name"] = *req.ScheduleName
+	}
+	if req.SleepPolicy != nil {
+		eventData["sleep_policy"] = normalizeTaskSleepPolicy(*req.SleepPolicy)
+	}
+	if req.WakeMacEnabled != nil {
+		eventData["wake_mac_enabled"] = *req.WakeMacEnabled
+	}
+	if req.WakeLeadMinutes != nil {
+		eventData["wake_lead_minutes"] = normalizeWakeLeadMinutes(*req.WakeLeadMinutes)
+	}
+	if req.WakeFallbackPolicy != nil {
+		eventData["wake_fallback_policy"] = normalizeWakeFallbackPolicy(*req.WakeFallbackPolicy)
 	}
 	if req.KanbanLabels != nil {
 		eventData["kanban_labels"] = req.KanbanLabels

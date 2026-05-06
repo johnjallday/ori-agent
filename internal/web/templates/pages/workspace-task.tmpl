@@ -3192,6 +3192,27 @@
       max-width: 7rem;
     }
 
+    .workspace-task-schedule-subsection {
+      display: grid;
+      gap: 0.85rem;
+      padding: 0.95rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+    }
+
+    .workspace-task-schedule-subsection-title {
+      color: var(--text-primary);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .workspace-task-schedule-permission-note {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
     .workspace-task-schedule-preview {
       padding: 0.85rem 0.95rem;
       border-radius: 16px;
@@ -3537,6 +3558,43 @@
                 <label for="workspace-task-schedule-cron" class="form-label">Cron expression</label>
                 <input type="text" id="workspace-task-schedule-cron" class="form-control" autocomplete="off" placeholder="0 9 * * *">
               </div>
+            </div>
+
+            <div class="workspace-task-schedule-subsection">
+              <div class="workspace-task-schedule-subsection-title">Sleep Handling</div>
+              <div class="workspace-task-schedule-field">
+                <label for="workspace-task-schedule-sleep-policy" class="form-label">When Ori was asleep</label>
+                <select id="workspace-task-schedule-sleep-policy" class="form-select">
+                  <option value="run_once_on_wake">Run once when Ori wakes</option>
+                  <option value="skip">Skip missed runs</option>
+                </select>
+              </div>
+
+              <div class="workspace-task-schedule-enable-row">
+                <div class="workspace-task-schedule-enable-copy">
+                  <div class="workspace-task-schedule-enable-title">Wake this Mac before the task runs</div>
+                  <div class="workspace-task-schedule-enable-subtitle">Ori programs the next macOS wake event for the earliest wake-enabled task.</div>
+                </div>
+                <input type="checkbox" id="workspace-task-schedule-wake-mac" class="form-check-input workspace-task-schedule-switch" role="switch" aria-label="Wake this Mac before scheduled runs">
+              </div>
+
+              <div id="workspace-task-schedule-wake-fields" class="workspace-task-schedule-field-grid">
+                <div class="workspace-task-schedule-field">
+                  <label for="workspace-task-schedule-wake-lead" class="form-label">Wake before run</label>
+                  <div class="workspace-task-schedule-inline">
+                    <input type="number" id="workspace-task-schedule-wake-lead" class="form-control" min="1" max="120" value="5" inputmode="numeric">
+                    <span class="workspace-task-schedule-permission-note">minutes</span>
+                  </div>
+                </div>
+                <div class="workspace-task-schedule-field">
+                  <label for="workspace-task-schedule-wake-fallback" class="form-label">If wake fails</label>
+                  <select id="workspace-task-schedule-wake-fallback" class="form-select">
+                    <option value="run_on_next_wake">Run once when Ori wakes later</option>
+                    <option value="skip">Skip the missed run</option>
+                  </select>
+                </div>
+              </div>
+              <div id="workspace-task-schedule-wake-permission" class="workspace-task-schedule-permission-note"></div>
             </div>
 
             <div id="workspace-task-schedule-preview" class="workspace-task-schedule-preview"></div>

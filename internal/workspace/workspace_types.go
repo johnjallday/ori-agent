@@ -200,6 +200,10 @@ type Task struct {
 	Schedule         *ScheduleConfig `json:"schedule,omitempty"`
 	ScheduleEnabled  bool            `json:"schedule_enabled,omitempty"`
 	ScheduleName     string          `json:"schedule_name,omitempty"`
+	SleepPolicy      string          `json:"sleep_policy,omitempty"`
+	WakeMacEnabled   bool            `json:"wake_mac_enabled,omitempty"`
+	WakeLeadMinutes  int             `json:"wake_lead_minutes,omitempty"`
+	WakeFallback     string          `json:"wake_fallback_policy,omitempty"`
 	NextRun          *time.Time      `json:"next_run,omitempty"`
 	LastRun          *time.Time      `json:"last_run,omitempty"`
 	ExecutionCount   int             `json:"execution_count,omitempty"`

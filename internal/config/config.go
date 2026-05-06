@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -33,6 +34,18 @@ type UtilitySettings struct {
 	BrowserAllowedDomains   []string `json:"browser_allowed_domains,omitempty"`
 	BlockPrivateHosts       bool     `json:"block_private_hosts"`
 	UserAgent               string   `json:"user_agent,omitempty"`
+}
+
+// MacWakeSettings controls macOS wake scheduling for workspace task schedules.
+type MacWakeSettings struct {
+	Enabled              bool       `json:"enabled"`
+	AdminApprovalGranted bool       `json:"admin_approval_granted,omitempty"`
+	DefaultLeadMinutes   int        `json:"default_lead_minutes,omitempty"`
+	FallbackPolicy       string     `json:"fallback_policy,omitempty"`
+	LastScheduledWakeAt  *time.Time `json:"last_scheduled_wake_at,omitempty"`
+	LastScheduledTaskID  string     `json:"last_scheduled_task_id,omitempty"`
+	LastScheduledOwner   string     `json:"last_scheduled_owner,omitempty"`
+	LastError            string     `json:"last_error,omitempty"`
 }
 
 // Settings holds application-wide configuration
@@ -77,6 +90,9 @@ type Settings struct {
 
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
+
+	// macOS wake scheduling settings
+	MacWake MacWakeSettings `json:"mac_wake,omitempty"`
 }
 
 // Manager handles configuration loading and saving
@@ -145,6 +161,14 @@ func defaultSettings() Settings {
 		SpeechProvider:        "auto",
 		SpeechLanguage:        "auto",
 		Utility:               defaultUtilitySettings(),
+		MacWake:               defaultMacWakeSettings(),
+	}
+}
+
+func defaultMacWakeSettings() MacWakeSettings {
+	return MacWakeSettings{
+		DefaultLeadMinutes: 5,
+		FallbackPolicy:     "run_on_next_wake",
 	}
 }
 
@@ -689,6 +713,7 @@ func (m *Manager) validate() error {
 	}
 
 	validateUtilitySettings(&m.settings.Utility)
+	validateMacWakeSettings(&m.settings.MacWake)
 
 	if m.settings.SystemReasoningEffort != "" {
 		effort := strings.ToLower(strings.TrimSpace(m.settings.SystemReasoningEffort))
@@ -802,6 +827,32 @@ func validateUtilitySettings(settings *UtilitySettings) {
 		cleanDomains = append(cleanDomains, domain)
 	}
 	settings.BrowserAllowedDomains = cleanDomains
+}
+
+func validateMacWakeSettings(settings *MacWakeSettings) {
+	if settings == nil {
+		return
+	}
+
+	defaults := defaultMacWakeSettings()
+	if settings.DefaultLeadMinutes <= 0 {
+		settings.DefaultLeadMinutes = defaults.DefaultLeadMinutes
+	}
+	if settings.DefaultLeadMinutes > 120 {
+		settings.DefaultLeadMinutes = 120
+	}
+
+	fallbackPolicy := strings.ToLower(strings.TrimSpace(settings.FallbackPolicy))
+	switch fallbackPolicy {
+	case "run_on_next_wake", "skip":
+		settings.FallbackPolicy = fallbackPolicy
+	default:
+		settings.FallbackPolicy = defaults.FallbackPolicy
+	}
+
+	settings.LastScheduledTaskID = strings.TrimSpace(settings.LastScheduledTaskID)
+	settings.LastScheduledOwner = strings.TrimSpace(settings.LastScheduledOwner)
+	settings.LastError = strings.TrimSpace(settings.LastError)
 }
 
 // validateAPIKey validates API key format if provided

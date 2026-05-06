@@ -44,6 +44,7 @@ function getStatusClass(status) {
   if (normalized === 'in_progress') return 'in_progress';
   if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
   if (normalized === 'cancelled') return 'cancelled';
+  if (normalized === 'skipped') return 'cancelled';
   if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout') return 'failed';
   return 'pending';
 }
@@ -59,6 +60,7 @@ function getDisplayStatus(status) {
     failed: 'Failed',
     blocked: 'Blocked',
     cancelled: 'Cancelled',
+    skipped: 'Skipped',
     timeout: 'Timed Out'
   };
   return labels[normalized] || 'Pending';
@@ -933,6 +935,12 @@ export class WorkspaceTaskPage {
       scheduleOnceInput: document.getElementById('workspace-task-schedule-once'),
       scheduleCronField: document.getElementById('workspace-task-schedule-cron-field'),
       scheduleCronInput: document.getElementById('workspace-task-schedule-cron'),
+      scheduleSleepPolicyInput: document.getElementById('workspace-task-schedule-sleep-policy'),
+      scheduleWakeMacInput: document.getElementById('workspace-task-schedule-wake-mac'),
+      scheduleWakeFields: document.getElementById('workspace-task-schedule-wake-fields'),
+      scheduleWakeLeadInput: document.getElementById('workspace-task-schedule-wake-lead'),
+      scheduleWakeFallbackInput: document.getElementById('workspace-task-schedule-wake-fallback'),
+      scheduleWakePermission: document.getElementById('workspace-task-schedule-wake-permission'),
       schedulePreview: document.getElementById('workspace-task-schedule-preview'),
       scheduleSubmitBtn: document.getElementById('workspace-task-schedule-submit'),
       scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
@@ -1009,6 +1017,7 @@ export class WorkspaceTaskPage {
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
     this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
+    this.elements.scheduleWakeMacInput?.addEventListener('change', () => this.updateScheduleModalFields());
     [
       this.elements.scheduleEnabledInput,
       this.elements.scheduleNameInput,
@@ -1017,7 +1026,11 @@ export class WorkspaceTaskPage {
       this.elements.scheduleIntervalValueInput,
       this.elements.scheduleIntervalUnitInput,
       this.elements.scheduleOnceInput,
-      this.elements.scheduleCronInput
+      this.elements.scheduleCronInput,
+      this.elements.scheduleSleepPolicyInput,
+      this.elements.scheduleWakeMacInput,
+      this.elements.scheduleWakeLeadInput,
+      this.elements.scheduleWakeFallbackInput
     ].forEach((element) => {
       element?.addEventListener('input', () => this.updateSchedulePreview());
       element?.addEventListener('change', () => this.updateSchedulePreview());
@@ -4176,6 +4189,18 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleCronInput) {
       this.elements.scheduleCronInput.value = schedule?.cron_expr || '0 9 * * *';
     }
+    if (this.elements.scheduleSleepPolicyInput) {
+      this.elements.scheduleSleepPolicyInput.value = this.task?.sleep_policy || 'run_once_on_wake';
+    }
+    if (this.elements.scheduleWakeMacInput) {
+      this.elements.scheduleWakeMacInput.checked = Boolean(this.task?.wake_mac_enabled);
+    }
+    if (this.elements.scheduleWakeLeadInput) {
+      this.elements.scheduleWakeLeadInput.value = String(this.task?.wake_lead_minutes || 5);
+    }
+    if (this.elements.scheduleWakeFallbackInput) {
+      this.elements.scheduleWakeFallbackInput.value = this.task?.wake_fallback_policy || 'run_on_next_wake';
+    }
     if (this.elements.scheduleRemoveBtn) {
       this.elements.scheduleRemoveBtn.hidden = !hasSchedule;
     }
@@ -4195,6 +4220,14 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleTimeLabel) {
       this.elements.scheduleTimeLabel.textContent = type === 'weekdays' ? 'Weekday time' : 'Time of day';
     }
+    if (this.elements.scheduleWakeFields) {
+      this.elements.scheduleWakeFields.hidden = !this.elements.scheduleWakeMacInput?.checked;
+    }
+    if (this.elements.scheduleWakePermission) {
+      this.elements.scheduleWakePermission.textContent = this.elements.scheduleWakeMacInput?.checked
+        ? 'Mac wake scheduling also needs to be enabled in Settings -> Device Capabilities.'
+        : 'This task will only run while Ori is awake, or according to the selected sleep handling policy after Ori wakes.';
+    }
 
     this.updateSchedulePreview();
   }
@@ -4205,8 +4238,12 @@ export class WorkspaceTaskPage {
     try {
       const payload = this.buildScheduleUpdatePayload({ validate: false });
       const summary = this.describeSchedule(payload.schedule);
+      const sleepText = this.describeSleepPolicy(payload.sleep_policy);
+      const wakeText = payload.wake_mac_enabled
+        ? ` Ori will ask macOS to wake this Mac ${payload.wake_lead_minutes} minutes before the run.`
+        : '';
       this.elements.schedulePreview.textContent = payload.schedule_enabled
-        ? `This existing task will run ${summary}.`
+        ? `This existing task will run ${summary}. ${sleepText}.${wakeText}`.trim()
         : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
     } catch (_error) {
       this.elements.schedulePreview.textContent = 'Complete the schedule fields to preview the run cadence.';
@@ -4218,6 +4255,11 @@ export class WorkspaceTaskPage {
     const enabled = Boolean(this.elements.scheduleEnabledInput?.checked);
     const scheduleName = String(this.elements.scheduleNameInput?.value || '').trim();
     const schedule = { type };
+    const wakeMacEnabled = Boolean(this.elements.scheduleWakeMacInput?.checked);
+    const sleepPolicy = String(this.elements.scheduleSleepPolicyInput?.value || 'run_once_on_wake').trim();
+    const wakeFallbackPolicy = String(this.elements.scheduleWakeFallbackInput?.value || 'run_on_next_wake').trim();
+    const rawWakeLead = Number.parseInt(this.elements.scheduleWakeLeadInput?.value || '5', 10);
+    const wakeLeadMinutes = Number.isFinite(rawWakeLead) && rawWakeLead > 0 ? Math.min(rawWakeLead, 120) : 5;
 
     const assignee = String(this.task?.to || '').trim();
     if (enabled && validate && (!assignee || assignee === 'unassigned')) {
@@ -4281,7 +4323,11 @@ export class WorkspaceTaskPage {
     return {
       schedule,
       schedule_enabled: enabled,
-      schedule_name: scheduleName
+      schedule_name: scheduleName,
+      sleep_policy: sleepPolicy || 'run_once_on_wake',
+      wake_mac_enabled: enabled && wakeMacEnabled,
+      wake_lead_minutes: wakeLeadMinutes,
+      wake_fallback_policy: wakeFallbackPolicy || 'run_on_next_wake'
     };
   }
 
@@ -4474,6 +4520,17 @@ export class WorkspaceTaskPage {
     }
   }
 
+  describeSleepPolicy(policy) {
+    const normalized = String(policy || '').trim().toLowerCase();
+    switch (normalized) {
+      case 'skip':
+        return 'If Ori was asleep, missed runs will be skipped';
+      case 'run_once_on_wake':
+      default:
+        return 'If Ori was asleep, one missed run will be queued when Ori wakes';
+    }
+  }
+
   formatIntervalMinutes(minutes) {
     const normalized = Math.max(1, Number.parseInt(minutes, 10) || 1);
     if (normalized >= 1440 && normalized % 1440 === 0) {
@@ -4513,6 +4570,9 @@ export class WorkspaceTaskPage {
     if (this.task?.last_run) {
       stats.push({ label: 'Last Run', value: formatDateTime(this.task.last_run) });
     }
+    if (this.task?.wake_mac_enabled) {
+      stats.push({ label: 'Mac Wake', value: `${this.task?.wake_lead_minutes || 5} min before` });
+    }
 
     const statsHtml = `
       <div class="workspace-task-schedule-stats">
@@ -4535,6 +4595,7 @@ export class WorkspaceTaskPage {
           <div class="workspace-task-schedule-banner-copy">
             ${this.escapeHtml(this.describeSchedule(this.task.schedule))}
             ${scheduleEnabled && this.task?.next_run ? ` · Next run ${this.escapeHtml(formatDateTime(this.task.next_run))}` : ''}
+            ${this.task?.wake_mac_enabled ? ` · ${this.escapeHtml('Mac wake on')}` : ''}
           </div>
         </div>
       </div>

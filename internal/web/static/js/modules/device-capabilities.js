@@ -9,6 +9,7 @@ const deviceCapabilities = {
    */
   async init() {
     await this.loadCapabilities();
+    await this.loadMacWakeStatus();
     this.bindEvents();
   },
 
@@ -19,6 +20,14 @@ const deviceCapabilities = {
     const redetectBtn = document.getElementById('redetectHardwareBtn');
     if (redetectBtn) {
       redetectBtn.addEventListener('click', () => this.redetectHardware());
+    }
+    const grantMacWakeBtn = document.getElementById('macWakeGrantPermissionBtn');
+    if (grantMacWakeBtn) {
+      grantMacWakeBtn.addEventListener('click', () => this.grantMacWakePermission());
+    }
+    const saveMacWakeBtn = document.getElementById('macWakeSaveBtn');
+    if (saveMacWakeBtn) {
+      saveMacWakeBtn.addEventListener('click', () => this.saveMacWakeSettings());
     }
   },
 
@@ -156,6 +165,165 @@ const deviceCapabilities = {
     const ollamaLinkEl = document.getElementById('deviceOllamaLink');
     if (ollamaLinkEl && data.ollama_library_url) {
       ollamaLinkEl.href = data.ollama_library_url;
+    }
+  },
+
+  async loadMacWakeStatus() {
+    const panel = document.getElementById('macWakePermissionPanel');
+    if (!panel) return;
+
+    try {
+      const response = await fetch('/api/settings/mac-wake');
+      if (!response.ok) {
+        throw new Error('Failed to fetch Mac wake status');
+      }
+      const data = await response.json();
+      this.renderMacWakeStatus(data.mac_wake || {});
+    } catch (error) {
+      console.error('Error loading Mac wake status:', error);
+      this.renderMacWakeError('Unable to load Mac wake scheduling status.');
+    }
+  },
+
+  renderMacWakeStatus(status) {
+    const badge = document.getElementById('macWakePermissionBadge');
+    const detail = document.getElementById('macWakePermissionDetail');
+    const grantBtn = document.getElementById('macWakeGrantPermissionBtn');
+    const enabledInput = document.getElementById('macWakeEnabled');
+    const leadInput = document.getElementById('macWakeDefaultLeadMinutes');
+    const fallbackInput = document.getElementById('macWakeFallbackPolicy');
+    const nextWake = document.getElementById('macWakeNextWake');
+    const systemEvents = document.getElementById('macWakeSystemEvents');
+
+    const supported = status.supported !== false;
+    const state = status.permission_state || 'needs_admin_approval';
+    const badgeColors = {
+      ready: '#198754',
+      needs_admin_approval: '#b7791f',
+      unsupported: '#6c757d'
+    };
+
+    if (badge) {
+      badge.textContent = status.permission_label || (supported ? 'Needs Admin Approval' : 'Unsupported');
+      badge.style.background = badgeColors[state] || 'var(--bg-tertiary)';
+      badge.style.color = '#fff';
+    }
+    if (detail) {
+      const baseDetail = status.permission_detail || 'macOS wake scheduling status is unavailable.';
+      detail.textContent = status.last_error ? `${baseDetail} Last error: ${status.last_error}` : baseDetail;
+    }
+    if (grantBtn) {
+      grantBtn.disabled = !supported || state === 'ready';
+      grantBtn.textContent = state === 'ready' ? 'Permission Ready' : 'Grant Permission';
+    }
+    if (enabledInput) {
+      enabledInput.checked = Boolean(status.enabled);
+      enabledInput.disabled = !supported;
+    }
+    if (leadInput) {
+      leadInput.value = String(status.default_lead_minutes || 5);
+      leadInput.disabled = !supported;
+    }
+    if (fallbackInput) {
+      fallbackInput.value = status.fallback_policy || 'run_on_next_wake';
+      fallbackInput.disabled = !supported;
+    }
+    if (nextWake) {
+      const wakeText = status.next_wake_at
+        ? `Next Ori-programmed Mac wake: ${new Date(status.next_wake_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`
+        : 'No Ori-programmed Mac wake is currently scheduled.';
+      nextWake.textContent = wakeText;
+    }
+    if (systemEvents) {
+      const events = Array.isArray(status.system_scheduled_events) ? status.system_scheduled_events : [];
+      systemEvents.textContent = events.length > 0
+        ? `macOS currently reports ${events.length} scheduled power event${events.length === 1 ? '' : 's'}.`
+        : 'macOS reports no scheduled power events.';
+    }
+  },
+
+  renderMacWakeError(message) {
+    const detail = document.getElementById('macWakePermissionDetail');
+    const badge = document.getElementById('macWakePermissionBadge');
+    if (badge) {
+      badge.textContent = 'Unavailable';
+      badge.style.background = '#6c757d';
+      badge.style.color = '#fff';
+    }
+    if (detail) {
+      detail.textContent = message;
+    }
+  },
+
+  async grantMacWakePermission() {
+    const btn = document.getElementById('macWakeGrantPermissionBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Waiting for macOS...';
+    }
+
+    try {
+      const response = await fetch('/api/settings/mac-wake/permission', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Permission was not granted');
+      }
+      this.renderMacWakeStatus(data.mac_wake || {});
+      this.notify('Mac wake permission is ready', 'success');
+    } catch (error) {
+      console.error('Error granting Mac wake permission:', error);
+      this.notify(error.message || 'Mac wake permission was not granted', 'error');
+    } finally {
+      await this.loadMacWakeStatus();
+    }
+  },
+
+  async saveMacWakeSettings() {
+    const btn = document.getElementById('macWakeSaveBtn');
+    const enabledInput = document.getElementById('macWakeEnabled');
+    const leadInput = document.getElementById('macWakeDefaultLeadMinutes');
+    const fallbackInput = document.getElementById('macWakeFallbackPolicy');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+    }
+
+    try {
+      const payload = {
+        enabled: Boolean(enabledInput?.checked),
+        default_lead_minutes: Number.parseInt(leadInput?.value || '5', 10) || 5,
+        fallback_policy: fallbackInput?.value || 'run_on_next_wake'
+      };
+      const response = await fetch('/api/settings/mac-wake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to save Mac wake settings');
+      }
+      this.renderMacWakeStatus(data.mac_wake || {});
+      this.notify('Mac wake settings saved', 'success');
+    } catch (error) {
+      console.error('Error saving Mac wake settings:', error);
+      this.notify(error.message || 'Failed to save Mac wake settings', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Save Wake Settings';
+      }
+    }
+  },
+
+  notify(message, type) {
+    if (typeof SettingsController !== 'undefined' && SettingsController.notify) {
+      SettingsController.notify(message, type);
+      return;
+    }
+    if (typeof showToast === 'function') {
+      showToast(message, type);
     }
   },
 

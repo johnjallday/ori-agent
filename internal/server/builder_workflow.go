@@ -192,7 +192,8 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	})
 
 	b.taskScheduler = workspace.NewTaskScheduler(b.workspaceStore, workspace.SchedulerConfig{
-		PollInterval: 1 * time.Minute,
+		PollInterval:  1 * time.Minute,
+		WakeScheduler: b.macWakeService,
 	})
 	b.taskScheduler.SetEventBus(b.eventBus)
 }

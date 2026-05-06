@@ -15,6 +15,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -23,6 +24,12 @@ import (
 
 var settingsLog = logger.New("settings")
 
+type macWakeService interface {
+	Status() macwake.Status
+	UpdateSettings(enabled *bool, leadMinutes *int, fallbackPolicy *string) (macwake.Status, error)
+	RequestAdminApproval() (macwake.Status, error)
+}
+
 type Handler struct {
 	store                   store.Store
 	configManager           *config.Manager
@@ -30,6 +37,7 @@ type Handler struct {
 	llmFactory              *llm.Factory
 	utilitySettingsReloader func()
 	vaultRootUpdater        func(string) error
+	macWakeService          macWakeService
 }
 
 func NewHandler(store store.Store, configManager *config.Manager, clientFactory *client.Factory, llmFactory *llm.Factory) *Handler {
@@ -49,6 +57,11 @@ func (h *Handler) SetUtilitySettingsReloader(fn func()) {
 // SetVaultRootUpdater sets a callback invoked after vault root settings are saved.
 func (h *Handler) SetVaultRootUpdater(fn func(string) error) {
 	h.vaultRootUpdater = fn
+}
+
+// SetMacWakeService wires the macOS wake scheduling service used by settings.
+func (h *Handler) SetMacWakeService(service macWakeService) {
+	h.macWakeService = service
 }
 
 func resolveAssistantDefaultAgentName(st store.Store) string {
@@ -646,6 +659,65 @@ func (h *Handler) UtilitySettingsHandler(w http.ResponseWriter, r *http.Request)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// MacWakeSettingsHandler handles global macOS wake scheduling settings.
+func (h *Handler) MacWakeSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if h.macWakeService == nil {
+		orihttp.InternalError(w, "Mac wake service is not available")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		orihttp.WriteJSON(w, map[string]any{
+			"mac_wake": h.macWakeService.Status(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Enabled            *bool   `json:"enabled,omitempty"`
+			DefaultLeadMinutes *int    `json:"default_lead_minutes,omitempty"`
+			FallbackPolicy     *string `json:"fallback_policy,omitempty"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		status, err := h.macWakeService.UpdateSettings(req.Enabled, req.DefaultLeadMinutes, req.FallbackPolicy)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Mac wake settings", err)
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{
+			"success":  true,
+			"mac_wake": status,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// MacWakePermissionHandler asks macOS for admin approval to program wake events.
+func (h *Handler) MacWakePermissionHandler(w http.ResponseWriter, r *http.Request) {
+	if h.macWakeService == nil {
+		orihttp.InternalError(w, "Mac wake service is not available")
+		return
+	}
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	status, err := h.macWakeService.RequestAdminApproval()
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Mac wake permission was not granted", err)
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{
+		"success":  true,
+		"mac_wake": status,
+	})
 }
 
 func toUtilitySettingsResponse(settings config.UtilitySettings) utilitySettingsResponse {

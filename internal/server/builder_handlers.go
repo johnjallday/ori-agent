@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
@@ -49,7 +50,9 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
+	b.macWakeService = macwake.NewService(b.configManager)
 	b.settingsHandler = settingshttp.NewHandler(b.st, b.configManager, b.clientFactory, b.llmFactory)
+	b.settingsHandler.SetMacWakeService(b.macWakeService)
 	b.speechHandler = speechhttp.NewHandler(b.configManager)
 
 	b.chatHandler = chathttp.NewHandler(b.st, b.clientFactory)
