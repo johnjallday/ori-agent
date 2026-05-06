@@ -14,14 +14,30 @@ type TaskScheduler struct {
 	workspaceStore Store
 	eventBus       *EventBus
 	pollInterval   time.Duration
+	wakeScheduler  WakeScheduler
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 }
 
+// WakeCandidate describes the next task run that may need a macOS wake event.
+type WakeCandidate struct {
+	WorkspaceID string
+	TaskID      string
+	TaskName    string
+	RunAt       time.Time
+	LeadMinutes int
+}
+
+// WakeScheduler programs system wake events for wake-enabled task schedules.
+type WakeScheduler interface {
+	SyncNextWake(candidates []WakeCandidate) error
+}
+
 // SchedulerConfig contains configuration for the task scheduler
 type SchedulerConfig struct {
-	PollInterval time.Duration // How often to check for scheduled tasks
+	PollInterval  time.Duration // How often to check for scheduled tasks
+	WakeScheduler WakeScheduler
 }
 
 // NewTaskScheduler creates a new task scheduler
@@ -33,6 +49,7 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 	return &TaskScheduler{
 		workspaceStore: store,
 		pollInterval:   config.PollInterval,
+		wakeScheduler:  config.WakeScheduler,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -99,6 +116,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 	}
 
 	now := time.Now()
+	wakeCandidates := make([]WakeCandidate, 0)
 
 	for _, wsID := range workspaceIDs {
 		ws, err := ts.workspaceStore.Get(wsID)
@@ -123,6 +141,11 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 			// Check if it's time to run (NextRun must be set and in the past/present)
 			if task.NextRun == nil || task.NextRun.After(now) {
+				continue
+			}
+
+			if ts.shouldSkipMissedTaskRun(task, now) {
+				ts.skipMissedTaskSchedule(ws, task, now)
 				continue
 			}
 
@@ -162,6 +185,93 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 		// Also check legacy ScheduledTasks for backward compatibility during migration
 		ts.checkLegacyScheduledTasks(ws, now)
+		wakeCandidates = append(wakeCandidates, collectWakeCandidates(ws, now)...)
+	}
+
+	if ts.wakeScheduler != nil {
+		if err := ts.wakeScheduler.SyncNextWake(wakeCandidates); err != nil {
+			logger.Warn("Failed to sync macOS wake schedule", logger.Fields{"error": err})
+		}
+	}
+}
+
+func collectWakeCandidates(ws *Workspace, now time.Time) []WakeCandidate {
+	if ws == nil || ws.Status != StatusActive {
+		return nil
+	}
+
+	candidates := make([]WakeCandidate, 0)
+	for i := range ws.Tasks {
+		task := &ws.Tasks[i]
+		if task.Schedule == nil || !task.ScheduleEnabled || !task.WakeMacEnabled || task.NextRun == nil {
+			continue
+		}
+		if !task.NextRun.After(now) {
+			continue
+		}
+		leadMinutes := task.WakeLeadMinutes
+		if leadMinutes <= 0 {
+			leadMinutes = 5
+		}
+		candidates = append(candidates, WakeCandidate{
+			WorkspaceID: ws.ID,
+			TaskID:      task.ID,
+			TaskName:    task.ScheduleName,
+			RunAt:       *task.NextRun,
+			LeadMinutes: leadMinutes,
+		})
+	}
+	return candidates
+}
+
+func (ts *TaskScheduler) shouldSkipMissedTaskRun(task *Task, now time.Time) bool {
+	if task == nil || task.NextRun == nil || task.SleepPolicy != "skip" {
+		return false
+	}
+	grace := ts.pollInterval + 30*time.Second
+	if grace < 90*time.Second {
+		grace = 90 * time.Second
+	}
+	return now.Sub(*task.NextRun) > grace
+}
+
+func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now time.Time) {
+	if ws == nil || task == nil || task.Schedule == nil {
+		return
+	}
+
+	missedAt := *task.NextRun
+	nextRun := CalculateNextRun(*task.Schedule, now)
+	task.NextRun = nextRun
+	if nextRun == nil {
+		task.ScheduleEnabled = false
+	}
+
+	execution := TaskExecution{
+		TaskID:     task.ID,
+		ExecutedAt: missedAt,
+		Status:     "skipped",
+		Summary:    "Skipped because Ori was asleep.",
+	}
+	task.ExecutionHistory = append(task.ExecutionHistory, execution)
+	if len(task.ExecutionHistory) > 20 {
+		task.ExecutionHistory = task.ExecutionHistory[len(task.ExecutionHistory)-20:]
+	}
+
+	if err := ws.UpdateTask(*task); err != nil {
+		logger.Error("Failed to update skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
+		return
+	}
+	if err := ts.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
+		return
+	}
+	if ts.eventBus != nil {
+		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler.skip", map[string]interface{}{
+			"task_id":   task.ID,
+			"missed_at": missedAt,
+			"next_run":  nextRun,
+		}))
 	}
 }
 
