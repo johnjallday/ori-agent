@@ -37,6 +37,8 @@ class TaskModalController {
     this.currentResultSourceTaskId = '';
     this.currentResultNextSteps = [];
     this.currentResultFollowUpPending = false;
+    this.currentMissingMCPRequirement = null;
+    this.mcpRequirementPending = false;
   }
 
   /**
@@ -53,6 +55,9 @@ class TaskModalController {
 
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
+    document.getElementById('taskModalMCPRequirementAdd')?.addEventListener('click', () => {
+      void this.addRequiredMCPConnector();
+    });
 
     // Schedule fields toggle
     document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
@@ -957,7 +962,12 @@ class TaskModalController {
       body: document.getElementById('taskModalResultBody'),
       nextSteps: document.getElementById('taskModalResultNextSteps'),
       nextStepsCopy: document.getElementById('taskModalResultNextStepsCopy'),
-      nextStepsActions: document.getElementById('taskModalResultNextStepsActions')
+      nextStepsActions: document.getElementById('taskModalResultNextStepsActions'),
+      mcpRequirement: document.getElementById('taskModalMCPRequirement'),
+      mcpRequirementServer: document.getElementById('taskModalMCPRequirementServer'),
+      mcpRequirementBody: document.getElementById('taskModalMCPRequirementBody'),
+      mcpRequirementStatus: document.getElementById('taskModalMCPRequirementStatus'),
+      mcpRequirementAdd: document.getElementById('taskModalMCPRequirementAdd')
     };
   }
 
@@ -967,12 +977,247 @@ class TaskModalController {
     this.currentResultSourceTaskId = '';
     this.currentResultNextSteps = [];
     this.currentResultFollowUpPending = false;
+    this.currentMissingMCPRequirement = null;
+    this.mcpRequirementPending = false;
     if (elements.section) elements.section.style.display = 'none';
     if (elements.meta) elements.meta.textContent = '';
     if (elements.body) elements.body.textContent = '';
     if (elements.nextSteps) elements.nextSteps.style.display = 'none';
     if (elements.nextStepsCopy) elements.nextStepsCopy.textContent = '';
     if (elements.nextStepsActions) elements.nextStepsActions.innerHTML = '';
+    if (elements.mcpRequirement) elements.mcpRequirement.style.display = 'none';
+    if (elements.mcpRequirementServer) elements.mcpRequirementServer.textContent = '';
+    if (elements.mcpRequirementBody) elements.mcpRequirementBody.textContent = '';
+    if (elements.mcpRequirementStatus) {
+      elements.mcpRequirementStatus.textContent = '';
+      elements.mcpRequirementStatus.style.display = 'none';
+    }
+    if (elements.mcpRequirementAdd) {
+      elements.mcpRequirementAdd.disabled = false;
+      elements.mcpRequirementAdd.textContent = 'Add Connector';
+    }
+  }
+
+  getTaskDiagnosticText(task, resultText = '') {
+    const parts = [resultText, task?.error, task?.last_error];
+
+    const addValue = (value) => {
+      const text = String(value || '').trim();
+      if (text) parts.push(text);
+    };
+
+    if (Array.isArray(task?.execution_trace)) {
+      task.execution_trace.forEach((entry) => {
+        addValue(entry?.summary);
+        addValue(entry?.title);
+      });
+    }
+
+    if (Array.isArray(task?.execution_history)) {
+      task.execution_history.forEach((entry) => {
+        addValue(entry?.error);
+        addValue(entry?.summary);
+      });
+    }
+
+    const humanLoop = task?.context?.human_loop;
+    if (humanLoop && typeof humanLoop === 'object') {
+      addValue(humanLoop.agent_response);
+      addValue(humanLoop.reason);
+    }
+
+    const retry = task?.context?.execution_retry;
+    if (retry && typeof retry === 'object' && Array.isArray(retry.history)) {
+      retry.history.forEach((entry) => addValue(entry?.summary));
+    }
+
+    return parts.filter(Boolean).join('\n');
+  }
+
+  detectMissingMCPRequirement(task, resultText = '') {
+    const diagnostic = this.getTaskDiagnosticText(task, resultText);
+    if (!diagnostic || !/load\s+MCP\s+template/i.test(diagnostic)) {
+      return null;
+    }
+
+    const directMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+)\s+for\s+binding\s+([^:\s]+):\s+server\s+([^\s:]+)\s+not\s+found/i);
+    const fallbackMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+).*?server\s+([^\s:]+)\s+not\s+found/i);
+    const serverName = String(directMatch?.[1] || fallbackMatch?.[1] || fallbackMatch?.[2] || '').trim();
+    if (!serverName || !/^[a-zA-Z0-9._-]+$/.test(serverName)) {
+      return null;
+    }
+
+    return {
+      serverName,
+      bindingId: String(directMatch?.[2] || '').trim()
+    };
+  }
+
+  renderMCPRequirement(task, resultText = '') {
+    const elements = this.getResultSectionElements();
+    if (!elements.mcpRequirement) return;
+
+    const requirement = this.detectMissingMCPRequirement(task, resultText);
+    this.currentMissingMCPRequirement = requirement;
+
+    if (!requirement) {
+      elements.mcpRequirement.style.display = 'none';
+      return;
+    }
+
+    const serverName = requirement.serverName;
+    elements.mcpRequirement.style.display = 'grid';
+    if (elements.mcpRequirementServer) {
+      elements.mcpRequirementServer.textContent = serverName;
+    }
+    if (elements.mcpRequirementBody) {
+      elements.mcpRequirementBody.textContent = requirement.bindingId
+        ? `Workspace binding ${requirement.bindingId} points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`
+        : `The workspace points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`;
+    }
+    if (elements.mcpRequirementStatus) {
+      elements.mcpRequirementStatus.textContent = '';
+      elements.mcpRequirementStatus.style.display = 'none';
+    }
+    if (elements.mcpRequirementAdd) {
+      elements.mcpRequirementAdd.disabled = false;
+      elements.mcpRequirementAdd.textContent = `Add ${serverName}`;
+    }
+  }
+
+  setMCPRequirementStatus(message) {
+    const status = document.getElementById('taskModalMCPRequirementStatus');
+    if (!status) return;
+    const text = String(message || '').trim();
+    status.textContent = text;
+    status.style.display = text ? 'block' : 'none';
+  }
+
+  async getConfiguredMCPServers() {
+    const response = await fetch('/api/mcp/servers');
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to load MCP servers');
+    }
+    const data = await response.json();
+    return Array.isArray(data?.servers) ? data.servers : [];
+  }
+
+  fallbackRegistryEntryForMCPServer(serverName) {
+    const normalized = String(serverName || '').trim().toLowerCase();
+    if (normalized !== 'fetch') {
+      return null;
+    }
+    return {
+      name: 'fetch',
+      command: 'uvx',
+      args: ['mcp-server-fetch'],
+      env: {},
+      transport: 'stdio'
+    };
+  }
+
+  async findRegistryMCPServer(serverName) {
+    const normalized = String(serverName || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    try {
+      const response = await fetch(`/api/mcp/search?q=${encodeURIComponent(normalized)}`);
+      if (response.ok) {
+        const entries = await response.json();
+        if (Array.isArray(entries)) {
+          const exact = entries.find((entry) => String(entry?.name || '').trim().toLowerCase() === normalized);
+          if (exact) return exact;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to search MCP registry:', error);
+    }
+
+    return this.fallbackRegistryEntryForMCPServer(normalized);
+  }
+
+  buildMCPServerConfigFromRegistry(entry, serverName) {
+    const name = String(entry?.name || serverName || '').trim();
+    const command = String(entry?.command || '').trim();
+    if (!name || !command) {
+      return null;
+    }
+
+    const env = entry?.env && typeof entry.env === 'object' && !Array.isArray(entry.env)
+      ? { ...entry.env }
+      : {};
+
+    return {
+      name,
+      command,
+      args: Array.isArray(entry?.args) ? entry.args : [],
+      env,
+      transport: String(entry?.transport || 'stdio').trim() || 'stdio',
+      enabled: false
+    };
+  }
+
+  async addRequiredMCPConnector() {
+    const requirement = this.currentMissingMCPRequirement;
+    if (!requirement?.serverName || this.mcpRequirementPending) return;
+
+    const serverName = requirement.serverName;
+    const button = document.getElementById('taskModalMCPRequirementAdd');
+    const originalText = button?.textContent || `Add ${serverName}`;
+    this.mcpRequirementPending = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = `Adding ${serverName}...`;
+    }
+
+    try {
+      this.setMCPRequirementStatus('Checking My Servers...');
+      const configuredServers = await this.getConfiguredMCPServers();
+      const alreadyConfigured = configuredServers.some((server) =>
+        String(server?.name || '').trim().toLowerCase() === serverName.toLowerCase()
+      );
+      if (alreadyConfigured) {
+        this.setMCPRequirementStatus(`${serverName} is already in My Servers. Retry the task when ready.`);
+        if (button) button.textContent = 'Connector available';
+        this.showToast(`${serverName} is already available`, 'info');
+        return;
+      }
+
+      this.setMCPRequirementStatus(`Searching the MCP registry for ${serverName}...`);
+      const entry = await this.findRegistryMCPServer(serverName);
+      const serverConfig = this.buildMCPServerConfigFromRegistry(entry, serverName);
+      if (!serverConfig) {
+        throw new Error(`${serverName} was not found in the MCP registry. Add it from MCP settings.`);
+      }
+
+      this.setMCPRequirementStatus(`Adding ${serverName} to My Servers...`);
+      const response = await fetch('/api/mcp/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serverConfig)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        if (!/already exists/i.test(text || '')) {
+          throw new Error(text || `Failed to add ${serverName}`);
+        }
+      }
+
+      this.setMCPRequirementStatus(`${serverName} has been added to My Servers. Retry the task to use it.`);
+      if (button) button.textContent = 'Connector added';
+      this.showToast(`${serverName} connector added`, 'success');
+    } catch (error) {
+      console.error('Failed to add required MCP connector:', error);
+      this.setMCPRequirementStatus(error.message || `Failed to add ${serverName}.`);
+      this.showToast(error.message || `Failed to add ${serverName}`, 'error');
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    } finally {
+      this.mcpRequirementPending = false;
+    }
   }
 
   getTaskStatusLabel(status) {
@@ -1093,7 +1338,7 @@ class TaskModalController {
 
     const resultData = this.resolveTaskResultData(task);
     const status = String(task.status || '').trim().toLowerCase();
-    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'timeout')) {
+    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'blocked' && status !== 'timeout')) {
       this.resetResultSection();
       return;
     }
@@ -1111,6 +1356,7 @@ class TaskModalController {
       elements.body.textContent = this.currentResultText;
     }
 
+    this.renderMCPRequirement(task, this.currentResultText);
     this.renderResultNextStepActions(task);
   }
 

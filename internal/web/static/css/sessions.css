@@ -3409,6 +3409,83 @@ body.task-modal-open {
   border-color: var(--text-secondary);
 }
 
+.task-modal-remediation {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.task-modal-remediation-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.task-modal-remediation-copy {
+  min-width: 0;
+}
+
+.task-modal-remediation-kicker {
+  margin-bottom: 2px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d97706;
+}
+
+.task-modal-remediation-title {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.task-modal-remediation-title code {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.task-modal-remediation-body {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.task-modal-remediation-status {
+  display: none;
+  margin-top: 7px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.task-modal-remediation-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-modal-remediation-actions .task-modal-btn {
+  width: 100%;
+  min-height: 36px;
+}
+
 .task-modal-btn-directory {
   display: flex;
   flex-direction: column;
@@ -3666,6 +3743,11 @@ body.task-modal-open {
 
 [data-bs-theme="dark"] .task-modal-content {
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+[data-bs-theme="dark"] .task-modal-remediation {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.28);
 }
 
 /* Note AI Generation Panel */
