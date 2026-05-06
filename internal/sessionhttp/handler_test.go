@@ -700,14 +700,14 @@ func TestHandler_MultiTab_ConcurrentUpdates(t *testing.T) {
 	// Simulate concurrent message additions from different "tabs"
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
-		go func(idx int) {
+		go func() {
 			msgBody := `{"role": "user", "content": "Concurrent message"}`
 			msgReq := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/messages", bytes.NewBufferString(msgBody))
 			msgReq.Header.Set("Content-Type", "application/json")
 			msgW := httptest.NewRecorder()
 			handler.HandleSessions(msgW, msgReq)
 			done <- msgW.Code == http.StatusCreated
-		}(i)
+		}()
 	}
 
 	// Wait for all goroutines

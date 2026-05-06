@@ -79,11 +79,11 @@ func (inv *CLIInvoker) Invoke(ctx context.Context, invocation CLIInvocation) (*R
 
 	switch invocation.Format {
 	case FormatClaudeStreamJSON:
-		return parseClaudeStreamJSON(stdout.Bytes(), stderr.String())
+		return parseClaudeStreamJSON(stdout.Bytes(), stderr.String()), nil
 	case FormatCodexJSONL:
-		return parseCodexJSONL(stdout.Bytes(), stderr.String(), invocation.OutputFile)
+		return parseCodexJSONL(stdout.Bytes(), stderr.String(), invocation.OutputFile), nil
 	case FormatGeminiStreamJSON:
-		return parseGeminiStreamJSON(stdout.Bytes(), stderr.String())
+		return parseGeminiStreamJSON(stdout.Bytes(), stderr.String()), nil
 	default:
 		// Plain text fallback
 		return &RawCLIOutput{
@@ -95,7 +95,7 @@ func (inv *CLIInvoker) Invoke(ctx context.Context, invocation CLIInvocation) (*R
 
 // parseClaudeStreamJSON parses Claude's stream-json output.
 // Each line is a JSON object with a "type" field.
-func parseClaudeStreamJSON(data []byte, stderrStr string) (*RawCLIOutput, error) {
+func parseClaudeStreamJSON(data []byte, stderrStr string) *RawCLIOutput {
 	raw := &RawCLIOutput{Stderr: stderrStr}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -148,7 +148,7 @@ func parseClaudeStreamJSON(data []byte, stderrStr string) (*RawCLIOutput, error)
 	}
 
 	raw.Output = lastText
-	return raw, nil
+	return raw
 }
 
 // parseClaudeUsageFromResult extracts usage from a Claude result event.
@@ -174,7 +174,7 @@ func parseClaudeUsageFromResult(obj map[string]any) StepUsage {
 }
 
 // parseCodexJSONL parses Codex's JSONL output.
-func parseCodexJSONL(data []byte, stderrStr string, outputFile string) (*RawCLIOutput, error) {
+func parseCodexJSONL(data []byte, stderrStr string, outputFile string) *RawCLIOutput {
 	raw := &RawCLIOutput{Stderr: stderrStr}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -233,12 +233,12 @@ func parseCodexJSONL(data []byte, stderrStr string, outputFile string) (*RawCLIO
 	}
 
 	raw.Output = lastText
-	return raw, nil
+	return raw
 }
 
 // parseGeminiStreamJSON parses Gemini CLI's stream-json output.
 // Each line is a JSON object with a "type" field (init, message, tool_use, tool_result, result).
-func parseGeminiStreamJSON(data []byte, stderrStr string) (*RawCLIOutput, error) {
+func parseGeminiStreamJSON(data []byte, stderrStr string) *RawCLIOutput {
 	raw := &RawCLIOutput{Stderr: stderrStr}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -282,7 +282,7 @@ func parseGeminiStreamJSON(data []byte, stderrStr string) (*RawCLIOutput, error)
 	}
 
 	raw.Output = lastText
-	return raw, nil
+	return raw
 }
 
 // parseGeminiUsageFromResult extracts usage from a Gemini result event.

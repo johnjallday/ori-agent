@@ -216,12 +216,13 @@ func joinStatusCodes(statuses []int) string {
 func buildUISmokeSummary(passed, failed int) string {
 	total := passed + failed
 	if failed == 0 {
-		return pluralizeCount(passed, "check") + " passed"
+		return pluralizeCount(passed) + " passed"
 	}
-	return pluralizeCount(passed, "check") + " passed, " + pluralizeCount(failed, "check") + " failed out of " + pluralizeCount(total, "check")
+	return pluralizeCount(passed) + " passed, " + pluralizeCount(failed) + " failed out of " + pluralizeCount(total)
 }
 
-func pluralizeCount(count int, singular string) string {
+func pluralizeCount(count int) string {
+	const singular = "check"
 	if count == 1 {
 		return "1 " + singular
 	}

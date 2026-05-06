@@ -132,7 +132,7 @@ func TestExecuteDirectTool(t *testing.T) {
 			}
 
 			// Execute
-			result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
+			result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), cmd)
 
 			// Verify success/failure
 			if result.Success != tt.wantSuccess {
@@ -346,7 +346,7 @@ func TestExecuteDirectToolWithFiles(t *testing.T) {
 			{Name: "test.wav", Type: "audio/wav", Size: 5, Content: []byte("audio")},
 		},
 	}
-	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
+	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), cmd)
 	if result.Success {
 		t.Error("expected tool not found, got success")
 	}

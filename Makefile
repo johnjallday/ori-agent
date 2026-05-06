@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
 
 # Default target
 .DEFAULT_GOAL := help
@@ -216,8 +216,18 @@ lint: ## Run linter (requires golangci-lint)
 		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
 		exit 1; \
 	fi
-	golangci-lint run ./... --max-same-issues 0 --max-issues-per-linter 0
+	golangci-lint run ./...
 	@echo "$(GREEN)✓ Lint passed$(NC)"
+
+lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint --fix)
+	@echo "$(BLUE)Auto-fixing Go lint issues...$(NC)"
+	@if ! command -v golangci-lint > /dev/null; then \
+		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
+		exit 1; \
+	fi
+	gofmt -r 'interface{} -> any' -w .
+	golangci-lint run --fix ./... || true
+	@echo "$(GREEN)✓ Auto-fix pass complete (review remaining unparam/modernize findings manually)$(NC)"
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"

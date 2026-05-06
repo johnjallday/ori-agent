@@ -126,7 +126,7 @@ func (h *Handler) handleLocalProviderToolCalls(
 				messages = append(messages, assistantMsg)
 			},
 			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
-				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, toolCalls, files, sessionID)
 			},
 			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
 				for i, tc := range toolCalls {

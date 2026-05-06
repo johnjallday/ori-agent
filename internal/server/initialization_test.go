@@ -163,10 +163,7 @@ func TestRegisterLLMProviders_NoAPIKeys(t *testing.T) {
 
 func TestResolveAgentStorePath(t *testing.T) {
 	// Test default path
-	path, err := resolveAgentStorePath()
-	if err != nil {
-		t.Fatalf("resolveAgentStorePath failed: %v", err)
-	}
+	path := resolveAgentStorePath()
 	if path == "" {
 		t.Error("Expected non-empty path")
 	}
@@ -175,10 +172,7 @@ func TestResolveAgentStorePath(t *testing.T) {
 	_ = os.Setenv("AGENT_STORE_PATH", "/custom/path/agents.json")
 	defer func() { _ = os.Unsetenv("AGENT_STORE_PATH") }()
 
-	path, err = resolveAgentStorePath()
-	if err != nil {
-		t.Fatalf("resolveAgentStorePath failed with env var: %v", err)
-	}
+	path = resolveAgentStorePath()
 	if path != "/custom/path/agents.json" {
 		t.Errorf("Expected '/custom/path/agents.json', got '%s'", path)
 	}
@@ -276,10 +270,7 @@ func TestResolveWorkflowTemplatesDir(t *testing.T) {
 
 func TestLoadLocationZones_NonExistentFile(t *testing.T) {
 	// Test with non-existent file (should return empty zones, not error)
-	zones, err := loadLocationZones("/nonexistent/path/zones.json")
-	if err != nil {
-		t.Errorf("loadLocationZones should not error on missing file: %v", err)
-	}
+	zones := loadLocationZones("/nonexistent/path/zones.json")
 	if len(zones) != 0 {
 		t.Errorf("Expected 0 zones for missing file, got %d", len(zones))
 	}

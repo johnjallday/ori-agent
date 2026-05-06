@@ -64,7 +64,7 @@ func writeWorkspaceAgent(workspaceFolder, agentName string, ag *agent.Agent) err
 		return fmt.Errorf("encode workspace agent %q: %w", agentName, err)
 	}
 	path := filepath.Join(dir, WorkspaceAgentConfigFile)
-	if err := atomicWriteFile(path, data, 0644); err != nil {
+	if err := atomicWriteFile(path, data); err != nil {
 		return fmt.Errorf("write workspace agent %q: %w", agentName, err)
 	}
 	return nil

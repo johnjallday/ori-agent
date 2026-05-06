@@ -8,10 +8,7 @@ func TestParseClaudeStreamJSON(t *testing.T) {
 	input := `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}
 {"type":"result","result":"Hello world","usage":{"input_tokens":100,"output_tokens":20},"total_cost_usd":0.005}`
 
-	raw, err := parseClaudeStreamJSON([]byte(input), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseClaudeStreamJSON([]byte(input), "")
 
 	if raw.Output != "Hello world" {
 		t.Errorf("expected output %q, got %q", "Hello world", raw.Output)
@@ -35,10 +32,7 @@ func TestParseClaudeStreamJSON_MalformedLines(t *testing.T) {
 {"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.001}
 also not json`
 
-	raw, err := parseClaudeStreamJSON([]byte(input), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseClaudeStreamJSON([]byte(input), "")
 	if raw.Output != "ok" {
 		t.Errorf("expected output %q, got %q", "ok", raw.Output)
 	}
@@ -48,10 +42,7 @@ also not json`
 }
 
 func TestParseClaudeStreamJSON_Empty(t *testing.T) {
-	raw, err := parseClaudeStreamJSON([]byte(""), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseClaudeStreamJSON([]byte(""), "")
 	if raw.Output != "" {
 		t.Errorf("expected empty output, got %q", raw.Output)
 	}
@@ -66,10 +57,7 @@ func TestParseCodexJSONL(t *testing.T) {
 {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Hello from Codex"}}
 {"type":"turn.completed","usage":{"input_tokens":15000,"cached_input_tokens":3000,"output_tokens":69}}`
 
-	raw, err := parseCodexJSONL([]byte(input), "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseCodexJSONL([]byte(input), "", "")
 
 	if raw.Output != "Hello from Codex" {
 		t.Errorf("expected output %q, got %q", "Hello from Codex", raw.Output)
@@ -86,10 +74,7 @@ func TestParseCodexJSONL(t *testing.T) {
 }
 
 func TestParseCodexJSONL_Empty(t *testing.T) {
-	raw, err := parseCodexJSONL([]byte(""), "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseCodexJSONL([]byte(""), "", "")
 	if raw.Output != "" {
 		t.Errorf("expected empty output, got %q", raw.Output)
 	}
@@ -101,10 +86,7 @@ func TestParseGeminiStreamJSON(t *testing.T) {
 {"type":"message","timestamp":"2026-04-14T02:05:56.059Z","role":"assistant","content":"Hello!","delta":true}
 {"type":"result","timestamp":"2026-04-14T02:05:56.069Z","status":"success","stats":{"total_tokens":9668,"input_tokens":9634,"output_tokens":34,"cached":0,"duration_ms":8745,"tool_calls":0}}`
 
-	raw, err := parseGeminiStreamJSON([]byte(input), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseGeminiStreamJSON([]byte(input), "")
 
 	if raw.Output != "Hello!" {
 		t.Errorf("expected output %q, got %q", "Hello!", raw.Output)
@@ -129,10 +111,7 @@ func TestParseGeminiStreamJSON_WithToolUse(t *testing.T) {
 {"type":"message","role":"assistant","content":"Done.","delta":true}
 {"type":"result","status":"success","stats":{"input_tokens":500,"output_tokens":25,"total_tokens":525,"tool_calls":1}}`
 
-	raw, err := parseGeminiStreamJSON([]byte(input), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseGeminiStreamJSON([]byte(input), "")
 
 	if raw.Output != "Done." {
 		t.Errorf("expected output %q, got %q", "Done.", raw.Output)
@@ -146,10 +125,7 @@ func TestParseGeminiStreamJSON_WithToolUse(t *testing.T) {
 }
 
 func TestParseGeminiStreamJSON_Empty(t *testing.T) {
-	raw, err := parseGeminiStreamJSON([]byte(""), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	raw := parseGeminiStreamJSON([]byte(""), "")
 	if raw.Output != "" {
 		t.Errorf("expected empty output, got %q", raw.Output)
 	}

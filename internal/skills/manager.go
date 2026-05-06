@@ -52,7 +52,7 @@ func (m *Manager) GetSkill(agentName, skillName string) (*Skill, bool, error) {
 	for _, skill := range skills {
 		if strings.EqualFold(skill.Name, skillName) {
 			if skill.Prompt == "" && skill.Path != "" {
-				full, err := m.loadSkillWithPrompt(skill, agentName)
+				full, err := m.loadSkillWithPrompt(skill)
 				if err != nil {
 					return nil, false, err
 				}
@@ -420,7 +420,7 @@ func (m *Manager) loadSkillEntry(skillPath, defaultName, source, skillDir string
 	return skill, nil
 }
 
-func (m *Manager) loadSkillWithPrompt(skill Skill, agentName string) (*Skill, error) {
+func (m *Manager) loadSkillWithPrompt(skill Skill) (*Skill, error) {
 	if skill.Path == "" {
 		return &skill, nil
 	}
@@ -500,10 +500,7 @@ func parseSkillFile(path string, defaultName string, includePrompt bool) (Skill,
 		return Skill{}, err
 	}
 
-	frontmatter, body, err := parseFrontmatter(string(content))
-	if err != nil {
-		return Skill{}, err
-	}
+	frontmatter, body := parseFrontmatter(string(content))
 
 	fm, fmErr := parseSkillFrontmatter(frontmatter)
 	name := fm.Name
@@ -551,23 +548,23 @@ func parseSkillFrontmatter(frontmatter string) (skillFrontmatter, error) {
 	return fm, nil
 }
 
-func parseFrontmatter(content string) (frontmatter, body string, err error) {
+func parseFrontmatter(content string) (frontmatter, body string) {
 	const delimiter = "---"
 
 	content = strings.TrimLeft(content, "\n\r\t ")
 	if !strings.HasPrefix(content, delimiter) {
-		return "", content, nil
+		return "", content
 	}
 
 	rest := content[len(delimiter):]
 	endIdx := strings.Index(rest, "\n"+delimiter)
 	if endIdx == -1 {
-		return "", content, nil
+		return "", content
 	}
 
 	frontmatter = strings.TrimSpace(rest[:endIdx])
 	body = strings.TrimLeft(rest[endIdx+len("\n"+delimiter):], "\n\r")
-	return frontmatter, body, nil
+	return frontmatter, body
 }
 
 func getStringField(raw map[string]interface{}, key string) string {

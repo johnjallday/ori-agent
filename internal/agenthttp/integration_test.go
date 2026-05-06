@@ -134,7 +134,7 @@ func assertStatus(t *testing.T, rr *httptest.ResponseRecorder, expected int) {
 }
 
 // Helper: Create test agent with metadata
-func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) map[string]interface{} {
+func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) {
 	t.Helper()
 
 	reqBody := map[string]interface{}{
@@ -151,11 +151,6 @@ func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) map[s
 
 	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
 	assertStatus(t, rr, http.StatusOK)
-
-	var response map[string]interface{}
-	decodeResponse(t, rr, &response)
-
-	return response
 }
 
 func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {

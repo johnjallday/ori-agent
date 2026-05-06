@@ -41,7 +41,7 @@ func TestServerStartup(t *testing.T) {
 	defer stopServer(cmd)
 
 	// Wait for server to be ready
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestHealthCheck(t *testing.T) {
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestAgentLifecycle(t *testing.T) {
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestSettingsEndpoint(t *testing.T) {
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestConcurrentRequests(t *testing.T) {
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -308,7 +308,7 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
-	if err := waitForServer(baseURL, startTimeout); err != nil {
+	if err := waitForServer(); err != nil {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -374,8 +374,8 @@ func stopServer(cmd *exec.Cmd) {
 	}
 }
 
-func waitForServer(url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func waitForServer() error {
+	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -384,9 +384,9 @@ func waitForServer(url string, timeout time.Duration) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("server did not become ready within %v", timeout)
+			return fmt.Errorf("server did not become ready within %v", startTimeout)
 		case <-ticker.C:
-			resp, err := http.Get(url + "/health")
+			resp, err := http.Get(baseURL + "/health")
 			if err == nil && resp.StatusCode == http.StatusOK {
 				_ = resp.Body.Close()
 				return nil

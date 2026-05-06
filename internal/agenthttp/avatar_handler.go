@@ -61,7 +61,7 @@ func (h *AvatarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.uploadAvatar(w, r, agentName)
 	case http.MethodDelete:
-		h.removeAvatar(w, r, agentName)
+		h.removeAvatar(w, agentName)
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
@@ -171,7 +171,7 @@ func (h *AvatarHandler) uploadAvatar(w http.ResponseWriter, r *http.Request, age
 }
 
 // removeAvatar handles DELETE /api/agents/{name}/avatar
-func (h *AvatarHandler) removeAvatar(w http.ResponseWriter, r *http.Request, agentName string) {
+func (h *AvatarHandler) removeAvatar(w http.ResponseWriter, agentName string) {
 	// Verify agent exists
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {

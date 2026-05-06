@@ -266,7 +266,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if _, err := th.executeTaskWithDependencies(ws, task, true); err != nil {
+		if _, err := th.executeTaskWithDependencies(ws, task); err != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(err, &blockedErr) {
 				return
@@ -518,7 +518,7 @@ func (th *TaskHandler) resumeTaskExecutionAsync(workspaceID, taskID string) {
 			return
 		}
 
-		if _, err := th.executeTaskWithDependencies(ws, task, true); err != nil {
+		if _, err := th.executeTaskWithDependencies(ws, task); err != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(err, &blockedErr) {
 				return
@@ -604,7 +604,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 				break
 			}
 
-			result, err := th.executeTaskWithDependencies(ws, subtask, true)
+			result, err := th.executeTaskWithDependencies(ws, subtask)
 			if err != nil {
 				if errors.As(err, &blockedErr) {
 					blockedSubtaskID = subtask.ID
@@ -710,7 +710,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	}
 }
 
-func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task *workspace.Task, manual bool) (string, error) {
+func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task *workspace.Task) (string, error) {
+	const manual = true
+
 	if task.To == "" || task.To == "unassigned" {
 		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
 	}

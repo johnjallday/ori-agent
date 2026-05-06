@@ -83,10 +83,7 @@ func (r *DefaultClaudeReader) parseAgentFile(path string) (ExternalAgent, error)
 		return ExternalAgent{}, err
 	}
 
-	frontmatter, body, err := parseFrontmatter(string(content))
-	if err != nil {
-		return ExternalAgent{}, err
-	}
+	frontmatter, body := parseFrontmatter(string(content))
 
 	// Try standard YAML parsing first
 	var fm agentFrontmatter
@@ -150,7 +147,7 @@ func parseAgentFrontmatterManual(frontmatter string) agentFrontmatter {
 
 // parseFrontmatter extracts YAML frontmatter and body from markdown content.
 // Frontmatter is delimited by --- at the start and end.
-func parseFrontmatter(content string) (frontmatter, body string, err error) {
+func parseFrontmatter(content string) (frontmatter, body string) {
 	const delimiter = "---"
 
 	// Trim leading whitespace/newlines
@@ -158,7 +155,7 @@ func parseFrontmatter(content string) (frontmatter, body string, err error) {
 
 	if !strings.HasPrefix(content, delimiter) {
 		// No frontmatter, entire content is body
-		return "", content, nil
+		return "", content
 	}
 
 	// Find the end of frontmatter
@@ -166,13 +163,13 @@ func parseFrontmatter(content string) (frontmatter, body string, err error) {
 	endIdx := strings.Index(rest, "\n"+delimiter)
 	if endIdx == -1 {
 		// No closing delimiter, treat as no frontmatter
-		return "", content, nil
+		return "", content
 	}
 
 	frontmatter = strings.TrimSpace(rest[:endIdx])
 	body = strings.TrimLeft(rest[endIdx+len("\n"+delimiter):], "\n\r")
 
-	return frontmatter, body, nil
+	return frontmatter, body
 }
 
 // ReadSettings reads the global settings from ~/.claude/settings.json.

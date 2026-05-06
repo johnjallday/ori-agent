@@ -110,7 +110,7 @@ func SyncTaskMarkdownFilesToFolder(folder string, ws *Workspace, settings worksp
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0755); err != nil {
 		return fmt.Errorf("create task markdown directory: %w", err)
 	}
-	if err := atomicWriteFile(taskPath, []byte(RenderWorkspaceTasksMarkdown(ws)), 0644); err != nil {
+	if err := atomicWriteFile(taskPath, []byte(RenderWorkspaceTasksMarkdown(ws))); err != nil {
 		return fmt.Errorf("write task markdown: %w", err)
 	}
 	if settings.GenerateAgentViews {
@@ -589,7 +589,7 @@ func writeAgentTaskViews(folder string, ws *Workspace) error {
 		}
 		sortTasksForMarkdown(tasks)
 		content := renderAgentTaskView(ws.ID, agentName, tasks)
-		if err := atomicWriteFile(filepath.Join(dir, "tasks.md"), []byte(content), 0644); err != nil {
+		if err := atomicWriteFile(filepath.Join(dir, "tasks.md"), []byte(content)); err != nil {
 			return fmt.Errorf("write agent task view for %s: %w", agentName, err)
 		}
 	}

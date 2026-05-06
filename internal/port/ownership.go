@@ -33,10 +33,7 @@ func IsPortAvailable(port int) bool {
 }
 
 func FindPortProcesses(port int) ([]ProcessInfo, error) {
-	pids, err := findPortPIDs(port)
-	if err != nil {
-		return nil, err
-	}
+	pids := findPortPIDs(port)
 	processes := make([]ProcessInfo, 0, len(pids))
 	for _, pid := range pids {
 		name, nameErr := ResolveProcessName(pid)
@@ -143,7 +140,7 @@ func normalizeProcessName(name string) string {
 	return strings.TrimSuffix(lower, ".exe")
 }
 
-func findPortPIDs(port int) ([]int, error) {
+func findPortPIDs(port int) []int {
 	pidSet := make(map[int]struct{})
 
 	switch runtime.GOOS {
@@ -151,7 +148,7 @@ func findPortPIDs(port int) ([]int, error) {
 		cmd := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port))
 		output, err := cmd.Output()
 		if err != nil {
-			return nil, nil
+			return nil
 		}
 		parsePIDs(output, pidSet)
 
@@ -160,18 +157,18 @@ func findPortPIDs(port int) ([]int, error) {
 		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
 		output, err := cmd.Output()
 		if err != nil {
-			return nil, nil
+			return nil
 		}
 		parsePIDs(output, pidSet)
 	default:
-		return nil, nil
+		return nil
 	}
 
 	pids := make([]int, 0, len(pidSet))
 	for pid := range pidSet {
 		pids = append(pids, pid)
 	}
-	return pids, nil
+	return pids
 }
 
 func parsePIDs(output []byte, pidSet map[int]struct{}) {

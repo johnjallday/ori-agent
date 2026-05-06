@@ -222,7 +222,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
+	if err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
 		handleWorkspaceParentError(w, err)
 		return
 	}
@@ -430,20 +430,20 @@ func parseWorkspaceKind(value string) (session.WorkspaceKind, error) {
 	}
 }
 
-func (h *Handler) requireGroupParent(ctx context.Context, parentID string) (*session.Workspace, error) {
+func (h *Handler) requireGroupParent(ctx context.Context, parentID string) error {
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
-		return nil, nil
+		return nil
 	}
 
 	parent, err := h.store.GetWorkspace(ctx, parentID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !parent.IsGroup() {
-		return nil, errParentWorkspaceMustBeGroup
+		return errParentWorkspaceMustBeGroup
 	}
-	return parent, nil
+	return nil
 }
 
 func handleWorkspaceParentError(w http.ResponseWriter, err error) {
@@ -588,7 +588,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 				}
 			}
 		}
-		if _, err := h.requireGroupParent(r.Context(), *req.ParentID); err != nil {
+		if err := h.requireGroupParent(r.Context(), *req.ParentID); err != nil {
 			handleWorkspaceParentError(w, err)
 			return
 		}
@@ -1087,7 +1087,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	if workspaceName == "" {
 		workspaceName = filepath.Base(normalizedPath)
 	}
-	if _, err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
+	if err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
 		handleWorkspaceParentError(w, err)
 		return
 	}

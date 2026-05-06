@@ -1049,7 +1049,7 @@ func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
 		},
 	}
 
-	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask); err != nil {
 		t.Fatalf("executeTaskWithDependencies failed: %v", err)
 	}
 
@@ -1099,7 +1099,7 @@ func TestExecuteTaskWithDependencies_CancelledRunStaysCancelled(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := handler.executeTaskWithDependencies(ws, persistedTask, true)
+		_, err := handler.executeTaskWithDependencies(ws, persistedTask)
 		errCh <- err
 	}()
 
@@ -1174,7 +1174,7 @@ func TestExecuteTaskWithDependencies_RecordsBlockedRunHistory(t *testing.T) {
 		},
 	}
 
-	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err == nil {
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask); err == nil {
 		t.Fatalf("expected blocked error")
 	}
 
@@ -1225,7 +1225,7 @@ func TestExecuteTaskWithDependencies_StepThroughPausesAfterFirstStructuredStep(t
 		},
 	}
 
-	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask); err != nil {
 		t.Fatalf("executeTaskWithDependencies failed: %v", err)
 	}
 
@@ -1299,7 +1299,7 @@ func TestExecuteTaskWithDependencies_CompletesStaleListingPlanFromExistingResult
 		taskHandler:    stub,
 	}
 
-	result, err := handler.executeTaskWithDependencies(ws, persistedTask, true)
+	result, err := handler.executeTaskWithDependencies(ws, persistedTask)
 	if err != nil {
 		t.Fatalf("executeTaskWithDependencies failed: %v", err)
 	}
@@ -1364,7 +1364,7 @@ func TestExecuteTaskWithDependencies_AutoRunsStructuredStepsToCompletion(t *test
 		},
 	}
 
-	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask); err != nil {
 		t.Fatalf("executeTaskWithDependencies failed: %v", err)
 	}
 

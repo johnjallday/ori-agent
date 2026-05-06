@@ -1,7 +1,6 @@
 package orchestration
 
 import (
-	"context"
 	"fmt"
 
 	"time"
@@ -13,7 +12,7 @@ import (
 )
 
 // executeResearchPipeline executes a full research, analysis, synthesis, validation pipeline
-func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("🔬 Executing full research pipeline", logger.Fields{})
 
 	subResults := make(map[string]interface{})

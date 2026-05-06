@@ -32,7 +32,7 @@ func (b *ServerBuilder) initializeConfiguration() error {
 }
 
 // initializeClientFactory creates the OpenAI client factory (deprecated).
-func (b *ServerBuilder) initializeClientFactory() error {
+func (b *ServerBuilder) initializeClientFactory() {
 	apiKey := b.configManager.GetAPIKey()
 	if apiKey == "" {
 		logger.Warn("OPENAI_API_KEY not set - OpenAI provider will be unavailable", logger.Fields{})
@@ -45,7 +45,6 @@ func (b *ServerBuilder) initializeClientFactory() error {
 		}
 	}
 	b.clientFactory = client.NewFactory(apiKey)
-	return nil
 }
 
 // initializeLLMFactory creates the LLM factory and registers all providers.
@@ -59,19 +58,15 @@ func (b *ServerBuilder) initializeLLMFactory() error {
 }
 
 // initializeGateway creates the gateway service.
-func (b *ServerBuilder) initializeGateway() error {
+func (b *ServerBuilder) initializeGateway() {
 	b.gateway = gateway.NewService(logger.New("gateway"))
-	return nil
 }
 
 // initializeStorage creates the agent store and sets the path.
 func (b *ServerBuilder) initializeStorage() error {
 	defaultConf := loadDefaultSettings()
 
-	agentStorePath, err := resolveAgentStorePath()
-	if err != nil {
-		return err
-	}
+	agentStorePath := resolveAgentStorePath()
 	b.agentStorePath = agentStorePath
 
 	st, err := createFileStore(agentStorePath, defaultConf)
@@ -92,7 +87,7 @@ func (b *ServerBuilder) initializeStorage() error {
 }
 
 // initializeActivityLogger creates the activity logger.
-func (b *ServerBuilder) initializeActivityLogger() error {
+func (b *ServerBuilder) initializeActivityLogger() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	activityLogDir := resolveActivityLogDir()
 
@@ -100,24 +95,20 @@ func (b *ServerBuilder) initializeActivityLogger() error {
 	if err != nil {
 		logger.Error("Failed to initialize activity logger", logger.Fields{"err": err})
 		b.activityLogger = nil
-		return nil // Continue without activity logging
+		return // Continue without activity logging
 	}
 
 	if verbose {
 		logger.Info("Activity logger initialized", logger.Fields{"activityLogDir": activityLogDir})
 	}
 	b.activityLogger = activityLogger
-	return nil
 }
 
 // initializeLocationManager sets up location detection and management.
-func (b *ServerBuilder) initializeLocationManager() error {
+func (b *ServerBuilder) initializeLocationManager() {
 	locationZonesPath := resolveLocationZonesPath()
 
-	zones, err := loadLocationZones(locationZonesPath)
-	if err != nil {
-		return err
-	}
+	zones := loadLocationZones(locationZonesPath)
 
 	mgr := createLocationManager(zones, locationZonesPath)
 
@@ -126,7 +117,6 @@ func (b *ServerBuilder) initializeLocationManager() error {
 	mgr.Start(ctx, 60*time.Second)
 
 	b.locationManager = mgr
-	return nil
 }
 
 // initializeTemplateRenderer creates and loads the template renderer.
@@ -140,25 +130,22 @@ func (b *ServerBuilder) initializeTemplateRenderer() error {
 }
 
 // initializeOnboardingManager creates the onboarding manager.
-func (b *ServerBuilder) initializeOnboardingManager() error {
+func (b *ServerBuilder) initializeOnboardingManager() {
 	b.onboardingMgr = onboarding.NewManager("app_state.json")
-	return nil
 }
 
 // initializeCostTracker creates the cost tracker for LLM usage monitoring.
-func (b *ServerBuilder) initializeCostTracker() error {
+func (b *ServerBuilder) initializeCostTracker() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	usageDataDir := resolveCostTrackerDir()
 	b.costTracker = llm.NewCostTracker(usageDataDir)
 	if verbose {
 		logger.Debug("Cost tracker initialized", logger.Fields{"dir": usageDataDir})
 	}
-	return nil
 }
 
 // initializeUpdateManager creates the update manager.
-func (b *ServerBuilder) initializeUpdateManager() error {
+func (b *ServerBuilder) initializeUpdateManager() {
 	currentVersion := version.GetVersion()
 	b.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "ori-agent")
-	return nil
 }

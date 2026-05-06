@@ -193,7 +193,7 @@ func (m *Manager) DownloadUpdate(version string) (string, error) {
 	}
 
 	// Download file
-	return m.downloadFile(asset.BrowserDownloadURL, asset.Name, version)
+	return m.downloadFile(asset.BrowserDownloadURL, asset.Name)
 }
 
 // GetCurrentVersion returns current version info
@@ -343,7 +343,7 @@ func (m *Manager) findAssetForPlatform(assets []struct {
 	return nil
 }
 
-func (m *Manager) downloadFile(url, filename, version string) (string, error) {
+func (m *Manager) downloadFile(url, filename string) (string, error) {
 	// Get current working directory (where the app is running)
 	currentDir, err := os.Getwd()
 	if err != nil {

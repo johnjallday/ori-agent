@@ -23,15 +23,14 @@ import (
 
 const testVaultPassword = "test-vault-password"
 
-func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB) {
-	handler, store, db, _ := newTestHandlerWithVaultFilesDir(t, secretStore, fallbackPath)
+func newTestHandler(t *testing.T, secretStore vault.SecretStore) (*Handler, *vault.Store, *database.DB) {
+	handler, store, db, _ := newTestHandlerWithVaultFilesDir(t, secretStore)
 	return handler, store, db
 }
 
-func newTestHandlerWithVaultFilesDir(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB, string) {
+func newTestHandlerWithVaultFilesDir(t *testing.T, secretStore vault.SecretStore) (*Handler, *vault.Store, *database.DB, string) {
 	t.Helper()
 	_ = secretStore
-	_ = fallbackPath
 
 	db, err := database.Open(context.Background(), &database.Config{
 		InMemory: true,
@@ -151,7 +150,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestHandlerRecordLifecycle(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -237,7 +236,7 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 }
 
 func TestHandlerFolderLifecycle(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -326,7 +325,7 @@ func TestHandlerFolderLifecycle(t *testing.T) {
 }
 
 func TestHandlerRecordAttachmentLifecycle(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -409,7 +408,7 @@ func TestHandlerRecordAttachmentLifecycle(t *testing.T) {
 }
 
 func TestHandlerEmailAccountLifecycle(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -483,7 +482,7 @@ func TestHandlerEmailAccountLifecycle(t *testing.T) {
 }
 
 func TestHandlerEmailOAuthProviders(t *testing.T) {
-	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_ID", "google-client-id")
@@ -519,7 +518,7 @@ func TestHandlerEmailOAuthProviders(t *testing.T) {
 }
 
 func TestHandlerEmailOAuthConnectCreatesAccount(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -616,7 +615,7 @@ func TestHandlerEmailOAuthConnectCreatesAccount(t *testing.T) {
 }
 
 func TestHandlerEmailOAuthReconnectReplacesPasswordAuth(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -687,7 +686,7 @@ func TestHandlerEmailOAuthReconnectReplacesPasswordAuth(t *testing.T) {
 }
 
 func TestHandlerDeniesActorWithoutGrant(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -733,7 +732,7 @@ func TestHandlerDeniesActorWithoutGrant(t *testing.T) {
 }
 
 func TestHandlerExportRequiresConfirmationAndPassword(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -787,7 +786,7 @@ func TestHandlerExportRequiresConfirmationAndPassword(t *testing.T) {
 }
 
 func TestHandlerUnlockAndLockPasswordProtectedVault(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 	primaryVault := createHandlerVault(t, store, "Primary Vault")
 
@@ -846,7 +845,7 @@ func TestHandlerUnlockAndLockPasswordProtectedVault(t *testing.T) {
 }
 
 func TestHandlerListRecordsReturnsExplicitErrorForMissingVaultFile(t *testing.T) {
-	handler, store, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	handler, store, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	item := createHandlerVault(t, store, "Broken Vault")
@@ -864,7 +863,7 @@ func TestHandlerListRecordsReturnsExplicitErrorForMissingVaultFile(t *testing.T)
 }
 
 func TestHandlerImportCreatesVaultAndRestoresBundle(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	sourceVault := createHandlerVault(t, store, "Finance Vault")
@@ -944,7 +943,7 @@ func TestHandlerImportCreatesVaultAndRestoresBundle(t *testing.T) {
 }
 
 func TestHandlerImportAcceptsMultipartBundleUpload(t *testing.T) {
-	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	sourceVault := createHandlerVault(t, store, "Travel Vault")
@@ -1023,7 +1022,7 @@ func TestHandlerImportAcceptsMultipartBundleUpload(t *testing.T) {
 }
 
 func TestHandlerSupportsNamedVaults(t *testing.T) {
-	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	createPrimaryVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
@@ -1125,7 +1124,7 @@ func TestHandlerSupportsNamedVaults(t *testing.T) {
 }
 
 func TestHandlerCreatesVaultInCustomDirectory(t *testing.T) {
-	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	customDir := t.TempDir()
@@ -1164,7 +1163,7 @@ func TestHandlerCreatesVaultInCustomDirectory(t *testing.T) {
 }
 
 func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
-	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
@@ -1238,7 +1237,7 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 }
 
 func TestHandlerRelinksMissingVault(t *testing.T) {
-	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
@@ -1300,7 +1299,7 @@ func TestHandlerRelinksMissingVault(t *testing.T) {
 }
 
 func TestHandlerDeleteVaultCanRemoveBackingFile(t *testing.T) {
-	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
@@ -1328,7 +1327,7 @@ func TestHandlerDeleteVaultCanRemoveBackingFile(t *testing.T) {
 }
 
 func TestHandlerRequiresVaultWhenNoneExist(t *testing.T) {
-	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status", nil)
@@ -1355,7 +1354,7 @@ func TestHandlerRequiresVaultWhenNoneExist(t *testing.T) {
 }
 
 func TestHandlerCreateVaultRequiresPassword(t *testing.T) {
-	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{

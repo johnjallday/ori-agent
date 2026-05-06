@@ -229,7 +229,7 @@ func TestMaybeAutoEnableMCPForPrompt_ReturnsWorkspaceResolutionForWebSearch(t *t
 	}
 	h.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(st, wsStore, reg, cfg))
 
-	result, updatedAgent := h.maybeAutoEnableMCPForPrompt(
+	result := h.maybeAutoEnableMCPForPrompt(
 		"Ori",
 		runtimeAgent,
 		"Please search the web for the latest Go release notes",
@@ -256,9 +256,6 @@ func TestMaybeAutoEnableMCPForPrompt_ReturnsWorkspaceResolutionForWebSearch(t *t
 	bindings := ws.GetMCPBindings()
 	if len(bindings) != 0 {
 		t.Fatalf("expected no workspace mutation before approval, got %d bindings", len(bindings))
-	}
-	if updatedAgent != nil {
-		t.Fatalf("expected no resolved agent override before approval, got %v", updatedAgent)
 	}
 	if len(cfg.enabled) != 0 {
 		t.Fatalf("expected no agent-scoped enable calls, got %v", cfg.enabled)
@@ -290,7 +287,7 @@ func TestMaybeAutoEnableMCPForPrompt_SkipsNonSystemAgent(t *testing.T) {
 		mcpConfigManager: cfg,
 	}
 
-	result, updatedAgent := h.maybeAutoEnableMCPForPrompt(
+	result := h.maybeAutoEnableMCPForPrompt(
 		"Researcher",
 		runtimeAgent,
 		"search the web for release notes",
@@ -299,9 +296,6 @@ func TestMaybeAutoEnableMCPForPrompt_SkipsNonSystemAgent(t *testing.T) {
 
 	if result != nil {
 		t.Fatalf("expected nil result for non-system agent, got %+v", result)
-	}
-	if updatedAgent != nil {
-		t.Fatalf("expected no resolved agent override for non-system agent, got %+v", updatedAgent)
 	}
 	if len(cfg.enabled) != 0 {
 		t.Fatalf("expected no config enable call, got %v", cfg.enabled)
@@ -332,7 +326,7 @@ func TestMaybeAutoEnableMCPForPrompt_SkipsWhenAlreadyEnabled(t *testing.T) {
 		mcpConfigManager: cfg,
 	}
 
-	result, updatedAgent := h.maybeAutoEnableMCPForPrompt(
+	result := h.maybeAutoEnableMCPForPrompt(
 		"Ori",
 		runtimeAgent,
 		"web search for latest news",
@@ -351,9 +345,6 @@ func TestMaybeAutoEnableMCPForPrompt_SkipsWhenAlreadyEnabled(t *testing.T) {
 	}
 	if len(reg.started) != 0 {
 		t.Fatalf("expected no server start call, got %v", reg.started)
-	}
-	if updatedAgent != nil {
-		t.Fatalf("expected no refreshed agent when already enabled, got %+v", updatedAgent)
 	}
 }
 
@@ -393,7 +384,7 @@ func TestMaybeAutoEnableMCPForPrompt_ReturnsMessageWhenNoWebServerConfigured(t *
 		mcpConfigManager: cfg,
 	}
 
-	result, _ := h.maybeAutoEnableMCPForPrompt(
+	result := h.maybeAutoEnableMCPForPrompt(
 		"Ori",
 		runtimeAgent,
 		"search weather on web",
@@ -434,15 +425,12 @@ func TestMaybeAutoEnableMCPForPrompt_RequiresWorkspaceContext(t *testing.T) {
 		mcpConfigManager: cfg,
 	}
 
-	result, updatedAgent := h.maybeAutoEnableMCPForPrompt("Ori", runtimeAgent, "search weather on web", normalizedChatRouteContext{})
+	result := h.maybeAutoEnableMCPForPrompt("Ori", runtimeAgent, "search weather on web", normalizedChatRouteContext{})
 	if result == nil {
 		t.Fatalf("expected result, got nil")
 	}
 	if result.userMessage == "" || !strings.Contains(strings.ToLower(result.userMessage), "workspace") {
 		t.Fatalf("expected workspace-required message, got %q", result.userMessage)
-	}
-	if updatedAgent != nil {
-		t.Fatalf("expected no updated agent without workspace context, got %+v", updatedAgent)
 	}
 }
 

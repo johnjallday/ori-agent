@@ -144,7 +144,7 @@ func (h *Handler) buildCapabilityRecoverySnapshot(
 	if h.skillsManager != nil {
 		skillsList, err := h.skillsManager.ListSkills(agentName)
 		if err == nil {
-			snapshot.InstalledSkills = filterCapabilityRecoverySkills(skillsList, intent)
+			snapshot.InstalledSkills = filterCapabilityRecoverySkills(skillsList)
 		}
 	}
 
@@ -249,7 +249,7 @@ func agentProviderSupportsTools(ag *resolvedChatAgent) bool {
 	return !isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model)
 }
 
-func filterCapabilityRecoverySkills(all []skills.Skill, intent capabilityRecoveryIntent) []skills.Skill {
+func filterCapabilityRecoverySkills(all []skills.Skill) []skills.Skill {
 	filtered := make([]skills.Skill, 0, 3)
 	for _, skill := range all {
 		if len(filtered) >= 3 {

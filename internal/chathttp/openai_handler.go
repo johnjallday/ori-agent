@@ -205,7 +205,7 @@ func (h *Handler) handleOpenAIToolCalls(
 				conversation = append(conversation, buildOpenAIAssistantToolCallMessage(content, toolCalls))
 			},
 			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
-				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, toolCalls, files, sessionID)
 			},
 			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
 				for i, tc := range toolCalls {

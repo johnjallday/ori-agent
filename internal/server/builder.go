@@ -207,15 +207,11 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeConfiguration(); err != nil { // Phase 1
 		return nil, fmt.Errorf("configuration phase failed: %w", err)
 	}
-	if err := b.initializeClientFactory(); err != nil { // Phase 3 (deprecated)
-		return nil, fmt.Errorf("client factory phase failed: %w", err)
-	}
+	b.initializeClientFactory()                      // Phase 3 (deprecated)
 	if err := b.initializeLLMFactory(); err != nil { // Phase 4
 		return nil, fmt.Errorf("LLM factory phase failed: %w", err)
 	}
-	if err := b.initializeGateway(); err != nil { // Phase 4.1
-		return nil, fmt.Errorf("gateway phase failed: %w", err)
-	}
+	b.initializeGateway() // Phase 4.1
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 2: STORAGE - Persistence layer (depends on: Core)
@@ -224,40 +220,26 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeStorage(); err != nil { // Phase 5
 		return nil, fmt.Errorf("storage phase failed: %w", err)
 	}
-	if err := b.initializeActivityLogger(); err != nil { // Phase 6
-		return nil, fmt.Errorf("activity logger phase failed: %w", err)
-	}
+	b.initializeActivityLogger() // Phase 6
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 3: SERVICES - Business logic layer (depends on: Core, Storage)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.initializeLocationManager(); err != nil { // Phase 8
-		return nil, fmt.Errorf("location manager phase failed: %w", err)
-	}
-	if err := b.initializeUpdateManager(); err != nil { // Phase 10
-		return nil, fmt.Errorf("update manager phase failed: %w", err)
-	}
+	b.initializeLocationManager()                          // Phase 8
+	b.initializeUpdateManager()                            // Phase 10
 	if err := b.initializeTemplateRenderer(); err != nil { // Phase 13
 		return nil, fmt.Errorf("template renderer phase failed: %w", err)
 	}
-	if err := b.initializeOnboardingManager(); err != nil { // Phase 14
-		return nil, fmt.Errorf("onboarding manager phase failed: %w", err)
-	}
-	if err := b.initializeCostTracker(); err != nil { // Phase 15
-		return nil, fmt.Errorf("cost tracker phase failed: %w", err)
-	}
-	if err := b.initializeMCP(); err != nil { // Phase 16
-		return nil, fmt.Errorf("MCP phase failed: %w", err)
-	}
+	b.initializeOnboardingManager() // Phase 14
+	b.initializeCostTracker()       // Phase 15
+	b.initializeMCP()               // Phase 16
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 4: HANDLERS - HTTP API layer (depends on: Core, Storage, Services)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.initializeHandlers(); err != nil { // Phase 17
-		return nil, fmt.Errorf("handlers phase failed: %w", err)
-	}
+	b.initializeHandlers()    // Phase 17
 	b.initializeMCPRegistry() // Phase 17.1 — wire MCP browser registry store
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -267,29 +249,19 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeWorkspaceStore(); err != nil { // Phase 18
 		return nil, fmt.Errorf("workspace store phase failed: %w", err)
 	}
-	if err := b.initializeEventSystem(); err != nil { // Phase 19
-		return nil, fmt.Errorf("event system phase failed: %w", err)
-	}
-	if err := b.initializeTaskExecution(); err != nil { // Phase 20
-		return nil, fmt.Errorf("task execution phase failed: %w", err)
-	}
+	b.initializeEventSystem()                           // Phase 19
+	b.initializeTaskExecution()                         // Phase 20
 	if err := b.initializeOrchestration(); err != nil { // Phase 21
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
 	}
-	if err := b.initializeWorkspaceOrchestrator(); err != nil { // Phase 22
-		return nil, fmt.Errorf("workspace orchestrator phase failed: %w", err)
-	}
-	if err := b.initializeTemplateManager(); err != nil { // Phase 23
-		return nil, fmt.Errorf("template manager phase failed: %w", err)
-	}
+	b.initializeWorkspaceOrchestrator() // Phase 22
+	b.initializeTemplateManager()       // Phase 23
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 6: FINALIZATION - Wire everything together (depends on: All)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.createDomainFacades(); err != nil { // Phase 25
-		return nil, fmt.Errorf("facade creation phase failed: %w", err)
-	}
+	b.createDomainFacades() // Phase 25
 
 	// Log success
 	if !verbose {
@@ -300,7 +272,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 }
 
 // createDomainFacades organizes dependencies into domain-specific facades
-func (b *ServerBuilder) createDomainFacades() error {
+func (b *ServerBuilder) createDomainFacades() {
 	// Core System Facade
 	b.server.Core = NewCoreSystemFacade(
 		b.clientFactory,
@@ -376,8 +348,6 @@ func (b *ServerBuilder) createDomainFacades() error {
 	)
 	b.server.Handlers.CLIAgents = b.cliAgentHandler
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
-
-	return nil
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

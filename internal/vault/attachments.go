@@ -403,7 +403,7 @@ func (s *Store) AddRecordAttachment(ctx context.Context, recordID string, attach
 	if err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +451,7 @@ func (s *Store) DeleteRecordAttachment(ctx context.Context, recordID string, att
 	if err != nil {
 		return err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return err
 	}
@@ -500,7 +500,7 @@ func (s *Store) GetRecordAttachmentContent(ctx context.Context, recordID string,
 	if err != nil {
 		return nil, nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return nil, nil, err
 	}

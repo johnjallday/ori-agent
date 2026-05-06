@@ -1,6 +1,6 @@
 package vault
 
-func newWindowsSecretStore(namespace string) SecretStore {
+func newWindowsSecretStore() SecretStore {
 	return unavailableStore{
 		status: StoreStatus{
 			Backend:   BackendWindowsSecureStore,

@@ -252,7 +252,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	logger.Debug("👥 Selected agents", logger.Fields{"agent": agents})
 
 	// 3. Execute workflow based on required roles
-	result, err := o.executeWorkflow(ctx, ws, task, agents)
+	result, err := o.executeWorkflow(ws, task, agents)
 	if err != nil {
 		ws.SetStatus(workspace.StatusFailed)
 		_ = o.workspaceStore.Save(ws) // Best effort save
@@ -330,7 +330,7 @@ func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]str
 }
 
 // executeWorkflow executes the appropriate workflow based on required roles
-func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	// Determine workflow type based on roles
 	hasResearcher := o.hasRole(task.RequiredRoles, types.RoleResearcher)
 	hasAnalyzer := o.hasRole(task.RequiredRoles, types.RoleAnalyzer)
@@ -338,13 +338,13 @@ func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *workspace.Worksp
 
 	if hasResearcher && hasAnalyzer && hasSynthesizer {
 		// Full research pipeline
-		return o.executeResearchPipeline(ctx, ws, task, agents)
+		return o.executeResearchPipeline(ws, task, agents)
 	} else if hasResearcher {
 		// Simple research workflow
-		return o.executeResearchWorkflow(ctx, ws, task, agents)
+		return o.executeResearchWorkflow(ws, task, agents)
 	} else {
 		// Generic parallel workflow
-		return o.executeParallelWorkflow(ctx, ws, task, agents)
+		return o.executeParallelWorkflow(ws, task, agents)
 	}
 }
 
@@ -359,7 +359,7 @@ func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) 
 }
 
 // executeResearchWorkflow executes a simple research workflow
-func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("📚 Executing research workflow", logger.Fields{})
 
 	subResults := make(map[string]interface{})
@@ -410,7 +410,7 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *workspac
 }
 
 // executeParallelWorkflow executes tasks in parallel across agents
-func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeParallelWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("⚡ Executing parallel workflow with agents", logger.Fields{"agent": len(agents)})
 
 	subResults := make(map[string]interface{})
