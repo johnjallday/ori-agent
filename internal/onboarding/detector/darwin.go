@@ -52,7 +52,7 @@ func (d *DarwinDetector) DetectApps(ctx context.Context) ([]DetectedApp, error) 
 	}
 
 	// Method 3: Get apps from /Applications that were modified recently
-	modifiedApps := d.findRecentlyModifiedApps(ctx)
+	modifiedApps := d.findRecentlyModifiedApps()
 	for _, app := range modifiedApps {
 		if _, exists := appSet[app.Path]; !exists {
 			if !d.config.IncludeSystemApps && isSystemApp(app.Path) {
@@ -145,7 +145,7 @@ func (d *DarwinDetector) findRecentlyUsedApps(ctx context.Context) []DetectedApp
 }
 
 // findRecentlyModifiedApps finds apps in /Applications modified recently.
-func (d *DarwinDetector) findRecentlyModifiedApps(ctx context.Context) []DetectedApp {
+func (d *DarwinDetector) findRecentlyModifiedApps() []DetectedApp {
 	var apps []DetectedApp
 	cutoff := time.Now().AddDate(0, 0, -d.config.RecencyDays)
 

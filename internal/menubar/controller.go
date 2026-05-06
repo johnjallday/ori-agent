@@ -88,11 +88,11 @@ func (c *Controller) StartServer(ctx context.Context) error {
 	c.notifyStatusChange(StatusStarting)
 
 	// Create context for server lifecycle
-	serverCtx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	c.cancelFunc = cancel
 
 	// Start server in goroutine
-	go c.runServer(serverCtx)
+	go c.runServer()
 
 	// Wait for server to be running (with timeout)
 	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -227,7 +227,7 @@ func (c *Controller) isPortAvailable() bool {
 }
 
 // runServer runs the HTTP server in a goroutine
-func (c *Controller) runServer(ctx context.Context) {
+func (c *Controller) runServer() {
 	logger.Debug("Starting ori-agent server on port ...", logger.Fields{"server": c.port})
 
 	// Create server instance

@@ -52,7 +52,7 @@ func TestFindTool_PrefersMCPBrowserOverNativeUtility(t *testing.T) {
 
 	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
-	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	tool, found := h.findTool(ag, "browser")
 	if !found {
 		t.Fatal("expected browser tool to be found")
 	}
@@ -94,7 +94,7 @@ func TestFindTool_BrowserPrefersPlaywrightServer(t *testing.T) {
 
 	ag := runtimeTestAgent(&agent.Agent{}, "puppeteer", "playwright")
 
-	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	tool, found := h.findTool(ag, "browser")
 	if !found {
 		t.Fatal("expected browser tool to be found")
 	}
@@ -134,7 +134,7 @@ func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
 
 	ag := runtimeTestAgent(&agent.Agent{}, "playwright", "browserbase")
 
-	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	tool, found := h.findTool(ag, "browser")
 	if !found {
 		t.Fatal("expected browser tool to be found")
 	}
@@ -167,7 +167,7 @@ func TestFindTool_BrowserFallsBackToBrowserNavigateAlias(t *testing.T) {
 
 	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
-	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	tool, found := h.findTool(ag, "browser")
 	if !found {
 		t.Fatal("expected browser alias tool to be found")
 	}
@@ -209,7 +209,7 @@ func TestFindTool_BrowserSuppressedWhenBrowserMCPConfiguredButNoMatchingTool(t *
 
 	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
-	_, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	_, found := h.findTool(ag, "browser")
 	if found {
 		t.Fatal("expected browser utility to be suppressed when browser MCP is configured")
 	}
@@ -225,7 +225,7 @@ func TestFindTool_BrowserUsesUtilityWhenNoBrowserMCPConfigured(t *testing.T) {
 
 	ag := runtimeTestAgent(&agent.Agent{})
 
-	tool, found := h.findTool(ag, "General Agent", "browser")
+	tool, found := h.findTool(ag, "browser")
 	if !found {
 		t.Fatal("expected native browser utility when no browser MCP is configured")
 	}

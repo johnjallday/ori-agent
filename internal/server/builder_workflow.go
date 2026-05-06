@@ -136,7 +136,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 }
 
 // initializeEventSystem creates the event bus and notification service.
-func (b *ServerBuilder) initializeEventSystem() error {
+func (b *ServerBuilder) initializeEventSystem() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	b.eventBus = workspace.DefaultEventBus()
@@ -160,12 +160,10 @@ func (b *ServerBuilder) initializeEventSystem() error {
 			}
 		}
 	}
-
-	return nil
 }
 
 // initializeTaskExecution creates task handler, executor, step executor, and scheduler.
-func (b *ServerBuilder) initializeTaskExecution() error {
+func (b *ServerBuilder) initializeTaskExecution() {
 	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
@@ -197,8 +195,6 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 		PollInterval: 1 * time.Minute,
 	})
 	b.taskScheduler.SetEventBus(b.eventBus)
-
-	return nil
 }
 
 // initializeOrchestration creates orchestrators and handlers.
@@ -265,7 +261,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 }
 
 // initializeWorkspaceOrchestrator creates the workspace orchestrator.
-func (b *ServerBuilder) initializeWorkspaceOrchestrator() error {
+func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
@@ -281,12 +277,10 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() error {
 	if verbose {
 		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
 	}
-
-	return nil
 }
 
 // initializeTemplateManager loads workflow templates and injects into orchestration handler.
-func (b *ServerBuilder) initializeTemplateManager() error {
+func (b *ServerBuilder) initializeTemplateManager() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	templatesDir := resolveWorkflowTemplatesDir()
 
@@ -295,7 +289,7 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 		if verbose {
 			logger.Error("Warning: failed to load workflow templates", logger.Fields{"err": err})
 		}
-		return nil // Non-critical
+		return // Non-critical
 	}
 
 	if verbose {
@@ -317,6 +311,4 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 
 	// Initialize workflow HTTP handler
 	b.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.workspaceStore)
-
-	return nil
 }

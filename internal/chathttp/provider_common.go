@@ -264,7 +264,6 @@ func fallbackToolLoopContent(results []ToolCallResult, fallbackMessage string) s
 func (h *Handler) executeToolCallsCommonWithSession(
 	baseCtx context.Context,
 	ag *resolvedChatAgent,
-	agentName string,
 	toolCalls []llm.ToolCall,
 	files []toolapi.FileAttachment,
 	sessionID string,
@@ -284,7 +283,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 		}
 
 		// Find tool by name (searches both plugins and MCP tools, with lazy loading)
-		tool, found := h.findTool(ag, agentName, name)
+		tool, found := h.findTool(ag, name)
 
 		var result string
 		var err error

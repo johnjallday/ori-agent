@@ -45,7 +45,7 @@ import (
 )
 
 // initializeHandlers creates all HTTP handlers and wires up dependencies.
-func (b *ServerBuilder) initializeHandlers() error {
+func (b *ServerBuilder) initializeHandlers() {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
@@ -261,8 +261,6 @@ func (b *ServerBuilder) initializeHandlers() error {
 	})
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
-
-	return nil
 }
 
 func (b *ServerBuilder) syncPlaywrightBrowserSettings(utility config.UtilitySettings) {

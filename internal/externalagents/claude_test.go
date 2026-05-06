@@ -46,10 +46,7 @@ This has no closing delimiter`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fm, body, err := parseFrontmatter(tt.content)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			fm, body := parseFrontmatter(tt.content)
 			if tt.wantFM != "" && fm != tt.wantFM {
 				t.Errorf("frontmatter = %q, want %q", fm, tt.wantFM)
 			}

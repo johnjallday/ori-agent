@@ -110,7 +110,7 @@ type DirectToolResult struct {
 }
 
 // executeDirectTool executes a tool directly without LLM decision-making
-func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, agentName string, cmd *DirectToolCommand) *DirectToolResult {
+func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, cmd *DirectToolCommand) *DirectToolResult {
 	startTime := time.Now()
 	result := &DirectToolResult{
 		ToolName: cmd.ToolName,
@@ -126,7 +126,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, 
 	}
 
 	// Find the tool (with lazy loading support)
-	tool, found := h.findTool(ag, agentName, cmd.ToolName)
+	tool, found := h.findTool(ag, cmd.ToolName)
 	if !found {
 		// Provide helpful error with available tools
 		availableTools := h.getAvailableToolNames(ag)

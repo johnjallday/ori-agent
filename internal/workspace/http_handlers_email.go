@@ -19,20 +19,20 @@ func (h *HTTPHandler) SetEmailAccountStore(store emailAccountStore) {
 	h.emailAccounts = store
 }
 
-func (h *HTTPHandler) normalizeBindingForPersistence(ctx context.Context, workspaceID string, binding WorkspaceMCPBinding) (WorkspaceMCPBinding, *vault.EmailAccount, error) {
+func (h *HTTPHandler) normalizeBindingForPersistence(ctx context.Context, workspaceID string, binding WorkspaceMCPBinding) (WorkspaceMCPBinding, error) {
 	if !isEmailMCPServer(binding.ServerName) {
-		return binding, nil, nil
+		return binding, nil
 	}
 	if h == nil || h.emailAccounts == nil {
-		return binding, nil, fmt.Errorf("email account store is not configured")
+		return binding, fmt.Errorf("email account store is not configured")
 	}
 
-	normalizedConfig, account, err := h.normalizeEmailBindingConfig(ctx, workspaceID, binding.Config)
+	normalizedConfig, _, err := h.normalizeEmailBindingConfig(ctx, workspaceID, binding.Config)
 	if err != nil {
-		return binding, nil, err
+		return binding, err
 	}
 	binding.Config = normalizedConfig
-	return binding, account, nil
+	return binding, nil
 }
 
 func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspaceID string, config map[string]interface{}) (map[string]interface{}, *vault.EmailAccount, error) {

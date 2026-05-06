@@ -125,7 +125,7 @@ func NewAutoSecretStore(opts AutoSecretStoreOptions) SecretStore {
 		}
 	case "windows":
 		if isWindowsStoreAvailable(opts) {
-			return newWindowsSecretStore(namespace)
+			return newWindowsSecretStore()
 		}
 	}
 

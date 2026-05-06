@@ -108,14 +108,14 @@ func TestTrackUsage_ConcurrentWritesNoDataLoss(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	for g := 0; g < goroutines; g++ {
-		go func(g int) {
+		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				_ = ct.TrackUsage("claude", "claude-3-5-sonnet-20241022", "agent",
 					Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 					"req")
 			}
-		}(g)
+		}()
 	}
 	wg.Wait()
 

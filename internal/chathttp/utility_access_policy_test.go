@@ -68,7 +68,7 @@ func TestExecuteDirectTool_BlocksWebUtilityWhenDisabled(t *testing.T) {
 		utilityRegistry: NewDefaultUtilityToolRegistry(),
 	}
 
-	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", &DirectToolCommand{
+	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), &DirectToolCommand{
 		ToolName: "web_search",
 		Args:     `{"query":"ai"}`,
 	})

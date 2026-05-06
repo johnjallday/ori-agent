@@ -184,7 +184,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 }
 
 // resolveAgentStorePath determines the agent store path from environment or default.
-func resolveAgentStorePath() (string, error) {
+func resolveAgentStorePath() string {
 	agentStorePath := "agents.json"
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
 		agentStorePath = p
@@ -197,7 +197,7 @@ func resolveAgentStorePath() (string, error) {
 		logger.Debug("Using agent store", logger.Fields{"agent": agentStorePath})
 	}
 
-	return agentStorePath, nil
+	return agentStorePath
 }
 
 // createFileStore creates a new file-based storage system for agents.
@@ -210,7 +210,7 @@ func createFileStore(agentStorePath string, defaultConf types.Settings) (store.S
 }
 
 // loadLocationZones loads location zones from the specified file path.
-func loadLocationZones(zonesPath string) ([]location.Zone, error) {
+func loadLocationZones(zonesPath string) []location.Zone {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	zones, err := location.LoadZones(zonesPath)
@@ -218,14 +218,14 @@ func loadLocationZones(zonesPath string) ([]location.Zone, error) {
 		if verbose {
 			logger.Error("failed to load location zones", logger.Fields{"err": err})
 		}
-		return []location.Zone{}, nil // Return empty zones instead of error
+		return []location.Zone{}
 	}
 
 	if verbose {
 		logger.Debug("📍 Loaded location zones", logger.Fields{"value1": len(zones)})
 	}
 
-	return zones, nil
+	return zones
 }
 
 // createLocationManager creates and starts the location manager with detectors.

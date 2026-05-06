@@ -71,13 +71,13 @@ func (d *DiffDetector) Snapshot(workingDir string) (*DirSnapshot, error) {
 // Compare detects files that changed since the snapshot was taken.
 func (d *DiffDetector) Compare(before *DirSnapshot, workingDir string) ([]FileChange, error) {
 	if before.IsGitRepo {
-		return d.compareGit(before, workingDir)
+		return d.compareGit(workingDir)
 	}
 	return d.compareMTime(before, workingDir)
 }
 
 // compareGit uses git diff to detect changes.
-func (d *DiffDetector) compareGit(before *DirSnapshot, workingDir string) ([]FileChange, error) {
+func (d *DiffDetector) compareGit(workingDir string) ([]FileChange, error) {
 	// Use git diff to find changes (both staged and unstaged, plus untracked)
 	var changes []FileChange
 

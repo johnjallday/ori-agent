@@ -431,7 +431,6 @@ func isBetterMatch(candidate, best *routedAgentMatch, current string) bool {
 
 func scoreAgentForIntent(name, current string, ag *resolvedRouteAgent, intent homeAssistantIntent, prompt string) *routedAgentMatch {
 	summary := buildAgentSummary(name, ag)
-	plugins := extractNormalizedPluginNames(ag)
 	mcpServers := extractNormalizedMCPServerNames(ag)
 	lowerName := normalizeRouteToken(name)
 	promptTokens := tokenizePrompt(prompt)
@@ -458,13 +457,6 @@ func scoreAgentForIntent(name, current string, ag *resolvedRouteAgent, intent ho
 	for _, preferredPlugin := range intent.PreferredPlugins {
 		if preferredPlugin == "" {
 			continue
-		}
-		for _, plugin := range plugins {
-			if strings.Contains(plugin, preferredPlugin) {
-				score += 3
-				reasons = appendReason(reasons, "has plugin support for "+preferredPlugin)
-				break
-			}
 		}
 		for _, server := range mcpServers {
 			if strings.Contains(server, preferredPlugin) {
@@ -545,10 +537,6 @@ func buildAgentSummary(name string, ag *resolvedRouteAgent) string {
 		parts = append(parts, normalizeRouteToken(strings.Join(ag.Capabilities, " ")))
 	}
 
-	pluginNames := extractNormalizedPluginNames(ag)
-	if len(pluginNames) > 0 {
-		parts = append(parts, strings.Join(pluginNames, " "))
-	}
 	mcpServerNames := extractNormalizedMCPServerNames(ag)
 	if len(mcpServerNames) > 0 {
 		parts = append(parts, strings.Join(mcpServerNames, " "))
@@ -708,10 +696,6 @@ func signalTokenOverlap(left, right []string) int {
 	}
 
 	return overlap
-}
-
-func extractNormalizedPluginNames(ag *resolvedRouteAgent) []string {
-	return []string{}
 }
 
 func extractNormalizedMCPServerNames(ag *resolvedRouteAgent) []string {

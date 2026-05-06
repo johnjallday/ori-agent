@@ -196,10 +196,7 @@ func (r *DefaultCodexReader) parseSkillFile(path string) (ExternalAgent, error) 
 		return ExternalAgent{}, err
 	}
 
-	frontmatter, body, err := parseFrontmatter(string(content))
-	if err != nil {
-		return ExternalAgent{}, err
-	}
+	frontmatter, body := parseFrontmatter(string(content))
 
 	// Use manual parsing like Claude agents to handle special characters
 	fm := parseSkillFrontmatterManual(frontmatter)

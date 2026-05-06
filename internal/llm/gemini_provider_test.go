@@ -178,10 +178,7 @@ func TestGeminiProviderBuildRequest(t *testing.T) {
 		},
 	}
 
-	built, err := provider.buildRequest(req)
-	if err != nil {
-		t.Fatalf("buildRequest failed: %v", err)
-	}
+	built := provider.buildRequest(req)
 
 	if built.SystemInstruction == nil || len(built.SystemInstruction.Parts) < 2 {
 		t.Fatal("Expected system instruction to include system prompt and system message")
@@ -259,10 +256,7 @@ func TestGeminiProviderBuildRequest_SanitizesToolSchemaForGemini(t *testing.T) {
 		},
 	}
 
-	built, err := provider.buildRequest(req)
-	if err != nil {
-		t.Fatalf("buildRequest failed: %v", err)
-	}
+	built := provider.buildRequest(req)
 
 	if len(built.Tools) != 1 || len(built.Tools[0].FunctionDeclarations) != 1 {
 		t.Fatalf("expected one function declaration, got %#v", built.Tools)

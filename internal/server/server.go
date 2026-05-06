@@ -310,25 +310,25 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 
 	// Check if this is a canvas route: /workspaces/{id}/canvas
 	if len(parts) == 2 && parts[1] == "canvas" {
-		s.serveWorkspaceCanvas(w, r, workspaceID)
+		s.serveWorkspaceCanvas(w, workspaceID)
 		return
 	}
 
 	// Check if this is a diagnostics route: /workspaces/{id}/diagnostics
 	if len(parts) == 2 && parts[1] == "diagnostics" {
-		s.serveWorkspaceDiagnostics(w, r, workspaceID)
+		s.serveWorkspaceDiagnostics(w, workspaceID)
 		return
 	}
 
 	// Check if this is a task route: /workspaces/{id}/task/{taskId}
 	if len(parts) == 3 && parts[1] == "task" && strings.TrimSpace(parts[2]) != "" {
-		s.serveWorkspaceTask(w, r, workspaceID, parts[2])
+		s.serveWorkspaceTask(w, workspaceID, parts[2])
 		return
 	}
 
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
-		s.serveWorkspaceDetail(w, r, workspaceID)
+		s.serveWorkspaceDetail(w, workspaceID)
 		return
 	}
 
@@ -336,7 +336,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
@@ -345,7 +345,7 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, wo
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
-func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Diagnostics - Ori Agent"
 	data.BrandText = "Ori Agent"
@@ -354,7 +354,7 @@ func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, r *http.Reques
 	s.renderAndWritePage(w, "workspace-diagnostics", data)
 }
 
-func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Canvas - Ori Agent"
 	data.BrandText = "Ori Agent"
@@ -363,7 +363,7 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 
-func (s *Server) serveWorkspaceTask(w http.ResponseWriter, r *http.Request, workspaceID, taskID string) {
+func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, taskID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Task - Ori Agent"
 	data.BrandText = "Ori Agent"

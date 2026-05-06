@@ -317,7 +317,7 @@ func (h *Handler) tryHandleUtilityDirect(
 		h.utilityTelemetry.RecordRouteDecision(string(decision.Mode), decision.Reason)
 	}
 
-	tool, found := h.findTool(ag, agentName, decision.ToolName)
+	tool, found := h.findTool(ag, decision.ToolName)
 	if !found || tool == nil {
 		if strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
 			responseText := "I couldn't find an available browser tool for this agent. Attach/configure Playwright (or another browser MCP) and try again."
@@ -469,7 +469,7 @@ func (h *Handler) tryHandleUtilityDirect(
 
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
-func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (toolapi.Tool, bool) {
+func (h *Handler) findTool(ag *resolvedChatAgent, toolName string) (toolapi.Tool, bool) {
 	if ag == nil || ag.Agent == nil || !isUtilityToolAllowedForAgent(ag.Agent, toolName) {
 		return nil, false
 	}
@@ -1110,7 +1110,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		result := h.executeDirectTool(r.Context(), ag, current, cmd)
+		result := h.executeDirectTool(r.Context(), ag, cmd)
 
 		// Add to conversation history for context
 		ag.Messages = append(ag.Messages, openai.UserMessage(q))
@@ -1219,10 +1219,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	preflight, updatedAgent := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery, normalizedRouteContext)
-	if updatedAgent != nil {
-		ag = updatedAgent
-	}
+	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery, normalizedRouteContext)
 	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
 		payload := attachRouteMetadata(map[string]any{
 			"response": preflight.userMessage,

@@ -28,7 +28,7 @@ func newHomeRouteTestStore(t *testing.T) store.Store {
 	return st
 }
 
-func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store.CreateAgentConfig, status types.AgentStatus, description string, tags []string, plugins []string) {
+func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store.CreateAgentConfig, description string, tags []string, plugins []string) {
 	t.Helper()
 
 	if cfg == nil {
@@ -43,7 +43,7 @@ func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store
 		t.Fatalf("agent %q not found after creation", name)
 	}
 
-	ag.Status = status
+	ag.Status = types.AgentStatusActive
 	if ag.Metadata == nil {
 		ag.Metadata = &types.AgentMetadata{}
 	}
@@ -140,9 +140,9 @@ func TestHomeAssistantRouteHandler_TravelMatch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"},
 		"Plans multi-day travel itineraries", []string{"travel", "itinerary"}, []string{"weather-tool", "web-search"})
-	addHomeRouteTestAgent(t, st, "Code Helper", &store.CreateAgentConfig{Type: "general"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Code Helper", &store.CreateAgentConfig{Type: "general"},
 		"Helps with code review", []string{"coding"}, []string{"git"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Plan my 3 day trip in LA"})
@@ -179,7 +179,7 @@ func TestHomeAssistantRouteHandler_NoMatchRequiresCreation(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Code Assistant", &store.CreateAgentConfig{Type: "general"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Code Assistant", &store.CreateAgentConfig{Type: "general"},
 		"Helps with code and tests", []string{"coding"}, []string{"git", "filesystem"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Plan my 3 day trip in LA"})
@@ -213,7 +213,7 @@ func TestHomeAssistantRouteHandler_EmailMatch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Inbox Triage", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Inbox Triage", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Summarizes unread emails and drafts replies", []string{"email", "inbox"}, []string{"gmail-reader"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Check my email and summarize unread messages"})
@@ -244,7 +244,7 @@ func TestHomeAssistantRouteHandler_EmailIntentPreferredOverAppLaunch(t *testing.
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Inbox Triage", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Inbox Triage", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Summarizes unread emails and drafts replies", []string{"email", "inbox"}, []string{"gmail-reader"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open my email inbox"})
@@ -266,7 +266,7 @@ func TestHomeAssistantRouteHandler_EmailMatch_UsesMCPServers(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Task Runner", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Task Runner", &store.CreateAgentConfig{Type: "tool-calling"},
 		"General assistant for home tasks", []string{"automation"}, []string{})
 	setHomeRouteRuntimeMCPServers(handler, st, "Task Runner", []string{"gmail"})
 
@@ -311,7 +311,7 @@ func TestHomeAssistantRouteHandler_CalendarMatch_UsesIntentVariant(t *testing.T)
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Calendar Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Calendar Assistant", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Checks calendar events and schedule availability", []string{"calendar", "schedule"}, nil)
 	setHomeRouteRuntimeMCPServers(handler, st, "Calendar Assistant", []string{"google-calendar"})
 
@@ -410,7 +410,7 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_NoLowSignalReuse(t *testing.T) 
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"},
 		"Plans multi-day travel itineraries", []string{"travel", "itinerary"}, []string{"weather-tool", "web-search"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open reaper"})
@@ -444,9 +444,9 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ContextualMatch(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Opens desktop applications like reaper and finder", []string{"desktop", "automation"}, []string{"os-shell"})
-	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Travel Planner", &store.CreateAgentConfig{Type: "research"},
 		"Plans travel itineraries", []string{"travel"}, []string{"weather-tool"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open reaper"})
@@ -477,7 +477,7 @@ func TestHomeAssistantRouteHandler_AppLaunchMatch_UsesRoutingProfile(t *testing.
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Handles audio production workflows", []string{"audio"}, []string{})
 	setHomeRouteTestAgentRoutingProfile(t, st, "REAPER Assistant", &types.AgentRoutingProfile{
 		MatchPhrases:    []string{"open my latest reaper project"},
@@ -518,7 +518,7 @@ func TestHomeAssistantRouteHandler_WorkspaceNotePrompt_NotClassifiedAsAppLaunch(
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Opens desktop applications like reaper and finder", []string{"desktop", "automation"}, []string{"os-shell"})
 
 	rr := postRouteRequest(t, handler, map[string]any{
@@ -552,7 +552,7 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_UsesRoutingProfileExamples(t *t
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Handles DAW automation", []string{"audio"}, []string{})
 	setHomeRouteTestAgentRoutingProfile(t, st, "REAPER Assistant", &types.AgentRoutingProfile{
 		ExampleRequests: []string{
@@ -595,7 +595,7 @@ func TestHomeAssistantRouteHandler_OpenDomain_NotClassifiedAsAppLaunch(t *testin
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"},
 		"Opens desktop applications like reaper and finder", []string{"desktop", "automation"}, []string{"os-shell"})
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open instagram.com"})
@@ -692,7 +692,7 @@ func TestHomeAssistantRouteHandler_WorkspaceContext_ForcesWorkspaceMode(t *testi
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	addHomeRouteTestAgent(t, st, "Task Assistant", &store.CreateAgentConfig{Type: "general"}, types.AgentStatusActive,
+	addHomeRouteTestAgent(t, st, "Task Assistant", &store.CreateAgentConfig{Type: "general"},
 		"General purpose task helper", []string{"tasks"}, []string{})
 
 	rr := postRouteRequest(t, handler, map[string]interface{}{

@@ -12,18 +12,18 @@ import (
 func (h *Handler) Web3WalletHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.getWeb3Wallet(w, r)
+		h.getWeb3Wallet(w)
 	case http.MethodPost:
 		h.saveWeb3Wallet(w, r)
 	case http.MethodDelete:
-		h.disconnectWeb3Wallet(w, r)
+		h.disconnectWeb3Wallet(w)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
 // getWeb3Wallet returns the current Web3 wallet connection info
-func (h *Handler) getWeb3Wallet(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) getWeb3Wallet(w http.ResponseWriter) {
 	wallet := h.configManager.GetWeb3Wallet()
 
 	if wallet == nil {
@@ -112,7 +112,7 @@ func (h *Handler) saveWeb3Wallet(w http.ResponseWriter, r *http.Request) {
 }
 
 // disconnectWeb3Wallet removes the Web3 wallet connection
-func (h *Handler) disconnectWeb3Wallet(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) disconnectWeb3Wallet(w http.ResponseWriter) {
 	h.configManager.ClearWeb3Wallet()
 
 	// Persist to disk

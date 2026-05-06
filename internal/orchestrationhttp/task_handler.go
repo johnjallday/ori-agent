@@ -754,8 +754,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					} else {
 						logger.Debug("Reassigning task to (no node id)", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 					}
-					_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
-					if err != nil {
+					if err := th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID); err != nil {
 						logger.Error("", logger.Fields{"err": err})
 						orihttp.InternalError(w, err.Error())
 						return
@@ -818,8 +817,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		}
 
 		// Update task assignment using helper
-		_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
-		if err != nil {
+		if err := th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID); err != nil {
 			logger.Error("", logger.Fields{"err": err})
 			orihttp.NotFound(w, "Task not found in workspace")
 			return

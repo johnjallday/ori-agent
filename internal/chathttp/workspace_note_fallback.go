@@ -90,7 +90,7 @@ func (h *Handler) maybeHandleWorkspaceSaveNoteWithoutModel(
 		return true
 	}
 
-	result := h.executeDirectTool(baseCtx, ag, agentName, &DirectToolCommand{
+	result := h.executeDirectTool(baseCtx, ag, &DirectToolCommand{
 		ToolName: "workspace_save_note",
 		Args:     string(args),
 	})

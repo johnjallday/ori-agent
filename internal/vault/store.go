@@ -146,7 +146,7 @@ func (s *Store) SetManagedVaultRoot(root string) error {
 	return nil
 }
 
-func (s *Store) vaultFileNameForPath(vaultID string, filePath string) string {
+func (s *Store) vaultFileNameForPath(filePath string) string {
 	filePath = strings.TrimSpace(filePath)
 	if filePath != "" {
 		if fileName := strings.TrimSpace(filepath.Base(filePath)); fileName != "" && fileName != "." {
@@ -172,7 +172,7 @@ func (s *Store) resolveRelinkTargetAbsolutePath(vaultID string, currentFilePath 
 			filepath.Join(directory, defaultVaultPackageFilePath(vaultID)),
 		}
 
-		legacyFileName := s.vaultFileNameForPath(vaultID, currentFilePath)
+		legacyFileName := s.vaultFileNameForPath(currentFilePath)
 		if legacyFileName != "" {
 			legacyCandidate := filepath.Join(directory, legacyFileName)
 			alreadyIncluded := false
@@ -372,24 +372,24 @@ func (s *Store) getVaultCatalog(ctx context.Context, vaultID string) (Vault, err
 	return item, nil
 }
 
-func (s *Store) openVaultContentDB(ctx context.Context, vaultID string) (Vault, *sql.DB, error) {
+func (s *Store) openVaultContentDB(ctx context.Context, vaultID string) (*sql.DB, error) {
 	selectedVault, err := s.getVaultCatalog(ctx, vaultID)
 	if err != nil {
-		return Vault{}, nil, err
+		return nil, err
 	}
 	if strings.TrimSpace(selectedVault.FilePath) == "" {
-		return Vault{}, nil, ErrVaultKeyUnavailable
+		return nil, ErrVaultKeyUnavailable
 	}
 
 	vaultDB, err := openExistingVaultFile(ctx, s.resolveVaultFileAbsolutePath(selectedVault.FilePath))
 	if err != nil {
-		return Vault{}, nil, fmt.Errorf("open vault content database: %w", err)
+		return nil, fmt.Errorf("open vault content database: %w", err)
 	}
 	if _, err := loadVaultFileMetadata(ctx, vaultDB, selectedVault.ID); err != nil {
 		_ = vaultDB.Close()
-		return Vault{}, nil, err
+		return nil, err
 	}
-	return selectedVault, vaultDB, nil
+	return vaultDB, nil
 }
 
 func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
@@ -926,7 +926,7 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 	if _, err := s.getVault(ctx, filter.VaultID); err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, filter.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, filter.VaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -1050,7 +1050,7 @@ func (s *Store) getRecord(ctx context.Context, id string, access AccessContext, 
 	if err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -1122,7 +1122,7 @@ func (s *Store) CreateRecord(ctx context.Context, record *Record, access AccessC
 	if _, err := s.getVault(ctx, record.VaultID); err != nil {
 		return err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, record.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, record.VaultID)
 	if err != nil {
 		return err
 	}
@@ -1212,7 +1212,7 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 	if err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,7 +1354,7 @@ func (s *Store) DeleteRecord(ctx context.Context, id string, access AccessContex
 	if err != nil {
 		return err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
 	if err != nil {
 		return err
 	}
@@ -1415,7 +1415,7 @@ func (s *Store) ListGrants(ctx context.Context, vaultID string, workspaceID stri
 	if _, err := s.getVault(ctx, vaultID); err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -1481,7 +1481,7 @@ func (s *Store) CreateGrant(ctx context.Context, grant *Grant) error {
 	if _, err := s.getVault(ctx, grant.VaultID); err != nil {
 		return err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, grant.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, grant.VaultID)
 	if err != nil {
 		return err
 	}
@@ -1866,7 +1866,7 @@ func (s *Store) recordCount(ctx context.Context, vaultID string) (int, error) {
 	if vaultID == "" {
 		return 0, ErrVaultRequired
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return 0, err
 	}
@@ -1886,7 +1886,7 @@ func (s *Store) hasMatchingRecords(ctx context.Context, filter RecordFilter) (bo
 	if filter.Type == "*" {
 		filter.Type = ""
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, filter.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, filter.VaultID)
 	if err != nil {
 		return false, err
 	}
@@ -2072,7 +2072,7 @@ func (s *Store) authorizeAccess(ctx context.Context, access AccessContext, vault
 }
 
 func (s *Store) hasAnyGrant(ctx context.Context, vaultID string, access AccessContext) bool {
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return false
 	}
@@ -2092,7 +2092,7 @@ func hasAnyGrantWithExecutor(ctx context.Context, executor attachmentSQLExecutor
 }
 
 func (s *Store) hasGrant(ctx context.Context, vaultID string, access AccessContext, workspaceID string, capability Capability, recordType string) bool {
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return false
 	}
@@ -2145,7 +2145,7 @@ func (s *Store) writeAuditBestEffort(ctx context.Context, event AuditEvent) {
 		return
 	}
 
-	_, vaultDB, err := s.openVaultContentDB(ctx, event.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, event.VaultID)
 	if err != nil {
 		logger.Warn("Failed to open vault audit database", logger.Fields{"vault_id": event.VaultID, "error": err})
 		return

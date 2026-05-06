@@ -104,7 +104,7 @@ func (th *TaskHandler) executeParentTaskGraph(ws *workspace.Workspace, subtasks 
 			continue
 		}
 
-		result, err := th.executeTaskWithDependencies(ws, sinkTask, true)
+		result, err := th.executeTaskWithDependencies(ws, sinkTask)
 		if err != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(err, &blockedErr) {

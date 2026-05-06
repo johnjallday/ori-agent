@@ -66,7 +66,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
-	binding, _, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, binding)
+	binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, binding)
 	if err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
@@ -200,7 +200,7 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if req.Config != nil {
 		binding.Config = req.Config
 	}
-	*binding, _, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, *binding)
+	*binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, *binding)
 	if err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return

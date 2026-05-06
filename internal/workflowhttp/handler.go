@@ -58,7 +58,7 @@ func (h *Handler) WorkflowsHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		h.handleListWorkflows(w, r)
+		h.handleListWorkflows(w)
 	case http.MethodPost:
 		h.handleCreateWorkflow(w, r)
 	default:
@@ -103,9 +103,9 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		h.handleGetWorkflow(w, r, workflowID)
+		h.handleGetWorkflow(w, workflowID)
 	case http.MethodDelete:
-		h.handleDeleteWorkflow(w, r, workflowID)
+		h.handleDeleteWorkflow(w, workflowID)
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
@@ -113,7 +113,7 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 
 // handleListWorkflows returns all custom workflows
 
-func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleListWorkflows(w http.ResponseWriter) {
 	if h.workflowManager == nil {
 		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
@@ -185,7 +185,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetWorkflow retrieves a specific workflow
-func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
+func (h *Handler) handleGetWorkflow(w http.ResponseWriter, workflowID string) {
 	if h.workflowManager == nil {
 		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
@@ -203,7 +203,7 @@ func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, work
 }
 
 // handleDeleteWorkflow deletes a custom workflow
-func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
+func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, workflowID string) {
 	if h.workflowManager == nil {
 		orihttp.InternalError(w, "Workflow manager not initialized")
 		return

@@ -100,10 +100,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}
 
-	requestBody, err := p.buildRequest(req)
-	if err != nil {
-		return nil, err
-	}
+	requestBody := p.buildRequest(req)
 
 	endpoint := fmt.Sprintf("%s/%s:generateContent", p.baseURL, geminiModelPath(req.Model))
 	respBody, err := p.doRequest(ctx, endpoint, requestBody)
@@ -124,10 +121,7 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}
 
-	requestBody, err := p.buildRequest(req)
-	if err != nil {
-		return nil, err
-	}
+	requestBody := p.buildRequest(req)
 
 	endpoint := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse", p.baseURL, geminiModelPath(req.Model))
 	httpReq, err := p.newRequest(ctx, endpoint, requestBody)
@@ -156,7 +150,7 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 	}, nil
 }
 
-func (p *GeminiProvider) buildRequest(req ChatRequest) (*geminiGenerateContentRequest, error) {
+func (p *GeminiProvider) buildRequest(req ChatRequest) *geminiGenerateContentRequest {
 	var contents []geminiContent
 	var systemParts []geminiPart
 
@@ -263,7 +257,7 @@ func (p *GeminiProvider) buildRequest(req ChatRequest) (*geminiGenerateContentRe
 		GenerationConfig:  genConfig,
 	}
 
-	return requestBody, nil
+	return requestBody
 }
 
 func (p *GeminiProvider) doRequest(ctx context.Context, endpoint string, body *geminiGenerateContentRequest) (*geminiGenerateContentResponse, error) {

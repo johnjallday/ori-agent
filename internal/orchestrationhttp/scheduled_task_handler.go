@@ -652,8 +652,7 @@ func (th *TaskHandler) getTaskWithWorkspace(taskID string) (*workspace.Task, *wo
 }
 
 // updateTaskAssignment updates the assignment (To and AssignedNodeID) of a task within a workspace
-// Returns the index of the updated task, or -1 if not found
-func (th *TaskHandler) updateTaskAssignment(ws *workspace.Workspace, taskID string, newTo *string, assignedNodeID *string) (int, error) {
+func (th *TaskHandler) updateTaskAssignment(ws *workspace.Workspace, taskID string, newTo *string, assignedNodeID *string) error {
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			if newTo != nil {
@@ -676,9 +675,9 @@ func (th *TaskHandler) updateTaskAssignment(ws *workspace.Workspace, taskID stri
 				ws.Tasks[i].AssignedNodeID = ""
 			}
 
-			return i, nil
+			return nil
 		}
 	}
 
-	return -1, fmt.Errorf("task not found in workspace")
+	return fmt.Errorf("task not found in workspace")
 }

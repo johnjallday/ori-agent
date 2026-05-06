@@ -54,22 +54,22 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 	ag *resolvedChatAgent,
 	prompt string,
 	routeCtx normalizedChatRouteContext,
-) (*mcpPreflightResult, *resolvedChatAgent) {
+) *mcpPreflightResult {
 	if h == nil || ag == nil || h.store == nil || h.mcpConfigManager == nil || h.mcpRegistry == nil {
-		return nil, nil
+		return nil
 	}
 	if !isSystemAssistantForPreflight(agentName) {
-		return nil, nil
+		return nil
 	}
 
 	requirement := detectMCPAutoRequirement(prompt)
 	if requirement == nil {
-		return nil, nil
+		return nil
 	}
 	if hasAnyMCPServer(ag.MCPServers, requirement.candidateServers) {
 		return &mcpPreflightResult{
 			requirementLabel: requirement.label,
-		}, nil
+		}
 	}
 
 	workspaceID := strings.TrimSpace(routeCtx.WorkspaceID)
@@ -80,20 +80,20 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 			return &mcpPreflightResult{
 				requirementLabel: requirement.label,
 				userMessage:      buildMissingMCPMessage(requirement),
-			}, nil
+			}
 		}
 		return &mcpPreflightResult{
 			requirementLabel:     requirement.label,
 			userMessage:          buildMissingMCPMessage(requirement),
 			dependencyResolution: buildMissingMCPDependencyResolution(requirement, workspaceID),
-		}, nil
+		}
 	}
 	if workspaceID != "" && h.isDependencyPromptSuppressed(workspaceID, dependencyTypeWorkspaceMCP, serverName) {
 		return &mcpPreflightResult{
 			requirementLabel: requirement.label,
 			serverName:       serverName,
 			userMessage:      buildWorkspaceEnableMCPMessage(requirement, serverName),
-		}, nil
+		}
 	}
 
 	if workspaceID == "" || h.workspaceStore == nil {
@@ -102,7 +102,7 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 			serverName:           serverName,
 			userMessage:          buildWorkspaceRequiredMCPMessage(requirement),
 			dependencyResolution: buildWorkspaceRequiredDependencyResolution(requirement, serverName),
-		}, nil
+		}
 	}
 
 	return &mcpPreflightResult{
@@ -110,11 +110,10 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 		serverName:       serverName,
 		userMessage:      buildWorkspaceEnableMCPMessage(requirement, serverName),
 		dependencyResolution: buildWorkspaceEnableMCPDependencyResolution(
-			requirement,
 			workspaceID,
 			serverName,
 		),
-	}, nil
+	}
 }
 
 func isSystemAssistantForPreflight(agentName string) bool {
@@ -414,7 +413,7 @@ func buildWorkspaceRequiredDependencyResolution(requirement *mcpAutoRequirement,
 	}
 }
 
-func buildWorkspaceEnableMCPDependencyResolution(requirement *mcpAutoRequirement, workspaceID, serverName string) *dependencyResolution {
+func buildWorkspaceEnableMCPDependencyResolution(workspaceID, serverName string) *dependencyResolution {
 	serverName = strings.TrimSpace(serverName)
 	summary := fmt.Sprintf("Enable the %s MCP connector in this workspace to continue automatically.", serverName)
 	preferenceKey := workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, serverName)

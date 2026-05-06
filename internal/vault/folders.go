@@ -161,7 +161,7 @@ func (s *Store) getFolderByPath(ctx context.Context, vaultID string, path string
 	if path == "" {
 		return nil, ErrFolderPathInvalid
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (s *Store) ListFolders(ctx context.Context, vaultID string) ([]Folder, erro
 	if _, err := s.getVault(ctx, vaultID); err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (s *Store) CreateFolder(ctx context.Context, folder *Folder) (*Folder, erro
 	if _, err := s.getVault(ctx, folder.VaultID); err != nil {
 		return nil, err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, folder.VaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, folder.VaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string, r
 	if _, err := s.getVault(ctx, vaultID); err != nil {
 		return err
 	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	vaultDB, err := s.openVaultContentDB(ctx, vaultID)
 	if err != nil {
 		return err
 	}

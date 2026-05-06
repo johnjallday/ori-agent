@@ -23,7 +23,7 @@ func (b *ServerBuilder) initializeMCPRegistry() {
 }
 
 // initializeMCP initializes the MCP system (registry, config manager, servers).
-func (b *ServerBuilder) initializeMCP() error {
+func (b *ServerBuilder) initializeMCP() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	b.mcpRegistry = mcp.NewRegistry()
@@ -52,7 +52,7 @@ func (b *ServerBuilder) initializeMCP() error {
 		if verbose {
 			logger.Error("failed to load MCP global config", logger.Fields{"err": err})
 		}
-		return nil // Non-critical
+		return // Non-critical
 	}
 
 	for _, serverConfig := range mcpGlobalConfig.Servers {
@@ -81,8 +81,6 @@ func (b *ServerBuilder) initializeMCP() error {
 	if verbose {
 		logger.Debug("MCP system initialized", logger.Fields{"server_count": len(mcpGlobalConfig.Servers)})
 	}
-
-	return nil
 }
 
 func externalMCPImportEnabled() bool {

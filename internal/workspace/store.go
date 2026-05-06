@@ -212,7 +212,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 
 	// Write workspace.json inside the folder
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -291,7 +291,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -387,7 +387,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
-	if err := atomicWriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -424,7 +424,8 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 
 // atomicWriteFile writes data to path via a temp file + rename so a crash
 // mid-write cannot leave a truncated/corrupt file behind.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+func atomicWriteFile(path string, data []byte) error {
+	const perm os.FileMode = 0644
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
 	if err != nil {
@@ -1117,7 +1118,7 @@ func (s *FileStore) persistWorkspaceLocked(ws *Workspace) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(s.resolveFolder(relPath), WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 	return nil
@@ -1160,7 +1161,7 @@ func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
 		logger.Error("failed to serialize migrated workspace", logger.Fields{"err": err, "workspace_id": ws.ID})
 		return
 	}
-	if err := atomicWriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data); err != nil {
 		logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 		return
 	}
