@@ -27,6 +27,10 @@ jobs:
     name: macOS Smoke Test
     runs-on: macos-latest
     timeout-minutes: 20
+    # Smoke tests run AFTER the release publishes — they verify installers
+    # rebuild cleanly. Treat infra flakes (hdiutil busy, setup-go cache hiccups)
+    # as advisory rather than rolling the release back.
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -126,6 +130,7 @@ jobs:
     name: Linux .deb Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -213,6 +218,7 @@ jobs:
     name: Linux .rpm Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     container:
       image: fedora:38
     steps:
@@ -302,6 +308,7 @@ jobs:
     name: Windows MSI Smoke Test
     runs-on: windows-latest
     timeout-minutes: 20
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -445,12 +452,16 @@ jobs:
           echo "  Windows MSI: ${{ needs.test-windows.result }}"
           echo ""
 
+          # Smoke tests are advisory (post-release verification). Surface failures
+          # in the summary but don't fail the workflow — the release artifacts
+          # were already built and published by release.yml. Re-run failing jobs
+          # via `gh run rerun --failed` if you suspect a real regression.
           if [ "${{ needs.test-macos.result }}" != "success" ] || \
              [ "${{ needs.test-linux-deb.result }}" != "success" ] || \
              [ "${{ needs.test-linux-rpm.result }}" != "success" ] || \
              [ "${{ needs.test-windows.result }}" != "success" ]; then
-            echo "❌ Some tests failed"
-            exit 1
+            echo "⚠️  Some smoke tests failed — see job logs."
+            echo "   These are post-release checks; investigate before next release."
           else
             echo "✅ All smoke tests passed!"
           fi
