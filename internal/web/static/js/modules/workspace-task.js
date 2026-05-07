@@ -1641,6 +1641,26 @@ export class WorkspaceTaskPage {
       .filter(Boolean);
   }
 
+  // getDependentTasks: reverse of getInputTasks. Returns the set of tasks
+  // whose input_task_ids reference this task — i.e. tasks downstream that
+  // consume this task's output. The relationships card uses this to show the
+  // user "what depends on this," which previously required clicking through
+  // every other task to discover the back-edge.
+  //
+  // Filters out the current task itself: legacy data may carry a self-input
+  // edge (the task graph validator now rejects this on AddTask, but existing
+  // stored tasks may still have it). Showing self-references would display
+  // the current task in its own "Used By" list and is never useful.
+  getDependentTasks() {
+    const myId = String(this.task?.id || '').trim();
+    if (!myId) return [];
+    return this.tasks.filter((item) => {
+      if (String(item?.id || '').trim() === myId) return false;
+      const inputs = Array.isArray(item?.input_task_ids) ? item.input_task_ids : [];
+      return inputs.some((id) => String(id || '').trim() === myId);
+    });
+  }
+
   render() {
     const statusInfo = this.getTaskStatusPresentation();
     this.currentBlockedTask = statusInfo.isBlocked ? this.buildBlockedTaskState() : null;
@@ -2165,21 +2185,42 @@ export class WorkspaceTaskPage {
   renderRelationships() {
     if (!this.elements.relationships || !this.elements.relationshipsCard) return;
 
+    // Three groups make the task's place in the dependency graph visible at
+    // a glance: parent (containing workflow), upstream input producers, and
+    // downstream consumers. Direction is conveyed via the kicker label and
+    // arrow glyph on each group; status is conveyed via a colored dot in
+    // each link card. The deep subtask tree continues to live in the
+    // workflow card below — keeping that separation lets the relationships
+    // card stay glanceable instead of becoming a graph viewer.
     const parentTask = this.getParentTask();
     const inputTasks = this.getInputTasks();
+    const dependentTasks = this.getDependentTasks();
     const groups = [];
 
     if (parentTask) {
       groups.push({
         title: 'Parent Task',
+        arrow: '↑',
+        direction: 'up',
         tasks: [parentTask]
       });
     }
 
     if (inputTasks.length > 0) {
       groups.push({
-        title: 'Input Tasks',
-        tasks: inputTasks
+        title: 'Receives Input From',
+        arrow: '←',
+        direction: 'in',
+        tasks: this.sortWorkflowTasks(inputTasks)
+      });
+    }
+
+    if (dependentTasks.length > 0) {
+      groups.push({
+        title: 'Used By',
+        arrow: '→',
+        direction: 'out',
+        tasks: this.sortWorkflowTasks(dependentTasks)
       });
     }
 
@@ -2191,15 +2232,25 @@ export class WorkspaceTaskPage {
 
     this.elements.relationshipsCard.hidden = false;
     this.elements.relationships.innerHTML = groups.map((group) => `
-      <section class="workspace-task-relationship-group">
-        <div class="workspace-task-relationship-title">${this.escapeHtml(group.title)}</div>
+      <section class="workspace-task-relationship-group" data-direction="${this.escapeHtml(group.direction)}">
+        <div class="workspace-task-relationship-title">
+          <span class="workspace-task-relationship-arrow" aria-hidden="true">${this.escapeHtml(group.arrow)}</span>
+          ${this.escapeHtml(group.title)}
+        </div>
         <div class="workspace-task-related-links">
-          ${group.tasks.map((task) => `
-            <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link">
-              <span class="workspace-task-related-link-title">${this.escapeHtml(this.getTaskDisplayLabel(task))}</span>
-              <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} • ${this.escapeHtml(String(task.to || 'Unassigned').trim() || 'Unassigned')}</span>
+          ${group.tasks.map((task) => {
+            const statusClass = getStatusClass(task?.status);
+            const assignee = String(task?.to || 'Unassigned').trim() || 'Unassigned';
+            return `
+            <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link" data-status="${this.escapeHtml(statusClass)}">
+              <span class="workspace-task-related-link-title">
+                <span class="workspace-task-related-link-dot" data-state="${this.escapeHtml(statusClass)}" aria-hidden="true"></span>
+                <span>${this.escapeHtml(this.getTaskDisplayLabel(task))}</span>
+              </span>
+              <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} · ${this.escapeHtml(assignee)}</span>
             </a>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </section>
     `).join('');
