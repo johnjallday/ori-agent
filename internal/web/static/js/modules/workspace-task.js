@@ -1150,20 +1150,60 @@ export class WorkspaceTaskPage {
 
     const payload = event?.data?.data || event?.data || {};
     const eventTaskId = String(payload?.task_id || payload?.id || payload?.task?.id || '').trim();
-    if (eventTaskId && eventTaskId !== this.taskId) {
+
+    // Was previously a hard early-return for sibling events. That broke the
+    // relationships card (parent / inputs / "Used By"), which depends on the
+    // graph neighbors' current status — when an upstream task completed, this
+    // page never knew. Now we still schedule a refresh; render() will detect
+    // via per-section fingerprints that nothing about THIS task changed and
+    // skip the heavy sub-renders.
+    const isSelfEvent = !eventTaskId || eventTaskId === this.taskId;
+    // Creation-style events affect the workspace's task graph (a new
+    // dependent could appear, a new subtask could be delegated). The new
+    // task is not yet in this.tasks so eventTaskIsNeighbor would return
+    // false; let these through unconditionally and rely on the render
+    // diff to no-op when they really are unrelated.
+    const isStructuralEvent = (
+      eventType === 'task.created' ||
+      eventType === 'task.delegated' ||
+      eventType === 'task.deleted' ||
+      eventType === 'task.assigned'
+    );
+    if (!isSelfEvent && !isStructuralEvent && !this.eventTaskIsNeighbor(eventTaskId)) {
       return;
     }
 
-    if (this.elements.root) {
-      this.elements.root.classList.remove('workspace-task-page-flash');
-      void this.elements.root.offsetWidth;
-      this.elements.root.classList.add('workspace-task-page-flash');
-    }
+    // Flash class previously fired on every task.* event to mask the
+    // layout thrash from a full re-render. With per-section selective
+    // rendering it's no longer needed for routine updates. We leave it
+    // unset here; significant lifecycle transitions surface on their own
+    // through the status pill / hero priority changes.
 
     window.clearTimeout(this.pendingRefreshTimer);
     this.pendingRefreshTimer = window.setTimeout(() => {
       this.loadData();
     }, 180);
+  }
+
+  // eventTaskIsNeighbor: true when the event refers to a task that this
+  // page's relationships or workflow card visualises (parent, an input
+  // producer, a downstream consumer, or a child). Lets us refresh on
+  // sibling events without re-rendering for every unrelated task.* event
+  // on the workspace.
+  eventTaskIsNeighbor(eventTaskId) {
+    const id = String(eventTaskId || '').trim();
+    if (!id) return false;
+    const t = this.task;
+    if (!t) return false;
+    if (String(t.parent_task_id || '').trim() === id) return true;
+    if (Array.isArray(t.input_task_ids) && t.input_task_ids.some((x) => String(x || '').trim() === id)) return true;
+    for (const sibling of this.tasks) {
+      if (!sibling || sibling.id === t.id) continue;
+      if (String(sibling.parent_task_id || '').trim() === t.id && sibling.id === id) return true;
+      const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
+      if (sibling.id === id && inputs.some((x) => String(x || '').trim() === t.id)) return true;
+    }
+    return false;
   }
 
   setState(state) {
@@ -1667,20 +1707,176 @@ export class WorkspaceTaskPage {
     this.taskAssistResponseExpanded = false;
     this.assistReviewMode = false;
 
-    this.renderHero(statusInfo);
-    this.renderHeroActions(statusInfo);
-    this.renderHeroPriority(statusInfo);
-    this.renderOverview();
-    this.renderSnapshot(statusInfo);
-    this.renderRelationships();
-    this.renderWorkflow();
-    this.renderOutput();
-    this.renderExecutionBreakdown();
-    this.renderExecutionTrace();
-    this.renderSchedule();
-    this.renderExecutionSteps();
-    this.renderContext();
-    this.renderBlockedState(statusInfo);
+    // Selective rendering: each sub-render is only invoked when its inputs
+    // actually changed since the previous render. The first render after
+    // page load (or after forceFullRender()) fills the cache and triggers
+    // every sub-render exactly once. Subsequent renders triggered by
+    // realtime events skip the sub-renders whose data is unchanged, which
+    // on a busy workspace is the difference between 14 sub-renders fired
+    // 12+ times per minute and just the 2-3 that actually need to update.
+    const inputs = this._renderInputs(statusInfo);
+    if (!this._renderCache) this._renderCache = {};
+    const cache = this._renderCache;
+
+    const dispatch = (key, fn) => {
+      if (cache[key] === inputs[key]) return;
+      cache[key] = inputs[key];
+      fn();
+    };
+
+    dispatch('hero', () => this.renderHero(statusInfo));
+    dispatch('heroActions', () => this.renderHeroActions(statusInfo));
+    dispatch('heroPriority', () => this.renderHeroPriority(statusInfo));
+    dispatch('overview', () => this.renderOverview());
+    dispatch('snapshot', () => this.renderSnapshot(statusInfo));
+    dispatch('relationships', () => this.renderRelationships());
+    dispatch('workflow', () => this.renderWorkflow());
+    dispatch('output', () => this.renderOutput());
+    dispatch('executionBreakdown', () => this.renderExecutionBreakdown());
+    dispatch('executionTrace', () => this.renderExecutionTrace());
+    dispatch('schedule', () => this.renderSchedule());
+    dispatch('executionSteps', () => this.renderExecutionSteps());
+    dispatch('context', () => this.renderContext());
+    dispatch('blockedState', () => this.renderBlockedState(statusInfo));
+  }
+
+  // forceFullRender clears the per-section input cache so the next render()
+  // invocation runs every sub-render unconditionally. Use after destructive
+  // actions (delete, structural reset) where the prior cache no longer
+  // describes the page.
+  forceFullRender() {
+    this._renderCache = null;
+  }
+
+  // _renderInputs builds a per-section input fingerprint. Each value must be
+  // a string (typically a JSON-stringified array of the data the section
+  // reads). Two renders with identical fingerprints are guaranteed to
+  // produce identical DOM, so the dispatcher in render() can safely skip.
+  //
+  // Adding a new sub-render requires:
+  //   1. Add an entry here returning a stable string of its inputs.
+  //   2. Add a dispatch() call in render().
+  //
+  // If a sub-render reads data NOT covered by its fingerprint, that data
+  // change won't trigger a re-render — keep this conservative.
+  _renderInputs(statusInfo) {
+    const t = this.task || {};
+    const blocked = this.currentBlockedTask;
+    const sigStatusInfo = JSON.stringify([
+      statusInfo?.label,
+      statusInfo?.className,
+      statusInfo?.isBlocked,
+      statusInfo?.waiting,
+    ]);
+    const sigBlocked = blocked
+      ? JSON.stringify([
+          blocked.reason,
+          blocked.reasonCode,
+          blocked.question,
+          blocked.response,
+          blocked.workflowStep?.id,
+          blocked.workflowStep?.stepType,
+          blocked.currentAgent,
+          blocked.suggestedActions,
+          blocked.selectedChoiceId,
+        ])
+      : 'null';
+    const sigGraphNeighbors = this._taskGraphNeighborsFingerprint();
+    const sigWorkflowSubtree = this._taskWorkflowSubtreeFingerprint();
+
+    return {
+      hero: JSON.stringify([
+        t.id, t.status, t.description, t.details, t.priority,
+        this.workspace?.name, sigStatusInfo,
+      ]),
+      heroActions: JSON.stringify([t.id, t.status, t.execution_mode, sigStatusInfo]),
+      heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
+      overview: JSON.stringify([
+        t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
+        t.template_ref, t.timeout, t.progress?.percentage, sigStatusInfo,
+      ]),
+      snapshot: JSON.stringify([
+        t.id, t.status, t.started_at, t.completed_at, t.error,
+        t.progress?.percentage, sigStatusInfo,
+      ]),
+      relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
+      workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
+      output: JSON.stringify([t.id, t.status, t.result, t.result_type, t.structured_result]),
+      executionBreakdown: JSON.stringify([
+        t.id, t.execution_steps, t.execution_history?.length, sigWorkflowSubtree,
+      ]),
+      executionTrace: JSON.stringify([t.id, t.execution_trace]),
+      schedule: JSON.stringify([
+        t.id, t.schedule, t.schedule_enabled, t.next_run, t.last_run,
+        t.execution_count, t.failure_count,
+      ]),
+      executionSteps: JSON.stringify([
+        t.id, t.execution_steps,
+        t.context?.execution_step_waiting,
+        t.context?.execution_step_waiting_index,
+        t.context?.execution_blocked_step_index,
+        t.context?.execution_blocked_step_title,
+      ]),
+      context: JSON.stringify([t.id, t.context || {}]),
+      blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
+    };
+  }
+
+  // _taskGraphNeighborsFingerprint captures the renderable state of every
+  // task that participates in this task's relationships card: parent, input
+  // producers, downstream consumers, and direct children. Sibling status
+  // changes flow through this fingerprint, so the relationships card stays
+  // fresh when an upstream task completes.
+  _taskGraphNeighborsFingerprint() {
+    const t = this.task;
+    if (!t) return '';
+    const neighborIds = new Set();
+    if (t.parent_task_id) neighborIds.add(String(t.parent_task_id).trim());
+    for (const id of (Array.isArray(t.input_task_ids) ? t.input_task_ids : [])) {
+      if (id) neighborIds.add(String(id).trim());
+    }
+    for (const sibling of this.tasks) {
+      if (!sibling || sibling.id === t.id) continue;
+      const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
+      if (inputs.some((id) => String(id || '').trim() === t.id)) {
+        neighborIds.add(String(sibling.id).trim());
+      }
+      if (String(sibling.parent_task_id || '').trim() === t.id) {
+        neighborIds.add(String(sibling.id).trim());
+      }
+    }
+    const sortedIds = [...neighborIds].sort();
+    const stamps = sortedIds.map((id) => {
+      const s = this.tasks.find((x) => x?.id === id);
+      if (!s) return [id, null];
+      return [id, s.status, s.description, s.to, s.subtask_index];
+    });
+    return JSON.stringify(stamps);
+  }
+
+  // _taskWorkflowSubtreeFingerprint captures the recursive child tree
+  // beneath this task. Workflow card sub-render is sensitive to any status
+  // or assignment change at any depth.
+  _taskWorkflowSubtreeFingerprint() {
+    const t = this.task;
+    if (!t) return '';
+    const visited = new Set();
+    const stamps = [];
+    const collect = (parentId) => {
+      if (!parentId || visited.has(parentId)) return;
+      visited.add(parentId);
+      for (const item of this.tasks) {
+        if (!item) continue;
+        if (String(item.parent_task_id || '').trim() !== parentId) continue;
+        stamps.push([
+          item.id, item.status, item.description, item.subtask_index,
+          item.to, item.result ? item.result.length : 0,
+        ]);
+        collect(String(item.id || '').trim());
+      }
+    };
+    collect(String(t.id || '').trim());
+    return JSON.stringify(stamps);
   }
 
   renderHero(statusInfo) {
