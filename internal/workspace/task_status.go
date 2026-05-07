@@ -34,6 +34,7 @@ var legalTaskTransitions = map[TaskStatus]map[TaskStatus]struct{}{
 	TaskStatusAssigned: {
 		TaskStatusPending:    {}, // unassign / hold
 		TaskStatusInProgress: {},
+		TaskStatusCompleted:  {}, // manual completion without execution
 		TaskStatusCancelled:  {},
 	},
 	TaskStatusInProgress: {

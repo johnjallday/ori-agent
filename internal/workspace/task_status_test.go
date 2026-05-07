@@ -50,7 +50,6 @@ func TestSetStatus_RejectsIllegalSkip(t *testing.T) {
 		{"Pending→Failed", TaskStatusPending, TaskStatusFailed},
 		{"Pending→Timeout", TaskStatusPending, TaskStatusTimeout},
 		{"Pending→WaitingForChoice", TaskStatusPending, TaskStatusWaitingForChoice},
-		{"Assigned→Completed", TaskStatusAssigned, TaskStatusCompleted},
 		{"Assigned→Failed", TaskStatusAssigned, TaskStatusFailed},
 		{"Completed→Failed", TaskStatusCompleted, TaskStatusFailed},
 		{"Failed→Completed", TaskStatusFailed, TaskStatusCompleted},
@@ -68,6 +67,18 @@ func TestSetStatus_RejectsIllegalSkip(t *testing.T) {
 				t.Fatalf("status changed despite error: from %q to %q", tc.from, tk.Status)
 			}
 		})
+	}
+}
+
+func TestSetStatus_AllowsManualAssignedCompletion(t *testing.T) {
+	t.Parallel()
+
+	tk := &Task{ID: "t", Status: TaskStatusAssigned}
+	if err := tk.SetStatus(TaskStatusCompleted); err != nil {
+		t.Fatalf("expected assigned task to be manually completable, got error: %v", err)
+	}
+	if tk.Status != TaskStatusCompleted {
+		t.Fatalf("Status = %q, want %q", tk.Status, TaskStatusCompleted)
 	}
 }
 

@@ -1378,20 +1378,32 @@ export class WorkspaceTaskPage {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to update task');
+      throw new Error(this.parseResponseError(text, 'Failed to update task'));
     }
 
-    const updatedTask = await response.json();
-    this.task = updatedTask || this.task;
+    const payload = await response.json();
+    const updatedTask = payload?.task || (payload?.id ? payload : null);
+    this.task = updatedTask ? { ...this.task, ...updatedTask } : { ...this.task, ...patch };
     if (Array.isArray(this.tasks)) {
       this.tasks = this.tasks.map((task) => (
         String(task?.id || '') === String(this.taskId)
-          ? { ...task, ...(updatedTask || {}) }
+          ? { ...task, ...(updatedTask || patch) }
           : task
       ));
     }
     this.render();
-    return updatedTask;
+    return this.task;
+  }
+
+  parseResponseError(text, fallback) {
+    const value = String(text || '').trim();
+    if (!value) return fallback;
+    try {
+      const payload = JSON.parse(value);
+      return payload?.message || payload?.error || fallback;
+    } catch (_error) {
+      return value;
+    }
   }
 
   getTaskDisplayLabel(task = this.task) {
@@ -2004,7 +2016,7 @@ export class WorkspaceTaskPage {
 
     const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
     const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
-    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'blocked', 'cancelled'];
+    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'cancelled', 'timeout'];
     const agentNames = this.getAssignableAgentNames(currentAgent);
 
     const snapshotItems = [
@@ -2513,7 +2525,7 @@ export class WorkspaceTaskPage {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to mark step done');
+        throw new Error(this.parseResponseError(text, 'Failed to mark step done'));
       }
       this.notify('success', 'Step marked done');
       await this.refreshAfterStepChange();
@@ -5977,7 +5989,7 @@ export class WorkspaceTaskPage {
       );
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to complete task');
+        throw new Error(this.parseResponseError(text, 'Failed to complete task'));
       }
       this.notify('success', 'Task marked as complete');
       await this.loadData();

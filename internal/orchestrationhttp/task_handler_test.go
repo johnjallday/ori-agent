@@ -659,6 +659,289 @@ func TestHandleCancelTask_CancelsRunningTask(t *testing.T) {
 	}
 }
 
+func TestHandleCompleteTask_AllowsAssignedTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-complete-assigned"
+
+	task := workspace.Task{
+		ID:          "task-complete-assigned",
+		Description: "Review the checklist",
+		To:          "Ori",
+		Status:      workspace.TaskStatusAssigned,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-complete-assigned/complete", nil)
+	rec := httptest.NewRecorder()
+
+	handler.handleCompleteTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success bool            `json:"success"`
+		Task    *workspace.Task `json:"task"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success response")
+	}
+	if resp.Task == nil || resp.Task.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected completed task in response, got %#v", resp.Task)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if savedTask.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %q", savedTask.Status)
+	}
+	if savedTask.Context["manual_completion"] == nil {
+		t.Fatalf("expected manual completion context to be recorded")
+	}
+}
+
+func TestHandleCompleteTask_RejectsParentWithIncompleteSubtasks(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-complete-parent"
+
+	parent := workspace.Task{
+		ID:          "parent-task",
+		Description: "Build release plan",
+		Status:      workspace.TaskStatusAssigned,
+	}
+	child := workspace.Task{
+		ID:           "child-task",
+		Description:  "Draft changelog",
+		ParentTaskID: parent.ID,
+		Status:       workspace.TaskStatusPending,
+	}
+	if err := ws.AddTask(parent); err != nil {
+		t.Fatalf("failed to add parent task: %v", err)
+	}
+	if err := ws.AddTask(child); err != nil {
+		t.Fatalf("failed to add child task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/parent-task/complete", nil)
+	rec := httptest.NewRecorder()
+
+	handler.handleCompleteTask(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedParent, err := savedWS.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("failed to reload parent task: %v", err)
+	}
+	if savedParent.Status != workspace.TaskStatusAssigned {
+		t.Fatalf("expected parent to remain assigned, got %q", savedParent.Status)
+	}
+}
+
+func TestHandleCompleteTask_ForceCompletesParentWithIncompleteSubtasks(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-complete-parent-force"
+
+	parent := workspace.Task{
+		ID:          "parent-task-force",
+		Description: "Build release plan",
+		Status:      workspace.TaskStatusAssigned,
+	}
+	child := workspace.Task{
+		ID:           "child-task-force",
+		Description:  "Draft changelog",
+		ParentTaskID: parent.ID,
+		Status:       workspace.TaskStatusPending,
+	}
+	if err := ws.AddTask(parent); err != nil {
+		t.Fatalf("failed to add parent task: %v", err)
+	}
+	if err := ws.AddTask(child); err != nil {
+		t.Fatalf("failed to add child task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	body := `{"force":true,"reason":"Verified outside Ori"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/parent-task-force/complete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.handleCompleteTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedParent, err := savedWS.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("failed to reload parent task: %v", err)
+	}
+	if savedParent.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected parent to be completed, got %q", savedParent.Status)
+	}
+	record, ok := savedParent.Context["manual_completion"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected manual completion record, got %T", savedParent.Context["manual_completion"])
+	}
+	if record["force"] != true {
+		t.Fatalf("expected forced completion record, got %#v", record)
+	}
+	if record["reason"] != "Verified outside Ori" {
+		t.Fatalf("expected completion reason to be recorded, got %#v", record)
+	}
+}
+
+func TestHandleUpdateTask_StatusReturnsUpdatedTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-status-update"
+
+	task := workspace.Task{
+		ID:          "task-status-update",
+		Description: "Read results",
+		Status:      workspace.TaskStatusPending,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	body := `{"status":"completed","result":"Looks good"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/orchestration/tasks/task-status-update", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updated workspace.Task
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatalf("failed to decode updated task: %v", err)
+	}
+	if updated.ID != task.ID {
+		t.Fatalf("expected updated task id %q, got %q", task.ID, updated.ID)
+	}
+	if updated.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %q", updated.Status)
+	}
+	if updated.Result != "Looks good" {
+		t.Fatalf("expected result to be preserved, got %q", updated.Result)
+	}
+}
+
+func TestHandleUpdateTask_Priority(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-priority-update"
+
+	task := workspace.Task{
+		ID:          "task-priority-update",
+		Description: "Tune priority",
+		Priority:    2,
+		Status:      workspace.TaskStatusPending,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	body := `{"priority":5}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/orchestration/tasks/task-priority-update", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updated workspace.Task
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatalf("failed to decode updated task: %v", err)
+	}
+	if updated.Priority != 5 {
+		t.Fatalf("expected priority 5 in response, got %d", updated.Priority)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if savedTask.Priority != 5 {
+		t.Fatalf("expected saved priority 5, got %d", savedTask.Priority)
+	}
+}
+
 func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Spain"})

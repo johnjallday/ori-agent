@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -379,7 +380,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		AssignedNodeID:         req.AssignedNodeID,
 		Description:            req.Description,
 		Details:                req.Details,
-		Priority:               req.Priority,
+		Priority:               normalizeTaskPriority(req.Priority),
 		InputTaskIDs:           req.InputTaskIDs,
 		ParentTaskID:           req.ParentTaskID,
 		SubtaskIndex:           req.SubtaskIndex,
@@ -496,6 +497,7 @@ type taskUpdateRequest struct {
 	Error                  string                         `json:"error"`
 	Description            *string                        `json:"description"`
 	Details                *string                        `json:"details"`
+	Priority               *int                           `json:"priority"`
 	Context                map[string]interface{}         `json:"context"`
 	To                     *string                        `json:"to"`
 	AssignedNodeID         *string                        `json:"assigned_node_id"`
@@ -522,7 +524,7 @@ type taskUpdateRequest struct {
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
-	return r.Description != nil || r.Details != nil || r.Context != nil || r.InputTaskIDs != nil ||
+	return r.Description != nil || r.Details != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
 		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
 		r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
@@ -544,6 +546,10 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.Details != nil {
 		task.Details = *req.Details
 		logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.Priority != nil {
+		task.Priority = normalizeTaskPriority(*req.Priority)
+		logger.Debug("Updated task priority", logger.Fields{"task_id": req.TaskID, "priority": task.Priority})
 	}
 	if req.Context != nil {
 		if task.Context == nil {
@@ -723,6 +729,9 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.To != nil {
 		eventData["to"] = *req.To
+	}
+	if req.Priority != nil {
+		eventData["priority"] = normalizeTaskPriority(*req.Priority)
 	}
 	if req.AssignedNodeID != nil {
 		eventData["assigned_node_id"] = *req.AssignedNodeID
@@ -945,17 +954,20 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	)
 
 	if err != nil {
-		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
+		logger.Error("Failed to update task status", logger.Fields{"task_id": req.TaskID, "error": err})
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
 
+	updatedTask, err := th.communicator.GetTask(req.TaskID)
+	if err != nil {
+		logger.Error("Failed to get updated task after status update", logger.Fields{"task_id": req.TaskID, "error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to retrieve updated task", err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
-		"success": true,
-		"task_id": req.TaskID,
-		"status":  req.Status,
-	})
+	orihttp.WriteJSON(w, updatedTask)
 }
 
 // handleDeleteTask deletes a task
@@ -1196,6 +1208,67 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type completeTaskRequest struct {
+	Force  bool   `json:"force,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func parseCompleteTaskRequest(r *http.Request) (completeTaskRequest, error) {
+	var req completeTaskRequest
+	if r == nil || r.Body == nil {
+		return req, nil
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return req, err
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return req, nil
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, err
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	return req, nil
+}
+
+func incompleteSubtaskLabels(subtasks []workspace.Task) []string {
+	labels := make([]string, 0, len(subtasks))
+	for _, subtask := range subtasks {
+		if subtask.Status == workspace.TaskStatusCompleted {
+			continue
+		}
+		label := strings.TrimSpace(subtask.Description)
+		if label == "" {
+			label = subtask.ID
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func recordManualCompletion(task *workspace.Task, req completeTaskRequest, completedAt time.Time) {
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+	record := map[string]interface{}{
+		"force":        req.Force,
+		"completed_at": completedAt.UTC().Format(time.RFC3339),
+	}
+	if req.Reason != "" {
+		record["reason"] = req.Reason
+	}
+	task.Context["manual_completion"] = record
+}
+
+func normalizeTaskPriority(priority int) int {
+	if priority < 1 || priority > 5 {
+		return 3
+	}
+	return priority
+}
+
 // handleCompleteTask handles POST /api/orchestration/tasks/{id}/complete
 // Marks a task as completed (for manual task completion)
 func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -1214,10 +1287,26 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	}
 	taskID := pathParts[0]
 
+	completeReq, err := parseCompleteTaskRequest(r)
+	if err != nil {
+		orihttp.BadRequest(w, "Invalid request body")
+		return
+	}
+
 	// Get task and workspace
 	task, ws, err := th.getTaskWithWorkspace(taskID)
 	if err != nil {
 		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	incompleteSubtasks := incompleteSubtaskLabels(ws.GetSubtasks(taskID))
+	if len(incompleteSubtasks) > 0 && !completeReq.Force {
+		message := fmt.Sprintf("Cannot complete task while %d subtask(s) are incomplete", len(incompleteSubtasks))
+		if len(incompleteSubtasks) <= 3 {
+			message = fmt.Sprintf("%s: %s", message, strings.Join(incompleteSubtasks, ", "))
+		}
+		orihttp.RespondError(w, http.StatusConflict, message)
 		return
 	}
 
@@ -1230,6 +1319,8 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 				return
 			}
 			ws.Tasks[i].CompletedAt = &now
+			ws.Tasks[i].Error = ""
+			recordManualCompletion(&ws.Tasks[i], completeReq, now)
 			break
 		}
 	}

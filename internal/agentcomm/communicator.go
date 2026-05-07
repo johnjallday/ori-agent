@@ -217,6 +217,7 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStat
 			task.CompletedAt = nil
 			task.Result = ""
 			task.Error = ""
+			workspace.ApplyTaskResultMetadata(task, "")
 		case workspace.TaskStatusInProgress:
 			if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
 				return fmt.Errorf("agent status transition rejected: %w", err)
@@ -227,21 +228,27 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStat
 				return fmt.Errorf("agent status transition rejected: %w", err)
 			}
 			task.Result = result
+			task.Error = ""
 			task.CompletedAt = &now
+			workspace.ApplyTaskResultMetadata(task, result)
 			// Send result message back to delegator
 			c.sendTaskResult(task, result, "")
 		case workspace.TaskStatusFailed:
 			if err := task.SetStatus(workspace.TaskStatusFailed); err != nil {
 				return fmt.Errorf("agent status transition rejected: %w", err)
 			}
+			task.Result = ""
 			task.Error = errorMsg
 			task.CompletedAt = &now
+			workspace.ApplyTaskResultMetadata(task, "")
 			// Send failure message back to delegator
 			c.sendTaskResult(task, "", errorMsg)
 		case workspace.TaskStatusCancelled:
 			if err := task.SetStatus(workspace.TaskStatusCancelled); err != nil {
 				return fmt.Errorf("agent status transition rejected: %w", err)
 			}
+			task.Result = ""
+			workspace.ApplyTaskResultMetadata(task, "")
 			task.CompletedAt = &now
 		}
 
