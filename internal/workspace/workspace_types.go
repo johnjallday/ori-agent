@@ -212,6 +212,24 @@ type Task struct {
 
 	// Result storage configuration - auto-save results on completion
 	ResultStorage *ResultStorageConfig `json:"result_storage,omitempty"`
+
+	// RuntimeInputs holds data derived at execution time (e.g. results of
+	// upstream tasks named in InputTaskIDs). It is rebuilt fresh for each
+	// execution and never persisted — keeping it here instead of merging
+	// into Context prevents the persisted task from accumulating stale
+	// runtime state across re-runs.
+	RuntimeInputs *TaskRuntimeInputs `json:"-"`
+}
+
+// TaskRuntimeInputs carries the inputs computed for a task at execution time.
+// All fields are keyed by input task ID.
+type TaskRuntimeInputs struct {
+	// TaskResults maps each input task ID to its raw text result.
+	TaskResults map[string]string
+	// StructuredOutputs maps each input task ID to its parsed structured
+	// output (when the upstream task declared an OutputSchema and the result
+	// matched).
+	StructuredOutputs map[string]map[string]interface{}
 }
 
 // ResultStorageConfig specifies how task results should be automatically stored

@@ -244,26 +244,22 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 	logger.Debug("▶️ Executing task for agent", logger.Fields{"description": task.Description, "agent": task.ID, "to": task.To})
 
-	// Inject input task results into task context if InputTaskIDs are specified
+	// Build runtime inputs (results of upstream tasks named in InputTaskIDs)
+	// and attach them to the task for the duration of this execution. Note:
+	// task.Context is intentionally untouched — runtime data lives in
+	// RuntimeInputs so re-runs cannot accumulate stale injection.
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
-		enrichedContext := ws.GetInputContext(&task)
-		task.Context = enrichedContext
+		task.RuntimeInputs = ws.BuildRuntimeInputs(&task)
 
-		// Debug: Check what was added to context
-		if inputResults, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap, ok := inputResults.(map[string]string)
-			if !ok {
-				logger.Warn("Unexpected input_task_results type", logger.Fields{"task_id": task.ID})
-			} else {
-				logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
-				for taskID, result := range resultsMap {
-					preview := result
-					if len(preview) > 100 {
-						preview = preview[:100] + "..."
-					}
-					logger.Debug("- Task result", logger.Fields{"task_id": taskID, "preview": preview})
+		if task.RuntimeInputs != nil && len(task.RuntimeInputs.TaskResults) > 0 {
+			logger.Debug("Built runtime inputs for task", logger.Fields{"result": len(task.RuntimeInputs.TaskResults), "id": task.ID})
+			for taskID, result := range task.RuntimeInputs.TaskResults {
+				preview := result
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
 				}
+				logger.Debug("- Task result", logger.Fields{"task_id": taskID, "preview": preview})
 			}
 		} else {
 			logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": task.ID})

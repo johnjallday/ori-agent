@@ -232,17 +232,15 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// Inject input task results into task context if InputTaskIDs are specified
+	// Build runtime inputs for this execution. Persisted task.Context stays
+	// untouched; see Task.RuntimeInputs for the runtime-only data path.
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
-		enrichedContext := workspace.GetInputContext(&task)
-		task.Context = enrichedContext
+		task.RuntimeInputs = workspace.BuildRuntimeInputs(&task)
 
-		// Debug: Check what was added to context
-		if inputResults, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap := inputResults.(map[string]string)
-			logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
-			for taskID, result := range resultsMap {
+		if task.RuntimeInputs != nil && len(task.RuntimeInputs.TaskResults) > 0 {
+			logger.Debug("Built runtime inputs for task", logger.Fields{"result": len(task.RuntimeInputs.TaskResults), "id": task.ID})
+			for taskID, result := range task.RuntimeInputs.TaskResults {
 				preview := result
 				if len(preview) > 100 {
 					preview = preview[:100] + "..."

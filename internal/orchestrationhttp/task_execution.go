@@ -772,12 +772,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
 
-		enrichedContext := ws.GetInputContext(task)
-		taskForExecution.Context = enrichedContext
+		taskForExecution.RuntimeInputs = ws.BuildRuntimeInputs(task)
 
-		if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap := inputResultsMap.(map[string]string)
-			logger.Debug("Injected input task results into task context", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
+		if taskForExecution.RuntimeInputs != nil && len(taskForExecution.RuntimeInputs.TaskResults) > 0 {
+			resultsMap := taskForExecution.RuntimeInputs.TaskResults
+			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
 
 			for _, inputTaskID := range task.InputTaskIDs {
 				if result, exists := resultsMap[inputTaskID]; exists {
@@ -2774,10 +2773,10 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
-		// Gather input context for this task
+		// Build runtime inputs for this execution. Persisted Context is left
+		// alone — runtime data lives in inputTask.RuntimeInputs.
 		if len(inputTask.InputTaskIDs) > 0 {
-			enrichedContext := ws.GetInputContext(inputTask)
-			inputTask.Context = enrichedContext
+			inputTask.RuntimeInputs = ws.BuildRuntimeInputs(inputTask)
 		}
 
 		// Execute the task (iterative best-effort)

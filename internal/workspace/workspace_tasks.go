@@ -334,27 +334,40 @@ func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
 	return results
 }
 
-// GetInputContext builds a context map that includes results from input tasks
-func (w *Workspace) GetInputContext(task *Task) map[string]interface{} {
-	context := make(map[string]interface{})
-
-	// Copy existing context
-	for k, v := range task.Context {
-		context[k] = v
+// BuildRuntimeInputs assembles a fresh TaskRuntimeInputs for the given task,
+// pulling current results and structured outputs for every InputTaskIDs entry.
+//
+// The returned value is intended to be assigned to task.RuntimeInputs only for
+// the duration of an execution. It must NOT be merged into task.Context: that
+// would corrupt the persisted task by interleaving runtime state with authored
+// context, and re-runs would see stale injection from prior executions.
+//
+// Returns nil if the task has no input tasks or none of them have results yet.
+func (w *Workspace) BuildRuntimeInputs(task *Task) *TaskRuntimeInputs {
+	if task == nil || len(task.InputTaskIDs) == 0 {
+		return nil
 	}
 
-	// Add input task results if any
-	if len(task.InputTaskIDs) > 0 {
-		inputResults := w.GetTaskResults(task.InputTaskIDs)
-		if len(inputResults) > 0 {
-			context["input_task_results"] = inputResults
-		}
-		if structuredOutputs := w.GetTaskStructuredOutputs(task.InputTaskIDs); len(structuredOutputs) > 0 {
-			context["input_task_structured_outputs"] = structuredOutputs
-		}
+	results := w.GetTaskResults(task.InputTaskIDs)
+	structured := w.GetTaskStructuredOutputs(task.InputTaskIDs)
+
+	if len(results) == 0 && len(structured) == 0 {
+		return nil
 	}
 
-	return context
+	out := &TaskRuntimeInputs{}
+	if len(results) > 0 {
+		out.TaskResults = results
+	}
+	if len(structured) > 0 {
+		out.StructuredOutputs = make(map[string]map[string]interface{}, len(structured))
+		for id, val := range structured {
+			if m, ok := val.(map[string]interface{}); ok {
+				out.StructuredOutputs[id] = m
+			}
+		}
+	}
+	return out
 }
 
 // GetTaskStructuredOutputs returns parsed structured outputs for tasks whose result matches a schema.

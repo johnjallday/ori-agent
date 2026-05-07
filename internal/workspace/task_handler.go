@@ -620,14 +620,12 @@ func (h *LLMTaskHandler) getProviderForAgent(configuredProvider, model string) s
 func (h *LLMTaskHandler) substitutePlaceholders(task Task) string {
 	description := task.Description
 
-	// Get input task results from context
-	inputTaskResults, hasInputResults := task.Context["input_task_results"]
-	if !hasInputResults {
-		return description // No substitution needed if no input results
+	// Get input task results from runtime inputs (rebuilt fresh each execution).
+	if task.RuntimeInputs == nil {
+		return description
 	}
-
-	resultsMap, ok := inputTaskResults.(map[string]string)
-	if !ok || len(resultsMap) == 0 {
+	resultsMap := task.RuntimeInputs.TaskResults
+	if len(resultsMap) == 0 {
 		return description
 	}
 
@@ -881,9 +879,8 @@ func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent 
 }
 
 // formatInputResults formats input task results based on the combination mode
-func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, inputTaskResults interface{}) {
-	resultsMap, ok := inputTaskResults.(map[string]string)
-	if !ok {
+func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, resultsMap map[string]string) {
+	if len(resultsMap) == 0 {
 		return
 	}
 
