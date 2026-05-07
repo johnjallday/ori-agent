@@ -84,7 +84,15 @@ func (te *TaskExecutor) Start() {
 	go te.pollLoop()
 }
 
-// cleanupOrphanedTasks resets tasks that were left in "in_progress" state from a previous server run
+// cleanupOrphanedTasks resets tasks that were left in "in_progress" state
+// from a previous server run.
+//
+// Per-workspace mutation runs inside Store.Update so the read-modify-save
+// is serialized against other instances and against in-flight handlers
+// touching the same workspace. The previous implementation did Get →
+// mutate → Save without per-workspace locking, which on multi-instance
+// deployments could (a) clobber a concurrent mutation between the Get and
+// the Save, and (b) let two boot-time cleanups race each other.
 func (te *TaskExecutor) cleanupOrphanedTasks() {
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
@@ -94,15 +102,13 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 
 	totalReset := 0
 	for _, wsID := range workspaceIDs {
-		ws, err := te.workspaceStore.Get(wsID)
-		if err != nil {
-			continue
-		}
-
 		resetCount := 0
-		for i := range ws.Tasks {
-			task := &ws.Tasks[i]
-			if task.Status == TaskStatusInProgress {
+		if err := te.workspaceStore.Update(wsID, func(fresh *Workspace) error {
+			for i := range fresh.Tasks {
+				task := &fresh.Tasks[i]
+				if task.Status != TaskStatusInProgress {
+					continue
+				}
 				if err := task.SetStatus(TaskStatusPending); err != nil {
 					logger.Error("Orphan cleanup transition rejected", logger.Fields{"task_id": task.ID, "error": err})
 					continue
@@ -110,15 +116,14 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 				task.StartedAt = nil
 				resetCount++
 			}
+			return nil
+		}); err != nil {
+			logger.Error("Failed to clean orphaned tasks in workspace", logger.Fields{"workspace_id": wsID, "err": err})
+			continue
 		}
-
 		if resetCount > 0 {
-			if err := te.workspaceStore.Save(ws); err != nil {
-				logger.Error("Failed to save workspace after orphaned task cleanup", logger.Fields{"workspace_id": wsID, "err": err})
-			} else {
-				totalReset += resetCount
-				logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": wsID})
-			}
+			totalReset += resetCount
+			logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": wsID})
 		}
 	}
 
