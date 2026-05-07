@@ -358,12 +358,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		if err := t.SetStatus(TaskStatusAssigned); err != nil {
 			return fmt.Errorf("scheduler: reset task to assigned: %w", err)
 		}
-		t.Result = ""
-		ApplyTaskResultMetadata(t, "")
-		t.Error = ""
-		t.Progress = nil
-		t.StartedAt = nil
-		t.CompletedAt = nil
+		ResetTaskRuntime(t)
 
 		// Update schedule tracking
 		t.LastRun = &now
@@ -522,12 +517,7 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		if err := t.SetStatus(TaskStatusAssigned); err != nil {
 			return fmt.Errorf("scheduler: reset target task to assigned: %w", err)
 		}
-		t.Result = ""
-		ApplyTaskResultMetadata(t, "")
-		t.Error = ""
-		t.Progress = nil
-		t.StartedAt = nil
-		t.CompletedAt = nil
+		ResetTaskRuntime(t)
 		return nil
 	}); err != nil {
 		ts.recordScheduleFailure(ws, st, fmt.Errorf("failed to queue target task %s: %w", targetTask.ID, err), targetTask.ID)

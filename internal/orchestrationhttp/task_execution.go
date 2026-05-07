@@ -202,12 +202,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot reset task for rerun", err)
 			return
 		}
-		foundTask.Result = ""
-		workspace.ApplyTaskResultMetadata(foundTask, "")
-		foundTask.Error = ""
-		foundTask.StartedAt = nil
-		foundTask.CompletedAt = nil
-		workspace.ResetTaskExecutionSteps(foundTask)
+		workspace.ResetTaskRuntime(foundTask)
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
@@ -426,11 +421,10 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot retry task", err)
 			return
 		}
-		task.StartedAt = nil
-		task.CompletedAt = nil
-		task.Error = ""
-		task.Result = ""
-		workspace.ApplyTaskResultMetadata(task, "")
+		// KeepingSteps preserves the per-step plan so PrepareTaskExecutionStepsForResume
+		// can pick up from the first not-yet-completed step instead of restarting.
+		// The freshly built humanLoop is re-attached below the switch.
+		workspace.ResetTaskRuntimeKeepingSteps(task)
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	case "retry", "continue_with_instruction":
@@ -438,11 +432,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot retry task", err)
 			return
 		}
-		task.StartedAt = nil
-		task.CompletedAt = nil
-		task.Error = ""
-		task.Result = ""
-		workspace.ApplyTaskResultMetadata(task, "")
+		workspace.ResetTaskRuntimeKeepingSteps(task)
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	default:
