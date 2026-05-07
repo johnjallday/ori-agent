@@ -2,12 +2,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // StepExecutor manages the execution of workflow steps
@@ -122,7 +123,13 @@ func (se *StepExecutor) checkAndExecuteSteps() {
 	}
 }
 
-// processWorkflow processes a single workflow
+// processWorkflow processes a single workflow.
+//
+// Each state-changing block runs under store.Update so a different instance
+// (or another goroutine in this one) can't load the same stale snapshot and
+// re-flip the step. The local snapshot read at the top is only used to decide
+// whether work is needed at all and to dispatch executeStep — actual mutations
+// go through the canonical Get → mutate → Save serialized by the store lock.
 func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 	workflow, err := ws.GetWorkflow(workflowID)
 	if err != nil {
@@ -136,28 +143,53 @@ func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 		return
 	}
 
-	// Update workflow status to in_progress if pending
+	// Update workflow status to in_progress if pending. The double-check
+	// inside the closure absorbs the (rare) case where another worker just
+	// won the race and already flipped the workflow.
 	if workflow.Status == WorkflowStatusPending {
-		workflow.Status = WorkflowStatusInProgress
-		now := time.Now()
-		workflow.StartedAt = &now
-		_ = ws.UpdateWorkflow(*workflow) // Best effort update
-		_ = se.workspaceStore.Save(ws)   // Best effort save
+		if err := se.workspaceStore.Update(ws.ID, func(fresh *Workspace) error {
+			wf, ok := fresh.Workflows[workflowID]
+			if !ok {
+				return fmt.Errorf("workflow %s not found", workflowID)
+			}
+			if wf.Status != WorkflowStatusPending {
+				return nil
+			}
+			wf.Status = WorkflowStatusInProgress
+			now := time.Now()
+			wf.StartedAt = &now
+			fresh.Workflows[workflowID] = wf
+			fresh.UpdatedAt = time.Now()
+			return nil
+		}); err != nil {
+			logger.Warn("Failed to flip workflow to in_progress", logger.Fields{"workflow_id": workflowID, "err": err})
+		}
 	}
 
-	// Update step statuses based on dependencies
-	se.updateStepStatuses(ws, workflow)
+	// Update step statuses based on dependencies (atomic).
+	se.updateStepStatuses(ws.ID, workflowID)
 
-	// Find and execute ready steps
-	for i := range workflow.Steps {
-		step := &workflow.Steps[i]
+	// Re-read the workflow once after the dependency-resolution batch so the
+	// dispatch loop sees the latest Ready set without holding the store lock.
+	freshWS, err := se.workspaceStore.Get(ws.ID)
+	if err != nil {
+		return
+	}
+	freshWorkflow, err := freshWS.GetWorkflow(workflowID)
+	if err != nil {
+		return
+	}
 
-		// Skip if not ready
+	// Find and execute ready steps.
+	for i := range freshWorkflow.Steps {
+		step := freshWorkflow.Steps[i]
+
 		if step.Status != StepStatusReady {
 			continue
 		}
 
-		// Check if already running
+		// Local-process duplicate guard. Cross-instance races are caught by
+		// the SetStatus check inside executeStep's claim Update.
 		se.mu.RLock()
 		_, isRunning := se.runningSteps[step.ID]
 		se.mu.RUnlock()
@@ -165,61 +197,79 @@ func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 			continue
 		}
 
-		// Execute the step
-		se.executeStep(ws, workflow, step)
+		se.executeStep(freshWS, freshWorkflow, &freshWorkflow.Steps[i])
 	}
 
-	// Check if workflow is complete
-	se.checkWorkflowCompletion(ws, workflow)
+	// Check if workflow is complete.
+	se.checkWorkflowCompletion(ws.ID, workflowID)
 }
 
-// updateStepStatuses updates step statuses based on dependencies
-func (se *StepExecutor) updateStepStatuses(ws *Workspace, workflow *Workflow) {
-	changed := false
-
-	for i := range workflow.Steps {
-		step := &workflow.Steps[i]
-
-		// Skip already processed steps
-		if step.Status != StepStatusPending && step.Status != StepStatusWaiting {
-			continue
+// updateStepStatuses transitions Pending/Waiting steps based on their
+// dependency state, atomic under store.Update so two workers don't race on
+// the same set of pending dependencies. Each individual transition goes
+// through SetStatus; an illegal transition (e.g. another worker already
+// promoted the step to Ready) is logged and skipped instead of being silently
+// overwritten.
+func (se *StepExecutor) updateStepStatuses(workspaceID, workflowID string) {
+	if err := se.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+		wf, ok := fresh.Workflows[workflowID]
+		if !ok {
+			return fmt.Errorf("workflow %s not found", workflowID)
 		}
 
-		// Check if dependencies are met
-		dependenciesMet, shouldSkip := se.checkDependencies(workflow, step)
+		changed := false
+		for i := range wf.Steps {
+			step := &wf.Steps[i]
 
-		if shouldSkip {
-			step.Status = StepStatusSkipped
-			changed = true
-			logger.Debug("Step skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
-		} else if dependenciesMet {
-			// Check condition if present
-			shouldExecute, err := se.evaluateCondition(workflow, step)
-			if err != nil {
-				logger.Error("Failed to evaluate condition for step", logger.Fields{"id": step.ID, "err": err})
+			if step.Status != StepStatusPending && step.Status != StepStatusWaiting {
 				continue
 			}
 
-			if shouldExecute {
-				step.Status = StepStatusReady
-				changed = true
-				logger.Info("Step is ready to execute", logger.Fields{"id": step.ID, "name": step.Name})
-			} else {
-				step.Status = StepStatusSkipped
-				changed = true
-				logger.Debug("Step skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
-			}
-		} else {
-			if step.Status != StepStatusWaiting {
-				step.Status = StepStatusWaiting
-				changed = true
-			}
-		}
-	}
+			dependenciesMet, shouldSkip := se.checkDependencies(&wf, step)
 
-	if changed {
-		_ = ws.UpdateWorkflow(*workflow) // Best effort update
-		_ = se.workspaceStore.Save(ws)   // Best effort save
+			var target StepStatus
+			switch {
+			case shouldSkip:
+				target = StepStatusSkipped
+				logger.Debug("Step skipped due to upstream failure", logger.Fields{"name": step.Name, "id": step.ID})
+			case dependenciesMet:
+				shouldExecute, err := se.evaluateCondition(&wf, step)
+				if err != nil {
+					logger.Error("Failed to evaluate condition for step", logger.Fields{"id": step.ID, "err": err})
+					continue
+				}
+				if shouldExecute {
+					target = StepStatusReady
+					logger.Info("Step is ready to execute", logger.Fields{"id": step.ID, "name": step.Name})
+				} else {
+					target = StepStatusSkipped
+					logger.Debug("Step skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
+				}
+			default:
+				if step.Status == StepStatusWaiting {
+					continue
+				}
+				target = StepStatusWaiting
+			}
+
+			if step.Status == target {
+				continue
+			}
+			if err := step.SetStatus(target); err != nil {
+				logger.Warn("Refused step status transition", logger.Fields{"id": step.ID, "err": err})
+				continue
+			}
+			changed = true
+		}
+
+		if !changed {
+			return nil
+		}
+		fresh.Workflows[workflowID] = wf
+		fresh.UpdatedAt = time.Now()
+		return nil
+	}); err != nil {
+		logger.Warn("Failed to update step statuses", logger.Fields{"workflow_id": workflowID, "err": err})
 	}
 }
 
@@ -329,20 +379,55 @@ func (se *StepExecutor) findStep(workflow *Workflow, stepID string) *WorkflowSte
 	return nil
 }
 
-// executeStep executes a single workflow step
+// executeStep executes a single workflow step.
+//
+// The Ready → InProgress transition is performed under store.Update via
+// SetStatus, which means at most one worker (across instances) can claim a
+// given step: the SetStatus call returns IllegalStepTransitionError for any
+// worker that loses the race, and that worker bails before spawning a
+// goroutine. The terminal flip (Completed/Failed) is likewise atomic and is
+// followed by a workflow-completion check on the same fresh snapshot.
 func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *WorkflowStep) {
-	// Create context with timeout
 	timeout := step.Timeout
 	if timeout == 0 {
-		timeout = 10 * time.Minute // Default timeout
+		timeout = 10 * time.Minute
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
-	// Track running step
+	stepID := step.ID
+	workflowID := workflow.ID
+	workspaceID := ws.ID
+	stepType := step.Type
+	stepName := step.Name
+
+	// Atomically claim the step. If SetStatus rejects the transition, another
+	// worker already moved this step out of Ready — abandon without spawning
+	// a goroutine.
+	claimErr := se.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+		return fresh.MutateWorkflowStep(workflowID, stepID, func(s *WorkflowStep) error {
+			if err := s.SetStatus(StepStatusInProgress); err != nil {
+				return err
+			}
+			now := time.Now()
+			s.StartedAt = &now
+			return nil
+		})
+	})
+	if claimErr != nil {
+		var illegal *IllegalStepTransitionError
+		if errors.As(claimErr, &illegal) {
+			logger.Debug("Step claim refused, another worker likely advanced it", logger.Fields{"id": stepID, "err": claimErr})
+		} else {
+			logger.Warn("Failed to claim step", logger.Fields{"id": stepID, "err": claimErr})
+		}
+		cancel()
+		return
+	}
+
 	se.mu.Lock()
-	se.runningSteps[step.ID] = &stepExecution{
-		WorkflowID: workflow.ID,
+	se.runningSteps[stepID] = &stepExecution{
+		WorkflowID: workflowID,
 		Step:       *step,
 		StartedAt:  time.Now(),
 		Context:    ctx,
@@ -350,100 +435,71 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 	}
 	se.mu.Unlock()
 
-	logger.Debug("Executing step in workflow", logger.Fields{"step_id": step.ID, "workflow_name": workflow.Name})
+	logger.Debug("Executing step in workflow", logger.Fields{"step_id": stepID, "workflow_name": workflow.Name})
 
-	// Update step status to in_progress
-	step.Status = StepStatusInProgress
-	now := time.Now()
-	step.StartedAt = &now
-
-	// Update in workflow
-	for i := range workflow.Steps {
-		if workflow.Steps[i].ID == step.ID {
-			workflow.Steps[i] = *step
-			break
-		}
-	}
-
-	_ = ws.UpdateWorkflow(*workflow) // Best effort update
-	_ = se.workspaceStore.Save(ws)   // Best effort save
-
-	// Execute asynchronously
 	se.wg.Add(1)
 	go func() {
 		defer se.wg.Done()
 		defer cancel()
 		defer func() {
 			se.mu.Lock()
-			delete(se.runningSteps, step.ID)
+			delete(se.runningSteps, stepID)
 			se.mu.Unlock()
 		}()
 
 		var result string
 		var execErr error
 
-		// Execute based on step type
-		switch step.Type {
+		switch stepType {
 		case StepTypeTask:
 			result, execErr = se.executeTaskStep(ctx, ws, step)
 		case StepTypeAggregate:
-			result, execErr = se.executeAggregateStep(workflow, step)
-		default:
-			execErr = fmt.Errorf("unsupported step type: %s", step.Type)
-		}
-
-		// Reload workspace (may have changed)
-		ws, wsErr := se.workspaceStore.Get(ws.ID)
-		if wsErr != nil {
-			logger.Error("Failed to reload workspace", logger.Fields{"workspace_id": ws.ID, "wsErr": wsErr})
-			return
-		}
-
-		// Reload workflow
-		workflow, wfErr := ws.GetWorkflow(workflow.ID)
-		if wfErr != nil {
-			logger.Error("Failed to reload workflow", logger.Fields{"id": workflow.ID, "wfErr": wfErr})
-			return
-		}
-
-		// Find the step in reloaded workflow
-		var updatedStep *WorkflowStep
-		for i := range workflow.Steps {
-			if workflow.Steps[i].ID == step.ID {
-				updatedStep = &workflow.Steps[i]
-				break
+			// Aggregate over a fresh workflow snapshot so it sees any sibling
+			// steps that finished while we were waiting for our claim.
+			fresh, getErr := se.workspaceStore.Get(workspaceID)
+			if getErr == nil {
+				if wf, wfErr := fresh.GetWorkflow(workflowID); wfErr == nil {
+					result, execErr = se.executeAggregateStep(wf, step)
+				} else {
+					execErr = wfErr
+				}
+			} else {
+				execErr = getErr
 			}
+		default:
+			execErr = fmt.Errorf("unsupported step type: %s", stepType)
 		}
 
-		if updatedStep == nil {
-			logger.Error("Step not found in workflow after execution", logger.Fields{"id": step.ID})
+		if updErr := se.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+			return fresh.MutateWorkflowStep(workflowID, stepID, func(s *WorkflowStep) error {
+				completedAt := time.Now()
+				s.CompletedAt = &completedAt
+				if execErr != nil {
+					if err := s.SetStatus(StepStatusFailed); err != nil {
+						return err
+					}
+					s.Error = execErr.Error()
+					return nil
+				}
+				if err := s.SetStatus(StepStatusCompleted); err != nil {
+					return err
+				}
+				s.Result = result
+				return nil
+			})
+		}); updErr != nil {
+			logger.Error("Failed to record step completion", logger.Fields{"id": stepID, "name": stepName, "err": updErr})
 			return
 		}
-
-		// Update step with result
-		completedAt := time.Now()
-		updatedStep.CompletedAt = &completedAt
 
 		if execErr != nil {
-			logger.Error("Step failed", logger.Fields{"id": step.ID, "name": step.Name, "execErr": execErr})
-			updatedStep.Status = StepStatusFailed
-			updatedStep.Error = execErr.Error()
+			logger.Error("Step failed", logger.Fields{"id": stepID, "name": stepName, "err": execErr})
 		} else {
-			logger.Info("Step completed successfully", logger.Fields{"id": step.ID, "name": step.Name})
-			updatedStep.Status = StepStatusCompleted
-			updatedStep.Result = result
+			logger.Info("Step completed successfully", logger.Fields{"id": stepID, "name": stepName})
 		}
 
-		// Update workflow with step
-		for i := range workflow.Steps {
-			if workflow.Steps[i].ID == step.ID {
-				workflow.Steps[i] = *updatedStep
-				break
-			}
-		}
-
-		_ = ws.UpdateWorkflow(*workflow) // Best effort update
-		_ = se.workspaceStore.Save(ws)   // Best effort save
+		// Roll up the workflow if this step's completion finished it.
+		se.checkWorkflowCompletion(workspaceID, workflowID)
 	}()
 }
 
@@ -508,36 +564,50 @@ func (se *StepExecutor) executeAggregateStep(workflow *Workflow, step *WorkflowS
 	return results.String(), nil
 }
 
-// checkWorkflowCompletion checks if a workflow is complete
-func (se *StepExecutor) checkWorkflowCompletion(ws *Workspace, workflow *Workflow) {
-	allComplete := true
-	anyFailed := false
-
-	for _, step := range workflow.Steps {
-		if step.Status == StepStatusFailed {
-			anyFailed = true
+// checkWorkflowCompletion checks if a workflow is complete and rolls it up
+// atomically. If another caller has already marked the workflow terminal,
+// the closure no-ops.
+func (se *StepExecutor) checkWorkflowCompletion(workspaceID, workflowID string) {
+	if err := se.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+		wf, ok := fresh.Workflows[workflowID]
+		if !ok {
+			return fmt.Errorf("workflow %s not found", workflowID)
+		}
+		if wf.Status == WorkflowStatusCompleted ||
+			wf.Status == WorkflowStatusFailed ||
+			wf.Status == WorkflowStatusCancelled {
+			return nil
 		}
 
-		if step.Status != StepStatusCompleted &&
-			step.Status != StepStatusSkipped &&
-			step.Status != StepStatusFailed {
-			allComplete = false
+		allComplete := true
+		anyFailed := false
+		for _, step := range wf.Steps {
+			if step.Status == StepStatusFailed {
+				anyFailed = true
+			}
+			if step.Status != StepStatusCompleted &&
+				step.Status != StepStatusSkipped &&
+				step.Status != StepStatusFailed {
+				allComplete = false
+			}
 		}
-	}
+		if !allComplete {
+			return nil
+		}
 
-	if allComplete {
 		completedAt := time.Now()
-		workflow.CompletedAt = &completedAt
-
+		wf.CompletedAt = &completedAt
 		if anyFailed {
-			workflow.Status = WorkflowStatusFailed
-			logger.Error("Workflow completed with failures", logger.Fields{"id": workflow.ID, "name": workflow.Name})
+			wf.Status = WorkflowStatusFailed
+			logger.Error("Workflow completed with failures", logger.Fields{"id": wf.ID, "name": wf.Name})
 		} else {
-			workflow.Status = WorkflowStatusCompleted
-			logger.Info("Workflow completed successfully", logger.Fields{"id": workflow.ID, "name": workflow.Name})
+			wf.Status = WorkflowStatusCompleted
+			logger.Info("Workflow completed successfully", logger.Fields{"id": wf.ID, "name": wf.Name})
 		}
-
-		_ = ws.UpdateWorkflow(*workflow) // Best effort update
-		_ = se.workspaceStore.Save(ws)   // Best effort save
+		fresh.Workflows[workflowID] = wf
+		fresh.UpdatedAt = time.Now()
+		return nil
+	}); err != nil {
+		logger.Warn("Failed to finalize workflow completion", logger.Fields{"workflow_id": workflowID, "err": err})
 	}
 }

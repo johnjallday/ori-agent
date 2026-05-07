@@ -138,6 +138,71 @@ func (w *Workspace) UpdateWorkflow(workflow Workflow) error {
 	return nil
 }
 
+// MutateWorkflowStep applies fn to the step identified by stepID inside the
+// workflow identified by workflowID, while holding w.mu — the analogue of
+// MutateTask for steps. fn receives a pointer to the live slice element and
+// may mutate it freely; returning a non-nil error aborts the mutation (the
+// in-memory state is left untouched). On success, UpdatedAt is bumped.
+//
+// fn must not call back into Workspace methods that take w.mu (deadlock) and
+// must not retain the *WorkflowStep beyond its own scope.
+//
+// Cross-instance race safety: pair this with Store.Update via
+// MutateWorkflowStepAndSave so the read-modify-write is serialized against
+// other instances/handlers operating on the same workspace.
+func (w *Workspace) MutateWorkflowStep(workflowID, stepID string, fn func(*WorkflowStep) error) error {
+	if fn == nil {
+		return fmt.Errorf("MutateWorkflowStep: fn is nil")
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.Workflows == nil {
+		return fmt.Errorf("workflow %s not found", workflowID)
+	}
+	workflow, exists := w.Workflows[workflowID]
+	if !exists {
+		return fmt.Errorf("workflow %s not found", workflowID)
+	}
+
+	stepIdx := -1
+	for i := range workflow.Steps {
+		if workflow.Steps[i].ID == stepID {
+			stepIdx = i
+			break
+		}
+	}
+	if stepIdx == -1 {
+		return fmt.Errorf("step %s not found in workflow %s", stepID, workflowID)
+	}
+
+	if err := fn(&workflow.Steps[stepIdx]); err != nil {
+		return err
+	}
+
+	// Write the workflow back so map-stored scalar fields stay consistent
+	// with the slice mutation we just performed (slice elements share their
+	// backing array, but assigning the workflow value defends against future
+	// fn implementations that assign whole-step replacements).
+	w.Workflows[workflowID] = workflow
+	w.UpdatedAt = time.Now()
+	return nil
+}
+
+// MutateWorkflowStepAndSave applies fn to the step identified by workflowID/
+// stepID and persists the workspace via store. Cross-instance safe via
+// store.Update.
+//
+// The caller's ws argument is advisory — its fields are not the ones fn
+// mutates and it must not be read after this call returns; re-Get the
+// workspace if you need the post-mutation state.
+func MutateWorkflowStepAndSave(store Store, ws *Workspace, workflowID, stepID string, fn func(*WorkflowStep) error) error {
+	return store.Update(ws.ID, func(fresh *Workspace) error {
+		return fresh.MutateWorkflowStep(workflowID, stepID, fn)
+	})
+}
+
 // ListWorkflows returns all workflows in the workspace
 func (w *Workspace) ListWorkflows() []Workflow {
 	if w.Workflows == nil {
