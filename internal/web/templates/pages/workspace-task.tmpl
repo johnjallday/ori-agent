@@ -231,6 +231,10 @@
                   <div class="workspace-task-page-card-kicker">Execution Trace</div>
                   <h2>Tool calls and step events</h2>
                 </div>
+                <div id="workspace-task-execution-trace-controls" class="workspace-task-trace-controls" hidden>
+                  <div id="workspace-task-execution-trace-filters" class="workspace-task-trace-filters" role="group" aria-label="Filter trace entries"></div>
+                  <div id="workspace-task-execution-trace-count" class="workspace-task-trace-count" aria-live="polite"></div>
+                </div>
               </div>
               <div id="workspace-task-execution-trace" class="workspace-task-trace-list"></div>
             </section>
@@ -3114,6 +3118,83 @@
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
+    }
+
+    .workspace-task-trace-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 0.4rem;
+    }
+
+    .workspace-task-trace-filters {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-trace-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .workspace-task-trace-filter:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 30%, var(--border-color));
+      color: var(--text-primary);
+    }
+
+    .workspace-task-trace-filter[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      border-color: color-mix(in srgb, var(--primary-color) 45%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-task-trace-filter-count {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      opacity: 0.85;
+    }
+
+    .workspace-task-trace-count {
+      margin-left: auto;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-task-trace-show-more {
+      align-self: flex-start;
+      padding: 0.45rem 0.95rem;
+      border-radius: 999px;
+      border: 1px dashed color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .workspace-task-trace-show-more:hover {
+      border-style: solid;
+      color: var(--primary-color);
+      border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+    }
+
+    .workspace-task-trace-empty {
+      padding: 0.85rem 1rem;
+      color: var(--text-muted);
+      font-style: italic;
     }
 
     .workspace-task-trace-item {

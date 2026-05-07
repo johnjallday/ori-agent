@@ -825,6 +825,12 @@ export class WorkspaceTaskPage {
     this.skillDraftRequestId = 0;
     this.resultSectionMenu = null;
     this.scheduleSubmitting = false;
+    // Execution-trace pagination/filter state. Persists across realtime
+    // refreshes so a user reading a long trace doesn't get bumped back to
+    // the first 50 entries when a new event arrives. Reset only on
+    // navigation away from this task.
+    this._traceVisibleCount = WorkspaceTaskPage.TRACE_PAGE_SIZE;
+    this._traceFilter = 'all';
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -915,6 +921,9 @@ export class WorkspaceTaskPage {
       trace: document.getElementById('workspace-task-trace'),
       executionTraceCard: document.getElementById('workspace-task-execution-trace-card'),
       executionTrace: document.getElementById('workspace-task-execution-trace'),
+      executionTraceControls: document.getElementById('workspace-task-execution-trace-controls'),
+      executionTraceFilters: document.getElementById('workspace-task-execution-trace-filters'),
+      executionTraceCount: document.getElementById('workspace-task-execution-trace-count'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
@@ -5206,11 +5215,23 @@ export class WorkspaceTaskPage {
     return `${normalized.slice(0, maxLength).trim()}...`;
   }
 
+  // Trace pagination + filtering. The trace previously hard-clipped at 32
+  // entries which silently dropped the tail of long runs (a 50-step task
+  // would not show why it failed at step 47). The filter chips group
+  // related event kinds — tool calls + tool errors + progress + thinking
+  // + terminal — so users can isolate "tool errors" without scrolling.
+  static get TRACE_PAGE_SIZE() { return 50; }
+
   renderExecutionTrace() {
     if (!this.elements.executionTrace || !this.elements.executionTraceCard) return;
 
     const entries = this.buildExecutionTraceEntries();
+    const showCount = this._traceVisibleCount || WorkspaceTaskPage.TRACE_PAGE_SIZE;
+
     if (entries.length === 0) {
+      if (this.elements.executionTraceControls) {
+        this.elements.executionTraceControls.hidden = true;
+      }
       if (!this.hasExecutionActivity()) {
         this.elements.executionTraceCard.hidden = true;
         this.elements.executionTrace.innerHTML = '';
@@ -5231,7 +5252,38 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.executionTraceCard.hidden = false;
-    this.elements.executionTrace.innerHTML = entries.slice(0, 32).map((entry) => `
+
+    const buckets = this.bucketTraceEntries(entries);
+    const activeFilter = this._traceFilter && buckets[this._traceFilter] ? this._traceFilter : 'all';
+    if (activeFilter !== this._traceFilter) {
+      this._traceFilter = activeFilter;
+    }
+
+    this.renderTraceFilterChips(buckets, activeFilter);
+
+    const filtered = activeFilter === 'all' ? entries : entries.filter((entry) => this.traceBucketForStatus(entry.status) === activeFilter);
+
+    const visible = filtered.slice(0, showCount);
+    const hiddenCount = Math.max(filtered.length - visible.length, 0);
+
+    if (this.elements.executionTraceCount) {
+      if (filtered.length === 0) {
+        this.elements.executionTraceCount.textContent = '';
+      } else if (filtered.length === entries.length) {
+        this.elements.executionTraceCount.textContent = `Showing ${visible.length} of ${filtered.length}`;
+      } else {
+        this.elements.executionTraceCount.textContent = `Showing ${visible.length} of ${filtered.length} (filtered from ${entries.length})`;
+      }
+    }
+
+    if (filtered.length === 0) {
+      this.elements.executionTrace.innerHTML = `
+        <div class="workspace-task-trace-empty">No trace entries match this filter.</div>
+      `;
+      return;
+    }
+
+    const itemsHtml = visible.map((entry) => `
       <div class="workspace-task-trace-item">
         <div class="workspace-task-trace-status">${this.escapeHtml(entry.status)}</div>
         <div>
@@ -5240,6 +5292,98 @@ export class WorkspaceTaskPage {
         </div>
       </div>
     `).join('');
+
+    const showMoreHtml = hiddenCount > 0
+      ? `<button type="button" class="workspace-task-trace-show-more" data-trace-action="show-more">Show ${Math.min(hiddenCount, WorkspaceTaskPage.TRACE_PAGE_SIZE)} more (${hiddenCount} hidden)</button>`
+      : '';
+
+    this.elements.executionTrace.innerHTML = itemsHtml + showMoreHtml;
+
+    if (hiddenCount > 0) {
+      const btn = this.elements.executionTrace.querySelector('[data-trace-action="show-more"]');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          this._traceVisibleCount = showCount + WorkspaceTaskPage.TRACE_PAGE_SIZE;
+          // Bypass the dispatch cache: trace inputs didn't change, only the
+          // page-size state did, so the fingerprint-based dispatcher would
+          // skip this re-render.
+          this._renderCache && delete this._renderCache.executionTrace;
+          this.renderExecutionTrace();
+        });
+      }
+    }
+  }
+
+  // Bucket entry status strings into a small set of filter categories.
+  // The chip row is built from the buckets that actually have entries, so
+  // a task with no tool calls won't show a "Tool Calls" chip.
+  bucketTraceEntries(entries) {
+    const buckets = { all: { count: entries.length, label: 'All' } };
+    for (const entry of entries) {
+      const bucket = this.traceBucketForStatus(entry.status);
+      if (!buckets[bucket]) {
+        buckets[bucket] = { count: 0, label: this.traceBucketLabel(bucket) };
+      }
+      buckets[bucket].count += 1;
+    }
+    return buckets;
+  }
+
+  traceBucketForStatus(rawStatus) {
+    const s = String(rawStatus || '').toLowerCase().trim();
+    if (s === 'tool call' || s === 'tool result') return 'tool';
+    if (s === 'tool error' || s === 'failed' || s === 'error') return 'errors';
+    if (s === 'progress' || s === 'thinking' || s === 'waiting') return 'progress';
+    if (s === 'started' || s === 'completed' || s === 'blocked' || s === 'cancelled' || s === 'timeout') return 'lifecycle';
+    return 'other';
+  }
+
+  traceBucketLabel(bucket) {
+    switch (bucket) {
+      case 'tool': return 'Tools';
+      case 'errors': return 'Errors';
+      case 'progress': return 'Progress';
+      case 'lifecycle': return 'Lifecycle';
+      default: return 'Other';
+    }
+  }
+
+  renderTraceFilterChips(buckets, activeFilter) {
+    if (!this.elements.executionTraceFilters || !this.elements.executionTraceControls) return;
+
+    // Stable chip order so the filter row doesn't reshuffle as new entries
+    // stream in. "All" anchors the left; the rest follow lifecycle order
+    // (lifecycle → tool → progress → errors → other).
+    const order = ['all', 'lifecycle', 'tool', 'progress', 'errors', 'other'];
+    const present = order.filter((key) => buckets[key]);
+    if (present.length <= 1) {
+      this.elements.executionTraceControls.hidden = true;
+      return;
+    }
+    this.elements.executionTraceControls.hidden = false;
+    this.elements.executionTraceFilters.innerHTML = present.map((key) => `
+      <button type="button"
+              class="workspace-task-trace-filter"
+              data-trace-filter="${this.escapeHtml(key)}"
+              aria-pressed="${key === activeFilter ? 'true' : 'false'}">
+        <span>${this.escapeHtml(buckets[key].label)}</span>
+        <span class="workspace-task-trace-filter-count">${buckets[key].count}</span>
+      </button>
+    `).join('');
+
+    this.elements.executionTraceFilters.querySelectorAll('[data-trace-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-trace-filter') || 'all';
+        if (key === this._traceFilter) return;
+        this._traceFilter = key;
+        // Reset paging when changing filter so the user always lands on the
+        // first page of the filtered set rather than mid-scroll into the
+        // previous filter's page.
+        this._traceVisibleCount = WorkspaceTaskPage.TRACE_PAGE_SIZE;
+        this._renderCache && delete this._renderCache.executionTrace;
+        this.renderExecutionTrace();
+      });
+    });
   }
 
   buildExecutionTraceEntries() {
