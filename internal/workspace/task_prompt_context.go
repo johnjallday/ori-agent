@@ -454,8 +454,10 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 
 	// Handle input task results specially for better formatting. Runtime inputs
 	// (rebuilt each execution) live on task.RuntimeInputs — never in Context.
+	// Structured outputs from upstream tasks with an OutputSchema get rendered
+	// as JSON alongside the raw text, so downstream tasks can consume either.
 	if task.RuntimeInputs != nil {
-		h.formatInputResults(&prompt, task.RuntimeInputs.TaskResults)
+		h.formatInputResults(&prompt, task.RuntimeInputs)
 	}
 
 	// Include authored context fields. With runtime inputs no longer merged

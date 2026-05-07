@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -878,16 +879,55 @@ func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent 
 	return attachmentContents
 }
 
-// formatInputResults formats input task results based on the combination mode
-func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, resultsMap map[string]string) {
-	if len(resultsMap) == 0 {
+// formatInputResults renders the upstream tasks' outputs into the prompt.
+// For every input task ID we emit:
+//
+//   - the raw text result inside a fenced block (always, when present), so
+//     downstream LLMs can see the upstream's full natural-language reply; and
+//   - the parsed structured output as a JSON code block (when the upstream
+//     declared an OutputSchema and the result matched). The JSON gives the
+//     downstream task a machine-precise view it can quote/extract from
+//     without re-parsing markdown.
+//
+// Tasks IDs that appear in only one of the two maps are still emitted with
+// just the section they have. Iteration order is sorted by task ID so prompts
+// stay deterministic across runs (Go map range is randomized).
+func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, inputs *TaskRuntimeInputs) {
+	if inputs == nil {
+		return
+	}
+	if len(inputs.TaskResults) == 0 && len(inputs.StructuredOutputs) == 0 {
 		return
 	}
 
-	// Include input task results as context
+	idSet := make(map[string]struct{}, len(inputs.TaskResults)+len(inputs.StructuredOutputs))
+	for id := range inputs.TaskResults {
+		idSet[id] = struct{}{}
+	}
+	for id := range inputs.StructuredOutputs {
+		idSet[id] = struct{}{}
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
 	prompt.WriteString("## Input from Previous Tasks\n\n")
-	for taskID, result := range resultsMap {
-		fmt.Fprintf(prompt, "**Task %s Result:**\n```\n%s\n```\n\n", taskID, result)
+	for _, taskID := range ids {
+		if result, ok := inputs.TaskResults[taskID]; ok && result != "" {
+			fmt.Fprintf(prompt, "**Task %s Result:**\n```\n%s\n```\n\n", taskID, result)
+		}
+		if structured, ok := inputs.StructuredOutputs[taskID]; ok && len(structured) > 0 {
+			encoded, err := json.MarshalIndent(structured, "", "  ")
+			if err != nil {
+				// Marshal of map[string]any is total in practice (any reachable
+				// value an OutputSchema produces is JSON-able); the fallback
+				// keeps the prompt valid if a future field type slips through.
+				continue
+			}
+			fmt.Fprintf(prompt, "**Task %s Structured Output (JSON):**\n```json\n%s\n```\n\n", taskID, encoded)
+		}
 	}
 }
 
