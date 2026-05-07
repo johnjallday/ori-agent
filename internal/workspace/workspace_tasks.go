@@ -34,6 +34,24 @@ func (w *Workspace) AddTask(task Task) error {
 	return nil
 }
 
+// findTaskIdxLocked returns the slice index of the task with the given ID, or
+// -1 if it does not exist. Caller must hold w.mu (read or write). Uses the
+// taskIndex when available and falls back to a linear scan for workspaces
+// constructed as zero-value literals (mostly tests) or whose index has drifted.
+func (w *Workspace) findTaskIdxLocked(taskID string) int {
+	if w.taskIndex != nil {
+		if idx, ok := w.taskIndex[taskID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == taskID {
+			return idx
+		}
+	}
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == taskID {
+			return i
+		}
+	}
+	return -1
+}
+
 // GetTask retrieves a task by ID using O(1) index lookup.
 //
 // Returns a pointer to a shallow copy, not the workspace's internal slice
@@ -45,23 +63,12 @@ func (w *Workspace) GetTask(taskID string) (*Task, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	// Use index for O(1) lookup if available
-	if w.taskIndex != nil {
-		if idx, ok := w.taskIndex[taskID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == taskID {
-			t := w.Tasks[idx]
-			return &t, nil
-		}
+	idx := w.findTaskIdxLocked(taskID)
+	if idx == -1 {
+		return nil, fmt.Errorf("task %q not found in workspace", taskID)
 	}
-
-	// Fallback to linear scan (for backward compatibility with workspaces loaded without index)
-	for i := range w.Tasks {
-		if w.Tasks[i].ID == taskID {
-			t := w.Tasks[i]
-			return &t, nil
-		}
-	}
-
-	return nil, fmt.Errorf("task %q not found in workspace", taskID)
+	t := w.Tasks[idx]
+	return &t, nil
 }
 
 // UpdateTask updates an existing task in the workspace using O(1) index lookup
@@ -69,25 +76,13 @@ func (w *Workspace) UpdateTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Use index for O(1) lookup if available
-	if w.taskIndex != nil {
-		if idx, ok := w.taskIndex[task.ID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == task.ID {
-			w.Tasks[idx] = task
-			w.UpdatedAt = time.Now()
-			return nil
-		}
+	idx := w.findTaskIdxLocked(task.ID)
+	if idx == -1 {
+		return fmt.Errorf("task %q not found in workspace", task.ID)
 	}
-
-	// Fallback to linear scan (for backward compatibility)
-	for i := range w.Tasks {
-		if w.Tasks[i].ID == task.ID {
-			w.Tasks[i] = task
-			w.UpdatedAt = time.Now()
-			return nil
-		}
-	}
-
-	return fmt.Errorf("task %q not found in workspace", task.ID)
+	w.Tasks[idx] = task
+	w.UpdatedAt = time.Now()
+	return nil
 }
 
 // MutateTaskAndSave applies fn to the task identified by taskID and persists
@@ -128,24 +123,10 @@ func (w *Workspace) MutateTask(id string, fn func(*Task) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	idx := -1
-	if w.taskIndex != nil {
-		if i, ok := w.taskIndex[id]; ok && i < len(w.Tasks) && w.Tasks[i].ID == id {
-			idx = i
-		}
-	}
-	if idx == -1 {
-		for i := range w.Tasks {
-			if w.Tasks[i].ID == id {
-				idx = i
-				break
-			}
-		}
-	}
+	idx := w.findTaskIdxLocked(id)
 	if idx == -1 {
 		return fmt.Errorf("task %q not found in workspace", id)
 	}
-
 	if err := fn(&w.Tasks[idx]); err != nil {
 		return err
 	}
@@ -158,24 +139,7 @@ func (w *Workspace) DeleteTask(id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Try to use index for O(1) lookup
-	idx := -1
-	if w.taskIndex != nil {
-		if i, ok := w.taskIndex[id]; ok && i < len(w.Tasks) && w.Tasks[i].ID == id {
-			idx = i
-		}
-	}
-
-	// Fallback to linear scan if index not available or stale
-	if idx == -1 {
-		for i := range w.Tasks {
-			if w.Tasks[i].ID == id {
-				idx = i
-				break
-			}
-		}
-	}
-
+	idx := w.findTaskIdxLocked(id)
 	if idx == -1 {
 		return fmt.Errorf("task %q not found in workspace", id)
 	}
@@ -309,26 +273,26 @@ func (w *Workspace) GetSubtasks(parentTaskID string) []Task {
 	return subtasks
 }
 
-// GetTaskResults returns the results of tasks by their IDs
+// GetTaskResults returns the results of tasks by their IDs.
+// Uses the task index for O(M) lookup where M is len(taskIDs).
 func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	results := make(map[string]string)
+	results := make(map[string]string, len(taskIDs))
 	for _, taskID := range taskIDs {
-		for _, task := range w.Tasks {
-			if task.ID == taskID {
-				// If task has been executed and has a result, use that
-				if task.Result != "" {
-					results[taskID] = task.Result
-				} else {
-					// Otherwise, use the task description
-					// This handles cases where tasks are not assigned to agents
-					// but their descriptions should be included in merge context
-					results[taskID] = task.Description
-				}
-				break
-			}
+		idx := w.findTaskIdxLocked(taskID)
+		if idx == -1 {
+			continue
+		}
+		task := &w.Tasks[idx]
+		// If the task has been executed, use its result; otherwise fall back
+		// to its description so unassigned/pending tasks still contribute
+		// merge context.
+		if task.Result != "" {
+			results[taskID] = task.Result
+		} else {
+			results[taskID] = task.Description
 		}
 	}
 	return results
@@ -370,22 +334,22 @@ func (w *Workspace) BuildRuntimeInputs(task *Task) *TaskRuntimeInputs {
 	return out
 }
 
-// GetTaskStructuredOutputs returns parsed structured outputs for tasks whose result matches a schema.
+// GetTaskStructuredOutputs returns parsed structured outputs for tasks whose
+// result matches a schema. Uses the task index for O(M) lookup.
 func (w *Workspace) GetTaskStructuredOutputs(taskIDs []string) map[string]interface{} {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	outputs := make(map[string]interface{})
+	outputs := make(map[string]interface{}, len(taskIDs))
 	for _, taskID := range taskIDs {
-		for _, task := range w.Tasks {
-			if task.ID != taskID {
-				continue
-			}
-			parsed, err := ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
-			if err == nil && len(parsed) > 0 {
-				outputs[taskID] = parsed
-			}
-			break
+		idx := w.findTaskIdxLocked(taskID)
+		if idx == -1 {
+			continue
+		}
+		task := &w.Tasks[idx]
+		parsed, err := ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
+		if err == nil && len(parsed) > 0 {
+			outputs[taskID] = parsed
 		}
 	}
 	return outputs
