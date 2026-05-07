@@ -611,8 +611,12 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			return
 		}
 
-		// Reset task state for rerun
-		targetTask.Status = workspace.TaskStatusInProgress
+		// Reset task state for rerun (terminal/pending → InProgress is a legal
+		// rerun shortcut in the transition table).
+		if err := targetTask.SetStatus(workspace.TaskStatusInProgress); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, fmt.Sprintf("cannot rerun task in state %q", targetTask.Status), err)
+			return
+		}
 		targetTask.Result = ""
 		workspace.ApplyTaskResultMetadata(targetTask, "")
 		targetTask.Error = ""
@@ -680,12 +684,15 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
-					task.Status = workspace.TaskStatusFailed
-					task.Error = execErr.Error()
-					completedAt := time.Now()
-					task.CompletedAt = &completedAt
-					_ = ws.UpdateTask(*task)
-					_ = th.workspaceStore.Save(ws)
+					if err := task.SetStatus(workspace.TaskStatusFailed); err != nil {
+						logger.Error("Scheduler node failure transition rejected", logger.Fields{"task_id": taskID, "error": err})
+					} else {
+						task.Error = execErr.Error()
+						completedAt := time.Now()
+						task.CompletedAt = &completedAt
+						_ = ws.UpdateTask(*task)
+						_ = th.workspaceStore.Save(ws)
+					}
 				}
 			}
 		} else {
@@ -695,13 +702,16 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
-					task.Status = workspace.TaskStatusCompleted
-					task.Result = result
-					workspace.ApplyTaskResultMetadata(task, result)
-					completedAt := time.Now()
-					task.CompletedAt = &completedAt
-					_ = ws.UpdateTask(*task)
-					_ = th.workspaceStore.Save(ws)
+					if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
+						logger.Error("Scheduler node completion transition rejected", logger.Fields{"task_id": taskID, "error": err})
+					} else {
+						task.Result = result
+						workspace.ApplyTaskResultMetadata(task, result)
+						completedAt := time.Now()
+						task.CompletedAt = &completedAt
+						_ = ws.UpdateTask(*task)
+						_ = th.workspaceStore.Save(ws)
+					}
 				}
 			}
 		}

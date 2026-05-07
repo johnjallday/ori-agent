@@ -355,7 +355,9 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		}
 
 		// Reset task state for re-execution
-		t.Status = TaskStatusAssigned
+		if err := t.SetStatus(TaskStatusAssigned); err != nil {
+			return fmt.Errorf("scheduler: reset task to assigned: %w", err)
+		}
 		t.Result = ""
 		ApplyTaskResultMetadata(t, "")
 		t.Error = ""
@@ -517,7 +519,9 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 
 	// Reset task state for rerun and queue it for the executor
 	if err := ws.MutateTask(targetTask.ID, func(t *Task) error {
-		t.Status = TaskStatusAssigned
+		if err := t.SetStatus(TaskStatusAssigned); err != nil {
+			return fmt.Errorf("scheduler: reset target task to assigned: %w", err)
+		}
 		t.Result = ""
 		ApplyTaskResultMetadata(t, "")
 		t.Error = ""

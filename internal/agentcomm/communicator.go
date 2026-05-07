@@ -203,33 +203,45 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStat
 			continue // Task not in this workspace
 		}
 
-		// Update task based on status
+		// Update task based on status. Status transitions are validated by
+		// SetStatus; if an agent reports an illegal transition (e.g. Failed →
+		// Completed without a reset), the error surfaces to the caller.
 		now := time.Now()
 		switch status {
 		case workspace.TaskStatusPending:
-			task.Status = workspace.TaskStatusPending
+			if err := task.SetStatus(workspace.TaskStatusPending); err != nil {
+				return fmt.Errorf("agent status transition rejected: %w", err)
+			}
 			// Clear completion-related fields when reverting to pending
 			task.StartedAt = nil
 			task.CompletedAt = nil
 			task.Result = ""
 			task.Error = ""
 		case workspace.TaskStatusInProgress:
-			task.Status = workspace.TaskStatusInProgress
+			if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
+				return fmt.Errorf("agent status transition rejected: %w", err)
+			}
 			task.StartedAt = &now
 		case workspace.TaskStatusCompleted:
-			task.Status = workspace.TaskStatusCompleted
+			if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
+				return fmt.Errorf("agent status transition rejected: %w", err)
+			}
 			task.Result = result
 			task.CompletedAt = &now
 			// Send result message back to delegator
 			c.sendTaskResult(task, result, "")
 		case workspace.TaskStatusFailed:
-			task.Status = workspace.TaskStatusFailed
+			if err := task.SetStatus(workspace.TaskStatusFailed); err != nil {
+				return fmt.Errorf("agent status transition rejected: %w", err)
+			}
 			task.Error = errorMsg
 			task.CompletedAt = &now
 			// Send failure message back to delegator
 			c.sendTaskResult(task, "", errorMsg)
 		case workspace.TaskStatusCancelled:
-			task.Status = workspace.TaskStatusCancelled
+			if err := task.SetStatus(workspace.TaskStatusCancelled); err != nil {
+				return fmt.Errorf("agent status transition rejected: %w", err)
+			}
 			task.CompletedAt = &now
 		}
 
@@ -386,7 +398,10 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 			task := &ws.Tasks[i]
 			if task.Status == workspace.TaskStatusInProgress && task.Timeout > 0 {
 				if task.StartedAt != nil && now.Sub(*task.StartedAt) > task.Timeout {
-					task.Status = workspace.TaskStatusTimeout
+					if err := task.SetStatus(workspace.TaskStatusTimeout); err != nil {
+						logger.Error("Timeout status transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+						continue
+					}
 					completedAt := now
 					task.CompletedAt = &completedAt
 					timedOut = append(timedOut, *task)

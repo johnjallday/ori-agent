@@ -1161,7 +1161,10 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 	now := time.Now()
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
-			ws.Tasks[i].Status = workspace.TaskStatusCancelled
+			if err := ws.Tasks[i].SetStatus(workspace.TaskStatusCancelled); err != nil {
+				http.Error(w, fmt.Sprintf("cannot cancel task in state %q: %v", ws.Tasks[i].Status, err), http.StatusConflict)
+				return
+			}
 			ws.Tasks[i].CompletedAt = &now
 			ws.Tasks[i].Error = "Cancelled by user"
 			ws.Tasks[i].Result = ""
@@ -1222,7 +1225,10 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			now := time.Now()
-			ws.Tasks[i].Status = workspace.TaskStatusCompleted
+			if err := ws.Tasks[i].SetStatus(workspace.TaskStatusCompleted); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusConflict, fmt.Sprintf("cannot complete task in state %q", ws.Tasks[i].Status), err)
+				return
+			}
 			ws.Tasks[i].CompletedAt = &now
 			break
 		}

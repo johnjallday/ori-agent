@@ -103,7 +103,10 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 		for i := range ws.Tasks {
 			task := &ws.Tasks[i]
 			if task.Status == TaskStatusInProgress {
-				task.Status = TaskStatusPending
+				if err := task.SetStatus(TaskStatusPending); err != nil {
+					logger.Error("Orphan cleanup transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+					continue
+				}
 				task.StartedAt = nil
 				resetCount++
 			}
@@ -268,13 +271,20 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": task.ID})
 	}
 
-	// Update task status to in_progress
+	// Update task status to in_progress. The local `task` value is a snapshot
+	// used for downstream event metadata; the persisted slice element is
+	// updated by the closure below.
 	now := time.Now()
-	task.Status = TaskStatusInProgress
+	if err := task.SetStatus(TaskStatusInProgress); err != nil {
+		logger.Error("Failed to mark local task in_progress", logger.Fields{"task_id": task.ID, "error": err})
+		return
+	}
 	task.StartedAt = &now
 
 	if err := MutateTaskAndSave(te.workspaceStore, ws, task.ID, func(t *Task) error {
-		t.Status = TaskStatusInProgress
+		if err := t.SetStatus(TaskStatusInProgress); err != nil {
+			return err
+		}
 		t.StartedAt = &now
 		return nil
 	}); err != nil {
@@ -334,19 +344,25 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 							executionSummary = be.RawResponse
 						}
 						t.CompletedAt = nil
-						t.Status = TaskStatusWaitingForChoice
+						if err := t.SetStatus(TaskStatusWaitingForChoice); err != nil {
+							return err
+						}
 						t.Error = ""
 						t.Result = ""
 						ApplyTaskResultMetadata(t, "")
 						applyExecutorTaskBlockedContext(t, be)
 					} else {
-						t.Status = TaskStatusFailed
+						if err := t.SetStatus(TaskStatusFailed); err != nil {
+							return err
+						}
 						t.Error = err.Error()
 					}
 					RecordTaskExecution(t, executionStatus, executionSummary, startedAt, completedAt.Sub(startedAt))
 				} else {
 					logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-					t.Status = TaskStatusCompleted
+					if err := t.SetStatus(TaskStatusCompleted); err != nil {
+						return err
+					}
 					t.Result = result
 					ApplyTaskResultMetadata(t, result)
 					RecordTaskExecution(t, "success", result, startedAt, completedAt.Sub(startedAt))

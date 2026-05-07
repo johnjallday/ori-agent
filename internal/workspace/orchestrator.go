@@ -257,7 +257,10 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	// Update task status to in_progress and post the task-request message in
 	// one atomic Update so a concurrent goroutine cannot drop either change.
 	now := time.Now()
-	task.Status = TaskStatusInProgress
+	if err := task.SetStatus(TaskStatusInProgress); err != nil {
+		logger.Error("[Orchestrator] Warning: failed to mark local task in_progress", logger.Fields{"task_id": task.ID, "error": err})
+		return err
+	}
 	task.StartedAt = &now
 
 	message := AgentMessage{
@@ -272,7 +275,9 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 
 	if updateErr := o.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
 		if err := fresh.MutateTask(task.ID, func(t *Task) error {
-			t.Status = TaskStatusInProgress
+			if err := t.SetStatus(TaskStatusInProgress); err != nil {
+				return err
+			}
 			t.StartedAt = &now
 			return nil
 		}); err != nil {
@@ -310,12 +315,16 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	if err != nil {
 		// Task failed
 		logger.Error("[Orchestrator] Task failed", logger.Fields{"task_id": task.ID, "err": err})
-		task.Status = TaskStatusFailed
+		if statusErr := task.SetStatus(TaskStatusFailed); statusErr != nil {
+			logger.Error("[Orchestrator] Warning: failed to mark local task failed", logger.Fields{"task_id": task.ID, "error": statusErr})
+		}
 		task.CompletedAt = &completed
 		task.Error = err.Error()
 
 		if updateErr := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
-			t.Status = TaskStatusFailed
+			if statusErr := t.SetStatus(TaskStatusFailed); statusErr != nil {
+				return statusErr
+			}
 			t.CompletedAt = &completed
 			t.Error = err.Error()
 			return nil
@@ -332,12 +341,16 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	}
 
 	// Mark task as completed
-	task.Status = TaskStatusCompleted
+	if statusErr := task.SetStatus(TaskStatusCompleted); statusErr != nil {
+		logger.Error("[Orchestrator] Warning: failed to mark local task completed", logger.Fields{"task_id": task.ID, "error": statusErr})
+	}
 	task.CompletedAt = &completed
 	task.Result = result
 	ApplyTaskResultMetadata(&task, result)
 	if err := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
-		t.Status = TaskStatusCompleted
+		if statusErr := t.SetStatus(TaskStatusCompleted); statusErr != nil {
+			return statusErr
+		}
 		t.CompletedAt = &completed
 		t.Result = result
 		ApplyTaskResultMetadata(t, result)
