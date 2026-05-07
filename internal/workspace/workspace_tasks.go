@@ -7,7 +7,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// AddTask adds a task to the workspace
+// AddTask adds a task to the workspace.
+//
+// The candidate task plus the existing graph are validated before commit; if
+// the addition would introduce a cycle, self-reference, or unknown
+// parent/input ID, the workspace state is left unchanged and the validation
+// error is returned. Forward references (a task whose parent/input has not
+// been added yet) are rejected here — batch importers that may not have
+// inserted dependencies in topological order should accumulate tasks first
+// and call ValidateTaskGraph at end-of-batch instead.
 func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -29,6 +37,18 @@ func (w *Workspace) AddTask(task Task) error {
 		w.taskIndex = make(map[string]int)
 	}
 	w.taskIndex[task.ID] = len(w.Tasks) - 1
+
+	// Only check when the candidate actually contributes graph edges, so the
+	// hot path for the common (no parent/no inputs) AddTask stays free of the
+	// O(V+E) walk.
+	if task.ParentTaskID != "" || len(task.InputTaskIDs) > 0 {
+		if err := validateTaskGraph(w.Tasks); err != nil {
+			w.Tasks = w.Tasks[:len(w.Tasks)-1]
+			delete(w.taskIndex, task.ID)
+			return err
+		}
+	}
+
 	w.UpdatedAt = time.Now()
 
 	return nil
