@@ -256,24 +256,12 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": task.ID})
 	}
 
-	// Update task status to in_progress
+	// Update task status to in_progress and post the task-request message in
+	// one atomic Update so a concurrent goroutine cannot drop either change.
 	now := time.Now()
 	task.Status = TaskStatusInProgress
 	task.StartedAt = &now
-	if err := workspace.MutateTask(task.ID, func(t *Task) error {
-		t.Status = TaskStatusInProgress
-		t.StartedAt = &now
-		return nil
-	}); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
-	}
 
-	o.publishEvent("task_started", workspaceID, map[string]interface{}{
-		"task_id":     task.ID,
-		"assigned_to": task.To,
-	})
-
-	// Send message to the assigned agent
 	message := AgentMessage{
 		ID:        uuid.New().String(),
 		From:      "orchestrator",
@@ -284,14 +272,23 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		Timestamp: time.Now(),
 	}
 
-	if err := workspace.AddMessage(message); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
+	if updateErr := o.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+		if err := fresh.MutateTask(task.ID, func(t *Task) error {
+			t.Status = TaskStatusInProgress
+			t.StartedAt = &now
+			return nil
+		}); err != nil {
+			return err
+		}
+		return fresh.AddMessage(message)
+	}); updateErr != nil {
+		logger.Error("[Orchestrator] Warning: failed to start task", logger.Fields{"task_id": task.ID, "error": updateErr})
 	}
 
-	// Save workspace with updated task and message
-	if err := o.workspaceStore.Save(workspace); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"error": err})
-	}
+	o.publishEvent("task_started", workspaceID, map[string]interface{}{
+		"task_id":     task.ID,
+		"assigned_to": task.To,
+	})
 
 	o.publishEvent("message_sent", workspaceID, map[string]interface{}{
 		"from":    message.From,
@@ -319,17 +316,13 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		task.CompletedAt = &completed
 		task.Error = err.Error()
 
-		if updateErr := workspace.MutateTask(task.ID, func(t *Task) error {
+		if updateErr := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
 			t.Status = TaskStatusFailed
 			t.CompletedAt = &completed
 			t.Error = err.Error()
 			return nil
 		}); updateErr != nil {
-			logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": updateErr})
-		}
-
-		if saveErr := o.workspaceStore.Save(workspace); saveErr != nil {
-			logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"workspace_id": saveErr})
+			logger.Error("[Orchestrator] Warning: failed to record task failure", logger.Fields{"task_id": task.ID, "error": updateErr})
 		}
 
 		o.publishEvent("task_failed", workspaceID, map[string]interface{}{
@@ -345,19 +338,14 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	task.CompletedAt = &completed
 	task.Result = result
 	ApplyTaskResultMetadata(&task, result)
-	if err := workspace.MutateTask(task.ID, func(t *Task) error {
+	if err := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
 		t.Status = TaskStatusCompleted
 		t.CompletedAt = &completed
 		t.Result = result
 		ApplyTaskResultMetadata(t, result)
 		return nil
 	}); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
-	}
-
-	// Save final workspace state
-	if err := o.workspaceStore.Save(workspace); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"error": err})
+		logger.Error("[Orchestrator] Warning: failed to record task completion", logger.Fields{"task_id": task.ID, "error": err})
 	}
 
 	o.publishEvent("task_completed", workspaceID, map[string]interface{}{

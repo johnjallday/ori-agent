@@ -153,15 +153,12 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			// max_runs=0 means unlimited executions
 			if task.Schedule.MaxRuns > 0 && task.ExecutionCount >= task.Schedule.MaxRuns {
 				logger.Debug("📅 Task schedule reached max runs, disabling", logger.Fields{"task_id": task.ID, "maxruns": task.Schedule.MaxRuns})
-				if err := ws.MutateTask(task.ID, func(t *Task) error {
+				if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
 					t.ScheduleEnabled = false
 					t.NextRun = nil
 					return nil
 				}); err != nil {
-					logger.Error("Failed to update task", logger.Fields{"error": err})
-				}
-				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"error": err})
+					logger.Error("Failed to disable task schedule", logger.Fields{"error": err, "task_id": task.ID})
 				}
 				continue
 			}
@@ -170,15 +167,12 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			// end_date is optional; nil means no end date
 			if task.Schedule.EndDate != nil && now.After(*task.Schedule.EndDate) {
 				logger.Debug("📅 Task schedule passed end date, disabling", logger.Fields{"task_id": task.ID})
-				if err := ws.MutateTask(task.ID, func(t *Task) error {
+				if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
 					t.ScheduleEnabled = false
 					t.NextRun = nil
 					return nil
 				}); err != nil {
-					logger.Error("Failed to update task", logger.Fields{"error": err})
-				}
-				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"error": err})
+					logger.Error("Failed to disable task schedule", logger.Fields{"error": err, "task_id": task.ID})
 				}
 				continue
 			}
@@ -247,7 +241,7 @@ func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now t
 	missedAt := *task.NextRun
 	var nextRun *time.Time
 
-	if err := ws.MutateTask(task.ID, func(t *Task) error {
+	if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
 		if t.Schedule == nil {
 			return fmt.Errorf("task %q has no schedule", t.ID)
 		}
@@ -267,11 +261,7 @@ func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now t
 		}
 		return nil
 	}); err != nil {
-		logger.Error("Failed to update skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
-		return
-	}
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
+		logger.Error("Failed to record skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
 		return
 	}
 	if ts.eventBus != nil {
@@ -359,7 +349,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		scheduleName   string
 	)
 
-	if err := ws.MutateTask(task.ID, func(t *Task) error {
+	if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
 		if t.Schedule == nil {
 			return fmt.Errorf("task %q has no schedule", t.ID)
 		}
@@ -402,12 +392,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		scheduleName = t.ScheduleName
 		return nil
 	}); err != nil {
-		logger.Error("Failed to update task", logger.Fields{"error": err})
-		return
-	}
-
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		logger.Error("Failed to record scheduled task execution", logger.Fields{"error": err, "task_id": task.ID})
 		return
 	}
 
@@ -439,7 +424,7 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 		scheduleName string
 	)
 
-	if mutErr := ws.MutateTask(task.ID, func(t *Task) error {
+	if mutErr := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
 		t.FailureCount++
 		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
 			TaskID:     t.ID,
@@ -462,11 +447,8 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 		scheduleName = t.ScheduleName
 		return nil
 	}); mutErr != nil {
-		logger.Error("Failed to update task", logger.Fields{"error": mutErr})
+		logger.Error("Failed to record scheduled task failure", logger.Fields{"error": mutErr, "task_id": task.ID})
 		return
-	}
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 	}
 
 	if ts.eventBus != nil {

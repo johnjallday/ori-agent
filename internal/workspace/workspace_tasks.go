@@ -90,6 +90,25 @@ func (w *Workspace) UpdateTask(task Task) error {
 	return fmt.Errorf("task %q not found in workspace", task.ID)
 }
 
+// MutateTaskAndSave applies fn to the task identified by taskID and persists
+// the workspace via store. It is the canonical "mutate + persist" pattern.
+//
+// Cross-instance race safety: this helper delegates to store.Update, which
+// re-loads the authoritative workspace under a per-workspace lock before
+// running fn. The caller's ws argument is therefore advisory — its fields are
+// not the ones fn mutates, and it should not be read after this call returns
+// because the on-disk and in-cache state has moved past it. Callers that need
+// to read the post-mutation workspace should re-Get it.
+//
+// Use this helper only when Save is the very next thing you would call. If
+// other workspace mutations (e.g. AddMessage) need to land in the same Save,
+// call store.Update directly with a closure that does all of them.
+func MutateTaskAndSave(store Store, ws *Workspace, taskID string, fn func(*Task) error) error {
+	return store.Update(ws.ID, func(fresh *Workspace) error {
+		return fresh.MutateTask(taskID, fn)
+	})
+}
+
 // MutateTask applies fn to the task identified by id while holding the workspace
 // lock, eliminating the read-modify-write race that GetTask + UpdateTask exposed.
 //

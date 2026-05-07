@@ -511,6 +511,24 @@ func convertToAgentWorkspaceLayout(layout *CanvasLayout) *workspace.CanvasLayout
 // Ensure WorkspaceStoreAdapter implements workspace.Store
 var _ workspace.Store = (*WorkspaceStoreAdapter)(nil)
 
+// adapterLocks serializes Update calls per workspace inside a single
+// adapter instance. The session-backed store has its own concurrency
+// strategy at the SQL layer; the lock here protects the
+// load → mutate → save read-modify-write window inside this process.
+var adapterLocks workspace.LockTable
+
+// Lock acquires the per-workspace mutex used by Update. Save itself does not
+// acquire the lock — callers that bypass Update can still race.
+func (a *WorkspaceStoreAdapter) Lock(wsID string) func() {
+	return adapterLocks.Lock(wsID)
+}
+
+// Update applies fn to the workspace and persists the result, atomic against
+// other Update calls on the same workspace within this process.
+func (a *WorkspaceStoreAdapter) Update(wsID string, fn func(*workspace.Workspace) error) error {
+	return workspace.CanonicalUpdate(a, wsID, fn)
+}
+
 // CreateWorkspaceViaAdapter creates a new workspace through the adapter interface.
 // This is a helper for creating workspaces with proper defaults.
 func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description string, agents []string) (*workspace.Workspace, error) {

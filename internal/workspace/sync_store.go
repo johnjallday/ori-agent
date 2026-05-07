@@ -97,6 +97,17 @@ func (s *SyncStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Age
 	return s.primary.GetWorkspaceAgent(workspaceID, agentName)
 }
 
+// Lock delegates per-workspace serialization to the primary store so that
+// Update calls remain atomic regardless of which Store value the caller holds.
+func (s *SyncStore) Lock(wsID string) func() { return s.primary.Lock(wsID) }
+
+// Update applies fn under the primary's per-workspace lock, then routes the
+// resulting Save through SyncStore.Save (which writes to both primary and the
+// disk sync target).
+func (s *SyncStore) Update(wsID string, fn func(*Workspace) error) error {
+	return CanonicalUpdate(s, wsID, fn)
+}
+
 // SaveWorkspaceAgent writes the snapshot to the primary store and to disk.
 func (s *SyncStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
 	if err := s.primary.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
