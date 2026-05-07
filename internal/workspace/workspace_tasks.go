@@ -34,7 +34,13 @@ func (w *Workspace) AddTask(task Task) error {
 	return nil
 }
 
-// GetTask retrieves a task by ID using O(1) index lookup
+// GetTask retrieves a task by ID using O(1) index lookup.
+//
+// Returns a pointer to a shallow copy, not the workspace's internal slice
+// element. Callers may freely mutate the returned task without racing the
+// workspace's other readers; persist changes back via UpdateTask. (Note:
+// reference fields like Context maps still alias the original — callers
+// that mutate those should rebuild the map rather than delete in place.)
 func (w *Workspace) GetTask(taskID string) (*Task, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -42,14 +48,16 @@ func (w *Workspace) GetTask(taskID string) (*Task, error) {
 	// Use index for O(1) lookup if available
 	if w.taskIndex != nil {
 		if idx, ok := w.taskIndex[taskID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == taskID {
-			return &w.Tasks[idx], nil
+			t := w.Tasks[idx]
+			return &t, nil
 		}
 	}
 
 	// Fallback to linear scan (for backward compatibility with workspaces loaded without index)
 	for i := range w.Tasks {
 		if w.Tasks[i].ID == taskID {
-			return &w.Tasks[i], nil
+			t := w.Tasks[i]
+			return &t, nil
 		}
 	}
 
@@ -80,6 +88,50 @@ func (w *Workspace) UpdateTask(task Task) error {
 	}
 
 	return fmt.Errorf("task %q not found in workspace", task.ID)
+}
+
+// MutateTask applies fn to the task identified by id while holding the workspace
+// lock, eliminating the read-modify-write race that GetTask + UpdateTask exposed.
+//
+// fn receives a pointer to the live slice element and may mutate it freely;
+// returning a non-nil error aborts the mutation (the in-memory state is left
+// untouched). On success, UpdatedAt is bumped. Callers are still responsible
+// for persisting the workspace via the store after MutateTask returns.
+//
+// fn must not call back into Workspace methods that take w.mu (deadlock) and
+// must not retain the *Task beyond its own scope (the slice may be reallocated
+// later by AddTask).
+func (w *Workspace) MutateTask(id string, fn func(*Task) error) error {
+	if fn == nil {
+		return fmt.Errorf("MutateTask: fn is nil")
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	idx := -1
+	if w.taskIndex != nil {
+		if i, ok := w.taskIndex[id]; ok && i < len(w.Tasks) && w.Tasks[i].ID == id {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		for i := range w.Tasks {
+			if w.Tasks[i].ID == id {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("task %q not found in workspace", id)
+	}
+
+	if err := fn(&w.Tasks[idx]); err != nil {
+		return err
+	}
+	w.UpdatedAt = time.Now()
+	return nil
 }
 
 // DeleteTask removes a task from the workspace by ID and cleans up layout metadata.

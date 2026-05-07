@@ -497,56 +497,70 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 			*warnings = append(*warnings, fmt.Sprintf("task %s from markdown was not found", taskID))
 			continue
 		}
+
+		// applyItem encodes how a markdown item modifies a task. It is run twice:
+		// once on a snapshot to detect whether anything actually changed (so we
+		// don't bump UpdatedAt on no-op syncs), and once inside MutateTask
+		// against the live slice element (so concurrent mutations are observed).
+		applyItem := func(t *Task) {
+			if t.Context == nil {
+				t.Context = map[string]interface{}{}
+			}
+			if item.Description != "" && item.Description != t.Description {
+				t.Description = item.Description
+			}
+			if item.To != "" && item.To != t.To {
+				t.To = item.To
+			}
+			if item.AssignedNodeID != "" && item.AssignedNodeID != t.AssignedNodeID {
+				t.AssignedNodeID = item.AssignedNodeID
+			}
+			parentID := item.ParentTaskID
+			if parentID == "" && item.ParentLine >= 0 {
+				parentID = lineToTaskID[item.ParentLine]
+			}
+			if parentID != t.ParentTaskID {
+				t.ParentTaskID = parentID
+			}
+			if parentID != "" && item.SubtaskIndex > 0 && item.SubtaskIndex != t.SubtaskIndex {
+				t.SubtaskIndex = item.SubtaskIndex
+			}
+			if item.Mode != "" {
+				mode := NormalizeTaskOrchestrationMode(item.Mode)
+				if mode != t.OrchestrationMode {
+					t.OrchestrationMode = mode
+				}
+			}
+			if item.InputTaskIDs != nil && !stringSlicesEqual(item.InputTaskIDs, t.InputTaskIDs) {
+				t.InputTaskIDs = item.InputTaskIDs
+			}
+			if item.Checked && t.Status != TaskStatusCompleted {
+				now := time.Now()
+				t.Status = TaskStatusCompleted
+				if t.CompletedAt == nil {
+					t.CompletedAt = &now
+				}
+			}
+			if !item.Checked && t.Status == TaskStatusCompleted {
+				t.Status = TaskStatusPending
+				t.CompletedAt = nil
+			}
+		}
+
 		next := *task
-		if next.Context == nil {
-			next.Context = map[string]interface{}{}
+		applyItem(&next)
+		if tasksEqualForMarkdownUpdate(*task, next) {
+			continue
 		}
-		if item.Description != "" && item.Description != next.Description {
-			next.Description = item.Description
+
+		if err := ws.MutateTask(taskID, func(t *Task) error {
+			applyItem(t)
+			return nil
+		}); err != nil {
+			*warnings = append(*warnings, fmt.Sprintf("failed to update task %s: %v", taskID, err))
+			continue
 		}
-		if item.To != "" && item.To != next.To {
-			next.To = item.To
-		}
-		if item.AssignedNodeID != "" && item.AssignedNodeID != next.AssignedNodeID {
-			next.AssignedNodeID = item.AssignedNodeID
-		}
-		parentID := item.ParentTaskID
-		if parentID == "" && item.ParentLine >= 0 {
-			parentID = lineToTaskID[item.ParentLine]
-		}
-		if parentID != next.ParentTaskID {
-			next.ParentTaskID = parentID
-		}
-		if parentID != "" && item.SubtaskIndex > 0 && item.SubtaskIndex != next.SubtaskIndex {
-			next.SubtaskIndex = item.SubtaskIndex
-		}
-		if item.Mode != "" {
-			mode := NormalizeTaskOrchestrationMode(item.Mode)
-			if mode != next.OrchestrationMode {
-				next.OrchestrationMode = mode
-			}
-		}
-		if item.InputTaskIDs != nil && !stringSlicesEqual(item.InputTaskIDs, next.InputTaskIDs) {
-			next.InputTaskIDs = item.InputTaskIDs
-		}
-		if item.Checked && next.Status != TaskStatusCompleted {
-			now := time.Now()
-			next.Status = TaskStatusCompleted
-			if next.CompletedAt == nil {
-				next.CompletedAt = &now
-			}
-		}
-		if !item.Checked && next.Status == TaskStatusCompleted {
-			next.Status = TaskStatusPending
-			next.CompletedAt = nil
-		}
-		if !tasksEqualForMarkdownUpdate(*task, next) {
-			if err := ws.UpdateTask(next); err != nil {
-				*warnings = append(*warnings, fmt.Sprintf("failed to update task %s: %v", taskID, err))
-				continue
-			}
-			changed = true
-		}
+		changed = true
 	}
 	if changed {
 		ws.UpdatedAt = time.Now()

@@ -260,7 +260,11 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	now := time.Now()
 	task.Status = TaskStatusInProgress
 	task.StartedAt = &now
-	if err := workspace.UpdateTask(task); err != nil {
+	if err := workspace.MutateTask(task.ID, func(t *Task) error {
+		t.Status = TaskStatusInProgress
+		t.StartedAt = &now
+		return nil
+	}); err != nil {
 		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
 	}
 
@@ -315,7 +319,12 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		task.CompletedAt = &completed
 		task.Error = err.Error()
 
-		if updateErr := workspace.UpdateTask(task); updateErr != nil {
+		if updateErr := workspace.MutateTask(task.ID, func(t *Task) error {
+			t.Status = TaskStatusFailed
+			t.CompletedAt = &completed
+			t.Error = err.Error()
+			return nil
+		}); updateErr != nil {
 			logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": updateErr})
 		}
 
@@ -336,7 +345,13 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	task.CompletedAt = &completed
 	task.Result = result
 	ApplyTaskResultMetadata(&task, result)
-	if err := workspace.UpdateTask(task); err != nil {
+	if err := workspace.MutateTask(task.ID, func(t *Task) error {
+		t.Status = TaskStatusCompleted
+		t.CompletedAt = &completed
+		t.Result = result
+		ApplyTaskResultMetadata(t, result)
+		return nil
+	}); err != nil {
 		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
 	}
 

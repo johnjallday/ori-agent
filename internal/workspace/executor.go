@@ -273,11 +273,15 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	// Update task status to in_progress
-	task.Status = TaskStatusInProgress
 	now := time.Now()
+	task.Status = TaskStatusInProgress
 	task.StartedAt = &now
 
-	if err := ws.UpdateTask(task); err != nil {
+	if err := ws.MutateTask(task.ID, func(t *Task) error {
+		t.Status = TaskStatusInProgress
+		t.StartedAt = &now
+		return nil
+	}); err != nil {
 		logger.Error("Failed to update task status", logger.Fields{"task_id": task.ID, "error": err})
 	}
 	if err := te.workspaceStore.Save(ws); err != nil {
@@ -314,56 +318,71 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			return
 		}
 
-		// Find the task in the reloaded workspace
-		var updatedTask *Task
-		for i := range ws.Tasks {
-			if ws.Tasks[i].ID == task.ID {
-				updatedTask = &ws.Tasks[i]
-				break
+		// Apply post-execution result/status under the workspace lock to avoid
+		// racing with concurrent mutations. The closure captures a snapshot for
+		// post-mutation event publishing and store I/O, which must not run
+		// while w.mu is held.
+		var (
+			snapshot    Task
+			blockedErr  *TaskBlockedError
+			completedAt = time.Now()
+		)
+		if mutErr := ws.MutateTask(task.ID, func(t *Task) error {
+			t.CompletedAt = &completedAt
+			startedAt := completedAt
+			if t.StartedAt != nil && !t.StartedAt.IsZero() {
+				startedAt = *t.StartedAt
 			}
-		}
 
-		if updatedTask == nil {
-			logger.Error("Task not found in workspace after execution", logger.Fields{"task_id": task.ID})
+			if err != nil {
+				logger.Error("Task failed", logger.Fields{"task_id": task.ID, "err": err})
+				executionStatus := "failed"
+				executionSummary := err.Error()
+				if be, ok := AsTaskBlockedError(err); ok {
+					blockedErr = be
+					executionStatus = "blocked"
+					executionSummary = be.Error()
+					if strings.TrimSpace(be.RawResponse) != "" {
+						executionSummary = be.RawResponse
+					}
+					t.CompletedAt = nil
+					t.Status = TaskStatusWaitingForChoice
+					t.Error = ""
+					t.Result = ""
+					ApplyTaskResultMetadata(t, "")
+					applyExecutorTaskBlockedContext(t, be)
+				} else {
+					t.Status = TaskStatusFailed
+					t.Error = err.Error()
+				}
+				RecordTaskExecution(t, executionStatus, executionSummary, startedAt, completedAt.Sub(startedAt))
+			} else {
+				logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
+				t.Status = TaskStatusCompleted
+				t.Result = result
+				ApplyTaskResultMetadata(t, result)
+				RecordTaskExecution(t, "success", result, startedAt, completedAt.Sub(startedAt))
+			}
+
+			if te.eventBus != nil {
+				RecordTaskExecutionTraceFromEventBus(t, te.eventBus, ws.ID, task.ID, startedAt, completedAt)
+			}
+
+			snapshot = *t
+			return nil
+		}); mutErr != nil {
+			logger.Error("Failed to update task", logger.Fields{"task_id": task.ID, "error": mutErr})
 			return
 		}
 
-		// Update task with result
-		completedAt := time.Now()
-		updatedTask.CompletedAt = &completedAt
-		startedAt := completedAt
-		if updatedTask.StartedAt != nil && !updatedTask.StartedAt.IsZero() {
-			startedAt = *updatedTask.StartedAt
-		}
-
+		// Post-mutation side effects (no workspace lock held).
 		if err != nil {
-			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "err": err})
-			executionStatus := "failed"
-			executionSummary := err.Error()
-			if blockedErr, ok := AsTaskBlockedError(err); ok {
-				executionStatus = "blocked"
-				executionSummary = blockedErr.Error()
-				if strings.TrimSpace(blockedErr.RawResponse) != "" {
-					executionSummary = blockedErr.RawResponse
-				}
-				updatedTask.CompletedAt = nil
-				updatedTask.Status = TaskStatusWaitingForChoice
-				updatedTask.Error = ""
-				updatedTask.Result = ""
-				ApplyTaskResultMetadata(updatedTask, "")
-				applyExecutorTaskBlockedContext(updatedTask, blockedErr)
-			} else {
-				updatedTask.Status = TaskStatusFailed
-				updatedTask.Error = err.Error()
-			}
-			RecordTaskExecution(updatedTask, executionStatus, executionSummary, startedAt, completedAt.Sub(startedAt))
-
 			if te.eventBus != nil {
-				if blockedErr, ok := AsTaskBlockedError(err); ok {
+				if blockedErr != nil {
 					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, ws.ID, task.ID, task.To, map[string]interface{}{
 						"description": task.Description,
-						"human_loop":  updatedTask.Context["human_loop"],
-						"status":      updatedTask.Status,
+						"human_loop":  snapshot.Context["human_loop"],
+						"status":      snapshot.Status,
 						"error":       blockedErr.Error(),
 					}))
 				} else {
@@ -374,45 +393,27 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 				}
 			}
 		} else {
-			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-			updatedTask.Status = TaskStatusCompleted
-			updatedTask.Result = result
-			ApplyTaskResultMetadata(updatedTask, result)
-			RecordTaskExecution(updatedTask, "success", result, startedAt, completedAt.Sub(startedAt))
-
 			// Automatically store result if agent is connected to a store node
 			te.autoStoreResult(ws, &task, result)
 
-			// Publish task completed event
 			if te.eventBus != nil {
-				event := NewTaskEvent(EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
 					"description": task.Description,
 					"result":      result,
-				})
-				te.eventBus.Publish(event)
+				}))
 			}
 		}
 
-		if te.eventBus != nil {
-			RecordTaskExecutionTraceFromEventBus(updatedTask, te.eventBus, ws.ID, task.ID, startedAt, completedAt)
-		}
-
-		// Save updated task
-		if err := ws.UpdateTask(*updatedTask); err != nil {
-			logger.Error("Failed to update task", logger.Fields{"task_id": updatedTask.ID, "error": err})
-			return
-		}
 		if err := te.workspaceStore.Save(ws); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		}
 
 		// Publish workspace updated event
 		if te.eventBus != nil {
-			event := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "task-executor", map[string]interface{}{
+			te.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "task-executor", map[string]interface{}{
 				"task_id": task.ID,
-				"status":  updatedTask.Status,
-			})
-			te.eventBus.Publish(event)
+				"status":  snapshot.Status,
+			}))
 		}
 	}()
 }
