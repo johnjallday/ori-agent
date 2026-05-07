@@ -865,6 +865,8 @@ export class WorkspaceTaskPage {
       heroActions: document.getElementById('workspace-task-hero-actions'),
       heroPriority: document.getElementById('workspace-task-hero-priority'),
       heroPriorityCopy: document.getElementById('workspace-task-hero-priority-copy'),
+      heroPriorityReason: document.getElementById('workspace-task-hero-priority-reason'),
+      heroPriorityReasonText: document.getElementById('workspace-task-hero-priority-reason-text'),
       heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
@@ -1747,16 +1749,38 @@ export class WorkspaceTaskPage {
     if (!blocked) {
       this.elements.heroPriority.hidden = true;
       this.elements.heroPriorityCopy.textContent = '';
+      if (this.elements.heroPriorityReason) {
+        this.elements.heroPriorityReason.hidden = true;
+      }
+      if (this.elements.heroPriorityReasonText) {
+        this.elements.heroPriorityReasonText.textContent = '';
+      }
       this.elements.heroPriorityActions.innerHTML = '';
       return;
     }
 
     const workflowStep = this.currentBlockedTask?.workflowStep || null;
     const hasAgentResponse = Boolean(String(this.currentBlockedTask?.response || '').trim());
-    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'Why Paused?';
+    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'More Context';
 
     this.elements.heroPriority.hidden = false;
-    this.elements.heroPriorityCopy.textContent = this.getBlockedHeroSummary(workflowStep);
+    const summary = this.getBlockedHeroSummary(workflowStep);
+    this.elements.heroPriorityCopy.textContent = summary;
+
+    // Show the raw blocked reason inline only when it adds information beyond
+    // the summary (which often is just the agent's question). This lets users
+    // see *why* the task is paused without scrolling to the assist card.
+    const rawReason = String(this.currentBlockedTask?.reason || '').trim();
+    const showReason = Boolean(rawReason) && rawReason !== summary;
+    if (this.elements.heroPriorityReason && this.elements.heroPriorityReasonText) {
+      if (showReason) {
+        this.elements.heroPriorityReasonText.textContent = rawReason;
+        this.elements.heroPriorityReason.hidden = false;
+      } else {
+        this.elements.heroPriorityReasonText.textContent = '';
+        this.elements.heroPriorityReason.hidden = true;
+      }
+    }
     this.elements.heroPriorityActions.innerHTML = `
       <button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-hero-priority-action="assist">
         ${this.escapeHtml(this.getBlockedHeroPrimaryActionLabel(workflowStep))}
