@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -82,19 +81,10 @@ const (
 	maxTaskToolResultFollowups = 1
 )
 
-var (
-	browserIntentWordPattern = regexp.MustCompile(`\b(open|visit|navigate|browse|click|fill|type|extract)\b`)
-	browserIntentGoToPattern = regexp.MustCompile(`\bgo\s+to\b`)
-	browserDomainPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+$`)
-)
-
+// taskUtilityToolNames lists the utility tool names this handler exposes
+// to agents during task execution. Browser-intent detection lives in
+// task_handler_browser_intent.go, which owns its own regex/extension data.
 var taskUtilityToolNames = []string{"time", "weather", "air_quality", "web_search", "web_fetch", "browser"}
-
-var browserLikeFileExtensions = map[string]struct{}{
-	"app": {}, "csv": {}, "doc": {}, "docx": {}, "gif": {}, "go": {}, "gz": {}, "heic": {}, "jpeg": {}, "jpg": {},
-	"js": {}, "json": {}, "key": {}, "md": {}, "mov": {}, "mp3": {}, "mp4": {}, "numbers": {}, "pages": {}, "pdf": {}, "png": {},
-	"ppt": {}, "pptx": {}, "py": {}, "rb": {}, "sh": {}, "svg": {}, "tar": {}, "ts": {}, "txt": {}, "wav": {}, "webp": {}, "xlsx": {}, "xls": {}, "zip": {},
-}
 
 // NewLLMTaskHandler creates a new LLM-based task handler
 func NewLLMTaskHandler(agentStore store.Store, llmFactory *llm.Factory, workspaceStore Store) *LLMTaskHandler {
@@ -201,149 +191,8 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	return h.executeTaskConversation(ctx, provider, providerName, modelName, ag, agentName, task, messages, tools)
 }
 
-func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*resolvedTaskAgent, error) {
-	normalizedAgentName := strings.TrimSpace(agentName)
-
-	if h.runtimeResolver != nil {
-		resolved, err := h.runtimeResolver.ResolveAgentForTask(normalizedAgentName, task)
-		if err != nil {
-			if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
-				return nil, blockedErr
-			}
-			return nil, err
-		}
-		if resolved != nil && resolved.Agent != nil {
-			return &resolvedTaskAgent{
-				Agent:      resolved.Agent,
-				MCPServers: append([]string{}, resolved.MCPServers...),
-			}, nil
-		}
-	}
-
-	if localAgent, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
-		return &resolvedTaskAgent{Agent: localAgent}, nil
-	}
-
-	ag, ok := h.agentStore.GetAgent(normalizedAgentName)
-	if !ok {
-		if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
-			return nil, blockedErr
-		}
-		return nil, fmt.Errorf("agent %s not found", normalizedAgentName)
-	}
-	return &resolvedTaskAgent{Agent: ag}, nil
-}
-
-func (h *LLMTaskHandler) getWorkspaceLocalAgentSnapshot(workspaceID, agentName string) (*agent.Agent, bool) {
-	if h == nil || h.workspaceStore == nil {
-		return nil, false
-	}
-	workspaceID = strings.TrimSpace(workspaceID)
-	agentName = strings.TrimSpace(agentName)
-	if workspaceID == "" || agentName == "" {
-		return nil, false
-	}
-
-	local, ok, err := h.workspaceStore.GetWorkspaceAgent(workspaceID, agentName)
-	if err != nil {
-		logger.Warn("workspace-local task agent lookup failed", logger.Fields{
-			"workspace_id": workspaceID,
-			"agent":        agentName,
-			"error":        err.Error(),
-		})
-		return nil, false
-	}
-	return local, ok && local != nil
-}
-
-func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string, task Task) *TaskBlockedError {
-	if h == nil || h.agentStore == nil {
-		return nil
-	}
-
-	normalizedAgentName := strings.TrimSpace(agentName)
-	if normalizedAgentName == "" {
-		return nil
-	}
-
-	if existing, ok := h.agentStore.GetAgent(normalizedAgentName); ok && existing != nil {
-		return nil
-	}
-
-	if _, ok := h.getWorkspaceLocalAgentSnapshot(task.WorkspaceID, normalizedAgentName); ok {
-		return nil
-	}
-
-	isWorkspaceAgent := false
-	if strings.TrimSpace(task.WorkspaceID) != "" && h.workspaceStore != nil {
-		if ws, err := h.workspaceStore.Get(task.WorkspaceID); err == nil && ws != nil {
-			isWorkspaceAgent = ws.HasAgent(normalizedAgentName)
-		}
-	}
-
-	reason := fmt.Sprintf("Assigned agent %s is no longer available.", normalizedAgentName)
-	question := fmt.Sprintf(
-		"This task is assigned to %s, but that agent no longer exists. Switch to another agent or recreate it, then retry.",
-		normalizedAgentName,
-	)
-	if isWorkspaceAgent {
-		reason = fmt.Sprintf("Assigned workspace agent %s is no longer available.", normalizedAgentName)
-		question = fmt.Sprintf(
-			"This task still points at workspace agent %s, but that agent no longer exists as a runnable definition. Switch to another agent or recreate it, then retry.",
-			normalizedAgentName,
-		)
-	}
-
-	if availableAgents := h.listAvailableExecutionAgents(normalizedAgentName); len(availableAgents) > 0 {
-		question = fmt.Sprintf(
-			"%s %d other runnable agent%s %s currently available.",
-			question,
-			len(availableAgents),
-			map[bool]string{true: "", false: "s"}[len(availableAgents) == 1],
-			map[bool]string{true: "is", false: "are"}[len(availableAgents) == 1],
-		)
-	}
-
-	return &TaskBlockedError{
-		ReasonCode: "assigned_agent_missing",
-		Reason:     reason,
-		Question:   question,
-		SuggestedActions: []string{
-			"switch_agent_retry",
-			"mark_failed",
-		},
-	}
-}
-
-func (h *LLMTaskHandler) listAvailableExecutionAgents(excludeAgent string) []string {
-	if h == nil || h.agentStore == nil {
-		return nil
-	}
-
-	names := append([]string(nil), h.agentStore.ListAgents()...)
-	sort.Strings(names)
-
-	excludedKey := strings.ToLower(strings.TrimSpace(excludeAgent))
-	seen := make(map[string]struct{}, len(names))
-	available := make([]string, 0, len(names))
-	for _, candidate := range names {
-		trimmed := strings.TrimSpace(candidate)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if key == excludedKey {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		available = append(available, trimmed)
-	}
-
-	return available
-}
+// resolveExecutionAgent and the rest of the agent-resolution helpers live
+// in task_handler_agent_resolver.go.
 
 func (h *LLMTaskHandler) executeTaskConversation(
 	ctx context.Context,
@@ -510,112 +359,10 @@ func buildToolResultsSummary(content string, toolResults []toolCallResult) strin
 	return strings.TrimSpace(resultBuilder.String())
 }
 
-func normalizeProviderName(provider string) string {
-	normalized := strings.ToLower(strings.TrimSpace(provider))
-	switch normalized {
-	case "anthropic":
-		return "claude"
-	default:
-		return normalized
-	}
-}
-
-func isClaudeFamilyModel(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" {
-		return false
-	}
-	if strings.HasPrefix(normalized, "claude-") {
-		return true
-	}
-	return normalized == "haiku" || normalized == "sonnet" || normalized == "opus"
-}
-
-func isGeminiFamilyModel(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(normalized, "gemini")
-}
-
-func isCodexFamilyModel(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(normalized, "codex")
-}
-
-func (h *LLMTaskHandler) normalizeModelForProvider(providerName, model string) string {
-	trimmedModel := strings.TrimSpace(model)
-	normalizedModel := strings.ToLower(trimmedModel)
-
-	if providerName == "claude" {
-		switch normalizedModel {
-		case "haiku":
-			return "claude-3-5-haiku-latest"
-		case "sonnet":
-			return "claude-3-5-sonnet-latest"
-		case "opus":
-			return "claude-3-opus-latest"
-		}
-	}
-
-	return trimmedModel
-}
-
-// getProviderForAgent resolves the best provider for the agent's configured provider/model.
-func (h *LLMTaskHandler) getProviderForAgent(configuredProvider, model string) string {
-	explicitProvider := normalizeProviderName(configuredProvider)
-	inferredProvider := h.getProviderForModel(model)
-
-	if explicitProvider == "" {
-		return inferredProvider
-	}
-
-	if h.llmFactory.HasProvider(explicitProvider) {
-		// Auto-correct common stale mismatch cases where provider was not persisted with model updates.
-		if explicitProvider == "openai" &&
-			inferredProvider != "" &&
-			inferredProvider != "openai" &&
-			(isClaudeFamilyModel(model) || isGeminiFamilyModel(model) || isCodexFamilyModel(model)) {
-			logFields := logger.Fields{
-				"configured_provider": explicitProvider,
-				"inferred_provider":   inferredProvider,
-				"model":               model,
-			}
-			if h.llmFactory.HasProvider(inferredProvider) {
-				logger.Warn("Detected provider/model mismatch; using inferred provider for task execution", logFields)
-				return inferredProvider
-			}
-			logger.Warn("Detected provider/model mismatch; inferred provider is not configured, keeping configured provider", logFields)
-			return explicitProvider
-		}
-
-		// Claude API does not accept short Claude Code model aliases.
-		if explicitProvider == "claude" && isClaudeFamilyModel(model) &&
-			(strings.EqualFold(strings.TrimSpace(model), "haiku") ||
-				strings.EqualFold(strings.TrimSpace(model), "sonnet") ||
-				strings.EqualFold(strings.TrimSpace(model), "opus")) &&
-			h.llmFactory.HasProvider("claude_code") {
-			logger.Warn("Detected Claude short model alias; using claude_code provider", logger.Fields{
-				"configured_provider": explicitProvider,
-				"inferred_provider":   "claude_code",
-				"model":               model,
-			})
-			return "claude_code"
-		}
-
-		return explicitProvider
-	}
-
-	if inferredProvider != "" && h.llmFactory.HasProvider(inferredProvider) {
-		logger.Warn("Configured provider unavailable; falling back to inferred provider", logger.Fields{
-			"configured_provider": explicitProvider,
-			"inferred_provider":   inferredProvider,
-			"model":               model,
-		})
-		return inferredProvider
-	}
-
-	// Preserve configured name for clearer upstream error messaging if no fallback exists.
-	return explicitProvider
-}
+// Provider-selection helpers (normalizeProviderName, isClaudeFamilyModel,
+// isGeminiFamilyModel, isCodexFamilyModel, normalizeModelForProvider,
+// getProviderForAgent, getProviderForModel) live in
+// task_handler_provider_selection.go.
 
 // substitutePlaceholders replaces placeholders like {result}, {input}, {result1}, {result2} in task description
 func (h *LLMTaskHandler) substitutePlaceholders(task Task) string {
@@ -687,135 +434,10 @@ func (h *LLMTaskHandler) cleanToolResult(result string) string {
 	return result
 }
 
-func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) bool {
-	if ag == nil || ag.Agent == nil {
-		return false
-	}
-	if !ag.Settings.IsWebSearchAllowed() {
-		return false
-	}
-
-	for _, capability := range ag.Capabilities {
-		switch strings.ToLower(strings.TrimSpace(capability)) {
-		case "browser", "browser_automation", "web_search", "web_fetch":
-			return true
-		}
-	}
-
-	for _, serverName := range ag.MCPServers {
-		name := strings.ToLower(strings.TrimSpace(serverName))
-		if name == "" {
-			continue
-		}
-		if strings.Contains(name, "playwright") || strings.Contains(name, "browserbase") || strings.Contains(name, "puppeteer") || strings.Contains(name, "browser") {
-			return true
-		}
-	}
-
-	for _, tool := range h.getAgentUtilityTools(ag) {
-		if tool == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(tool.Definition().Name))
-		if name == "web_search" || name == "web_fetch" || name == "browser" {
-			return true
-		}
-	}
-
-	for _, tool := range h.getAgentMCPTools(ag) {
-		if tool == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(tool.Definition().Name))
-		if strings.HasPrefix(name, "browser") ||
-			strings.HasPrefix(name, "web_fetch") ||
-			strings.HasPrefix(name, "web_search") ||
-			name == "navigate" ||
-			name == "open_url" {
-			return true
-		}
-	}
-
-	return false
-}
-
-func isLikelyBrowserAutomationIntent(description string) bool {
-	lower := strings.ToLower(strings.TrimSpace(description))
-	if lower == "" {
-		return false
-	}
-
-	if !browserIntentWordPattern.MatchString(lower) && !browserIntentGoToPattern.MatchString(lower) {
-		return false
-	}
-
-	if strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "www.") || strings.Contains(lower, "localhost:") {
-		return true
-	}
-
-	for _, token := range strings.Fields(lower) {
-		cleaned := strings.Trim(token, " \t\r\n,.;:!?\"'`()[]{}<>")
-		if strings.Count(cleaned, ".") < 1 || strings.Contains(cleaned, "/") {
-			continue
-		}
-		if !browserDomainPattern.MatchString(cleaned) {
-			continue
-		}
-		parts := strings.Split(cleaned, ".")
-		tld := parts[len(parts)-1]
-		if _, isFileExtension := browserLikeFileExtensions[tld]; isFileExtension {
-			continue
-		}
-		if len(tld) >= 2 && len(tld) <= 12 {
-			return true
-		}
-	}
-
-	return false
-}
-
-func taskRequiresBrowserAutomation(task Task) bool {
-	return isLikelyBrowserAutomationIntent(taskBrowserIntentDescription(task))
-}
-
-func taskBrowserIntentDescription(task Task) string {
-	if task.Context != nil {
-		if overall, ok := task.Context["execution_overall_task_description"].(string); ok {
-			if trimmed := strings.TrimSpace(overall); trimmed != "" {
-				return trimmed
-			}
-		}
-	}
-	return task.Description
-}
-
-func looksLikeBrowserCapabilityRefusal(response string) bool {
-	lower := strings.ToLower(strings.TrimSpace(response))
-	if lower == "" {
-		return false
-	}
-
-	markers := []string{
-		"i don't have the capability",
-		"i do not have the capability",
-		"i can't open websites",
-		"i cannot open websites",
-		"cannot open websites directly",
-		"can't access websites directly",
-		"cannot access websites directly",
-		"i'm unable to open websites",
-		"i am unable to open websites",
-		"i can't browse",
-		"i cannot browse",
-	}
-	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-
-	return false
-}
+// Browser-intent detection (agentSupportsBrowserAutomation, the
+// isLikelyBrowserAutomationIntent / taskRequiresBrowserAutomation /
+// looksLikeBrowserCapabilityRefusal helpers and their pattern data) lives
+// in task_handler_browser_intent.go.
 
 // buildTaskPrompt creates a prompt for the task
 // AttachmentContent holds attachment info and file contents
@@ -929,53 +551,6 @@ func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, inputs *Tas
 			fmt.Fprintf(prompt, "**Task %s Structured Output (JSON):**\n```json\n%s\n```\n\n", taskID, encoded)
 		}
 	}
-}
-
-// getProviderForModel determines which LLM provider to use (dynamic detection)
-func (h *LLMTaskHandler) getProviderForModel(model string) string {
-	trimmedModel := strings.TrimSpace(model)
-	normalizedModel := strings.ToLower(trimmedModel)
-	if trimmedModel == "" {
-		return "openai"
-	}
-
-	// Claude Code short aliases map directly to claude_code when available.
-	if normalizedModel == "haiku" || normalizedModel == "sonnet" || normalizedModel == "opus" {
-		if h.llmFactory.HasProvider("claude_code") {
-			return "claude_code"
-		}
-		if h.llmFactory.HasProvider("claude") {
-			return "claude"
-		}
-		// Keep this in the Claude family even if provider isn't currently configured.
-		return "claude"
-	}
-
-	// Check for Claude API models.
-	if strings.HasPrefix(normalizedModel, "claude-") {
-		return "claude"
-	}
-
-	// Check for Gemini models.
-	if strings.HasPrefix(normalizedModel, "gemini") {
-		return "gemini"
-	}
-
-	// Check for Codex models.
-	if strings.HasPrefix(normalizedModel, "codex") {
-		return "codex"
-	}
-
-	if localProvider := llm.FindLocalProviderByModel(h.llmFactory, trimmedModel); localProvider != "" {
-		logger.Info("Model found in local provider, using local provider", logger.Fields{
-			"model":    trimmedModel,
-			"provider": localProvider,
-		})
-		return localProvider
-	}
-
-	// Default to OpenAI
-	return "openai"
 }
 
 // convertAgentToolsToLLMTools converts MCP and workspace tools into LLM tools.
