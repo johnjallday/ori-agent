@@ -5,6 +5,7 @@ import {
   TRACE_PAGE_SIZE,
 } from './workspace-task-execution-views.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
+import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 
 const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
   return String(value ?? '')
@@ -1986,14 +1987,19 @@ export class WorkspaceTaskPage {
     }
 
     const status = String(this.task?.status || '').trim().toLowerCase();
-    const hasAgent = Boolean(this.task?.to);
+    const hasAgent = Boolean(this.task?.to) && this.task.to !== 'unassigned';
     const buttons = [];
     const hasSchedule = Boolean(this.task?.schedule);
     const scheduleLabel = hasSchedule ? 'Edit Schedule' : 'Schedule';
 
-    if (status === 'pending' && hasAgent) {
+    // Run is always available for pending/assigned tasks; if no agent is
+    // attached we'll surface an agent picker on click rather than hiding
+    // the button (the previous gating left users with no obvious next
+    // step on a pending+unassigned task — discoverability bug #5).
+    if (status === 'pending' || status === 'assigned') {
+      const runLabel = hasAgent ? 'Run' : 'Assign & Run';
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>Run
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${this.escapeHtml(runLabel)}
       </button>`);
     }
 
@@ -2770,11 +2776,17 @@ export class WorkspaceTaskPage {
         return !assigned && !completed;
       });
       this.elements.workflowRunAllBtn.disabled = anyRunning || anyUnassigned;
-      this.elements.workflowRunAllBtn.title = anyUnassigned
+      const reason = anyUnassigned
         ? 'Assign unfinished steps or mark manual steps done before running the workflow'
         : anyRunning
           ? 'A step is already running'
-          : 'Run all steps in sequence';
+          : '';
+      this.elements.workflowRunAllBtn.title = reason || 'Run all steps in sequence';
+      // Mirror the disabled-reason inline so touch users (no hover, no
+      // tooltip) understand why Run all is greyed out.
+      this.renderWorkflowRunAllReason(reason);
+    } else {
+      this.renderWorkflowRunAllReason('');
     }
 
     if (this.elements.workflowEmpty) {
@@ -5749,6 +5761,32 @@ export class WorkspaceTaskPage {
 
     if (isRerun && !confirm(`${label} this task? Previous results will be replaced.`)) return;
 
+    // Inline assign-and-run for unassigned tasks. Without this the user
+    // would see the Run button do nothing meaningful (or a generic
+    // server error) when the task has no agent — they'd have to leave
+    // the hero, scroll to the snapshot card, change agent, then come
+    // back. The picker reuses the same dialog the canvas uses.
+    const currentAgent = String(this.task?.to || '').trim();
+    if (!currentAgent || currentAgent === 'unassigned') {
+      const agents = this.getAssignableAgentOptions();
+      if (agents.length === 0) {
+        this.notify('error', 'No agents in this workspace yet — add one before running tasks.');
+        return;
+      }
+      const picked = await showCanvasAgentPicker({
+        title: 'Assign an agent',
+        message: `This task is unassigned. Pick an agent to run "${this.getTaskDisplayLabel()}".`,
+        agents
+      });
+      if (!picked) return;
+      try {
+        await this.updateTaskFields({ to: picked.name });
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to assign agent');
+        return;
+      }
+    }
+
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
@@ -5765,6 +5803,49 @@ export class WorkspaceTaskPage {
       console.error('Failed to execute task:', error);
       this.notify('error', error?.message || 'Failed to execute task');
     }
+  }
+
+  /**
+   * Render or clear the inline disabled-reason hint for the workflow
+   * "Run all" button. Anchored after the card header (rather than
+   * alongside the buttons) so it never sits inside the header's flex
+   * row and disrupt the action-button layout.
+   */
+  renderWorkflowRunAllReason(reason) {
+    const card = this.elements.workflowCard;
+    if (!card) return;
+    const id = 'workspace-task-workflow-run-all-reason';
+    let el = document.getElementById(id);
+    if (!reason) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'workspace-task-workflow-run-all-reason';
+      const header = card.querySelector('.workspace-task-page-card-header');
+      if (header) {
+        header.insertAdjacentElement('afterend', el);
+      } else {
+        card.prepend(el);
+      }
+    }
+    el.textContent = reason;
+  }
+
+  /**
+   * Build the agent list for the inline assign-and-run picker, in the
+   * shape expected by showCanvasAgentPicker ([{ name, instanceNumber }]).
+   * Filters out the "unassigned" placeholder. Mirrors the existing
+   * snapshot-card agent dropdown so the user sees the same set in
+   * either place.
+   */
+  getAssignableAgentOptions() {
+    const names = this.getAssignableAgentNames('');
+    return names
+      .filter((name) => name && name !== 'unassigned')
+      .map((name) => ({ name }));
   }
 
   async completeTask() {
