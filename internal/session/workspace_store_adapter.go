@@ -131,6 +131,7 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		Agents:      ws.Agents,
 		SharedData:  ws.SharedData,
 		Status:      WorkspaceStatus(ws.Status),
+		Version:     ws.Version,
 	}
 
 	// Convert AgentInstances
@@ -251,6 +252,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		Agents:      ws.Agents,
 		SharedData:  ws.SharedData,
 		Status:      workspace.WorkspaceStatus(ws.Status),
+		Version:     ws.Version,
 	}
 
 	// Default status to active if not set

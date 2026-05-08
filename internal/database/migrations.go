@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 14
+const schemaVersion = 15
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -93,6 +93,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration013RemoveLegacyVaultCatalogRows(ctx)
 	case 14:
 		return db.migration014WorkspaceNoteVaultReferences(ctx)
+	case 15:
+		return db.migration015WorkspaceVersion(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -870,6 +872,22 @@ func (db *DB) migration013RemoveLegacyVaultCatalogRows(ctx context.Context) erro
 	}
 
 	return tx.Commit()
+}
+
+func (db *DB) migration015WorkspaceVersion(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN version INTEGER NOT NULL DEFAULT 0
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace version column: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) migration014WorkspaceNoteVaultReferences(ctx context.Context) error {

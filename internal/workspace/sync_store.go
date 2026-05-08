@@ -25,11 +25,16 @@ func (s *SyncStore) FileStore() *FileStore {
 	return s.fileSync
 }
 
-// Save persists to the primary store, then syncs workspace.json to disk.
+// Save persists the workspace.
+//
+// The FileStore runs first because it owns the monotonic Version counter and
+// performs the lost-write detection check. Bumping there before the primary
+// write means the SQLite row records the post-bump version, so a subsequent
+// Get -> Save cycle reads back the same version that's on disk and the CAS
+// check stays meaningful. If the FileStore write fails (e.g. slug conflict)
+// we still persist to the primary so the authoritative record is updated;
+// the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
-	if err := s.primary.Save(ws); err != nil {
-		return err
-	}
 	if s.fileSync != nil {
 		if err := s.fileSync.Save(ws); err != nil {
 			logger.Warn("Failed to sync workspace to disk", logger.Fields{
@@ -38,7 +43,7 @@ func (s *SyncStore) Save(ws *Workspace) error {
 			})
 		}
 	}
-	return nil
+	return s.primary.Save(ws)
 }
 
 // Get retrieves a workspace from the primary store.
