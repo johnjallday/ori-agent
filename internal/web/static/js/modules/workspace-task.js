@@ -932,7 +932,8 @@ export class WorkspaceTaskPage {
       heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
-      snapshot: document.getElementById('workspace-task-snapshot'),
+      heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
+      heroAgent: document.getElementById('workspace-task-hero-agent'),
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
@@ -1090,6 +1091,17 @@ export class WorkspaceTaskPage {
           this._taskTabUserPicked = true;
           this.setTaskTab(next);
         });
+      });
+    }
+    if (this.elements.heroAgent) {
+      this.elements.heroAgent.addEventListener('change', async (event) => {
+        const value = event.target.value || '';
+        try {
+          await this.updateTaskFields({ to: value });
+          this.notify('success', value ? `Reassigned to ${value}` : 'Agent unassigned');
+        } catch (error) {
+          this.notify('error', error?.message || 'Failed to update agent');
+        }
       });
     }
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
@@ -1990,9 +2002,9 @@ export class WorkspaceTaskPage {
 
     dispatch('hero', () => this.renderHero(statusInfo));
     dispatch('heroActions', () => this.renderHeroActions(statusInfo));
+    dispatch('heroAgent', () => this.renderHeroAgent(statusInfo));
     dispatch('heroPriority', () => this.renderHeroPriority(statusInfo));
     dispatch('overview', () => this.renderOverview());
-    dispatch('snapshot', () => this.renderSnapshot(statusInfo));
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
     dispatch('output', () => this.renderOutput());
@@ -2056,14 +2068,14 @@ export class WorkspaceTaskPage {
         this.workspace?.name, sigStatusInfo,
       ]),
       heroActions: JSON.stringify([t.id, t.status, t.execution_mode, sigStatusInfo]),
+      heroAgent: JSON.stringify([
+        t.id, t.to, t.status,
+        (this.availableAgents || []).map((a) => a?.name || '').sort().join('|'),
+      ]),
       heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
       overview: JSON.stringify([
         t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
         t.template_ref, t.timeout, t.progress?.percentage, sigStatusInfo,
-      ]),
-      snapshot: JSON.stringify([
-        t.id, t.status, t.started_at, t.completed_at, t.error,
-        t.progress?.percentage, sigStatusInfo,
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
       workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
@@ -2260,6 +2272,52 @@ export class WorkspaceTaskPage {
         if (action === 'cancel-confirm') this.handleCancelTask();
       });
     });
+  }
+
+  // renderHeroAgent populates the inline "Agent" picker next to the status
+  // pill. Visible whenever the task is in a state where reassignment is
+  // meaningful: not actively running, not blocked. Replaces the old Quick
+  // Controls aside which buried the only commonly-used override (reassign)
+  // behind a disclosure.
+  renderHeroAgent(statusInfo) {
+    const wrap = this.elements.heroAgentWrap;
+    const select = this.elements.heroAgent;
+    if (!wrap || !select) return;
+
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    const reassignable = status !== 'in_progress' && !statusInfo.isBlocked;
+    if (!reassignable) {
+      wrap.hidden = true;
+      return;
+    }
+
+    const currentAgent = String(this.task?.to || '').trim();
+    const currentAgentUnavailable =
+      Boolean(currentAgent) && !this.isRunnableAgentName(currentAgent);
+    const agentNames = this.getAssignableAgentNames(currentAgent);
+
+    const options = [];
+    options.push(`<option value="" ${!currentAgent ? 'selected' : ''}>Unassigned</option>`);
+    if (currentAgentUnavailable) {
+      options.push(
+        `<option value="${this.escapeHtml(currentAgent)}" selected disabled>${this.escapeHtml(`${currentAgent} (Unavailable)`)}</option>`
+      );
+    }
+    for (const name of agentNames) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) continue;
+      const isCurrent = !currentAgentUnavailable && trimmed.toLowerCase() === currentAgent.toLowerCase();
+      options.push(
+        `<option value="${this.escapeHtml(trimmed)}" ${isCurrent ? 'selected' : ''}>${this.escapeHtml(trimmed)}</option>`
+      );
+    }
+
+    select.innerHTML = options.join('');
+    wrap.classList.toggle('is-unavailable', currentAgentUnavailable);
+    wrap.hidden = false;
+
+    // The change handler is bound once in bindEvents(); each render replaces
+    // the <option> children in place, so the listener stays attached.
   }
 
   async handleCancelTask() {
@@ -2586,133 +2644,6 @@ export class WorkspaceTaskPage {
     textarea.addEventListener('blur', (e) => {
       if (actions.contains(e.relatedTarget)) return;
       finish(true);
-    });
-  }
-
-  renderSnapshot(statusInfo) {
-    if (!this.elements.snapshot) return;
-
-    const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
-    const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
-    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'cancelled', 'timeout'];
-    const agentNames = this.getAssignableAgentNames(currentAgent);
-
-    const snapshotItems = [
-      ['Created', formatDateTime(this.task?.created_at)],
-      ['Started', formatDateTime(this.task?.started_at)],
-      ['Completed', formatDateTime(this.task?.completed_at)],
-      ['Task Type', this.getSubtasks().length > 0 ? 'Parent Task' : 'Leaf Task']
-    ];
-
-    if (this.task?.schedule_name) {
-      snapshotItems.push(['Schedule', String(this.task.schedule_name).trim()]);
-    }
-
-    const statusSelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Status</span>
-        <select id="workspace-task-snapshot-status" class="workspace-task-snapshot-select workspace-task-page-status-inline" data-state="${this.escapeHtml(statusInfo.className)}">
-          ${statusOptions.map((s) => `<option value="${this.escapeHtml(s)}" ${s === (this.task?.status || 'pending') ? 'selected' : ''}>${this.escapeHtml(getDisplayStatus(s))}</option>`).join('')}
-        </select>
-      </div>
-    `;
-
-    const agentSelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Agent</span>
-        <select id="workspace-task-snapshot-agent" class="workspace-task-snapshot-select">
-          <option value="" ${!this.task?.to ? 'selected' : ''}>Unassigned</option>
-          ${currentAgentUnavailable
-            ? `<option value="${this.escapeHtml(currentAgent)}" selected disabled>${this.escapeHtml(`${currentAgent} (Unavailable)`)}</option>`
-            : ''}
-          ${agentNames
-            .filter((name) => String(name || '').trim() && String(name || '').trim().toLowerCase() !== currentAgent.toLowerCase())
-            .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
-            .join('')}
-          ${!currentAgentUnavailable
-            ? agentNames
-              .filter((name) => String(name || '').trim().toLowerCase() === currentAgent.toLowerCase())
-              .map((name) => `<option value="${this.escapeHtml(name)}" selected>${this.escapeHtml(name)}</option>`)
-              .join('')
-            : ''}
-        </select>
-      </div>
-    `;
-
-    const currentPriority = Number(this.task?.priority) || 3;
-    const priorityLabels = { 1: '1 - Highest', 2: '2 - High', 3: '3 - Medium', 4: '4 - Low', 5: '5 - Lowest' };
-    const prioritySelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Priority</span>
-        <select id="workspace-task-snapshot-priority" class="workspace-task-snapshot-select">
-          ${[1, 2, 3, 4, 5].map((p) => `<option value="${p}" ${p === currentPriority ? 'selected' : ''}>${this.escapeHtml(priorityLabels[p])}</option>`).join('')}
-        </select>
-      </div>
-    `;
-
-    const staticItemsHtml = snapshotItems.map(([label, value]) => `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">${this.escapeHtml(label)}</span>
-        <span class="workspace-task-snapshot-value">${this.escapeHtml(value || '—')}</span>
-      </div>
-    `).join('');
-
-    const summaryCopy = currentAgentUnavailable
-      ? 'This task is assigned to an unavailable agent. Reassign it before retrying execution.'
-      : (statusInfo.isBlocked || statusInfo.className === 'in_progress'
-      ? 'The main page already shows the important execution state. Open this only if you need to adjust controls or inspect metadata.'
-      : 'Open this only when you need to change task controls or inspect metadata.');
-
-    this.elements.snapshot.innerHTML = `
-      <div class="workspace-task-snapshot-summary">
-        <div class="workspace-task-snapshot-summary-copy">${this.escapeHtml(summaryCopy)}</div>
-        <div class="workspace-task-snapshot-chip-row">
-          <span class="workspace-task-snapshot-chip workspace-task-snapshot-chip-status" data-state="${this.escapeHtml(statusInfo.className)}">${this.escapeHtml(statusInfo.label)}</span>
-          <span class="workspace-task-snapshot-chip">${this.escapeHtml(currentAgentUnavailable ? `${currentAgent} (Unavailable)` : currentAgent)}</span>
-          <span class="workspace-task-snapshot-chip">${this.escapeHtml(priorityLabels[currentPriority] || `Priority ${currentPriority}`)}</span>
-        </div>
-      </div>
-
-      <details class="workspace-task-snapshot-disclosure">
-        <summary class="workspace-task-snapshot-disclosure-toggle">Show full task controls and metadata</summary>
-        <div class="workspace-task-snapshot-disclosure-body">
-          ${statusSelectHtml}
-          ${agentSelectHtml}
-          ${prioritySelectHtml}
-          ${staticItemsHtml}
-        </div>
-      </details>
-    `;
-
-    const statusSelect = document.getElementById('workspace-task-snapshot-status');
-    const agentSelect = document.getElementById('workspace-task-snapshot-agent');
-
-    statusSelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ status: statusSelect.value });
-        this.notify('success', 'Status updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update status');
-      }
-    });
-
-    agentSelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ to: agentSelect.value || '' });
-        this.notify('success', 'Agent updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update agent');
-      }
-    });
-
-    const prioritySelect = document.getElementById('workspace-task-snapshot-priority');
-    prioritySelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ priority: Number(prioritySelect.value) || 3 });
-        this.notify('success', 'Priority updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update priority');
-      }
     });
   }
 

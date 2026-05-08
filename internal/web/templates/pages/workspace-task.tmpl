@@ -93,6 +93,10 @@
             <span id="workspace-task-live-badge" class="workspace-task-page-live-badge" hidden>
               <span class="workspace-task-page-live-dot"></span>Live
             </span>
+            <label class="workspace-task-page-agent-picker" id="workspace-task-hero-agent-wrap" hidden>
+              <span class="workspace-task-page-agent-picker-label">Agent</span>
+              <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign task agent"></select>
+            </label>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
             <div id="workspace-task-hero-priority" class="workspace-task-hero-priority" hidden>
               <div class="workspace-task-hero-priority-kicker">Action Required</div>
@@ -285,18 +289,6 @@
               </div>
             </div>
           </main>
-
-          <aside class="workspace-task-page-sidebar">
-            <section class="workspace-task-page-card workspace-task-page-card-compact">
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Quick Controls</div>
-                  <h2>On-demand task state</h2>
-                </div>
-              </div>
-              <div id="workspace-task-snapshot" class="workspace-task-snapshot-list"></div>
-            </section>
-          </aside>
         </div>
 
         <!-- Floating respond trigger -->
@@ -964,22 +956,63 @@
     }
 
     .workspace-task-page-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
-      gap: 1.25rem;
-      align-items: start;
+      display: block;
     }
 
-    .workspace-task-page-main,
-    .workspace-task-page-sidebar {
+    .workspace-task-page-main {
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
     }
 
-    .workspace-task-page-sidebar {
-      position: sticky;
-      top: 92px;
+    .workspace-task-page-agent-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.55rem 0.3rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .workspace-task-page-agent-picker:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-page-agent-picker-label {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 0.62rem;
+      color: var(--text-tertiary, var(--text-secondary));
+    }
+
+    .workspace-task-page-agent-picker-select {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.05rem 0.25rem 0.05rem 0;
+      cursor: pointer;
+      max-width: 14rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-task-page-agent-picker-select:focus {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 50%, transparent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    .workspace-task-page-agent-picker.is-unavailable {
+      border-color: rgba(248, 113, 113, 0.45);
+      background: rgba(248, 113, 113, 0.08);
     }
 
     .workspace-task-page-tabs {
