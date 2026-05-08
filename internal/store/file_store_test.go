@@ -285,23 +285,9 @@ func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(
 	}
 }
 
-func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *testing.T) {
-	tempDir := t.TempDir()
-	indexPath := filepath.Join(tempDir, "agents_index.json")
+func readSkillsStateDefault(t *testing.T, skillsStatePath string) (enabled bool, trusted bool) {
+	t.Helper()
 
-	fs, err := NewFileStore(indexPath, types.Settings{
-		Model:       "gpt-4o-mini",
-		Temperature: 1.0,
-	})
-	if err != nil {
-		t.Fatalf("NewFileStore() failed: %v", err)
-	}
-
-	if err := fs.CreateAgent("new-agent", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
-		t.Fatalf("CreateAgent() failed: %v", err)
-	}
-
-	skillsStatePath := filepath.Join(tempDir, "agents", "new-agent", "skills_state.json")
 	data, err := os.ReadFile(skillsStatePath)
 	if err != nil {
 		t.Fatalf("failed reading skills state: %v", err)
@@ -321,10 +307,94 @@ func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *test
 	if !ok {
 		t.Fatalf("expected wildcard default state entry to exist")
 	}
-	if defaultState.Enabled {
+	return defaultState.Enabled, defaultState.Trusted
+}
+
+func TestFileStore_NewFileStore_BackfillsMissingSkillsStateForLoadedAgent(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	if err := os.WriteFile(indexPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("failed writing index file: %v", err)
+	}
+
+	agentDir := filepath.Join(tempDir, "agents", "restored-agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("failed creating agent directory: %v", err)
+	}
+	settings := `{
+		"type":"orchestration",
+		"Settings":{"model":"gpt-4o-mini","temperature":1}
+	}`
+	if err := os.WriteFile(filepath.Join(agentDir, "agent_settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatalf("failed writing agent settings: %v", err)
+	}
+
+	if _, err := NewFileStore(indexPath, types.Settings{}); err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	enabled, trusted := readSkillsStateDefault(t, filepath.Join(agentDir, "skills_state.json"))
+	if enabled {
+		t.Fatalf("expected backfilled wildcard default state to start disabled")
+	}
+	if trusted {
+		t.Fatalf("expected backfilled wildcard trusted state to start false")
+	}
+}
+
+func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-4o-mini",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	if err := fs.CreateAgent("new-agent", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent() failed: %v", err)
+	}
+
+	enabled, trusted := readSkillsStateDefault(t, filepath.Join(tempDir, "agents", "new-agent", "skills_state.json"))
+	if enabled {
 		t.Fatalf("expected wildcard default state to start disabled")
 	}
-	if defaultState.Trusted {
+	if trusted {
+		t.Fatalf("expected wildcard default trusted to start false")
+	}
+}
+
+func TestFileStore_SetAgent_InitializesSkillsStateWithDisabledDefault(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-4o-mini",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	if err := fs.SetAgent("snapshot-agent", &agent.Agent{
+		Type: agent.TypeGeneral,
+		Settings: types.Settings{
+			Model:       "gpt-4o-mini",
+			Temperature: 1.0,
+		},
+	}); err != nil {
+		t.Fatalf("SetAgent() failed: %v", err)
+	}
+
+	enabled, trusted := readSkillsStateDefault(t, filepath.Join(tempDir, "agents", "snapshot-agent", "skills_state.json"))
+	if enabled {
+		t.Fatalf("expected wildcard default state to start disabled")
+	}
+	if trusted {
 		t.Fatalf("expected wildcard default trusted to start false")
 	}
 }
