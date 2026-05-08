@@ -1392,6 +1392,15 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 				return nil, warning, fmt.Errorf("update imported workspace %s: %w", item.ID, err)
 			}
 		}
+
+		if importedNotes, err := h.importWorkspaceNoteFiles(ctx, item.ID, localFolderPath); err != nil {
+			return nil, warning, fmt.Errorf("import notes for workspace %s: %w", item.ID, err)
+		} else if importedNotes > 0 {
+			logger.Info("Imported workspace note files", logger.Fields{
+				"workspace_id": item.ID,
+				"count":        importedNotes,
+			})
+		}
 	}
 
 	rootSessionWorkspace, err := h.store.GetWorkspace(ctx, rootWorkspace.ID)
@@ -2634,6 +2643,12 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 					logger.Fields{"id": id, "name": diskWS.Name, "error": err})
 				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
 				continue
+			}
+			if folderPath, err := h.workspaceStore.GetFolderPath(id); err == nil {
+				if _, err := h.importWorkspaceNoteFiles(ctx, id, folderPath); err != nil {
+					logger.Warn("Sync import: failed to import note files", logger.Fields{"id": id, "error": err})
+					warnings = append(warnings, fmt.Sprintf("Imported %s but failed to import note files", diskWS.Name))
+				}
 			}
 			imported++
 		}
