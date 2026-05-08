@@ -14,6 +14,11 @@ bin/
 
 # Dependency directories
 vendor/
+# Web frontend vendor: pinned + SRI-hashed third-party libs we self-host
+# instead of loading from a CDN. Tracked in git so we control the bytes
+# the browser actually executes.
+!internal/web/static/js/vendor/
+!internal/web/static/js/vendor/**
 
 # Go workspace file
 go.work
