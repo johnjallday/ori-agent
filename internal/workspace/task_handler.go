@@ -208,14 +208,21 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	conversation := append([]llm.Message(nil), messages...)
 	var lastToolSummary string
 	toolResultFollowups := 0
+	successfulToolCalls := map[string]bool{}
+	forceFinalAnswer := false
 
 	for round := 0; round < maxTaskToolRounds; round++ {
+		requestTools := tools
+		if forceFinalAnswer {
+			requestTools = nil
+		}
+
 		resp, err := provider.Chat(ctx, llm.ChatRequest{
 			Model:           modelName,
 			Messages:        conversation,
 			Temperature:     ag.Settings.Temperature,
 			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
-			Tools:           tools,
+			Tools:           requestTools,
 		})
 		if err != nil {
 			if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
@@ -225,6 +232,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		}
 
 		if len(resp.ToolCalls) == 0 {
+			forceFinalAnswer = false
 			if strings.TrimSpace(resp.Content) == "" {
 				if strings.TrimSpace(lastToolSummary) != "" {
 					if toolResultFollowups < maxTaskToolResultFollowups {
@@ -242,6 +250,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				if strings.TrimSpace(rawResponse) != "" {
 					if toolResultFollowups < maxTaskToolResultFollowups {
 						toolResultFollowups++
+						forceFinalAnswer = !toolSummaryLooksLikeEmptyWebSearch(rawResponse)
 						conversation = append(conversation, llm.Message{
 							Role:    llm.RoleAssistant,
 							Content: resp.Content,
@@ -271,6 +280,20 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			return resp.Content, nil
 		}
 
+		if forceFinalAnswer {
+			return "", buildToolOnlyBlockedError(firstNonEmptyString(lastToolSummary, resp.Content))
+		}
+
+		if repeatedSuccessfulToolCalls(resp.ToolCalls, successfulToolCalls) && strings.TrimSpace(lastToolSummary) != "" {
+			if toolResultFollowups < maxTaskToolResultFollowups {
+				toolResultFollowups++
+				forceFinalAnswer = true
+				conversation = append(conversation, llm.NewUserMessage(buildRepeatedToolCallFollowupPrompt(task)))
+				continue
+			}
+			return "", buildToolOnlyBlockedError(lastToolSummary)
+		}
+
 		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "toolcalls)": len(resp.ToolCalls), "round": round + 1})
 		conversationToolCalls := make([]llm.ToolCall, len(resp.ToolCalls))
 		copy(conversationToolCalls, resp.ToolCalls)
@@ -288,6 +311,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		toolResults := h.executeToolCalls(ctx, ag, agentName, task, resp.ToolCalls)
 		lastToolSummary = buildToolResultsSummary(resp.Content, toolResults)
 		for index, tr := range toolResults {
+			if tr.Error == nil {
+				successfulToolCalls[taskToolCallSignature(resp.ToolCalls[index])] = true
+			}
+
 			toolContent := tr.Result
 			if tr.Error != nil {
 				toolContent = fmt.Sprintf("ERROR: %s", tr.Error.Error())
@@ -305,8 +332,55 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", maxTaskToolRounds)
 }
 
+func repeatedSuccessfulToolCalls(toolCalls []llm.ToolCall, successfulToolCalls map[string]bool) bool {
+	if len(toolCalls) == 0 || len(successfulToolCalls) == 0 {
+		return false
+	}
+	for _, toolCall := range toolCalls {
+		if !successfulToolCalls[taskToolCallSignature(toolCall)] {
+			return false
+		}
+	}
+	return true
+}
+
+func taskToolCallSignature(toolCall llm.ToolCall) string {
+	name := strings.ToLower(strings.TrimSpace(toolCall.Name))
+	args := strings.TrimSpace(toolCall.Arguments)
+	if name == "web_search" {
+		args = normalizeWebSearchToolArguments(args)
+	}
+	return name + "\x00" + args
+}
+
+func normalizeWebSearchToolArguments(arguments string) string {
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(arguments), &parsed); err != nil {
+		return strings.ToLower(strings.Join(strings.Fields(arguments), " "))
+	}
+	if query, ok := parsed["query"].(string); ok {
+		parsed["query"] = strings.ToLower(strings.Join(strings.Fields(query), " "))
+	}
+	normalized, err := json.Marshal(parsed)
+	if err != nil {
+		return strings.ToLower(strings.Join(strings.Fields(arguments), " "))
+	}
+	return string(normalized)
+}
+
 func responseLooksLikeRawToolResults(content string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(content)), "tool results:")
+}
+
+func buildRepeatedToolCallFollowupPrompt(task Task) string {
+	var prompt strings.Builder
+	prompt.WriteString("You already received a successful result for that same tool call. Do not call tools again. Use the existing tool result to answer the task concisely. ")
+	prompt.WriteString("Do not return raw Tool Results.")
+	if strings.TrimSpace(task.Description) != "" {
+		prompt.WriteString("\n\nTask: ")
+		prompt.WriteString(strings.TrimSpace(task.Description))
+	}
+	return prompt.String()
 }
 
 func buildToolResultFollowupPrompt(task Task) string {

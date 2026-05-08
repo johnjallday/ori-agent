@@ -993,6 +993,7 @@ class TaskModalController {
       section: document.getElementById('taskModalResultSection'),
       meta: document.getElementById('taskModalResultMeta'),
       body: document.getElementById('taskModalResultBody'),
+      toolSummary: document.getElementById('taskModalToolSummary'),
       nextSteps: document.getElementById('taskModalResultNextSteps'),
       nextStepsCopy: document.getElementById('taskModalResultNextStepsCopy'),
       nextStepsActions: document.getElementById('taskModalResultNextStepsActions'),
@@ -1015,6 +1016,10 @@ class TaskModalController {
     if (elements.section) elements.section.style.display = 'none';
     if (elements.meta) elements.meta.textContent = '';
     if (elements.body) elements.body.textContent = '';
+    if (elements.toolSummary) {
+      elements.toolSummary.style.display = 'none';
+      elements.toolSummary.innerHTML = '';
+    }
     if (elements.nextSteps) elements.nextSteps.style.display = 'none';
     if (elements.nextStepsCopy) elements.nextStepsCopy.textContent = '';
     if (elements.nextStepsActions) elements.nextStepsActions.innerHTML = '';
@@ -1029,6 +1034,155 @@ class TaskModalController {
       elements.mcpRequirementAdd.disabled = false;
       elements.mcpRequirementAdd.textContent = 'Add Connector';
     }
+  }
+
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  truncateToolSummaryText(value, maxLength = 180) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+  }
+
+  extractToolNameFromTraceEntry(entry) {
+    const title = String(entry?.title || '').trim();
+    const titleMatch = title.match(/^(?:Calling|Completed|Failed)\s+(.+)$/i);
+    if (titleMatch?.[1]) {
+      return titleMatch[1].trim();
+    }
+
+    const summary = String(entry?.summary || '').trim();
+    const summaryMatch = summary.match(/^(?:Calling|Completed|Failed)\s+([^\n]+)/i);
+    if (summaryMatch?.[1]) {
+      return summaryMatch[1].trim();
+    }
+
+    return '';
+  }
+
+  getToolKindLabel(toolName, entry) {
+    const source = String(entry?.source || '').trim().toLowerCase();
+    const name = String(toolName || '').trim().toLowerCase();
+    if (source.includes('mcp') || name.startsWith('mcp.') || name.startsWith('mcp:')) {
+      return 'MCP';
+    }
+    const nativeTools = new Set(['web_search', 'web_fetch', 'weather', 'time', 'finance', 'sports', 'air_quality']);
+    if (nativeTools.has(name)) {
+      return 'Native';
+    }
+    return 'Tool';
+  }
+
+  summarizeToolArguments(detail) {
+    const raw = String(detail || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const keys = ['query', 'url', 'location', 'ticker', 'city'];
+      for (const key of keys) {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, key)) {
+          return `${key}: ${this.truncateToolSummaryText(parsed[key], 140)}`;
+        }
+      }
+    } catch (_error) {
+      // Detail is often already a readable string.
+    }
+    return this.truncateToolSummaryText(raw, 160);
+  }
+
+  summarizeToolResult(summary) {
+    return this.truncateToolSummaryText(summary, 180);
+  }
+
+  getTaskToolUsage(task) {
+    const trace = Array.isArray(task?.execution_trace) ? task.execution_trace : [];
+    const byName = new Map();
+
+    trace.forEach((entry) => {
+      const rawStatus = String(entry?.status || entry?.type || '').trim().toLowerCase();
+      const rawTitle = String(entry?.title || '').trim().toLowerCase();
+      if (!rawStatus.includes('tool') &&
+          !rawTitle.startsWith('calling ') &&
+          !rawTitle.startsWith('completed ') &&
+          !rawTitle.startsWith('failed ')) {
+        return;
+      }
+
+      const toolName = this.extractToolNameFromTraceEntry(entry);
+      if (!toolName) return;
+
+      if (!byName.has(toolName)) {
+        byName.set(toolName, {
+          name: toolName,
+          kind: this.getToolKindLabel(toolName, entry),
+          calls: 0,
+          results: 0,
+          errors: 0,
+          latestArgs: '',
+          latestResult: ''
+        });
+      }
+
+      const item = byName.get(toolName);
+      if (rawStatus.includes('call') || rawTitle.startsWith('calling ')) {
+        item.calls += 1;
+        item.latestArgs = this.summarizeToolArguments(entry?.detail);
+      } else if (rawStatus.includes('error') || rawTitle.startsWith('failed ')) {
+        item.errors += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+      } else if (rawStatus.includes('result') || rawTitle.startsWith('completed ')) {
+        item.results += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+      }
+    });
+
+    return Array.from(byName.values());
+  }
+
+  renderTaskToolSummary(task) {
+    const elements = this.getResultSectionElements();
+    if (!elements.toolSummary) return;
+
+    const tools = this.getTaskToolUsage(task);
+    if (tools.length === 0) {
+      elements.toolSummary.style.display = 'none';
+      elements.toolSummary.innerHTML = '';
+      return;
+    }
+
+    const totalCalls = tools.reduce((sum, item) => sum + Math.max(item.calls, item.results + item.errors), 0);
+    const cards = tools.map((item) => {
+      const status = item.errors > 0 ? 'Error' : (item.results > 0 ? 'Completed' : 'Called');
+      const callCount = Math.max(item.calls, item.results + item.errors);
+      const count = callCount === 1 ? '1 call' : `${callCount} calls`;
+      const detail = item.latestArgs || item.latestResult || '';
+      return `
+        <div style="display: grid; gap: 4px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="min-width: 0; color: var(--text-primary); font-size: 0.84rem; font-weight: 700; overflow-wrap: anywhere;">${this.escapeHtml(item.name)}</div>
+            <div style="flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--primary-color) 40%, transparent); background: color-mix(in srgb, var(--primary-color) 13%, transparent); color: var(--primary-color); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;">${this.escapeHtml(item.kind)}</div>
+          </div>
+          <div style="font-size: 0.74rem; color: var(--text-secondary); line-height: 1.4;">${this.escapeHtml(status)} • ${this.escapeHtml(count)}</div>
+          ${detail ? `<div style="font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere;">${this.escapeHtml(detail)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    elements.toolSummary.style.display = 'grid';
+    elements.toolSummary.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px;">
+        <div style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary);">Tools Used</div>
+        <div style="font-size: 0.72rem; color: var(--text-muted);">${this.escapeHtml(tools.length === 1 ? '1 tool' : `${tools.length} tools`)} • ${this.escapeHtml(totalCalls === 1 ? '1 call' : `${totalCalls} calls`)}</div>
+      </div>
+      <div style="display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));">${cards}</div>
+    `;
   }
 
   getTaskDiagnosticText(task, resultText = '') {
@@ -1258,6 +1412,7 @@ class TaskModalController {
     const labels = {
       pending: 'Pending',
       in_progress: 'In Progress',
+      waiting_for_choice: 'Waiting for Input',
       completed: 'Completed',
       failed: 'Failed',
       blocked: 'Blocked',
@@ -1293,6 +1448,19 @@ class TaskModalController {
       return {
         label: 'Result',
         text: String(task.result),
+        sourceTask: task,
+        answeredBy: String(task.to || task.from || 'Unknown agent').trim()
+      };
+    }
+
+    const humanLoop = task?.context?.human_loop;
+    const agentResponse = humanLoop && typeof humanLoop === 'object'
+      ? String(humanLoop.agent_response || '').trim()
+      : '';
+    if (agentResponse) {
+      return {
+        label: 'Agent Output',
+        text: agentResponse,
         sourceTask: task,
         answeredBy: String(task.to || task.from || 'Unknown agent').trim()
       };
@@ -1371,7 +1539,7 @@ class TaskModalController {
 
     const resultData = this.resolveTaskResultData(task);
     const status = String(task.status || '').trim().toLowerCase();
-    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'blocked' && status !== 'timeout')) {
+    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'blocked' && status !== 'timeout' && status !== 'waiting_for_choice')) {
       this.resetResultSection();
       return;
     }
@@ -1390,6 +1558,7 @@ class TaskModalController {
     }
 
     this.renderMCPRequirement(task, this.currentResultText);
+    this.renderTaskToolSummary(task);
     this.renderResultNextStepActions(task);
   }
 

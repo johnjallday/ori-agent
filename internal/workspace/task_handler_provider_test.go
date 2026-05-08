@@ -413,6 +413,9 @@ func TestExecuteTask_FollowsUpWhenModelReturnsEmptyAfterToolResult(t *testing.T)
 		t.Fatalf("expected follow-up request after empty tool result, got %d requests", len(provider.requests))
 	}
 	lastRequest := provider.requests[len(provider.requests)-1]
+	if len(lastRequest.Tools) == 0 {
+		t.Fatal("expected empty search follow-up request to keep tools available for broadening")
+	}
 	if len(lastRequest.Messages) == 0 {
 		t.Fatal("expected follow-up request messages")
 	}
@@ -490,6 +493,9 @@ func TestExecuteTask_FollowsUpWhenModelReturnsRawToolResult(t *testing.T) {
 		t.Fatalf("expected automatic finalization request after raw tool result, got %d requests", len(provider.requests))
 	}
 	lastRequest := provider.requests[len(provider.requests)-1]
+	if len(lastRequest.Tools) != 0 {
+		t.Fatalf("expected raw-result finalization request to disable tools, got %#v", lastRequest.Tools)
+	}
 	if len(lastRequest.Messages) == 0 {
 		t.Fatal("expected finalization request messages")
 	}
@@ -497,6 +503,91 @@ func TestExecuteTask_FollowsUpWhenModelReturnsRawToolResult(t *testing.T) {
 	for _, want := range []string{"not a final answer", "Do not return raw Tool Results", "check pollen count in NYC"} {
 		if !strings.Contains(followup, want) {
 			t.Fatalf("expected follow-up prompt to contain %q, got %q", want, followup)
+		}
+	}
+}
+
+func TestExecuteTask_FinalizesInsteadOfRepeatingSuccessfulToolCall(t *testing.T) {
+	provider := &scriptedProviderStub{
+		name: "openai",
+		responses: []llm.ChatResponse{
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:        "search-1",
+						Name:      "web_search",
+						Arguments: `{"query":"pollen count in nyc"}`,
+					},
+				},
+				FinishReason: llm.FinishReasonToolCalls,
+			},
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:        "search-2",
+						Name:      "web_search",
+						Arguments: `{"query":"pollen count in NYC"}`,
+					},
+				},
+				FinishReason: llm.FinishReasonToolCalls,
+			},
+			{
+				Content: "NYC pollen is high today. Pollen.com reports a pollen index of 10.3 for New York, NY 10001, with Oak, Birch, and Maple as top allergens.",
+			},
+		},
+	}
+	factory := llm.NewFactory()
+	factory.Register("openai", provider)
+
+	searchTool := &taskHandlerToolFunc{
+		name:   "web_search",
+		result: `{"query":"pollen count in NYC","results":[{"title":"Current Pollen Allergy Forecast for NEW YORK, NY (10001) | Pollen.com","url":"https://www.pollen.com/forecast/current/pollen/10001","snippet":"Current allergy forecast for New York, NY; forecast date 2026-05-08T00:00:00-04:00; today's pollen index 10.3 (high); top allergens: Oak (Quercus), Birch (Betula), Maple (Acer)."}],"source":"pollen.com"}`,
+	}
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Ori": {
+			Settings: types.Settings{
+				Provider:    "openai",
+				Model:       "gpt-test",
+				Temperature: 0,
+			},
+		},
+	}}
+	handler := &LLMTaskHandler{
+		agentStore: agentStore,
+		llmFactory: factory,
+	}
+	handler.SetUtilityToolProvider(taskUtilityProviderStub{tools: map[string]toolapi.Tool{
+		"web_search": searchTool,
+	}})
+
+	result, err := handler.ExecuteTask(context.Background(), "Ori", Task{
+		ID:          "task-pollen",
+		Description: "check pollen count in NYC",
+		To:          "Ori",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTask failed: %v", err)
+	}
+	if searchTool.calls != 1 {
+		t.Fatalf("expected duplicate web_search to be skipped, got %d calls", searchTool.calls)
+	}
+	if !strings.Contains(result, "10.3") {
+		t.Fatalf("expected final answer to include pollen index, got %q", result)
+	}
+	if len(provider.requests) != 3 {
+		t.Fatalf("expected one finalization request after repeated tool call, got %d requests", len(provider.requests))
+	}
+	finalRequest := provider.requests[len(provider.requests)-1]
+	if len(finalRequest.Tools) != 0 {
+		t.Fatalf("expected finalization request to disable tools, got %#v", finalRequest.Tools)
+	}
+	if len(finalRequest.Messages) == 0 {
+		t.Fatal("expected finalization request messages")
+	}
+	followup := finalRequest.Messages[len(finalRequest.Messages)-1].Content
+	for _, want := range []string{"successful result", "Do not call tools again", "check pollen count in NYC"} {
+		if !strings.Contains(followup, want) {
+			t.Fatalf("expected repeated-tool follow-up prompt to contain %q, got %q", want, followup)
 		}
 	}
 }

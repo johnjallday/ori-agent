@@ -17,6 +17,7 @@ import {
   getDisplayStatus,
   getStatusClass,
   getTaskEventData,
+  summarizeText,
   stringifyTraceValue,
 } from './workspace-task.js';
 
@@ -60,6 +61,148 @@ export const taskExecutionViewsMethods = {
 
   renderRunHistory() {
     this.renderExecutionBreakdown();
+  },
+
+  renderToolSummary() {
+    const target = this.elements.toolSummary;
+    if (!target) return;
+
+    const tools = this.getToolUsageSummary();
+    if (tools.length === 0) {
+      target.hidden = true;
+      target.innerHTML = '';
+      return;
+    }
+
+    const totalCalls = tools.reduce((sum, item) => sum + Math.max(item.calls, item.results + item.errors), 0);
+    const cardsHtml = tools.map((item) => {
+      const status = item.errors > 0 ? 'Error' : (item.results > 0 ? 'Completed' : 'Called');
+      const count = Math.max(item.calls, item.results + item.errors);
+      const countText = count === 1 ? '1 call' : `${count} calls`;
+      const detail = [item.latestArgs ? `Args: ${item.latestArgs}` : '', item.latestResult ? `Result: ${item.latestResult}` : '']
+        .filter(Boolean)
+        .join(' · ');
+
+      return `
+        <div class="workspace-task-tool-card">
+          <div class="workspace-task-tool-card-top">
+            <div class="workspace-task-tool-name">${this.escapeHtml(item.name)}</div>
+            <span class="workspace-task-tool-badge">${this.escapeHtml(item.kind)}</span>
+          </div>
+          <div class="workspace-task-tool-meta">${this.escapeHtml(status)} · ${this.escapeHtml(countText)}</div>
+          ${detail ? `<div class="workspace-task-tool-detail">${this.escapeHtml(detail)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    target.hidden = false;
+    target.innerHTML = `
+      <div class="workspace-task-tool-summary-head">
+        <span>Tools Used</span>
+        <span class="workspace-task-tool-summary-total">${this.escapeHtml(tools.length === 1 ? '1 tool' : `${tools.length} tools`)} · ${this.escapeHtml(totalCalls === 1 ? '1 call' : `${totalCalls} calls`)}</span>
+      </div>
+      <div class="workspace-task-tool-summary-grid">${cardsHtml}</div>
+    `;
+  },
+
+  getToolUsageSummary() {
+    const trace = Array.isArray(this.task?.execution_trace) ? this.task.execution_trace : [];
+    const byName = new Map();
+
+    trace.forEach((entry) => {
+      if (!this.isToolTraceEntry(entry)) return;
+
+      const toolName = this.extractToolNameFromTraceEntry(entry);
+      if (!toolName) return;
+
+      if (!byName.has(toolName)) {
+        byName.set(toolName, {
+          name: toolName,
+          kind: this.getToolKindLabel(toolName, entry),
+          calls: 0,
+          results: 0,
+          errors: 0,
+          latestArgs: '',
+          latestResult: ''
+        });
+      }
+
+      const item = byName.get(toolName);
+      const status = String(entry?.status || entry?.type || '').trim().toLowerCase();
+      const title = String(entry?.title || '').trim().toLowerCase();
+
+      if (status.includes('call') || title.startsWith('calling ')) {
+        item.calls += 1;
+        item.latestArgs = this.summarizeToolArguments(entry?.detail);
+        return;
+      }
+      if (status.includes('error') || title.startsWith('failed ')) {
+        item.errors += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+        return;
+      }
+      if (status.includes('result') || title.startsWith('completed ')) {
+        item.results += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+      }
+    });
+
+    return Array.from(byName.values());
+  },
+
+  isToolTraceEntry(entry) {
+    const status = String(entry?.status || entry?.type || '').trim().toLowerCase();
+    const title = String(entry?.title || '').trim().toLowerCase();
+    return status.includes('tool') ||
+      title.startsWith('calling ') ||
+      title.startsWith('completed ') ||
+      title.startsWith('failed ');
+  },
+
+  extractToolNameFromTraceEntry(entry) {
+    const title = String(entry?.title || '').trim();
+    const titleMatch = title.match(/^(?:Calling|Completed|Failed)\s+(.+)$/i);
+    if (titleMatch?.[1]) return titleMatch[1].trim();
+
+    const summary = String(entry?.summary || '').trim();
+    const summaryMatch = summary.match(/^(?:Calling|Completed|Failed)\s+([^\n]+)/i);
+    if (summaryMatch?.[1]) return summaryMatch[1].trim();
+
+    return '';
+  },
+
+  getToolKindLabel(toolName, entry) {
+    const source = String(entry?.source || '').trim().toLowerCase();
+    const name = String(toolName || '').trim().toLowerCase();
+    if (source.includes('mcp') || name.startsWith('mcp.') || name.startsWith('mcp:')) {
+      return 'MCP';
+    }
+    const nativeTools = new Set(['web_search', 'web_fetch', 'weather', 'time', 'finance', 'sports', 'air_quality']);
+    if (nativeTools.has(name)) {
+      return 'Native';
+    }
+    return 'Tool';
+  },
+
+  summarizeToolArguments(value) {
+    const raw = stringifyTraceValue(value, 600).trim();
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const keys = ['query', 'url', 'location', 'ticker', 'city'];
+      for (const key of keys) {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, key)) {
+          return `${key}: ${summarizeText(parsed[key], 150)}`;
+        }
+      }
+    } catch (_error) {
+      // Raw detail is already readable when it is not JSON.
+    }
+    return summarizeText(raw, 180);
+  },
+
+  summarizeToolResult(value) {
+    return summarizeText(stringifyTraceValue(value, 700), 200);
   },
 
   getExecutionBreakdownSteps(task, subtasks = []) {

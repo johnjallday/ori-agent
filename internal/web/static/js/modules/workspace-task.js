@@ -967,6 +967,7 @@ export class WorkspaceTaskPage {
       runsTabTrace: document.getElementById('workspace-task-runs-tab-trace'),
       runsTabRunsCount: document.getElementById('workspace-task-runs-tab-runs-count'),
       runsTabTraceCount: document.getElementById('workspace-task-runs-tab-trace-count'),
+      toolSummary: document.getElementById('workspace-task-tool-summary'),
       trace: document.getElementById('workspace-task-trace'),
       executionTrace: document.getElementById('workspace-task-execution-trace'),
       executionTraceControls: document.getElementById('workspace-task-execution-trace-controls'),
@@ -4923,6 +4924,10 @@ export class WorkspaceTaskPage {
 
     if (!hasBreakdown && !hasTraceSurface) {
       this.elements.runsCard.hidden = true;
+      if (this.elements.toolSummary) {
+        this.elements.toolSummary.hidden = true;
+        this.elements.toolSummary.innerHTML = '';
+      }
       if (this.elements.trace) this.elements.trace.innerHTML = '';
       if (this.elements.executionTrace) this.elements.executionTrace.innerHTML = '';
       if (this.elements.executionTraceControls) this.elements.executionTraceControls.hidden = true;
@@ -4930,6 +4935,9 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.runsCard.hidden = false;
+    if (typeof this.renderToolSummary === 'function') {
+      this.renderToolSummary();
+    }
 
     if (this.elements.runsTabRuns) this.elements.runsTabRuns.hidden = !hasBreakdown;
     if (this.elements.runsTabTrace) this.elements.runsTabTrace.hidden = !hasTraceSurface;

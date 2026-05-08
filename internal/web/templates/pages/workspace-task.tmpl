@@ -222,6 +222,7 @@
                   <h2>Runs and tool calls</h2>
                 </div>
               </div>
+              <div id="workspace-task-tool-summary" class="workspace-task-tool-summary" hidden></div>
               <div class="workspace-task-runs-tabs" role="tablist" aria-label="Run history view">
                 <button type="button" class="workspace-task-runs-tab is-active" data-runs-tab="runs" role="tab" aria-selected="true" aria-controls="workspace-task-trace" id="workspace-task-runs-tab-runs">
                   <span>Runs</span>
@@ -3260,6 +3261,97 @@
     .workspace-task-runs-tab.is-active .workspace-task-runs-tab-count {
       background: color-mix(in srgb, var(--primary-color) 22%, transparent);
       color: var(--primary-color);
+    }
+
+    .workspace-task-tool-summary {
+      display: grid;
+      gap: 0.65rem;
+      margin-bottom: 0.85rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-tool-summary[hidden] {
+      display: none;
+    }
+
+    .workspace-task-tool-summary-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-tool-summary-total {
+      color: var(--text-muted);
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .workspace-task-tool-summary-grid {
+      display: grid;
+      gap: 0.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .workspace-task-tool-card {
+      min-width: 0;
+      display: grid;
+      gap: 0.42rem;
+      padding: 0.7rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+      background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+    }
+
+    .workspace-task-tool-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+    }
+
+    .workspace-task-tool-name {
+      min-width: 0;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-tool-badge {
+      flex: 0 0 auto;
+      padding: 0.16rem 0.48rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 42%, transparent);
+      background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+      color: var(--primary-color);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-tool-meta {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-tool-detail {
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
     }
 
     .workspace-task-page-hero-cancel-confirm {
