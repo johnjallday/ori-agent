@@ -202,20 +202,43 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 		return err
 	}
 
-	// If already has servers, don't overwrite
-	if len(config.Servers) > 0 {
-		return nil
-	}
-
 	// Get user's home directory for default allowed directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "/tmp" // Fallback
 	}
 
-	// Add default filesystem server (disabled by default for security)
-	// Uses user's home directory as the allowed directory
-	defaultServers := []ServerConfig{
+	defaultServers := defaultMCPServers(homeDir)
+	existing := make(map[string]struct{}, len(config.Servers))
+	for _, server := range config.Servers {
+		name := strings.TrimSpace(server.Name)
+		if name == "" {
+			continue
+		}
+		existing[name] = struct{}{}
+	}
+
+	added := false
+	for _, server := range defaultServers {
+		if _, ok := existing[server.Name]; ok {
+			continue
+		}
+		config.Servers = append(config.Servers, server)
+		added = true
+	}
+	if !added {
+		return nil
+	}
+
+	return cm.SaveGlobalConfig(config)
+}
+
+func defaultMCPServers(homeDir string) []ServerConfig {
+	if strings.TrimSpace(homeDir) == "" {
+		homeDir = "/tmp"
+	}
+
+	return []ServerConfig{
 		{
 			Name:      "filesystem",
 			Command:   "npx",
@@ -224,10 +247,15 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 			Transport: "stdio",
 			Enabled:   false,
 		},
+		{
+			Name:      "fetch",
+			Command:   "uvx",
+			Args:      []string{"mcp-server-fetch"},
+			Env:       make(map[string]string),
+			Transport: "stdio",
+			Enabled:   false,
+		},
 	}
-
-	config.Servers = defaultServers
-	return cm.SaveGlobalConfig(config)
 }
 
 // ImportExternalGlobalServers imports MCP server definitions from external/global

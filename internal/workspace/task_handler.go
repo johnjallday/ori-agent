@@ -237,6 +237,22 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				return "Task completed (no output)", nil
 			}
 
+			if responseLooksLikeRawToolResults(resp.Content) {
+				rawResponse := strings.TrimSpace(firstNonEmptyString(lastToolSummary, resp.Content))
+				if strings.TrimSpace(rawResponse) != "" {
+					if toolResultFollowups < maxTaskToolResultFollowups {
+						toolResultFollowups++
+						conversation = append(conversation, llm.Message{
+							Role:    llm.RoleAssistant,
+							Content: resp.Content,
+						})
+						conversation = append(conversation, llm.NewUserMessage(buildToolResultFollowupPrompt(task)))
+						continue
+					}
+					return "", buildToolOnlyBlockedError(rawResponse)
+				}
+			}
+
 			if taskRequiresBrowserAutomation(task) && looksLikeBrowserCapabilityRefusal(resp.Content) {
 				return "", &TaskBlockedError{
 					ReasonCode: "capability_refusal",
@@ -287,6 +303,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	}
 
 	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", maxTaskToolRounds)
+}
+
+func responseLooksLikeRawToolResults(content string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(content)), "tool results:")
 }
 
 func buildToolResultFollowupPrompt(task Task) string {
