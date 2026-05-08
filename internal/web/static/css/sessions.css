@@ -3516,6 +3516,201 @@ body.task-modal-open {
   opacity: 1;
 }
 
+.task-modal-input-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  min-height: 40px;
+}
+
+.task-modal-input-chips.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.task-modal-input-chip-group-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.task-modal-input-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-modal-input-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+  max-width: 100%;
+}
+
+.task-modal-input-chip:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.task-modal-input-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.task-modal-input-chip.is-selected {
+  background: color-mix(in srgb, var(--primary-color) 14%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--primary-color) 50%, var(--border-color));
+  color: var(--primary-color);
+}
+
+.task-modal-input-chip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 24ch;
+}
+
+.task-modal-input-chip-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.task-modal-input-chip.is-selected .task-modal-input-chip-mark::after {
+  content: "";
+  width: 6px;
+  height: 9px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.task-modal-automation {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+}
+
+.task-modal-automation-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.task-modal-automation-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.task-modal-automation-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.task-modal-day-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-modal-day-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.task-modal-day-pill input[type="checkbox"] {
+  display: none;
+}
+
+.task-modal-day-pill:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.task-modal-day-pill:has(input[type="checkbox"]:checked) {
+  background: color-mix(in srgb, var(--primary-color) 14%, var(--bg-primary));
+  border-color: color-mix(in srgb, var(--primary-color) 56%, var(--border-color));
+  color: var(--primary-color);
+}
+
+.task-modal-day-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.task-modal-day-preset {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.task-modal-day-preset:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 50%, var(--border-color));
+  color: var(--primary-color);
+}
+
+.task-modal-schedule-preview {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.task-modal-schedule-preview[hidden] {
+  display: none;
+}
+
 .task-modal-subtask-section {
   margin-top: 16px;
 }

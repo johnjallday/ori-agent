@@ -233,12 +233,11 @@
         </div>
       </div>
       <div class="task-modal-field" id="taskModalInputTasksField">
-        <label for="taskModalInputTasks" class="task-modal-label">Input Tasks <span class="task-modal-optional">(optional)</span></label>
-        <select id="taskModalInputTasks" class="task-modal-input task-modal-input-multi" multiple size="4"></select>
+        <label class="task-modal-label">Input Tasks <span class="task-modal-optional">(optional)</span></label>
+        <div id="taskModalInputTasks" class="task-modal-input-chips" data-selected-inputs="[]" role="group" aria-label="Input tasks"></div>
         <div id="taskModalInputTasksEmpty" class="task-modal-input-empty" style="display: none;">No other tasks available yet.</div>
         <div id="taskModalInputTasksNotice" class="task-modal-input-hint" style="display: none;">Inputs are set per subtask when this is a workflow.</div>
-        <div class="task-modal-input-hint">Use <code>{previous}</code> or <code>{result}</code> for the most recent input.</div>
-        <div class="task-modal-input-hint">Use <code>{input1}</code>, <code>{input2}</code>, ... for specific inputs.</div>
+        <div class="task-modal-input-hint">Click a task to use its result as an input. Use <code>{previous}</code> or <code>{result}</code> in the title for the most recent input, or <code>{input1}</code>, <code>{input2}</code>, ... for specific inputs.</div>
       </div>
       <!-- Subtasks Section -->
       <div id="taskModalSubtaskSection" class="task-modal-subtask-section">
@@ -257,8 +256,15 @@
         <div id="taskModalSubtaskList" class="task-modal-subtask-list"></div>
         <div id="taskModalSubtaskEmpty" class="task-modal-subtask-empty">No subtasks yet.</div>
       </div>
+      <!-- Automation Section: Schedule + Auto-save Results -->
+      <div class="task-modal-automation" style="margin-top: 18px;">
+        <div class="task-modal-automation-header">
+          <div class="task-modal-automation-title">Automation</div>
+          <div class="task-modal-automation-subtitle">Run this task on a schedule and persist its output between runs.</div>
+        </div>
+
       <!-- Schedule Section -->
-      <div class="task-modal-field" style="margin-top: 16px;">
+      <div class="task-modal-field">
         <div style="display: flex; align-items: center; gap: 8px;">
           <input type="checkbox" id="taskModalScheduleEnabled" style="width: 16px; height: 16px; cursor: pointer;">
           <label for="taskModalScheduleEnabled" class="task-modal-label" style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px;">
@@ -289,16 +295,21 @@
           <input type="time" id="taskModalScheduleTime" class="task-modal-input" value="09:00">
         </div>
         <div id="taskModalScheduleDayField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
-          <label for="taskModalScheduleDay" class="task-modal-label" style="font-size: 0.8rem;">Day of Week</label>
-          <select id="taskModalScheduleDay" class="task-modal-input" style="cursor: pointer;">
-            <option value="0">Sunday</option>
-            <option value="1">Monday</option>
-            <option value="2">Tuesday</option>
-            <option value="3">Wednesday</option>
-            <option value="4">Thursday</option>
-            <option value="5">Friday</option>
-            <option value="6">Saturday</option>
-          </select>
+          <label class="task-modal-label" style="font-size: 0.8rem;">Days</label>
+          <div id="taskModalScheduleDayRow" class="task-modal-day-row" role="group" aria-label="Days of week">
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="1"><span>Mon</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="2"><span>Tue</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="3"><span>Wed</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="4"><span>Thu</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="5"><span>Fri</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="6"><span>Sat</span></label>
+            <label class="task-modal-day-pill"><input type="checkbox" data-day-value="0"><span>Sun</span></label>
+          </div>
+          <div class="task-modal-day-presets">
+            <button type="button" class="task-modal-day-preset" data-day-preset="weekdays">Weekdays</button>
+            <button type="button" class="task-modal-day-preset" data-day-preset="weekend">Weekend</button>
+            <button type="button" class="task-modal-day-preset" data-day-preset="all">Every day</button>
+          </div>
         </div>
         <div id="taskModalScheduleIntervalField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
           <label class="task-modal-label" style="font-size: 0.8rem;">Interval</label>
@@ -319,6 +330,7 @@
           <label for="taskModalScheduleCron" class="task-modal-label" style="font-size: 0.8rem;">Cron Expression</label>
           <input type="text" id="taskModalScheduleCron" class="task-modal-input" placeholder="0 9 * * *" autocomplete="off">
         </div>
+        <div id="taskModalSchedulePreview" class="task-modal-schedule-preview" aria-live="polite"></div>
       </div>
       <!-- Auto-save Results Section -->
       <div class="task-modal-field" style="margin-top: 16px;">
@@ -374,6 +386,7 @@
           </select>
         </div>
       </div>
+      </div><!-- End task-modal-automation -->
       </div><!-- End taskManualSection -->
 
       <!-- File Attachments Section (visible in both Manual and Auto modes) -->

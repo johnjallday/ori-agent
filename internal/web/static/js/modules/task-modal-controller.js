@@ -65,11 +65,44 @@ class TaskModalController {
       if (scheduleFields) {
         scheduleFields.style.display = e.target.checked ? 'block' : 'none';
       }
+      this.updateSchedulePreview();
     });
 
     // Schedule type change handler
     document.getElementById('taskModalScheduleType')?.addEventListener('change', () => {
       this.updateScheduleTypeFields();
+      this.updateSchedulePreview();
+    });
+
+    // Live preview triggers — any field that affects the schedule
+    // summary should refresh the preview text.
+    [
+      'taskModalScheduleTime',
+      'taskModalScheduleIntervalValue',
+      'taskModalScheduleIntervalUnit',
+      'taskModalScheduleDatetime',
+      'taskModalScheduleCron'
+    ].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', () => this.updateSchedulePreview());
+      document.getElementById(id)?.addEventListener('change', () => this.updateSchedulePreview());
+    });
+
+    // Day-of-week pills + presets
+    const dayRow = document.getElementById('taskModalScheduleDayRow');
+    if (dayRow) {
+      dayRow.addEventListener('change', () => this.updateSchedulePreview());
+    }
+    document.querySelectorAll('[data-day-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const preset = btn.getAttribute('data-day-preset') || '';
+        const presets = {
+          weekdays: [1, 2, 3, 4, 5],
+          weekend: [0, 6],
+          all: [0, 1, 2, 3, 4, 5, 6]
+        };
+        this.setSelectedScheduleDays(presets[preset] || []);
+        this.updateSchedulePreview();
+      });
     });
 
     // Auto-save fields toggle
@@ -2482,7 +2515,6 @@ class TaskModalController {
     const scheduleName = document.getElementById('taskModalScheduleName');
     const scheduleType = document.getElementById('taskModalScheduleType');
     const scheduleTime = document.getElementById('taskModalScheduleTime');
-    const scheduleDay = document.getElementById('taskModalScheduleDay');
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
@@ -2493,13 +2525,14 @@ class TaskModalController {
     if (scheduleName) scheduleName.value = '';
     if (scheduleType) scheduleType.value = 'interval';
     if (scheduleTime) scheduleTime.value = '09:00';
-    if (scheduleDay) scheduleDay.value = '1';
+    this.setSelectedScheduleDays([]);
     if (scheduleIntervalValue) scheduleIntervalValue.value = '1';
     if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'hours';
     if (scheduleDatetime) scheduleDatetime.value = '';
     if (scheduleCron) scheduleCron.value = '0 9 * * *';
 
     this.updateScheduleTypeFields();
+    this.updateSchedulePreview();
   }
 
   /**
@@ -2511,7 +2544,6 @@ class TaskModalController {
     const scheduleName = document.getElementById('taskModalScheduleName');
     const scheduleType = document.getElementById('taskModalScheduleType');
     const scheduleTime = document.getElementById('taskModalScheduleTime');
-    const scheduleDay = document.getElementById('taskModalScheduleDay');
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
@@ -2521,13 +2553,27 @@ class TaskModalController {
       if (enabledCheckbox) enabledCheckbox.checked = Boolean(task.schedule_enabled);
       if (scheduleFields) scheduleFields.style.display = 'block';
       if (scheduleName) scheduleName.value = task.schedule_name || '';
-      if (scheduleType) scheduleType.value = task.schedule.type || 'interval';
+
+      // Detect a multi-day weekly cron and back-convert to the weekly
+      // form so the checkbox row stays the canonical UI for that case.
+      const schedule = task.schedule;
+      const cronWeekly = this.parseWeeklyCron(schedule.type === 'cron' ? schedule.cron_expr : '');
+      const inferredType = cronWeekly ? 'weekly' : (schedule.type || 'interval');
+      if (scheduleType) scheduleType.value = inferredType;
 
       // Populate type-specific fields
-      const schedule = task.schedule;
-      if (schedule.time && scheduleTime) scheduleTime.value = schedule.time;
-      if (schedule.time_of_day && scheduleTime) scheduleTime.value = schedule.time_of_day;
-      if (schedule.day_of_week != null && scheduleDay) scheduleDay.value = schedule.day_of_week;
+      if (cronWeekly) {
+        if (scheduleTime) scheduleTime.value = cronWeekly.time;
+        this.setSelectedScheduleDays(cronWeekly.days);
+      } else {
+        if (schedule.time && scheduleTime) scheduleTime.value = schedule.time;
+        if (schedule.time_of_day && scheduleTime) scheduleTime.value = schedule.time_of_day;
+        if (schedule.day_of_week != null) {
+          this.setSelectedScheduleDays([Number(schedule.day_of_week)]);
+        } else {
+          this.setSelectedScheduleDays([]);
+        }
+      }
 
       const intervalMinutes = this.getScheduleIntervalMinutes(schedule);
       if (intervalMinutes) {
@@ -2550,14 +2596,123 @@ class TaskModalController {
       if (schedule.execute_at && scheduleDatetime) {
         scheduleDatetime.value = this.formatLocalDatetimeInput(schedule.execute_at);
       }
-      if (schedule.cron_expr && scheduleCron) {
+      if (schedule.cron_expr && scheduleCron && !cronWeekly) {
         scheduleCron.value = schedule.cron_expr;
       }
 
       this.updateScheduleTypeFields();
+      this.updateSchedulePreview();
     } else {
       this.resetScheduleFields();
     }
+  }
+
+  /**
+   * Read currently-checked day-of-week pills, returning an ascending list.
+   */
+  getSelectedScheduleDays() {
+    const row = document.getElementById('taskModalScheduleDayRow');
+    if (!row) return [];
+    return Array.from(row.querySelectorAll('input[type="checkbox"][data-day-value]'))
+      .filter((cb) => cb.checked)
+      .map((cb) => Number.parseInt(cb.getAttribute('data-day-value') || '0', 10))
+      .sort((a, b) => a - b);
+  }
+
+  setSelectedScheduleDays(days) {
+    const row = document.getElementById('taskModalScheduleDayRow');
+    if (!row) return;
+    const set = new Set((days || []).map((d) => Number(d)));
+    row.querySelectorAll('input[type="checkbox"][data-day-value]').forEach((cb) => {
+      cb.checked = set.has(Number(cb.getAttribute('data-day-value')));
+    });
+  }
+
+  /**
+   * Recognize "M H * * d1,d2,..." cron expressions and translate them back
+   * into the weekly multi-day form. Returns null for shapes we don't
+   * round-trip — the user will see the raw cron in the cron field.
+   */
+  parseWeeklyCron(expr) {
+    const parts = String(expr || '').trim().split(/\s+/);
+    if (parts.length !== 5) return null;
+    const [minutePart, hourPart, dom, mon, dow] = parts;
+    if (dom !== '*' || mon !== '*') return null;
+    if (!/^\d+$/.test(minutePart) || !/^\d+$/.test(hourPart)) return null;
+    const days = dow.split(',').map((d) => d.trim()).filter(Boolean);
+    if (days.length < 2) return null;
+    const numericDays = [];
+    for (const d of days) {
+      if (!/^[0-6]$/.test(d)) return null;
+      numericDays.push(Number(d));
+    }
+    const minute = Number.parseInt(minutePart, 10);
+    const hour = Number.parseInt(hourPart, 10);
+    const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return { days: numericDays, time };
+  }
+
+  /**
+   * Render a human-readable summary of the current schedule selections —
+   * "Every Mon, Wed at 09:00", "Every 30 min", etc. Updates the inline
+   * preview line so users get immediate feedback before saving.
+   */
+  updateSchedulePreview() {
+    const previewEl = document.getElementById('taskModalSchedulePreview');
+    if (!previewEl) return;
+
+    const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
+    if (!enabledCheckbox?.checked) {
+      previewEl.textContent = '';
+      previewEl.hidden = true;
+      return;
+    }
+
+    const scheduleType = document.getElementById('taskModalScheduleType')?.value || 'interval';
+    const time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    let summary = '';
+    switch (scheduleType) {
+      case 'daily':
+        summary = `Every day at ${time}`;
+        break;
+      case 'weekly': {
+        const days = this.getSelectedScheduleDays();
+        if (days.length === 0) {
+          summary = 'Pick at least one day';
+        } else if (days.length === 7) {
+          summary = `Every day at ${time}`;
+        } else {
+          summary = `Every ${days.map((d) => dayLabels[d] || '?').join(', ')} at ${time}`;
+        }
+        break;
+      }
+      case 'interval': {
+        const value = Number.parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '0', 10);
+        const unit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
+        if (value > 0) {
+          summary = `Every ${value} ${unit}`;
+        }
+        break;
+      }
+      case 'once': {
+        const dt = document.getElementById('taskModalScheduleDatetime')?.value;
+        summary = dt ? `Once at ${dt.replace('T', ' ')}` : 'Pick a date and time';
+        break;
+      }
+      case 'cron':
+        summary = `Cron: ${document.getElementById('taskModalScheduleCron')?.value?.trim() || '(empty)'}`;
+        break;
+    }
+
+    if (!summary) {
+      previewEl.textContent = '';
+      previewEl.hidden = true;
+      return;
+    }
+    previewEl.hidden = false;
+    previewEl.textContent = summary;
   }
 
   /**
@@ -2588,10 +2743,25 @@ class TaskModalController {
       case 'daily':
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
         break;
-      case 'weekly':
-        schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
-        schedule.day_of_week = Number.parseInt(document.getElementById('taskModalScheduleDay')?.value || '1', 10);
+      case 'weekly': {
+        const time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+        const days = this.getSelectedScheduleDays();
+        if (days.length <= 1) {
+          schedule.time = time;
+          schedule.day_of_week = days.length === 1 ? days[0] : 1;
+        } else {
+          // Backend ScheduleConfig stores a single DayOfWeek int, so a
+          // multi-day weekly request is persisted as a cron expression.
+          // The user still sees "Weekly" in the form because the cron is
+          // round-tripped back into checkboxes by populateScheduleFields.
+          const [hourStr, minuteStr] = time.split(':');
+          const hour = Number.parseInt(hourStr || '9', 10);
+          const minute = Number.parseInt(minuteStr || '0', 10);
+          schedule.type = 'cron';
+          schedule.cron_expr = `${minute} ${hour} * * ${days.join(',')}`;
+        }
         break;
+      }
       case 'interval': {
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
         const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
@@ -2893,27 +3063,111 @@ class TaskModalController {
   /**
    * Get selected input references from a select element.
    */
-  getSelectedInputRefs(selectEl) {
-    if (!selectEl) return [];
-    return Array.from(selectEl.selectedOptions)
-      .map((option) => option.value)
-      .filter((value) => value && value.trim() !== '');
+  /**
+   * Read the currently-selected input task refs from a chip container
+   * (or, for backward compatibility, a legacy <select multiple>).
+   * Chip containers store their selection as JSON in
+   * data-selected-inputs so the value is robust to DOM rerenders that
+   * recreate the chip buttons.
+   */
+  getSelectedInputRefs(container) {
+    if (!container) return [];
+    if (container.tagName === 'SELECT') {
+      return Array.from(container.selectedOptions)
+        .map((option) => option.value)
+        .filter((value) => value && value.trim() !== '');
+    }
+    try {
+      const raw = JSON.parse(container.dataset.selectedInputs || '[]');
+      return Array.isArray(raw) ? raw.filter((v) => typeof v === 'string' && v.trim() !== '') : [];
+    } catch (_e) {
+      return [];
+    }
   }
 
   /**
-   * Enable click-to-toggle behavior for multi-select inputs.
+   * Render a clickable chip widget for selecting input tasks.
+   *
+   * `groups` is an array of { label?, items: [{value, label}] }. Items
+   * inside each group are rendered as togglable chips with a visible
+   * "selected" state. When the user clicks a chip the container fires
+   * a `change` event so existing subtask-badge / hint code paths keep
+   * working without modification.
    */
-  bindMultiSelectToggle(selectEl) {
-    if (!selectEl || selectEl.dataset.toggleBound === 'true') return;
-    selectEl.dataset.toggleBound = 'true';
+  renderInputTaskChips(container, groups, selectedRefs, options = {}) {
+    if (!container) return;
+    container.classList.toggle('is-disabled', Boolean(options.disabled));
 
-    selectEl.addEventListener('mousedown', (event) => {
-      if (selectEl.disabled) return;
+    const allItems = groups.reduce((sum, g) => sum + (g?.items?.length || 0), 0);
+    const selectedSet = new Set(Array.isArray(selectedRefs) ? selectedRefs : []);
+    container.dataset.selectedInputs = JSON.stringify(Array.from(selectedSet));
+
+    if (allItems === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const escapeAttr = (value) => this.escapeHtml(value);
+    const sectionsHtml = groups
+      .filter((group) => group?.items?.length)
+      .map((group) => {
+        const labelHtml = group.label
+          ? `<div class="task-modal-input-chip-group-label">${escapeAttr(group.label)}</div>`
+          : '';
+        const chipsHtml = group.items.map((item) => {
+          const checked = selectedSet.has(item.value);
+          return `
+            <button type="button"
+                    class="task-modal-input-chip${checked ? ' is-selected' : ''}"
+                    data-input-value="${escapeAttr(item.value)}"
+                    aria-pressed="${checked ? 'true' : 'false'}"
+                    ${options.disabled ? 'disabled' : ''}>
+              <span class="task-modal-input-chip-mark" aria-hidden="true"></span>
+              <span class="task-modal-input-chip-label">${escapeAttr(item.label)}</span>
+            </button>
+          `;
+        }).join('');
+        return `${labelHtml}<div class="task-modal-input-chip-row">${chipsHtml}</div>`;
+      }).join('');
+
+    container.innerHTML = sectionsHtml;
+
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        const value = btn.getAttribute('data-input-value') || '';
+        const current = new Set(this.getSelectedInputRefs(container));
+        if (current.has(value)) {
+          current.delete(value);
+        } else {
+          current.add(value);
+        }
+        container.dataset.selectedInputs = JSON.stringify(Array.from(current));
+        const isSelected = current.has(value);
+        btn.classList.toggle('is-selected', isSelected);
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        container.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+  }
+
+  /**
+   * Bind a legacy <select multiple> for click-to-toggle. Chip widgets
+   * handle their own clicks; this stays as a no-op for any non-select
+   * element so existing callers continue to compile.
+   */
+  bindMultiSelectToggle(container) {
+    if (!container || container.tagName !== 'SELECT') return;
+    if (container.dataset.toggleBound === 'true') return;
+    container.dataset.toggleBound = 'true';
+
+    container.addEventListener('mousedown', (event) => {
+      if (container.disabled) return;
       const option = event.target;
       if (!option || option.tagName !== 'OPTION' || option.disabled) return;
       event.preventDefault();
       option.selected = !option.selected;
-      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      container.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
 
@@ -2921,8 +3175,8 @@ class TaskModalController {
    * Populate the main task input selection list.
    */
   populateMainInputTasks(task = null) {
-    const selectEl = document.getElementById('taskModalInputTasks');
-    if (!selectEl) return;
+    const container = document.getElementById('taskModalInputTasks');
+    if (!container) return;
 
     const currentTaskId = this.editingTaskId || '';
     const excludeIds = new Set();
@@ -2931,18 +3185,7 @@ class TaskModalController {
     const options = this.getWorkspaceTaskOptions({ excludeIds });
     const selectedRefs = (task?.input_task_ids || []).map((id) => `task:${id}`);
 
-    selectEl.innerHTML = '';
-    options.forEach((opt) => {
-      const optionEl = document.createElement('option');
-      optionEl.value = opt.value;
-      optionEl.textContent = opt.label;
-      optionEl.selected = selectedRefs.includes(opt.value);
-      selectEl.appendChild(optionEl);
-    });
-    this.bindMultiSelectToggle(selectEl);
-    if (selectedRefs.length === 0) {
-      selectEl.selectedIndex = -1;
-    }
+    this.renderInputTaskChips(container, [{ items: options }], selectedRefs);
 
     const emptyEl = document.getElementById('taskModalInputTasksEmpty');
     if (emptyEl) {
@@ -2951,42 +3194,43 @@ class TaskModalController {
   }
 
   setMainInputTaskRefs(refs = []) {
-    const selectEl = document.getElementById('taskModalInputTasks');
-    if (!selectEl) return;
-
-    const normalizedRefs = Array.isArray(refs)
+    const container = document.getElementById('taskModalInputTasks');
+    if (!container) return;
+    const normalized = Array.isArray(refs)
       ? refs.map((value) => String(value || '').trim()).filter(Boolean)
       : [];
-    const appliedRefs = [];
-
-    Array.from(selectEl.options).forEach((option) => {
-      option.selected = normalizedRefs.includes(option.value);
-      if (option.selected) {
-        appliedRefs.push(option.value);
-      }
+    container.dataset.selectedInputs = JSON.stringify(normalized);
+    const selectedSet = new Set(normalized);
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      const value = btn.getAttribute('data-input-value') || '';
+      const checked = selectedSet.has(value);
+      btn.classList.toggle('is-selected', checked);
+      btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
     });
-
-    if (appliedRefs.length === 0) {
-      selectEl.selectedIndex = -1;
-    }
   }
 
   /**
    * Update main input selection state when subtasks exist.
    */
   updateMainInputTasksState() {
-    const selectEl = document.getElementById('taskModalInputTasks');
+    const container = document.getElementById('taskModalInputTasks');
     const noticeEl = document.getElementById('taskModalInputTasksNotice');
-    if (!selectEl || !noticeEl) return;
+    if (!container || !noticeEl) return;
 
     const list = document.getElementById('taskModalSubtaskList');
     const hasSubtasks = list && list.children.length > 0;
-    selectEl.disabled = hasSubtasks;
     noticeEl.style.display = hasSubtasks ? 'block' : 'none';
 
+    container.classList.toggle('is-disabled', hasSubtasks);
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      btn.disabled = hasSubtasks;
+    });
     if (hasSubtasks) {
-      Array.from(selectEl.options).forEach((option) => {
-        option.selected = false;
+      // Wipe selection — workflow inputs live on each subtask now.
+      container.dataset.selectedInputs = JSON.stringify([]);
+      container.querySelectorAll('[data-input-value].is-selected').forEach((btn) => {
+        btn.classList.remove('is-selected');
+        btn.setAttribute('aria-pressed', 'false');
       });
     }
   }
@@ -3020,68 +3264,37 @@ class TaskModalController {
     const externalOptions = this.getWorkspaceTaskOptions({ excludeIds: workflowTaskIds });
 
     cards.forEach((card, index) => {
-      const selectEl = card.querySelector('.task-modal-subtask-inputs');
-      if (!selectEl) return;
+      const container = card.querySelector('.task-modal-subtask-inputs');
+      if (!container) return;
 
       let selectedRefs = [];
-      if (selectEl.dataset.selectedInputs) {
-        try {
-          selectedRefs = JSON.parse(selectEl.dataset.selectedInputs) || [];
-        } catch (error) {
-          selectedRefs = [];
-        }
-      } else {
-        selectedRefs = this.getSelectedInputRefs(selectEl);
+      try {
+        selectedRefs = JSON.parse(container.dataset.selectedInputs || '[]');
+      } catch (_e) {
+        selectedRefs = [];
       }
-
-      selectEl.innerHTML = '';
 
       const availableSteps = stepOptions.slice(0, index);
-      if (availableSteps.length > 0) {
-        const stepGroup = document.createElement('optgroup');
-        stepGroup.label = 'Workflow steps';
-        availableSteps.forEach((opt) => {
-          const optionEl = document.createElement('option');
-          optionEl.value = opt.value;
-          optionEl.textContent = opt.label;
-          stepGroup.appendChild(optionEl);
-        });
-        selectEl.appendChild(stepGroup);
+      const groups = [];
+      if (availableSteps.length > 0) groups.push({ label: 'Workflow steps', items: availableSteps });
+      if (externalOptions.length > 0) groups.push({ label: 'Workspace tasks', items: externalOptions });
+
+      if (groups.length === 0) {
+        container.innerHTML = '<div class="task-modal-input-empty">No input tasks available — add another step or another task to the workspace.</div>';
+        container.dataset.selectedInputs = JSON.stringify([]);
+        this.updateSubtaskInputsBadge(card, 0);
+        return;
       }
 
-      if (externalOptions.length > 0) {
-        const taskGroup = document.createElement('optgroup');
-        taskGroup.label = 'Workspace tasks';
-        externalOptions.forEach((opt) => {
-          const optionEl = document.createElement('option');
-          optionEl.value = opt.value;
-          optionEl.textContent = opt.label;
-          taskGroup.appendChild(optionEl);
-        });
-        selectEl.appendChild(taskGroup);
-      }
+      // Drop refs that no longer exist in the rendered options. This
+      // prevents stale "task:abc" refs from sticking around after the
+      // referenced sibling step is removed.
+      const validValues = new Set();
+      groups.forEach((g) => g.items.forEach((item) => validValues.add(item.value)));
+      const filteredRefs = selectedRefs.filter((ref) => validValues.has(ref));
 
-      if (availableSteps.length === 0 && externalOptions.length === 0) {
-        const optionEl = document.createElement('option');
-        optionEl.value = '';
-        optionEl.textContent = '-- No input tasks available --';
-        optionEl.disabled = true;
-        selectEl.appendChild(optionEl);
-      }
-
-      const appliedSelections = [];
-      Array.from(selectEl.options).forEach((option) => {
-        if (selectedRefs.includes(option.value)) {
-          option.selected = true;
-          appliedSelections.push(option.value);
-        }
-      });
-      if (appliedSelections.length === 0) {
-        selectEl.selectedIndex = -1;
-      }
-      selectEl.dataset.selectedInputs = JSON.stringify(appliedSelections);
-
-      this.updateSubtaskInputsBadge(card, appliedSelections.length);
+      this.renderInputTaskChips(container, groups, filteredRefs);
+      this.updateSubtaskInputsBadge(card, filteredRefs.length);
     });
 
     this.updateMainInputTasksState();
@@ -3401,26 +3614,23 @@ class TaskModalController {
     inputsField.className = 'task-modal-field';
     const inputsLabel = document.createElement('label');
     inputsLabel.className = 'task-modal-label';
-    inputsLabel.setAttribute('for', `${rowId}-inputs`);
     inputsLabel.textContent = 'Input Tasks';
-    const inputsSelect = document.createElement('select');
-    inputsSelect.id = `${rowId}-inputs`;
-    inputsSelect.className = 'task-modal-input task-modal-subtask-inputs';
-    inputsSelect.multiple = true;
-    inputsSelect.size = 3;
-    inputsSelect.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
-    this.bindMultiSelectToggle(inputsSelect);
+    const inputsContainer = document.createElement('div');
+    inputsContainer.id = `${rowId}-inputs`;
+    inputsContainer.className = 'task-modal-input-chips task-modal-subtask-inputs';
+    inputsContainer.setAttribute('role', 'group');
+    inputsContainer.setAttribute('aria-label', 'Subtask input tasks');
+    inputsContainer.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
     inputsField.appendChild(inputsLabel);
-    inputsField.appendChild(inputsSelect);
+    inputsField.appendChild(inputsContainer);
 
     const inputsHint = document.createElement('div');
     inputsHint.className = 'task-modal-subtask-inputs-hint';
-    inputsHint.textContent = 'Use {input1}, {input2}, {previous}, or {result} in the task title.';
+    inputsHint.textContent = 'Click a step or task to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
     inputsField.appendChild(inputsHint);
 
-    inputsSelect.addEventListener('change', () => {
-      const selectedRefs = this.getSelectedInputRefs(inputsSelect);
-      inputsSelect.dataset.selectedInputs = JSON.stringify(selectedRefs);
+    inputsContainer.addEventListener('change', () => {
+      const selectedRefs = this.getSelectedInputRefs(inputsContainer);
       this.updateSubtaskInputsBadge(card, selectedRefs.length);
     });
 
