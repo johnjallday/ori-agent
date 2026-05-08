@@ -851,6 +851,40 @@ export class WorkspaceTaskPage {
     this.setupRealtime();
   }
 
+  // destroy releases the resources init() acquired so the page can be
+  // safely torn down (e.g. inside an SPA host that swaps the route, or by
+  // a future test harness). Today the page is rebuilt by full reload, but
+  // the leak surface is still real once any caller mounts more than one
+  // task page in the same document lifetime: the realtime subscription
+  // would fire callbacks against a detached DOM, the skill-draft fetch
+  // would resolve into a stale instance, and the debounced refresh timer
+  // would call loadData() on a page that no longer exists.
+  destroy() {
+    if (typeof this.workspaceRealtimeUnsubscribe === 'function') {
+      try {
+        this.workspaceRealtimeUnsubscribe();
+      } catch (_err) {
+        // Subscriber teardown is best-effort; nothing useful to do here.
+      }
+      this.workspaceRealtimeUnsubscribe = null;
+    }
+    if (this.skillDraftAbortController) {
+      try {
+        this.skillDraftAbortController.abort();
+      } catch (_err) {
+        // AbortController.abort can throw on some polyfills; ignore.
+      }
+      this.skillDraftAbortController = null;
+    }
+    if (this.pendingRefreshTimer) {
+      window.clearTimeout(this.pendingRefreshTimer);
+      this.pendingRefreshTimer = null;
+    }
+    // Tear down menu listeners + drop the menu DOM node if a contextual
+    // result-section menu is open.
+    this.closeResultSectionMenu();
+  }
+
   cacheElements() {
     this.elements = {
       root: document.getElementById('workspaceTaskPageRoot'),
@@ -6397,6 +6431,20 @@ export class WorkspaceTaskPage {
   }
 
   async completeTask() {
+    // Confirm when overriding a running task. The server validates the
+    // transition (since the harden-completion commit) and will reject
+    // bad cases — but a silent client-side override on an in-flight
+    // execution still races the executor in confusing ways. Make the
+    // user opt in explicitly. The other allowed source statuses
+    // (pending / assigned / waiting_for_choice) don't risk losing
+    // execution work, so they skip the prompt.
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    if (status === 'in_progress') {
+      const proceed = window.confirm(
+        'This task is currently running. Marking it complete now will override the live execution and may discard any work the agent is mid-way through. Continue?'
+      );
+      if (!proceed) return;
+    }
     try {
       const response = await fetch(
         `/api/orchestration/tasks/${encodeURIComponent(this.taskId)}/complete`,
