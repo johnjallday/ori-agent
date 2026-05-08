@@ -313,6 +313,15 @@ func (h *Handler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.TasksHandler(w, r)
 }
 
+// WorkflowCreateHandler accepts a parent task plus N subtasks and persists
+// them atomically. Used by the workflow modal builder and the
+// "Break this into steps" flow on the task detail page.
+//
+// Delegates to TaskHandler for modular organization.
+func (h *Handler) WorkflowCreateHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.HandleCreateWorkflow(w, r)
+}
+
 // TaskResultsHandler retrieves results from one or more tasks
 // Delegates to TaskHandler for modular organization
 func (h *Handler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {

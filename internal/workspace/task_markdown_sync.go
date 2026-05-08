@@ -582,7 +582,7 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 		if err := ws.ValidateTaskGraph(); err != nil {
 			if gErr, ok := err.(*TaskGraphError); ok {
 				for _, issue := range gErr.Issues {
-					*warnings = append(*warnings, "markdown import created invalid task graph: "+issue)
+					*warnings = append(*warnings, "markdown import created invalid task graph: "+issue.Message)
 				}
 			} else {
 				*warnings = append(*warnings, "markdown import created invalid task graph: "+err.Error())

@@ -1637,12 +1637,29 @@ class TaskModalController {
         });
 
         if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(errText || 'Failed to create task');
+          throw await this._parseTaskApiError(response, 'Failed to create task');
         }
 
         const createdPayload = await response.json();
         return this.extractTaskFromResponse(createdPayload);
+      };
+
+      const createWorkflow = async (parentPayload, subtaskPayloads) => {
+        const response = await fetch('/api/orchestration/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: this.workspaceId,
+            parent: parentPayload,
+            subtasks: subtaskPayloads
+          })
+        });
+
+        if (!response.ok) {
+          throw await this._parseTaskApiError(response, 'Failed to create workflow');
+        }
+
+        return response.json();
       };
 
       const updateTask = async (taskId, payload) => {
@@ -1798,43 +1815,57 @@ class TaskModalController {
           this.showToast('Task updated', 'success');
         }
       } else if (subtasks.length > 0) {
-        const parentTask = await createTask({
-          workspace_id: this.workspaceId,
-          description,
-          details,
+        // Atomic workflow create. Pre-generate UUIDs for parent + every
+        // subtask so we can wire `input_task_ids` between siblings up
+        // front and post the whole DAG to /api/orchestration/workflows in
+        // a single call. The server validates the graph as one batch and
+        // rolls back the entire workspace state on any cycle / unknown
+        // ref / duplicate ID — no half-created workflow if validation
+        // trips on subtask 5.
+        const parentId = this._generateTaskId();
+        const subtaskIds = subtasks.map((subtask) => subtask.id || this._generateTaskId());
+        // Stamp the IDs back onto the in-memory subtask list and the DOM
+        // cards so per-subtask error highlighting can map server issues
+        // (`issue.task_id`) onto the correct row.
+        this._stampSubtaskIds(subtaskIds);
+
+        const subtaskPayloads = subtasks.map((subtask, i) => ({
+          id: subtaskIds[i],
+          description: subtask.description,
+          details: subtask.details,
           priority,
-          to: to || undefined,
-          assigned_node_id: assignedNodeId || undefined
-        });
+          to: subtask.to || '',
+          assigned_node_id: subtask.assigned_node_id || '',
+          input_task_ids: this.resolveInputRefs(subtask.input_task_ids, subtaskIds),
+          subtask_index: i + 1,
+          result_storage: this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)?.result_storage || null
+        }));
 
-        if (!parentTask?.id) {
-          throw new Error('Parent task created but ID is missing');
-        }
-
-        let lastSubtaskId = '';
-        const stepIdsByIndex = subtasks.map(() => '');
-        for (let i = 0; i < subtasks.length; i++) {
-          const subtask = subtasks[i];
-          const inputTaskIds = this.resolveInputRefs(subtask.input_task_ids, stepIdsByIndex);
-          const createdSubtask = await createTask({
-            workspace_id: this.workspaceId,
-            description: subtask.description,
-            details: subtask.details,
+        await createWorkflow(
+          {
+            id: parentId,
+            description,
+            details,
             priority,
-            to: subtask.to || undefined,
-            assigned_node_id: subtask.assigned_node_id || undefined,
-            input_task_ids: inputTaskIds,
-            parent_task_id: parentTask.id,
-            subtask_index: i + 1,
-            ...this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false),
-            ...this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)
-          });
-          if (createdSubtask?.id) {
-            lastSubtaskId = createdSubtask.id;
-            stepIdsByIndex[i] = createdSubtask.id;
-          }
+            to: to || '',
+            assigned_node_id: assignedNodeId || ''
+          },
+          subtaskPayloads
+        );
+
+        // Schedule + auto-save fields the bulk endpoint does not yet model
+        // are still applied per-subtask via the existing /tasks PUT path.
+        // This keeps the bulk contract small while preserving the modal's
+        // existing per-step schedule semantics.
+        for (let i = 0; i < subtasks.length; i++) {
+          const schedulePayload = this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false);
+          const autoSavePayload = this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false);
+          const extras = { ...schedulePayload, ...autoSavePayload };
+          if (Object.keys(extras).length === 0) continue;
+          await updateTask(subtaskIds[i], extras);
         }
 
+        const lastSubtaskId = subtaskIds[subtaskIds.length - 1];
         if (lastSubtaskId && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(lastSubtaskId);
         }
@@ -1871,10 +1902,18 @@ class TaskModalController {
       // Clear pending files
       this.pendingFiles = [];
       this.pendingFilePaths = [];
+      this._clearSubtaskGraphErrors();
       await this.finalizeSuccessfulSave(eventName, eventPayload);
     } catch (error) {
       console.error('Failed to save task:', error);
-      this.showToast(error.message || 'Failed to save task', 'error');
+      const issues = Array.isArray(error?.issues) ? error.issues : [];
+      if (issues.length > 0) {
+        this._applySubtaskGraphErrors(issues);
+        const summary = issues[0]?.message || error.message || 'Workflow has invalid dependencies';
+        this.showToast(summary, 'error');
+      } else {
+        this.showToast(error.message || 'Failed to save task', 'error');
+      }
     } finally {
       this.isSaving = false;
       if (saveButton) {
@@ -1883,6 +1922,93 @@ class TaskModalController {
       }
       if (saveText) saveText.textContent = originalText || 'Save Task';
     }
+  }
+
+  /**
+   * Generate a UUID for client-side task IDs. Falls back to a non-RFC
+   * pseudo-UUID on browsers without crypto.randomUUID() — good enough for
+   * the in-flight workflow create contract (server validates uniqueness).
+   */
+  _generateTaskId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
+  }
+
+  /**
+   * Stamp the pre-generated subtask IDs onto the subtask card DOM so a
+   * later validation error from the server can be mapped back to the
+   * specific row that produced it (highlight + inline message).
+   */
+  _stampSubtaskIds(ids) {
+    const cards = document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card');
+    cards.forEach((card, i) => {
+      if (!ids[i]) return;
+      card.dataset.subtaskId = ids[i];
+    });
+  }
+
+  /**
+   * Read a non-2xx response from the task/workflow API and synthesize an
+   * Error whose `.issues` carries the structured graph-validation
+   * payload when the server provided one. Falls back to the response's
+   * text for older / non-JSON error paths.
+   */
+  async _parseTaskApiError(response, fallbackMessage) {
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch (_e) {
+      bodyText = '';
+    }
+    let parsed = null;
+    if (bodyText) {
+      try { parsed = JSON.parse(bodyText); } catch (_e) { parsed = null; }
+    }
+    const message = (parsed && (parsed.error || parsed.message)) || bodyText || fallbackMessage;
+    const error = new Error(message || fallbackMessage);
+    if (parsed && Array.isArray(parsed.issues)) {
+      error.issues = parsed.issues;
+    }
+    return error;
+  }
+
+  /**
+   * Apply per-row error styling + inline messages to subtask cards whose
+   * IDs appear in the structured issue list. Issues that name a task ID
+   * we don't have a card for fall through silently — the toast still
+   * carries the human message.
+   */
+  _applySubtaskGraphErrors(issues) {
+    this._clearSubtaskGraphErrors();
+    const byId = new Map();
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card').forEach((card) => {
+      if (card.dataset.subtaskId) byId.set(card.dataset.subtaskId, card);
+    });
+    issues.forEach((issue) => {
+      const card = byId.get(issue?.task_id);
+      if (!card) return;
+      card.classList.add('task-modal-subtask-card--has-error');
+      let messageEl = card.querySelector('.task-modal-subtask-card-error');
+      if (!messageEl) {
+        messageEl = document.createElement('div');
+        messageEl.className = 'task-modal-subtask-card-error';
+        card.appendChild(messageEl);
+      }
+      const existing = messageEl.textContent ? `${messageEl.textContent} ` : '';
+      messageEl.textContent = existing + (issue?.message || 'Invalid dependency');
+    });
+  }
+
+  _clearSubtaskGraphErrors() {
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card--has-error').forEach((card) => {
+      card.classList.remove('task-modal-subtask-card--has-error');
+    });
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card-error').forEach((el) => {
+      el.remove();
+    });
   }
 
   /**

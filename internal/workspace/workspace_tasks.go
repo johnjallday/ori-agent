@@ -7,6 +7,59 @@ import (
 	"github.com/google/uuid"
 )
 
+// AddTasks atomically appends a batch of tasks to the workspace under a
+// single lock. The whole batch is validated together at end-of-append, so
+// callers may include forward references between siblings (e.g. a workflow's
+// subtasks pointing at each other via input_task_ids) — something the
+// per-task AddTask path cannot accept.
+//
+// On any validation failure the workspace state is fully restored: every
+// task added by this call is rolled back from both Tasks and taskIndex.
+// Caller-supplied IDs are preserved when present, so workflows can wire
+// up sibling references with UUIDs they generate before the call.
+func (w *Workspace) AddTasks(tasks []Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.taskIndex == nil {
+		w.taskIndex = make(map[string]int)
+	}
+
+	originalLen := len(w.Tasks)
+	addedIDs := make([]string, 0, len(tasks))
+	now := time.Now()
+
+	for i := range tasks {
+		t := tasks[i]
+		if t.ID == "" {
+			t.ID = uuid.New().String()
+		}
+		if t.CreatedAt.IsZero() {
+			t.CreatedAt = now
+		}
+		t.WorkspaceID = w.ID
+
+		w.Tasks = append(w.Tasks, t)
+		w.taskIndex[t.ID] = len(w.Tasks) - 1
+		addedIDs = append(addedIDs, t.ID)
+	}
+
+	if err := validateTaskGraph(w.Tasks); err != nil {
+		w.Tasks = w.Tasks[:originalLen]
+		for _, id := range addedIDs {
+			delete(w.taskIndex, id)
+		}
+		return err
+	}
+
+	w.UpdatedAt = now
+	return nil
+}
+
 // AddTask adds a task to the workspace.
 //
 // The candidate task plus the existing graph are validated before commit; if

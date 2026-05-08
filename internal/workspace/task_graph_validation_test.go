@@ -225,9 +225,104 @@ func TestWorkspace_ValidateTaskGraph_PostBatch(t *testing.T) {
 	}
 }
 
-func containsIssue(issues []string, needle string) bool {
-	for _, s := range issues {
-		if strings.Contains(s, needle) {
+func TestAddTasks_AtomicSuccessWithForwardRef(t *testing.T) {
+	ws := &Workspace{ID: "ws1"}
+	parentID := "parent-1"
+	step1ID := "step-1"
+	step2ID := "step-2"
+	if err := ws.AddTasks([]Task{
+		{ID: parentID, Description: "Parent"},
+		{ID: step1ID, Description: "Step 1", ParentTaskID: parentID, SubtaskIndex: 1},
+		{ID: step2ID, Description: "Step 2", ParentTaskID: parentID, SubtaskIndex: 2, InputTaskIDs: []string{step1ID}},
+	}); err != nil {
+		t.Fatalf("AddTasks: unexpected error %v", err)
+	}
+	if len(ws.Tasks) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(ws.Tasks))
+	}
+	for _, id := range []string{parentID, step1ID, step2ID} {
+		if _, ok := ws.taskIndex[id]; !ok {
+			t.Fatalf("expected taskIndex entry for %s", id)
+		}
+	}
+}
+
+func TestAddTasks_RollsBackOnCycle(t *testing.T) {
+	ws := &Workspace{ID: "ws1"}
+	if err := ws.AddTask(Task{ID: "existing", Description: "Existing"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	err := ws.AddTasks([]Task{
+		{ID: "a", Description: "A", InputTaskIDs: []string{"b"}},
+		{ID: "b", Description: "B", InputTaskIDs: []string{"a"}},
+	})
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	var gErr *TaskGraphError
+	if !errors.As(err, &gErr) {
+		t.Fatalf("expected *TaskGraphError, got %T", err)
+	}
+	if len(ws.Tasks) != 1 || ws.Tasks[0].ID != "existing" {
+		t.Fatalf("expected workspace to retain only the seed task, got %v", ws.Tasks)
+	}
+	if _, leaked := ws.taskIndex["a"]; leaked {
+		t.Fatal("expected taskIndex to drop rolled-back task a")
+	}
+	if _, leaked := ws.taskIndex["b"]; leaked {
+		t.Fatal("expected taskIndex to drop rolled-back task b")
+	}
+}
+
+func TestAddTasks_RollsBackOnUnknownInput(t *testing.T) {
+	ws := &Workspace{ID: "ws1"}
+	err := ws.AddTasks([]Task{
+		{ID: "parent", Description: "Parent"},
+		{ID: "child", Description: "Child", ParentTaskID: "parent", InputTaskIDs: []string{"ghost"}},
+	})
+	if err == nil {
+		t.Fatal("expected unknown-input error")
+	}
+	var gErr *TaskGraphError
+	if !errors.As(err, &gErr) {
+		t.Fatalf("expected *TaskGraphError, got %T", err)
+	}
+	hasUnknownInput := false
+	for _, issue := range gErr.Issues {
+		if issue.Kind == TaskGraphIssueUnknownInput && issue.TaskID == "child" && issue.Reference == "ghost" {
+			hasUnknownInput = true
+		}
+	}
+	if !hasUnknownInput {
+		t.Fatalf("expected structured unknown-input issue, got %+v", gErr.Issues)
+	}
+	if len(ws.Tasks) != 0 {
+		t.Fatalf("expected full rollback, got %d tasks", len(ws.Tasks))
+	}
+}
+
+func TestAddTasks_AssignsIDsAndPreservesProvided(t *testing.T) {
+	ws := &Workspace{ID: "ws1"}
+	if err := ws.AddTasks([]Task{
+		{Description: "no-id"},
+		{ID: "explicit-id", Description: "with-id"},
+	}); err != nil {
+		t.Fatalf("AddTasks: %v", err)
+	}
+	if len(ws.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(ws.Tasks))
+	}
+	if ws.Tasks[0].ID == "" {
+		t.Fatal("expected first task to receive a generated ID")
+	}
+	if ws.Tasks[1].ID != "explicit-id" {
+		t.Fatalf("expected provided ID to be preserved, got %q", ws.Tasks[1].ID)
+	}
+}
+
+func containsIssue(issues []TaskGraphIssue, needle string) bool {
+	for _, issue := range issues {
+		if strings.Contains(issue.Message, needle) {
 			return true
 		}
 	}

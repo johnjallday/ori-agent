@@ -3568,6 +3568,18 @@ body.task-modal-open {
   gap: 10px;
 }
 
+.task-modal-subtask-card.task-modal-subtask-card--has-error {
+  border-color: rgba(194, 59, 59, 0.55);
+  background: color-mix(in srgb, #c23b3b 6%, var(--bg-secondary));
+}
+
+.task-modal-subtask-card-error {
+  color: #c23b3b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 .task-modal-subtask-card .task-modal-field {
   margin-bottom: 0;
 }

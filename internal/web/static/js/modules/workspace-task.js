@@ -4215,45 +4215,85 @@ export class WorkspaceTaskPage {
 
       const fallbackAgent = String(this.task?.to || '').trim();
       const parentTaskId = String(this.task.id);
-      let createdCount = 0;
 
-      for (let index = 0; index < draft.subtasks.length; index++) {
-        const subtask = draft.subtasks[index];
+      // Atomic attach: post the whole batch of generated steps under the
+      // existing parent task in a single call. The server validates the
+      // graph as one batch and rolls back the entire draft on any
+      // validation error, so the user never ends up with a half-created
+      // step list to manually clean up.
+      const subtaskPayloads = draft.subtasks.map((subtask, index) => {
         const description = String(subtask?.description || '').trim() || `Step ${index + 1}`;
         const details = String(subtask?.details || '').trim();
         const agentFromDraft = this.agentNameFromAssignmentValue(subtask?.assignmentValue);
         const to = agentFromDraft || (fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '');
+        return {
+          id: this._generateClientTaskId(),
+          description,
+          details,
+          to,
+          subtask_index: index + 1,
+          priority: 3
+        };
+      });
 
-        const response = await fetch('/api/orchestration/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspace_id: this.workspaceId,
-            description,
-            details,
-            to,
-            parent_task_id: parentTaskId,
-            subtask_index: index + 1,
-            priority: 3
-          })
-        });
+      const response = await fetch('/api/orchestration/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          attach_to_parent_id: parentTaskId,
+          subtasks: subtaskPayloads
+        })
+      });
 
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to create step ${index + 1}`);
-        }
-        createdCount += 1;
+      if (!response.ok) {
+        throw await this._parseGraphError(response, 'Failed to generate steps');
       }
 
+      const createdCount = subtaskPayloads.length;
       this.notify('success', `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`);
       await this.refreshAfterStepChange();
     } catch (error) {
       console.error('Failed to generate steps from result:', error);
-      this.notify('error', error?.message || 'Failed to generate steps');
+      const summary = Array.isArray(error?.issues) && error.issues.length > 0
+        ? error.issues[0]?.message || error.message
+        : error?.message;
+      this.notify('error', summary || 'Failed to generate steps');
     } finally {
       this.workflowDraftPending = false;
       this.renderWorkflow();
     }
+  }
+
+  /**
+   * Generate a UUID for client-side task IDs so the workflow endpoint can
+   * receive a fully-formed batch with sibling input refs already wired up.
+   */
+  _generateClientTaskId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
+  }
+
+  /**
+   * Parse a non-2xx response from the task API and surface structured
+   * graph-validation issues via error.issues when present.
+   */
+  async _parseGraphError(response, fallbackMessage) {
+    let body = '';
+    try { body = await response.text(); } catch (_e) { body = ''; }
+    let parsed = null;
+    if (body) {
+      try { parsed = JSON.parse(body); } catch (_e) { parsed = null; }
+    }
+    const message = (parsed && (parsed.error || parsed.message)) || body || fallbackMessage;
+    const err = new Error(message || fallbackMessage);
+    if (parsed && Array.isArray(parsed.issues)) {
+      err.issues = parsed.issues;
+    }
+    return err;
   }
 
   openScheduleModal() {

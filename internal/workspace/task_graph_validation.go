@@ -5,19 +5,64 @@ import (
 	"strings"
 )
 
+// TaskGraphIssueKind classifies the way a single graph edge fails validation.
+// HTTP layers can map the kind onto a UI affordance (highlight which subtask
+// row references which missing/invalid task) without having to parse the
+// human-facing message.
+type TaskGraphIssueKind string
+
+const (
+	TaskGraphIssueDuplicateID    TaskGraphIssueKind = "duplicate_id"
+	TaskGraphIssueSelfParent     TaskGraphIssueKind = "self_parent"
+	TaskGraphIssueSelfInput      TaskGraphIssueKind = "self_input"
+	TaskGraphIssueUnknownParent  TaskGraphIssueKind = "unknown_parent"
+	TaskGraphIssueUnknownInput   TaskGraphIssueKind = "unknown_input"
+	TaskGraphIssueDependencyLoop TaskGraphIssueKind = "dependency_cycle"
+)
+
+// TaskGraphIssue describes a single validation problem.
+//
+// TaskID is the task the issue is about — i.e., the row a UI should highlight.
+// Reference is the *other* task ID involved (e.g., the missing parent ID, or
+// the bad input ID). It is empty for kinds that do not point at a peer (the
+// duplicate-ID kind, for instance, is fully described by TaskID alone).
+// Message is the human-readable rendering used for non-structured surfaces.
+type TaskGraphIssue struct {
+	Kind      TaskGraphIssueKind `json:"kind"`
+	TaskID    string             `json:"task_id"`
+	Reference string             `json:"reference,omitempty"`
+	Message   string             `json:"message"`
+}
+
 // TaskGraphError aggregates one or more issues discovered while validating the
-// task dependency graph. The Issues slice is exposed so callers can render
-// per-issue feedback (e.g. surface them as markdown-import warnings) instead
-// of just dumping the joined Error string.
+// task dependency graph.
 type TaskGraphError struct {
-	Issues []string
+	Issues []TaskGraphIssue
 }
 
 func (e *TaskGraphError) Error() string {
 	if e == nil || len(e.Issues) == 0 {
 		return "task graph validation: no issues"
 	}
-	return "task graph validation: " + strings.Join(e.Issues, "; ")
+	parts := make([]string, 0, len(e.Issues))
+	for _, issue := range e.Issues {
+		parts = append(parts, issue.Message)
+	}
+	return "task graph validation: " + strings.Join(parts, "; ")
+}
+
+// IssueMessages returns the human-readable messages of every issue, preserving
+// order. Useful when callers want to log or render the flat strings without
+// caring about the structured fields.
+func (e *TaskGraphError) IssueMessages() []string {
+	if e == nil {
+		return nil
+	}
+	out := make([]string, 0, len(e.Issues))
+	for _, issue := range e.Issues {
+		out = append(out, issue.Message)
+	}
+	return out
 }
 
 // validateTaskGraph inspects a slice of tasks for problems in their parent /
@@ -52,7 +97,7 @@ func validateTaskGraph(tasks []Task) error {
 		}
 	}
 
-	var issues []string
+	var issues []TaskGraphIssue
 
 	seen := make(map[string]struct{}, len(tasks))
 	for i := range tasks {
@@ -61,15 +106,29 @@ func validateTaskGraph(tasks []Task) error {
 			continue
 		}
 		if _, dup := seen[t.ID]; dup {
-			issues = append(issues, fmt.Sprintf("duplicate task ID %q", t.ID))
+			issues = append(issues, TaskGraphIssue{
+				Kind:    TaskGraphIssueDuplicateID,
+				TaskID:  t.ID,
+				Message: fmt.Sprintf("duplicate task ID %q", t.ID),
+			})
 		}
 		seen[t.ID] = struct{}{}
 
 		if t.ParentTaskID != "" {
 			if t.ParentTaskID == t.ID {
-				issues = append(issues, fmt.Sprintf("task %q lists itself as parent", t.ID))
+				issues = append(issues, TaskGraphIssue{
+					Kind:      TaskGraphIssueSelfParent,
+					TaskID:    t.ID,
+					Reference: t.ID,
+					Message:   fmt.Sprintf("task %q lists itself as parent", t.ID),
+				})
 			} else if _, ok := index[t.ParentTaskID]; !ok {
-				issues = append(issues, fmt.Sprintf("task %q references unknown parent %q", t.ID, t.ParentTaskID))
+				issues = append(issues, TaskGraphIssue{
+					Kind:      TaskGraphIssueUnknownParent,
+					TaskID:    t.ID,
+					Reference: t.ParentTaskID,
+					Message:   fmt.Sprintf("task %q references unknown parent %q", t.ID, t.ParentTaskID),
+				})
 			}
 		}
 		for _, inputID := range t.InputTaskIDs {
@@ -77,11 +136,21 @@ func validateTaskGraph(tasks []Task) error {
 				continue
 			}
 			if inputID == t.ID {
-				issues = append(issues, fmt.Sprintf("task %q lists itself as input", t.ID))
+				issues = append(issues, TaskGraphIssue{
+					Kind:      TaskGraphIssueSelfInput,
+					TaskID:    t.ID,
+					Reference: t.ID,
+					Message:   fmt.Sprintf("task %q lists itself as input", t.ID),
+				})
 				continue
 			}
 			if _, ok := index[inputID]; !ok {
-				issues = append(issues, fmt.Sprintf("task %q references unknown input %q", t.ID, inputID))
+				issues = append(issues, TaskGraphIssue{
+					Kind:      TaskGraphIssueUnknownInput,
+					TaskID:    t.ID,
+					Reference: inputID,
+					Message:   fmt.Sprintf("task %q references unknown input %q", t.ID, inputID),
+				})
 			}
 		}
 	}
@@ -110,7 +179,12 @@ func validateTaskGraph(tasks []Task) error {
 		if pIdx, ok := index[t.ParentTaskID]; ok && pIdx != idx {
 			if visit(pIdx) {
 				if _, dup := reportedCycle[t.ID]; !dup {
-					issues = append(issues, fmt.Sprintf("dependency cycle through task %q", t.ID))
+					issues = append(issues, TaskGraphIssue{
+						Kind:      TaskGraphIssueDependencyLoop,
+						TaskID:    t.ID,
+						Reference: t.ParentTaskID,
+						Message:   fmt.Sprintf("dependency cycle through task %q", t.ID),
+					})
 					reportedCycle[t.ID] = struct{}{}
 				}
 				color[idx] = colorBlack
@@ -124,7 +198,12 @@ func validateTaskGraph(tasks []Task) error {
 			}
 			if visit(iIdx) {
 				if _, dup := reportedCycle[t.ID]; !dup {
-					issues = append(issues, fmt.Sprintf("dependency cycle through task %q", t.ID))
+					issues = append(issues, TaskGraphIssue{
+						Kind:      TaskGraphIssueDependencyLoop,
+						TaskID:    t.ID,
+						Reference: inputID,
+						Message:   fmt.Sprintf("dependency cycle through task %q", t.ID),
+					})
 					reportedCycle[t.ID] = struct{}{}
 				}
 				color[idx] = colorBlack

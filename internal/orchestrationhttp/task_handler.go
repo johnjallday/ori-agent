@@ -424,6 +424,9 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
+		if respondTaskGraphError(w, err, "Failed to add task") {
+			return
+		}
 		logger.Error("Failed to add task to workspace", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add task", err)
 		return
