@@ -3899,8 +3899,15 @@ export class WorkspaceDetailPage {
         ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
         : '';
 
+    const cardOpenLabel = `Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}`;
     return `
-      <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
+      <div class="${itemClasses.join(' ')}"
+           data-task-id="${task.id}"
+           role="button"
+           tabindex="0"
+           aria-label="${cardOpenLabel}"
+           onclick="if (event.target.closest('button, a, input, select, textarea, [contenteditable=true]')) return; window.workspaceDetail?.openTask('${task.id}')"
+           onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea, [contenteditable=true]')) { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
         ${
           hasAssistData
             ? `
@@ -3947,12 +3954,7 @@ export class WorkspaceDetailPage {
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content"
-             role="button"
-             tabindex="0"
-             aria-label="Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}"
-             onclick="window.workspaceDetail?.openTask('${task.id}')"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
+        <div class="workspace-detail-item-content">
           <div class="d-flex justify-content-between align-items-start">
             <div class="workspace-detail-item-title">
               ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
