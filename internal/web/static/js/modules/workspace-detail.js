@@ -227,7 +227,12 @@ export class WorkspaceDetailPage {
     this.workspaceIntentReviewLoading = false;
     this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
-    this.workspaceConfigPreferenceLoaded = false;
+    // Per-task activity tracking: taskId -> { at: number, label: string }.
+    // Fed by realtime task.* events; surfaced inline next to the status pill
+    // on running tasks so users can see "Awaiting model response · 4s ago"
+    // instead of an opaque "In Progress" with no signal of forward motion.
+    this._taskActivity = new Map();
+    this._taskActivityTickHandle = null;
     this.agentCatalogLoaded = false;
     this.agentCatalogLoadFailed = false;
     this.workspaceAgentSnapshots = new Set();
@@ -2911,6 +2916,34 @@ export class WorkspaceDetailPage {
    */
   renderTasks() {
     this.renderAgentGroups();
+    this.refreshTaskActivityBadges();
+  }
+
+  // refreshTaskActivityBadges is called after renderTasks() (which rebuilds
+  // task DOM nodes from scratch and would otherwise blow away inline activity
+  // text). It also drops activity entries for tasks that have left the
+  // in_progress state in the meantime.
+  refreshTaskActivityBadges() {
+    if (this._taskActivity.size === 0) return;
+    const runningIds = new Set();
+    for (const t of (this.tasks || [])) {
+      if (!t) continue;
+      if (String(t.status || '').trim().toLowerCase() === 'in_progress') {
+        runningIds.add(t.id);
+      }
+    }
+    for (const taskId of Array.from(this._taskActivity.keys())) {
+      if (!runningIds.has(taskId)) {
+        this._taskActivity.delete(taskId);
+        continue;
+      }
+      this.patchTaskActivityBadge(taskId);
+    }
+    if (this._taskActivity.size === 0) {
+      this.stopTaskActivityTick();
+    } else {
+      this.ensureTaskActivityTick();
+    }
   }
 
   renderAgentDetailLink(agentName, encodedAgentName) {
@@ -3916,7 +3949,10 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-item-title">
               ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
             </div>
-            <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+            <div class="workspace-detail-task-status-group">
+              <span class="workspace-detail-task-activity" data-task-activity-slot hidden></span>
+              <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+            </div>
           </div>
           <div class="workspace-detail-item-meta">
             ${taskMetaParts.join(' · ')}
@@ -9250,37 +9286,6 @@ export class WorkspaceDetailPage {
 
   // ── Workspace Configuration Methods ─────────────────────────────────
 
-  getWorkspaceConfigStorageKey() {
-    return `workspace-detail-config-expanded:${this.workspaceId}`;
-  }
-
-  readWorkspaceConfigExpandedPreference() {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return null;
-    }
-
-    try {
-      const stored = window.localStorage.getItem(this.getWorkspaceConfigStorageKey());
-      if (stored === 'true') return true;
-      if (stored === 'false') return false;
-    } catch (error) {
-      console.warn('Failed to read workspace configuration preference:', error);
-    }
-    return null;
-  }
-
-  writeWorkspaceConfigExpandedPreference(expanded) {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(this.getWorkspaceConfigStorageKey(), expanded ? 'true' : 'false');
-    } catch (error) {
-      console.warn('Failed to persist workspace configuration preference:', error);
-    }
-  }
-
   formatWorkspaceConfigPresetLabel(preset) {
     const value = String(preset || '').trim();
     if (!value) return 'Guided';
@@ -9323,11 +9328,7 @@ export class WorkspaceDetailPage {
     );
   }
 
-  shouldDefaultExpandWorkspaceConfig() {
-    return false;
-  }
-
-  setWorkspaceConfigExpanded(expanded, options = {}) {
+  setWorkspaceConfigExpanded(expanded) {
     const nextExpanded = expanded !== false;
     this.workspaceConfigExpanded = nextExpanded;
 
@@ -9345,24 +9346,10 @@ export class WorkspaceDetailPage {
         ? 'Hide Configuration'
         : 'Show Configuration';
     }
-
-    if (options.persist !== false) {
-      this.writeWorkspaceConfigExpandedPreference(nextExpanded);
-    }
   }
 
   initializeWorkspaceConfigExpansion() {
-    if (this.workspaceConfigPreferenceLoaded) {
-      this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded, { persist: false });
-      return;
-    }
-
-    const storedPreference = this.readWorkspaceConfigExpandedPreference();
-    const nextExpanded =
-      storedPreference === null ? this.shouldDefaultExpandWorkspaceConfig() : storedPreference;
-
-    this.workspaceConfigPreferenceLoaded = true;
-    this.setWorkspaceConfigExpanded(nextExpanded, { persist: false });
+    this.setWorkspaceConfigExpanded(false);
   }
 
   toggleWorkspaceConfigExpanded() {
@@ -13504,11 +13491,16 @@ export class WorkspaceDetailPage {
       case 'task.completed':
       case 'task.failed':
       case 'task.deleted':
+        this.captureTaskActivity(event);
         this.loadTasks();
         break;
       case 'task.thinking':
       case 'task.tool_call':
       case 'task.tool_result':
+      case 'task.heartbeat':
+        // Phase events fire frequently — don't refetch tasks for each one.
+        // Just patch the inline activity badge for the affected task.
+        this.captureTaskActivity(event);
         break;
       case 'task.blocked': {
         this.loadTasks();
@@ -13568,6 +13560,121 @@ export class WorkspaceDetailPage {
         }
         break;
       }
+    }
+  }
+
+  // captureTaskActivity records the most recent task.* event for a task and
+  // patches its inline activity badge in-place. The page deliberately does
+  // NOT refetch tasks for thinking/tool/heartbeat events — those fire every
+  // few seconds during a run and would thrash the table.
+  captureTaskActivity(event) {
+    const eventType = String(event?.type || '').trim();
+    const payload = event?.data?.data || event?.data || {};
+    const taskId = String(payload?.task_id || event?.task_id || '').trim();
+    if (!taskId) return;
+
+    if (eventType === 'task.heartbeat') {
+      const prev = this._taskActivity.get(taskId);
+      this._taskActivity.set(taskId, { at: Date.now(), label: prev?.label || '' });
+    } else {
+      const label = this.taskActivityLabelFor(eventType, payload);
+      if (label === null) return;
+      this._taskActivity.set(taskId, { at: Date.now(), label });
+    }
+
+    // Drop the entry once the task is no longer in_progress so a re-run
+    // starts clean. We check live state to avoid stale labels persisting
+    // after a completion event sneaks past the heartbeat goroutine.
+    const task = this.tasks?.find?.(t => t?.id === taskId);
+    if (task && String(task.status || '').trim().toLowerCase() !== 'in_progress') {
+      this._taskActivity.delete(taskId);
+    }
+
+    this.patchTaskActivityBadge(taskId);
+    this.ensureTaskActivityTick();
+  }
+
+  taskActivityLabelFor(eventType, payload) {
+    const data = (payload && typeof payload === 'object') ? payload : {};
+    switch (eventType) {
+      case 'task.thinking': {
+        const phase = String(data.phase || '').trim();
+        if (phase === 'awaiting_llm') return 'Awaiting model';
+        if (phase === 'llm_returned') {
+          const calls = Number(data.tool_call_count || 0);
+          return calls > 0 ? `Processing ${calls} tool` : 'Processing model';
+        }
+        if (phase === 'starting') return 'Analyzing';
+        return 'Thinking';
+      }
+      case 'task.tool_call': {
+        const tool = String(data.tool_name || '').trim();
+        return tool ? `→ ${tool}` : 'Calling tool';
+      }
+      case 'task.tool_result': {
+        const tool = String(data.tool_name || '').trim();
+        const success = data.success !== false;
+        if (tool) return success ? `${tool} ✓` : `${tool} ✗`;
+        return 'Tool finished';
+      }
+      case 'task.started':
+        return 'Started';
+      case 'task.resumed':
+        return 'Resumed';
+      default:
+        return null;
+    }
+  }
+
+  formatTaskActivityAgo(timestampMs) {
+    if (!timestampMs) return '';
+    const elapsed = Math.max(0, Date.now() - timestampMs);
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds < 2) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  }
+
+  patchTaskActivityBadge(taskId) {
+    if (!taskId) return;
+    const item = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
+    if (!item) return;
+    const slot = item.querySelector('[data-task-activity-slot]');
+    if (!slot) return;
+    const activity = this._taskActivity.get(taskId);
+    if (!activity) {
+      slot.textContent = '';
+      slot.hidden = true;
+      return;
+    }
+    const ago = this.formatTaskActivityAgo(activity.at);
+    const text = activity.label
+      ? (ago ? `${activity.label} · ${ago}` : activity.label)
+      : (ago ? `Active ${ago}` : 'Active');
+    slot.textContent = text;
+    slot.hidden = false;
+  }
+
+  ensureTaskActivityTick() {
+    if (this._taskActivityTickHandle) return;
+    this._taskActivityTickHandle = window.setInterval(() => {
+      if (this._taskActivity.size === 0) {
+        this.stopTaskActivityTick();
+        return;
+      }
+      for (const taskId of this._taskActivity.keys()) {
+        this.patchTaskActivityBadge(taskId);
+      }
+    }, 2000);
+  }
+
+  stopTaskActivityTick() {
+    if (this._taskActivityTickHandle) {
+      window.clearInterval(this._taskActivityTickHandle);
+      this._taskActivityTickHandle = null;
     }
   }
 

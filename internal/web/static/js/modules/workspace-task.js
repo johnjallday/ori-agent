@@ -841,6 +841,11 @@ export class WorkspaceTaskPage {
     this._runsTab = 'runs';
     this._cancelConfirmActive = false;
     this._cancelInFlight = false;
+    // Live-activity tracking. Populated from realtime task.* events for the
+    // current task; the live badge renders "Active Xs ago · <phase>" off this
+    // so users can tell a still-spinning task is making progress.
+    this._latestActivity = null;
+    this._activityTickHandle = null;
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -890,6 +895,7 @@ export class WorkspaceTaskPage {
       window.clearTimeout(this.pendingRefreshTimer);
       this.pendingRefreshTimer = null;
     }
+    this.stopActivityTick();
     // Tear down menu listeners + drop the menu DOM node if a contextual
     // result-section menu is open.
     this.closeResultSectionMenu();
@@ -1159,6 +1165,7 @@ export class WorkspaceTaskPage {
         this.tasks = this.task ? [this.task] : [];
       }
 
+      this.seedLiveActivityFromHistory();
       this.render();
       this.setState('content');
     } catch (error) {
@@ -1249,6 +1256,10 @@ export class WorkspaceTaskPage {
       return;
     }
 
+    if (isSelfEvent) {
+      this.captureLiveActivity(eventType, payload);
+    }
+
     // Flash class previously fired on every task.* event to mask the
     // layout thrash from a full re-render. With per-section selective
     // rendering it's no longer needed for routine updates. We leave it
@@ -1259,6 +1270,149 @@ export class WorkspaceTaskPage {
     this.pendingRefreshTimer = window.setTimeout(() => {
       this.loadData();
     }, 180);
+  }
+
+  // captureLiveActivity records the most recent task.* event for this task
+  // so the live badge can show what the agent is currently doing. Without
+  // this, in_progress tasks are visually indistinguishable from frozen ones
+  // — see slice 1 of the stuck-task UX work.
+  captureLiveActivity(eventType, payload) {
+    if (eventType === 'task.heartbeat') {
+      // Heartbeats only refresh the freshness counter; preserve the last
+      // phase label. If we have no label yet (page refreshed mid-run before
+      // any phase event), keep the old behaviour and just record activity.
+      const prev = this._latestActivity;
+      this._latestActivity = { at: Date.now(), label: prev?.label || '' };
+      this.renderLiveBadge();
+      return;
+    }
+
+    const label = this.activityLabelFor(eventType, payload);
+    if (label === null) return;
+    this._latestActivity = { at: Date.now(), label };
+    this.renderLiveBadge();
+  }
+
+  // activityLabelFor maps a task.* event into the human label rendered on
+  // the live badge. Returns null for events that should not change the
+  // label (callers decide whether to ignore the event entirely or just
+  // refresh the timestamp).
+  activityLabelFor(eventType, payload) {
+    const data = (payload && typeof payload === 'object') ? payload : {};
+    switch (eventType) {
+      case 'task.thinking': {
+        const phase = String(data.phase || '').trim();
+        if (phase === 'awaiting_llm') return 'Awaiting model response';
+        if (phase === 'llm_returned') {
+          const calls = Number(data.tool_call_count || 0);
+          return calls > 0
+            ? `Processing ${calls} tool call${calls === 1 ? '' : 's'}`
+            : 'Processing model response';
+        }
+        if (phase === 'starting') return 'Analyzing task';
+        return 'Thinking';
+      }
+      case 'task.tool_call': {
+        const tool = String(data.tool_name || '').trim();
+        return tool ? `Calling ${tool}` : 'Calling tool';
+      }
+      case 'task.tool_result': {
+        const tool = String(data.tool_name || '').trim();
+        const success = data.success !== false;
+        if (tool) return success ? `${tool} returned` : `${tool} failed`;
+        return 'Tool finished';
+      }
+      case 'task.started':
+        return 'Started';
+      case 'task.resumed':
+        return 'Resumed';
+      default:
+        return null;
+    }
+  }
+
+  // seedLiveActivityFromHistory walks taskEvents (loaded by /api/orchestration/events)
+  // backwards and lifts the most recent phase-bearing event into _latestActivity
+  // so a page refresh during a running task immediately shows context instead
+  // of a blank "Live" until the next event arrives.
+  seedLiveActivityFromHistory() {
+    if (!Array.isArray(this.taskEvents) || this.taskEvents.length === 0) return;
+    if (this._latestActivity) return;
+    for (let i = this.taskEvents.length - 1; i >= 0; i--) {
+      const ev = this.taskEvents[i];
+      if (!ev) continue;
+      const type = String(ev.type || '').trim();
+      const payload = ev?.data?.data || ev?.data || {};
+      const evTaskId = String(payload?.task_id || ev?.task_id || '').trim();
+      if (evTaskId && evTaskId !== this.taskId) continue;
+      const label = this.activityLabelFor(type, payload);
+      if (label === null) continue;
+      const ts = ev.timestamp ? Date.parse(ev.timestamp) : NaN;
+      this._latestActivity = {
+        at: Number.isFinite(ts) ? ts : Date.now(),
+        label
+      };
+      return;
+    }
+  }
+
+  // formatRelativeAgo renders the freshness component of the live badge.
+  // Sub-second flickers are rounded to "just now" to avoid the badge
+  // visually thrashing on a fast tool sequence.
+  formatRelativeAgo(timestampMs) {
+    if (!timestampMs) return '';
+    const elapsed = Math.max(0, Date.now() - timestampMs);
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds < 2) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  }
+
+  renderLiveBadge() {
+    const badge = this.elements.liveBadge;
+    if (!badge) return;
+
+    const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+    const isLive = isRunning && this.workspaceRealtimeUnsubscribe;
+    badge.hidden = !isLive;
+    if (!isLive) {
+      this.stopActivityTick();
+      return;
+    }
+
+    const activity = this._latestActivity;
+    let text = 'Live';
+    if (activity && activity.label) {
+      const ago = this.formatRelativeAgo(activity.at);
+      text = ago ? `${activity.label} · ${ago}` : activity.label;
+    }
+    badge.innerHTML = `<span class="workspace-task-page-live-dot"></span>${this.escapeHtml(text)}`;
+
+    this.startActivityTick();
+  }
+
+  startActivityTick() {
+    if (this._activityTickHandle) return;
+    // 2s cadence keeps the "Xs ago" counter live without burning CPU; the
+    // badge text only changes once per second of real wall-clock anyway.
+    this._activityTickHandle = window.setInterval(() => {
+      const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      if (!isRunning) {
+        this.stopActivityTick();
+        return;
+      }
+      this.renderLiveBadge();
+    }, 2000);
+  }
+
+  stopActivityTick() {
+    if (this._activityTickHandle) {
+      window.clearInterval(this._activityTickHandle);
+      this._activityTickHandle = null;
+    }
   }
 
   // eventTaskIsNeighbor: true when the event refers to a task that this
@@ -1968,10 +2122,13 @@ export class WorkspaceTaskPage {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
     }
-    if (this.elements.liveBadge) {
-      const isLive = statusInfo.className === 'in_progress' && this.workspaceRealtimeUnsubscribe;
-      this.elements.liveBadge.hidden = !isLive;
+    if (statusInfo.className !== 'in_progress') {
+      // Drop stale activity when the task transitions out of in_progress so a
+      // subsequent re-run starts the badge clean instead of inheriting the
+      // last phase from the previous run.
+      this._latestActivity = null;
     }
+    this.renderLiveBadge();
   }
 
   renderHeroActions(statusInfo) {

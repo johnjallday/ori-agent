@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -135,9 +136,21 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	// Publish thinking event
 	if h.eventBus != nil {
 		event := NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+			"phase":   "starting",
 			"message": "Agent is analyzing the task...",
 		})
 		h.eventBus.Publish(event)
+	}
+
+	// Spawn a heartbeat goroutine so the UI sees activity even during very
+	// long phases (e.g. a 60s LLM call between awaiting_llm and
+	// llm_returned). Cancelled when ExecuteTask returns; the existing
+	// thinking/tool events update the badge label, heartbeats only refresh
+	// "active Xs ago".
+	if h.eventBus != nil {
+		heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
+		defer heartbeatCancel()
+		go h.runTaskHeartbeats(heartbeatCtx, task.WorkspaceID, task.ID, agentName)
 	}
 
 	// Get the agent
@@ -217,6 +230,18 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			requestTools = nil
 		}
 
+		// Bracket the LLM call so the UI can show "awaiting LLM" instead of a
+		// silent in_progress span. provider.Chat() can take tens of seconds,
+		// during which no other event would otherwise fire.
+		if h.eventBus != nil {
+			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+				"phase":   "awaiting_llm",
+				"round":   round + 1,
+				"model":   modelName,
+				"message": "Awaiting model response",
+			}))
+		}
+
 		resp, err := provider.Chat(ctx, llm.ChatRequest{
 			Model:           modelName,
 			Messages:        conversation,
@@ -229,6 +254,14 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				return "", fmt.Errorf("%s", friendlyMsg)
 			}
 			return "", fmt.Errorf("LLM call failed: %w", err)
+		}
+
+		if h.eventBus != nil {
+			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+				"phase":           "llm_returned",
+				"round":           round + 1,
+				"tool_call_count": len(resp.ToolCalls),
+			}))
 		}
 
 		if len(resp.ToolCalls) == 0 {
@@ -729,6 +762,31 @@ type toolCallResult struct {
 	Name   string
 	Result string
 	Error  error
+}
+
+// taskHeartbeatInterval controls how often EventTaskHeartbeat fires while a
+// task is executing. Short enough that "active Xs ago" stays meaningful for
+// users; long enough that a noisy event bus won't impact performance.
+const taskHeartbeatInterval = 5 * time.Second
+
+// runTaskHeartbeats publishes EventTaskHeartbeat at a fixed cadence until ctx
+// is cancelled. The events carry no phase — they exist only to advance the
+// "last activity" timestamp the UI uses to distinguish "still working" from
+// "stuck". Returns immediately if the bus is unset.
+func (h *LLMTaskHandler) runTaskHeartbeats(ctx context.Context, workspaceID, taskID, agentName string) {
+	if h.eventBus == nil {
+		return
+	}
+	ticker := time.NewTicker(taskHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.eventBus.Publish(NewTaskEvent(EventTaskHeartbeat, workspaceID, taskID, agentName, nil))
+		}
+	}
 }
 
 // executeToolCalls executes tool calls and returns results
