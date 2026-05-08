@@ -121,6 +121,8 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 
 	now := time.Now()
+	staleRootPath := filepath.Join("/Users", "johnj", "Ori Workspaces", "spain-export")
+	staleChildPath := filepath.Join(staleRootPath, agentworkspace.SubWorkspacesDir, "madrid")
 	rootWorkspace := &agentworkspace.Workspace{
 		ID:         "ws-imported-spain",
 		Name:       "Spain",
@@ -138,6 +140,29 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				NodeID:         "trip-manager-node-1",
 				EntryPoint:     true,
 				CreatedAt:      now,
+			},
+		},
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "root-dir-ref",
+				WorkspaceID: "ws-imported-spain",
+				Name:        "spain-export",
+				Path:        staleRootPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+			{
+				ID:         "root-files-binding",
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{staleRootPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 		},
 	}
@@ -171,6 +196,29 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				NodeID:         "madrid-planner-node-1",
 				EntryPoint:     true,
 				CreatedAt:      now,
+			},
+		},
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "child-dir-ref",
+				WorkspaceID: "ws-imported-madrid",
+				Name:        "madrid",
+				Path:        staleChildPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+			{
+				ID:         "child-files-binding",
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{staleChildPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 		},
 	}
@@ -230,6 +278,34 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if got, ok := handler.agentStore.GetAgent("Trip Manager"); !ok || got == nil || got.Settings.Model != "imported-trip-model" {
 		t.Fatalf("expected Trip Manager snapshot restored into agent store, ok=%v agent=%#v", ok, got)
 	}
+	rootFolderPath, err := fileStore.GetFolderPath(rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to get restored root folder path: %v", err)
+	}
+	rootRefs, err := decodeDirectoryReferences(restoredRoot.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored root directory references: %v", err)
+	}
+	if len(rootRefs) != 1 || cleanWorkspaceSyncPath(rootRefs[0].Path) != cleanWorkspaceSyncPath(rootFolderPath) {
+		t.Fatalf("expected restored root directory reference %q, got %#v", rootFolderPath, rootRefs)
+	}
+	rootBindings, err := decodeWorkspaceMCPBindings(restoredRoot.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored root mcp bindings: %v", err)
+	}
+	if len(rootBindings) != 1 || !workspaceBindingHasRoot(rootBindings[0].Config, rootFolderPath) {
+		t.Fatalf("expected restored root workspace-files binding for %q, got %#v", rootFolderPath, rootBindings)
+	}
+	if workspaceBindingHasRoot(rootBindings[0].Config, staleRootPath) {
+		t.Fatalf("expected stale root path %q to be removed from bindings, got %#v", staleRootPath, rootBindings)
+	}
+	diskRoot, err := fileStore.Get(rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to load restored root disk workspace: %v", err)
+	}
+	if len(diskRoot.DirectoryReferences) != 1 || cleanWorkspaceSyncPath(diskRoot.DirectoryReferences[0].Path) != cleanWorkspaceSyncPath(rootFolderPath) {
+		t.Fatalf("expected disk root directory reference %q, got %#v", rootFolderPath, diskRoot.DirectoryReferences)
+	}
 
 	restoredChild, err := handler.store.GetWorkspace(context.Background(), childWorkspace.ID)
 	if err != nil {
@@ -249,6 +325,27 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 	if got, ok := handler.agentStore.GetAgent("Madrid Planner"); !ok || got == nil || got.Settings.Model != "imported-madrid-model" {
 		t.Fatalf("expected Madrid Planner snapshot restored into agent store, ok=%v agent=%#v", ok, got)
+	}
+	childFolderPath, err := fileStore.GetFolderPath(childWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to get restored child folder path: %v", err)
+	}
+	childRefs, err := decodeDirectoryReferences(restoredChild.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored child directory references: %v", err)
+	}
+	if len(childRefs) != 1 || cleanWorkspaceSyncPath(childRefs[0].Path) != cleanWorkspaceSyncPath(childFolderPath) {
+		t.Fatalf("expected restored child directory reference %q, got %#v", childFolderPath, childRefs)
+	}
+	childBindings, err := decodeWorkspaceMCPBindings(restoredChild.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored child mcp bindings: %v", err)
+	}
+	if len(childBindings) != 1 || !workspaceBindingHasRoot(childBindings[0].Config, childFolderPath) {
+		t.Fatalf("expected restored child workspace-files binding for %q, got %#v", childFolderPath, childBindings)
+	}
+	if workspaceBindingHasRoot(childBindings[0].Config, staleChildPath) {
+		t.Fatalf("expected stale child path %q to be removed from bindings, got %#v", staleChildPath, childBindings)
 	}
 }
 
