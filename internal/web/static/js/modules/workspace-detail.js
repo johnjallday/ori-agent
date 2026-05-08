@@ -2449,7 +2449,7 @@ export class WorkspaceDetailPage {
         </div>
         <div class="col-lg-6">
           <div class="workspace-setup-section">
-            <div class="workspace-setup-label">Workspace Connections</div>
+            <div class="workspace-setup-label">Workspace MCP</div>
             ${
               mcps.length > 0
                 ? mcps.map(item => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
@@ -9382,7 +9382,7 @@ export class WorkspaceDetailPage {
       this.elements.configPresetChip.textContent = `Workspace: ${this.formatWorkspaceSettingsProfileLabel(profile)} · ${this.formatWorkspaceConfigPresetLabel(preset)}`;
     }
     if (this.elements.configConnectionsChip) {
-      this.elements.configConnectionsChip.textContent = `Connections: ${connectionCount}`;
+      this.elements.configConnectionsChip.textContent = `MCP: ${connectionCount}`;
     }
     if (this.elements.configSkillsChip) {
       this.elements.configSkillsChip.textContent = `Skills: ${skillCount}`;
