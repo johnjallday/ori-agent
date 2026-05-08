@@ -28,16 +28,14 @@ export const TRACE_PAGE_SIZE = 50;
 
 export const taskExecutionViewsMethods = {
   renderExecutionBreakdown() {
-    if (!this.elements.trace || !this.elements.traceCard) return;
+    if (!this.elements.trace) return;
 
     const steps = this.getExecutionBreakdownSteps(this.task, this.getSubtasks());
     if (steps.length === 0) {
-      this.elements.traceCard.hidden = true;
       this.elements.trace.innerHTML = '';
       return;
     }
 
-    this.elements.traceCard.hidden = false;
     this.elements.trace.innerHTML = steps.map((step, index) => {
       const statusKey = String(step?.status || this.task?.status || 'pending').trim().toLowerCase();
       const statusClass = getStatusClass(statusKey);
@@ -327,7 +325,7 @@ export const taskExecutionViewsMethods = {
   },
 
   renderExecutionTrace() {
-    if (!this.elements.executionTrace || !this.elements.executionTraceCard) return;
+    if (!this.elements.executionTrace) return;
 
     const entries = this.buildExecutionTraceEntries();
     const showCount = this._traceVisibleCount || TRACE_PAGE_SIZE;
@@ -337,25 +335,21 @@ export const taskExecutionViewsMethods = {
         this.elements.executionTraceControls.hidden = true;
       }
       if (!this.hasExecutionActivity()) {
-        this.elements.executionTraceCard.hidden = true;
         this.elements.executionTrace.innerHTML = '';
         return;
       }
 
-      this.elements.executionTraceCard.hidden = false;
       this.elements.executionTrace.innerHTML = `
         <div class="workspace-task-trace-item">
-          <div class="workspace-task-trace-status">not captured</div>
+          <div class="workspace-task-trace-status">no events</div>
           <div>
-            <div class="workspace-task-trace-summary">No detailed execution trace was captured for this run.</div>
-            <div class="workspace-task-trace-meta">Re-run this task after the trace update is deployed to capture tool calls, progress events, and terminal status here.</div>
+            <div class="workspace-task-trace-summary">No detailed trace was captured for this run.</div>
+            <div class="workspace-task-trace-meta">Tool calls and progress events will appear here on the next run.</div>
           </div>
         </div>
       `;
       return;
     }
-
-    this.elements.executionTraceCard.hidden = false;
 
     const buckets = this.bucketTraceEntries(entries);
     const activeFilter = this._traceFilter && buckets[this._traceFilter] ? this._traceFilter : 'all';
@@ -408,7 +402,7 @@ export const taskExecutionViewsMethods = {
       if (btn) {
         btn.addEventListener('click', () => {
           this._traceVisibleCount = showCount + TRACE_PAGE_SIZE;
-          this._renderCache && delete this._renderCache.executionTrace;
+          this._renderCache && delete this._renderCache.runs;
           this.renderExecutionTrace();
         });
       }
@@ -472,7 +466,7 @@ export const taskExecutionViewsMethods = {
         if (key === this._traceFilter) return;
         this._traceFilter = key;
         this._traceVisibleCount = TRACE_PAGE_SIZE;
-        this._renderCache && delete this._renderCache.executionTrace;
+        this._renderCache && delete this._renderCache.runs;
         this.renderExecutionTrace();
       });
     });

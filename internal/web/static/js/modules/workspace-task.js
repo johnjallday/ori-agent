@@ -837,6 +837,9 @@ export class WorkspaceTaskPage {
     // navigation away from this task.
     this._traceVisibleCount = TRACE_PAGE_SIZE;
     this._traceFilter = 'all';
+    this._runsTab = 'runs';
+    this._cancelConfirmActive = false;
+    this._cancelInFlight = false;
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -957,9 +960,13 @@ export class WorkspaceTaskPage {
       workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
       workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
       workflowSteps: document.getElementById('workspace-task-workflow-steps'),
-      traceCard: document.getElementById('workspace-task-trace-card'),
+      runsCard: document.getElementById('workspace-task-runs-card'),
+      runsTabs: document.querySelectorAll('#workspace-task-runs-card [data-runs-tab]'),
+      runsTabRuns: document.getElementById('workspace-task-runs-tab-runs'),
+      runsTabTrace: document.getElementById('workspace-task-runs-tab-trace'),
+      runsTabRunsCount: document.getElementById('workspace-task-runs-tab-runs-count'),
+      runsTabTraceCount: document.getElementById('workspace-task-runs-tab-trace-count'),
       trace: document.getElementById('workspace-task-trace'),
-      executionTraceCard: document.getElementById('workspace-task-execution-trace-card'),
       executionTrace: document.getElementById('workspace-task-execution-trace'),
       executionTraceControls: document.getElementById('workspace-task-execution-trace-controls'),
       executionTraceFilters: document.getElementById('workspace-task-execution-trace-filters'),
@@ -995,8 +1002,6 @@ export class WorkspaceTaskPage {
       schedulePreview: document.getElementById('workspace-task-schedule-preview'),
       scheduleSubmitBtn: document.getElementById('workspace-task-schedule-submit'),
       scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
-      stepsCard: document.getElementById('workspace-task-steps-card'),
-      steps: document.getElementById('workspace-task-steps'),
       contextCard: document.getElementById('workspace-task-context-card'),
       context: document.getElementById('workspace-task-context'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
@@ -1030,9 +1035,29 @@ export class WorkspaceTaskPage {
 
   bindEvents() {
     this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
+    this.elements.title?.addEventListener('click', (event) => {
+      // Don't hijack the user's text-selection drag — only treat a plain
+      // click with no selection as an "open editor" intent.
+      if (window.getSelection && String(window.getSelection() || '').length > 0) return;
+      if (event.detail > 1) return; // double-click handled below
+      this.startTitleEdit();
+    });
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
     this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
+    this.elements.subtitle?.addEventListener('click', (event) => {
+      if (window.getSelection && String(window.getSelection() || '').length > 0) return;
+      if (event.detail > 1) return;
+      this.startHeroDetailsEdit();
+    });
     this.elements.subtitle?.addEventListener('dblclick', () => this.startHeroDetailsEdit());
+    if (this.elements.runsTabs && this.elements.runsTabs.forEach) {
+      this.elements.runsTabs.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const next = btn.getAttribute('data-runs-tab') || 'runs';
+          this.setRunsTab(next);
+        });
+      });
+    }
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
@@ -1781,10 +1806,8 @@ export class WorkspaceTaskPage {
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
     dispatch('output', () => this.renderOutput());
-    dispatch('executionBreakdown', () => this.renderExecutionBreakdown());
-    dispatch('executionTrace', () => this.renderExecutionTrace());
+    dispatch('runs', () => this.renderRunsCard());
     dispatch('schedule', () => this.renderSchedule());
-    dispatch('executionSteps', () => this.renderExecutionSteps());
     dispatch('context', () => this.renderContext());
     dispatch('blockedState', () => this.renderBlockedState(statusInfo));
   }
@@ -1851,20 +1874,14 @@ export class WorkspaceTaskPage {
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
       workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
       output: JSON.stringify([t.id, t.status, t.result, t.result_type, t.structured_result]),
-      executionBreakdown: JSON.stringify([
-        t.id, t.execution_steps, t.execution_history?.length, sigWorkflowSubtree,
+      runs: JSON.stringify([
+        t.id, t.execution_steps, t.execution_history?.length,
+        t.execution_trace, sigWorkflowSubtree,
+        this._runsTab || 'runs',
       ]),
-      executionTrace: JSON.stringify([t.id, t.execution_trace]),
       schedule: JSON.stringify([
         t.id, t.schedule, t.schedule_enabled, t.next_run, t.last_run,
         t.execution_count, t.failure_count,
-      ]),
-      executionSteps: JSON.stringify([
-        t.id, t.execution_steps,
-        t.context?.execution_step_waiting,
-        t.context?.execution_step_waiting_index,
-        t.context?.execution_blocked_step_index,
-        t.context?.execution_blocked_step_title,
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
       blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
@@ -1958,6 +1975,16 @@ export class WorkspaceTaskPage {
   renderHeroActions(statusInfo) {
     if (!this.elements.heroActions) return;
 
+    // A pending Cancel inline-confirm is always re-rendered when render()
+    // fires; status changes during the prompt invalidate the confirm and
+    // we drop back to the normal action row.
+    if (this._cancelConfirmActive) {
+      const stillRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      if (!stillRunning) {
+        this._cancelConfirmActive = false;
+      }
+    }
+
     const status = String(this.task?.status || '').trim().toLowerCase();
     const hasAgent = Boolean(this.task?.to);
     const buttons = [];
@@ -1982,15 +2009,32 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
-    if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
+    // Mark Complete is for *manual* close-out before a run starts. Hiding
+    // it during in_progress avoids racing the agent's own completion path.
+    if ((status === 'pending' || status === 'assigned') && !statusInfo.isBlocked) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
+      </button>`);
+    }
+
+    if (status === 'in_progress' && !this._cancelConfirmActive) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-danger" data-action="cancel-prompt">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18,6H15V4A2,2 0 0,0 13,2H11A2,2 0 0,0 9,4V6H6V8H7V19A2,2 0 0,0 9,21H15A2,2 0 0,0 17,19V8H18V6M11,4H13V6H11V4M15,19H9V8H15V19Z"/></svg>Cancel
       </button>`);
     }
 
     buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="schedule">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19M7,10H12V15H7V10Z"/></svg>${this.escapeHtml(scheduleLabel)}
     </button>`);
+
+    if (status === 'in_progress' && this._cancelConfirmActive) {
+      const disabled = this._cancelInFlight ? 'disabled' : '';
+      buttons.push(`<span class="workspace-task-page-hero-cancel-confirm" role="alertdialog" aria-label="Confirm cancel">
+        <span class="workspace-task-page-hero-cancel-confirm-label">Cancel this run?</span>
+        <button type="button" class="workspace-task-page-hero-cancel-yes" data-action="cancel-confirm" ${disabled}>${this._cancelInFlight ? 'Cancelling…' : 'Yes'}</button>
+        <button type="button" class="workspace-task-page-hero-cancel-no" data-action="cancel-dismiss" ${disabled}>No</button>
+      </span>`);
+    }
 
     this.elements.heroActions.innerHTML = buttons.join('');
 
@@ -2001,8 +2045,51 @@ export class WorkspaceTaskPage {
         if (action === 'complete') this.completeTask();
         if (action === 'schedule') this.openScheduleModal();
         if (action === 'create-skill') this.openSkillDraftModal();
+        if (action === 'cancel-prompt') {
+          this._cancelConfirmActive = true;
+          if (this._renderCache) delete this._renderCache.heroActions;
+          this.renderHeroActions(statusInfo);
+        }
+        if (action === 'cancel-dismiss') {
+          this._cancelConfirmActive = false;
+          if (this._renderCache) delete this._renderCache.heroActions;
+          this.renderHeroActions(statusInfo);
+        }
+        if (action === 'cancel-confirm') this.handleCancelTask();
       });
     });
+  }
+
+  async handleCancelTask() {
+    if (this._cancelInFlight) return;
+    const id = String(this.task?.id || '').trim();
+    if (!id) return;
+
+    this._cancelInFlight = true;
+    if (this._renderCache) delete this._renderCache.heroActions;
+    this.renderHeroActions(this.getTaskStatusPresentation());
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to cancel run');
+      }
+      this.notify('success', 'Run cancelled');
+      this._cancelConfirmActive = false;
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to cancel task:', error);
+      this.notify('error', error?.message || 'Failed to cancel run');
+    } finally {
+      this._cancelInFlight = false;
+      if (this._renderCache) delete this._renderCache.heroActions;
+      this.renderHeroActions(this.getTaskStatusPresentation());
+    }
   }
 
   renderHeroPriority(statusInfo) {
@@ -4662,45 +4749,79 @@ export class WorkspaceTaskPage {
   }
 
 
-  renderExecutionSteps() {
-    if (!this.elements.steps || !this.elements.stepsCard) return;
+  // renderRunsCard owns the visibility + active-tab state of the merged
+  // Runs/Trace card. It delegates the inner HTML to renderExecutionBreakdown
+  // (Runs tab) and renderExecutionTrace (Trace tab); those methods only
+  // populate their inner panes — they no longer toggle card visibility on
+  // their own.
+  renderRunsCard() {
+    if (!this.elements.runsCard) return;
 
-    const steps = Array.isArray(this.task?.execution_steps) ? this.task.execution_steps : [];
-    if (steps.length === 0) {
-      this.elements.stepsCard.hidden = true;
-      this.elements.steps.innerHTML = '';
+    const breakdownSteps = this.getExecutionBreakdownSteps(this.task, this.getSubtasks());
+    const traceEntries = this.buildExecutionTraceEntries();
+    const hasBreakdown = breakdownSteps.length > 0;
+    const hasAnyTrace = traceEntries.length > 0;
+    const hasTraceSurface = hasAnyTrace || this.hasExecutionActivity();
+
+    if (!hasBreakdown && !hasTraceSurface) {
+      this.elements.runsCard.hidden = true;
+      if (this.elements.trace) this.elements.trace.innerHTML = '';
+      if (this.elements.executionTrace) this.elements.executionTrace.innerHTML = '';
+      if (this.elements.executionTraceControls) this.elements.executionTraceControls.hidden = true;
       return;
     }
 
-    this.elements.stepsCard.hidden = false;
-    this.elements.steps.innerHTML = steps.map((step, index) => {
-      const resultText = String(step?.result || '').trim();
-      const errorText = String(step?.error || '').trim();
-      const isLongResult = resultText.length > 400;
-      const isLongError = errorText.length > 400;
+    this.elements.runsCard.hidden = false;
 
-      return `
-        <article class="workspace-task-step">
-          <div class="workspace-task-step-index">${index + 1}</div>
-          <div>
-            <div class="workspace-task-step-title-row">
-              <span class="workspace-task-step-title">${this.escapeHtml(String(step?.title || `Step ${index + 1}`).trim())}</span>
-              ${step?.tag ? `<span class="workspace-task-step-tag">${this.escapeHtml(String(step.tag).trim())}</span>` : ''}
-              <span class="workspace-task-step-status" data-state="${this.escapeHtml(getStatusClass(step?.status))}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
-            </div>
-            ${step?.detail ? `<div class="workspace-task-step-copy">${this.escapeHtml(String(step.detail).trim())}</div>` : ''}
-            ${resultText ? (isLongResult
-              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show result</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(resultText)}</pre></details>`
-              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(resultText)}</pre>`)
-            : ''}
-            ${errorText ? (isLongError
-              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show error</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(errorText)}</pre></details>`
-              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(errorText)}</pre>`)
-            : ''}
-          </div>
-        </article>
-      `;
-    }).join('');
+    if (this.elements.runsTabRuns) this.elements.runsTabRuns.hidden = !hasBreakdown;
+    if (this.elements.runsTabTrace) this.elements.runsTabTrace.hidden = !hasTraceSurface;
+
+    let active = this._runsTab === 'trace' ? 'trace' : 'runs';
+    if (active === 'runs' && !hasBreakdown && hasTraceSurface) active = 'trace';
+    if (active === 'trace' && !hasTraceSurface && hasBreakdown) active = 'runs';
+    this._runsTab = active;
+
+    if (this.elements.runsTabRuns) {
+      this.elements.runsTabRuns.classList.toggle('is-active', active === 'runs');
+      this.elements.runsTabRuns.setAttribute('aria-selected', active === 'runs' ? 'true' : 'false');
+    }
+    if (this.elements.runsTabTrace) {
+      this.elements.runsTabTrace.classList.toggle('is-active', active === 'trace');
+      this.elements.runsTabTrace.setAttribute('aria-selected', active === 'trace' ? 'true' : 'false');
+    }
+
+    const setCount = (el, count) => {
+      if (!el) return;
+      if (!count) { el.hidden = true; el.textContent = ''; return; }
+      el.hidden = false;
+      el.textContent = String(count);
+    };
+    setCount(this.elements.runsTabRunsCount, breakdownSteps.length);
+    setCount(this.elements.runsTabTraceCount, traceEntries.length);
+
+    this.renderExecutionBreakdown();
+    this.renderExecutionTrace();
+
+    if (this.elements.trace) this.elements.trace.hidden = active !== 'runs';
+    if (this.elements.executionTrace) this.elements.executionTrace.hidden = active !== 'trace';
+    if (this.elements.executionTraceControls) {
+      // Filter chips only make sense while looking at the trace pane and
+      // only when we have at least 2 distinct buckets — bucketing logic in
+      // renderTraceFilterChips already handles the latter; here we just
+      // gate by which tab is visible.
+      const wantControls = active === 'trace' && hasAnyTrace;
+      // Don't force-show: the trace renderer may still hide it when there's
+      // only one bucket. Only force-hide when on the runs tab.
+      if (!wantControls) this.elements.executionTraceControls.hidden = true;
+    }
+  }
+
+  setRunsTab(name) {
+    const next = name === 'trace' ? 'trace' : 'runs';
+    if (next === this._runsTab) return;
+    this._runsTab = next;
+    if (this._renderCache) delete this._renderCache.runs;
+    this.renderRunsCard();
   }
 
   renderContext() {
