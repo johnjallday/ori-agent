@@ -83,6 +83,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     statInProgress: document.getElementById('hubStatInProgress'),
     statScheduled: document.getElementById('hubStatScheduled'),
     statFailed: document.getElementById('hubStatFailed'),
+    statNeedsAttention: document.getElementById('hubStatNeedsAttention'),
+    statNeedsAttentionBtn: document.getElementById('hubStatNeedsAttentionBtn'),
+    statButtons: document.querySelectorAll('#hubStats [data-task-filter]'),
+    taskFilterbar: document.getElementById('hubTaskFilterbar'),
+    taskFilterChips: document.getElementById('hubTaskFilterChips'),
+    taskSearchInput: document.getElementById('hubTaskSearchInput'),
+    taskSearchClearBtn: document.getElementById('hubTaskSearchClear'),
     schedulesList: document.getElementById('hubSchedulesList'),
     viewSchedulesBtn: document.getElementById('hubViewSchedulesBtn'),
     launcher: document.getElementById('workspaceLauncher'),
@@ -2305,6 +2312,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     window.WorkspaceHubSmartInput.setEnabled(true);
     window.WorkspaceHubSmartInput.resetPrompt();
     window.WorkspaceHubSmartInput.setStatus('', { busy: false });
+    if (typeof window.WorkspaceHubTasks?.resetTaskFilters === 'function') {
+      window.WorkspaceHubTasks.resetTaskFilters();
+    }
     window.WorkspaceHubTasks.loadTasks(workspaceId);
     window.WorkspaceHubSessions.loadSessions(workspaceId);
     window.WorkspaceHubNotes.loadNotes(workspaceId);
