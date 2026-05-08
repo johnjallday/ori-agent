@@ -1681,7 +1681,8 @@ export class WorkspaceTaskPage {
     });
   }
 
-  async updateTaskFields(patch) {
+  async updateTaskFields(patch, options = {}) {
+    const { deferRender = false } = options;
     const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.taskId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -1703,7 +1704,16 @@ export class WorkspaceTaskPage {
           : task
       ));
     }
-    this.render();
+    // The synchronous render() pipeline runs 14 sub-renders (markdown, trace,
+    // schedule, etc.) and on a task with sizeable execution history can stall
+    // the main thread long enough that callers awaiting this method block
+    // their visible UX (e.g. modal close). deferRender lets the caller close
+    // the modal first and let the heavy re-render paint in the next frame.
+    if (deferRender) {
+      window.requestAnimationFrame(() => this.render());
+    } else {
+      this.render();
+    }
     return this.task;
   }
 
@@ -4768,7 +4778,11 @@ export class WorkspaceTaskPage {
     if (submitText) submitText.textContent = 'Saving...';
 
     try {
-      await this.updateTaskFields(payload);
+      // deferRender lets the modal close first; the page-wide re-render —
+      // which includes markdown / trace / schedule sub-renders that can take
+      // 100–300ms on a task with history — happens in the next frame so the
+      // "Saving..." spinner doesn't stay pinned to the screen waiting on it.
+      await this.updateTaskFields(payload, { deferRender: true });
       if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
       }
@@ -4796,7 +4810,7 @@ export class WorkspaceTaskPage {
         schedule: null,
         schedule_enabled: false,
         schedule_name: ''
-      });
+      }, { deferRender: true });
       if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
       }
