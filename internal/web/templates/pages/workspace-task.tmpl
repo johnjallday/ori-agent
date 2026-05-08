@@ -129,142 +129,161 @@
 
         <div id="workspace-task-page-content" class="workspace-task-page-layout" hidden>
           <main class="workspace-task-page-main">
-            <section class="workspace-task-page-card">
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Task Brief</div>
-                  <h2>Current scope</h2>
-                </div>
-              </div>
-              <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
-            </section>
+            <div class="workspace-task-page-tabs" role="tablist" aria-label="Task sections">
+              <button type="button" class="workspace-task-page-tab is-active" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="workspace-task-tab-overview" id="workspace-task-tab-button-overview">Overview</button>
+              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">Activity</button>
+              <button type="button" class="workspace-task-page-tab" data-task-tab="developer" role="tab" aria-selected="false" aria-controls="workspace-task-tab-developer" id="workspace-task-tab-button-developer">Developer</button>
+            </div>
 
-            <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Blocked Context</div>
-                  <h2>Why the task paused</h2>
+            <div id="workspace-task-tab-overview" class="workspace-task-tab-pane is-active" role="tabpanel" aria-labelledby="workspace-task-tab-button-overview">
+              <section class="workspace-task-page-card">
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Task Brief</div>
+                    <h2>Current scope</h2>
+                  </div>
                 </div>
-              </div>
-              <div class="workspace-task-blocked-reason">
-                <div class="workspace-task-page-mini-label">Pause reason</div>
-                <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
-              </div>
-              <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
-                <div class="workspace-task-page-mini-label">Agent request</div>
-                <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
-                <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
-                <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
-              </div>
-            </section>
+                <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
+              </section>
 
-            <section id="workspace-task-relationships-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Task Graph</div>
-                  <h2>Dependencies and parents</h2>
+              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
+                    <h2>Why the task paused</h2>
+                  </div>
                 </div>
-              </div>
-              <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
-            </section>
+                <div class="workspace-task-blocked-reason">
+                  <div class="workspace-task-page-mini-label">Pause reason</div>
+                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
+                </div>
+                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Agent request</div>
+                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
+                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
+                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
+                </div>
+              </section>
 
-            <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Workflow</div>
-                  <h2>Steps</h2>
+              <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Result</div>
+                    <h2>Latest output</h2>
+                  </div>
+                  <div class="workspace-task-output-actions" aria-label="Result actions">
+                    <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                      <i class="bi bi-copy" aria-hidden="true"></i>
+                      <span>Copy</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
+                      <i class="bi bi-journal-plus" aria-hidden="true"></i>
+                      <span>Save as Note</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
+                      <i class="bi bi-magic" aria-hidden="true"></i>
+                      <span>Create Skill</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
+                      <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                      <span>Create Workflow Task</span>
+                    </button>
+                  </div>
                 </div>
-                <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
-                  <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
-                  <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
-                </div>
-              </div>
-              <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
-                <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
-                <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
-              </div>
-              <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
-            </section>
+                <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
+                <div id="workspace-task-output"></div>
+              </section>
 
-            <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Result</div>
-                  <h2>Latest output</h2>
-                </div>
-                <div class="workspace-task-output-actions" aria-label="Result actions">
-                  <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
-                    <i class="bi bi-copy" aria-hidden="true"></i>
-                    <span>Copy</span>
-                  </button>
-                  <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
-                    <i class="bi bi-journal-plus" aria-hidden="true"></i>
-                    <span>Save as Note</span>
-                  </button>
-                  <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                    <i class="bi bi-magic" aria-hidden="true"></i>
-                    <span>Create Skill</span>
-                  </button>
-                  <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                    <span>Create Workflow Task</span>
+              <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Schedule</div>
+                    <h2>Execution history</h2>
+                  </div>
+                  <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
+                    <i class="bi bi-calendar2-week" aria-hidden="true"></i>
+                    <span>Edit</span>
                   </button>
                 </div>
-              </div>
-              <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
-              <div id="workspace-task-output"></div>
-            </section>
+                <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
+              </section>
+            </div>
 
-            <section id="workspace-task-runs-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Run history</div>
-                  <h2>Runs and tool calls</h2>
+            <div id="workspace-task-tab-activity" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-activity" hidden>
+              <section id="workspace-task-relationships-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Task Graph</div>
+                    <h2>Dependencies and parents</h2>
+                  </div>
                 </div>
-              </div>
-              <div id="workspace-task-tool-summary" class="workspace-task-tool-summary" hidden></div>
-              <div class="workspace-task-runs-tabs" role="tablist" aria-label="Run history view">
-                <button type="button" class="workspace-task-runs-tab is-active" data-runs-tab="runs" role="tab" aria-selected="true" aria-controls="workspace-task-trace" id="workspace-task-runs-tab-runs">
-                  <span>Runs</span>
-                  <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-runs-count" hidden></span>
-                </button>
-                <button type="button" class="workspace-task-runs-tab" data-runs-tab="trace" role="tab" aria-selected="false" aria-controls="workspace-task-execution-trace" id="workspace-task-runs-tab-trace">
-                  <span>Trace</span>
-                  <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-trace-count" hidden></span>
-                </button>
-              </div>
-              <div id="workspace-task-execution-trace-controls" class="workspace-task-trace-controls" hidden>
-                <div id="workspace-task-execution-trace-filters" class="workspace-task-trace-filters" role="group" aria-label="Filter trace entries"></div>
-                <div id="workspace-task-execution-trace-count" class="workspace-task-trace-count" aria-live="polite"></div>
-              </div>
-              <div id="workspace-task-trace" class="workspace-task-breakdown-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-runs"></div>
-              <div id="workspace-task-execution-trace" class="workspace-task-trace-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-trace" hidden></div>
-            </section>
+                <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
+              </section>
 
-            <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Schedule</div>
-                  <h2>Execution history</h2>
+              <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Workflow</div>
+                    <h2>Steps</h2>
+                  </div>
+                  <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
+                    <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
+                    <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
+                  </div>
                 </div>
-                <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
-                  <i class="bi bi-calendar2-week" aria-hidden="true"></i>
-                  <span>Edit</span>
-                </button>
-              </div>
-              <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
-            </section>
+                <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
+                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
+                  <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
+                </div>
+                <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
+              </section>
 
-            <details id="workspace-task-context-card" class="workspace-task-page-card workspace-task-context-disclosure" hidden>
-              <summary class="workspace-task-page-card-header workspace-task-context-toggle">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Developer</div>
-                  <h2>Raw task context</h2>
+              <section id="workspace-task-runs-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Run history</div>
+                    <h2>Runs and tool calls</h2>
+                  </div>
                 </div>
-                <span class="workspace-task-context-chevron" aria-hidden="true"></span>
-              </summary>
-              <div id="workspace-task-context"></div>
-            </details>
+                <div id="workspace-task-tool-summary" class="workspace-task-tool-summary" hidden></div>
+                <div class="workspace-task-runs-tabs" role="tablist" aria-label="Run history view">
+                  <button type="button" class="workspace-task-runs-tab is-active" data-runs-tab="runs" role="tab" aria-selected="true" aria-controls="workspace-task-trace" id="workspace-task-runs-tab-runs">
+                    <span>Runs</span>
+                    <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-runs-count" hidden></span>
+                  </button>
+                  <button type="button" class="workspace-task-runs-tab" data-runs-tab="trace" role="tab" aria-selected="false" aria-controls="workspace-task-execution-trace" id="workspace-task-runs-tab-trace">
+                    <span>Trace</span>
+                    <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-trace-count" hidden></span>
+                  </button>
+                </div>
+                <div id="workspace-task-execution-trace-controls" class="workspace-task-trace-controls" hidden>
+                  <div id="workspace-task-execution-trace-filters" class="workspace-task-trace-filters" role="group" aria-label="Filter trace entries"></div>
+                  <div id="workspace-task-execution-trace-count" class="workspace-task-trace-count" aria-live="polite"></div>
+                </div>
+                <div id="workspace-task-trace" class="workspace-task-breakdown-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-runs"></div>
+                <div id="workspace-task-execution-trace" class="workspace-task-trace-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-trace" hidden></div>
+              </section>
+
+              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
+                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
+              </div>
+            </div>
+
+            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
+              <section id="workspace-task-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Developer</div>
+                    <h2>Raw task context</h2>
+                  </div>
+                </div>
+                <div id="workspace-task-context"></div>
+              </section>
+
+              <div id="workspace-task-developer-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
+                <p class="workspace-task-tab-empty-copy">No developer context available for this task yet.</p>
+              </div>
+            </div>
           </main>
 
           <aside class="workspace-task-page-sidebar">
@@ -961,6 +980,61 @@
     .workspace-task-page-sidebar {
       position: sticky;
       top: 92px;
+    }
+
+    .workspace-task-page-tabs {
+      display: inline-flex;
+      gap: 0.35rem;
+      padding: 0.35rem;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      border: 1px solid var(--border-color);
+      width: fit-content;
+    }
+
+    .workspace-task-page-tab {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-page-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-page-tab.is-active {
+      background: var(--bg-primary);
+      border-color: var(--border-color);
+      color: var(--text-primary);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    }
+
+    .workspace-task-tab-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .workspace-task-tab-pane[hidden] {
+      display: none !important;
+    }
+
+    .workspace-task-tab-empty {
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-tab-empty-copy {
+      margin: 0;
+      font-size: 0.9rem;
     }
 
     .workspace-task-page-card {
