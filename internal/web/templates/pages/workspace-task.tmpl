@@ -1640,6 +1640,69 @@
       gap: 0.9rem;
     }
 
+    .workspace-task-relgraph-wrap {
+      margin: 0.4rem 0 1rem;
+      padding: 0.6rem 0.4rem 0.2rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 90%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-relgraph {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 220px;
+      overflow: visible;
+    }
+
+    .workspace-task-relgraph-edge {
+      stroke: color-mix(in srgb, var(--text-muted) 65%, transparent);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 3;
+      fill: none;
+    }
+
+    .workspace-task-relgraph-node {
+      cursor: pointer;
+    }
+
+    .workspace-task-relgraph-node circle {
+      transition: stroke 0.14s ease, transform 0.14s ease;
+    }
+
+    .workspace-task-relgraph-node:hover circle {
+      stroke: var(--primary-color);
+      stroke-width: 2;
+    }
+
+    .workspace-task-relgraph-node--current {
+      cursor: default;
+    }
+
+    .workspace-task-relgraph-node--current circle {
+      filter: drop-shadow(0 1px 6px rgba(15, 23, 42, 0.18));
+    }
+
+    .workspace-task-relgraph-label {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      fill: var(--text-secondary);
+    }
+
+    .workspace-task-relgraph-node--current .workspace-task-relgraph-label {
+      fill: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .workspace-task-relgraph-truncated {
+      margin-top: 4px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
     .workspace-task-relationship-group {
       display: flex;
       flex-direction: column;

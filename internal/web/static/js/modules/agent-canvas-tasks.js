@@ -1,4 +1,5 @@
 import { apiPost, apiPut } from './agent-canvas-api.js';
+import { showCanvasConfirm, showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 
 export async function executeTask(canvas, task) {
   if (!task || !task.id) {
@@ -9,21 +10,15 @@ export async function executeTask(canvas, task) {
   // If unassigned, prompt assignment first
   if (task.to === 'unassigned') {
     if (!canvas.agents || canvas.agents.length === 0) {
-      alert('No agents available. Please add agents to the workspace first.');
+      canvas.showNotification('No agents in this workspace yet — add an agent before running tasks.', 'error');
       return;
     }
-    const agentOptions = canvas.agents.map((a, i) => {
-      const displayName = a.instanceNumber ? `${a.name} #${a.instanceNumber}` : a.name;
-      return `${i + 1}. ${displayName}`;
-    }).join('\n');
-    const selection = prompt(`This task is unassigned. Select an agent to execute it:\n\n${agentOptions}\n\nEnter agent number (1-${canvas.agents.length}):`);
-    if (!selection) return;
-    const agentIndex = parseInt(selection) - 1;
-    if (agentIndex < 0 || agentIndex >= canvas.agents.length) {
-      alert('Invalid agent selection');
-      return;
-    }
-    const selectedAgent = canvas.agents[agentIndex];
+    const selectedAgent = await showCanvasAgentPicker({
+      title: 'Assign an agent',
+      message: `This task is unassigned. Pick an agent to run "${task.description || task.id}".`,
+      agents: canvas.agents
+    });
+    if (!selectedAgent) return;
     await apiPut(`/api/orchestration/tasks/${task.id}`, {
       to: selectedAgent.name,
       status: 'pending'
@@ -42,13 +37,16 @@ export async function rerunTask(canvas, task) {
     console.error('Invalid task:', task);
     return;
   }
-  const confirmMsg = task.status === 'failed'
-    ? `Rerun this failed task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again.`
-    : `Rerun this task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again with the same parameters.`;
-
-  if (!confirm(confirmMsg)) {
-    return;
-  }
+  const label = task.description || 'this task';
+  const confirmed = await showCanvasConfirm({
+    title: task.status === 'failed' ? 'Rerun failed task?' : 'Rerun task?',
+    message: task.status === 'failed'
+      ? `"${label}" will execute again from scratch.`
+      : `"${label}" will execute again with the same parameters.`,
+    confirmLabel: 'Rerun',
+    cancelLabel: 'Cancel'
+  });
+  if (!confirmed) return;
 
   // Update local task state
   task.status = 'pending';

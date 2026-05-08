@@ -2563,7 +2563,12 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.relationshipsCard.hidden = false;
-    this.elements.relationships.innerHTML = groups.map((group) => `
+    const graphHtml = this.renderRelationshipsGraph({
+      parentTask,
+      inputTasks: groups.find((g) => g.direction === 'in')?.tasks || [],
+      dependentTasks: groups.find((g) => g.direction === 'out')?.tasks || []
+    });
+    const groupsHtml = groups.map((group) => `
       <section class="workspace-task-relationship-group" data-direction="${this.escapeHtml(group.direction)}">
         <div class="workspace-task-relationship-title">
           <span class="workspace-task-relationship-arrow" aria-hidden="true">${this.escapeHtml(group.arrow)}</span>
@@ -2586,6 +2591,107 @@ export class WorkspaceTaskPage {
         </div>
       </section>
     `).join('');
+    this.elements.relationships.innerHTML = graphHtml + groupsHtml;
+  }
+
+  /**
+   * Build a small inline SVG showing this task's place in the dependency
+   * graph: parent above, inputs to the left, consumers to the right, and
+   * the current task in the center. Each neighbor is a clickable node
+   * that navigates to that task's detail page; status is encoded via the
+   * fill color matching the rest of the page's status palette. Returns
+   * an empty string when the task has no neighbors so the relationships
+   * card stays compact.
+   */
+  renderRelationshipsGraph({ parentTask, inputTasks, dependentTasks }) {
+    const inputs = (inputTasks || []).slice(0, 4);
+    const consumers = (dependentTasks || []).slice(0, 4);
+    const totalNeighbors = (parentTask ? 1 : 0) + inputs.length + consumers.length;
+    if (totalNeighbors === 0) return '';
+
+    const width = 520;
+    const height = 200;
+    const cx = width / 2;
+    const cy = height / 2;
+    const sideX = 60;
+    const r = 11;
+
+    const colorForStatus = (status) => {
+      const cls = getStatusClass(status);
+      switch (cls) {
+        case 'completed': return '#157347';
+        case 'in_progress': return '#0c63e7';
+        case 'failed': return '#c23b3b';
+        case 'blocked': return '#b45309';
+        case 'cancelled': return '#6b7280';
+        default: return '#9ca3af';
+      }
+    };
+
+    const nodeMarkup = (task, x, y, opts = {}) => {
+      const fill = colorForStatus(task?.status);
+      const id = String(task?.id || '').replace(/"/g, '&quot;');
+      const labelRaw = this.getTaskDisplayLabel(task);
+      const label = labelRaw.length > 22 ? labelRaw.slice(0, 21) + '…' : labelRaw;
+      const labelY = opts.labelBelow ? y + r + 14 : y - r - 6;
+      const isCurrent = Boolean(opts.isCurrent);
+      const cls = isCurrent
+        ? 'workspace-task-relgraph-node workspace-task-relgraph-node--current'
+        : 'workspace-task-relgraph-node';
+      const titleAttr = `${this.escapeHtml(labelRaw)} · ${this.escapeHtml(getDisplayStatus(task?.status))}`;
+      const wrapStart = isCurrent ? '<g' : `<a href="${this.getTaskHref(id)}"`;
+      const wrapEnd = isCurrent ? '</g>' : '</a>';
+      return `
+        ${wrapStart} class="${cls}">
+          <title>${titleAttr}</title>
+          <circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${isCurrent ? '#1f2937' : 'rgba(15,23,42,0.18)'}" stroke-width="${isCurrent ? 2.5 : 1}"></circle>
+          <text x="${x}" y="${labelY}" text-anchor="middle" class="workspace-task-relgraph-label">${this.escapeHtml(label)}</text>
+        ${wrapEnd}
+      `;
+    };
+
+    const edge = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="workspace-task-relgraph-edge"></line>`;
+
+    const stackY = (count, idx) => {
+      if (count === 1) return cy;
+      const total = (count - 1) * 36;
+      return cy - total / 2 + idx * 36;
+    };
+
+    const parts = [];
+
+    if (parentTask) {
+      const py = 30;
+      parts.push(edge(cx, py, cx, cy - r));
+      parts.push(nodeMarkup(parentTask, cx, py, { labelBelow: false }));
+    }
+
+    inputs.forEach((task, i) => {
+      const y = stackY(inputs.length, i);
+      parts.push(edge(sideX + r, y, cx - r, cy));
+      parts.push(nodeMarkup(task, sideX, y, { labelBelow: true }));
+    });
+
+    consumers.forEach((task, i) => {
+      const y = stackY(consumers.length, i);
+      parts.push(edge(cx + r, cy, width - sideX - r, y));
+      parts.push(nodeMarkup(task, width - sideX, y, { labelBelow: true }));
+    });
+
+    parts.push(nodeMarkup(this.task, cx, cy, { labelBelow: true, isCurrent: true }));
+
+    const truncatedNote = (inputTasks?.length || 0) > inputs.length || (dependentTasks?.length || 0) > consumers.length
+      ? '<div class="workspace-task-relgraph-truncated">Showing first 4 in each direction.</div>'
+      : '';
+
+    return `
+      <div class="workspace-task-relgraph-wrap">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Task dependency graph" class="workspace-task-relgraph">
+          ${parts.join('')}
+        </svg>
+        ${truncatedNote}
+      </div>
+    `;
   }
 
   sortWorkflowTasks(tasks) {
