@@ -3727,9 +3727,8 @@
 
     .workspace-task-schedule-run {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.8rem;
+      flex-direction: column;
+      gap: 0.6rem;
       padding: 0.6rem 0.85rem;
       border-radius: 14px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
@@ -3737,8 +3736,92 @@
       font-size: 0.88rem;
     }
 
+    .workspace-task-schedule-run-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.8rem;
+    }
+
+    .workspace-task-schedule-run-meta {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .workspace-task-schedule-run-duration {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .workspace-task-schedule-run-summary {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-task-schedule-run-trail {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+
     .workspace-task-schedule-run-status {
       font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-schedule-run-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-schedule-run-toggle:hover {
+      color: var(--text-primary);
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-schedule-run-toggle svg {
+      transition: transform 0.18s ease;
+    }
+
+    .workspace-task-schedule-run-toggle.is-open svg {
+      transform: rotate(180deg);
+    }
+
+    .workspace-task-schedule-run-panel {
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+      padding-top: 0.5rem;
+    }
+
+    .workspace-task-schedule-run-result {
+      margin: 0;
+      padding: 0.6rem 0.7rem;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+      color: var(--text-primary);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      max-height: 22rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
 
     .workspace-task-schedule-run-status[data-state="completed"] {

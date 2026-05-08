@@ -396,7 +396,8 @@ type TaskExecution struct {
 	TaskID     string    `json:"task_id"`            // ID of the executed task
 	ExecutedAt time.Time `json:"executed_at"`        // When the run started
 	Status     string    `json:"status"`             // "success", "failed", or "blocked"
-	Summary    string    `json:"summary,omitempty"`  // Short result or failure summary
+	Summary    string    `json:"summary,omitempty"`  // Short result or failure summary (truncated, ~360 chars)
+	Result     string    `json:"result,omitempty"`   // Full result body, capped at maxRecordedTaskExecutionResult bytes
 	Error      string    `json:"error,omitempty"`    // Full error message if failed or blocked
 	Duration   int64     `json:"duration,omitempty"` // Execution duration in milliseconds
 }
