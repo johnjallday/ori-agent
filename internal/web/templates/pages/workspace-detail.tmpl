@@ -986,10 +986,10 @@
       <div class="modal-content workspace-detail-mcp-modal-content">
         <div class="modal-header">
           <div class="workspace-detail-mcp-modal-heading">
-            <div class="workspace-detail-mcp-modal-kicker">Workspace-scoped connector</div>
+            <div class="workspace-detail-mcp-modal-kicker">Workspace MCP</div>
             <h5 class="modal-title" id="workspace-detail-mcp-modal-title">Add Workspace MCP</h5>
             <p id="workspace-detail-mcp-modal-subtitle" class="workspace-detail-mcp-modal-subtitle mb-0">
-              Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.
+              Bind a globally available MCP server to this workspace, then decide which agent instances can use it here.
             </p>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -997,16 +997,16 @@
         <form id="workspace-detail-mcp-form">
           <div class="modal-body">
             <div id="workspace-detail-mcp-modal-banner" class="workspace-detail-mcp-modal-banner">
-              Workspace bindings control scope and access. Global MCP settings still define how each connector starts.
+              Workspace bindings control scope and access. Global MCP settings still define how each MCP server starts.
             </div>
             <div class="row g-3">
               <div class="col-md-6">
-                <label for="workspace-detail-mcp-server" class="form-label">Connector</label>
+                <label for="workspace-detail-mcp-server" class="form-label">MCP Server</label>
                 <select id="workspace-detail-mcp-server" class="form-select">
-                  <option value="">Select a connector</option>
+                  <option value="">Select an MCP server</option>
                 </select>
                 <div id="workspace-detail-mcp-server-help" class="workspace-detail-mcp-field-help">
-                  Only globally enabled connectors can be added here.
+                  Only globally enabled MCP servers can be added here.
                 </div>
               </div>
               <div class="col-md-6">
@@ -1023,10 +1023,10 @@
                 </div>
               </div>
               <div class="col-12">
-                <label for="workspace-detail-mcp-scope" class="form-label">Scope JSON</label>
+                <label for="workspace-detail-mcp-scope" class="form-label">Access Scope</label>
                 <textarea id="workspace-detail-mcp-scope" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;roots&quot;: [&quot;/repo/app&quot;]&#10;}"></textarea>
                 <div class="workspace-detail-mcp-field-help">
-                  Optional JSON object for workspace-specific scope like <code>roots</code>, <code>repos</code>, or <code>channels</code>.
+                  Optional JSON object that limits workspace access, such as <code>roots</code>, <code>repos</code>, or <code>channels</code>.
                 </div>
               </div>
               <div id="workspace-detail-mcp-email-fields" class="col-12 d-none">
@@ -1101,10 +1101,10 @@
                 </div>
               </div>
               <div id="workspace-detail-mcp-config-field" class="col-12">
-                <details id="workspace-detail-mcp-config-details" class="workspace-detail-mcp-advanced-details" open>
-                  <summary class="workspace-detail-mcp-advanced-summary">Advanced Config JSON</summary>
+                <details id="workspace-detail-mcp-config-details" class="workspace-detail-mcp-advanced-details">
+                  <summary class="workspace-detail-mcp-advanced-summary">Runtime Overrides</summary>
                   <div class="workspace-detail-mcp-advanced-body">
-                    <label for="workspace-detail-mcp-config" class="form-label">Config JSON</label>
+                    <label for="workspace-detail-mcp-config" class="form-label">Overrides JSON</label>
                     <textarea id="workspace-detail-mcp-config" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;args&quot;: [&quot;playwright-mcp&quot;, &quot;--headless&quot;],&#10;  &quot;env&quot;: { &quot;BROWSER_CONTEXT&quot;: &quot;workspace&quot; }&#10;}"></textarea>
                     <div class="workspace-detail-mcp-field-help">
                       Optional runtime overrides for this workspace binding. Supported keys today are <code>command</code>, <code>args</code>, <code>env</code>, and <code>transport</code>.
