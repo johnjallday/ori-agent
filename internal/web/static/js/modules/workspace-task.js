@@ -4980,9 +4980,6 @@ export class WorkspaceTaskPage {
         this.isAssistActionSuggested('retry') ||
         this.isAssistActionSuggested('mark_failed');
       this.elements.assistMoreActions.hidden = !hasMoreActions;
-      if (!hasMoreActions) {
-        this.elements.assistMoreActions.open = false;
-      }
     }
 
     this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');

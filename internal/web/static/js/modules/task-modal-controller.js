@@ -1646,6 +1646,10 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    // Reset for this save attempt; _safeAttachUploads pushes per-failure
+    // entries during the run, and the success path drains them into a
+    // warning toast so partial failures stay visible to the user.
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -1750,12 +1754,7 @@ class TaskModalController {
             ...autoSaveData
           });
 
-          if (this.pendingFiles.length > 0) {
-            await this.uploadFilesToTask(this.editingTaskId);
-          }
-          if (this.pendingFilePaths.length > 0) {
-            await this.saveFilePathsToTask(this.editingTaskId);
-          }
+          await this._safeAttachUploads(this.editingTaskId);
 
           this.showToast('Task updated', 'success');
         } else if (isWorkflow) {
@@ -1818,12 +1817,7 @@ class TaskModalController {
           }
 
           const attachmentTarget = lastSubtaskId || this.editingTaskId;
-          if (this.pendingFiles.length > 0 && attachmentTarget) {
-            await this.uploadFilesToTask(attachmentTarget);
-          }
-          if (this.pendingFilePaths.length > 0 && attachmentTarget) {
-            await this.saveFilePathsToTask(attachmentTarget);
-          }
+          await this._safeAttachUploads(attachmentTarget);
 
           this.showToast('Workflow updated', 'success');
         } else {
@@ -1838,12 +1832,7 @@ class TaskModalController {
           });
 
           // Upload files to existing task
-          if (this.pendingFiles.length > 0) {
-            await this.uploadFilesToTask(this.editingTaskId);
-          }
-          if (this.pendingFilePaths.length > 0) {
-            await this.saveFilePathsToTask(this.editingTaskId);
-          }
+          await this._safeAttachUploads(this.editingTaskId);
 
           this.showToast('Task updated', 'success');
         }
@@ -1899,12 +1888,7 @@ class TaskModalController {
         }
 
         const lastSubtaskId = subtaskIds[subtaskIds.length - 1];
-        if (lastSubtaskId && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(lastSubtaskId);
-        }
-        if (lastSubtaskId && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(lastSubtaskId);
-        }
+        await this._safeAttachUploads(lastSubtaskId);
 
         this.showToast('Workflow created', 'success');
       } else {
@@ -1920,17 +1904,18 @@ class TaskModalController {
           ...autoSaveData
         });
 
-        if (createdTask?.id && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(createdTask.id);
-        }
-        if (createdTask?.id && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(createdTask.id);
-        }
+        await this._safeAttachUploads(createdTask?.id);
 
         eventName = 'task:created';
         eventPayload = { task: createdTask };
         this.showToast('Task created', 'success');
       }
+
+      // Surface partial-success warning before closing the modal — the
+      // task itself was saved, but one or more attachment uploads failed.
+      // Without this users would only see the success toast and not
+      // realize their files weren't attached.
+      this._reportUploadFailures();
 
       // Clear pending files
       this.pendingFiles = [];
@@ -1955,6 +1940,64 @@ class TaskModalController {
       }
       if (saveText) saveText.textContent = originalText || 'Save Task';
     }
+  }
+
+  /**
+   * Run pendingFiles + pendingFilePaths uploads against the given task ID
+   * without letting failures abort the surrounding save flow. The task
+   * itself is already persisted by the time we get here, so an upload
+   * failure must not roll back a successful creation — instead we collect
+   * the errors so the final toast can warn the user about partial
+   * success ("Task created — 2 attachment(s) failed").
+   *
+   * Reports through `this._uploadFailures` which is initialized to []
+   * before each save and inspected after the try block.
+   */
+  async _safeAttachUploads(taskId) {
+    if (!taskId) return;
+    if (!Array.isArray(this._uploadFailures)) this._uploadFailures = [];
+
+    if (this.pendingFiles.length > 0) {
+      try {
+        await this.uploadFilesToTask(taskId);
+      } catch (err) {
+        this._uploadFailures.push({
+          kind: 'file',
+          count: this.pendingFiles.length,
+          message: err?.message || 'Failed to upload files'
+        });
+      }
+    }
+    if (this.pendingFilePaths.length > 0) {
+      try {
+        await this.saveFilePathsToTask(taskId);
+      } catch (err) {
+        this._uploadFailures.push({
+          kind: 'path',
+          count: this.pendingFilePaths.length,
+          message: err?.message || 'Failed to attach file paths'
+        });
+      }
+    }
+  }
+
+  /**
+   * Render a single warning toast summarizing any attachment upload
+   * failures collected by _safeAttachUploads. The task itself was
+   * already persisted by this point so this is strictly an extra
+   * signal — the success toast still fires alongside.
+   */
+  _reportUploadFailures() {
+    const failures = Array.isArray(this._uploadFailures) ? this._uploadFailures : [];
+    if (failures.length === 0) return;
+
+    const counts = failures.reduce((sum, entry) => sum + (Number(entry?.count) || 0), 0);
+    const firstMessage = failures[0]?.message || '';
+    const summary = counts > 0
+      ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
+      : `Some attachments failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
+    this.showToast(summary, 'warning');
+    this._uploadFailures = [];
   }
 
   /**
@@ -2074,6 +2117,7 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -2227,12 +2271,8 @@ class TaskModalController {
           }
         }
 
-        if (lastCreatedTaskId && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(lastCreatedTaskId);
-        }
-        if (lastCreatedTaskId && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(lastCreatedTaskId);
-        }
+        await this._safeAttachUploads(lastCreatedTaskId);
+        this._reportUploadFailures();
 
         // Clear pending files
         this.pendingFiles = [];
@@ -2279,12 +2319,8 @@ class TaskModalController {
       // Upload files to newly created task
       const createdPayload = await createResponse.json();
       const createdTask = this.extractTaskFromResponse(createdPayload);
-      if (createdTask?.id && this.pendingFiles.length > 0) {
-        await this.uploadFilesToTask(createdTask.id);
-      }
-      if (createdTask?.id && this.pendingFilePaths.length > 0) {
-        await this.saveFilePathsToTask(createdTask.id);
-      }
+      await this._safeAttachUploads(createdTask?.id);
+      this._reportUploadFailures();
 
       // Clear pending files
       this.pendingFiles = [];
@@ -2335,6 +2371,7 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -2438,12 +2475,8 @@ class TaskModalController {
       }
 
       // Upload files if any
-      if (this.pendingFiles.length > 0) {
-        await this.uploadFilesToTask(this.editingTaskId);
-      }
-      if (this.pendingFilePaths.length > 0) {
-        await this.saveFilePathsToTask(this.editingTaskId);
-      }
+      await this._safeAttachUploads(this.editingTaskId);
+      this._reportUploadFailures();
 
       // Clear pending files
       this.pendingFiles = [];

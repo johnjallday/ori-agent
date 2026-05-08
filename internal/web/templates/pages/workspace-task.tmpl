@@ -336,8 +336,11 @@
                 <button type="button" id="workspace-task-assist-continue" class="modern-btn modern-btn-primary workspace-task-assist-continue-btn">Continue</button>
               </div>
 
-              <details class="workspace-task-assist-more-actions">
-                <summary class="workspace-task-assist-more-toggle">More actions</summary>
+              <!-- Recovery actions live alongside Continue rather than
+                   behind a "More actions" disclosure. The most common
+                   stuck-task remediation (reassign or fail-out) shouldn't
+                   require an extra click to reveal. -->
+              <div class="workspace-task-assist-more-actions">
                 <div class="workspace-task-assist-more-content">
                   <div class="workspace-task-assist-switch">
                     <label class="form-label" for="workspace-task-assist-agent">Reassign agent</label>
@@ -353,7 +356,7 @@
                     <button type="button" id="workspace-task-assist-fail" class="workspace-task-page-text-button workspace-task-assist-fail">Mark as Failed</button>
                   </div>
                 </div>
-              </details>
+              </div>
             </div>
           </div>
         </div>
@@ -2858,36 +2861,14 @@
       margin-top: 0.85rem;
     }
 
-    .workspace-task-assist-more-toggle {
-      color: var(--text-secondary);
-      font-size: 0.84rem;
-      font-weight: 700;
-      cursor: pointer;
-      list-style: none;
-      user-select: none;
-    }
-
-    .workspace-task-assist-more-toggle::-webkit-details-marker {
+    .workspace-task-assist-more-actions[hidden] {
       display: none;
-    }
-
-    .workspace-task-assist-more-toggle::before {
-      content: "\25B6";
-      display: inline-block;
-      margin-right: 0.4rem;
-      font-size: 0.65rem;
-      transition: transform 0.16s ease;
-    }
-
-    .workspace-task-assist-more-actions[open] > .workspace-task-assist-more-toggle::before {
-      transform: rotate(90deg);
     }
 
     .workspace-task-assist-more-content {
       display: flex;
       flex-direction: column;
       gap: 0.85rem;
-      margin-top: 0.75rem;
       padding: 0.95rem 1rem;
       border-radius: 20px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
