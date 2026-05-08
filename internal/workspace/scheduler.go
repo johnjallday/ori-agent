@@ -256,8 +256,8 @@ func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now t
 			Status:     "skipped",
 			Summary:    "Skipped because Ori was asleep.",
 		})
-		if len(t.ExecutionHistory) > 20 {
-			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-20:]
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
 		}
 		return nil
 	}); err != nil {
@@ -371,8 +371,8 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 			ExecutedAt: now,
 			Status:     "success",
 		})
-		if len(t.ExecutionHistory) > 20 {
-			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-20:]
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
 		}
 
 		// Calculate next run
@@ -429,8 +429,8 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 			Status:     "failed",
 			Error:      err.Error(),
 		})
-		if len(t.ExecutionHistory) > 20 {
-			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-20:]
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
 		}
 
 		// Auto-disable after 5 consecutive failures
@@ -536,8 +536,8 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		Status:     "success",
 	}
 	st.ExecutionHistory = append(st.ExecutionHistory, execution)
-	if len(st.ExecutionHistory) > 20 {
-		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	if len(st.ExecutionHistory) > maxRecordedTaskExecutions {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-maxRecordedTaskExecutions:]
 	}
 
 	nextRun := ts.calculateNextRun(st.Schedule, now)
@@ -595,8 +595,8 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 		Error:      err.Error(),
 	}
 	st.ExecutionHistory = append(st.ExecutionHistory, execution)
-	if len(st.ExecutionHistory) > 20 {
-		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	if len(st.ExecutionHistory) > maxRecordedTaskExecutions {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-maxRecordedTaskExecutions:]
 	}
 
 	if st.FailureCount >= 5 {
