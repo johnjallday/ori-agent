@@ -38,6 +38,10 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	// Migrate existing agents to have types
 	fs.migrateAgentTypesUnlocked()
 
+	if err := fs.initializeMissingAgentSkillsStateUnlocked(); err != nil {
+		logger.Verbosef("Warning: failed to initialize missing agent skills state: %v", err)
+	}
+
 	if err := fs.saveUnlocked(); err != nil {
 		logger.Verbosef("Warning: failed to save store during initialization: %v", err)
 	}
@@ -206,6 +210,15 @@ func (s *fileStore) initializeNewAgentSkillsStateUnlocked(agentName string) erro
 	return os.WriteFile(skillsStatePath, payload, 0o644)
 }
 
+func (s *fileStore) initializeMissingAgentSkillsStateUnlocked() error {
+	for agentName := range s.agents {
+		if err := s.initializeNewAgentSkillsStateUnlocked(agentName); err != nil {
+			return fmt.Errorf("%s: %w", agentName, err)
+		}
+	}
+	return nil
+}
+
 func (s *fileStore) DeleteAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -259,6 +272,9 @@ func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agents[name] = ag
+	if err := s.initializeNewAgentSkillsStateUnlocked(name); err != nil {
+		return fmt.Errorf("initialize skill defaults: %w", err)
+	}
 	return s.saveUnlocked()
 }
 

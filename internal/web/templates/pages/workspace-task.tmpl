@@ -93,10 +93,18 @@
             <span id="workspace-task-live-badge" class="workspace-task-page-live-badge" hidden>
               <span class="workspace-task-page-live-dot"></span>Live
             </span>
+            <label class="workspace-task-page-agent-picker" id="workspace-task-hero-agent-wrap" hidden>
+              <span class="workspace-task-page-agent-picker-label">Agent</span>
+              <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign task agent"></select>
+            </label>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
             <div id="workspace-task-hero-priority" class="workspace-task-hero-priority" hidden>
               <div class="workspace-task-hero-priority-kicker">Action Required</div>
               <div id="workspace-task-hero-priority-copy" class="workspace-task-hero-priority-copy"></div>
+              <div id="workspace-task-hero-priority-reason" class="workspace-task-hero-priority-reason" hidden>
+                <span class="workspace-task-hero-priority-reason-label">Reason</span>
+                <span id="workspace-task-hero-priority-reason-text" class="workspace-task-hero-priority-reason-text"></span>
+              </div>
               <div id="workspace-task-hero-priority-actions" class="workspace-task-hero-priority-actions"></div>
             </div>
           </div>
@@ -125,159 +133,189 @@
 
         <div id="workspace-task-page-content" class="workspace-task-page-layout" hidden>
           <main class="workspace-task-page-main">
-            <section class="workspace-task-page-card">
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Task Brief</div>
-                  <h2>Current scope</h2>
-                </div>
-              </div>
-              <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
-            </section>
+            <div class="workspace-task-page-tabs" role="tablist" aria-label="Task sections">
+              <button type="button" class="workspace-task-page-tab is-active" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="workspace-task-tab-overview" id="workspace-task-tab-button-overview">Overview</button>
+              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">Activity</button>
+              <button type="button" class="workspace-task-page-tab" data-task-tab="developer" role="tab" aria-selected="false" aria-controls="workspace-task-tab-developer" id="workspace-task-tab-button-developer">Developer</button>
+            </div>
 
-            <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Blocked Context</div>
-                  <h2>Why the task paused</h2>
+            <div id="workspace-task-tab-overview" class="workspace-task-tab-pane is-active" role="tabpanel" aria-labelledby="workspace-task-tab-button-overview">
+              <section class="workspace-task-page-card">
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Task Brief</div>
+                    <h2>Current scope</h2>
+                  </div>
                 </div>
-              </div>
-              <div class="workspace-task-blocked-reason">
-                <div class="workspace-task-page-mini-label">Pause reason</div>
-                <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
-              </div>
-              <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
-                <div class="workspace-task-page-mini-label">Agent request</div>
-                <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
-                <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
-                <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
-              </div>
-            </section>
+                <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
+              </section>
 
-            <section id="workspace-task-relationships-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Task Graph</div>
-                  <h2>Dependencies and parents</h2>
+              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
+                    <h2>Why the task paused</h2>
+                  </div>
                 </div>
-              </div>
-              <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
-            </section>
+                <div class="workspace-task-blocked-reason">
+                  <div class="workspace-task-page-mini-label">Pause reason</div>
+                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
+                </div>
+                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Agent request</div>
+                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
+                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
+                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
+                </div>
+              </section>
 
-            <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Workflow</div>
-                  <h2>Steps</h2>
+              <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Result</div>
+                    <h2>Latest output</h2>
+                  </div>
+                  <div class="workspace-task-output-actions" aria-label="Result actions">
+                    <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                      <i class="bi bi-copy" aria-hidden="true"></i>
+                      <span>Copy</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
+                      <i class="bi bi-journal-plus" aria-hidden="true"></i>
+                      <span>Save as Note</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
+                      <i class="bi bi-magic" aria-hidden="true"></i>
+                      <span>Create Skill</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-followup" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                      <i class="bi bi-arrow-down-right-circle" aria-hidden="true"></i>
+                      <span>Follow-up task</span>
+                    </button>
+                    <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
+                      <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                      <span>Create Workflow Task</span>
+                    </button>
+                  </div>
                 </div>
-                <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
-                  <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
-                  <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
+                <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
+                <div id="workspace-task-output"></div>
+                <div id="workspace-task-followup-panel" class="workspace-task-followup-panel" hidden>
+                  <div class="workspace-task-followup-kicker">New follow-up task</div>
+                  <p class="workspace-task-followup-copy">Creates a new task that receives this task's result as input. The downstream agent reads it via runtime inputs at execution time.</p>
+                  <label class="workspace-task-followup-field">
+                    <span>What should the follow-up do?</span>
+                    <input type="text" id="workspace-task-followup-description" maxlength="500" placeholder="e.g. Draft a calendar reminder from this allergy report" />
+                  </label>
+                  <label class="workspace-task-followup-field">
+                    <span>Details <em>(optional)</em></span>
+                    <textarea id="workspace-task-followup-details" rows="3" placeholder="Any constraints, format, or extra context the downstream agent should know."></textarea>
+                  </label>
+                  <label class="workspace-task-followup-field">
+                    <span>Assign to</span>
+                    <select id="workspace-task-followup-agent"></select>
+                  </label>
+                  <div id="workspace-task-followup-error" class="workspace-task-followup-error" hidden></div>
+                  <div class="workspace-task-followup-actions">
+                    <button type="button" id="workspace-task-followup-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+                    <button type="button" id="workspace-task-followup-submit" class="modern-btn modern-btn-primary">
+                      <span>Create follow-up</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
-                <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
-                <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
-              </div>
-              <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
-            </section>
+              </section>
 
-            <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Result</div>
-                  <h2>Latest output</h2>
-                </div>
-                <div class="workspace-task-output-actions" aria-label="Result actions">
-                  <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
-                    <i class="bi bi-copy" aria-hidden="true"></i>
-                    <span>Copy</span>
+              <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Schedule</div>
+                    <h2>Execution history</h2>
+                  </div>
+                  <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
+                    <i class="bi bi-calendar2-week" aria-hidden="true"></i>
+                    <span>Edit</span>
                   </button>
-                  <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
-                    <i class="bi bi-journal-plus" aria-hidden="true"></i>
-                    <span>Save as Note</span>
+                </div>
+                <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
+              </section>
+            </div>
+
+            <div id="workspace-task-tab-activity" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-activity" hidden>
+              <section id="workspace-task-relationships-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Task Graph</div>
+                    <h2>Dependencies and parents</h2>
+                  </div>
+                </div>
+                <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
+              </section>
+
+              <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Workflow</div>
+                    <h2>Steps</h2>
+                  </div>
+                  <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
+                    <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
+                    <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
+                  </div>
+                </div>
+                <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
+                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
+                  <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
+                </div>
+                <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
+              </section>
+
+              <section id="workspace-task-runs-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Run history</div>
+                    <h2>Runs and tool calls</h2>
+                  </div>
+                </div>
+                <div id="workspace-task-tool-summary" class="workspace-task-tool-summary" hidden></div>
+                <div class="workspace-task-runs-tabs" role="tablist" aria-label="Run history view">
+                  <button type="button" class="workspace-task-runs-tab is-active" data-runs-tab="runs" role="tab" aria-selected="true" aria-controls="workspace-task-trace" id="workspace-task-runs-tab-runs">
+                    <span>Runs</span>
+                    <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-runs-count" hidden></span>
                   </button>
-                  <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                    <i class="bi bi-magic" aria-hidden="true"></i>
-                    <span>Create Skill</span>
-                  </button>
-                  <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                    <span>Create Workflow Task</span>
+                  <button type="button" class="workspace-task-runs-tab" data-runs-tab="trace" role="tab" aria-selected="false" aria-controls="workspace-task-execution-trace" id="workspace-task-runs-tab-trace">
+                    <span>Trace</span>
+                    <span class="workspace-task-runs-tab-count" id="workspace-task-runs-tab-trace-count" hidden></span>
                   </button>
                 </div>
-              </div>
-              <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
-              <div id="workspace-task-output"></div>
-            </section>
-
-            <section id="workspace-task-trace-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Execution Breakdown</div>
-                  <h2>Runs and outcomes</h2>
+                <div id="workspace-task-execution-trace-controls" class="workspace-task-trace-controls" hidden>
+                  <div id="workspace-task-execution-trace-filters" class="workspace-task-trace-filters" role="group" aria-label="Filter trace entries"></div>
+                  <div id="workspace-task-execution-trace-count" class="workspace-task-trace-count" aria-live="polite"></div>
                 </div>
-              </div>
-              <div id="workspace-task-trace" class="workspace-task-breakdown-list"></div>
-            </section>
+                <div id="workspace-task-trace" class="workspace-task-breakdown-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-runs"></div>
+                <div id="workspace-task-execution-trace" class="workspace-task-trace-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-trace" hidden></div>
+              </section>
 
-            <section id="workspace-task-execution-trace-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Execution Trace</div>
-                  <h2>Tool calls and step events</h2>
-                </div>
+              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
+                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
               </div>
-              <div id="workspace-task-execution-trace" class="workspace-task-trace-list"></div>
-            </section>
+            </div>
 
-            <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Schedule</div>
-                  <h2>Execution history</h2>
+            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
+              <section id="workspace-task-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Developer</div>
+                    <h2>Raw task context</h2>
+                  </div>
                 </div>
-                <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
-                  <i class="bi bi-calendar2-week" aria-hidden="true"></i>
-                  <span>Edit</span>
-                </button>
+                <div id="workspace-task-context"></div>
+              </section>
+
+              <div id="workspace-task-developer-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
+                <p class="workspace-task-tab-empty-copy">No developer context available for this task yet.</p>
               </div>
-              <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
-            </section>
-
-            <section id="workspace-task-steps-card" class="workspace-task-page-card" hidden>
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Execution</div>
-                  <h2>Internal steps</h2>
-                </div>
-              </div>
-              <div id="workspace-task-steps" class="workspace-task-step-list"></div>
-            </section>
-
-            <details id="workspace-task-context-card" class="workspace-task-page-card workspace-task-context-disclosure" hidden>
-              <summary class="workspace-task-page-card-header workspace-task-context-toggle">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Developer</div>
-                  <h2>Raw task context</h2>
-                </div>
-                <span class="workspace-task-context-chevron" aria-hidden="true"></span>
-              </summary>
-              <div id="workspace-task-context"></div>
-            </details>
+            </div>
           </main>
-
-          <aside class="workspace-task-page-sidebar">
-            <section class="workspace-task-page-card workspace-task-page-card-compact">
-              <div class="workspace-task-page-card-header">
-                <div>
-                  <div class="workspace-task-page-card-kicker">Quick Controls</div>
-                  <h2>On-demand task state</h2>
-                </div>
-              </div>
-              <div id="workspace-task-snapshot" class="workspace-task-snapshot-list"></div>
-            </section>
-          </aside>
         </div>
 
         <!-- Floating respond trigger -->
@@ -337,8 +375,11 @@
                 <button type="button" id="workspace-task-assist-continue" class="modern-btn modern-btn-primary workspace-task-assist-continue-btn">Continue</button>
               </div>
 
-              <details class="workspace-task-assist-more-actions">
-                <summary class="workspace-task-assist-more-toggle">More actions</summary>
+              <!-- Recovery actions live alongside Continue rather than
+                   behind a "More actions" disclosure. The most common
+                   stuck-task remediation (reassign or fail-out) shouldn't
+                   require an extra click to reveal. -->
+              <div class="workspace-task-assist-more-actions">
                 <div class="workspace-task-assist-more-content">
                   <div class="workspace-task-assist-switch">
                     <label class="form-label" for="workspace-task-assist-agent">Reassign agent</label>
@@ -354,7 +395,7 @@
                     <button type="button" id="workspace-task-assist-fail" class="workspace-task-page-text-button workspace-task-assist-fail">Mark as Failed</button>
                   </div>
                 </div>
-              </details>
+              </div>
             </div>
           </div>
         </div>
@@ -450,7 +491,16 @@
       font-size: clamp(2rem, 4vw, 3.1rem);
       line-height: 1.02;
       color: var(--text-primary);
-      max-width: 14ch;
+      overflow-wrap: anywhere;
+      cursor: text;
+    }
+
+    .workspace-task-page-title:hover {
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 6px;
+      text-decoration-color: color-mix(in srgb, var(--primary-color) 38%, transparent);
     }
 
     .workspace-task-page-title-row {
@@ -555,7 +605,7 @@
     }
 
     .workspace-task-page-title-input {
-      width: min(100%, 14ch);
+      width: 100%;
       min-height: 4.4rem;
       padding: 0.2rem 0 0.35rem;
       border: none;
@@ -591,6 +641,15 @@
       color: var(--text-secondary);
       font-size: 1rem;
       line-height: 1.65;
+      cursor: text;
+    }
+
+    .workspace-task-page-subtitle:hover {
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 4px;
+      text-decoration-color: color-mix(in srgb, var(--primary-color) 32%, transparent);
     }
 
     .workspace-task-page-subtitle-edit {
@@ -706,12 +765,61 @@
     }
     .workspace-task-page-status[data-state="failed"]::before { content: "✕"; }
 
-    .workspace-task-page-status[data-state="cancelled"] {
+    .workspace-task-page-status[data-state="cancelled"],
+    .workspace-task-page-status[data-state="skipped"] {
       color: #64748b;
       border-color: rgba(100, 116, 139, 0.24);
       background: rgba(148, 163, 184, 0.12);
     }
     .workspace-task-page-status[data-state="cancelled"]::before { content: "⊘"; }
+    .workspace-task-page-status[data-state="skipped"]::before { content: "⤳"; }
+
+    .workspace-task-page-status[data-state="timeout"] {
+      color: #7f1d1d;
+      border-color: rgba(127, 29, 29, 0.32);
+      background: rgba(220, 38, 38, 0.14);
+    }
+    .workspace-task-page-status[data-state="timeout"]::before { content: "⏱"; }
+
+    /*
+     * Dark-theme overrides for the hero status pill. The base rules above use
+     * deep saturated text (e.g. #157347) tuned for the light --bg-primary; on
+     * the dark canvas the same hex collapses to ~1.4:1 against the tinted
+     * pill background. The tints are kept (so the pill still reads as a
+     * green/blue/orange chip) and the text is lifted to a Tailwind-300/400
+     * shade that lands ≥4.5:1 against the composited surface.
+     */
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="completed"] {
+      color: #4ade80;
+      border-color: rgba(74, 222, 128, 0.45);
+      background: rgba(34, 197, 94, 0.22);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="in_progress"] {
+      color: #93c5fd;
+      border-color: rgba(147, 197, 253, 0.45);
+      background: rgba(59, 130, 246, 0.22);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="blocked"] {
+      color: #fcd34d;
+      border-color: rgba(252, 211, 77, 0.45);
+      background: rgba(245, 158, 11, 0.22);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="failed"] {
+      color: #fca5a5;
+      border-color: rgba(252, 165, 165, 0.45);
+      background: rgba(239, 68, 68, 0.22);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="cancelled"],
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="skipped"] {
+      color: #cbd5e1;
+      border-color: rgba(203, 213, 225, 0.4);
+      background: rgba(148, 163, 184, 0.22);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="timeout"] {
+      color: #fca5a5;
+      border-color: rgba(252, 165, 165, 0.45);
+      background: rgba(248, 113, 113, 0.22);
+    }
 
     .workspace-task-page-live-badge {
       display: inline-flex;
@@ -782,6 +890,34 @@
       line-height: 1.55;
     }
 
+    .workspace-task-hero-priority-reason {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+      padding: 0.55rem 0.7rem;
+      border-radius: 12px;
+      border: 1px solid rgba(194, 132, 11, 0.32);
+      background: rgba(255, 255, 255, 0.55);
+      font-size: 0.86rem;
+      line-height: 1.45;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-hero-priority-reason-label {
+      flex: 0 0 auto;
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #7a4f00;
+      padding-top: 0.12rem;
+    }
+
+    .workspace-task-hero-priority-reason-text {
+      flex: 1 1 auto;
+      word-break: break-word;
+    }
+
     .workspace-task-hero-priority-actions {
       display: flex;
       flex-wrap: wrap;
@@ -826,6 +962,17 @@
       background: var(--primary-color);
     }
 
+    .workspace-task-page-hero-btn-danger {
+      color: #c23b3b;
+      border-color: rgba(194, 59, 59, 0.32);
+    }
+
+    .workspace-task-page-hero-btn-danger:hover {
+      background: rgba(194, 59, 59, 0.1);
+      border-color: rgba(194, 59, 59, 0.45);
+      color: #c23b3b;
+    }
+
     .workspace-task-page-alert {
       padding: 0.95rem 1.1rem;
       border-radius: 18px;
@@ -836,22 +983,118 @@
     }
 
     .workspace-task-page-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
-      gap: 1.25rem;
-      align-items: start;
+      display: block;
     }
 
-    .workspace-task-page-main,
-    .workspace-task-page-sidebar {
+    .workspace-task-page-main {
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
     }
 
-    .workspace-task-page-sidebar {
-      position: sticky;
-      top: 92px;
+    .workspace-task-page-agent-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.55rem 0.3rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .workspace-task-page-agent-picker:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-page-agent-picker-label {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 0.62rem;
+      color: var(--text-tertiary, var(--text-secondary));
+    }
+
+    .workspace-task-page-agent-picker-select {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.05rem 0.25rem 0.05rem 0;
+      cursor: pointer;
+      max-width: 14rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-task-page-agent-picker-select:focus {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 50%, transparent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    .workspace-task-page-agent-picker.is-unavailable {
+      border-color: rgba(248, 113, 113, 0.45);
+      background: rgba(248, 113, 113, 0.08);
+    }
+
+    .workspace-task-page-tabs {
+      display: inline-flex;
+      gap: 0.35rem;
+      padding: 0.35rem;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      border: 1px solid var(--border-color);
+      width: fit-content;
+    }
+
+    .workspace-task-page-tab {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-page-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-page-tab.is-active {
+      background: var(--bg-primary);
+      border-color: var(--border-color);
+      color: var(--text-primary);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    }
+
+    .workspace-task-tab-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .workspace-task-tab-pane[hidden] {
+      display: none !important;
+    }
+
+    .workspace-task-tab-empty {
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-tab-empty-copy {
+      margin: 0;
+      font-size: 0.9rem;
     }
 
     .workspace-task-page-card {
@@ -950,6 +1193,84 @@
       color: var(--text-secondary);
       font-size: 0.92rem;
       line-height: 1.4;
+    }
+
+    .workspace-task-followup-panel {
+      margin-top: 1.1rem;
+      padding: 1rem 1.1rem 1.15rem;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+
+    .workspace-task-followup-kicker {
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-followup-copy {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+
+    .workspace-task-followup-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.32rem;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-followup-field > span {
+      font-weight: 600;
+    }
+
+    .workspace-task-followup-field em {
+      color: var(--text-tertiary, var(--text-secondary));
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    .workspace-task-followup-field input,
+    .workspace-task-followup-field textarea,
+    .workspace-task-followup-field select {
+      width: 100%;
+      padding: 0.55rem 0.7rem;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    .workspace-task-followup-field input:focus,
+    .workspace-task-followup-field textarea:focus,
+    .workspace-task-followup-field select:focus {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 50%, transparent);
+      outline-offset: 1px;
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-followup-error {
+      color: #c23b3b;
+      font-size: 0.84rem;
+    }
+
+    .workspace-task-followup-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      flex-wrap: wrap;
     }
 
     .workspace-task-output-note-status-copy strong {
@@ -1532,6 +1853,69 @@
       gap: 0.9rem;
     }
 
+    .workspace-task-relgraph-wrap {
+      margin: 0.4rem 0 1rem;
+      padding: 0.6rem 0.4rem 0.2rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 90%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-relgraph {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 220px;
+      overflow: visible;
+    }
+
+    .workspace-task-relgraph-edge {
+      stroke: color-mix(in srgb, var(--text-muted) 65%, transparent);
+      stroke-width: 1.5;
+      stroke-dasharray: 4 3;
+      fill: none;
+    }
+
+    .workspace-task-relgraph-node {
+      cursor: pointer;
+    }
+
+    .workspace-task-relgraph-node circle {
+      transition: stroke 0.14s ease, transform 0.14s ease;
+    }
+
+    .workspace-task-relgraph-node:hover circle {
+      stroke: var(--primary-color);
+      stroke-width: 2;
+    }
+
+    .workspace-task-relgraph-node--current {
+      cursor: default;
+    }
+
+    .workspace-task-relgraph-node--current circle {
+      filter: drop-shadow(0 1px 6px rgba(15, 23, 42, 0.18));
+    }
+
+    .workspace-task-relgraph-label {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      fill: var(--text-secondary);
+    }
+
+    .workspace-task-relgraph-node--current .workspace-task-relgraph-label {
+      fill: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .workspace-task-relgraph-truncated {
+      margin-top: 4px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
     .workspace-task-relationship-group {
       display: flex;
       flex-direction: column;
@@ -1539,12 +1923,98 @@
     }
 
     .workspace-task-relationship-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
       color: var(--text-secondary);
       font-size: 0.8rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
+
+    .workspace-task-relationship-arrow {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.2rem;
+      height: 1.2rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+      color: var(--primary-color);
+      font-size: 0.78rem;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .workspace-task-relationship-group[data-direction="up"] .workspace-task-relationship-arrow {
+      background: color-mix(in srgb, #94a3b8 22%, transparent);
+      color: #475569;
+    }
+    .workspace-task-relationship-group[data-direction="in"] .workspace-task-relationship-arrow {
+      background: rgba(59, 130, 246, 0.18);
+      color: #1d4ed8;
+    }
+    .workspace-task-relationship-group[data-direction="out"] .workspace-task-relationship-arrow {
+      background: rgba(34, 197, 94, 0.18);
+      color: #166534;
+    }
+    [data-bs-theme="dark"] .workspace-task-relationship-group[data-direction="up"] .workspace-task-relationship-arrow {
+      background: rgba(148, 163, 184, 0.28);
+      color: #cbd5e1;
+    }
+    [data-bs-theme="dark"] .workspace-task-relationship-group[data-direction="in"] .workspace-task-relationship-arrow {
+      background: rgba(59, 130, 246, 0.28);
+      color: #93c5fd;
+    }
+    [data-bs-theme="dark"] .workspace-task-relationship-group[data-direction="out"] .workspace-task-relationship-arrow {
+      background: rgba(34, 197, 94, 0.28);
+      color: #4ade80;
+    }
+
+    .workspace-task-related-link-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /*
+     * Status dot: a small filled circle on each related-task link, colored
+     * by the same lifecycle palette as the hub status pills. Lets a user
+     * read the completion state of every adjacent node in the dependency
+     * graph at a glance without scanning the meta line.
+     */
+    .workspace-task-related-link-dot {
+      flex: 0 0 auto;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 999px;
+      background: var(--text-muted);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg-primary) 70%, transparent);
+    }
+    .workspace-task-related-link-dot[data-state="completed"] { background: #16a34a; }
+    .workspace-task-related-link-dot[data-state="in_progress"],
+    .workspace-task-related-link-dot[data-state="assigned"] { background: #2563eb; }
+    .workspace-task-related-link-dot[data-state="failed"] { background: #dc2626; }
+    .workspace-task-related-link-dot[data-state="pending"] { background: #ca8a04; }
+    .workspace-task-related-link-dot[data-state="blocked"],
+    .workspace-task-related-link-dot[data-state="waiting_for_choice"] { background: #d97706; }
+    .workspace-task-related-link-dot[data-state="cancelled"],
+    .workspace-task-related-link-dot[data-state="skipped"] { background: #94a3b8; }
+    .workspace-task-related-link-dot[data-state="timeout"] { background: #b91c1c; }
+
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="completed"] { background: #4ade80; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="in_progress"],
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="assigned"] { background: #93c5fd; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="failed"] { background: #fca5a5; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="pending"] { background: #fde047; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="blocked"],
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="waiting_for_choice"] { background: #fcd34d; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="cancelled"],
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="skipped"] { background: #cbd5e1; }
+    [data-bs-theme="dark"] .workspace-task-related-link-dot[data-state="timeout"] { background: #fca5a5; }
 
     .workspace-task-related-links {
       display: flex;
@@ -1678,6 +2148,19 @@
       padding: 0.4rem 0.85rem;
       font-size: 0.82rem;
       white-space: nowrap;
+    }
+
+    .workspace-task-workflow-run-all-reason {
+      margin: 0.5rem 0 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #b45309;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.32);
+      border-radius: 999px;
+      padding: 5px 14px;
+      width: fit-content;
+      max-width: 100%;
     }
 
     .workspace-task-workflow-empty {
@@ -2667,36 +3150,14 @@
       margin-top: 0.85rem;
     }
 
-    .workspace-task-assist-more-toggle {
-      color: var(--text-secondary);
-      font-size: 0.84rem;
-      font-weight: 700;
-      cursor: pointer;
-      list-style: none;
-      user-select: none;
-    }
-
-    .workspace-task-assist-more-toggle::-webkit-details-marker {
+    .workspace-task-assist-more-actions[hidden] {
       display: none;
-    }
-
-    .workspace-task-assist-more-toggle::before {
-      content: "\25B6";
-      display: inline-block;
-      margin-right: 0.4rem;
-      font-size: 0.65rem;
-      transition: transform 0.16s ease;
-    }
-
-    .workspace-task-assist-more-actions[open] > .workspace-task-assist-more-toggle::before {
-      transform: rotate(90deg);
     }
 
     .workspace-task-assist-more-content {
       display: flex;
       flex-direction: column;
       gap: 0.85rem;
-      margin-top: 0.75rem;
       padding: 0.95rem 1rem;
       border-radius: 20px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
@@ -2949,6 +3410,292 @@
       gap: 0.65rem;
     }
 
+    .workspace-task-runs-tabs {
+      display: inline-flex;
+      gap: 0.25rem;
+      padding: 0.25rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+      width: fit-content;
+      margin-bottom: 0.85rem;
+    }
+
+    .workspace-task-runs-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.42rem 0.95rem;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: background 0.16s ease, color 0.16s ease;
+    }
+
+    .workspace-task-runs-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-runs-tab.is-active {
+      background: var(--bg-primary);
+      color: var(--primary-color);
+      box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
+    }
+
+    .workspace-task-runs-tab:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-runs-tab[hidden] {
+      display: none;
+    }
+
+    .workspace-task-runs-tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.4rem;
+      padding: 0 0.4rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.7rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-task-runs-tab.is-active .workspace-task-runs-tab-count {
+      background: color-mix(in srgb, var(--primary-color) 22%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-task-tool-summary {
+      display: grid;
+      gap: 0.65rem;
+      margin-bottom: 0.85rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-tool-summary[hidden] {
+      display: none;
+    }
+
+    .workspace-task-tool-summary-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-tool-summary-total {
+      color: var(--text-muted);
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .workspace-task-tool-summary-grid {
+      display: grid;
+      gap: 0.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .workspace-task-tool-card {
+      min-width: 0;
+      display: grid;
+      gap: 0.42rem;
+      padding: 0.7rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+      background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+    }
+
+    .workspace-task-tool-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+    }
+
+    .workspace-task-tool-name {
+      min-width: 0;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-tool-badge {
+      flex: 0 0 auto;
+      padding: 0.16rem 0.48rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 42%, transparent);
+      background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+      color: var(--primary-color);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-tool-meta {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-tool-detail {
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-page-hero-cancel-confirm {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, #c23b3b 32%, var(--border-color));
+      background: color-mix(in srgb, #c23b3b 8%, var(--bg-primary));
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-page-hero-cancel-confirm-label {
+      white-space: nowrap;
+    }
+
+    .workspace-task-page-hero-cancel-yes {
+      padding: 0.3rem 0.7rem;
+      border-radius: 999px;
+      border: 1px solid #c23b3b;
+      background: #c23b3b;
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-page-hero-cancel-yes:hover {
+      filter: brightness(0.95);
+    }
+
+    .workspace-task-page-hero-cancel-yes:disabled {
+      opacity: 0.6;
+      cursor: progress;
+    }
+
+    .workspace-task-page-hero-cancel-no {
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-page-hero-cancel-no:hover {
+      color: var(--text-primary);
+      border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+    }
+
+    .workspace-task-trace-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 0.4rem;
+    }
+
+    .workspace-task-trace-filters {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-trace-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .workspace-task-trace-filter:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 30%, var(--border-color));
+      color: var(--text-primary);
+    }
+
+    .workspace-task-trace-filter[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      border-color: color-mix(in srgb, var(--primary-color) 45%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-task-trace-filter-count {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      opacity: 0.85;
+    }
+
+    .workspace-task-trace-count {
+      margin-left: auto;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-task-trace-show-more {
+      align-self: flex-start;
+      padding: 0.45rem 0.95rem;
+      border-radius: 999px;
+      border: 1px dashed color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .workspace-task-trace-show-more:hover {
+      border-style: solid;
+      color: var(--primary-color);
+      border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+    }
+
+    .workspace-task-trace-empty {
+      padding: 0.85rem 1rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
     .workspace-task-trace-item {
       display: grid;
       grid-template-columns: minmax(86px, auto) 1fr;
@@ -3085,9 +3832,8 @@
 
     .workspace-task-schedule-run {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.8rem;
+      flex-direction: column;
+      gap: 0.6rem;
       padding: 0.6rem 0.85rem;
       border-radius: 14px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
@@ -3095,8 +3841,92 @@
       font-size: 0.88rem;
     }
 
+    .workspace-task-schedule-run-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.8rem;
+    }
+
+    .workspace-task-schedule-run-meta {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .workspace-task-schedule-run-duration {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .workspace-task-schedule-run-summary {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-task-schedule-run-trail {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+
     .workspace-task-schedule-run-status {
       font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-schedule-run-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-schedule-run-toggle:hover {
+      color: var(--text-primary);
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-schedule-run-toggle svg {
+      transition: transform 0.18s ease;
+    }
+
+    .workspace-task-schedule-run-toggle.is-open svg {
+      transform: rotate(180deg);
+    }
+
+    .workspace-task-schedule-run-panel {
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+      padding-top: 0.5rem;
+    }
+
+    .workspace-task-schedule-run-result {
+      margin: 0;
+      padding: 0.6rem 0.7rem;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+      color: var(--text-primary);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      max-height: 22rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
 
     .workspace-task-schedule-run-status[data-state="completed"] {
@@ -3190,6 +4020,27 @@
 
     .workspace-task-schedule-inline .form-control {
       max-width: 7rem;
+    }
+
+    .workspace-task-schedule-subsection {
+      display: grid;
+      gap: 0.85rem;
+      padding: 0.95rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+    }
+
+    .workspace-task-schedule-subsection-title {
+      color: var(--text-primary);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .workspace-task-schedule-permission-note {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.45;
     }
 
     .workspace-task-schedule-preview {
@@ -3539,6 +4390,43 @@
               </div>
             </div>
 
+            <div class="workspace-task-schedule-subsection">
+              <div class="workspace-task-schedule-subsection-title">Sleep Handling</div>
+              <div class="workspace-task-schedule-field">
+                <label for="workspace-task-schedule-sleep-policy" class="form-label">When Ori was asleep</label>
+                <select id="workspace-task-schedule-sleep-policy" class="form-select">
+                  <option value="run_once_on_wake">Run once when Ori wakes</option>
+                  <option value="skip">Skip missed runs</option>
+                </select>
+              </div>
+
+              <div class="workspace-task-schedule-enable-row">
+                <div class="workspace-task-schedule-enable-copy">
+                  <div class="workspace-task-schedule-enable-title">Wake this Mac before the task runs</div>
+                  <div class="workspace-task-schedule-enable-subtitle">Ori programs the next macOS wake event for the earliest wake-enabled task.</div>
+                </div>
+                <input type="checkbox" id="workspace-task-schedule-wake-mac" class="form-check-input workspace-task-schedule-switch" role="switch" aria-label="Wake this Mac before scheduled runs">
+              </div>
+
+              <div id="workspace-task-schedule-wake-fields" class="workspace-task-schedule-field-grid">
+                <div class="workspace-task-schedule-field">
+                  <label for="workspace-task-schedule-wake-lead" class="form-label">Wake before run</label>
+                  <div class="workspace-task-schedule-inline">
+                    <input type="number" id="workspace-task-schedule-wake-lead" class="form-control" min="1" max="120" value="5" inputmode="numeric">
+                    <span class="workspace-task-schedule-permission-note">minutes</span>
+                  </div>
+                </div>
+                <div class="workspace-task-schedule-field">
+                  <label for="workspace-task-schedule-wake-fallback" class="form-label">If wake fails</label>
+                  <select id="workspace-task-schedule-wake-fallback" class="form-select">
+                    <option value="run_on_next_wake">Run once when Ori wakes later</option>
+                    <option value="skip">Skip the missed run</option>
+                  </select>
+                </div>
+              </div>
+              <div id="workspace-task-schedule-wake-permission" class="workspace-task-schedule-permission-note"></div>
+            </div>
+
             <div id="workspace-task-schedule-preview" class="workspace-task-schedule-preview"></div>
           </div>
         </div>
@@ -3696,8 +4584,8 @@
   {{template "session-modals.tmpl" .}}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="/js/vendor/marked-14.1.4.min.js" integrity="sha384-lqPzN0kmFw9t2syAMwVPM4VbAyqsz/lPyYWbb2Xt6nSPM0WPNrpSWCUBgdcAdgnC"></script>
+  <script src="/js/vendor/dompurify-3.1.6.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"></script>
   <script src="/js/modules/themeManager.js"></script>
   <script src="/js/utils/logger.js"></script>
   <script src="/js/utils/event-bus.js"></script>

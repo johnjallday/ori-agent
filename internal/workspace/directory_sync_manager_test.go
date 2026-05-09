@@ -61,6 +61,12 @@ func (s *directorySyncTestStore) SaveWorkspaceAgent(workspaceID, agentName strin
 	return nil
 }
 
+func (s *directorySyncTestStore) Lock(wsID string) func() { return func() {} }
+
+func (s *directorySyncTestStore) Update(wsID string, fn func(*Workspace) error) error {
+	return CanonicalUpdate(s, wsID, fn)
+}
+
 func TestDirectorySyncManagerEmitsWorkspaceUpdatedEvent(t *testing.T) {
 	dir := t.TempDir()
 	ws := &Workspace{

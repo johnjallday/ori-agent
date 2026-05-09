@@ -9,6 +9,104 @@
 
   const { formatDate, buildTaskHierarchy, getDisplayStatus, getDisplayResult, computeTaskStats } = window.WorkspaceHubUtils;
 
+  // Persistent filter state for the Tasks panel. Survives realtime
+  // refreshes within a workspace; resetTaskFilters() is called on
+  // workspace switch so a stale filter from another workspace doesn't
+  // confuse the user.
+  const FILTER_DEFAULT = 'all';
+  const taskFilterState = {
+    status: FILTER_DEFAULT,
+    query: '',
+    schedulesShowAll: false
+  };
+  let taskSearchDebounceTimer = null;
+  let filterUIInitialized = false;
+  let lastFilterStats = null;
+
+  // Order matters — chips render in this order. "Needs attention" is
+  // separate (lives in the stat tile row) so users always see it even
+  // when they're filtering elsewhere.
+  const FILTER_DEFINITIONS = [
+    { key: 'all', label: 'All' },
+    { key: 'needs_attention', label: 'Needs attention', danger: true },
+    { key: 'in_progress', label: 'Running' },
+    { key: 'pending', label: 'Pending' },
+    { key: 'blocked', label: 'Blocked' },
+    { key: 'completed', label: 'Completed' },
+    { key: 'failed', label: 'Failed' },
+    { key: 'scheduled', label: 'Scheduled' }
+  ];
+
+  function resetTaskFilters() {
+    taskFilterState.status = FILTER_DEFAULT;
+    taskFilterState.query = '';
+    taskFilterState.schedulesShowAll = false;
+    const elements = window.WorkspaceHubState.getElements();
+    if (elements.taskSearchInput) elements.taskSearchInput.value = '';
+    if (elements.taskSearchClearBtn) elements.taskSearchClearBtn.hidden = true;
+  }
+
+  function statusBucket(task) {
+    const status = String(task?.status || 'pending').trim().toLowerCase();
+    if (status === 'completed') return 'completed';
+    if (status === 'in_progress') return 'in_progress';
+    if (status === 'failed') return 'failed';
+    if (status === 'blocked' || status === 'waiting_for_choice') return 'blocked';
+    if (status === 'cancelled' || status === 'timeout' || status === 'skipped') return status;
+    return 'pending';
+  }
+
+  function isNeedsAttentionTask(task) {
+    const bucket = statusBucket(task);
+    return bucket === 'blocked' || bucket === 'failed';
+  }
+
+  function applyTaskFilters(tasks) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return [];
+    const status = taskFilterState.status;
+    const query = String(taskFilterState.query || '').trim().toLowerCase();
+    if (status === 'all' && !query) return tasks.slice();
+
+    const matchesFilter = (task) => {
+      if (status === 'needs_attention') {
+        if (!isNeedsAttentionTask(task)) return false;
+      } else if (status === 'scheduled') {
+        if (!task.schedule_enabled) return false;
+      } else if (status !== 'all') {
+        if (statusBucket(task) !== status) return false;
+      }
+      if (query) {
+        const haystack = `${task?.name || ''} ${task?.description || ''} ${task?.details || ''} ${task?.to || ''}`.toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    };
+
+    // First pass: collect direct matches.
+    const matchedIds = new Set();
+    tasks.forEach((task) => {
+      if (matchesFilter(task)) matchedIds.add(task.id);
+    });
+
+    if (matchedIds.size === 0) return [];
+
+    // Second pass: pull in any ancestor workflow parents of matched
+    // subtasks so the surfaced rows still render under their parent
+    // group. Without this a "failed" filter that catches a single
+    // subtask would orphan it visually.
+    const taskById = new Map(tasks.map((t) => [t.id, t]));
+    const includeIds = new Set(matchedIds);
+    matchedIds.forEach((id) => {
+      let cursor = taskById.get(id);
+      while (cursor && cursor.parent_task_id && taskById.has(cursor.parent_task_id)) {
+        includeIds.add(cursor.parent_task_id);
+        cursor = taskById.get(cursor.parent_task_id);
+      }
+    });
+
+    return tasks.filter((task) => includeIds.has(task.id));
+  }
+
   function formatTaskStatusLabel(status) {
     const normalized = String(status || 'pending').trim().toLowerCase();
     if (normalized === 'waiting_for_choice') return 'waiting for choice';
@@ -419,16 +517,28 @@
   function renderStats(stats) {
     const elements = window.WorkspaceHubState.getElements();
     if (!stats) return;
+    lastFilterStats = stats;
     if (elements.statCompleted) elements.statCompleted.textContent = stats.completed || 0;
     if (elements.statInProgress) elements.statInProgress.textContent = stats.in_progress || 0;
     if (elements.statFailed) elements.statFailed.textContent = stats.failed || 0;
     if (elements.statScheduled) elements.statScheduled.textContent = stats.scheduled || 0;
+    if (elements.statNeedsAttention) elements.statNeedsAttention.textContent = stats.needs_attention || 0;
+    if (elements.statNeedsAttentionBtn) {
+      // Hide the tile when there's nothing to act on; this keeps the
+      // stat row focused on routine counts and only surfaces the
+      // attention pill when it has signal.
+      elements.statNeedsAttentionBtn.hidden = !(stats.needs_attention > 0);
+    }
+    syncStatTileActiveState();
+    renderFilterChips(stats);
   }
 
   /**
    * Render schedules list
    * @param {Array} tasks - Tasks array
    */
+  const SCHEDULES_COLLAPSED_LIMIT = 5;
+
   function renderSchedules(tasks) {
     const elements = window.WorkspaceHubState.getElements();
     if (!elements.schedulesList) return;
@@ -446,7 +556,10 @@
       return aTime - bTime;
     });
 
-    const items = sorted.slice(0, 5).map((task) => {
+    const showAll = taskFilterState.schedulesShowAll || sorted.length <= SCHEDULES_COLLAPSED_LIMIT;
+    const visible = showAll ? sorted : sorted.slice(0, SCHEDULES_COLLAPSED_LIMIT);
+
+    const items = visible.map((task) => {
       const nextRun = task.next_run ? formatDate(task.next_run) : 'Not scheduled';
       return `
         <div class="hub-schedule-item">
@@ -459,7 +572,23 @@
       `;
     });
 
-    elements.schedulesList.innerHTML = items.join('');
+    let html = items.join('');
+    if (sorted.length > SCHEDULES_COLLAPSED_LIMIT) {
+      const hiddenCount = sorted.length - SCHEDULES_COLLAPSED_LIMIT;
+      const label = showAll
+        ? 'Show fewer'
+        : `Show all (${sorted.length})`;
+      html += `<button type="button" class="hub-schedules-toggle" id="hubSchedulesToggle" aria-expanded="${showAll ? 'true' : 'false'}">${escapeHtml(label)}${showAll ? '' : ` <span class="hub-schedules-toggle-hint">${hiddenCount} more</span>`}</button>`;
+    }
+
+    elements.schedulesList.innerHTML = html;
+    const toggle = document.getElementById('hubSchedulesToggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        taskFilterState.schedulesShowAll = !taskFilterState.schedulesShowAll;
+        renderSchedules(tasks);
+      });
+    }
   }
 
   /**
@@ -471,8 +600,17 @@
     const state = window.WorkspaceHubState.getState();
 
     if (!elements.tasksList) return;
+    setupTaskFilterUI();
 
-    if (!tasks || tasks.length === 0) {
+    const totalCount = Array.isArray(tasks) ? tasks.length : 0;
+    if (elements.taskFilterbar) {
+      // Hide the filter bar entirely when the workspace has no tasks at
+      // all — there's nothing to filter, and showing an empty filter
+      // bar reads as broken UI.
+      elements.taskFilterbar.hidden = totalCount === 0;
+    }
+
+    if (totalCount === 0) {
       elements.tasksList.innerHTML = '<div class="hub-empty">No tasks yet. Create the first one to get started.</div>';
       if (elements.tasksSubtitle) {
         elements.tasksSubtitle.textContent = 'No tasks created yet.';
@@ -480,7 +618,30 @@
       return;
     }
 
-    state.taskHierarchy = buildTaskHierarchy(tasks);
+    const filtered = applyTaskFilters(tasks);
+
+    if (filtered.length === 0) {
+      const activeChip = FILTER_DEFINITIONS.find((d) => d.key === taskFilterState.status);
+      const filterLabel = activeChip ? activeChip.label.toLowerCase() : 'this filter';
+      const queryActive = String(taskFilterState.query || '').trim().length > 0;
+      const message = queryActive
+        ? `No tasks match "${escapeHtml(taskFilterState.query)}"${taskFilterState.status !== 'all' ? ` in ${escapeHtml(filterLabel)}` : ''}.`
+        : `No ${escapeHtml(filterLabel)} tasks right now.`;
+      elements.tasksList.innerHTML = `
+        <div class="hub-empty hub-empty--filtered">
+          <div>${message}</div>
+          <button type="button" class="modern-btn modern-btn-secondary hub-empty-clear-btn" id="hubTasksClearFilterBtn">Clear filter</button>
+        </div>
+      `;
+      const clearBtn = document.getElementById('hubTasksClearFilterBtn');
+      if (clearBtn) clearBtn.addEventListener('click', () => clearTaskFilter());
+      if (elements.tasksSubtitle) {
+        elements.tasksSubtitle.textContent = `0 of ${totalCount} task${totalCount === 1 ? '' : 's'} match the filter.`;
+      }
+      return;
+    }
+
+    state.taskHierarchy = buildTaskHierarchy(filtered);
     const { rootTasks, subtasksByParent, taskById } = state.taskHierarchy;
     const parentCount = rootTasks.filter((task) => subtasksByParent.has(task.id)).length;
     const subtaskCount = Array.from(subtasksByParent.values()).reduce((total, list) => total + list.length, 0);
@@ -863,6 +1024,131 @@
     modal.addEventListener('shown.bs.modal', () => nameInput.focus(), { once: true });
   }
 
+  function renderFilterChips(stats) {
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.taskFilterChips) return;
+
+    const counts = {
+      all: (stats?.completed || 0) + (stats?.in_progress || 0) + (stats?.pending || 0) + (stats?.blocked || 0) + (stats?.failed || 0),
+      needs_attention: stats?.needs_attention || 0,
+      in_progress: stats?.in_progress || 0,
+      pending: stats?.pending || 0,
+      blocked: stats?.blocked || 0,
+      completed: stats?.completed || 0,
+      failed: stats?.failed || 0,
+      scheduled: stats?.scheduled || 0
+    };
+
+    const chips = FILTER_DEFINITIONS
+      // Drop chips that have no matches AND aren't the active filter.
+      // This keeps the bar tight on small workspaces while still
+      // showing a chip the user has explicitly selected.
+      .filter((def) => def.key === 'all' || counts[def.key] > 0 || def.key === taskFilterState.status)
+      .map((def) => {
+        const active = def.key === taskFilterState.status;
+        const count = counts[def.key] || 0;
+        const dangerClass = def.danger ? ' hub-task-filter-chip--danger' : '';
+        const activeClass = active ? ' is-active' : '';
+        return `
+          <button type="button"
+                  class="hub-task-filter-chip${activeClass}${dangerClass}"
+                  data-task-filter="${escapeHtml(def.key)}"
+                  aria-pressed="${active ? 'true' : 'false'}">
+            <span>${escapeHtml(def.label)}</span>
+            <span class="hub-task-filter-chip-count">${count}</span>
+          </button>
+        `;
+      })
+      .join('');
+
+    elements.taskFilterChips.innerHTML = chips;
+    elements.taskFilterChips.querySelectorAll('[data-task-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => setTaskFilter(btn.getAttribute('data-task-filter')));
+    });
+  }
+
+  function syncStatTileActiveState() {
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.statButtons) return;
+    elements.statButtons.forEach((btn) => {
+      const filter = btn.getAttribute('data-task-filter');
+      btn.classList.toggle('is-active', filter === taskFilterState.status);
+    });
+  }
+
+  function setTaskFilter(name) {
+    const next = String(name || 'all').trim() || 'all';
+    if (next === taskFilterState.status) return;
+    taskFilterState.status = next;
+    const state = window.WorkspaceHubState.getState();
+    if (lastFilterStats) renderFilterChips(lastFilterStats);
+    syncStatTileActiveState();
+    renderTasksList(state.tasks || []);
+  }
+
+  function clearTaskFilter() {
+    taskFilterState.status = FILTER_DEFAULT;
+    taskFilterState.query = '';
+    const elements = window.WorkspaceHubState.getElements();
+    if (elements.taskSearchInput) elements.taskSearchInput.value = '';
+    if (elements.taskSearchClearBtn) elements.taskSearchClearBtn.hidden = true;
+    if (lastFilterStats) renderFilterChips(lastFilterStats);
+    syncStatTileActiveState();
+    const state = window.WorkspaceHubState.getState();
+    renderTasksList(state.tasks || []);
+  }
+
+  function setupTaskFilterUI() {
+    if (filterUIInitialized) return;
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.taskSearchInput && !elements.statButtons) return;
+
+    if (elements.taskSearchInput) {
+      elements.taskSearchInput.addEventListener('input', (event) => {
+        const value = event.target.value;
+        if (elements.taskSearchClearBtn) {
+          elements.taskSearchClearBtn.hidden = !value;
+        }
+        if (taskSearchDebounceTimer) {
+          window.clearTimeout(taskSearchDebounceTimer);
+        }
+        taskSearchDebounceTimer = window.setTimeout(() => {
+          taskFilterState.query = value;
+          const state = window.WorkspaceHubState.getState();
+          renderTasksList(state.tasks || []);
+        }, 200);
+      });
+      elements.taskSearchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && taskFilterState.query) {
+          event.preventDefault();
+          clearTaskFilter();
+        }
+      });
+    }
+
+    if (elements.taskSearchClearBtn) {
+      elements.taskSearchClearBtn.addEventListener('click', () => clearTaskFilter());
+    }
+
+    if (elements.statButtons) {
+      elements.statButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const filter = btn.getAttribute('data-task-filter');
+          // Clicking an already-active stat tile clears the filter — gives
+          // users a single-click way back to "All" without hunting for the
+          // chip row.
+          if (filter === taskFilterState.status) {
+            clearTaskFilter();
+          } else {
+            setTaskFilter(filter);
+          }
+        });
+      });
+    }
+
+    filterUIInitialized = true;
+  }
+
   // Expose tasks manager globally
   window.WorkspaceHubTasks = {
     getSubtasksForParent,
@@ -875,6 +1161,7 @@
     renderStats,
     renderSchedules,
     renderTasksList,
-    saveTaskAsWorkflow
+    saveTaskAsWorkflow,
+    resetTaskFilters
   };
 })();

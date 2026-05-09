@@ -1284,7 +1284,7 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		return nil, "", fmt.Errorf("no workspace configuration found in %s", folderPath)
 	}
 
-	rootWorkspace := importTree[0]
+	rootWorkspace := importTree[0].Workspace
 	if trimmedName := strings.TrimSpace(req.Name); trimmedName != "" {
 		rootWorkspace.Name = trimmedName
 	}
@@ -1324,7 +1324,8 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	// so the imported workspace's entry agent (and any other referenced agents)
 	// resolve cleanly even if the importing instance had never seen them before.
 	if h.agentStore != nil {
-		for _, item := range importTree {
+		for _, importItem := range importTree {
+			item := importItem.Workspace
 			if registered, restoreErr := agentworkspace.RestoreWorkspaceAgents(h.workspaceStore, item, h.agentStore); restoreErr != nil {
 				logger.Warn("Restore workspace agents during import failed", logger.Fields{
 					"workspace_id": item.ID,
@@ -1340,10 +1341,17 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	}
 
 	adapter := session.NewWorkspaceStoreAdapter(h.store)
-	for _, item := range importTree {
+	for _, importItem := range importTree {
+		item := importItem.Workspace
 		if item.Status == "" {
 			item.Status = agentworkspace.StatusActive
 		}
+
+		localFolderPath, err := h.workspaceStore.GetFolderPath(item.ID)
+		if err != nil {
+			return nil, warning, fmt.Errorf("locate imported workspace %s: %w", item.ID, err)
+		}
+		rebaseImportedWorkspaceFolderReferences(item, importItem.SourcePath, localFolderPath)
 
 		if err := h.workspaceStore.Save(item); err != nil {
 			return nil, warning, fmt.Errorf("persist imported workspace %s: %w", item.ID, err)
@@ -1384,6 +1392,15 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 				return nil, warning, fmt.Errorf("update imported workspace %s: %w", item.ID, err)
 			}
 		}
+
+		if importedNotes, err := h.importWorkspaceNoteFiles(ctx, item.ID, localFolderPath); err != nil {
+			return nil, warning, fmt.Errorf("import notes for workspace %s: %w", item.ID, err)
+		} else if importedNotes > 0 {
+			logger.Info("Imported workspace note files", logger.Fields{
+				"workspace_id": item.ID,
+				"count":        importedNotes,
+			})
+		}
 	}
 
 	rootSessionWorkspace, err := h.store.GetWorkspace(ctx, rootWorkspace.ID)
@@ -1393,15 +1410,20 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	return rootSessionWorkspace, warning, nil
 }
 
-func loadWorkspaceImportTree(folderPath string, parentID string) ([]*agentworkspace.Workspace, error) {
-	result := make([]*agentworkspace.Workspace, 0, 1)
+type workspaceImportItem struct {
+	Workspace  *agentworkspace.Workspace
+	SourcePath string
+}
+
+func loadWorkspaceImportTree(folderPath string, parentID string) ([]workspaceImportItem, error) {
+	result := make([]workspaceImportItem, 0, 1)
 	if err := appendWorkspaceImportTree(&result, folderPath, parentID); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func appendWorkspaceImportTree(result *[]*agentworkspace.Workspace, folderPath string, parentID string) error {
+func appendWorkspaceImportTree(result *[]workspaceImportItem, folderPath string, parentID string) error {
 	configPath := filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -1416,7 +1438,10 @@ func appendWorkspaceImportTree(result *[]*agentworkspace.Workspace, folderPath s
 		ws.FolderSlug = filepath.Base(folderPath)
 	}
 	ws.ParentID = strings.TrimSpace(parentID)
-	*result = append(*result, ws)
+	*result = append(*result, workspaceImportItem{
+		Workspace:  ws,
+		SourcePath: folderPath,
+	})
 
 	subDir := filepath.Join(folderPath, agentworkspace.SubWorkspacesDir)
 	entries, err := os.ReadDir(subDir)
@@ -1437,6 +1462,118 @@ func appendWorkspaceImportTree(result *[]*agentworkspace.Workspace, folderPath s
 	}
 
 	return nil
+}
+
+func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPath string, newPath string) {
+	if ws == nil {
+		return
+	}
+
+	normalizedNew := cleanWorkspaceSyncPath(newPath)
+	if normalizedNew == "" {
+		return
+	}
+
+	now := time.Now()
+	normalizedOld := cleanWorkspaceSyncPath(oldPath)
+	folderSlug := strings.TrimSpace(ws.FolderSlug)
+	newBaseName := filepath.Base(normalizedNew)
+	matchedReference := false
+
+	for i := range ws.DirectoryReferences {
+		refPath := cleanWorkspaceSyncPath(ws.DirectoryReferences[i].Path)
+		if (normalizedOld != "" && refPath == normalizedOld) ||
+			refPath == normalizedNew ||
+			(folderSlug != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), folderSlug)) ||
+			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), newBaseName)) {
+			ws.DirectoryReferences[i].WorkspaceID = ws.ID
+			if strings.TrimSpace(ws.DirectoryReferences[i].Name) == "" {
+				ws.DirectoryReferences[i].Name = workspaceReferenceName(ws, normalizedNew)
+			}
+			ws.DirectoryReferences[i].Path = normalizedNew
+			ws.DirectoryReferences[i].UpdatedAt = now
+			matchedReference = true
+		}
+	}
+
+	if !matchedReference {
+		ws.DirectoryReferences = append(ws.DirectoryReferences, agentworkspace.DirectoryReference{
+			ID:          uuid.New().String(),
+			WorkspaceID: ws.ID,
+			Name:        workspaceReferenceName(ws, normalizedNew),
+			Path:        normalizedNew,
+			X:           400,
+			Y:           300,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+	ws.DirectoryReferences = compactAgentWorkspaceDirectoryReferences(ws.DirectoryReferences)
+
+	matchedBinding := false
+	for i := range ws.MCPBindings {
+		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), "workspace-files") ||
+			workspaceBindingHasRoot(ws.MCPBindings[i].Config, normalizedOld) {
+			if ws.MCPBindings[i].Config == nil {
+				ws.MCPBindings[i].Config = make(map[string]interface{})
+			}
+			ws.MCPBindings[i].Config["roots"] = []string{normalizedNew}
+			ws.MCPBindings[i].UpdatedAt = now
+			ws.MCPBindings[i].Enabled = true
+			matchedBinding = true
+		}
+	}
+
+	if !matchedBinding {
+		ws.MCPBindings = append(ws.MCPBindings, agentworkspace.WorkspaceMCPBinding{
+			ID:         uuid.New().String(),
+			ServerName: "filesystem",
+			Alias:      "workspace-files",
+			Enabled:    true,
+			Config: map[string]interface{}{
+				"roots": []string{normalizedNew},
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+}
+
+func workspaceReferenceName(ws *agentworkspace.Workspace, path string) string {
+	if ws != nil {
+		if name := strings.TrimSpace(ws.FolderSlug); name != "" {
+			return name
+		}
+		if name := strings.TrimSpace(ws.Name); name != "" {
+			return name
+		}
+	}
+	return filepath.Base(path)
+}
+
+func compactAgentWorkspaceDirectoryReferences(refs []agentworkspace.DirectoryReference) []agentworkspace.DirectoryReference {
+	if len(refs) < 2 {
+		return refs
+	}
+
+	seen := make(map[string]int, len(refs))
+	compact := make([]agentworkspace.DirectoryReference, 0, len(refs))
+	for _, ref := range refs {
+		key := cleanWorkspaceSyncPath(ref.Path)
+		if key == "" {
+			compact = append(compact, ref)
+			continue
+		}
+		if existingIndex, ok := seen[key]; ok {
+			if strings.TrimSpace(compact[existingIndex].Name) == "" && strings.TrimSpace(ref.Name) != "" {
+				compact[existingIndex].Name = ref.Name
+			}
+			continue
+		}
+		seen[key] = len(compact)
+		compact = append(compact, ref)
+	}
+	return compact
 }
 
 func ensureImportedWorkspaceEntryAgent(ws *agentworkspace.Workspace, agentName string) error {
@@ -2507,6 +2644,12 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
 				continue
 			}
+			if folderPath, err := h.workspaceStore.GetFolderPath(id); err == nil {
+				if _, err := h.importWorkspaceNoteFiles(ctx, id, folderPath); err != nil {
+					logger.Warn("Sync import: failed to import note files", logger.Fields{"id": id, "error": err})
+					warnings = append(warnings, fmt.Sprintf("Imported %s but failed to import note files", diskWS.Name))
+				}
+			}
 			imported++
 		}
 	}
@@ -2623,6 +2766,8 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 	if normalizedNew == "" {
 		return fmt.Errorf("new workspace folder path is required")
 	}
+	folderSlug := strings.TrimSpace(workspace.FolderSlug)
+	newBaseName := filepath.Base(normalizedNew)
 
 	refs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
 	if err != nil {
@@ -2635,7 +2780,14 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 		if refPath == "" {
 			continue
 		}
-		if refPath == normalizedOld || (strings.TrimSpace(workspace.FolderSlug) != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), strings.TrimSpace(workspace.FolderSlug))) {
+		if refPath == normalizedOld ||
+			refPath == normalizedNew ||
+			(folderSlug != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), folderSlug)) ||
+			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), newBaseName)) {
+			refs[i].WorkspaceID = workspace.ID
+			if strings.TrimSpace(refs[i].Name) == "" {
+				refs[i].Name = sessionWorkspaceReferenceName(workspace, normalizedNew)
+			}
 			refs[i].Path = normalizedNew
 			refs[i].UpdatedAt = now
 			matchedReference = true
@@ -2645,7 +2797,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 		refs = append(refs, workspaceDirectoryReference{
 			ID:          uuid.New().String(),
 			WorkspaceID: workspace.ID,
-			Name:        strings.TrimSpace(workspace.FolderSlug),
+			Name:        sessionWorkspaceReferenceName(workspace, normalizedNew),
 			Path:        normalizedNew,
 			X:           400,
 			Y:           300,
@@ -2653,6 +2805,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 			UpdatedAt:   now,
 		})
 	}
+	refs = compactWorkspaceDirectoryReferences(refs)
 
 	refData, err := json.Marshal(refs)
 	if err != nil {
@@ -2698,6 +2851,43 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 	workspace.MCPBindingsJSON = bindingData
 
 	return nil
+}
+
+func sessionWorkspaceReferenceName(ws *session.Workspace, path string) string {
+	if ws != nil {
+		if name := strings.TrimSpace(ws.FolderSlug); name != "" {
+			return name
+		}
+		if name := strings.TrimSpace(ws.Name); name != "" {
+			return name
+		}
+	}
+	return filepath.Base(path)
+}
+
+func compactWorkspaceDirectoryReferences(refs []workspaceDirectoryReference) []workspaceDirectoryReference {
+	if len(refs) < 2 {
+		return refs
+	}
+
+	seen := make(map[string]int, len(refs))
+	compact := make([]workspaceDirectoryReference, 0, len(refs))
+	for _, ref := range refs {
+		key := cleanWorkspaceSyncPath(ref.Path)
+		if key == "" {
+			compact = append(compact, ref)
+			continue
+		}
+		if existingIndex, ok := seen[key]; ok {
+			if strings.TrimSpace(compact[existingIndex].Name) == "" && strings.TrimSpace(ref.Name) != "" {
+				compact[existingIndex].Name = ref.Name
+			}
+			continue
+		}
+		seen[key] = len(compact)
+		compact = append(compact, ref)
+	}
+	return compact
 }
 
 func (h *Handler) restoreWorkspaceNoteFiles(ctx context.Context, workspaceID string) error {

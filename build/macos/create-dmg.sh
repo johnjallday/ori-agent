@@ -272,14 +272,35 @@ echo "💿 Creating compressed DMG image..."
 
 # Create compressed DMG
 rm -f "${DIST_DIR}/${DMG_NAME}"
-hdiutil create \
-  -srcfolder "${DMG_STAGING}" \
-  -volname "${APP_NAME} ${VERSION}" \
-  -fs HFS+ \
-  -fsargs "-c c=64,a=16,e=16" \
-  -format UDZO \
-  -imagekey zlib-level=9 \
-  "${DIST_DIR}/${DMG_NAME}"
+
+# Detach any leftover disk images that could hold hdiutil resources busy.
+# This is the most common cause of "hdiutil: create failed - Resource busy"
+# on shared/CI runners.
+hdiutil info | awk '/^image-path/ {print $NF}' | while read -r path; do
+  hdiutil detach -force "$path" >/dev/null 2>&1 || true
+done
+
+# hdiutil on shared CI runners flakes intermittently with "Resource busy".
+# Retry up to 3 times with backoff.
+for attempt in 1 2 3; do
+  if hdiutil create \
+    -srcfolder "${DMG_STAGING}" \
+    -volname "${APP_NAME} ${VERSION}" \
+    -fs HFS+ \
+    -fsargs "-c c=64,a=16,e=16" \
+    -format UDZO \
+    -imagekey zlib-level=9 \
+    "${DIST_DIR}/${DMG_NAME}"; then
+    break
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    echo "❌ hdiutil create failed after 3 attempts" >&2
+    exit 1
+  fi
+  echo "⚠️  hdiutil create failed (attempt ${attempt}/3); retrying after 10s..." >&2
+  rm -f "${DIST_DIR}/${DMG_NAME}"
+  sleep 10
+done
 
 # Clean up
 rm -rf "${BUILD_DIR}"

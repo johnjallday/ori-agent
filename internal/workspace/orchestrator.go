@@ -65,13 +65,27 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 
 	logger.Debug("[Orchestrator] Starting mission for workspace", logger.Fields{"workspace_id": workspaceID, "mission": mission})
 
-	// Step 1: Analyze the mission and break it down into tasks
+	// Step 1: Analyze the mission and break it down into tasks. analyzeMission
+	// resolves the LLM's dependency hints (1-based indices into the task
+	// array) into Task.InputTaskIDs against the freshly minted task UUIDs.
 	tasks, err := o.analyzeMission(ctx, mission, workspace.Agents)
 	if err != nil {
 		return fmt.Errorf("failed to analyze mission: %w", err)
 	}
 
 	logger.Info("[Orchestrator] Created tasks from mission", logger.Fields{"task_id": len(tasks)})
+
+	// Step 1.5: Topologically sort so AddTask sees dependencies before
+	// dependents (graph validation in AddTask rejects forward references)
+	// AND so ExecuteTasksSequentially below honors the dependency order
+	// even when the LLM returned tasks in an arbitrary sequence. Cycles
+	// (which shouldn't normally come out of the LLM) are reported here
+	// rather than discovered later as a deadlock during execution.
+	sortedTasks, sortErr := TopoSortTasks(tasks)
+	if sortErr != nil {
+		return fmt.Errorf("orchestrator: %w", sortErr)
+	}
+	tasks = sortedTasks
 
 	// Step 2: Add tasks to the workspace
 	for _, task := range tasks {
@@ -100,7 +114,11 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 	return nil
 }
 
-// analyzeMission uses LLM to break down a mission into tasks
+// analyzeMission uses LLM to break down a mission into tasks. The LLM is
+// asked to express dependencies as 1-based indices into the task array
+// (since it doesn't know task UUIDs at generation time), which we then
+// resolve into the corresponding generated task IDs and stash on
+// Task.InputTaskIDs so downstream execution can build runtime inputs.
 func (o *Orchestrator) analyzeMission(ctx context.Context, mission string, availableAgents []string) ([]Task, error) {
 	// Create a system prompt for task breakdown
 	systemPrompt := fmt.Sprintf(`You are an intelligent task orchestrator. Your job is to break down a high-level mission into specific tasks and delegate them to available agents.
@@ -112,7 +130,7 @@ Analyze the mission and create a list of tasks. For each task:
 1. Provide a clear, actionable description
 2. Assign it to the most appropriate agent based on their capabilities
 3. Set a priority (1-10, higher = more urgent)
-4. Identify dependencies (which tasks must complete first)
+4. Identify dependencies as 1-based indices into THIS task array (e.g. [1, 3] means depends on tasks 1 and 3). Use [] if no dependencies. Do not refer to tasks by description or by name; only indices.
 
 Return your response as a JSON array of tasks in this format:
 [
@@ -146,12 +164,14 @@ Return your response as a JSON array of tasks in this format:
 
 	content := completion.Choices[0].Message.Content
 
-	// Parse JSON response
+	// Parse JSON response. Dependencies are read as RawMessage so we can
+	// accept either ints (1-based) or numeric strings; LLMs occasionally
+	// stringify the indices despite the schema.
 	var taskSpecs []struct {
-		Description  string   `json:"description"`
-		AssignedTo   string   `json:"assigned_to"`
-		Priority     int      `json:"priority"`
-		Dependencies []string `json:"dependencies"`
+		Description  string            `json:"description"`
+		AssignedTo   string            `json:"assigned_to"`
+		Priority     int               `json:"priority"`
+		Dependencies []json.RawMessage `json:"dependencies"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &taskSpecs); err != nil {
@@ -171,7 +191,7 @@ Return your response as a JSON array of tasks in this format:
 		}, nil
 	}
 
-	// Convert to Task structs
+	// Generate IDs first so dependency indices can resolve to real UUIDs.
 	tasks := make([]Task, len(taskSpecs))
 	for i, spec := range taskSpecs {
 		tasks[i] = Task{
@@ -182,7 +202,6 @@ Return your response as a JSON array of tasks in this format:
 			Priority:    spec.Priority,
 			Context: map[string]interface{}{
 				"original_mission": mission,
-				"dependencies":     spec.Dependencies,
 				"task_index":       i,
 			},
 			Status:    TaskStatusPending,
@@ -190,7 +209,66 @@ Return your response as a JSON array of tasks in this format:
 		}
 	}
 
+	// Resolve dependencies. Each dependency entry is interpreted as a
+	// 1-based index into taskSpecs; out-of-range or unparseable entries are
+	// dropped with a warning rather than failing the whole plan.
+	for i, spec := range taskSpecs {
+		if len(spec.Dependencies) == 0 {
+			continue
+		}
+		var resolved []string
+		for _, raw := range spec.Dependencies {
+			depIdx, ok := parseDependencyIndex(raw, len(tasks))
+			if !ok {
+				logger.Warn("[Orchestrator] dropping unparseable dependency", logger.Fields{
+					"task_index": i + 1,
+					"raw":        string(raw),
+				})
+				continue
+			}
+			if depIdx == i {
+				logger.Warn("[Orchestrator] dropping self-dependency", logger.Fields{
+					"task_index": i + 1,
+				})
+				continue
+			}
+			resolved = append(resolved, tasks[depIdx].ID)
+		}
+		if len(resolved) > 0 {
+			tasks[i].InputTaskIDs = resolved
+		}
+	}
+
 	return tasks, nil
+}
+
+// parseDependencyIndex returns the 0-based index a dependency entry refers
+// to, given the LLM emits 1-based indices into the same array. Accepts
+// either a JSON number or a JSON string that happens to wrap an integer
+// (some LLMs do this). Returns (idx, true) on success and (0, false) on
+// any unparseable / out-of-range value.
+func parseDependencyIndex(raw json.RawMessage, taskCount int) (int, bool) {
+	// Try integer.
+	var asInt int
+	if err := json.Unmarshal(raw, &asInt); err == nil {
+		idx := asInt - 1
+		if idx >= 0 && idx < taskCount {
+			return idx, true
+		}
+		return 0, false
+	}
+	// Try string-of-int.
+	var asStr string
+	if err := json.Unmarshal(raw, &asStr); err == nil {
+		var parsed int
+		if _, scanErr := fmt.Sscanf(asStr, "%d", &parsed); scanErr == nil {
+			idx := parsed - 1
+			if idx >= 0 && idx < taskCount {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // executeTasksSequentially executes tasks in priority order
@@ -232,17 +310,15 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		return fmt.Errorf("failed to get workspace: %w", err)
 	}
 
-	// Inject input task results into task context if InputTaskIDs are specified
+	// Build runtime inputs for this execution. Persisted task.Context stays
+	// untouched; see Task.RuntimeInputs for the runtime-only data path.
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
-		enrichedContext := workspace.GetInputContext(&task)
-		task.Context = enrichedContext
+		task.RuntimeInputs = workspace.BuildRuntimeInputs(&task)
 
-		// Debug: Check what was added to context
-		if inputResults, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap := inputResults.(map[string]string)
-			logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
-			for taskID, result := range resultsMap {
+		if task.RuntimeInputs != nil && len(task.RuntimeInputs.TaskResults) > 0 {
+			logger.Debug("Built runtime inputs for task", logger.Fields{"result": len(task.RuntimeInputs.TaskResults), "id": task.ID})
+			for taskID, result := range task.RuntimeInputs.TaskResults {
 				preview := result
 				if len(preview) > 100 {
 					preview = preview[:100] + "..."
@@ -256,20 +332,15 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": task.ID})
 	}
 
-	// Update task status to in_progress
+	// Update task status to in_progress and post the task-request message in
+	// one atomic Update so a concurrent goroutine cannot drop either change.
 	now := time.Now()
-	task.Status = TaskStatusInProgress
-	task.StartedAt = &now
-	if err := workspace.UpdateTask(task); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
+	if err := task.SetStatus(TaskStatusInProgress); err != nil {
+		logger.Error("[Orchestrator] Warning: failed to mark local task in_progress", logger.Fields{"task_id": task.ID, "error": err})
+		return err
 	}
+	task.StartedAt = &now
 
-	o.publishEvent("task_started", workspaceID, map[string]interface{}{
-		"task_id":     task.ID,
-		"assigned_to": task.To,
-	})
-
-	// Send message to the assigned agent
 	message := AgentMessage{
 		ID:        uuid.New().String(),
 		From:      "orchestrator",
@@ -280,14 +351,25 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		Timestamp: time.Now(),
 	}
 
-	if err := workspace.AddMessage(message); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
+	if updateErr := o.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
+		if err := fresh.MutateTask(task.ID, func(t *Task) error {
+			if err := t.SetStatus(TaskStatusInProgress); err != nil {
+				return err
+			}
+			t.StartedAt = &now
+			return nil
+		}); err != nil {
+			return err
+		}
+		return fresh.AddMessage(message)
+	}); updateErr != nil {
+		logger.Error("[Orchestrator] Warning: failed to start task", logger.Fields{"task_id": task.ID, "error": updateErr})
 	}
 
-	// Save workspace with updated task and message
-	if err := o.workspaceStore.Save(workspace); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"error": err})
-	}
+	o.publishEvent("task_started", workspaceID, map[string]interface{}{
+		"task_id":     task.ID,
+		"assigned_to": task.To,
+	})
 
 	o.publishEvent("message_sent", workspaceID, map[string]interface{}{
 		"from":    message.From,
@@ -311,16 +393,21 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	if err != nil {
 		// Task failed
 		logger.Error("[Orchestrator] Task failed", logger.Fields{"task_id": task.ID, "err": err})
-		task.Status = TaskStatusFailed
+		if statusErr := task.SetStatus(TaskStatusFailed); statusErr != nil {
+			logger.Error("[Orchestrator] Warning: failed to mark local task failed", logger.Fields{"task_id": task.ID, "error": statusErr})
+		}
 		task.CompletedAt = &completed
 		task.Error = err.Error()
 
-		if updateErr := workspace.UpdateTask(task); updateErr != nil {
-			logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": updateErr})
-		}
-
-		if saveErr := o.workspaceStore.Save(workspace); saveErr != nil {
-			logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"workspace_id": saveErr})
+		if updateErr := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
+			if statusErr := t.SetStatus(TaskStatusFailed); statusErr != nil {
+				return statusErr
+			}
+			t.CompletedAt = &completed
+			t.Error = err.Error()
+			return nil
+		}); updateErr != nil {
+			logger.Error("[Orchestrator] Warning: failed to record task failure", logger.Fields{"task_id": task.ID, "error": updateErr})
 		}
 
 		o.publishEvent("task_failed", workspaceID, map[string]interface{}{
@@ -332,17 +419,22 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	}
 
 	// Mark task as completed
-	task.Status = TaskStatusCompleted
+	if statusErr := task.SetStatus(TaskStatusCompleted); statusErr != nil {
+		logger.Error("[Orchestrator] Warning: failed to mark local task completed", logger.Fields{"task_id": task.ID, "error": statusErr})
+	}
 	task.CompletedAt = &completed
 	task.Result = result
 	ApplyTaskResultMetadata(&task, result)
-	if err := workspace.UpdateTask(task); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
-	}
-
-	// Save final workspace state
-	if err := o.workspaceStore.Save(workspace); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save workspace", logger.Fields{"error": err})
+	if err := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
+		if statusErr := t.SetStatus(TaskStatusCompleted); statusErr != nil {
+			return statusErr
+		}
+		t.CompletedAt = &completed
+		t.Result = result
+		ApplyTaskResultMetadata(t, result)
+		return nil
+	}); err != nil {
+		logger.Error("[Orchestrator] Warning: failed to record task completion", logger.Fields{"task_id": task.ID, "error": err})
 	}
 
 	o.publishEvent("task_completed", workspaceID, map[string]interface{}{

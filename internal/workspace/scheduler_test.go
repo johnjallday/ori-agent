@@ -410,3 +410,67 @@ func TestCalculateNextRun_ExistingScheduleTypes(t *testing.T) {
 		}
 	})
 }
+
+func TestTaskScheduler_ShouldSkipMissedTaskRun(t *testing.T) {
+	ts := &TaskScheduler{pollInterval: time.Minute}
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+
+	missedAt := now.Add(-10 * time.Minute)
+	task := &Task{
+		SleepPolicy: "skip",
+		NextRun:     &missedAt,
+	}
+
+	if !ts.shouldSkipMissedTaskRun(task, now) {
+		t.Fatal("expected overdue skip-policy task to be skipped")
+	}
+
+	recentlyDue := now.Add(-30 * time.Second)
+	task.NextRun = &recentlyDue
+	if ts.shouldSkipMissedTaskRun(task, now) {
+		t.Fatal("did not expect recently due task to be treated as missed sleep")
+	}
+
+	task.SleepPolicy = "run_once_on_wake"
+	task.NextRun = &missedAt
+	if ts.shouldSkipMissedTaskRun(task, now) {
+		t.Fatal("did not expect run-on-wake policy to skip missed task")
+	}
+}
+
+func TestCollectWakeCandidates(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	nextRun := now.Add(2 * time.Hour)
+	pastRun := now.Add(-time.Hour)
+
+	ws := &Workspace{
+		ID:     "workspace-1",
+		Status: StatusActive,
+		Tasks: []Task{
+			{
+				ID:              "task-1",
+				ScheduleName:    "Daily report",
+				Schedule:        &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"},
+				ScheduleEnabled: true,
+				WakeMacEnabled:  true,
+				WakeLeadMinutes: 10,
+				NextRun:         &nextRun,
+			},
+			{
+				ID:              "task-2",
+				Schedule:        &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "10:00"},
+				ScheduleEnabled: true,
+				WakeMacEnabled:  true,
+				NextRun:         &pastRun,
+			},
+		},
+	}
+
+	candidates := collectWakeCandidates(ws, now)
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 wake candidate, got %d", len(candidates))
+	}
+	if candidates[0].TaskID != "task-1" || candidates[0].LeadMinutes != 10 {
+		t.Fatalf("unexpected candidate: %#v", candidates[0])
+	}
+}

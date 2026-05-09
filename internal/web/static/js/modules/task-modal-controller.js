@@ -37,6 +37,8 @@ class TaskModalController {
     this.currentResultSourceTaskId = '';
     this.currentResultNextSteps = [];
     this.currentResultFollowUpPending = false;
+    this.currentMissingMCPRequirement = null;
+    this.mcpRequirementPending = false;
   }
 
   /**
@@ -53,6 +55,9 @@ class TaskModalController {
 
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
+    document.getElementById('taskModalMCPRequirementAdd')?.addEventListener('click', () => {
+      void this.addRequiredMCPConnector();
+    });
 
     // Schedule fields toggle
     document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
@@ -60,11 +65,44 @@ class TaskModalController {
       if (scheduleFields) {
         scheduleFields.style.display = e.target.checked ? 'block' : 'none';
       }
+      this.updateSchedulePreview();
     });
 
     // Schedule type change handler
     document.getElementById('taskModalScheduleType')?.addEventListener('change', () => {
       this.updateScheduleTypeFields();
+      this.updateSchedulePreview();
+    });
+
+    // Live preview triggers — any field that affects the schedule
+    // summary should refresh the preview text.
+    [
+      'taskModalScheduleTime',
+      'taskModalScheduleIntervalValue',
+      'taskModalScheduleIntervalUnit',
+      'taskModalScheduleDatetime',
+      'taskModalScheduleCron'
+    ].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', () => this.updateSchedulePreview());
+      document.getElementById(id)?.addEventListener('change', () => this.updateSchedulePreview());
+    });
+
+    // Day-of-week pills + presets
+    const dayRow = document.getElementById('taskModalScheduleDayRow');
+    if (dayRow) {
+      dayRow.addEventListener('change', () => this.updateSchedulePreview());
+    }
+    document.querySelectorAll('[data-day-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const preset = btn.getAttribute('data-day-preset') || '';
+        const presets = {
+          weekdays: [1, 2, 3, 4, 5],
+          weekend: [0, 6],
+          all: [0, 1, 2, 3, 4, 5, 6]
+        };
+        this.setSelectedScheduleDays(presets[preset] || []);
+        this.updateSchedulePreview();
+      });
     });
 
     // Auto-save fields toggle
@@ -955,9 +993,15 @@ class TaskModalController {
       section: document.getElementById('taskModalResultSection'),
       meta: document.getElementById('taskModalResultMeta'),
       body: document.getElementById('taskModalResultBody'),
+      toolSummary: document.getElementById('taskModalToolSummary'),
       nextSteps: document.getElementById('taskModalResultNextSteps'),
       nextStepsCopy: document.getElementById('taskModalResultNextStepsCopy'),
-      nextStepsActions: document.getElementById('taskModalResultNextStepsActions')
+      nextStepsActions: document.getElementById('taskModalResultNextStepsActions'),
+      mcpRequirement: document.getElementById('taskModalMCPRequirement'),
+      mcpRequirementServer: document.getElementById('taskModalMCPRequirementServer'),
+      mcpRequirementBody: document.getElementById('taskModalMCPRequirementBody'),
+      mcpRequirementStatus: document.getElementById('taskModalMCPRequirementStatus'),
+      mcpRequirementAdd: document.getElementById('taskModalMCPRequirementAdd')
     };
   }
 
@@ -967,12 +1011,400 @@ class TaskModalController {
     this.currentResultSourceTaskId = '';
     this.currentResultNextSteps = [];
     this.currentResultFollowUpPending = false;
+    this.currentMissingMCPRequirement = null;
+    this.mcpRequirementPending = false;
     if (elements.section) elements.section.style.display = 'none';
     if (elements.meta) elements.meta.textContent = '';
     if (elements.body) elements.body.textContent = '';
+    if (elements.toolSummary) {
+      elements.toolSummary.style.display = 'none';
+      elements.toolSummary.innerHTML = '';
+    }
     if (elements.nextSteps) elements.nextSteps.style.display = 'none';
     if (elements.nextStepsCopy) elements.nextStepsCopy.textContent = '';
     if (elements.nextStepsActions) elements.nextStepsActions.innerHTML = '';
+    if (elements.mcpRequirement) elements.mcpRequirement.style.display = 'none';
+    if (elements.mcpRequirementServer) elements.mcpRequirementServer.textContent = '';
+    if (elements.mcpRequirementBody) elements.mcpRequirementBody.textContent = '';
+    if (elements.mcpRequirementStatus) {
+      elements.mcpRequirementStatus.textContent = '';
+      elements.mcpRequirementStatus.style.display = 'none';
+    }
+    if (elements.mcpRequirementAdd) {
+      elements.mcpRequirementAdd.disabled = false;
+      elements.mcpRequirementAdd.textContent = 'Add Connector';
+    }
+  }
+
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  truncateToolSummaryText(value, maxLength = 180) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+  }
+
+  extractToolNameFromTraceEntry(entry) {
+    const title = String(entry?.title || '').trim();
+    const titleMatch = title.match(/^(?:Calling|Completed|Failed)\s+(.+)$/i);
+    if (titleMatch?.[1]) {
+      return titleMatch[1].trim();
+    }
+
+    const summary = String(entry?.summary || '').trim();
+    const summaryMatch = summary.match(/^(?:Calling|Completed|Failed)\s+([^\n]+)/i);
+    if (summaryMatch?.[1]) {
+      return summaryMatch[1].trim();
+    }
+
+    return '';
+  }
+
+  getToolKindLabel(toolName, entry) {
+    const source = String(entry?.source || '').trim().toLowerCase();
+    const name = String(toolName || '').trim().toLowerCase();
+    if (source.includes('mcp') || name.startsWith('mcp.') || name.startsWith('mcp:')) {
+      return 'MCP';
+    }
+    const nativeTools = new Set(['web_search', 'web_fetch', 'weather', 'time', 'finance', 'sports', 'air_quality']);
+    if (nativeTools.has(name)) {
+      return 'Native';
+    }
+    return 'Tool';
+  }
+
+  summarizeToolArguments(detail) {
+    const raw = String(detail || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const keys = ['query', 'url', 'location', 'ticker', 'city'];
+      for (const key of keys) {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, key)) {
+          return `${key}: ${this.truncateToolSummaryText(parsed[key], 140)}`;
+        }
+      }
+    } catch (_error) {
+      // Detail is often already a readable string.
+    }
+    return this.truncateToolSummaryText(raw, 160);
+  }
+
+  summarizeToolResult(summary) {
+    return this.truncateToolSummaryText(summary, 180);
+  }
+
+  getTaskToolUsage(task) {
+    const trace = Array.isArray(task?.execution_trace) ? task.execution_trace : [];
+    const byName = new Map();
+
+    trace.forEach((entry) => {
+      const rawStatus = String(entry?.status || entry?.type || '').trim().toLowerCase();
+      const rawTitle = String(entry?.title || '').trim().toLowerCase();
+      if (!rawStatus.includes('tool') &&
+          !rawTitle.startsWith('calling ') &&
+          !rawTitle.startsWith('completed ') &&
+          !rawTitle.startsWith('failed ')) {
+        return;
+      }
+
+      const toolName = this.extractToolNameFromTraceEntry(entry);
+      if (!toolName) return;
+
+      if (!byName.has(toolName)) {
+        byName.set(toolName, {
+          name: toolName,
+          kind: this.getToolKindLabel(toolName, entry),
+          calls: 0,
+          results: 0,
+          errors: 0,
+          latestArgs: '',
+          latestResult: ''
+        });
+      }
+
+      const item = byName.get(toolName);
+      if (rawStatus.includes('call') || rawTitle.startsWith('calling ')) {
+        item.calls += 1;
+        item.latestArgs = this.summarizeToolArguments(entry?.detail);
+      } else if (rawStatus.includes('error') || rawTitle.startsWith('failed ')) {
+        item.errors += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+      } else if (rawStatus.includes('result') || rawTitle.startsWith('completed ')) {
+        item.results += 1;
+        item.latestResult = this.summarizeToolResult(entry?.summary);
+      }
+    });
+
+    return Array.from(byName.values());
+  }
+
+  renderTaskToolSummary(task) {
+    const elements = this.getResultSectionElements();
+    if (!elements.toolSummary) return;
+
+    const tools = this.getTaskToolUsage(task);
+    if (tools.length === 0) {
+      elements.toolSummary.style.display = 'none';
+      elements.toolSummary.innerHTML = '';
+      return;
+    }
+
+    const totalCalls = tools.reduce((sum, item) => sum + Math.max(item.calls, item.results + item.errors), 0);
+    const cards = tools.map((item) => {
+      const status = item.errors > 0 ? 'Error' : (item.results > 0 ? 'Completed' : 'Called');
+      const callCount = Math.max(item.calls, item.results + item.errors);
+      const count = callCount === 1 ? '1 call' : `${callCount} calls`;
+      const detail = item.latestArgs || item.latestResult || '';
+      return `
+        <div style="display: grid; gap: 4px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="min-width: 0; color: var(--text-primary); font-size: 0.84rem; font-weight: 700; overflow-wrap: anywhere;">${this.escapeHtml(item.name)}</div>
+            <div style="flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--primary-color) 40%, transparent); background: color-mix(in srgb, var(--primary-color) 13%, transparent); color: var(--primary-color); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;">${this.escapeHtml(item.kind)}</div>
+          </div>
+          <div style="font-size: 0.74rem; color: var(--text-secondary); line-height: 1.4;">${this.escapeHtml(status)} • ${this.escapeHtml(count)}</div>
+          ${detail ? `<div style="font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere;">${this.escapeHtml(detail)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    elements.toolSummary.style.display = 'grid';
+    elements.toolSummary.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px;">
+        <div style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary);">Tools Used</div>
+        <div style="font-size: 0.72rem; color: var(--text-muted);">${this.escapeHtml(tools.length === 1 ? '1 tool' : `${tools.length} tools`)} • ${this.escapeHtml(totalCalls === 1 ? '1 call' : `${totalCalls} calls`)}</div>
+      </div>
+      <div style="display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));">${cards}</div>
+    `;
+  }
+
+  getTaskDiagnosticText(task, resultText = '') {
+    const parts = [resultText, task?.error, task?.last_error];
+
+    const addValue = (value) => {
+      const text = String(value || '').trim();
+      if (text) parts.push(text);
+    };
+
+    if (Array.isArray(task?.execution_trace)) {
+      task.execution_trace.forEach((entry) => {
+        addValue(entry?.summary);
+        addValue(entry?.title);
+      });
+    }
+
+    if (Array.isArray(task?.execution_history)) {
+      task.execution_history.forEach((entry) => {
+        addValue(entry?.error);
+        addValue(entry?.summary);
+      });
+    }
+
+    const humanLoop = task?.context?.human_loop;
+    if (humanLoop && typeof humanLoop === 'object') {
+      addValue(humanLoop.agent_response);
+      addValue(humanLoop.reason);
+    }
+
+    const retry = task?.context?.execution_retry;
+    if (retry && typeof retry === 'object' && Array.isArray(retry.history)) {
+      retry.history.forEach((entry) => addValue(entry?.summary));
+    }
+
+    return parts.filter(Boolean).join('\n');
+  }
+
+  detectMissingMCPRequirement(task, resultText = '') {
+    const diagnostic = this.getTaskDiagnosticText(task, resultText);
+    if (!diagnostic || !/load\s+MCP\s+template/i.test(diagnostic)) {
+      return null;
+    }
+
+    const directMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+)\s+for\s+binding\s+([^:\s]+):\s+server\s+([^\s:]+)\s+not\s+found/i);
+    const fallbackMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+).*?server\s+([^\s:]+)\s+not\s+found/i);
+    const serverName = String(directMatch?.[1] || fallbackMatch?.[1] || fallbackMatch?.[2] || '').trim();
+    if (!serverName || !/^[a-zA-Z0-9._-]+$/.test(serverName)) {
+      return null;
+    }
+
+    return {
+      serverName,
+      bindingId: String(directMatch?.[2] || '').trim()
+    };
+  }
+
+  renderMCPRequirement(task, resultText = '') {
+    const elements = this.getResultSectionElements();
+    if (!elements.mcpRequirement) return;
+
+    const requirement = this.detectMissingMCPRequirement(task, resultText);
+    this.currentMissingMCPRequirement = requirement;
+
+    if (!requirement) {
+      elements.mcpRequirement.style.display = 'none';
+      return;
+    }
+
+    const serverName = requirement.serverName;
+    elements.mcpRequirement.style.display = 'grid';
+    if (elements.mcpRequirementServer) {
+      elements.mcpRequirementServer.textContent = serverName;
+    }
+    if (elements.mcpRequirementBody) {
+      elements.mcpRequirementBody.textContent = requirement.bindingId
+        ? `Workspace binding ${requirement.bindingId} points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`
+        : `The workspace points to ${serverName}, but My Servers does not have that connector yet. Add it from the MCP registry, then retry the task.`;
+    }
+    if (elements.mcpRequirementStatus) {
+      elements.mcpRequirementStatus.textContent = '';
+      elements.mcpRequirementStatus.style.display = 'none';
+    }
+    if (elements.mcpRequirementAdd) {
+      elements.mcpRequirementAdd.disabled = false;
+      elements.mcpRequirementAdd.textContent = `Add ${serverName}`;
+    }
+  }
+
+  setMCPRequirementStatus(message) {
+    const status = document.getElementById('taskModalMCPRequirementStatus');
+    if (!status) return;
+    const text = String(message || '').trim();
+    status.textContent = text;
+    status.style.display = text ? 'block' : 'none';
+  }
+
+  async getConfiguredMCPServers() {
+    const response = await fetch('/api/mcp/servers');
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to load MCP servers');
+    }
+    const data = await response.json();
+    return Array.isArray(data?.servers) ? data.servers : [];
+  }
+
+  fallbackRegistryEntryForMCPServer(serverName) {
+    const normalized = String(serverName || '').trim().toLowerCase();
+    if (normalized !== 'fetch') {
+      return null;
+    }
+    return {
+      name: 'fetch',
+      command: 'uvx',
+      args: ['mcp-server-fetch'],
+      env: {},
+      transport: 'stdio'
+    };
+  }
+
+  async findRegistryMCPServer(serverName) {
+    const normalized = String(serverName || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    try {
+      const response = await fetch(`/api/mcp/search?q=${encodeURIComponent(normalized)}`);
+      if (response.ok) {
+        const entries = await response.json();
+        if (Array.isArray(entries)) {
+          const exact = entries.find((entry) => String(entry?.name || '').trim().toLowerCase() === normalized);
+          if (exact) return exact;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to search MCP registry:', error);
+    }
+
+    return this.fallbackRegistryEntryForMCPServer(normalized);
+  }
+
+  buildMCPServerConfigFromRegistry(entry, serverName) {
+    const name = String(entry?.name || serverName || '').trim();
+    const command = String(entry?.command || '').trim();
+    if (!name || !command) {
+      return null;
+    }
+
+    const env = entry?.env && typeof entry.env === 'object' && !Array.isArray(entry.env)
+      ? { ...entry.env }
+      : {};
+
+    return {
+      name,
+      command,
+      args: Array.isArray(entry?.args) ? entry.args : [],
+      env,
+      transport: String(entry?.transport || 'stdio').trim() || 'stdio',
+      enabled: false
+    };
+  }
+
+  async addRequiredMCPConnector() {
+    const requirement = this.currentMissingMCPRequirement;
+    if (!requirement?.serverName || this.mcpRequirementPending) return;
+
+    const serverName = requirement.serverName;
+    const button = document.getElementById('taskModalMCPRequirementAdd');
+    const originalText = button?.textContent || `Add ${serverName}`;
+    this.mcpRequirementPending = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = `Adding ${serverName}...`;
+    }
+
+    try {
+      this.setMCPRequirementStatus('Checking My Servers...');
+      const configuredServers = await this.getConfiguredMCPServers();
+      const alreadyConfigured = configuredServers.some((server) =>
+        String(server?.name || '').trim().toLowerCase() === serverName.toLowerCase()
+      );
+      if (alreadyConfigured) {
+        this.setMCPRequirementStatus(`${serverName} is already in My Servers. Retry the task when ready.`);
+        if (button) button.textContent = 'Connector available';
+        this.showToast(`${serverName} is already available`, 'info');
+        return;
+      }
+
+      this.setMCPRequirementStatus(`Searching the MCP registry for ${serverName}...`);
+      const entry = await this.findRegistryMCPServer(serverName);
+      const serverConfig = this.buildMCPServerConfigFromRegistry(entry, serverName);
+      if (!serverConfig) {
+        throw new Error(`${serverName} was not found in the MCP registry. Add it from MCP settings.`);
+      }
+
+      this.setMCPRequirementStatus(`Adding ${serverName} to My Servers...`);
+      const response = await fetch('/api/mcp/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serverConfig)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        if (!/already exists/i.test(text || '')) {
+          throw new Error(text || `Failed to add ${serverName}`);
+        }
+      }
+
+      this.setMCPRequirementStatus(`${serverName} has been added to My Servers. Retry the task to use it.`);
+      if (button) button.textContent = 'Connector added';
+      this.showToast(`${serverName} connector added`, 'success');
+    } catch (error) {
+      console.error('Failed to add required MCP connector:', error);
+      this.setMCPRequirementStatus(error.message || `Failed to add ${serverName}.`);
+      this.showToast(error.message || `Failed to add ${serverName}`, 'error');
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    } finally {
+      this.mcpRequirementPending = false;
+    }
   }
 
   getTaskStatusLabel(status) {
@@ -980,6 +1412,7 @@ class TaskModalController {
     const labels = {
       pending: 'Pending',
       in_progress: 'In Progress',
+      waiting_for_choice: 'Waiting for Input',
       completed: 'Completed',
       failed: 'Failed',
       blocked: 'Blocked',
@@ -1015,6 +1448,19 @@ class TaskModalController {
       return {
         label: 'Result',
         text: String(task.result),
+        sourceTask: task,
+        answeredBy: String(task.to || task.from || 'Unknown agent').trim()
+      };
+    }
+
+    const humanLoop = task?.context?.human_loop;
+    const agentResponse = humanLoop && typeof humanLoop === 'object'
+      ? String(humanLoop.agent_response || '').trim()
+      : '';
+    if (agentResponse) {
+      return {
+        label: 'Agent Output',
+        text: agentResponse,
         sourceTask: task,
         answeredBy: String(task.to || task.from || 'Unknown agent').trim()
       };
@@ -1093,7 +1539,7 @@ class TaskModalController {
 
     const resultData = this.resolveTaskResultData(task);
     const status = String(task.status || '').trim().toLowerCase();
-    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'timeout')) {
+    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'blocked' && status !== 'timeout' && status !== 'waiting_for_choice')) {
       this.resetResultSection();
       return;
     }
@@ -1111,6 +1557,8 @@ class TaskModalController {
       elements.body.textContent = this.currentResultText;
     }
 
+    this.renderMCPRequirement(task, this.currentResultText);
+    this.renderTaskToolSummary(task);
     this.renderResultNextStepActions(task);
   }
 
@@ -1367,6 +1815,10 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    // Reset for this save attempt; _safeAttachUploads pushes per-failure
+    // entries during the run, and the success path drains them into a
+    // warning toast so partial failures stay visible to the user.
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -1391,12 +1843,29 @@ class TaskModalController {
         });
 
         if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(errText || 'Failed to create task');
+          throw await this._parseTaskApiError(response, 'Failed to create task');
         }
 
         const createdPayload = await response.json();
         return this.extractTaskFromResponse(createdPayload);
+      };
+
+      const createWorkflow = async (parentPayload, subtaskPayloads) => {
+        const response = await fetch('/api/orchestration/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: this.workspaceId,
+            parent: parentPayload,
+            subtasks: subtaskPayloads
+          })
+        });
+
+        if (!response.ok) {
+          throw await this._parseTaskApiError(response, 'Failed to create workflow');
+        }
+
+        return response.json();
       };
 
       const updateTask = async (taskId, payload) => {
@@ -1454,12 +1923,7 @@ class TaskModalController {
             ...autoSaveData
           });
 
-          if (this.pendingFiles.length > 0) {
-            await this.uploadFilesToTask(this.editingTaskId);
-          }
-          if (this.pendingFilePaths.length > 0) {
-            await this.saveFilePathsToTask(this.editingTaskId);
-          }
+          await this._safeAttachUploads(this.editingTaskId);
 
           this.showToast('Task updated', 'success');
         } else if (isWorkflow) {
@@ -1522,12 +1986,7 @@ class TaskModalController {
           }
 
           const attachmentTarget = lastSubtaskId || this.editingTaskId;
-          if (this.pendingFiles.length > 0 && attachmentTarget) {
-            await this.uploadFilesToTask(attachmentTarget);
-          }
-          if (this.pendingFilePaths.length > 0 && attachmentTarget) {
-            await this.saveFilePathsToTask(attachmentTarget);
-          }
+          await this._safeAttachUploads(attachmentTarget);
 
           this.showToast('Workflow updated', 'success');
         } else {
@@ -1542,59 +2001,63 @@ class TaskModalController {
           });
 
           // Upload files to existing task
-          if (this.pendingFiles.length > 0) {
-            await this.uploadFilesToTask(this.editingTaskId);
-          }
-          if (this.pendingFilePaths.length > 0) {
-            await this.saveFilePathsToTask(this.editingTaskId);
-          }
+          await this._safeAttachUploads(this.editingTaskId);
 
           this.showToast('Task updated', 'success');
         }
       } else if (subtasks.length > 0) {
-        const parentTask = await createTask({
-          workspace_id: this.workspaceId,
-          description,
-          details,
+        // Atomic workflow create. Pre-generate UUIDs for parent + every
+        // subtask so we can wire `input_task_ids` between siblings up
+        // front and post the whole DAG to /api/orchestration/workflows in
+        // a single call. The server validates the graph as one batch and
+        // rolls back the entire workspace state on any cycle / unknown
+        // ref / duplicate ID — no half-created workflow if validation
+        // trips on subtask 5.
+        const parentId = this._generateTaskId();
+        const subtaskIds = subtasks.map((subtask) => subtask.id || this._generateTaskId());
+        // Stamp the IDs back onto the in-memory subtask list and the DOM
+        // cards so per-subtask error highlighting can map server issues
+        // (`issue.task_id`) onto the correct row.
+        this._stampSubtaskIds(subtaskIds);
+
+        const subtaskPayloads = subtasks.map((subtask, i) => ({
+          id: subtaskIds[i],
+          description: subtask.description,
+          details: subtask.details,
           priority,
-          to: to || undefined,
-          assigned_node_id: assignedNodeId || undefined
-        });
+          to: subtask.to || '',
+          assigned_node_id: subtask.assigned_node_id || '',
+          input_task_ids: this.resolveInputRefs(subtask.input_task_ids, subtaskIds),
+          subtask_index: i + 1,
+          result_storage: this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)?.result_storage || null
+        }));
 
-        if (!parentTask?.id) {
-          throw new Error('Parent task created but ID is missing');
-        }
-
-        let lastSubtaskId = '';
-        const stepIdsByIndex = subtasks.map(() => '');
-        for (let i = 0; i < subtasks.length; i++) {
-          const subtask = subtasks[i];
-          const inputTaskIds = this.resolveInputRefs(subtask.input_task_ids, stepIdsByIndex);
-          const createdSubtask = await createTask({
-            workspace_id: this.workspaceId,
-            description: subtask.description,
-            details: subtask.details,
+        await createWorkflow(
+          {
+            id: parentId,
+            description,
+            details,
             priority,
-            to: subtask.to || undefined,
-            assigned_node_id: subtask.assigned_node_id || undefined,
-            input_task_ids: inputTaskIds,
-            parent_task_id: parentTask.id,
-            subtask_index: i + 1,
-            ...this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false),
-            ...this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)
-          });
-          if (createdSubtask?.id) {
-            lastSubtaskId = createdSubtask.id;
-            stepIdsByIndex[i] = createdSubtask.id;
-          }
+            to: to || '',
+            assigned_node_id: assignedNodeId || ''
+          },
+          subtaskPayloads
+        );
+
+        // Schedule + auto-save fields the bulk endpoint does not yet model
+        // are still applied per-subtask via the existing /tasks PUT path.
+        // This keeps the bulk contract small while preserving the modal's
+        // existing per-step schedule semantics.
+        for (let i = 0; i < subtasks.length; i++) {
+          const schedulePayload = this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false);
+          const autoSavePayload = this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false);
+          const extras = { ...schedulePayload, ...autoSavePayload };
+          if (Object.keys(extras).length === 0) continue;
+          await updateTask(subtaskIds[i], extras);
         }
 
-        if (lastSubtaskId && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(lastSubtaskId);
-        }
-        if (lastSubtaskId && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(lastSubtaskId);
-        }
+        const lastSubtaskId = subtaskIds[subtaskIds.length - 1];
+        await this._safeAttachUploads(lastSubtaskId);
 
         this.showToast('Workflow created', 'success');
       } else {
@@ -1610,25 +2073,34 @@ class TaskModalController {
           ...autoSaveData
         });
 
-        if (createdTask?.id && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(createdTask.id);
-        }
-        if (createdTask?.id && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(createdTask.id);
-        }
+        await this._safeAttachUploads(createdTask?.id);
 
         eventName = 'task:created';
         eventPayload = { task: createdTask };
         this.showToast('Task created', 'success');
       }
 
+      // Surface partial-success warning before closing the modal — the
+      // task itself was saved, but one or more attachment uploads failed.
+      // Without this users would only see the success toast and not
+      // realize their files weren't attached.
+      this._reportUploadFailures();
+
       // Clear pending files
       this.pendingFiles = [];
       this.pendingFilePaths = [];
+      this._clearSubtaskGraphErrors();
       await this.finalizeSuccessfulSave(eventName, eventPayload);
     } catch (error) {
       console.error('Failed to save task:', error);
-      this.showToast(error.message || 'Failed to save task', 'error');
+      const issues = Array.isArray(error?.issues) ? error.issues : [];
+      if (issues.length > 0) {
+        this._applySubtaskGraphErrors(issues);
+        const summary = issues[0]?.message || error.message || 'Workflow has invalid dependencies';
+        this.showToast(summary, 'error');
+      } else {
+        this.showToast(error.message || 'Failed to save task', 'error');
+      }
     } finally {
       this.isSaving = false;
       if (saveButton) {
@@ -1637,6 +2109,151 @@ class TaskModalController {
       }
       if (saveText) saveText.textContent = originalText || 'Save Task';
     }
+  }
+
+  /**
+   * Run pendingFiles + pendingFilePaths uploads against the given task ID
+   * without letting failures abort the surrounding save flow. The task
+   * itself is already persisted by the time we get here, so an upload
+   * failure must not roll back a successful creation — instead we collect
+   * the errors so the final toast can warn the user about partial
+   * success ("Task created — 2 attachment(s) failed").
+   *
+   * Reports through `this._uploadFailures` which is initialized to []
+   * before each save and inspected after the try block.
+   */
+  async _safeAttachUploads(taskId) {
+    if (!taskId) return;
+    if (!Array.isArray(this._uploadFailures)) this._uploadFailures = [];
+
+    if (this.pendingFiles.length > 0) {
+      try {
+        await this.uploadFilesToTask(taskId);
+      } catch (err) {
+        this._uploadFailures.push({
+          kind: 'file',
+          count: this.pendingFiles.length,
+          message: err?.message || 'Failed to upload files'
+        });
+      }
+    }
+    if (this.pendingFilePaths.length > 0) {
+      try {
+        await this.saveFilePathsToTask(taskId);
+      } catch (err) {
+        this._uploadFailures.push({
+          kind: 'path',
+          count: this.pendingFilePaths.length,
+          message: err?.message || 'Failed to attach file paths'
+        });
+      }
+    }
+  }
+
+  /**
+   * Render a single warning toast summarizing any attachment upload
+   * failures collected by _safeAttachUploads. The task itself was
+   * already persisted by this point so this is strictly an extra
+   * signal — the success toast still fires alongside.
+   */
+  _reportUploadFailures() {
+    const failures = Array.isArray(this._uploadFailures) ? this._uploadFailures : [];
+    if (failures.length === 0) return;
+
+    const counts = failures.reduce((sum, entry) => sum + (Number(entry?.count) || 0), 0);
+    const firstMessage = failures[0]?.message || '';
+    const summary = counts > 0
+      ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
+      : `Some attachments failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
+    this.showToast(summary, 'warning');
+    this._uploadFailures = [];
+  }
+
+  /**
+   * Generate a UUID for client-side task IDs. Falls back to a non-RFC
+   * pseudo-UUID on browsers without crypto.randomUUID() — good enough for
+   * the in-flight workflow create contract (server validates uniqueness).
+   */
+  _generateTaskId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
+  }
+
+  /**
+   * Stamp the pre-generated subtask IDs onto the subtask card DOM so a
+   * later validation error from the server can be mapped back to the
+   * specific row that produced it (highlight + inline message).
+   */
+  _stampSubtaskIds(ids) {
+    const cards = document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card');
+    cards.forEach((card, i) => {
+      if (!ids[i]) return;
+      card.dataset.subtaskId = ids[i];
+    });
+  }
+
+  /**
+   * Read a non-2xx response from the task/workflow API and synthesize an
+   * Error whose `.issues` carries the structured graph-validation
+   * payload when the server provided one. Falls back to the response's
+   * text for older / non-JSON error paths.
+   */
+  async _parseTaskApiError(response, fallbackMessage) {
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch (_e) {
+      bodyText = '';
+    }
+    let parsed = null;
+    if (bodyText) {
+      try { parsed = JSON.parse(bodyText); } catch (_e) { parsed = null; }
+    }
+    const message = (parsed && (parsed.error || parsed.message)) || bodyText || fallbackMessage;
+    const error = new Error(message || fallbackMessage);
+    if (parsed && Array.isArray(parsed.issues)) {
+      error.issues = parsed.issues;
+    }
+    return error;
+  }
+
+  /**
+   * Apply per-row error styling + inline messages to subtask cards whose
+   * IDs appear in the structured issue list. Issues that name a task ID
+   * we don't have a card for fall through silently — the toast still
+   * carries the human message.
+   */
+  _applySubtaskGraphErrors(issues) {
+    this._clearSubtaskGraphErrors();
+    const byId = new Map();
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card').forEach((card) => {
+      if (card.dataset.subtaskId) byId.set(card.dataset.subtaskId, card);
+    });
+    issues.forEach((issue) => {
+      const card = byId.get(issue?.task_id);
+      if (!card) return;
+      card.classList.add('task-modal-subtask-card--has-error');
+      let messageEl = card.querySelector('.task-modal-subtask-card-error');
+      if (!messageEl) {
+        messageEl = document.createElement('div');
+        messageEl.className = 'task-modal-subtask-card-error';
+        card.appendChild(messageEl);
+      }
+      const existing = messageEl.textContent ? `${messageEl.textContent} ` : '';
+      messageEl.textContent = existing + (issue?.message || 'Invalid dependency');
+    });
+  }
+
+  _clearSubtaskGraphErrors() {
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card--has-error').forEach((card) => {
+      card.classList.remove('task-modal-subtask-card--has-error');
+    });
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card-error').forEach((el) => {
+      el.remove();
+    });
   }
 
   /**
@@ -1669,6 +2286,7 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -1822,12 +2440,8 @@ class TaskModalController {
           }
         }
 
-        if (lastCreatedTaskId && this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(lastCreatedTaskId);
-        }
-        if (lastCreatedTaskId && this.pendingFilePaths.length > 0) {
-          await this.saveFilePathsToTask(lastCreatedTaskId);
-        }
+        await this._safeAttachUploads(lastCreatedTaskId);
+        this._reportUploadFailures();
 
         // Clear pending files
         this.pendingFiles = [];
@@ -1874,12 +2488,8 @@ class TaskModalController {
       // Upload files to newly created task
       const createdPayload = await createResponse.json();
       const createdTask = this.extractTaskFromResponse(createdPayload);
-      if (createdTask?.id && this.pendingFiles.length > 0) {
-        await this.uploadFilesToTask(createdTask.id);
-      }
-      if (createdTask?.id && this.pendingFilePaths.length > 0) {
-        await this.saveFilePathsToTask(createdTask.id);
-      }
+      await this._safeAttachUploads(createdTask?.id);
+      this._reportUploadFailures();
 
       // Clear pending files
       this.pendingFiles = [];
@@ -1930,6 +2540,7 @@ class TaskModalController {
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
     this.isSaving = true;
+    this._uploadFailures = [];
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.classList.add('is-saving');
@@ -2033,12 +2644,8 @@ class TaskModalController {
       }
 
       // Upload files if any
-      if (this.pendingFiles.length > 0) {
-        await this.uploadFilesToTask(this.editingTaskId);
-      }
-      if (this.pendingFilePaths.length > 0) {
-        await this.saveFilePathsToTask(this.editingTaskId);
-      }
+      await this._safeAttachUploads(this.editingTaskId);
+      this._reportUploadFailures();
 
       // Clear pending files
       this.pendingFiles = [];
@@ -2110,7 +2717,6 @@ class TaskModalController {
     const scheduleName = document.getElementById('taskModalScheduleName');
     const scheduleType = document.getElementById('taskModalScheduleType');
     const scheduleTime = document.getElementById('taskModalScheduleTime');
-    const scheduleDay = document.getElementById('taskModalScheduleDay');
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
@@ -2121,13 +2727,14 @@ class TaskModalController {
     if (scheduleName) scheduleName.value = '';
     if (scheduleType) scheduleType.value = 'interval';
     if (scheduleTime) scheduleTime.value = '09:00';
-    if (scheduleDay) scheduleDay.value = '1';
+    this.setSelectedScheduleDays([]);
     if (scheduleIntervalValue) scheduleIntervalValue.value = '1';
     if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'hours';
     if (scheduleDatetime) scheduleDatetime.value = '';
     if (scheduleCron) scheduleCron.value = '0 9 * * *';
 
     this.updateScheduleTypeFields();
+    this.updateSchedulePreview();
   }
 
   /**
@@ -2139,7 +2746,6 @@ class TaskModalController {
     const scheduleName = document.getElementById('taskModalScheduleName');
     const scheduleType = document.getElementById('taskModalScheduleType');
     const scheduleTime = document.getElementById('taskModalScheduleTime');
-    const scheduleDay = document.getElementById('taskModalScheduleDay');
     const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
     const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
     const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
@@ -2149,13 +2755,27 @@ class TaskModalController {
       if (enabledCheckbox) enabledCheckbox.checked = Boolean(task.schedule_enabled);
       if (scheduleFields) scheduleFields.style.display = 'block';
       if (scheduleName) scheduleName.value = task.schedule_name || '';
-      if (scheduleType) scheduleType.value = task.schedule.type || 'interval';
+
+      // Detect a multi-day weekly cron and back-convert to the weekly
+      // form so the checkbox row stays the canonical UI for that case.
+      const schedule = task.schedule;
+      const cronWeekly = this.parseWeeklyCron(schedule.type === 'cron' ? schedule.cron_expr : '');
+      const inferredType = cronWeekly ? 'weekly' : (schedule.type || 'interval');
+      if (scheduleType) scheduleType.value = inferredType;
 
       // Populate type-specific fields
-      const schedule = task.schedule;
-      if (schedule.time && scheduleTime) scheduleTime.value = schedule.time;
-      if (schedule.time_of_day && scheduleTime) scheduleTime.value = schedule.time_of_day;
-      if (schedule.day_of_week != null && scheduleDay) scheduleDay.value = schedule.day_of_week;
+      if (cronWeekly) {
+        if (scheduleTime) scheduleTime.value = cronWeekly.time;
+        this.setSelectedScheduleDays(cronWeekly.days);
+      } else {
+        if (schedule.time && scheduleTime) scheduleTime.value = schedule.time;
+        if (schedule.time_of_day && scheduleTime) scheduleTime.value = schedule.time_of_day;
+        if (schedule.day_of_week != null) {
+          this.setSelectedScheduleDays([Number(schedule.day_of_week)]);
+        } else {
+          this.setSelectedScheduleDays([]);
+        }
+      }
 
       const intervalMinutes = this.getScheduleIntervalMinutes(schedule);
       if (intervalMinutes) {
@@ -2178,14 +2798,123 @@ class TaskModalController {
       if (schedule.execute_at && scheduleDatetime) {
         scheduleDatetime.value = this.formatLocalDatetimeInput(schedule.execute_at);
       }
-      if (schedule.cron_expr && scheduleCron) {
+      if (schedule.cron_expr && scheduleCron && !cronWeekly) {
         scheduleCron.value = schedule.cron_expr;
       }
 
       this.updateScheduleTypeFields();
+      this.updateSchedulePreview();
     } else {
       this.resetScheduleFields();
     }
+  }
+
+  /**
+   * Read currently-checked day-of-week pills, returning an ascending list.
+   */
+  getSelectedScheduleDays() {
+    const row = document.getElementById('taskModalScheduleDayRow');
+    if (!row) return [];
+    return Array.from(row.querySelectorAll('input[type="checkbox"][data-day-value]'))
+      .filter((cb) => cb.checked)
+      .map((cb) => Number.parseInt(cb.getAttribute('data-day-value') || '0', 10))
+      .sort((a, b) => a - b);
+  }
+
+  setSelectedScheduleDays(days) {
+    const row = document.getElementById('taskModalScheduleDayRow');
+    if (!row) return;
+    const set = new Set((days || []).map((d) => Number(d)));
+    row.querySelectorAll('input[type="checkbox"][data-day-value]').forEach((cb) => {
+      cb.checked = set.has(Number(cb.getAttribute('data-day-value')));
+    });
+  }
+
+  /**
+   * Recognize "M H * * d1,d2,..." cron expressions and translate them back
+   * into the weekly multi-day form. Returns null for shapes we don't
+   * round-trip — the user will see the raw cron in the cron field.
+   */
+  parseWeeklyCron(expr) {
+    const parts = String(expr || '').trim().split(/\s+/);
+    if (parts.length !== 5) return null;
+    const [minutePart, hourPart, dom, mon, dow] = parts;
+    if (dom !== '*' || mon !== '*') return null;
+    if (!/^\d+$/.test(minutePart) || !/^\d+$/.test(hourPart)) return null;
+    const days = dow.split(',').map((d) => d.trim()).filter(Boolean);
+    if (days.length < 2) return null;
+    const numericDays = [];
+    for (const d of days) {
+      if (!/^[0-6]$/.test(d)) return null;
+      numericDays.push(Number(d));
+    }
+    const minute = Number.parseInt(minutePart, 10);
+    const hour = Number.parseInt(hourPart, 10);
+    const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return { days: numericDays, time };
+  }
+
+  /**
+   * Render a human-readable summary of the current schedule selections —
+   * "Every Mon, Wed at 09:00", "Every 30 min", etc. Updates the inline
+   * preview line so users get immediate feedback before saving.
+   */
+  updateSchedulePreview() {
+    const previewEl = document.getElementById('taskModalSchedulePreview');
+    if (!previewEl) return;
+
+    const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
+    if (!enabledCheckbox?.checked) {
+      previewEl.textContent = '';
+      previewEl.hidden = true;
+      return;
+    }
+
+    const scheduleType = document.getElementById('taskModalScheduleType')?.value || 'interval';
+    const time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    let summary = '';
+    switch (scheduleType) {
+      case 'daily':
+        summary = `Every day at ${time}`;
+        break;
+      case 'weekly': {
+        const days = this.getSelectedScheduleDays();
+        if (days.length === 0) {
+          summary = 'Pick at least one day';
+        } else if (days.length === 7) {
+          summary = `Every day at ${time}`;
+        } else {
+          summary = `Every ${days.map((d) => dayLabels[d] || '?').join(', ')} at ${time}`;
+        }
+        break;
+      }
+      case 'interval': {
+        const value = Number.parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '0', 10);
+        const unit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
+        if (value > 0) {
+          summary = `Every ${value} ${unit}`;
+        }
+        break;
+      }
+      case 'once': {
+        const dt = document.getElementById('taskModalScheduleDatetime')?.value;
+        summary = dt ? `Once at ${dt.replace('T', ' ')}` : 'Pick a date and time';
+        break;
+      }
+      case 'cron':
+        summary = `Cron: ${document.getElementById('taskModalScheduleCron')?.value?.trim() || '(empty)'}`;
+        break;
+    }
+
+    if (!summary) {
+      previewEl.textContent = '';
+      previewEl.hidden = true;
+      return;
+    }
+    previewEl.hidden = false;
+    previewEl.textContent = summary;
   }
 
   /**
@@ -2216,10 +2945,25 @@ class TaskModalController {
       case 'daily':
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
         break;
-      case 'weekly':
-        schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
-        schedule.day_of_week = Number.parseInt(document.getElementById('taskModalScheduleDay')?.value || '1', 10);
+      case 'weekly': {
+        const time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+        const days = this.getSelectedScheduleDays();
+        if (days.length <= 1) {
+          schedule.time = time;
+          schedule.day_of_week = days.length === 1 ? days[0] : 1;
+        } else {
+          // Backend ScheduleConfig stores a single DayOfWeek int, so a
+          // multi-day weekly request is persisted as a cron expression.
+          // The user still sees "Weekly" in the form because the cron is
+          // round-tripped back into checkboxes by populateScheduleFields.
+          const [hourStr, minuteStr] = time.split(':');
+          const hour = Number.parseInt(hourStr || '9', 10);
+          const minute = Number.parseInt(minuteStr || '0', 10);
+          schedule.type = 'cron';
+          schedule.cron_expr = `${minute} ${hour} * * ${days.join(',')}`;
+        }
         break;
+      }
       case 'interval': {
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
         const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
@@ -2521,27 +3265,111 @@ class TaskModalController {
   /**
    * Get selected input references from a select element.
    */
-  getSelectedInputRefs(selectEl) {
-    if (!selectEl) return [];
-    return Array.from(selectEl.selectedOptions)
-      .map((option) => option.value)
-      .filter((value) => value && value.trim() !== '');
+  /**
+   * Read the currently-selected input task refs from a chip container
+   * (or, for backward compatibility, a legacy <select multiple>).
+   * Chip containers store their selection as JSON in
+   * data-selected-inputs so the value is robust to DOM rerenders that
+   * recreate the chip buttons.
+   */
+  getSelectedInputRefs(container) {
+    if (!container) return [];
+    if (container.tagName === 'SELECT') {
+      return Array.from(container.selectedOptions)
+        .map((option) => option.value)
+        .filter((value) => value && value.trim() !== '');
+    }
+    try {
+      const raw = JSON.parse(container.dataset.selectedInputs || '[]');
+      return Array.isArray(raw) ? raw.filter((v) => typeof v === 'string' && v.trim() !== '') : [];
+    } catch (_e) {
+      return [];
+    }
   }
 
   /**
-   * Enable click-to-toggle behavior for multi-select inputs.
+   * Render a clickable chip widget for selecting input tasks.
+   *
+   * `groups` is an array of { label?, items: [{value, label}] }. Items
+   * inside each group are rendered as togglable chips with a visible
+   * "selected" state. When the user clicks a chip the container fires
+   * a `change` event so existing subtask-badge / hint code paths keep
+   * working without modification.
    */
-  bindMultiSelectToggle(selectEl) {
-    if (!selectEl || selectEl.dataset.toggleBound === 'true') return;
-    selectEl.dataset.toggleBound = 'true';
+  renderInputTaskChips(container, groups, selectedRefs, options = {}) {
+    if (!container) return;
+    container.classList.toggle('is-disabled', Boolean(options.disabled));
 
-    selectEl.addEventListener('mousedown', (event) => {
-      if (selectEl.disabled) return;
+    const allItems = groups.reduce((sum, g) => sum + (g?.items?.length || 0), 0);
+    const selectedSet = new Set(Array.isArray(selectedRefs) ? selectedRefs : []);
+    container.dataset.selectedInputs = JSON.stringify(Array.from(selectedSet));
+
+    if (allItems === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const escapeAttr = (value) => this.escapeHtml(value);
+    const sectionsHtml = groups
+      .filter((group) => group?.items?.length)
+      .map((group) => {
+        const labelHtml = group.label
+          ? `<div class="task-modal-input-chip-group-label">${escapeAttr(group.label)}</div>`
+          : '';
+        const chipsHtml = group.items.map((item) => {
+          const checked = selectedSet.has(item.value);
+          return `
+            <button type="button"
+                    class="task-modal-input-chip${checked ? ' is-selected' : ''}"
+                    data-input-value="${escapeAttr(item.value)}"
+                    aria-pressed="${checked ? 'true' : 'false'}"
+                    ${options.disabled ? 'disabled' : ''}>
+              <span class="task-modal-input-chip-mark" aria-hidden="true"></span>
+              <span class="task-modal-input-chip-label">${escapeAttr(item.label)}</span>
+            </button>
+          `;
+        }).join('');
+        return `${labelHtml}<div class="task-modal-input-chip-row">${chipsHtml}</div>`;
+      }).join('');
+
+    container.innerHTML = sectionsHtml;
+
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        const value = btn.getAttribute('data-input-value') || '';
+        const current = new Set(this.getSelectedInputRefs(container));
+        if (current.has(value)) {
+          current.delete(value);
+        } else {
+          current.add(value);
+        }
+        container.dataset.selectedInputs = JSON.stringify(Array.from(current));
+        const isSelected = current.has(value);
+        btn.classList.toggle('is-selected', isSelected);
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        container.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+  }
+
+  /**
+   * Bind a legacy <select multiple> for click-to-toggle. Chip widgets
+   * handle their own clicks; this stays as a no-op for any non-select
+   * element so existing callers continue to compile.
+   */
+  bindMultiSelectToggle(container) {
+    if (!container || container.tagName !== 'SELECT') return;
+    if (container.dataset.toggleBound === 'true') return;
+    container.dataset.toggleBound = 'true';
+
+    container.addEventListener('mousedown', (event) => {
+      if (container.disabled) return;
       const option = event.target;
       if (!option || option.tagName !== 'OPTION' || option.disabled) return;
       event.preventDefault();
       option.selected = !option.selected;
-      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      container.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
 
@@ -2549,8 +3377,8 @@ class TaskModalController {
    * Populate the main task input selection list.
    */
   populateMainInputTasks(task = null) {
-    const selectEl = document.getElementById('taskModalInputTasks');
-    if (!selectEl) return;
+    const container = document.getElementById('taskModalInputTasks');
+    if (!container) return;
 
     const currentTaskId = this.editingTaskId || '';
     const excludeIds = new Set();
@@ -2559,18 +3387,7 @@ class TaskModalController {
     const options = this.getWorkspaceTaskOptions({ excludeIds });
     const selectedRefs = (task?.input_task_ids || []).map((id) => `task:${id}`);
 
-    selectEl.innerHTML = '';
-    options.forEach((opt) => {
-      const optionEl = document.createElement('option');
-      optionEl.value = opt.value;
-      optionEl.textContent = opt.label;
-      optionEl.selected = selectedRefs.includes(opt.value);
-      selectEl.appendChild(optionEl);
-    });
-    this.bindMultiSelectToggle(selectEl);
-    if (selectedRefs.length === 0) {
-      selectEl.selectedIndex = -1;
-    }
+    this.renderInputTaskChips(container, [{ items: options }], selectedRefs);
 
     const emptyEl = document.getElementById('taskModalInputTasksEmpty');
     if (emptyEl) {
@@ -2579,42 +3396,43 @@ class TaskModalController {
   }
 
   setMainInputTaskRefs(refs = []) {
-    const selectEl = document.getElementById('taskModalInputTasks');
-    if (!selectEl) return;
-
-    const normalizedRefs = Array.isArray(refs)
+    const container = document.getElementById('taskModalInputTasks');
+    if (!container) return;
+    const normalized = Array.isArray(refs)
       ? refs.map((value) => String(value || '').trim()).filter(Boolean)
       : [];
-    const appliedRefs = [];
-
-    Array.from(selectEl.options).forEach((option) => {
-      option.selected = normalizedRefs.includes(option.value);
-      if (option.selected) {
-        appliedRefs.push(option.value);
-      }
+    container.dataset.selectedInputs = JSON.stringify(normalized);
+    const selectedSet = new Set(normalized);
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      const value = btn.getAttribute('data-input-value') || '';
+      const checked = selectedSet.has(value);
+      btn.classList.toggle('is-selected', checked);
+      btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
     });
-
-    if (appliedRefs.length === 0) {
-      selectEl.selectedIndex = -1;
-    }
   }
 
   /**
    * Update main input selection state when subtasks exist.
    */
   updateMainInputTasksState() {
-    const selectEl = document.getElementById('taskModalInputTasks');
+    const container = document.getElementById('taskModalInputTasks');
     const noticeEl = document.getElementById('taskModalInputTasksNotice');
-    if (!selectEl || !noticeEl) return;
+    if (!container || !noticeEl) return;
 
     const list = document.getElementById('taskModalSubtaskList');
     const hasSubtasks = list && list.children.length > 0;
-    selectEl.disabled = hasSubtasks;
     noticeEl.style.display = hasSubtasks ? 'block' : 'none';
 
+    container.classList.toggle('is-disabled', hasSubtasks);
+    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+      btn.disabled = hasSubtasks;
+    });
     if (hasSubtasks) {
-      Array.from(selectEl.options).forEach((option) => {
-        option.selected = false;
+      // Wipe selection — workflow inputs live on each subtask now.
+      container.dataset.selectedInputs = JSON.stringify([]);
+      container.querySelectorAll('[data-input-value].is-selected').forEach((btn) => {
+        btn.classList.remove('is-selected');
+        btn.setAttribute('aria-pressed', 'false');
       });
     }
   }
@@ -2648,68 +3466,37 @@ class TaskModalController {
     const externalOptions = this.getWorkspaceTaskOptions({ excludeIds: workflowTaskIds });
 
     cards.forEach((card, index) => {
-      const selectEl = card.querySelector('.task-modal-subtask-inputs');
-      if (!selectEl) return;
+      const container = card.querySelector('.task-modal-subtask-inputs');
+      if (!container) return;
 
       let selectedRefs = [];
-      if (selectEl.dataset.selectedInputs) {
-        try {
-          selectedRefs = JSON.parse(selectEl.dataset.selectedInputs) || [];
-        } catch (error) {
-          selectedRefs = [];
-        }
-      } else {
-        selectedRefs = this.getSelectedInputRefs(selectEl);
+      try {
+        selectedRefs = JSON.parse(container.dataset.selectedInputs || '[]');
+      } catch (_e) {
+        selectedRefs = [];
       }
-
-      selectEl.innerHTML = '';
 
       const availableSteps = stepOptions.slice(0, index);
-      if (availableSteps.length > 0) {
-        const stepGroup = document.createElement('optgroup');
-        stepGroup.label = 'Workflow steps';
-        availableSteps.forEach((opt) => {
-          const optionEl = document.createElement('option');
-          optionEl.value = opt.value;
-          optionEl.textContent = opt.label;
-          stepGroup.appendChild(optionEl);
-        });
-        selectEl.appendChild(stepGroup);
+      const groups = [];
+      if (availableSteps.length > 0) groups.push({ label: 'Workflow steps', items: availableSteps });
+      if (externalOptions.length > 0) groups.push({ label: 'Workspace tasks', items: externalOptions });
+
+      if (groups.length === 0) {
+        container.innerHTML = '<div class="task-modal-input-empty">No input tasks available — add another step or another task to the workspace.</div>';
+        container.dataset.selectedInputs = JSON.stringify([]);
+        this.updateSubtaskInputsBadge(card, 0);
+        return;
       }
 
-      if (externalOptions.length > 0) {
-        const taskGroup = document.createElement('optgroup');
-        taskGroup.label = 'Workspace tasks';
-        externalOptions.forEach((opt) => {
-          const optionEl = document.createElement('option');
-          optionEl.value = opt.value;
-          optionEl.textContent = opt.label;
-          taskGroup.appendChild(optionEl);
-        });
-        selectEl.appendChild(taskGroup);
-      }
+      // Drop refs that no longer exist in the rendered options. This
+      // prevents stale "task:abc" refs from sticking around after the
+      // referenced sibling step is removed.
+      const validValues = new Set();
+      groups.forEach((g) => g.items.forEach((item) => validValues.add(item.value)));
+      const filteredRefs = selectedRefs.filter((ref) => validValues.has(ref));
 
-      if (availableSteps.length === 0 && externalOptions.length === 0) {
-        const optionEl = document.createElement('option');
-        optionEl.value = '';
-        optionEl.textContent = '-- No input tasks available --';
-        optionEl.disabled = true;
-        selectEl.appendChild(optionEl);
-      }
-
-      const appliedSelections = [];
-      Array.from(selectEl.options).forEach((option) => {
-        if (selectedRefs.includes(option.value)) {
-          option.selected = true;
-          appliedSelections.push(option.value);
-        }
-      });
-      if (appliedSelections.length === 0) {
-        selectEl.selectedIndex = -1;
-      }
-      selectEl.dataset.selectedInputs = JSON.stringify(appliedSelections);
-
-      this.updateSubtaskInputsBadge(card, appliedSelections.length);
+      this.renderInputTaskChips(container, groups, filteredRefs);
+      this.updateSubtaskInputsBadge(card, filteredRefs.length);
     });
 
     this.updateMainInputTasksState();
@@ -3029,26 +3816,23 @@ class TaskModalController {
     inputsField.className = 'task-modal-field';
     const inputsLabel = document.createElement('label');
     inputsLabel.className = 'task-modal-label';
-    inputsLabel.setAttribute('for', `${rowId}-inputs`);
     inputsLabel.textContent = 'Input Tasks';
-    const inputsSelect = document.createElement('select');
-    inputsSelect.id = `${rowId}-inputs`;
-    inputsSelect.className = 'task-modal-input task-modal-subtask-inputs';
-    inputsSelect.multiple = true;
-    inputsSelect.size = 3;
-    inputsSelect.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
-    this.bindMultiSelectToggle(inputsSelect);
+    const inputsContainer = document.createElement('div');
+    inputsContainer.id = `${rowId}-inputs`;
+    inputsContainer.className = 'task-modal-input-chips task-modal-subtask-inputs';
+    inputsContainer.setAttribute('role', 'group');
+    inputsContainer.setAttribute('aria-label', 'Subtask input tasks');
+    inputsContainer.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
     inputsField.appendChild(inputsLabel);
-    inputsField.appendChild(inputsSelect);
+    inputsField.appendChild(inputsContainer);
 
     const inputsHint = document.createElement('div');
     inputsHint.className = 'task-modal-subtask-inputs-hint';
-    inputsHint.textContent = 'Use {input1}, {input2}, {previous}, or {result} in the task title.';
+    inputsHint.textContent = 'Click a step or task to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
     inputsField.appendChild(inputsHint);
 
-    inputsSelect.addEventListener('change', () => {
-      const selectedRefs = this.getSelectedInputRefs(inputsSelect);
-      inputsSelect.dataset.selectedInputs = JSON.stringify(selectedRefs);
+    inputsContainer.addEventListener('change', () => {
+      const selectedRefs = this.getSelectedInputRefs(inputsContainer);
       this.updateSubtaskInputsBadge(card, selectedRefs.length);
     });
 

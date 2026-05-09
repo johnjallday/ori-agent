@@ -42,6 +42,21 @@ type Store interface {
 	// SaveWorkspaceAgent writes an agent snapshot into the workspace folder so
 	// the workspace becomes self-contained for export/import.
 	SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error
+
+	// Lock acquires an exclusive lock for the given workspace, used by Update
+	// to serialize cross-instance mutations. The returned unlock function must
+	// always be called (typically via defer). Implementations that don't need
+	// per-workspace serialization may return a no-op unlock.
+	Lock(wsID string) func()
+
+	// Update applies fn to the workspace and persists the result, atomically
+	// with respect to other Update calls on the same workspace. fn receives a
+	// freshly-loaded workspace pointer; on success Save is called. Use this
+	// instead of Get+mutate+Save to avoid the lost-update race where two
+	// goroutines clone, mutate disjoint fields, and overwrite each other.
+	//
+	// Implementations should typically delegate to CanonicalUpdate.
+	Update(wsID string, fn func(*Workspace) error) error
 }
 
 // FileStore implements Store using folder-based persistence.
@@ -52,6 +67,18 @@ type FileStore struct {
 	idToPath map[string]string // maps workspace ID → relative folder path from basePath
 	index    *Index            // optional global index (nil if not configured)
 	mu       sync.RWMutex
+	locks    LockTable // serializes Update calls per workspace
+}
+
+// Lock acquires a per-workspace write lock used to serialize Update calls.
+// Save itself does NOT acquire this lock — callers that bypass Update can
+// still race. Use Update for cross-instance race safety.
+func (s *FileStore) Lock(wsID string) func() { return s.locks.Lock(wsID) }
+
+// Update applies fn to the workspace and persists the result, atomic against
+// other Update calls on the same workspace. See Store.Update.
+func (s *FileStore) Update(wsID string, fn func(*Workspace) error) error {
+	return CanonicalUpdate(s, wsID, fn)
 }
 
 var ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
@@ -1260,6 +1287,7 @@ type InMemoryStore struct {
 	workspaces map[string]*Workspace
 	agents     map[string]map[string]*agent.Agent // workspaceID → agentName → snapshot
 	mu         sync.RWMutex
+	locks      LockTable
 }
 
 // NewInMemoryStore creates a new in-memory workspace store
@@ -1268,6 +1296,15 @@ func NewInMemoryStore() *InMemoryStore {
 		workspaces: make(map[string]*Workspace),
 		agents:     make(map[string]map[string]*agent.Agent),
 	}
+}
+
+// Lock acquires a per-workspace write lock used to serialize Update calls.
+func (s *InMemoryStore) Lock(wsID string) func() { return s.locks.Lock(wsID) }
+
+// Update applies fn to the workspace and persists the result, atomic against
+// other Update calls on the same workspace. See Store.Update.
+func (s *InMemoryStore) Update(wsID string, fn func(*Workspace) error) error {
+	return CanonicalUpdate(s, wsID, fn)
 }
 
 // GetWorkspaceAgent returns an in-memory snapshot of a workspace-local agent.

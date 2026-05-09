@@ -169,7 +169,7 @@ export class WorkspaceMCPManager {
       const response = await fetch('/api/mcp/servers');
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to load MCP connectors');
+        throw new Error(text || 'Failed to load MCP servers');
       }
 
       const data = await response.json();
@@ -759,7 +759,7 @@ export class WorkspaceMCPManager {
       availableServers.unshift({ name: normalizedSelected, unavailable: true });
     }
 
-    const options = ['<option value="">Select a connector</option>'];
+    const options = ['<option value="">Select an MCP server</option>'];
     availableServers.forEach(server => {
       const name = String(server?.name || '').trim();
       if (!name) return;
@@ -783,7 +783,7 @@ export class WorkspaceMCPManager {
 
     if (availableServers.length === 0) {
       this.setWorkspaceMCPServerHelp(
-        'No globally enabled connectors are available yet. Enable an MCP globally first.',
+        'No globally enabled MCP servers are available yet. Enable one globally first.',
         true
       );
       return;
@@ -797,7 +797,7 @@ export class WorkspaceMCPManager {
       return;
     }
 
-    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.setWorkspaceMCPServerHelp('Only globally enabled MCP servers can be added here.');
   }
 
   renderWorkspaceMCPAgentOptions(bindingId) {
@@ -853,7 +853,7 @@ export class WorkspaceMCPManager {
       this.host.elements.mcpForm.reset();
     }
     if (this.host.elements.mcpServerSelect) {
-      this.host.elements.mcpServerSelect.innerHTML = '<option value="">Select a connector</option>';
+      this.host.elements.mcpServerSelect.innerHTML = '<option value="">Select an MCP server</option>';
     }
     if (this.host.elements.mcpAgentOptions) {
       this.host.elements.mcpAgentOptions.innerHTML =
@@ -864,7 +864,7 @@ export class WorkspaceMCPManager {
     }
     if (this.host.elements.mcpModalSubtitle) {
       this.host.elements.mcpModalSubtitle.textContent =
-        'Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.';
+        'Bind a globally available MCP server to this workspace, then decide which agent instances can use it here.';
     }
     if (this.host.elements.mcpEnabledInput) {
       this.host.elements.mcpEnabledInput.checked = true;
@@ -876,7 +876,7 @@ export class WorkspaceMCPManager {
       this.host.elements.mcpConfigInput.value = '';
     }
     if (this.host.elements.mcpConfigDetails) {
-      this.host.elements.mcpConfigDetails.open = true;
+      this.host.elements.mcpConfigDetails.open = false;
     }
     if (this.host.elements.mcpAliasInput) {
       this.host.elements.mcpAliasInput.value = '';
@@ -902,7 +902,7 @@ export class WorkspaceMCPManager {
       this.host.elements.mcpSubmitBtn.disabled = false;
       this.host.elements.mcpSubmitBtn.textContent = 'Add Binding';
     }
-    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.setWorkspaceMCPServerHelp('Only globally enabled MCP servers can be added here.');
     this.updateWorkspaceMCPAgentAccessSummary();
   }
 
@@ -956,9 +956,9 @@ export class WorkspaceMCPManager {
     try {
       await this.loadAvailableMCPServers();
     } catch (error) {
-      console.error('Failed to load MCP connectors:', error);
+      console.error('Failed to load MCP servers:', error);
       if (!existingBinding) {
-        if (window.Toast) window.Toast.error(error.message || 'Failed to load MCP connectors');
+        if (window.Toast) window.Toast.error(error.message || 'Failed to load MCP servers');
         return;
       }
     }
@@ -1003,6 +1003,9 @@ export class WorkspaceMCPManager {
           ? JSON.stringify(existingBinding.config, null, 2)
           : '';
       this.host.elements.mcpConfigInput.value = config;
+      if (this.host.elements.mcpConfigDetails) {
+        this.host.elements.mcpConfigDetails.open = config !== '';
+      }
     }
     const emailConfig =
       existingBinding?.config && typeof existingBinding.config === 'object'
@@ -1045,11 +1048,11 @@ export class WorkspaceMCPManager {
     try {
       parsed = JSON.parse(raw);
     } catch (_error) {
-      throw new Error('Scope JSON must be valid JSON');
+      throw new Error('Access Scope must be valid JSON');
     }
 
     if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-      throw new Error('Scope JSON must be an object');
+      throw new Error('Access Scope must be a JSON object');
     }
 
     return parsed;
@@ -1063,11 +1066,11 @@ export class WorkspaceMCPManager {
     try {
       parsed = JSON.parse(raw);
     } catch (_error) {
-      throw new Error('Config JSON must be valid JSON');
+      throw new Error('Runtime Overrides must be valid JSON');
     }
 
     if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-      throw new Error('Config JSON must be an object');
+      throw new Error('Runtime Overrides must be a JSON object');
     }
 
     return parsed;
@@ -1244,10 +1247,10 @@ export class WorkspaceMCPManager {
 
     if (!serverName) {
       this.setWorkspaceMCPServerHelp(
-        'Choose a connector before saving this workspace binding.',
+        'Choose an MCP server before saving this workspace binding.',
         true
       );
-      if (window.Toast) window.Toast.error('Choose a connector');
+      if (window.Toast) window.Toast.error('Choose an MCP server');
       return;
     }
 
@@ -1255,8 +1258,8 @@ export class WorkspaceMCPManager {
     try {
       scope = this.parseWorkspaceMCPScopeValue();
     } catch (error) {
-      this.setWorkspaceMCPServerHelp(error.message || 'Scope JSON is invalid', true);
-      if (window.Toast) window.Toast.error(error.message || 'Scope JSON is invalid');
+      this.setWorkspaceMCPServerHelp(error.message || 'Access Scope is invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Access Scope is invalid');
       return;
     }
 
@@ -1264,8 +1267,8 @@ export class WorkspaceMCPManager {
     try {
       config = this.parseWorkspaceMCPConfigValue();
     } catch (error) {
-      this.setWorkspaceMCPServerHelp(error.message || 'Config JSON is invalid', true);
-      if (window.Toast) window.Toast.error(error.message || 'Config JSON is invalid');
+      this.setWorkspaceMCPServerHelp(error.message || 'Runtime Overrides are invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Runtime Overrides are invalid');
       return;
     }
 
@@ -1286,7 +1289,7 @@ export class WorkspaceMCPManager {
       }
     }
 
-    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.setWorkspaceMCPServerHelp('Only globally enabled MCP servers can be added here.');
     this.setWorkspaceMCPModalSubmitting(true);
 
     try {

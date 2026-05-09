@@ -185,10 +185,10 @@
             <div class="workspace-detail-config-header">
               <div>
                 <div class="workspace-detail-config-kicker">Workspace Configuration</div>
-                <h2 class="workspace-detail-config-title">Manager settings, connections, and skill policy</h2>
+                <h2 class="workspace-detail-config-title">Manager settings, MCP, and skill policy</h2>
                 <div class="workspace-detail-config-summary" id="workspace-detail-config-summary">
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Workspace: General · Guided</span>
-                  <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">Connections: 0</span>
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">MCP: 0</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-skills-chip">Skills: 0</span>
                 </div>
               </div>
@@ -237,7 +237,7 @@
                   role="tab"
                   aria-controls="workspace-detail-config-mcp-pane"
                   aria-selected="false">
-                  Connections
+                  MCP
                 </button>
                 <button
                   class="nav-link workspace-detail-config-tab"
@@ -537,9 +537,9 @@
                   tabindex="0">
                   <div class="workspace-detail-config-pane-header">
                     <div>
-                      <div class="workspace-detail-config-pane-title">Workspace Connections</div>
+                      <div class="workspace-detail-config-pane-title">Workspace MCP</div>
                       <div class="workspace-detail-config-pane-copy">
-                        Manage the MCP connectors and workspace-scoped integrations that agents can use in this workspace.
+                        Manage the MCP servers and workspace-scoped integrations that agents can use in this workspace.
                       </div>
                     </div>
                     <div class="workspace-detail-config-pane-actions">
@@ -986,10 +986,10 @@
       <div class="modal-content workspace-detail-mcp-modal-content">
         <div class="modal-header">
           <div class="workspace-detail-mcp-modal-heading">
-            <div class="workspace-detail-mcp-modal-kicker">Workspace-scoped connector</div>
+            <div class="workspace-detail-mcp-modal-kicker">Workspace MCP</div>
             <h5 class="modal-title" id="workspace-detail-mcp-modal-title">Add Workspace MCP</h5>
             <p id="workspace-detail-mcp-modal-subtitle" class="workspace-detail-mcp-modal-subtitle mb-0">
-              Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.
+              Bind a globally available MCP server to this workspace, then decide which agent instances can use it here.
             </p>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -997,16 +997,16 @@
         <form id="workspace-detail-mcp-form">
           <div class="modal-body">
             <div id="workspace-detail-mcp-modal-banner" class="workspace-detail-mcp-modal-banner">
-              Workspace bindings control scope and access. Global MCP settings still define how each connector starts.
+              Workspace bindings control scope and access. Global MCP settings still define how each MCP server starts.
             </div>
             <div class="row g-3">
               <div class="col-md-6">
-                <label for="workspace-detail-mcp-server" class="form-label">Connector</label>
+                <label for="workspace-detail-mcp-server" class="form-label">MCP Server</label>
                 <select id="workspace-detail-mcp-server" class="form-select">
-                  <option value="">Select a connector</option>
+                  <option value="">Select an MCP server</option>
                 </select>
                 <div id="workspace-detail-mcp-server-help" class="workspace-detail-mcp-field-help">
-                  Only globally enabled connectors can be added here.
+                  Only globally enabled MCP servers can be added here.
                 </div>
               </div>
               <div class="col-md-6">
@@ -1023,10 +1023,10 @@
                 </div>
               </div>
               <div class="col-12">
-                <label for="workspace-detail-mcp-scope" class="form-label">Scope JSON</label>
+                <label for="workspace-detail-mcp-scope" class="form-label">Access Scope</label>
                 <textarea id="workspace-detail-mcp-scope" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;roots&quot;: [&quot;/repo/app&quot;]&#10;}"></textarea>
                 <div class="workspace-detail-mcp-field-help">
-                  Optional JSON object for workspace-specific scope like <code>roots</code>, <code>repos</code>, or <code>channels</code>.
+                  Optional JSON object that limits workspace access, such as <code>roots</code>, <code>repos</code>, or <code>channels</code>.
                 </div>
               </div>
               <div id="workspace-detail-mcp-email-fields" class="col-12 d-none">
@@ -1101,10 +1101,10 @@
                 </div>
               </div>
               <div id="workspace-detail-mcp-config-field" class="col-12">
-                <details id="workspace-detail-mcp-config-details" class="workspace-detail-mcp-advanced-details" open>
-                  <summary class="workspace-detail-mcp-advanced-summary">Advanced Config JSON</summary>
+                <details id="workspace-detail-mcp-config-details" class="workspace-detail-mcp-advanced-details">
+                  <summary class="workspace-detail-mcp-advanced-summary">Runtime Overrides</summary>
                   <div class="workspace-detail-mcp-advanced-body">
-                    <label for="workspace-detail-mcp-config" class="form-label">Config JSON</label>
+                    <label for="workspace-detail-mcp-config" class="form-label">Overrides JSON</label>
                     <textarea id="workspace-detail-mcp-config" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;args&quot;: [&quot;playwright-mcp&quot;, &quot;--headless&quot;],&#10;  &quot;env&quot;: { &quot;BROWSER_CONTEXT&quot;: &quot;workspace&quot; }&#10;}"></textarea>
                     <div class="workspace-detail-mcp-field-help">
                       Optional runtime overrides for this workspace binding. Supported keys today are <code>command</code>, <code>args</code>, <code>env</code>, and <code>transport</code>.
@@ -3818,13 +3818,16 @@
       position: relative;
     }
 
+    .workspace-detail-item[role="button"] {
+      cursor: pointer;
+    }
+
     .workspace-detail-item:hover {
       background: var(--bg-tertiary);
       border-color: var(--border-color);
     }
 
     .workspace-detail-item-content {
-      cursor: pointer;
       border-radius: 4px;
     }
 
@@ -3932,6 +3935,15 @@
 	      opacity: 0.35;
 	      cursor: not-allowed;
 	      pointer-events: none;
+	    }
+
+	    .workspace-detail-item-run.is-rerun {
+	      color: #60a5fa;
+	    }
+
+	    .workspace-detail-item-run.is-rerun:hover {
+	      background: rgba(96, 165, 250, 0.16);
+	      color: #60a5fa;
 	    }
 
 	    .workspace-detail-item-sync {
@@ -5095,6 +5107,55 @@
     .workspace-detail-task-status.blocked {
       background: rgba(245, 158, 11, 0.15);
       color: #f59e0b;
+    }
+
+    .workspace-detail-task-status-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: nowrap;
+    }
+
+    .workspace-detail-task-activity {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: #2563eb;
+      background: rgba(37, 99, 235, 0.08);
+      border: 1px solid rgba(37, 99, 235, 0.2);
+      max-width: 16rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-task-activity::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #2563eb;
+      flex-shrink: 0;
+      animation: workspace-detail-task-activity-pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes workspace-detail-task-activity-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-task-activity {
+      color: #60a5fa;
+      background: rgba(96, 165, 250, 0.12);
+      border-color: rgba(96, 165, 250, 0.3);
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-task-activity::before {
+      background: #60a5fa;
     }
 
     #workspace-detail-view[hidden],
@@ -6958,8 +7019,8 @@
 
   <!-- Core Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="/js/vendor/marked-14.1.4.min.js" integrity="sha384-lqPzN0kmFw9t2syAMwVPM4VbAyqsz/lPyYWbb2Xt6nSPM0WPNrpSWCUBgdcAdgnC"></script>
+  <script src="/js/vendor/dompurify-3.1.6.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"></script>
 
   <!-- Theme Manager (load early) -->
   <script src="/js/modules/themeManager.js"></script>

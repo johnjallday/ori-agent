@@ -452,31 +452,22 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 		}
 	}
 
-	// Handle input task results specially for better formatting
-	inputTaskResults, hasInputResults := task.Context["input_task_results"]
-	if hasInputResults {
-		h.formatInputResults(&prompt, inputTaskResults)
+	// Handle input task results specially for better formatting. Runtime inputs
+	// (rebuilt each execution) live on task.RuntimeInputs — never in Context.
+	// Structured outputs from upstream tasks with an OutputSchema get rendered
+	// as JSON alongside the raw text, so downstream tasks can consume either.
+	if task.RuntimeInputs != nil {
+		h.formatInputResults(&prompt, task.RuntimeInputs)
 	}
 
-	// Include other context fields
+	// Include authored context fields. With runtime inputs no longer merged
+	// into Context, every key here is authored — no filtering needed.
 	if len(task.Context) > 0 {
-		hasOtherContext := false
-		for key := range task.Context {
-			if key != "input_task_results" {
-				hasOtherContext = true
-				break
-			}
+		prompt.WriteString("## Additional Context\n\n")
+		for key, value := range task.Context {
+			fmt.Fprintf(&prompt, "- **%s**: %v\n", key, value)
 		}
-
-		if hasOtherContext {
-			prompt.WriteString("## Additional Context\n\n")
-			for key, value := range task.Context {
-				if key != "input_task_results" {
-					fmt.Fprintf(&prompt, "- **%s**: %v\n", key, value)
-				}
-			}
-			prompt.WriteString("\n")
-		}
+		prompt.WriteString("\n")
 	}
 
 	if outputInstructions := BuildTaskOutputSchemaPrompt(task.OutputSchema); outputInstructions != "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -141,6 +142,34 @@ func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
 	})
 
 	return config
+}
+
+func normalizeTaskSleepPolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "skip", "run_once_on_wake":
+		return strings.ToLower(strings.TrimSpace(policy))
+	default:
+		return "run_once_on_wake"
+	}
+}
+
+func normalizeWakeFallbackPolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "run_on_next_wake", "skip":
+		return strings.ToLower(strings.TrimSpace(policy))
+	default:
+		return "run_on_next_wake"
+	}
+}
+
+func normalizeWakeLeadMinutes(minutes int) int {
+	if minutes <= 0 {
+		return 5
+	}
+	if minutes > 120 {
+		return 120
+	}
+	return minutes
 }
 
 // TaskHandler manages task and scheduled task operations
@@ -308,6 +337,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Schedule               json.RawMessage                `json:"schedule"`
 		ScheduleEnabled        bool                           `json:"schedule_enabled"`
 		ScheduleName           string                         `json:"schedule_name"`
+		SleepPolicy            string                         `json:"sleep_policy"`
+		WakeMacEnabled         bool                           `json:"wake_mac_enabled"`
+		WakeLeadMinutes        int                            `json:"wake_lead_minutes"`
+		WakeFallbackPolicy     string                         `json:"wake_fallback_policy"`
 		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	}
 
@@ -347,7 +380,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		AssignedNodeID:         req.AssignedNodeID,
 		Description:            req.Description,
 		Details:                req.Details,
-		Priority:               req.Priority,
+		Priority:               normalizeTaskPriority(req.Priority),
 		InputTaskIDs:           req.InputTaskIDs,
 		ParentTaskID:           req.ParentTaskID,
 		SubtaskIndex:           req.SubtaskIndex,
@@ -360,6 +393,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Schedule:               schedule,
 		ScheduleEnabled:        req.ScheduleEnabled,
 		ScheduleName:           req.ScheduleName,
+		SleepPolicy:            normalizeTaskSleepPolicy(req.SleepPolicy),
+		WakeMacEnabled:         req.WakeMacEnabled,
+		WakeLeadMinutes:        normalizeWakeLeadMinutes(req.WakeLeadMinutes),
+		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
 	}
 
@@ -372,6 +409,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		// Calculate NextRun - pass zero time since task has never run
 		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Time{})
 		task.NextRun = nextRun
+	} else if task.WakeMacEnabled {
+		task.WakeMacEnabled = false
 	}
 
 	// Auto-add agent to workspace if not already present
@@ -385,6 +424,9 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
+		if respondTaskGraphError(w, err, "Failed to add task") {
+			return
+		}
 		logger.Error("Failed to add task to workspace", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add task", err)
 		return
@@ -458,6 +500,7 @@ type taskUpdateRequest struct {
 	Error                  string                         `json:"error"`
 	Description            *string                        `json:"description"`
 	Details                *string                        `json:"details"`
+	Priority               *int                           `json:"priority"`
 	Context                map[string]interface{}         `json:"context"`
 	To                     *string                        `json:"to"`
 	AssignedNodeID         *string                        `json:"assigned_node_id"`
@@ -472,6 +515,10 @@ type taskUpdateRequest struct {
 	Schedule               json.RawMessage                `json:"schedule"`
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
 	ScheduleName           *string                        `json:"schedule_name"`
+	SleepPolicy            *string                        `json:"sleep_policy"`
+	WakeMacEnabled         *bool                          `json:"wake_mac_enabled"`
+	WakeLeadMinutes        *int                           `json:"wake_lead_minutes"`
+	WakeFallbackPolicy     *string                        `json:"wake_fallback_policy"`
 	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	KanbanColumnID         *string                        `json:"kanban_column_id"`
 	KanbanLabels           []string                       `json:"kanban_labels"`
@@ -480,7 +527,7 @@ type taskUpdateRequest struct {
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
-	return r.Description != nil || r.Details != nil || r.Context != nil || r.InputTaskIDs != nil ||
+	return r.Description != nil || r.Details != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
 		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
 		r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
@@ -489,7 +536,8 @@ func (r *taskUpdateRequest) hasFieldUpdates() bool {
 
 // hasScheduleUpdates returns true if the request contains schedule-related updates
 func (r *taskUpdateRequest) hasScheduleUpdates(schedule *workspace.ScheduleConfig, clearSchedule bool) bool {
-	return schedule != nil || clearSchedule || r.ScheduleEnabled != nil || r.ScheduleName != nil
+	return schedule != nil || clearSchedule || r.ScheduleEnabled != nil || r.ScheduleName != nil ||
+		r.SleepPolicy != nil || r.WakeMacEnabled != nil || r.WakeLeadMinutes != nil || r.WakeFallbackPolicy != nil
 }
 
 // applyBasicFieldUpdates applies description, details, input connections, parent, and subtask updates
@@ -501,6 +549,10 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.Details != nil {
 		task.Details = *req.Details
 		logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.Priority != nil {
+		task.Priority = normalizeTaskPriority(*req.Priority)
+		logger.Debug("Updated task priority", logger.Fields{"task_id": req.TaskID, "priority": task.Priority})
 	}
 	if req.Context != nil {
 		if task.Context == nil {
@@ -606,6 +658,10 @@ func (th *TaskHandler) applyScheduleUpdates(task *workspace.Task, req *taskUpdat
 		task.Schedule = nil
 		task.ScheduleEnabled = false
 		task.ScheduleName = ""
+		task.SleepPolicy = ""
+		task.WakeMacEnabled = false
+		task.WakeLeadMinutes = 0
+		task.WakeFallback = ""
 		task.NextRun = nil
 		logger.Debug("Cleared task schedule", logger.Fields{"task_id": req.TaskID})
 	}
@@ -632,6 +688,22 @@ func (th *TaskHandler) applyScheduleUpdates(task *workspace.Task, req *taskUpdat
 
 	if req.ScheduleName != nil {
 		task.ScheduleName = *req.ScheduleName
+	}
+	if req.SleepPolicy != nil {
+		task.SleepPolicy = normalizeTaskSleepPolicy(*req.SleepPolicy)
+	}
+	if req.WakeMacEnabled != nil {
+		task.WakeMacEnabled = *req.WakeMacEnabled
+	}
+	if req.WakeLeadMinutes != nil {
+		task.WakeLeadMinutes = normalizeWakeLeadMinutes(*req.WakeLeadMinutes)
+	}
+	if req.WakeFallbackPolicy != nil {
+		task.WakeFallback = normalizeWakeFallbackPolicy(*req.WakeFallbackPolicy)
+	}
+
+	if task.WakeMacEnabled && (task.Schedule == nil || !task.ScheduleEnabled) {
+		task.WakeMacEnabled = false
 	}
 
 	return ""
@@ -661,6 +733,9 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	if req.To != nil {
 		eventData["to"] = *req.To
 	}
+	if req.Priority != nil {
+		eventData["priority"] = normalizeTaskPriority(*req.Priority)
+	}
 	if req.AssignedNodeID != nil {
 		eventData["assigned_node_id"] = *req.AssignedNodeID
 	}
@@ -687,6 +762,18 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.ScheduleName != nil {
 		eventData["schedule_name"] = *req.ScheduleName
+	}
+	if req.SleepPolicy != nil {
+		eventData["sleep_policy"] = normalizeTaskSleepPolicy(*req.SleepPolicy)
+	}
+	if req.WakeMacEnabled != nil {
+		eventData["wake_mac_enabled"] = *req.WakeMacEnabled
+	}
+	if req.WakeLeadMinutes != nil {
+		eventData["wake_lead_minutes"] = normalizeWakeLeadMinutes(*req.WakeLeadMinutes)
+	}
+	if req.WakeFallbackPolicy != nil {
+		eventData["wake_fallback_policy"] = normalizeWakeFallbackPolicy(*req.WakeFallbackPolicy)
 	}
 	if req.KanbanLabels != nil {
 		eventData["kanban_labels"] = req.KanbanLabels
@@ -870,17 +957,20 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	)
 
 	if err != nil {
-		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
+		logger.Error("Failed to update task status", logger.Fields{"task_id": req.TaskID, "error": err})
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
 
+	updatedTask, err := th.communicator.GetTask(req.TaskID)
+	if err != nil {
+		logger.Error("Failed to get updated task after status update", logger.Fields{"task_id": req.TaskID, "error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to retrieve updated task", err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
-		"success": true,
-		"task_id": req.TaskID,
-		"status":  req.Status,
-	})
+	orihttp.WriteJSON(w, updatedTask)
 }
 
 // handleDeleteTask deletes a task
@@ -1086,7 +1176,10 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 	now := time.Now()
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
-			ws.Tasks[i].Status = workspace.TaskStatusCancelled
+			if err := ws.Tasks[i].SetStatus(workspace.TaskStatusCancelled); err != nil {
+				http.Error(w, fmt.Sprintf("cannot cancel task in state %q: %v", ws.Tasks[i].Status, err), http.StatusConflict)
+				return
+			}
 			ws.Tasks[i].CompletedAt = &now
 			ws.Tasks[i].Error = "Cancelled by user"
 			ws.Tasks[i].Result = ""
@@ -1118,6 +1211,67 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type completeTaskRequest struct {
+	Force  bool   `json:"force,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func parseCompleteTaskRequest(r *http.Request) (completeTaskRequest, error) {
+	var req completeTaskRequest
+	if r == nil || r.Body == nil {
+		return req, nil
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return req, err
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return req, nil
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return req, err
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	return req, nil
+}
+
+func incompleteSubtaskLabels(subtasks []workspace.Task) []string {
+	labels := make([]string, 0, len(subtasks))
+	for _, subtask := range subtasks {
+		if subtask.Status == workspace.TaskStatusCompleted {
+			continue
+		}
+		label := strings.TrimSpace(subtask.Description)
+		if label == "" {
+			label = subtask.ID
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func recordManualCompletion(task *workspace.Task, req completeTaskRequest, completedAt time.Time) {
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+	record := map[string]interface{}{
+		"force":        req.Force,
+		"completed_at": completedAt.UTC().Format(time.RFC3339),
+	}
+	if req.Reason != "" {
+		record["reason"] = req.Reason
+	}
+	task.Context["manual_completion"] = record
+}
+
+func normalizeTaskPriority(priority int) int {
+	if priority < 1 || priority > 5 {
+		return 3
+	}
+	return priority
+}
+
 // handleCompleteTask handles POST /api/orchestration/tasks/{id}/complete
 // Marks a task as completed (for manual task completion)
 func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -1136,6 +1290,12 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	}
 	taskID := pathParts[0]
 
+	completeReq, err := parseCompleteTaskRequest(r)
+	if err != nil {
+		orihttp.BadRequest(w, "Invalid request body")
+		return
+	}
+
 	// Get task and workspace
 	task, ws, err := th.getTaskWithWorkspace(taskID)
 	if err != nil {
@@ -1143,12 +1303,29 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	incompleteSubtasks := incompleteSubtaskLabels(ws.GetSubtasks(taskID))
+	if len(incompleteSubtasks) > 0 && !completeReq.Force {
+		message := fmt.Sprintf("Cannot complete task while %d subtask(s) are incomplete", len(incompleteSubtasks))
+		if len(incompleteSubtasks) <= 3 {
+			message = fmt.Sprintf("%s: %s", message, strings.Join(incompleteSubtasks, ", "))
+		}
+		if err := orihttp.RespondError(w, http.StatusConflict, message); err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	// Find and update task status to completed
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			now := time.Now()
-			ws.Tasks[i].Status = workspace.TaskStatusCompleted
+			if err := ws.Tasks[i].SetStatus(workspace.TaskStatusCompleted); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusConflict, fmt.Sprintf("cannot complete task in state %q", ws.Tasks[i].Status), err)
+				return
+			}
 			ws.Tasks[i].CompletedAt = &now
+			ws.Tasks[i].Error = ""
+			recordManualCompletion(&ws.Tasks[i], completeReq, now)
 			break
 		}
 	}

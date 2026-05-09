@@ -150,6 +150,84 @@ func TestHandleWorkspaceSyncStatusAndLocateMissingWorkspaceFolder(t *testing.T) 
 	}
 }
 
+func TestUpdateManagedWorkspaceReferencesCompactsStaleImportedPath(t *testing.T) {
+	localPath := filepath.Join(t.TempDir(), "instagram-posts")
+	stalePath := filepath.Join("/Users", "johnj", "Ori Workspaces", "instagram-posts")
+
+	refs, err := json.Marshal([]workspaceDirectoryReference{
+		{
+			ID:          "stale-ref",
+			WorkspaceID: "workspace-instagram",
+			Name:        "instagram-posts",
+			Path:        stalePath,
+			X:           400,
+			Y:           300,
+		},
+		{
+			ID:          "local-ref",
+			WorkspaceID: "workspace-instagram",
+			Name:        "",
+			Path:        localPath,
+			X:           400,
+			Y:           300,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal refs: %v", err)
+	}
+
+	bindings, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{
+		{
+			ID:         "binding",
+			ServerName: "filesystem",
+			Alias:      "workspace-files",
+			Enabled:    true,
+			Config: map[string]interface{}{
+				"roots": []string{stalePath},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal bindings: %v", err)
+	}
+
+	workspace := &session.Workspace{
+		ID:                      "workspace-instagram",
+		Name:                    "instagram-posts",
+		DirectoryReferencesJSON: refs,
+		MCPBindingsJSON:         bindings,
+	}
+
+	if err := updateManagedWorkspaceReferences(workspace, localPath, localPath); err != nil {
+		t.Fatalf("updateManagedWorkspaceReferences: %v", err)
+	}
+
+	gotRefs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode refs: %v", err)
+	}
+	if len(gotRefs) != 1 {
+		t.Fatalf("expected stale and duplicate refs to compact to one ref, got %#v", gotRefs)
+	}
+	if cleanWorkspaceSyncPath(gotRefs[0].Path) != cleanWorkspaceSyncPath(localPath) {
+		t.Fatalf("expected local path %q, got %#v", localPath, gotRefs)
+	}
+	if gotRefs[0].Name != "instagram-posts" {
+		t.Fatalf("expected reference name to be preserved, got %#v", gotRefs[0])
+	}
+
+	gotBindings, err := decodeWorkspaceMCPBindings(workspace.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("decode bindings: %v", err)
+	}
+	if len(gotBindings) != 1 || !workspaceBindingHasRoot(gotBindings[0].Config, localPath) {
+		t.Fatalf("expected workspace-files root %q, got %#v", localPath, gotBindings)
+	}
+	if workspaceBindingHasRoot(gotBindings[0].Config, stalePath) {
+		t.Fatalf("expected stale path %q to be removed, got %#v", stalePath, gotBindings)
+	}
+}
+
 func TestHandleWorkspaceSyncStatusSkipsImportedWorkspaceFolders(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

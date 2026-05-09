@@ -180,6 +180,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/external-agents", s.Handlers.Settings.ExternalAgentsSettingsHandler)
 	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
 	mux.HandleFunc("/api/settings/utility", s.Handlers.Settings.UtilitySettingsHandler)
+	mux.HandleFunc("/api/settings/mac-wake", s.Handlers.Settings.MacWakeSettingsHandler)
+	mux.HandleFunc("/api/settings/mac-wake/permission", s.Handlers.Settings.MacWakePermissionHandler)
 	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
 	if s.Handlers.Vault != nil {
 		mux.Handle("/api/vault", s.Handlers.Vault)
@@ -357,6 +359,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/tasks", s.Handlers.Orchestration.TasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/bulk", s.Handlers.Orchestration.BulkDeleteTasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.Handlers.Orchestration.ExecuteTaskHandler)
+	mux.HandleFunc("/api/orchestration/workflows", s.Handlers.Orchestration.WorkflowCreateHandler)
 	if s.Handlers.AutoTask != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
 	}

@@ -227,7 +227,12 @@ export class WorkspaceDetailPage {
     this.workspaceIntentReviewLoading = false;
     this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
-    this.workspaceConfigPreferenceLoaded = false;
+    // Per-task activity tracking: taskId -> { at: number, label: string }.
+    // Fed by realtime task.* events; surfaced inline next to the status pill
+    // on running tasks so users can see "Awaiting model response · 4s ago"
+    // instead of an opaque "In Progress" with no signal of forward motion.
+    this._taskActivity = new Map();
+    this._taskActivityTickHandle = null;
     this.agentCatalogLoaded = false;
     this.agentCatalogLoadFailed = false;
     this.workspaceAgentSnapshots = new Set();
@@ -2449,7 +2454,7 @@ export class WorkspaceDetailPage {
         </div>
         <div class="col-lg-6">
           <div class="workspace-setup-section">
-            <div class="workspace-setup-label">Workspace Connections</div>
+            <div class="workspace-setup-label">Workspace MCP</div>
             ${
               mcps.length > 0
                 ? mcps.map(item => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
@@ -2911,6 +2916,34 @@ export class WorkspaceDetailPage {
    */
   renderTasks() {
     this.renderAgentGroups();
+    this.refreshTaskActivityBadges();
+  }
+
+  // refreshTaskActivityBadges is called after renderTasks() (which rebuilds
+  // task DOM nodes from scratch and would otherwise blow away inline activity
+  // text). It also drops activity entries for tasks that have left the
+  // in_progress state in the meantime.
+  refreshTaskActivityBadges() {
+    if (this._taskActivity.size === 0) return;
+    const runningIds = new Set();
+    for (const t of (this.tasks || [])) {
+      if (!t) continue;
+      if (String(t.status || '').trim().toLowerCase() === 'in_progress') {
+        runningIds.add(t.id);
+      }
+    }
+    for (const taskId of Array.from(this._taskActivity.keys())) {
+      if (!runningIds.has(taskId)) {
+        this._taskActivity.delete(taskId);
+        continue;
+      }
+      this.patchTaskActivityBadge(taskId);
+    }
+    if (this._taskActivity.size === 0) {
+      this.stopTaskActivityTick();
+    } else {
+      this.ensureTaskActivityTick();
+    }
   }
 
   renderAgentDetailLink(agentName, encodedAgentName) {
@@ -3798,6 +3831,8 @@ export class WorkspaceDetailPage {
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
+    const taskTerminalState = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' || task.status === 'timeout';
+    const isRerun = !isParent && taskTerminalState;
     const executeTitle = isParent
       ? hasUnassignedSubtasks
         ? 'Assign agents to all subtasks before executing'
@@ -3805,12 +3840,14 @@ export class WorkspaceDetailPage {
           ? 'A subtask is already running'
           : 'Execute workflow now'
       : !assignedAgent
-        ? 'Will auto-assign a workspace agent before execution'
+        ? (isRerun ? 'Will auto-assign a workspace agent before re-running' : 'Will auto-assign a workspace agent before execution')
         : awaitingNextStep
           ? 'Execute the next internal step'
           : task.status === 'in_progress'
             ? 'Task is already running'
-            : 'Execute task now';
+            : isRerun
+              ? 'Re-run this task'
+              : 'Execute task now';
     const resultTitle = hasResultData
       ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
       : '';
@@ -3862,8 +3899,15 @@ export class WorkspaceDetailPage {
         ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
         : '';
 
+    const cardOpenLabel = `Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}`;
     return `
-      <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
+      <div class="${itemClasses.join(' ')}"
+           data-task-id="${task.id}"
+           role="button"
+           tabindex="0"
+           aria-label="${cardOpenLabel}"
+           onclick="if (event.target.closest('button, a, input, select, textarea, [contenteditable=true]')) return; window.workspaceDetail?.openTask('${task.id}')"
+           onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea, [contenteditable=true]')) { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
         ${
           hasAssistData
             ? `
@@ -3892,31 +3936,33 @@ export class WorkspaceDetailPage {
               : ''
         }
         <button type="button"
-                class="workspace-detail-item-run"
+                class="workspace-detail-item-run${isRerun ? ' is-rerun' : ''}"
                 onclick="event.stopPropagation(); window.workspaceDetail?.executeTask('${task.id}')"
                 title="${this.escapeHtml(executeTitle)}"
-                aria-label="Execute task ${taskLabel}"
+                aria-label="${isRerun ? 'Re-run' : 'Execute'} task ${taskLabel}"
                 ${canExecute ? '' : 'disabled'}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
-          </svg>
+          ${isRerun
+            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                 <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+               </svg>`
+            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                 <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+               </svg>`}
         </button>
         <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content"
-             role="button"
-             tabindex="0"
-             aria-label="Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}"
-             onclick="window.workspaceDetail?.openTask('${task.id}')"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
+        <div class="workspace-detail-item-content">
           <div class="d-flex justify-content-between align-items-start">
             <div class="workspace-detail-item-title">
               ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
             </div>
-            <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+            <div class="workspace-detail-task-status-group">
+              <span class="workspace-detail-task-activity" data-task-activity-slot hidden></span>
+              <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
+            </div>
           </div>
           <div class="workspace-detail-item-meta">
             ${taskMetaParts.join(' · ')}
@@ -9250,37 +9296,6 @@ export class WorkspaceDetailPage {
 
   // ── Workspace Configuration Methods ─────────────────────────────────
 
-  getWorkspaceConfigStorageKey() {
-    return `workspace-detail-config-expanded:${this.workspaceId}`;
-  }
-
-  readWorkspaceConfigExpandedPreference() {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return null;
-    }
-
-    try {
-      const stored = window.localStorage.getItem(this.getWorkspaceConfigStorageKey());
-      if (stored === 'true') return true;
-      if (stored === 'false') return false;
-    } catch (error) {
-      console.warn('Failed to read workspace configuration preference:', error);
-    }
-    return null;
-  }
-
-  writeWorkspaceConfigExpandedPreference(expanded) {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(this.getWorkspaceConfigStorageKey(), expanded ? 'true' : 'false');
-    } catch (error) {
-      console.warn('Failed to persist workspace configuration preference:', error);
-    }
-  }
-
   formatWorkspaceConfigPresetLabel(preset) {
     const value = String(preset || '').trim();
     if (!value) return 'Guided';
@@ -9323,11 +9338,7 @@ export class WorkspaceDetailPage {
     );
   }
 
-  shouldDefaultExpandWorkspaceConfig() {
-    return false;
-  }
-
-  setWorkspaceConfigExpanded(expanded, options = {}) {
+  setWorkspaceConfigExpanded(expanded) {
     const nextExpanded = expanded !== false;
     this.workspaceConfigExpanded = nextExpanded;
 
@@ -9345,24 +9356,10 @@ export class WorkspaceDetailPage {
         ? 'Hide Configuration'
         : 'Show Configuration';
     }
-
-    if (options.persist !== false) {
-      this.writeWorkspaceConfigExpandedPreference(nextExpanded);
-    }
   }
 
   initializeWorkspaceConfigExpansion() {
-    if (this.workspaceConfigPreferenceLoaded) {
-      this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded, { persist: false });
-      return;
-    }
-
-    const storedPreference = this.readWorkspaceConfigExpandedPreference();
-    const nextExpanded =
-      storedPreference === null ? this.shouldDefaultExpandWorkspaceConfig() : storedPreference;
-
-    this.workspaceConfigPreferenceLoaded = true;
-    this.setWorkspaceConfigExpanded(nextExpanded, { persist: false });
+    this.setWorkspaceConfigExpanded(false);
   }
 
   toggleWorkspaceConfigExpanded() {
@@ -9382,7 +9379,7 @@ export class WorkspaceDetailPage {
       this.elements.configPresetChip.textContent = `Workspace: ${this.formatWorkspaceSettingsProfileLabel(profile)} · ${this.formatWorkspaceConfigPresetLabel(preset)}`;
     }
     if (this.elements.configConnectionsChip) {
-      this.elements.configConnectionsChip.textContent = `Connections: ${connectionCount}`;
+      this.elements.configConnectionsChip.textContent = `MCP: ${connectionCount}`;
     }
     if (this.elements.configSkillsChip) {
       this.elements.configSkillsChip.textContent = `Skills: ${skillCount}`;
@@ -13504,11 +13501,16 @@ export class WorkspaceDetailPage {
       case 'task.completed':
       case 'task.failed':
       case 'task.deleted':
+        this.captureTaskActivity(event);
         this.loadTasks();
         break;
       case 'task.thinking':
       case 'task.tool_call':
       case 'task.tool_result':
+      case 'task.heartbeat':
+        // Phase events fire frequently — don't refetch tasks for each one.
+        // Just patch the inline activity badge for the affected task.
+        this.captureTaskActivity(event);
         break;
       case 'task.blocked': {
         this.loadTasks();
@@ -13568,6 +13570,121 @@ export class WorkspaceDetailPage {
         }
         break;
       }
+    }
+  }
+
+  // captureTaskActivity records the most recent task.* event for a task and
+  // patches its inline activity badge in-place. The page deliberately does
+  // NOT refetch tasks for thinking/tool/heartbeat events — those fire every
+  // few seconds during a run and would thrash the table.
+  captureTaskActivity(event) {
+    const eventType = String(event?.type || '').trim();
+    const payload = event?.data?.data || event?.data || {};
+    const taskId = String(payload?.task_id || event?.task_id || '').trim();
+    if (!taskId) return;
+
+    if (eventType === 'task.heartbeat') {
+      const prev = this._taskActivity.get(taskId);
+      this._taskActivity.set(taskId, { at: Date.now(), label: prev?.label || '' });
+    } else {
+      const label = this.taskActivityLabelFor(eventType, payload);
+      if (label === null) return;
+      this._taskActivity.set(taskId, { at: Date.now(), label });
+    }
+
+    // Drop the entry once the task is no longer in_progress so a re-run
+    // starts clean. We check live state to avoid stale labels persisting
+    // after a completion event sneaks past the heartbeat goroutine.
+    const task = this.tasks?.find?.(t => t?.id === taskId);
+    if (task && String(task.status || '').trim().toLowerCase() !== 'in_progress') {
+      this._taskActivity.delete(taskId);
+    }
+
+    this.patchTaskActivityBadge(taskId);
+    this.ensureTaskActivityTick();
+  }
+
+  taskActivityLabelFor(eventType, payload) {
+    const data = (payload && typeof payload === 'object') ? payload : {};
+    switch (eventType) {
+      case 'task.thinking': {
+        const phase = String(data.phase || '').trim();
+        if (phase === 'awaiting_llm') return 'Awaiting model';
+        if (phase === 'llm_returned') {
+          const calls = Number(data.tool_call_count || 0);
+          return calls > 0 ? `Processing ${calls} tool` : 'Processing model';
+        }
+        if (phase === 'starting') return 'Analyzing';
+        return 'Thinking';
+      }
+      case 'task.tool_call': {
+        const tool = String(data.tool_name || '').trim();
+        return tool ? `→ ${tool}` : 'Calling tool';
+      }
+      case 'task.tool_result': {
+        const tool = String(data.tool_name || '').trim();
+        const success = data.success !== false;
+        if (tool) return success ? `${tool} ✓` : `${tool} ✗`;
+        return 'Tool finished';
+      }
+      case 'task.started':
+        return 'Started';
+      case 'task.resumed':
+        return 'Resumed';
+      default:
+        return null;
+    }
+  }
+
+  formatTaskActivityAgo(timestampMs) {
+    if (!timestampMs) return '';
+    const elapsed = Math.max(0, Date.now() - timestampMs);
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds < 2) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  }
+
+  patchTaskActivityBadge(taskId) {
+    if (!taskId) return;
+    const item = document.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
+    if (!item) return;
+    const slot = item.querySelector('[data-task-activity-slot]');
+    if (!slot) return;
+    const activity = this._taskActivity.get(taskId);
+    if (!activity) {
+      slot.textContent = '';
+      slot.hidden = true;
+      return;
+    }
+    const ago = this.formatTaskActivityAgo(activity.at);
+    const text = activity.label
+      ? (ago ? `${activity.label} · ${ago}` : activity.label)
+      : (ago ? `Active ${ago}` : 'Active');
+    slot.textContent = text;
+    slot.hidden = false;
+  }
+
+  ensureTaskActivityTick() {
+    if (this._taskActivityTickHandle) return;
+    this._taskActivityTickHandle = window.setInterval(() => {
+      if (this._taskActivity.size === 0) {
+        this.stopTaskActivityTick();
+        return;
+      }
+      for (const taskId of this._taskActivity.keys()) {
+        this.patchTaskActivityBadge(taskId);
+      }
+    }, 2000);
+  }
+
+  stopTaskActivityTick() {
+    if (this._taskActivityTickHandle) {
+      window.clearInterval(this._taskActivityTickHandle);
+      this._taskActivityTickHandle = null;
     }
   }
 

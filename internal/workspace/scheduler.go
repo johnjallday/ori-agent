@@ -14,14 +14,30 @@ type TaskScheduler struct {
 	workspaceStore Store
 	eventBus       *EventBus
 	pollInterval   time.Duration
+	wakeScheduler  WakeScheduler
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 }
 
+// WakeCandidate describes the next task run that may need a macOS wake event.
+type WakeCandidate struct {
+	WorkspaceID string
+	TaskID      string
+	TaskName    string
+	RunAt       time.Time
+	LeadMinutes int
+}
+
+// WakeScheduler programs system wake events for wake-enabled task schedules.
+type WakeScheduler interface {
+	SyncNextWake(candidates []WakeCandidate) error
+}
+
 // SchedulerConfig contains configuration for the task scheduler
 type SchedulerConfig struct {
-	PollInterval time.Duration // How often to check for scheduled tasks
+	PollInterval  time.Duration // How often to check for scheduled tasks
+	WakeScheduler WakeScheduler
 }
 
 // NewTaskScheduler creates a new task scheduler
@@ -33,6 +49,7 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 	return &TaskScheduler{
 		workspaceStore: store,
 		pollInterval:   config.PollInterval,
+		wakeScheduler:  config.WakeScheduler,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -99,6 +116,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 	}
 
 	now := time.Now()
+	wakeCandidates := make([]WakeCandidate, 0)
 
 	for _, wsID := range workspaceIDs {
 		ws, err := ts.workspaceStore.Get(wsID)
@@ -126,17 +144,21 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 				continue
 			}
 
+			if ts.shouldSkipMissedTaskRun(task, now) {
+				ts.skipMissedTaskSchedule(ws, task, now)
+				continue
+			}
+
 			// VALIDATION 1: Check if max runs reached
 			// max_runs=0 means unlimited executions
 			if task.Schedule.MaxRuns > 0 && task.ExecutionCount >= task.Schedule.MaxRuns {
 				logger.Debug("📅 Task schedule reached max runs, disabling", logger.Fields{"task_id": task.ID, "maxruns": task.Schedule.MaxRuns})
-				task.ScheduleEnabled = false
-				task.NextRun = nil
-				if err := ws.UpdateTask(*task); err != nil {
-					logger.Error("Failed to update task", logger.Fields{"error": err})
-				}
-				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"error": err})
+				if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+					t.ScheduleEnabled = false
+					t.NextRun = nil
+					return nil
+				}); err != nil {
+					logger.Error("Failed to disable task schedule", logger.Fields{"error": err, "task_id": task.ID})
 				}
 				continue
 			}
@@ -145,13 +167,12 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			// end_date is optional; nil means no end date
 			if task.Schedule.EndDate != nil && now.After(*task.Schedule.EndDate) {
 				logger.Debug("📅 Task schedule passed end date, disabling", logger.Fields{"task_id": task.ID})
-				task.ScheduleEnabled = false
-				task.NextRun = nil
-				if err := ws.UpdateTask(*task); err != nil {
-					logger.Error("Failed to update task", logger.Fields{"error": err})
-				}
-				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"error": err})
+				if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+					t.ScheduleEnabled = false
+					t.NextRun = nil
+					return nil
+				}); err != nil {
+					logger.Error("Failed to disable task schedule", logger.Fields{"error": err, "task_id": task.ID})
 				}
 				continue
 			}
@@ -162,6 +183,93 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 		// Also check legacy ScheduledTasks for backward compatibility during migration
 		ts.checkLegacyScheduledTasks(ws, now)
+		wakeCandidates = append(wakeCandidates, collectWakeCandidates(ws, now)...)
+	}
+
+	if ts.wakeScheduler != nil {
+		if err := ts.wakeScheduler.SyncNextWake(wakeCandidates); err != nil {
+			logger.Warn("Failed to sync macOS wake schedule", logger.Fields{"error": err})
+		}
+	}
+}
+
+func collectWakeCandidates(ws *Workspace, now time.Time) []WakeCandidate {
+	if ws == nil || ws.Status != StatusActive {
+		return nil
+	}
+
+	candidates := make([]WakeCandidate, 0)
+	for i := range ws.Tasks {
+		task := &ws.Tasks[i]
+		if task.Schedule == nil || !task.ScheduleEnabled || !task.WakeMacEnabled || task.NextRun == nil {
+			continue
+		}
+		if !task.NextRun.After(now) {
+			continue
+		}
+		leadMinutes := task.WakeLeadMinutes
+		if leadMinutes <= 0 {
+			leadMinutes = 5
+		}
+		candidates = append(candidates, WakeCandidate{
+			WorkspaceID: ws.ID,
+			TaskID:      task.ID,
+			TaskName:    task.ScheduleName,
+			RunAt:       *task.NextRun,
+			LeadMinutes: leadMinutes,
+		})
+	}
+	return candidates
+}
+
+func (ts *TaskScheduler) shouldSkipMissedTaskRun(task *Task, now time.Time) bool {
+	if task == nil || task.NextRun == nil || task.SleepPolicy != "skip" {
+		return false
+	}
+	grace := ts.pollInterval + 30*time.Second
+	if grace < 90*time.Second {
+		grace = 90 * time.Second
+	}
+	return now.Sub(*task.NextRun) > grace
+}
+
+func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now time.Time) {
+	if ws == nil || task == nil || task.Schedule == nil || task.NextRun == nil {
+		return
+	}
+
+	missedAt := *task.NextRun
+	var nextRun *time.Time
+
+	if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+		if t.Schedule == nil {
+			return fmt.Errorf("task %q has no schedule", t.ID)
+		}
+		nextRun = CalculateNextRun(*t.Schedule, now)
+		t.NextRun = nextRun
+		if nextRun == nil {
+			t.ScheduleEnabled = false
+		}
+		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
+			TaskID:     t.ID,
+			ExecutedAt: missedAt,
+			Status:     "skipped",
+			Summary:    "Skipped because Ori was asleep.",
+		})
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
+		}
+		return nil
+	}); err != nil {
+		logger.Error("Failed to record skipped scheduled task", logger.Fields{"error": err, "task_id": task.ID})
+		return
+	}
+	if ts.eventBus != nil {
+		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler.skip", map[string]interface{}{
+			"task_id":   task.ID,
+			"missed_at": missedAt,
+			"next_run":  nextRun,
+		}))
 	}
 }
 
@@ -235,69 +343,71 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 		return
 	}
 
-	// Reset task state for re-execution
-	task.Status = TaskStatusAssigned
-	task.Result = ""
-	ApplyTaskResultMetadata(task, "")
-	task.Error = ""
-	task.Progress = nil
-	task.StartedAt = nil
-	task.CompletedAt = nil
+	var (
+		nextRun        *time.Time
+		executionCount int
+		scheduleName   string
+	)
 
-	// Update schedule tracking
-	task.LastRun = &now
-	task.ExecutionCount++
-	task.FailureCount = 0 // Reset failure count on successful trigger
+	if err := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+		if t.Schedule == nil {
+			return fmt.Errorf("task %q has no schedule", t.ID)
+		}
 
-	// Add to execution history
-	execution := TaskExecution{
-		TaskID:     task.ID,
-		ExecutedAt: now,
-		Status:     "success",
-	}
-	task.ExecutionHistory = append(task.ExecutionHistory, execution)
-	if len(task.ExecutionHistory) > 20 {
-		task.ExecutionHistory = task.ExecutionHistory[len(task.ExecutionHistory)-20:]
-	}
+		// Reset task state for re-execution
+		if err := t.SetStatus(TaskStatusAssigned); err != nil {
+			return fmt.Errorf("scheduler: reset task to assigned: %w", err)
+		}
+		ResetTaskRuntime(t)
 
-	// Calculate next run
-	nextRun := CalculateNextRun(*task.Schedule, now)
-	task.NextRun = nextRun
+		// Update schedule tracking
+		t.LastRun = &now
+		t.ExecutionCount++
+		t.FailureCount = 0 // Reset failure count on successful trigger
 
-	// Auto-disable one-time schedules
-	if nextRun == nil {
-		task.ScheduleEnabled = false
-		logger.Info("📅 Task schedule completed (one-time execution), disabling", logger.Fields{"task_id": task.ID})
-	}
+		// Add to execution history
+		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
+			TaskID:     t.ID,
+			ExecutedAt: now,
+			Status:     "success",
+		})
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
+		}
 
-	// Save changes
-	if err := ws.UpdateTask(*task); err != nil {
-		logger.Error("Failed to update task", logger.Fields{"error": err})
-		return
-	}
+		// Calculate next run
+		nextRun = CalculateNextRun(*t.Schedule, now)
+		t.NextRun = nextRun
 
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		// Auto-disable one-time schedules
+		if nextRun == nil {
+			t.ScheduleEnabled = false
+			logger.Info("📅 Task schedule completed (one-time execution), disabling", logger.Fields{"task_id": t.ID})
+		}
+
+		executionCount = t.ExecutionCount
+		scheduleName = t.ScheduleName
+		return nil
+	}); err != nil {
+		logger.Error("Failed to record scheduled task execution", logger.Fields{"error": err, "task_id": task.ID})
 		return
 	}
 
 	// Publish events
 	if ts.eventBus != nil {
-		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, task.ID, task.ScheduleName, map[string]interface{}{
+		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, task.ID, scheduleName, map[string]interface{}{
 			"task_id":         task.ID,
 			"task_created":    false,
-			"execution_count": task.ExecutionCount,
+			"execution_count": executionCount,
 			"next_run":        nextRun,
 			"timestamp":       now,
-		})
-		ts.eventBus.Publish(event)
+		}))
 
-		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
 			"task_id":         task.ID,
-			"execution_count": task.ExecutionCount,
+			"execution_count": executionCount,
 			"next_run":        nextRun,
-		})
-		ts.eventBus.Publish(workspaceEvent)
+		}))
 	}
 }
 
@@ -305,40 +415,46 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, err error) {
 	logger.Error("Failed to execute scheduled task", logger.Fields{"task_id": task.ID, "err": err})
 
-	task.FailureCount++
+	var (
+		failureCount int
+		disabled     bool
+		scheduleName string
+	)
 
-	execution := TaskExecution{
-		TaskID:     task.ID,
-		ExecutedAt: time.Now(),
-		Status:     "failed",
-		Error:      err.Error(),
-	}
-	task.ExecutionHistory = append(task.ExecutionHistory, execution)
-	if len(task.ExecutionHistory) > 20 {
-		task.ExecutionHistory = task.ExecutionHistory[len(task.ExecutionHistory)-20:]
-	}
+	if mutErr := MutateTaskAndSave(ts.workspaceStore, ws, task.ID, func(t *Task) error {
+		t.FailureCount++
+		t.ExecutionHistory = append(t.ExecutionHistory, TaskExecution{
+			TaskID:     t.ID,
+			ExecutedAt: time.Now(),
+			Status:     "failed",
+			Error:      err.Error(),
+		})
+		if len(t.ExecutionHistory) > maxRecordedTaskExecutions {
+			t.ExecutionHistory = t.ExecutionHistory[len(t.ExecutionHistory)-maxRecordedTaskExecutions:]
+		}
 
-	// Auto-disable after 5 consecutive failures
-	if task.FailureCount >= 5 {
-		logger.Warn("Task schedule disabled after consecutive failures", logger.Fields{"task_id": task.ID, "failure_count": task.FailureCount})
-		task.ScheduleEnabled = false
-	}
+		// Auto-disable after 5 consecutive failures
+		if t.FailureCount >= 5 {
+			logger.Warn("Task schedule disabled after consecutive failures", logger.Fields{"task_id": t.ID, "failure_count": t.FailureCount})
+			t.ScheduleEnabled = false
+		}
 
-	if err := ws.UpdateTask(*task); err != nil {
-		logger.Error("Failed to update task", logger.Fields{"error": err})
-	}
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		failureCount = t.FailureCount
+		disabled = !t.ScheduleEnabled
+		scheduleName = t.ScheduleName
+		return nil
+	}); mutErr != nil {
+		logger.Error("Failed to record scheduled task failure", logger.Fields{"error": mutErr, "task_id": task.ID})
+		return
 	}
 
 	if ts.eventBus != nil {
-		event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, task.ID, task.ScheduleName, map[string]interface{}{
+		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, task.ID, scheduleName, map[string]interface{}{
 			"error":         err.Error(),
-			"failure_count": task.FailureCount,
+			"failure_count": failureCount,
 			"timestamp":     time.Now(),
-			"disabled":      !task.ScheduleEnabled,
-		})
-		ts.eventBus.Publish(event)
+			"disabled":      disabled,
+		}))
 	}
 }
 
@@ -397,15 +513,13 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 	}
 
 	// Reset task state for rerun and queue it for the executor
-	targetTask.Status = TaskStatusAssigned
-	targetTask.Result = ""
-	ApplyTaskResultMetadata(targetTask, "")
-	targetTask.Error = ""
-	targetTask.Progress = nil
-	targetTask.StartedAt = nil
-	targetTask.CompletedAt = nil
-
-	if err := ws.UpdateTask(*targetTask); err != nil {
+	if err := ws.MutateTask(targetTask.ID, func(t *Task) error {
+		if err := t.SetStatus(TaskStatusAssigned); err != nil {
+			return fmt.Errorf("scheduler: reset target task to assigned: %w", err)
+		}
+		ResetTaskRuntime(t)
+		return nil
+	}); err != nil {
 		ts.recordScheduleFailure(ws, st, fmt.Errorf("failed to queue target task %s: %w", targetTask.ID, err), targetTask.ID)
 		return
 	}
@@ -422,8 +536,8 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		Status:     "success",
 	}
 	st.ExecutionHistory = append(st.ExecutionHistory, execution)
-	if len(st.ExecutionHistory) > 20 {
-		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	if len(st.ExecutionHistory) > maxRecordedTaskExecutions {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-maxRecordedTaskExecutions:]
 	}
 
 	nextRun := ts.calculateNextRun(st.Schedule, now)
@@ -481,8 +595,8 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 		Error:      err.Error(),
 	}
 	st.ExecutionHistory = append(st.ExecutionHistory, execution)
-	if len(st.ExecutionHistory) > 20 {
-		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	if len(st.ExecutionHistory) > maxRecordedTaskExecutions {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-maxRecordedTaskExecutions:]
 	}
 
 	if st.FailureCount >= 5 {

@@ -80,16 +80,26 @@
     const stats = {
       completed: 0,
       in_progress: 0,
+      pending: 0,
+      blocked: 0,
       failed: 0,
-      scheduled: 0
+      scheduled: 0,
+      needs_attention: 0
     };
 
-    tasks.forEach((task) => {
-      const status = task.status || 'pending';
+    (tasks || []).forEach((task) => {
+      const status = String(task.status || 'pending').trim().toLowerCase();
       if (status === 'completed') stats.completed += 1;
       if (status === 'in_progress') stats.in_progress += 1;
+      if (status === 'pending' || status === 'assigned') stats.pending += 1;
+      if (status === 'blocked' || status === 'waiting_for_choice') stats.blocked += 1;
       if (status === 'failed') stats.failed += 1;
       if (task.schedule_enabled) stats.scheduled += 1;
+      // Needs attention combines blocked-ish + failed so users have one
+      // pill to scan when they open the hub looking for "what needs me".
+      if (status === 'blocked' || status === 'waiting_for_choice' || status === 'failed') {
+        stats.needs_attention += 1;
+      }
     });
 
     return stats;

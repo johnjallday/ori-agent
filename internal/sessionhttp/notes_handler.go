@@ -317,6 +317,18 @@ func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) 
 
 // listNotesByWorkspace handles GET /api/workspaces/{id}/notes.
 func (h *Handler) listNotesByWorkspace(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	if imported, err := h.importWorkspaceNoteFilesForWorkspace(r.Context(), workspaceID); err != nil {
+		logger.Warn("Failed to hydrate workspace note files", logger.Fields{
+			"workspace_id": workspaceID,
+			"error":        err,
+		})
+	} else if imported > 0 {
+		logger.Info("Hydrated workspace note files", logger.Fields{
+			"workspace_id": workspaceID,
+			"count":        imported,
+		})
+	}
+
 	notes, err := h.store.ListNotesByWorkspace(r.Context(), workspaceID)
 	if err != nil {
 		// Don't log context canceled - it's normal when client disconnects

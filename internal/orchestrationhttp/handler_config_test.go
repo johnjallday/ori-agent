@@ -145,3 +145,7 @@ func (m *mockWorkspaceStore) GetWorkspaceAgent(workspaceID, agentName string) (*
 func (m *mockWorkspaceStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
 	return nil
 }
+func (m *mockWorkspaceStore) Lock(wsID string) func() { return func() {} }
+func (m *mockWorkspaceStore) Update(wsID string, fn func(*workspace.Workspace) error) error {
+	return workspace.CanonicalUpdate(m, wsID, fn)
+}

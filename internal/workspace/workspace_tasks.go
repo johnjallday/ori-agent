@@ -7,7 +7,68 @@ import (
 	"github.com/google/uuid"
 )
 
-// AddTask adds a task to the workspace
+// AddTasks atomically appends a batch of tasks to the workspace under a
+// single lock. The whole batch is validated together at end-of-append, so
+// callers may include forward references between siblings (e.g. a workflow's
+// subtasks pointing at each other via input_task_ids) — something the
+// per-task AddTask path cannot accept.
+//
+// On any validation failure the workspace state is fully restored: every
+// task added by this call is rolled back from both Tasks and taskIndex.
+// Caller-supplied IDs are preserved when present, so workflows can wire
+// up sibling references with UUIDs they generate before the call.
+func (w *Workspace) AddTasks(tasks []Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.taskIndex == nil {
+		w.taskIndex = make(map[string]int)
+	}
+
+	originalLen := len(w.Tasks)
+	addedIDs := make([]string, 0, len(tasks))
+	now := time.Now()
+
+	for i := range tasks {
+		t := tasks[i]
+		if t.ID == "" {
+			t.ID = uuid.New().String()
+		}
+		if t.CreatedAt.IsZero() {
+			t.CreatedAt = now
+		}
+		t.WorkspaceID = w.ID
+
+		w.Tasks = append(w.Tasks, t)
+		w.taskIndex[t.ID] = len(w.Tasks) - 1
+		addedIDs = append(addedIDs, t.ID)
+	}
+
+	if err := validateTaskGraph(w.Tasks); err != nil {
+		w.Tasks = w.Tasks[:originalLen]
+		for _, id := range addedIDs {
+			delete(w.taskIndex, id)
+		}
+		return err
+	}
+
+	w.UpdatedAt = now
+	return nil
+}
+
+// AddTask adds a task to the workspace.
+//
+// The candidate task plus the existing graph are validated before commit; if
+// the addition would introduce a cycle, self-reference, or unknown
+// parent/input ID, the workspace state is left unchanged and the validation
+// error is returned. Forward references (a task whose parent/input has not
+// been added yet) are rejected here — batch importers that may not have
+// inserted dependencies in topological order should accumulate tasks first
+// and call ValidateTaskGraph at end-of-batch instead.
 func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -29,31 +90,58 @@ func (w *Workspace) AddTask(task Task) error {
 		w.taskIndex = make(map[string]int)
 	}
 	w.taskIndex[task.ID] = len(w.Tasks) - 1
+
+	// Only check when the candidate actually contributes graph edges, so the
+	// hot path for the common (no parent/no inputs) AddTask stays free of the
+	// O(V+E) walk.
+	if task.ParentTaskID != "" || len(task.InputTaskIDs) > 0 {
+		if err := validateTaskGraph(w.Tasks); err != nil {
+			w.Tasks = w.Tasks[:len(w.Tasks)-1]
+			delete(w.taskIndex, task.ID)
+			return err
+		}
+	}
+
 	w.UpdatedAt = time.Now()
 
 	return nil
 }
 
-// GetTask retrieves a task by ID using O(1) index lookup
+// findTaskIdxLocked returns the slice index of the task with the given ID, or
+// -1 if it does not exist. Caller must hold w.mu (read or write). Uses the
+// taskIndex when available and falls back to a linear scan for workspaces
+// constructed as zero-value literals (mostly tests) or whose index has drifted.
+func (w *Workspace) findTaskIdxLocked(taskID string) int {
+	if w.taskIndex != nil {
+		if idx, ok := w.taskIndex[taskID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == taskID {
+			return idx
+		}
+	}
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == taskID {
+			return i
+		}
+	}
+	return -1
+}
+
+// GetTask retrieves a task by ID using O(1) index lookup.
+//
+// Returns a pointer to a shallow copy, not the workspace's internal slice
+// element. Callers may freely mutate the returned task without racing the
+// workspace's other readers; persist changes back via UpdateTask. (Note:
+// reference fields like Context maps still alias the original — callers
+// that mutate those should rebuild the map rather than delete in place.)
 func (w *Workspace) GetTask(taskID string) (*Task, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	// Use index for O(1) lookup if available
-	if w.taskIndex != nil {
-		if idx, ok := w.taskIndex[taskID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == taskID {
-			return &w.Tasks[idx], nil
-		}
+	idx := w.findTaskIdxLocked(taskID)
+	if idx == -1 {
+		return nil, fmt.Errorf("task %q not found in workspace", taskID)
 	}
-
-	// Fallback to linear scan (for backward compatibility with workspaces loaded without index)
-	for i := range w.Tasks {
-		if w.Tasks[i].ID == taskID {
-			return &w.Tasks[i], nil
-		}
-	}
-
-	return nil, fmt.Errorf("task %q not found in workspace", taskID)
+	t := w.Tasks[idx]
+	return &t, nil
 }
 
 // UpdateTask updates an existing task in the workspace using O(1) index lookup
@@ -61,25 +149,62 @@ func (w *Workspace) UpdateTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Use index for O(1) lookup if available
-	if w.taskIndex != nil {
-		if idx, ok := w.taskIndex[task.ID]; ok && idx < len(w.Tasks) && w.Tasks[idx].ID == task.ID {
-			w.Tasks[idx] = task
-			w.UpdatedAt = time.Now()
-			return nil
-		}
+	idx := w.findTaskIdxLocked(task.ID)
+	if idx == -1 {
+		return fmt.Errorf("task %q not found in workspace", task.ID)
+	}
+	w.Tasks[idx] = task
+	w.UpdatedAt = time.Now()
+	return nil
+}
+
+// MutateTaskAndSave applies fn to the task identified by taskID and persists
+// the workspace via store. It is the canonical "mutate + persist" pattern.
+//
+// Cross-instance race safety: this helper delegates to store.Update, which
+// re-loads the authoritative workspace under a per-workspace lock before
+// running fn. The caller's ws argument is therefore advisory — its fields are
+// not the ones fn mutates, and it should not be read after this call returns
+// because the on-disk and in-cache state has moved past it. Callers that need
+// to read the post-mutation workspace should re-Get it.
+//
+// Use this helper only when Save is the very next thing you would call. If
+// other workspace mutations (e.g. AddMessage) need to land in the same Save,
+// call store.Update directly with a closure that does all of them.
+func MutateTaskAndSave(store Store, ws *Workspace, taskID string, fn func(*Task) error) error {
+	return store.Update(ws.ID, func(fresh *Workspace) error {
+		return fresh.MutateTask(taskID, fn)
+	})
+}
+
+// MutateTask applies fn to the task identified by id while holding the workspace
+// lock, eliminating the read-modify-write race that GetTask + UpdateTask exposed.
+//
+// fn receives a pointer to the live slice element and may mutate it freely;
+// returning a non-nil error aborts the mutation (the in-memory state is left
+// untouched). On success, UpdatedAt is bumped. Callers are still responsible
+// for persisting the workspace via the store after MutateTask returns.
+//
+// fn must not call back into Workspace methods that take w.mu (deadlock) and
+// must not retain the *Task beyond its own scope (the slice may be reallocated
+// later by AddTask).
+func (w *Workspace) MutateTask(id string, fn func(*Task) error) error {
+	if fn == nil {
+		return fmt.Errorf("MutateTask: fn is nil")
 	}
 
-	// Fallback to linear scan (for backward compatibility)
-	for i := range w.Tasks {
-		if w.Tasks[i].ID == task.ID {
-			w.Tasks[i] = task
-			w.UpdatedAt = time.Now()
-			return nil
-		}
-	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	return fmt.Errorf("task %q not found in workspace", task.ID)
+	idx := w.findTaskIdxLocked(id)
+	if idx == -1 {
+		return fmt.Errorf("task %q not found in workspace", id)
+	}
+	if err := fn(&w.Tasks[idx]); err != nil {
+		return err
+	}
+	w.UpdatedAt = time.Now()
+	return nil
 }
 
 // DeleteTask removes a task from the workspace by ID and cleans up layout metadata.
@@ -87,24 +212,7 @@ func (w *Workspace) DeleteTask(id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Try to use index for O(1) lookup
-	idx := -1
-	if w.taskIndex != nil {
-		if i, ok := w.taskIndex[id]; ok && i < len(w.Tasks) && w.Tasks[i].ID == id {
-			idx = i
-		}
-	}
-
-	// Fallback to linear scan if index not available or stale
-	if idx == -1 {
-		for i := range w.Tasks {
-			if w.Tasks[i].ID == id {
-				idx = i
-				break
-			}
-		}
-	}
-
+	idx := w.findTaskIdxLocked(id)
 	if idx == -1 {
 		return fmt.Errorf("task %q not found in workspace", id)
 	}
@@ -238,70 +346,83 @@ func (w *Workspace) GetSubtasks(parentTaskID string) []Task {
 	return subtasks
 }
 
-// GetTaskResults returns the results of tasks by their IDs
+// GetTaskResults returns the results of tasks by their IDs.
+// Uses the task index for O(M) lookup where M is len(taskIDs).
 func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	results := make(map[string]string)
+	results := make(map[string]string, len(taskIDs))
 	for _, taskID := range taskIDs {
-		for _, task := range w.Tasks {
-			if task.ID == taskID {
-				// If task has been executed and has a result, use that
-				if task.Result != "" {
-					results[taskID] = task.Result
-				} else {
-					// Otherwise, use the task description
-					// This handles cases where tasks are not assigned to agents
-					// but their descriptions should be included in merge context
-					results[taskID] = task.Description
-				}
-				break
-			}
+		idx := w.findTaskIdxLocked(taskID)
+		if idx == -1 {
+			continue
+		}
+		task := &w.Tasks[idx]
+		// If the task has been executed, use its result; otherwise fall back
+		// to its description so unassigned/pending tasks still contribute
+		// merge context.
+		if task.Result != "" {
+			results[taskID] = task.Result
+		} else {
+			results[taskID] = task.Description
 		}
 	}
 	return results
 }
 
-// GetInputContext builds a context map that includes results from input tasks
-func (w *Workspace) GetInputContext(task *Task) map[string]interface{} {
-	context := make(map[string]interface{})
-
-	// Copy existing context
-	for k, v := range task.Context {
-		context[k] = v
+// BuildRuntimeInputs assembles a fresh TaskRuntimeInputs for the given task,
+// pulling current results and structured outputs for every InputTaskIDs entry.
+//
+// The returned value is intended to be assigned to task.RuntimeInputs only for
+// the duration of an execution. It must NOT be merged into task.Context: that
+// would corrupt the persisted task by interleaving runtime state with authored
+// context, and re-runs would see stale injection from prior executions.
+//
+// Returns nil if the task has no input tasks or none of them have results yet.
+func (w *Workspace) BuildRuntimeInputs(task *Task) *TaskRuntimeInputs {
+	if task == nil || len(task.InputTaskIDs) == 0 {
+		return nil
 	}
 
-	// Add input task results if any
-	if len(task.InputTaskIDs) > 0 {
-		inputResults := w.GetTaskResults(task.InputTaskIDs)
-		if len(inputResults) > 0 {
-			context["input_task_results"] = inputResults
-		}
-		if structuredOutputs := w.GetTaskStructuredOutputs(task.InputTaskIDs); len(structuredOutputs) > 0 {
-			context["input_task_structured_outputs"] = structuredOutputs
-		}
+	results := w.GetTaskResults(task.InputTaskIDs)
+	structured := w.GetTaskStructuredOutputs(task.InputTaskIDs)
+
+	if len(results) == 0 && len(structured) == 0 {
+		return nil
 	}
 
-	return context
+	out := &TaskRuntimeInputs{}
+	if len(results) > 0 {
+		out.TaskResults = results
+	}
+	if len(structured) > 0 {
+		out.StructuredOutputs = make(map[string]map[string]interface{}, len(structured))
+		for id, val := range structured {
+			if m, ok := val.(map[string]interface{}); ok {
+				out.StructuredOutputs[id] = m
+			}
+		}
+	}
+	return out
 }
 
-// GetTaskStructuredOutputs returns parsed structured outputs for tasks whose result matches a schema.
+// GetTaskStructuredOutputs returns parsed structured outputs for tasks whose
+// result matches a schema. Uses the task index for O(M) lookup.
 func (w *Workspace) GetTaskStructuredOutputs(taskIDs []string) map[string]interface{} {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	outputs := make(map[string]interface{})
+	outputs := make(map[string]interface{}, len(taskIDs))
 	for _, taskID := range taskIDs {
-		for _, task := range w.Tasks {
-			if task.ID != taskID {
-				continue
-			}
-			parsed, err := ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
-			if err == nil && len(parsed) > 0 {
-				outputs[taskID] = parsed
-			}
-			break
+		idx := w.findTaskIdxLocked(taskID)
+		if idx == -1 {
+			continue
+		}
+		task := &w.Tasks[idx]
+		parsed, err := ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
+		if err == nil && len(parsed) > 0 {
+			outputs[taskID] = parsed
 		}
 	}
 	return outputs

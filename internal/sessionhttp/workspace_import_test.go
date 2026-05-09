@@ -121,6 +121,8 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 
 	now := time.Now()
+	staleRootPath := filepath.Join("/Users", "johnj", "Ori Workspaces", "spain-export")
+	staleChildPath := filepath.Join(staleRootPath, agentworkspace.SubWorkspacesDir, "madrid")
 	rootWorkspace := &agentworkspace.Workspace{
 		ID:         "ws-imported-spain",
 		Name:       "Spain",
@@ -138,6 +140,29 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				NodeID:         "trip-manager-node-1",
 				EntryPoint:     true,
 				CreatedAt:      now,
+			},
+		},
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "root-dir-ref",
+				WorkspaceID: "ws-imported-spain",
+				Name:        "spain-export",
+				Path:        staleRootPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+			{
+				ID:         "root-files-binding",
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{staleRootPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 		},
 	}
@@ -171,6 +196,29 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				NodeID:         "madrid-planner-node-1",
 				EntryPoint:     true,
 				CreatedAt:      now,
+			},
+		},
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "child-dir-ref",
+				WorkspaceID: "ws-imported-madrid",
+				Name:        "madrid",
+				Path:        staleChildPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+			{
+				ID:         "child-files-binding",
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{staleChildPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 		},
 	}
@@ -230,6 +278,34 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	if got, ok := handler.agentStore.GetAgent("Trip Manager"); !ok || got == nil || got.Settings.Model != "imported-trip-model" {
 		t.Fatalf("expected Trip Manager snapshot restored into agent store, ok=%v agent=%#v", ok, got)
 	}
+	rootFolderPath, err := fileStore.GetFolderPath(rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to get restored root folder path: %v", err)
+	}
+	rootRefs, err := decodeDirectoryReferences(restoredRoot.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored root directory references: %v", err)
+	}
+	if len(rootRefs) != 1 || cleanWorkspaceSyncPath(rootRefs[0].Path) != cleanWorkspaceSyncPath(rootFolderPath) {
+		t.Fatalf("expected restored root directory reference %q, got %#v", rootFolderPath, rootRefs)
+	}
+	rootBindings, err := decodeWorkspaceMCPBindings(restoredRoot.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored root mcp bindings: %v", err)
+	}
+	if len(rootBindings) != 1 || !workspaceBindingHasRoot(rootBindings[0].Config, rootFolderPath) {
+		t.Fatalf("expected restored root workspace-files binding for %q, got %#v", rootFolderPath, rootBindings)
+	}
+	if workspaceBindingHasRoot(rootBindings[0].Config, staleRootPath) {
+		t.Fatalf("expected stale root path %q to be removed from bindings, got %#v", staleRootPath, rootBindings)
+	}
+	diskRoot, err := fileStore.Get(rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to load restored root disk workspace: %v", err)
+	}
+	if len(diskRoot.DirectoryReferences) != 1 || cleanWorkspaceSyncPath(diskRoot.DirectoryReferences[0].Path) != cleanWorkspaceSyncPath(rootFolderPath) {
+		t.Fatalf("expected disk root directory reference %q, got %#v", rootFolderPath, diskRoot.DirectoryReferences)
+	}
 
 	restoredChild, err := handler.store.GetWorkspace(context.Background(), childWorkspace.ID)
 	if err != nil {
@@ -249,6 +325,188 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	}
 	if got, ok := handler.agentStore.GetAgent("Madrid Planner"); !ok || got == nil || got.Settings.Model != "imported-madrid-model" {
 		t.Fatalf("expected Madrid Planner snapshot restored into agent store, ok=%v agent=%#v", ok, got)
+	}
+	childFolderPath, err := fileStore.GetFolderPath(childWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to get restored child folder path: %v", err)
+	}
+	childRefs, err := decodeDirectoryReferences(restoredChild.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored child directory references: %v", err)
+	}
+	if len(childRefs) != 1 || cleanWorkspaceSyncPath(childRefs[0].Path) != cleanWorkspaceSyncPath(childFolderPath) {
+		t.Fatalf("expected restored child directory reference %q, got %#v", childFolderPath, childRefs)
+	}
+	childBindings, err := decodeWorkspaceMCPBindings(restoredChild.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("failed to decode restored child mcp bindings: %v", err)
+	}
+	if len(childBindings) != 1 || !workspaceBindingHasRoot(childBindings[0].Config, childFolderPath) {
+		t.Fatalf("expected restored child workspace-files binding for %q, got %#v", childFolderPath, childBindings)
+	}
+	if workspaceBindingHasRoot(childBindings[0].Config, staleChildPath) {
+		t.Fatalf("expected stale child path %q to be removed from bindings, got %#v", staleChildPath, childBindings)
+	}
+}
+
+func TestHandleWorkspaceImportRestoresExportedWorkspaceNotes(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	storeDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	exportRoot := filepath.Join(t.TempDir(), "branding-export")
+	notesDir := filepath.Join(exportRoot, agentworkspace.NotesDir)
+	if err := os.MkdirAll(notesDir, 0755); err != nil {
+		t.Fatalf("failed to create exported notes folder: %v", err)
+	}
+
+	createdAt := time.Date(2026, 4, 29, 9, 7, 2, 0, time.UTC)
+	updatedAt := createdAt.Add(2 * time.Second)
+	rootWorkspace := &agentworkspace.Workspace{
+		ID:         "ws-imported-branding-notes",
+		Name:       "Branding",
+		FolderSlug: "branding-export",
+		Status:     agentworkspace.StatusActive,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+	}
+	rootData, err := rootWorkspace.ToJSON()
+	if err != nil {
+		t.Fatalf("failed to encode root workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(exportRoot, agentworkspace.WorkspaceConfigFile), rootData, 0644); err != nil {
+		t.Fatalf("failed to write root workspace.json: %v", err)
+	}
+
+	noteID := "3a71c2e1-29f7-45ff-aa5c-a4748fc80bc3"
+	noteBody := "# Brand Kit\n\nImported brand context.\n"
+	noteMarkdown := "---\n" +
+		"id: \"" + noteID + "\"\n" +
+		"created_at: \"" + createdAt.Format(time.RFC3339) + "\"\n" +
+		"updated_at: \"" + updatedAt.Format(time.RFC3339) + "\"\n" +
+		"---\n\n" +
+		noteBody
+	notePath := filepath.Join(notesDir, agentworkspace.NoteFilename("Brand Kit", noteID))
+	if err := os.WriteFile(notePath, []byte(noteMarkdown), 0644); err != nil {
+		t.Fatalf("failed to write exported note: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"path": exportRoot,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for exported workspace restore, got %d: %s", w.Code, w.Body.String())
+	}
+
+	notes, err := handler.store.ListNotesByWorkspace(context.Background(), rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("ListNotesByWorkspace: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 imported note, got %#v", notes)
+	}
+	if notes[0].ID != noteID {
+		t.Fatalf("expected imported note id %q, got %q", noteID, notes[0].ID)
+	}
+	if notes[0].Name != "Brand Kit" {
+		t.Fatalf("expected imported note name Brand Kit, got %q", notes[0].Name)
+	}
+
+	note, err := handler.store.GetNote(context.Background(), noteID)
+	if err != nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	if note.Content != noteBody {
+		t.Fatalf("expected note content %q, got %q", noteBody, note.Content)
+	}
+	if !note.CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected note created_at %s, got %s", createdAt, note.CreatedAt)
+	}
+	if !note.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("expected note updated_at %s, got %s", updatedAt, note.UpdatedAt)
+	}
+}
+
+func TestListWorkspaceNotesHydratesExistingNoteFiles(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	storeDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	workspaceID := createTestWorkspace(t, handler, "Hydrate Notes")
+	folderPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 8, 13, 45, 0, 0, time.UTC)
+	noteID := "88b94c66-a6ef-4555-8990-8da06b0e6803"
+	noteBody := "# Launch Task List\n\nImported from disk.\n"
+	noteMarkdown := "---\n" +
+		"id: \"" + noteID + "\"\n" +
+		"created_at: \"" + createdAt.Format(time.RFC3339) + "\"\n" +
+		"updated_at: \"" + createdAt.Format(time.RFC3339) + "\"\n" +
+		"---\n\n" +
+		noteBody
+	notePath := filepath.Join(folderPath, agentworkspace.NotesDir, agentworkspace.NoteFilename("Launch Task List", noteID))
+	if err := os.WriteFile(notePath, []byte(noteMarkdown), 0644); err != nil {
+		t.Fatalf("failed to write note file: %v", err)
+	}
+	rawNotePath := filepath.Join(folderPath, agentworkspace.NotesDir, "loose-note.md")
+	if err := os.WriteFile(rawNotePath, []byte("# Loose Note\n\nImported without frontmatter.\n"), 0644); err != nil {
+		t.Fatalf("failed to write raw note file: %v", err)
+	}
+
+	rawNoteID := importedNoteStableID(workspaceID, "loose-note.md")
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+workspaceID+"/notes", nil)
+		w := httptest.NewRecorder()
+		handler.HandleWorkspaceNotes(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 for workspace notes, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Notes []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"notes"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(resp.Notes) != 2 {
+			t.Fatalf("expected 2 hydrated notes on attempt %d, got %#v", attempt+1, resp.Notes)
+		}
+
+		namesByID := make(map[string]string, len(resp.Notes))
+		for _, note := range resp.Notes {
+			namesByID[note.ID] = note.Name
+		}
+		if namesByID[noteID] != "Launch Task List" {
+			t.Fatalf("expected hydrated note %q to be Launch Task List, got %#v", noteID, namesByID)
+		}
+		if namesByID[rawNoteID] != "Loose Note" {
+			t.Fatalf("expected raw note %q to be Loose Note, got %#v", rawNoteID, namesByID)
+		}
 	}
 }
 

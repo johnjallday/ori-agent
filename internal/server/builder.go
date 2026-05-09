@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
@@ -113,6 +114,7 @@ type ServerBuilder struct {
 	taskExecutor             *workspace.TaskExecutor
 	stepExecutor             *workspace.StepExecutor
 	taskScheduler            *workspace.TaskScheduler
+	macWakeService           *macwake.Service
 	eventBus                 *workspace.EventBus
 	notificationService      *workspace.NotificationService
 	directorySyncManager     *workspace.DirectorySyncManager

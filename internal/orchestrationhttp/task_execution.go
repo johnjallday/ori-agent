@@ -198,13 +198,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	if foundTask.Status == workspace.TaskStatusCompleted {
 		// Allow rerun of completed tasks by resetting status
 		logger.Info("Rerunning completed task", logger.Fields{"task_id": req.TaskID})
-		foundTask.Status = workspace.TaskStatusPending
-		foundTask.Result = ""
-		workspace.ApplyTaskResultMetadata(foundTask, "")
-		foundTask.Error = ""
-		foundTask.StartedAt = nil
-		foundTask.CompletedAt = nil
-		workspace.ResetTaskExecutionSteps(foundTask)
+		if err := foundTask.SetStatus(workspace.TaskStatusPending); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot reset task for rerun", err)
+			return
+		}
+		workspace.ResetTaskRuntime(foundTask)
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
@@ -397,7 +395,11 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	switch action {
 	case "mark_failed":
 		now := time.Now()
-		task.Status = workspace.TaskStatusFailed
+		// "mark_failed" is a manual user override. The task can be in any
+		// prior state (Pending, Assigned, WaitingForChoice, InProgress, etc.)
+		// — the user is declaring it failed regardless. ForceStatus bypasses
+		// the lifecycle table by design.
+		task.ForceStatus(workspace.TaskStatusFailed)
 		task.CompletedAt = &now
 		task.Result = ""
 		workspace.ApplyTaskResultMetadata(task, "")
@@ -415,21 +417,22 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		}
 		task.To = agentName
 		task.AssignedNodeID = resolveAssignedNodeID(ws, agentName)
-		task.Status = workspace.TaskStatusPending
-		task.StartedAt = nil
-		task.CompletedAt = nil
-		task.Error = ""
-		task.Result = ""
-		workspace.ApplyTaskResultMetadata(task, "")
+		if err := task.SetStatus(workspace.TaskStatusPending); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot retry task", err)
+			return
+		}
+		// KeepingSteps preserves the per-step plan so PrepareTaskExecutionStepsForResume
+		// can pick up from the first not-yet-completed step instead of restarting.
+		// The freshly built humanLoop is re-attached below the switch.
+		workspace.ResetTaskRuntimeKeepingSteps(task)
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	case "retry", "continue_with_instruction":
-		task.Status = workspace.TaskStatusPending
-		task.StartedAt = nil
-		task.CompletedAt = nil
-		task.Error = ""
-		task.Result = ""
-		workspace.ApplyTaskResultMetadata(task, "")
+		if err := task.SetStatus(workspace.TaskStatusPending); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "cannot retry task", err)
+			return
+		}
+		workspace.ResetTaskRuntimeKeepingSteps(task)
 		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	default:
@@ -550,7 +553,10 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	subtasks = sortParentSubtasks(subtasks)
 
 	startedAt := time.Now()
-	parentTask.Status = workspace.TaskStatusInProgress
+	if err := parentTask.SetStatus(workspace.TaskStatusInProgress); err != nil {
+		logger.Error("Parent task in_progress transition rejected", logger.Fields{"task_id": parentTask.ID, "error": err})
+		return
+	}
 	parentTask.StartedAt = &startedAt
 	parentTask.CompletedAt = nil
 	parentTask.Result = ""
@@ -648,7 +654,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		parentTask.CompletedAt = &completedAt
 		if errors.Is(execErr, context.Canceled) {
 			logger.Info("Task sequence cancelled", logger.Fields{"task_id": parentTaskID})
-			parentTask.Status = workspace.TaskStatusCancelled
+			if err := parentTask.SetStatus(workspace.TaskStatusCancelled); err != nil {
+				logger.Error("Parent task cancelled transition rejected", logger.Fields{"task_id": parentTask.ID, "error": err})
+			}
 			parentTask.Error = "Cancelled by user"
 			parentTask.Result = ""
 			workspace.ApplyTaskResultMetadata(parentTask, "")
@@ -660,7 +668,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			}
 		} else {
 			logger.Error("Task sequence failed", logger.Fields{"task_id": parentTaskID, "error": execErr})
-			parentTask.Status = workspace.TaskStatusFailed
+			if err := parentTask.SetStatus(workspace.TaskStatusFailed); err != nil {
+				logger.Error("Parent task failed transition rejected", logger.Fields{"task_id": parentTask.ID, "error": err})
+			}
 			parentTask.Error = execErr.Error()
 			parentTask.Result = ""
 			workspace.ApplyTaskResultMetadata(parentTask, "")
@@ -678,7 +688,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		completedAt := time.Now()
 		parentTask.CompletedAt = &completedAt
 		logger.Info("Task sequence completed successfully", logger.Fields{"task_id": parentTaskID})
-		parentTask.Status = workspace.TaskStatusCompleted
+		if err := parentTask.SetStatus(workspace.TaskStatusCompleted); err != nil {
+			logger.Error("Parent task completed transition rejected", logger.Fields{"task_id": parentTask.ID, "error": err})
+		}
 		parentTask.Result = lastResult
 		workspace.ApplyTaskResultMetadata(parentTask, lastResult)
 		parentTask.Error = ""
@@ -736,9 +748,10 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 
 	if task.Status != workspace.TaskStatusInProgress {
 		workspace.PrepareTaskExecutionStepsForResume(task)
+		if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
+			return "", fmt.Errorf("cannot start task: %w", err)
+		}
 	}
-
-	task.Status = workspace.TaskStatusInProgress
 	now := time.Now()
 	if task.StartedAt == nil || task.StartedAt.IsZero() {
 		task.StartedAt = &now
@@ -772,12 +785,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
 
-		enrichedContext := ws.GetInputContext(task)
-		taskForExecution.Context = enrichedContext
+		taskForExecution.RuntimeInputs = ws.BuildRuntimeInputs(task)
 
-		if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap := inputResultsMap.(map[string]string)
-			logger.Debug("Injected input task results into task context", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
+		if taskForExecution.RuntimeInputs != nil && len(taskForExecution.RuntimeInputs.TaskResults) > 0 {
+			resultsMap := taskForExecution.RuntimeInputs.TaskResults
+			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
 
 			for _, inputTaskID := range task.InputTaskIDs {
 				if result, exists := resultsMap[inputTaskID]; exists {
@@ -825,7 +837,9 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	if errors.Is(ctx.Err(), context.Canceled) {
 		completedAt := time.Now()
 		task.CompletedAt = &completedAt
-		task.Status = workspace.TaskStatusCancelled
+		if err := task.SetStatus(workspace.TaskStatusCancelled); err != nil {
+			logger.Error("Task cancellation transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+		}
 		task.Error = "Cancelled by user"
 		startedAt := completedAt
 		if task.StartedAt != nil && !task.StartedAt.IsZero() {
@@ -856,7 +870,9 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			completedAt := time.Now()
 			task.CompletedAt = &completedAt
 			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
-			task.Status = workspace.TaskStatusFailed
+			if err := task.SetStatus(workspace.TaskStatusFailed); err != nil {
+				logger.Error("Task failed transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+			}
 			task.Error = execErr.Error()
 			startedAt := completedAt
 			if task.StartedAt != nil && !task.StartedAt.IsZero() {
@@ -867,7 +883,9 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			completedAt := time.Now()
 			task.CompletedAt = &completedAt
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-			task.Status = workspace.TaskStatusCompleted
+			if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
+				logger.Error("Task completed transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+			}
 			task.Result = result
 			workspace.ApplyTaskResultMetadata(task, result)
 			task.Error = ""
@@ -942,7 +960,9 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	now := time.Now()
-	task.Status = workspace.TaskStatusWaitingForChoice
+	if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
+		return fmt.Errorf("cannot mark task waiting for choice: %w", err)
+	}
 	task.CompletedAt = nil
 	task.Error = ""
 	task.Result = ""
@@ -2747,7 +2767,9 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 
 			inputTask.To = task.To
 			inputTask.AssignedNodeID = task.AssignedNodeID
-			inputTask.Status = workspace.TaskStatusPending
+			if err := inputTask.SetStatus(workspace.TaskStatusPending); err != nil {
+				return fmt.Errorf("cannot auto-assign input task to pending: %w", err)
+			}
 
 			// Save the assignment
 			if err := ws.UpdateTask(*inputTask); err != nil {
@@ -2763,7 +2785,9 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		defer cancel()
 
 		// Update status to in_progress
-		inputTask.Status = workspace.TaskStatusInProgress
+		if err := inputTask.SetStatus(workspace.TaskStatusInProgress); err != nil {
+			return fmt.Errorf("cannot start input task: %w", err)
+		}
 		now := time.Now()
 		inputTask.StartedAt = &now
 
@@ -2774,10 +2798,10 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
-		// Gather input context for this task
+		// Build runtime inputs for this execution. Persisted Context is left
+		// alone — runtime data lives in inputTask.RuntimeInputs.
 		if len(inputTask.InputTaskIDs) > 0 {
-			enrichedContext := ws.GetInputContext(inputTask)
-			inputTask.Context = enrichedContext
+			inputTask.RuntimeInputs = ws.BuildRuntimeInputs(inputTask)
 		}
 
 		// Execute the task (iterative best-effort)
@@ -2790,11 +2814,15 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 
 		if err != nil {
 			logger.Error("Input task execution failed", logger.Fields{"input_task_id": inputTaskID, "error": err})
-			inputTask.Status = workspace.TaskStatusFailed
+			if statusErr := inputTask.SetStatus(workspace.TaskStatusFailed); statusErr != nil {
+				logger.Error("Input task failed transition rejected", logger.Fields{"input_task_id": inputTaskID, "error": statusErr})
+			}
 			inputTask.Error = err.Error()
 		} else {
 			logger.Info("Input task completed successfully", logger.Fields{"input_task_id": inputTaskID})
-			inputTask.Status = workspace.TaskStatusCompleted
+			if statusErr := inputTask.SetStatus(workspace.TaskStatusCompleted); statusErr != nil {
+				logger.Error("Input task completed transition rejected", logger.Fields{"input_task_id": inputTaskID, "error": statusErr})
+			}
 			inputTask.Result = result
 			workspace.ApplyTaskResultMetadata(inputTask, result)
 		}

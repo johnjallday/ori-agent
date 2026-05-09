@@ -89,6 +89,9 @@ func TestSyncNoteToFile(t *testing.T) {
 	if !strings.Contains(content, `id: "note-abc12345"`) {
 		t.Error("Expected note ID in frontmatter")
 	}
+	if !strings.Contains(content, `name: "Test Note"`) {
+		t.Error("Expected note name in frontmatter")
+	}
 
 	// Verify note content
 	if !strings.Contains(content, "# Hello") {

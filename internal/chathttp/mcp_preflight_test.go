@@ -200,6 +200,12 @@ func (s *preflightWorkspaceStore) SaveWorkspaceAgent(workspaceID, agentName stri
 	return nil
 }
 
+func (s *preflightWorkspaceStore) Lock(wsID string) func() { return func() {} }
+
+func (s *preflightWorkspaceStore) Update(wsID string, fn func(*workspace.Workspace) error) error {
+	return workspace.CanonicalUpdate(s, wsID, fn)
+}
+
 func TestMaybeAutoEnableMCPForPrompt_ReturnsWorkspaceResolutionForWebSearch(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	ag, _ := st.GetAgent("Ori")

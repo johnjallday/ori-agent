@@ -291,6 +291,9 @@ type Workspace struct {
 	// Status is the current state of the workspace.
 	Status WorkspaceStatus `json:"status,omitempty"`
 
+	// Version is a monotonic counter bumped on every save; used to detect lost writes.
+	Version int64 `json:"version,omitempty"`
+
 	// Layout stores the visual arrangement of workspace elements on the canvas.
 	Layout *CanvasLayout `json:"layout,omitempty"`
 

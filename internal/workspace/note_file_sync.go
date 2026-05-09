@@ -60,6 +60,7 @@ func SyncNoteFile(fs *FileStore, note NoteFileParams) {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "id: %q\n", note.ID)
+	fmt.Fprintf(&sb, "name: %q\n", note.Name)
 	fmt.Fprintf(&sb, "created_at: %q\n", note.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	fmt.Fprintf(&sb, "updated_at: %q\n", note.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	sb.WriteString("---\n\n")

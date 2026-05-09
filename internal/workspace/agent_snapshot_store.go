@@ -37,6 +37,14 @@ func (s *AgentSnapshotStore) Save(ws *Workspace) error {
 	return nil
 }
 
+// Update overrides the inherited Store.Update so the wrapper's Save (with the
+// snapshot hook) is invoked at the end of the canonical mutate-then-save flow.
+// Without this override the embedded Store's Update would call the inner's
+// Save directly, skipping snapshotReferencedAgents.
+func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) error {
+	return CanonicalUpdate(s, wsID, fn)
+}
+
 // SnapshotReferencedAgents writes a snapshot for every agent the workspace
 // references, when a matching global agent definition exists. Exported so the
 // startup migration can call it directly without re-saving the workspace.

@@ -1,5 +1,12 @@
 /* global escapeHtml */
 
+import {
+  taskExecutionViewsMethods,
+  TRACE_PAGE_SIZE,
+} from './workspace-task-execution-views.js';
+import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
+import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
+
 const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -9,7 +16,7 @@ const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
     .replace(/'/g, '&#39;');
 };
 
-function _formatRelativeDate(dateString) {
+export function _formatRelativeDate(dateString) {
   if (!dateString) return '—';
 
   const date = new Date(dateString);
@@ -28,7 +35,7 @@ function _formatRelativeDate(dateString) {
   return date.toLocaleDateString();
 }
 
-function formatDateTime(dateString) {
+export function formatDateTime(dateString) {
   if (!dateString) return '—';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return '—';
@@ -38,17 +45,18 @@ function formatDateTime(dateString) {
   });
 }
 
-function getStatusClass(status) {
+export function getStatusClass(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'completed' || normalized === 'success') return 'completed';
   if (normalized === 'in_progress') return 'in_progress';
   if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
   if (normalized === 'cancelled') return 'cancelled';
+  if (normalized === 'skipped') return 'cancelled';
   if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout') return 'failed';
   return 'pending';
 }
 
-function getDisplayStatus(status) {
+export function getDisplayStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
   const labels = {
     pending: 'Pending',
@@ -56,15 +64,18 @@ function getDisplayStatus(status) {
     in_progress: 'In Progress',
     waiting_for_choice: 'Waiting for Choice',
     completed: 'Completed',
+    success: 'Completed',
     failed: 'Failed',
+    error: 'Failed',
     blocked: 'Blocked',
     cancelled: 'Cancelled',
+    skipped: 'Skipped',
     timeout: 'Timed Out'
   };
   return labels[normalized] || 'Pending';
 }
 
-function summarizeText(value, maxLength = 220) {
+export function summarizeText(value, maxLength = 220) {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
   if (normalized.length <= maxLength) return normalized;
@@ -77,7 +88,7 @@ function summarizeText(value, maxLength = 220) {
   return `${trimmed.trim()}...`;
 }
 
-function normalizeResultText(value) {
+export function normalizeResultText(value) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -88,18 +99,18 @@ function normalizeResultText(value) {
   }
 }
 
-const TASK_SKILL_RESULT_CONTEXT_MAX_CHARS = 2600;
-const TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS = 1200;
-const TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS = 6200;
+export const TASK_SKILL_RESULT_CONTEXT_MAX_CHARS = 2600;
+export const TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS = 1200;
+export const TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS = 6200;
 
-function stripSkillUnsafeMarkup(value) {
+export function stripSkillUnsafeMarkup(value) {
   return String(value ?? '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function trimTaskSkillText(value, maxLength = 900) {
+export function trimTaskSkillText(value, maxLength = 900) {
   const normalized = String(value ?? '').trim();
   if (!normalized || normalized.length <= maxLength) return normalized;
 
@@ -111,7 +122,7 @@ function trimTaskSkillText(value, maxLength = 900) {
   return `${trimmed.trim()}...`;
 }
 
-function buildTaskSkillNameSlug(value) {
+export function buildTaskSkillNameSlug(value) {
   let slug = stripSkillUnsafeMarkup(value)
     .toLowerCase()
     .replace(/anthropic/g, 'provider')
@@ -127,7 +138,7 @@ function buildTaskSkillNameSlug(value) {
   return slug || 'task-skill';
 }
 
-function extractGeneratedSkillPrompt(raw) {
+export function extractGeneratedSkillPrompt(raw) {
   let text = String(raw || '').trim();
   if (!text) return '';
 
@@ -148,7 +159,7 @@ function extractGeneratedSkillPrompt(raw) {
   return text;
 }
 
-function stringifyTraceValue(value, maxLength = 900) {
+export function stringifyTraceValue(value, maxLength = 900) {
   if (value === undefined || value === null) return '';
 
   let text = '';
@@ -165,7 +176,7 @@ function stringifyTraceValue(value, maxLength = 900) {
   return trimTaskSkillText(text, maxLength);
 }
 
-function getTaskEventData(event) {
+export function getTaskEventData(event) {
   const data = event?.data;
   if (data?.data && typeof data.data === 'object') return data.data;
   return data && typeof data === 'object' ? data : {};
@@ -823,6 +834,30 @@ export class WorkspaceTaskPage {
     this.skillDraftRequestId = 0;
     this.resultSectionMenu = null;
     this.scheduleSubmitting = false;
+    // Execution-trace pagination/filter state. Persists across realtime
+    // refreshes so a user reading a long trace doesn't get bumped back to
+    // the first 50 entries when a new event arrives. Reset only on
+    // navigation away from this task.
+    this._traceVisibleCount = TRACE_PAGE_SIZE;
+    this._traceFilter = 'all';
+    this._runsTab = 'runs';
+    this._cancelConfirmActive = false;
+    this._cancelInFlight = false;
+    // Live-activity tracking. Populated from realtime task.* events for the
+    // current task; the live badge renders "Active Xs ago · <phase>" off this
+    // so users can tell a still-spinning task is making progress.
+    this._latestActivity = null;
+    this._activityTickHandle = null;
+    // Tab state (Overview / Activity / Developer). Defaults to Overview but
+    // auto-switches to Activity for failed/cancelled/timeout tasks on first
+    // load so debugging starts in the right place. _taskTabUserPicked turns
+    // true once a user clicks a tab, suppressing further auto-switching.
+    this._taskTab = 'overview';
+    this._taskTabUserPicked = false;
+    // Follow-up form lives inline under the result card; only one instance
+    // open at a time. _followupSubmitting prevents double-submits.
+    this._followupOpen = false;
+    this._followupSubmitting = false;
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -841,6 +876,41 @@ export class WorkspaceTaskPage {
     this.bindEvents();
     await this.loadData();
     this.setupRealtime();
+  }
+
+  // destroy releases the resources init() acquired so the page can be
+  // safely torn down (e.g. inside an SPA host that swaps the route, or by
+  // a future test harness). Today the page is rebuilt by full reload, but
+  // the leak surface is still real once any caller mounts more than one
+  // task page in the same document lifetime: the realtime subscription
+  // would fire callbacks against a detached DOM, the skill-draft fetch
+  // would resolve into a stale instance, and the debounced refresh timer
+  // would call loadData() on a page that no longer exists.
+  destroy() {
+    if (typeof this.workspaceRealtimeUnsubscribe === 'function') {
+      try {
+        this.workspaceRealtimeUnsubscribe();
+      } catch (_err) {
+        // Subscriber teardown is best-effort; nothing useful to do here.
+      }
+      this.workspaceRealtimeUnsubscribe = null;
+    }
+    if (this.skillDraftAbortController) {
+      try {
+        this.skillDraftAbortController.abort();
+      } catch (_err) {
+        // AbortController.abort can throw on some polyfills; ignore.
+      }
+      this.skillDraftAbortController = null;
+    }
+    if (this.pendingRefreshTimer) {
+      window.clearTimeout(this.pendingRefreshTimer);
+      this.pendingRefreshTimer = null;
+    }
+    this.stopActivityTick();
+    // Tear down menu listeners + drop the menu DOM node if a contextual
+    // result-section menu is open.
+    this.closeResultSectionMenu();
   }
 
   cacheElements() {
@@ -863,10 +933,21 @@ export class WorkspaceTaskPage {
       heroActions: document.getElementById('workspace-task-hero-actions'),
       heroPriority: document.getElementById('workspace-task-hero-priority'),
       heroPriorityCopy: document.getElementById('workspace-task-hero-priority-copy'),
+      heroPriorityReason: document.getElementById('workspace-task-hero-priority-reason'),
+      heroPriorityReasonText: document.getElementById('workspace-task-hero-priority-reason-text'),
       heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
-      snapshot: document.getElementById('workspace-task-snapshot'),
+      heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
+      heroAgent: document.getElementById('workspace-task-hero-agent'),
+      outputFollowupBtn: document.getElementById('workspace-task-output-followup'),
+      followupPanel: document.getElementById('workspace-task-followup-panel'),
+      followupDescription: document.getElementById('workspace-task-followup-description'),
+      followupDetails: document.getElementById('workspace-task-followup-details'),
+      followupAgent: document.getElementById('workspace-task-followup-agent'),
+      followupError: document.getElementById('workspace-task-followup-error'),
+      followupSubmit: document.getElementById('workspace-task-followup-submit'),
+      followupCancel: document.getElementById('workspace-task-followup-cancel'),
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
@@ -907,10 +988,18 @@ export class WorkspaceTaskPage {
       workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
       workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
       workflowSteps: document.getElementById('workspace-task-workflow-steps'),
-      traceCard: document.getElementById('workspace-task-trace-card'),
+      runsCard: document.getElementById('workspace-task-runs-card'),
+      runsTabs: document.querySelectorAll('#workspace-task-runs-card [data-runs-tab]'),
+      runsTabRuns: document.getElementById('workspace-task-runs-tab-runs'),
+      runsTabTrace: document.getElementById('workspace-task-runs-tab-trace'),
+      runsTabRunsCount: document.getElementById('workspace-task-runs-tab-runs-count'),
+      runsTabTraceCount: document.getElementById('workspace-task-runs-tab-trace-count'),
+      toolSummary: document.getElementById('workspace-task-tool-summary'),
       trace: document.getElementById('workspace-task-trace'),
-      executionTraceCard: document.getElementById('workspace-task-execution-trace-card'),
       executionTrace: document.getElementById('workspace-task-execution-trace'),
+      executionTraceControls: document.getElementById('workspace-task-execution-trace-controls'),
+      executionTraceFilters: document.getElementById('workspace-task-execution-trace-filters'),
+      executionTraceCount: document.getElementById('workspace-task-execution-trace-count'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
@@ -933,13 +1022,25 @@ export class WorkspaceTaskPage {
       scheduleOnceInput: document.getElementById('workspace-task-schedule-once'),
       scheduleCronField: document.getElementById('workspace-task-schedule-cron-field'),
       scheduleCronInput: document.getElementById('workspace-task-schedule-cron'),
+      scheduleSleepPolicyInput: document.getElementById('workspace-task-schedule-sleep-policy'),
+      scheduleWakeMacInput: document.getElementById('workspace-task-schedule-wake-mac'),
+      scheduleWakeFields: document.getElementById('workspace-task-schedule-wake-fields'),
+      scheduleWakeLeadInput: document.getElementById('workspace-task-schedule-wake-lead'),
+      scheduleWakeFallbackInput: document.getElementById('workspace-task-schedule-wake-fallback'),
+      scheduleWakePermission: document.getElementById('workspace-task-schedule-wake-permission'),
       schedulePreview: document.getElementById('workspace-task-schedule-preview'),
       scheduleSubmitBtn: document.getElementById('workspace-task-schedule-submit'),
       scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
-      stepsCard: document.getElementById('workspace-task-steps-card'),
-      steps: document.getElementById('workspace-task-steps'),
       contextCard: document.getElementById('workspace-task-context-card'),
       context: document.getElementById('workspace-task-context'),
+      tabButtons: Array.from(document.querySelectorAll('.workspace-task-page-tab')),
+      tabPanes: {
+        overview: document.getElementById('workspace-task-tab-overview'),
+        activity: document.getElementById('workspace-task-tab-activity'),
+        developer: document.getElementById('workspace-task-tab-developer')
+      },
+      activityEmpty: document.getElementById('workspace-task-activity-empty'),
+      developerEmpty: document.getElementById('workspace-task-developer-empty'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
       blockedReason: document.getElementById('workspace-task-blocked-reason'),
       blockedRequestWrap: document.getElementById('workspace-task-blocked-request-wrap'),
@@ -971,9 +1072,55 @@ export class WorkspaceTaskPage {
 
   bindEvents() {
     this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
+    this.elements.title?.addEventListener('click', (event) => {
+      // Don't hijack the user's text-selection drag — only treat a plain
+      // click with no selection as an "open editor" intent.
+      if (window.getSelection && String(window.getSelection() || '').length > 0) return;
+      if (event.detail > 1) return; // double-click handled below
+      this.startTitleEdit();
+    });
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
     this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
+    this.elements.subtitle?.addEventListener('click', (event) => {
+      if (window.getSelection && String(window.getSelection() || '').length > 0) return;
+      if (event.detail > 1) return;
+      this.startHeroDetailsEdit();
+    });
     this.elements.subtitle?.addEventListener('dblclick', () => this.startHeroDetailsEdit());
+    if (this.elements.runsTabs && this.elements.runsTabs.forEach) {
+      this.elements.runsTabs.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const next = btn.getAttribute('data-runs-tab') || 'runs';
+          this.setRunsTab(next);
+        });
+      });
+    }
+    if (Array.isArray(this.elements.tabButtons)) {
+      this.elements.tabButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const next = btn.getAttribute('data-task-tab') || 'overview';
+          // Sticky for the rest of the session: once the user picks a tab,
+          // don't fight them by auto-switching back to a status-based default
+          // on the next data refresh.
+          this._taskTabUserPicked = true;
+          this.setTaskTab(next);
+        });
+      });
+    }
+    if (this.elements.heroAgent) {
+      this.elements.heroAgent.addEventListener('change', async (event) => {
+        const value = event.target.value || '';
+        try {
+          await this.updateTaskFields({ to: value });
+          this.notify('success', value ? `Reassigned to ${value}` : 'Agent unassigned');
+        } catch (error) {
+          this.notify('error', error?.message || 'Failed to update agent');
+        }
+      });
+    }
+    this.elements.outputFollowupBtn?.addEventListener('click', () => this.toggleFollowupPanel(true));
+    this.elements.followupCancel?.addEventListener('click', () => this.toggleFollowupPanel(false));
+    this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
@@ -1009,6 +1156,7 @@ export class WorkspaceTaskPage {
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
     this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
+    this.elements.scheduleWakeMacInput?.addEventListener('change', () => this.updateScheduleModalFields());
     [
       this.elements.scheduleEnabledInput,
       this.elements.scheduleNameInput,
@@ -1017,7 +1165,11 @@ export class WorkspaceTaskPage {
       this.elements.scheduleIntervalValueInput,
       this.elements.scheduleIntervalUnitInput,
       this.elements.scheduleOnceInput,
-      this.elements.scheduleCronInput
+      this.elements.scheduleCronInput,
+      this.elements.scheduleSleepPolicyInput,
+      this.elements.scheduleWakeMacInput,
+      this.elements.scheduleWakeLeadInput,
+      this.elements.scheduleWakeFallbackInput
     ].forEach((element) => {
       element?.addEventListener('input', () => this.updateSchedulePreview());
       element?.addEventListener('change', () => this.updateSchedulePreview());
@@ -1068,6 +1220,7 @@ export class WorkspaceTaskPage {
         this.tasks = this.task ? [this.task] : [];
       }
 
+      this.seedLiveActivityFromHistory();
       this.render();
       this.setState('content');
     } catch (error) {
@@ -1135,20 +1288,207 @@ export class WorkspaceTaskPage {
 
     const payload = event?.data?.data || event?.data || {};
     const eventTaskId = String(payload?.task_id || payload?.id || payload?.task?.id || '').trim();
-    if (eventTaskId && eventTaskId !== this.taskId) {
+
+    // Was previously a hard early-return for sibling events. That broke the
+    // relationships card (parent / inputs / "Used By"), which depends on the
+    // graph neighbors' current status — when an upstream task completed, this
+    // page never knew. Now we still schedule a refresh; render() will detect
+    // via per-section fingerprints that nothing about THIS task changed and
+    // skip the heavy sub-renders.
+    const isSelfEvent = !eventTaskId || eventTaskId === this.taskId;
+    // Creation-style events affect the workspace's task graph (a new
+    // dependent could appear, a new subtask could be delegated). The new
+    // task is not yet in this.tasks so eventTaskIsNeighbor would return
+    // false; let these through unconditionally and rely on the render
+    // diff to no-op when they really are unrelated.
+    const isStructuralEvent = (
+      eventType === 'task.created' ||
+      eventType === 'task.delegated' ||
+      eventType === 'task.deleted' ||
+      eventType === 'task.assigned'
+    );
+    if (!isSelfEvent && !isStructuralEvent && !this.eventTaskIsNeighbor(eventTaskId)) {
       return;
     }
 
-    if (this.elements.root) {
-      this.elements.root.classList.remove('workspace-task-page-flash');
-      void this.elements.root.offsetWidth;
-      this.elements.root.classList.add('workspace-task-page-flash');
+    if (isSelfEvent) {
+      this.captureLiveActivity(eventType, payload);
     }
+
+    // Flash class previously fired on every task.* event to mask the
+    // layout thrash from a full re-render. With per-section selective
+    // rendering it's no longer needed for routine updates. We leave it
+    // unset here; significant lifecycle transitions surface on their own
+    // through the status pill / hero priority changes.
 
     window.clearTimeout(this.pendingRefreshTimer);
     this.pendingRefreshTimer = window.setTimeout(() => {
       this.loadData();
     }, 180);
+  }
+
+  // captureLiveActivity records the most recent task.* event for this task
+  // so the live badge can show what the agent is currently doing. Without
+  // this, in_progress tasks are visually indistinguishable from frozen ones
+  // — see slice 1 of the stuck-task UX work.
+  captureLiveActivity(eventType, payload) {
+    if (eventType === 'task.heartbeat') {
+      // Heartbeats only refresh the freshness counter; preserve the last
+      // phase label. If we have no label yet (page refreshed mid-run before
+      // any phase event), keep the old behaviour and just record activity.
+      const prev = this._latestActivity;
+      this._latestActivity = { at: Date.now(), label: prev?.label || '' };
+      this.renderLiveBadge();
+      return;
+    }
+
+    const label = this.activityLabelFor(eventType, payload);
+    if (label === null) return;
+    this._latestActivity = { at: Date.now(), label };
+    this.renderLiveBadge();
+  }
+
+  // activityLabelFor maps a task.* event into the human label rendered on
+  // the live badge. Returns null for events that should not change the
+  // label (callers decide whether to ignore the event entirely or just
+  // refresh the timestamp).
+  activityLabelFor(eventType, payload) {
+    const data = (payload && typeof payload === 'object') ? payload : {};
+    switch (eventType) {
+      case 'task.thinking': {
+        const phase = String(data.phase || '').trim();
+        if (phase === 'awaiting_llm') return 'Awaiting model response';
+        if (phase === 'llm_returned') {
+          const calls = Number(data.tool_call_count || 0);
+          return calls > 0
+            ? `Processing ${calls} tool call${calls === 1 ? '' : 's'}`
+            : 'Processing model response';
+        }
+        if (phase === 'starting') return 'Analyzing task';
+        return 'Thinking';
+      }
+      case 'task.tool_call': {
+        const tool = String(data.tool_name || '').trim();
+        return tool ? `Calling ${tool}` : 'Calling tool';
+      }
+      case 'task.tool_result': {
+        const tool = String(data.tool_name || '').trim();
+        const success = data.success !== false;
+        if (tool) return success ? `${tool} returned` : `${tool} failed`;
+        return 'Tool finished';
+      }
+      case 'task.started':
+        return 'Started';
+      case 'task.resumed':
+        return 'Resumed';
+      default:
+        return null;
+    }
+  }
+
+  // seedLiveActivityFromHistory walks taskEvents (loaded by /api/orchestration/events)
+  // backwards and lifts the most recent phase-bearing event into _latestActivity
+  // so a page refresh during a running task immediately shows context instead
+  // of a blank "Live" until the next event arrives.
+  seedLiveActivityFromHistory() {
+    if (!Array.isArray(this.taskEvents) || this.taskEvents.length === 0) return;
+    if (this._latestActivity) return;
+    for (let i = this.taskEvents.length - 1; i >= 0; i--) {
+      const ev = this.taskEvents[i];
+      if (!ev) continue;
+      const type = String(ev.type || '').trim();
+      const payload = ev?.data?.data || ev?.data || {};
+      const evTaskId = String(payload?.task_id || ev?.task_id || '').trim();
+      if (evTaskId && evTaskId !== this.taskId) continue;
+      const label = this.activityLabelFor(type, payload);
+      if (label === null) continue;
+      const ts = ev.timestamp ? Date.parse(ev.timestamp) : NaN;
+      this._latestActivity = {
+        at: Number.isFinite(ts) ? ts : Date.now(),
+        label
+      };
+      return;
+    }
+  }
+
+  // formatRelativeAgo renders the freshness component of the live badge.
+  // Sub-second flickers are rounded to "just now" to avoid the badge
+  // visually thrashing on a fast tool sequence.
+  formatRelativeAgo(timestampMs) {
+    if (!timestampMs) return '';
+    const elapsed = Math.max(0, Date.now() - timestampMs);
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds < 2) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  }
+
+  renderLiveBadge() {
+    const badge = this.elements.liveBadge;
+    if (!badge) return;
+
+    const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+    const isLive = isRunning && this.workspaceRealtimeUnsubscribe;
+    badge.hidden = !isLive;
+    if (!isLive) {
+      this.stopActivityTick();
+      return;
+    }
+
+    const activity = this._latestActivity;
+    let text = 'Live';
+    if (activity && activity.label) {
+      const ago = this.formatRelativeAgo(activity.at);
+      text = ago ? `${activity.label} · ${ago}` : activity.label;
+    }
+    badge.innerHTML = `<span class="workspace-task-page-live-dot"></span>${this.escapeHtml(text)}`;
+
+    this.startActivityTick();
+  }
+
+  startActivityTick() {
+    if (this._activityTickHandle) return;
+    // 2s cadence keeps the "Xs ago" counter live without burning CPU; the
+    // badge text only changes once per second of real wall-clock anyway.
+    this._activityTickHandle = window.setInterval(() => {
+      const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      if (!isRunning) {
+        this.stopActivityTick();
+        return;
+      }
+      this.renderLiveBadge();
+    }, 2000);
+  }
+
+  stopActivityTick() {
+    if (this._activityTickHandle) {
+      window.clearInterval(this._activityTickHandle);
+      this._activityTickHandle = null;
+    }
+  }
+
+  // eventTaskIsNeighbor: true when the event refers to a task that this
+  // page's relationships or workflow card visualises (parent, an input
+  // producer, a downstream consumer, or a child). Lets us refresh on
+  // sibling events without re-rendering for every unrelated task.* event
+  // on the workspace.
+  eventTaskIsNeighbor(eventTaskId) {
+    const id = String(eventTaskId || '').trim();
+    if (!id) return false;
+    const t = this.task;
+    if (!t) return false;
+    if (String(t.parent_task_id || '').trim() === id) return true;
+    if (Array.isArray(t.input_task_ids) && t.input_task_ids.some((x) => String(x || '').trim() === id)) return true;
+    for (const sibling of this.tasks) {
+      if (!sibling || sibling.id === t.id) continue;
+      if (String(sibling.parent_task_id || '').trim() === t.id && sibling.id === id) return true;
+      const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
+      if (sibling.id === id && inputs.some((x) => String(x || '').trim() === t.id)) return true;
+    }
+    return false;
   }
 
   setState(state) {
@@ -1356,7 +1696,8 @@ export class WorkspaceTaskPage {
     });
   }
 
-  async updateTaskFields(patch) {
+  async updateTaskFields(patch, options = {}) {
+    const { deferRender = false } = options;
     const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.taskId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -1365,20 +1706,161 @@ export class WorkspaceTaskPage {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || 'Failed to update task');
+      throw new Error(this.parseResponseError(text, 'Failed to update task'));
     }
 
-    const updatedTask = await response.json();
-    this.task = updatedTask || this.task;
+    const payload = await response.json();
+    const updatedTask = payload?.task || (payload?.id ? payload : null);
+    this.task = updatedTask ? { ...this.task, ...updatedTask } : { ...this.task, ...patch };
     if (Array.isArray(this.tasks)) {
       this.tasks = this.tasks.map((task) => (
         String(task?.id || '') === String(this.taskId)
-          ? { ...task, ...(updatedTask || {}) }
+          ? { ...task, ...(updatedTask || patch) }
           : task
       ));
     }
-    this.render();
-    return updatedTask;
+    // The synchronous render() pipeline runs 14 sub-renders (markdown, trace,
+    // schedule, etc.) and on a task with sizeable execution history can stall
+    // the main thread long enough that callers awaiting this method block
+    // their visible UX (e.g. modal close). deferRender lets the caller close
+    // the modal first and let the heavy re-render paint in the next frame.
+    if (deferRender) {
+      window.requestAnimationFrame(() => this.render());
+    } else {
+      this.render();
+    }
+    return this.task;
+  }
+
+  // toggleFollowupPanel shows/hides the inline follow-up creation form
+  // beneath the Result card. When opening, it pre-fills the agent picker
+  // with the current task's agent (or the workspace's first available
+  // agent) and focuses the description input so the user can type
+  // immediately.
+  toggleFollowupPanel(open) {
+    const panel = this.elements.followupPanel;
+    if (!panel) return;
+    const next = open === undefined ? !this._followupOpen : Boolean(open);
+    this._followupOpen = next;
+    panel.hidden = !next;
+
+    if (this.elements.followupError) this.elements.followupError.hidden = true;
+    if (!next) return;
+
+    this.populateFollowupAgentOptions();
+    if (this.elements.followupDescription) {
+      this.elements.followupDescription.value = '';
+      // Defer focus to next frame so the panel is in the layout flow before
+      // we try to scroll/focus into it.
+      window.requestAnimationFrame(() => this.elements.followupDescription?.focus());
+    }
+    if (this.elements.followupDetails) this.elements.followupDetails.value = '';
+  }
+
+  populateFollowupAgentOptions() {
+    const select = this.elements.followupAgent;
+    if (!select) return;
+    const currentAgent = String(this.task?.to || '').trim();
+    const agents = this.getAssignableAgentNames(currentAgent);
+    const options = ['<option value="">Unassigned (auto-assign on run)</option>'];
+    let preselected = false;
+    for (const name of agents) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) continue;
+      const isCurrent = trimmed.toLowerCase() === currentAgent.toLowerCase();
+      if (isCurrent) preselected = true;
+      options.push(
+        `<option value="${this.escapeHtml(trimmed)}" ${isCurrent ? 'selected' : ''}>${this.escapeHtml(trimmed)}</option>`
+      );
+    }
+    if (currentAgent && !preselected && !this.isRunnableAgentName(currentAgent)) {
+      // Source task is assigned to an agent that no longer exists; don't
+      // auto-pick it for the follow-up.
+    }
+    select.innerHTML = options.join('');
+  }
+
+  setFollowupError(message = '') {
+    const el = this.elements.followupError;
+    if (!el) return;
+    const trimmed = String(message || '').trim();
+    el.textContent = trimmed;
+    el.hidden = !trimmed;
+  }
+
+  async submitFollowupTask() {
+    if (this._followupSubmitting) return;
+    const desc = String(this.elements.followupDescription?.value || '').trim();
+    if (!desc) {
+      this.setFollowupError('Describe what the follow-up task should do.');
+      this.elements.followupDescription?.focus();
+      return;
+    }
+    if (!this.task?.id) {
+      this.setFollowupError('Source task is not loaded yet — try again in a moment.');
+      return;
+    }
+    this.setFollowupError('');
+
+    const details = String(this.elements.followupDetails?.value || '').trim();
+    const agent = String(this.elements.followupAgent?.value || '').trim();
+
+    const submitBtn = this.elements.followupSubmit;
+    const submitText = submitBtn?.querySelector('span');
+    const originalText = submitText?.textContent || 'Create follow-up';
+    this._followupSubmitting = true;
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Creating…';
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          description: desc,
+          details: details || undefined,
+          status: 'pending',
+          to: agent || undefined,
+          input_task_ids: [this.task.id]
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(this.parseResponseError(text, 'Failed to create follow-up task.'));
+      }
+      const payload = await response.json();
+      const created = payload?.task || (payload?.id ? payload : null);
+      const newTaskId = String(created?.id || '').trim();
+
+      this.toggleFollowupPanel(false);
+      this.notify('success', 'Follow-up task created');
+
+      if (newTaskId) {
+        // Send the user straight to the new task page so they can run /
+        // edit it immediately. Using a full navigation (not history.push)
+        // because each task page bootstraps its own controller.
+        window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(newTaskId)}`;
+      }
+    } catch (error) {
+      console.error('Failed to create follow-up task:', error);
+      this.setFollowupError(error?.message || 'Failed to create follow-up task.');
+    } finally {
+      this._followupSubmitting = false;
+      if (submitBtn) submitBtn.disabled = false;
+      if (submitText) submitText.textContent = originalText;
+    }
+  }
+
+  parseResponseError(text, fallback) {
+    const value = String(text || '').trim();
+    if (!value) return fallback;
+    try {
+      const payload = JSON.parse(value);
+      return payload?.message || payload?.error || fallback;
+    } catch (_error) {
+      return value;
+    }
   }
 
   getTaskDisplayLabel(task = this.task) {
@@ -1614,26 +2096,212 @@ export class WorkspaceTaskPage {
       .filter(Boolean);
   }
 
+  // getDependentTasks: reverse of getInputTasks. Returns the set of tasks
+  // whose input_task_ids reference this task — i.e. tasks downstream that
+  // consume this task's output. The relationships card uses this to show the
+  // user "what depends on this," which previously required clicking through
+  // every other task to discover the back-edge.
+  //
+  // Filters out the current task itself: legacy data may carry a self-input
+  // edge (the task graph validator now rejects this on AddTask, but existing
+  // stored tasks may still have it). Showing self-references would display
+  // the current task in its own "Used By" list and is never useful.
+  getDependentTasks() {
+    const myId = String(this.task?.id || '').trim();
+    if (!myId) return [];
+    return this.tasks.filter((item) => {
+      if (String(item?.id || '').trim() === myId) return false;
+      const inputs = Array.isArray(item?.input_task_ids) ? item.input_task_ids : [];
+      return inputs.some((id) => String(id || '').trim() === myId);
+    });
+  }
+
   render() {
     const statusInfo = this.getTaskStatusPresentation();
     this.currentBlockedTask = statusInfo.isBlocked ? this.buildBlockedTaskState() : null;
     this.taskAssistResponseExpanded = false;
     this.assistReviewMode = false;
 
-    this.renderHero(statusInfo);
-    this.renderHeroActions(statusInfo);
-    this.renderHeroPriority(statusInfo);
-    this.renderOverview();
-    this.renderSnapshot(statusInfo);
-    this.renderRelationships();
-    this.renderWorkflow();
-    this.renderOutput();
-    this.renderExecutionBreakdown();
-    this.renderExecutionTrace();
-    this.renderSchedule();
-    this.renderExecutionSteps();
-    this.renderContext();
-    this.renderBlockedState(statusInfo);
+    // Pick a default tab on first render based on task status. After the user
+    // clicks a tab we never override their choice.
+    if (!this._taskTabUserPicked) {
+      this.setTaskTab(this.defaultTaskTab());
+    } else {
+      this.refreshTaskTabEmptyStates();
+    }
+
+    // Selective rendering: each sub-render is only invoked when its inputs
+    // actually changed since the previous render. The first render after
+    // page load (or after forceFullRender()) fills the cache and triggers
+    // every sub-render exactly once. Subsequent renders triggered by
+    // realtime events skip the sub-renders whose data is unchanged, which
+    // on a busy workspace is the difference between 14 sub-renders fired
+    // 12+ times per minute and just the 2-3 that actually need to update.
+    const inputs = this._renderInputs(statusInfo);
+    if (!this._renderCache) this._renderCache = {};
+    const cache = this._renderCache;
+
+    const dispatch = (key, fn) => {
+      if (cache[key] === inputs[key]) return;
+      cache[key] = inputs[key];
+      fn();
+    };
+
+    dispatch('hero', () => this.renderHero(statusInfo));
+    dispatch('heroActions', () => this.renderHeroActions(statusInfo));
+    dispatch('heroAgent', () => this.renderHeroAgent(statusInfo));
+    dispatch('heroPriority', () => this.renderHeroPriority(statusInfo));
+    dispatch('overview', () => this.renderOverview());
+    dispatch('relationships', () => this.renderRelationships());
+    dispatch('workflow', () => this.renderWorkflow());
+    dispatch('output', () => this.renderOutput());
+    dispatch('runs', () => this.renderRunsCard());
+    dispatch('schedule', () => this.renderSchedule());
+    dispatch('context', () => this.renderContext());
+    dispatch('blockedState', () => this.renderBlockedState(statusInfo));
+
+    // Tab visibility depends on which cards ended up hidden after the
+    // sub-renders — refresh the per-tab empty placeholders here.
+    this.refreshTaskTabEmptyStates();
+  }
+
+  // forceFullRender clears the per-section input cache so the next render()
+  // invocation runs every sub-render unconditionally. Use after destructive
+  // actions (delete, structural reset) where the prior cache no longer
+  // describes the page.
+  forceFullRender() {
+    this._renderCache = null;
+  }
+
+  // _renderInputs builds a per-section input fingerprint. Each value must be
+  // a string (typically a JSON-stringified array of the data the section
+  // reads). Two renders with identical fingerprints are guaranteed to
+  // produce identical DOM, so the dispatcher in render() can safely skip.
+  //
+  // Adding a new sub-render requires:
+  //   1. Add an entry here returning a stable string of its inputs.
+  //   2. Add a dispatch() call in render().
+  //
+  // If a sub-render reads data NOT covered by its fingerprint, that data
+  // change won't trigger a re-render — keep this conservative.
+  _renderInputs(statusInfo) {
+    const t = this.task || {};
+    const blocked = this.currentBlockedTask;
+    const sigStatusInfo = JSON.stringify([
+      statusInfo?.label,
+      statusInfo?.className,
+      statusInfo?.isBlocked,
+      statusInfo?.waiting,
+    ]);
+    const sigBlocked = blocked
+      ? JSON.stringify([
+          blocked.reason,
+          blocked.reasonCode,
+          blocked.question,
+          blocked.response,
+          blocked.workflowStep?.id,
+          blocked.workflowStep?.stepType,
+          blocked.currentAgent,
+          blocked.suggestedActions,
+          blocked.selectedChoiceId,
+        ])
+      : 'null';
+    const sigGraphNeighbors = this._taskGraphNeighborsFingerprint();
+    const sigWorkflowSubtree = this._taskWorkflowSubtreeFingerprint();
+
+    return {
+      hero: JSON.stringify([
+        t.id, t.status, t.description, t.details, t.priority,
+        this.workspace?.name, sigStatusInfo,
+      ]),
+      heroActions: JSON.stringify([t.id, t.status, t.execution_mode, sigStatusInfo]),
+      heroAgent: JSON.stringify([
+        t.id, t.to, t.status,
+        (this.availableAgents || []).map((a) => a?.name || '').sort().join('|'),
+      ]),
+      heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
+      overview: JSON.stringify([
+        t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
+        t.template_ref, t.timeout, t.progress?.percentage, sigStatusInfo,
+      ]),
+      relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
+      workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
+      output: JSON.stringify([t.id, t.status, t.result, t.result_type, t.structured_result]),
+      runs: JSON.stringify([
+        t.id, t.execution_steps, t.execution_history?.length,
+        t.execution_trace, sigWorkflowSubtree,
+        this._runsTab || 'runs',
+      ]),
+      schedule: JSON.stringify([
+        t.id, t.schedule, t.schedule_enabled, t.next_run, t.last_run,
+        t.execution_count, t.failure_count,
+        // Include the run-history length and the latest entry's identity so a
+        // newly-recorded run forces the schedule card to re-render (otherwise
+        // the cached fingerprint would skip rendering until something else on
+        // the schedule changed).
+        Array.isArray(t.execution_history) ? t.execution_history.length : 0,
+        t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
+      ]),
+      context: JSON.stringify([t.id, t.context || {}]),
+      blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
+    };
+  }
+
+  // _taskGraphNeighborsFingerprint captures the renderable state of every
+  // task that participates in this task's relationships card: parent, input
+  // producers, downstream consumers, and direct children. Sibling status
+  // changes flow through this fingerprint, so the relationships card stays
+  // fresh when an upstream task completes.
+  _taskGraphNeighborsFingerprint() {
+    const t = this.task;
+    if (!t) return '';
+    const neighborIds = new Set();
+    if (t.parent_task_id) neighborIds.add(String(t.parent_task_id).trim());
+    for (const id of (Array.isArray(t.input_task_ids) ? t.input_task_ids : [])) {
+      if (id) neighborIds.add(String(id).trim());
+    }
+    for (const sibling of this.tasks) {
+      if (!sibling || sibling.id === t.id) continue;
+      const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
+      if (inputs.some((id) => String(id || '').trim() === t.id)) {
+        neighborIds.add(String(sibling.id).trim());
+      }
+      if (String(sibling.parent_task_id || '').trim() === t.id) {
+        neighborIds.add(String(sibling.id).trim());
+      }
+    }
+    const sortedIds = [...neighborIds].sort();
+    const stamps = sortedIds.map((id) => {
+      const s = this.tasks.find((x) => x?.id === id);
+      if (!s) return [id, null];
+      return [id, s.status, s.description, s.to, s.subtask_index];
+    });
+    return JSON.stringify(stamps);
+  }
+
+  // _taskWorkflowSubtreeFingerprint captures the recursive child tree
+  // beneath this task. Workflow card sub-render is sensitive to any status
+  // or assignment change at any depth.
+  _taskWorkflowSubtreeFingerprint() {
+    const t = this.task;
+    if (!t) return '';
+    const visited = new Set();
+    const stamps = [];
+    const collect = (parentId) => {
+      if (!parentId || visited.has(parentId)) return;
+      visited.add(parentId);
+      for (const item of this.tasks) {
+        if (!item) continue;
+        if (String(item.parent_task_id || '').trim() !== parentId) continue;
+        stamps.push([
+          item.id, item.status, item.description, item.subtask_index,
+          item.to, item.result ? item.result.length : 0,
+        ]);
+        collect(String(item.id || '').trim());
+      }
+    };
+    collect(String(t.id || '').trim());
+    return JSON.stringify(stamps);
   }
 
   renderHero(statusInfo) {
@@ -1657,24 +2325,42 @@ export class WorkspaceTaskPage {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
     }
-    if (this.elements.liveBadge) {
-      const isLive = statusInfo.className === 'in_progress' && this.workspaceRealtimeUnsubscribe;
-      this.elements.liveBadge.hidden = !isLive;
+    if (statusInfo.className !== 'in_progress') {
+      // Drop stale activity when the task transitions out of in_progress so a
+      // subsequent re-run starts the badge clean instead of inheriting the
+      // last phase from the previous run.
+      this._latestActivity = null;
     }
+    this.renderLiveBadge();
   }
 
   renderHeroActions(statusInfo) {
     if (!this.elements.heroActions) return;
 
+    // A pending Cancel inline-confirm is always re-rendered when render()
+    // fires; status changes during the prompt invalidate the confirm and
+    // we drop back to the normal action row.
+    if (this._cancelConfirmActive) {
+      const stillRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      if (!stillRunning) {
+        this._cancelConfirmActive = false;
+      }
+    }
+
     const status = String(this.task?.status || '').trim().toLowerCase();
-    const hasAgent = Boolean(this.task?.to);
+    const hasAgent = Boolean(this.task?.to) && this.task.to !== 'unassigned';
     const buttons = [];
     const hasSchedule = Boolean(this.task?.schedule);
     const scheduleLabel = hasSchedule ? 'Edit Schedule' : 'Schedule';
 
-    if (status === 'pending' && hasAgent) {
+    // Run is always available for pending/assigned tasks; if no agent is
+    // attached we'll surface an agent picker on click rather than hiding
+    // the button (the previous gating left users with no obvious next
+    // step on a pending+unassigned task — discoverability bug #5).
+    if (status === 'pending' || status === 'assigned') {
+      const runLabel = hasAgent ? 'Run' : 'Assign & Run';
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>Run
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${this.escapeHtml(runLabel)}
       </button>`);
     }
 
@@ -1690,15 +2376,32 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
-    if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
+    // Mark Complete is for *manual* close-out before a run starts. Hiding
+    // it during in_progress avoids racing the agent's own completion path.
+    if ((status === 'pending' || status === 'assigned') && !statusInfo.isBlocked) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
+      </button>`);
+    }
+
+    if (status === 'in_progress' && !this._cancelConfirmActive) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-danger" data-action="cancel-prompt">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18,6H15V4A2,2 0 0,0 13,2H11A2,2 0 0,0 9,4V6H6V8H7V19A2,2 0 0,0 9,21H15A2,2 0 0,0 17,19V8H18V6M11,4H13V6H11V4M15,19H9V8H15V19Z"/></svg>Cancel
       </button>`);
     }
 
     buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="schedule">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19M7,10H12V15H7V10Z"/></svg>${this.escapeHtml(scheduleLabel)}
     </button>`);
+
+    if (status === 'in_progress' && this._cancelConfirmActive) {
+      const disabled = this._cancelInFlight ? 'disabled' : '';
+      buttons.push(`<span class="workspace-task-page-hero-cancel-confirm" role="alertdialog" aria-label="Confirm cancel">
+        <span class="workspace-task-page-hero-cancel-confirm-label">Cancel this run?</span>
+        <button type="button" class="workspace-task-page-hero-cancel-yes" data-action="cancel-confirm" ${disabled}>${this._cancelInFlight ? 'Cancelling…' : 'Yes'}</button>
+        <button type="button" class="workspace-task-page-hero-cancel-no" data-action="cancel-dismiss" ${disabled}>No</button>
+      </span>`);
+    }
 
     this.elements.heroActions.innerHTML = buttons.join('');
 
@@ -1709,8 +2412,97 @@ export class WorkspaceTaskPage {
         if (action === 'complete') this.completeTask();
         if (action === 'schedule') this.openScheduleModal();
         if (action === 'create-skill') this.openSkillDraftModal();
+        if (action === 'cancel-prompt') {
+          this._cancelConfirmActive = true;
+          if (this._renderCache) delete this._renderCache.heroActions;
+          this.renderHeroActions(statusInfo);
+        }
+        if (action === 'cancel-dismiss') {
+          this._cancelConfirmActive = false;
+          if (this._renderCache) delete this._renderCache.heroActions;
+          this.renderHeroActions(statusInfo);
+        }
+        if (action === 'cancel-confirm') this.handleCancelTask();
       });
     });
+  }
+
+  // renderHeroAgent populates the inline "Agent" picker next to the status
+  // pill. Visible whenever the task is in a state where reassignment is
+  // meaningful: not actively running, not blocked. Replaces the old Quick
+  // Controls aside which buried the only commonly-used override (reassign)
+  // behind a disclosure.
+  renderHeroAgent(statusInfo) {
+    const wrap = this.elements.heroAgentWrap;
+    const select = this.elements.heroAgent;
+    if (!wrap || !select) return;
+
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    const reassignable = status !== 'in_progress' && !statusInfo.isBlocked;
+    if (!reassignable) {
+      wrap.hidden = true;
+      return;
+    }
+
+    const currentAgent = String(this.task?.to || '').trim();
+    const currentAgentUnavailable =
+      Boolean(currentAgent) && !this.isRunnableAgentName(currentAgent);
+    const agentNames = this.getAssignableAgentNames(currentAgent);
+
+    const options = [];
+    options.push(`<option value="" ${!currentAgent ? 'selected' : ''}>Unassigned</option>`);
+    if (currentAgentUnavailable) {
+      options.push(
+        `<option value="${this.escapeHtml(currentAgent)}" selected disabled>${this.escapeHtml(`${currentAgent} (Unavailable)`)}</option>`
+      );
+    }
+    for (const name of agentNames) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) continue;
+      const isCurrent = !currentAgentUnavailable && trimmed.toLowerCase() === currentAgent.toLowerCase();
+      options.push(
+        `<option value="${this.escapeHtml(trimmed)}" ${isCurrent ? 'selected' : ''}>${this.escapeHtml(trimmed)}</option>`
+      );
+    }
+
+    select.innerHTML = options.join('');
+    wrap.classList.toggle('is-unavailable', currentAgentUnavailable);
+    wrap.hidden = false;
+
+    // The change handler is bound once in bindEvents(); each render replaces
+    // the <option> children in place, so the listener stays attached.
+  }
+
+  async handleCancelTask() {
+    if (this._cancelInFlight) return;
+    const id = String(this.task?.id || '').trim();
+    if (!id) return;
+
+    this._cancelInFlight = true;
+    if (this._renderCache) delete this._renderCache.heroActions;
+    this.renderHeroActions(this.getTaskStatusPresentation());
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to cancel run');
+      }
+      this.notify('success', 'Run cancelled');
+      this._cancelConfirmActive = false;
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to cancel task:', error);
+      this.notify('error', error?.message || 'Failed to cancel run');
+    } finally {
+      this._cancelInFlight = false;
+      if (this._renderCache) delete this._renderCache.heroActions;
+      this.renderHeroActions(this.getTaskStatusPresentation());
+    }
   }
 
   renderHeroPriority(statusInfo) {
@@ -1722,16 +2514,38 @@ export class WorkspaceTaskPage {
     if (!blocked) {
       this.elements.heroPriority.hidden = true;
       this.elements.heroPriorityCopy.textContent = '';
+      if (this.elements.heroPriorityReason) {
+        this.elements.heroPriorityReason.hidden = true;
+      }
+      if (this.elements.heroPriorityReasonText) {
+        this.elements.heroPriorityReasonText.textContent = '';
+      }
       this.elements.heroPriorityActions.innerHTML = '';
       return;
     }
 
     const workflowStep = this.currentBlockedTask?.workflowStep || null;
     const hasAgentResponse = Boolean(String(this.currentBlockedTask?.response || '').trim());
-    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'Why Paused?';
+    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'More Context';
 
     this.elements.heroPriority.hidden = false;
-    this.elements.heroPriorityCopy.textContent = this.getBlockedHeroSummary(workflowStep);
+    const summary = this.getBlockedHeroSummary(workflowStep);
+    this.elements.heroPriorityCopy.textContent = summary;
+
+    // Show the raw blocked reason inline only when it adds information beyond
+    // the summary (which often is just the agent's question). This lets users
+    // see *why* the task is paused without scrolling to the assist card.
+    const rawReason = String(this.currentBlockedTask?.reason || '').trim();
+    const showReason = Boolean(rawReason) && rawReason !== summary;
+    if (this.elements.heroPriorityReason && this.elements.heroPriorityReasonText) {
+      if (showReason) {
+        this.elements.heroPriorityReasonText.textContent = rawReason;
+        this.elements.heroPriorityReason.hidden = false;
+      } else {
+        this.elements.heroPriorityReasonText.textContent = '';
+        this.elements.heroPriorityReason.hidden = true;
+      }
+    }
     this.elements.heroPriorityActions.innerHTML = `
       <button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-hero-priority-action="assist">
         ${this.escapeHtml(this.getBlockedHeroPrimaryActionLabel(workflowStep))}
@@ -1986,151 +2800,45 @@ export class WorkspaceTaskPage {
     });
   }
 
-  renderSnapshot(statusInfo) {
-    if (!this.elements.snapshot) return;
-
-    const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
-    const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
-    const statusOptions = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'blocked', 'cancelled'];
-    const agentNames = this.getAssignableAgentNames(currentAgent);
-
-    const snapshotItems = [
-      ['Created', formatDateTime(this.task?.created_at)],
-      ['Started', formatDateTime(this.task?.started_at)],
-      ['Completed', formatDateTime(this.task?.completed_at)],
-      ['Task Type', this.getSubtasks().length > 0 ? 'Parent Task' : 'Leaf Task']
-    ];
-
-    if (this.task?.schedule_name) {
-      snapshotItems.push(['Schedule', String(this.task.schedule_name).trim()]);
-    }
-
-    const statusSelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Status</span>
-        <select id="workspace-task-snapshot-status" class="workspace-task-snapshot-select workspace-task-page-status-inline" data-state="${this.escapeHtml(statusInfo.className)}">
-          ${statusOptions.map((s) => `<option value="${this.escapeHtml(s)}" ${s === (this.task?.status || 'pending') ? 'selected' : ''}>${this.escapeHtml(getDisplayStatus(s))}</option>`).join('')}
-        </select>
-      </div>
-    `;
-
-    const agentSelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Agent</span>
-        <select id="workspace-task-snapshot-agent" class="workspace-task-snapshot-select">
-          <option value="" ${!this.task?.to ? 'selected' : ''}>Unassigned</option>
-          ${currentAgentUnavailable
-            ? `<option value="${this.escapeHtml(currentAgent)}" selected disabled>${this.escapeHtml(`${currentAgent} (Unavailable)`)}</option>`
-            : ''}
-          ${agentNames
-            .filter((name) => String(name || '').trim() && String(name || '').trim().toLowerCase() !== currentAgent.toLowerCase())
-            .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
-            .join('')}
-          ${!currentAgentUnavailable
-            ? agentNames
-              .filter((name) => String(name || '').trim().toLowerCase() === currentAgent.toLowerCase())
-              .map((name) => `<option value="${this.escapeHtml(name)}" selected>${this.escapeHtml(name)}</option>`)
-              .join('')
-            : ''}
-        </select>
-      </div>
-    `;
-
-    const currentPriority = Number(this.task?.priority) || 3;
-    const priorityLabels = { 1: '1 - Highest', 2: '2 - High', 3: '3 - Medium', 4: '4 - Low', 5: '5 - Lowest' };
-    const prioritySelectHtml = `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">Priority</span>
-        <select id="workspace-task-snapshot-priority" class="workspace-task-snapshot-select">
-          ${[1, 2, 3, 4, 5].map((p) => `<option value="${p}" ${p === currentPriority ? 'selected' : ''}>${this.escapeHtml(priorityLabels[p])}</option>`).join('')}
-        </select>
-      </div>
-    `;
-
-    const staticItemsHtml = snapshotItems.map(([label, value]) => `
-      <div class="workspace-task-snapshot-item">
-        <span class="workspace-task-snapshot-label">${this.escapeHtml(label)}</span>
-        <span class="workspace-task-snapshot-value">${this.escapeHtml(value || '—')}</span>
-      </div>
-    `).join('');
-
-    const summaryCopy = currentAgentUnavailable
-      ? 'This task is assigned to an unavailable agent. Reassign it before retrying execution.'
-      : (statusInfo.isBlocked || statusInfo.className === 'in_progress'
-      ? 'The main page already shows the important execution state. Open this only if you need to adjust controls or inspect metadata.'
-      : 'Open this only when you need to change task controls or inspect metadata.');
-
-    this.elements.snapshot.innerHTML = `
-      <div class="workspace-task-snapshot-summary">
-        <div class="workspace-task-snapshot-summary-copy">${this.escapeHtml(summaryCopy)}</div>
-        <div class="workspace-task-snapshot-chip-row">
-          <span class="workspace-task-snapshot-chip workspace-task-snapshot-chip-status" data-state="${this.escapeHtml(statusInfo.className)}">${this.escapeHtml(statusInfo.label)}</span>
-          <span class="workspace-task-snapshot-chip">${this.escapeHtml(currentAgentUnavailable ? `${currentAgent} (Unavailable)` : currentAgent)}</span>
-          <span class="workspace-task-snapshot-chip">${this.escapeHtml(priorityLabels[currentPriority] || `Priority ${currentPriority}`)}</span>
-        </div>
-      </div>
-
-      <details class="workspace-task-snapshot-disclosure">
-        <summary class="workspace-task-snapshot-disclosure-toggle">Show full task controls and metadata</summary>
-        <div class="workspace-task-snapshot-disclosure-body">
-          ${statusSelectHtml}
-          ${agentSelectHtml}
-          ${prioritySelectHtml}
-          ${staticItemsHtml}
-        </div>
-      </details>
-    `;
-
-    const statusSelect = document.getElementById('workspace-task-snapshot-status');
-    const agentSelect = document.getElementById('workspace-task-snapshot-agent');
-
-    statusSelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ status: statusSelect.value });
-        this.notify('success', 'Status updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update status');
-      }
-    });
-
-    agentSelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ to: agentSelect.value || '' });
-        this.notify('success', 'Agent updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update agent');
-      }
-    });
-
-    const prioritySelect = document.getElementById('workspace-task-snapshot-priority');
-    prioritySelect?.addEventListener('change', async () => {
-      try {
-        await this.updateTaskFields({ priority: Number(prioritySelect.value) || 3 });
-        this.notify('success', 'Priority updated');
-      } catch (error) {
-        this.notify('error', error?.message || 'Failed to update priority');
-      }
-    });
-  }
-
   renderRelationships() {
     if (!this.elements.relationships || !this.elements.relationshipsCard) return;
 
+    // Three groups make the task's place in the dependency graph visible at
+    // a glance: parent (containing workflow), upstream input producers, and
+    // downstream consumers. Direction is conveyed via the kicker label and
+    // arrow glyph on each group; status is conveyed via a colored dot in
+    // each link card. The deep subtask tree continues to live in the
+    // workflow card below — keeping that separation lets the relationships
+    // card stay glanceable instead of becoming a graph viewer.
     const parentTask = this.getParentTask();
     const inputTasks = this.getInputTasks();
+    const dependentTasks = this.getDependentTasks();
     const groups = [];
 
     if (parentTask) {
       groups.push({
         title: 'Parent Task',
+        arrow: '↑',
+        direction: 'up',
         tasks: [parentTask]
       });
     }
 
     if (inputTasks.length > 0) {
       groups.push({
-        title: 'Input Tasks',
-        tasks: inputTasks
+        title: 'Receives Input From',
+        arrow: '←',
+        direction: 'in',
+        tasks: this.sortWorkflowTasks(inputTasks)
+      });
+    }
+
+    if (dependentTasks.length > 0) {
+      groups.push({
+        title: 'Used By',
+        arrow: '→',
+        direction: 'out',
+        tasks: this.sortWorkflowTasks(dependentTasks)
       });
     }
 
@@ -2141,19 +2849,135 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.relationshipsCard.hidden = false;
-    this.elements.relationships.innerHTML = groups.map((group) => `
-      <section class="workspace-task-relationship-group">
-        <div class="workspace-task-relationship-title">${this.escapeHtml(group.title)}</div>
+    const graphHtml = this.renderRelationshipsGraph({
+      parentTask,
+      inputTasks: groups.find((g) => g.direction === 'in')?.tasks || [],
+      dependentTasks: groups.find((g) => g.direction === 'out')?.tasks || []
+    });
+    const groupsHtml = groups.map((group) => `
+      <section class="workspace-task-relationship-group" data-direction="${this.escapeHtml(group.direction)}">
+        <div class="workspace-task-relationship-title">
+          <span class="workspace-task-relationship-arrow" aria-hidden="true">${this.escapeHtml(group.arrow)}</span>
+          ${this.escapeHtml(group.title)}
+        </div>
         <div class="workspace-task-related-links">
-          ${group.tasks.map((task) => `
-            <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link">
-              <span class="workspace-task-related-link-title">${this.escapeHtml(this.getTaskDisplayLabel(task))}</span>
-              <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} • ${this.escapeHtml(String(task.to || 'Unassigned').trim() || 'Unassigned')}</span>
+          ${group.tasks.map((task) => {
+            const statusClass = getStatusClass(task?.status);
+            const assignee = String(task?.to || 'Unassigned').trim() || 'Unassigned';
+            return `
+            <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link" data-status="${this.escapeHtml(statusClass)}">
+              <span class="workspace-task-related-link-title">
+                <span class="workspace-task-related-link-dot" data-state="${this.escapeHtml(statusClass)}" aria-hidden="true"></span>
+                <span>${this.escapeHtml(this.getTaskDisplayLabel(task))}</span>
+              </span>
+              <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} · ${this.escapeHtml(assignee)}</span>
             </a>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </section>
     `).join('');
+    this.elements.relationships.innerHTML = graphHtml + groupsHtml;
+  }
+
+  /**
+   * Build a small inline SVG showing this task's place in the dependency
+   * graph: parent above, inputs to the left, consumers to the right, and
+   * the current task in the center. Each neighbor is a clickable node
+   * that navigates to that task's detail page; status is encoded via the
+   * fill color matching the rest of the page's status palette. Returns
+   * an empty string when the task has no neighbors so the relationships
+   * card stays compact.
+   */
+  renderRelationshipsGraph({ parentTask, inputTasks, dependentTasks }) {
+    const inputs = (inputTasks || []).slice(0, 4);
+    const consumers = (dependentTasks || []).slice(0, 4);
+    const totalNeighbors = (parentTask ? 1 : 0) + inputs.length + consumers.length;
+    if (totalNeighbors === 0) return '';
+
+    const width = 520;
+    const height = 200;
+    const cx = width / 2;
+    const cy = height / 2;
+    const sideX = 60;
+    const r = 11;
+
+    const colorForStatus = (status) => {
+      const cls = getStatusClass(status);
+      switch (cls) {
+        case 'completed': return '#157347';
+        case 'in_progress': return '#0c63e7';
+        case 'failed': return '#c23b3b';
+        case 'blocked': return '#b45309';
+        case 'cancelled': return '#6b7280';
+        default: return '#9ca3af';
+      }
+    };
+
+    const nodeMarkup = (task, x, y, opts = {}) => {
+      const fill = colorForStatus(task?.status);
+      const id = String(task?.id || '').replace(/"/g, '&quot;');
+      const labelRaw = this.getTaskDisplayLabel(task);
+      const label = labelRaw.length > 22 ? labelRaw.slice(0, 21) + '…' : labelRaw;
+      const labelY = opts.labelBelow ? y + r + 14 : y - r - 6;
+      const isCurrent = Boolean(opts.isCurrent);
+      const cls = isCurrent
+        ? 'workspace-task-relgraph-node workspace-task-relgraph-node--current'
+        : 'workspace-task-relgraph-node';
+      const titleAttr = `${this.escapeHtml(labelRaw)} · ${this.escapeHtml(getDisplayStatus(task?.status))}`;
+      const wrapStart = isCurrent ? '<g' : `<a href="${this.getTaskHref(id)}"`;
+      const wrapEnd = isCurrent ? '</g>' : '</a>';
+      return `
+        ${wrapStart} class="${cls}">
+          <title>${titleAttr}</title>
+          <circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${isCurrent ? '#1f2937' : 'rgba(15,23,42,0.18)'}" stroke-width="${isCurrent ? 2.5 : 1}"></circle>
+          <text x="${x}" y="${labelY}" text-anchor="middle" class="workspace-task-relgraph-label">${this.escapeHtml(label)}</text>
+        ${wrapEnd}
+      `;
+    };
+
+    const edge = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="workspace-task-relgraph-edge"></line>`;
+
+    const stackY = (count, idx) => {
+      if (count === 1) return cy;
+      const total = (count - 1) * 36;
+      return cy - total / 2 + idx * 36;
+    };
+
+    const parts = [];
+
+    if (parentTask) {
+      const py = 30;
+      parts.push(edge(cx, py, cx, cy - r));
+      parts.push(nodeMarkup(parentTask, cx, py, { labelBelow: false }));
+    }
+
+    inputs.forEach((task, i) => {
+      const y = stackY(inputs.length, i);
+      parts.push(edge(sideX + r, y, cx - r, cy));
+      parts.push(nodeMarkup(task, sideX, y, { labelBelow: true }));
+    });
+
+    consumers.forEach((task, i) => {
+      const y = stackY(consumers.length, i);
+      parts.push(edge(cx + r, cy, width - sideX - r, y));
+      parts.push(nodeMarkup(task, width - sideX, y, { labelBelow: true }));
+    });
+
+    parts.push(nodeMarkup(this.task, cx, cy, { labelBelow: true, isCurrent: true }));
+
+    const truncatedNote = (inputTasks?.length || 0) > inputs.length || (dependentTasks?.length || 0) > consumers.length
+      ? '<div class="workspace-task-relgraph-truncated">Showing first 4 in each direction.</div>'
+      : '';
+
+    return `
+      <div class="workspace-task-relgraph-wrap">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Task dependency graph" class="workspace-task-relgraph">
+          ${parts.join('')}
+        </svg>
+        ${truncatedNote}
+      </div>
+    `;
   }
 
   sortWorkflowTasks(tasks) {
@@ -2232,11 +3056,17 @@ export class WorkspaceTaskPage {
         return !assigned && !completed;
       });
       this.elements.workflowRunAllBtn.disabled = anyRunning || anyUnassigned;
-      this.elements.workflowRunAllBtn.title = anyUnassigned
+      const reason = anyUnassigned
         ? 'Assign unfinished steps or mark manual steps done before running the workflow'
         : anyRunning
           ? 'A step is already running'
-          : 'Run all steps in sequence';
+          : '';
+      this.elements.workflowRunAllBtn.title = reason || 'Run all steps in sequence';
+      // Mirror the disabled-reason inline so touch users (no hover, no
+      // tooltip) understand why Run all is greyed out.
+      this.renderWorkflowRunAllReason(reason);
+    } else {
+      this.renderWorkflowRunAllReason('');
     }
 
     if (this.elements.workflowEmpty) {
@@ -2500,7 +3330,7 @@ export class WorkspaceTaskPage {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to mark step done');
+        throw new Error(this.parseResponseError(text, 'Failed to mark step done'));
       }
       this.notify('success', 'Step marked done');
       await this.refreshAfterStepChange();
@@ -3498,301 +4328,6 @@ export class WorkspaceTaskPage {
     return this.getCurrentResultText() || String(this.task?.error || '').trim();
   }
 
-  canCreateSkillFromTask(task = this.task) {
-    if (!task || typeof task !== 'object') return false;
-    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
-    if (!String(task.to || '').trim()) return false;
-    if (String(task.error || '').trim()) return false;
-    return Boolean(normalizeResultText(task.result).trim());
-  }
-
-  async copyCurrentResult() {
-    const outputText = this.getCurrentOutputText();
-    if (!outputText) {
-      this.notify('warning', 'No result is available to copy.');
-      return;
-    }
-
-    await this.copyToClipboard(outputText, 'Result copied');
-  }
-
-  setSkillDraftError(message) {
-    if (!this.elements.skillError) return;
-
-    const text = String(message || '').trim();
-    this.elements.skillError.hidden = !text;
-    this.elements.skillError.textContent = text;
-  }
-
-  updateSkillDraftButtons() {
-    const busy = this.skillDraftGenerating || this.skillDraftSubmitting;
-    if (this.elements.skillGenerateBtn) {
-      const label = this.elements.skillGenerateBtn.querySelector('span');
-      if (label) label.textContent = this.skillDraftGenerating ? 'Generating...' : 'Regenerate With AI';
-      this.elements.skillGenerateBtn.disabled = busy;
-    }
-    if (this.elements.skillSubmitBtn) {
-      const label = this.elements.skillSubmitBtn.querySelector('span');
-      if (label) label.textContent = this.skillDraftSubmitting ? 'Creating...' : 'Create Skill';
-      this.elements.skillSubmitBtn.disabled = busy;
-    }
-
-    const resultText = this.getCurrentResultText();
-    this.updateResultActionButtons(resultText, Boolean(resultText));
-  }
-
-  getTaskSkillAgentName() {
-    return String(this.task?.to || '').trim();
-  }
-
-  buildTaskSkillDefaultName() {
-    return buildTaskSkillNameSlug(this.getTaskDisplayLabel());
-  }
-
-  buildTaskSkillSavedDescription() {
-    const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed task';
-    const details = stripSkillUnsafeMarkup(this.task?.details || '');
-    const result = stripSkillUnsafeMarkup(this.getCurrentResultText());
-    const parts = [`Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`];
-
-    if (details) {
-      parts.push(`Use when: ${trimTaskSkillText(details, 360)}.`);
-    } else if (result) {
-      parts.push(`Produces results like: ${trimTaskSkillText(result, 360)}.`);
-    }
-
-    return trimTaskSkillText(parts.join(' ').replace(/\s+/g, ' ').trim(), 900);
-  }
-
-  buildTaskSkillGenerationDescription(name, savedDescription) {
-    const taskTitle = this.getTaskDisplayLabel();
-    const taskDetails = String(this.task?.details || '').trim();
-    const resultText = this.getCurrentResultText();
-    const assistMessage = String(this.task?.context?.user_assist_message || '').trim();
-    const completedAt = formatDateTime(this.task?.completed_at);
-    const agentName = this.getTaskSkillAgentName();
-    const workspaceName = String(this.workspace?.name || '').trim();
-
-    const lines = [
-      'Create a reusable Ori Agent skill from this successful task.',
-      'The skill should let the assigned agent repeat the workflow with less user instruction next time.',
-      'Prefer public pages, browser-readable sources, local context, and fallback source strategies before asking users for API keys.',
-      'Generalize the workflow; do not include task IDs, run-specific timestamps, localhost URLs, or one-off troubleshooting notes unless they are broadly useful.',
-      `Proposed skill name: ${name}`,
-      `Saved skill description: ${savedDescription}`
-    ];
-
-    if (workspaceName) lines.push(`Workspace: ${workspaceName}`);
-    if (agentName) lines.push(`Assigned agent: ${agentName}`);
-    if (completedAt !== '—') lines.push(`Completed: ${completedAt}`);
-    if (taskTitle) lines.push(`Original task title: ${taskTitle}`);
-    if (taskDetails) {
-      lines.push('', 'Original task details:', trimTaskSkillText(taskDetails, TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS));
-    }
-    if (assistMessage) {
-      lines.push('', 'User clarification collected during the task:', trimTaskSkillText(assistMessage, 900));
-    }
-    if (resultText) {
-      lines.push('', 'Successful result excerpt:', trimTaskSkillText(resultText, TASK_SKILL_RESULT_CONTEXT_MAX_CHARS));
-    }
-
-    lines.push(
-      '',
-      'Write the skill prompt as operational guidance for future runs. Include source selection, verification expectations, fallback behavior, and the expected final response format when inferable from the result.'
-    );
-
-    return trimTaskSkillText(lines.join('\n'), TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS);
-  }
-
-  populateSkillDraftModal() {
-    const agentName = this.getTaskSkillAgentName();
-    const skillName = this.buildTaskSkillDefaultName();
-    const description = this.buildTaskSkillSavedDescription();
-    const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
-
-    this.setSkillDraftError('');
-    if (this.elements.skillMeta) {
-      this.elements.skillMeta.textContent = `Drafts a reusable skill for "${agentName}" from "${taskLabel}".`;
-    }
-    if (this.elements.skillAgentInput) {
-      this.elements.skillAgentInput.value = agentName;
-    }
-    if (this.elements.skillNameInput) {
-      this.elements.skillNameInput.value = skillName;
-    }
-    if (this.elements.skillDescriptionInput) {
-      this.elements.skillDescriptionInput.value = description;
-    }
-    if (this.elements.skillPromptInput) {
-      this.elements.skillPromptInput.value = '';
-    }
-    this.updateSkillDraftButtons();
-  }
-
-  openSkillDraftModal() {
-    if (!this.canCreateSkillFromTask()) {
-      this.notify('warning', 'Only completed tasks with a successful result and assigned agent can become skills.');
-      return;
-    }
-    if (!this.elements.skillModal || typeof bootstrap === 'undefined') {
-      this.notify('error', 'Skill editor is not available.');
-      return;
-    }
-
-    this.populateSkillDraftModal();
-    const modal =
-      typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.skillModal)
-        : bootstrap.Modal.getInstance(this.elements.skillModal) ||
-          new bootstrap.Modal(this.elements.skillModal);
-    modal.show();
-    setTimeout(() => {
-      this.elements.skillNameInput?.focus();
-      this.elements.skillNameInput?.select();
-    }, 120);
-    this.generateSkillPromptFromTask(false);
-  }
-
-  async generateSkillPromptFromTask(force = false) {
-    if (this.skillDraftGenerating || this.skillDraftSubmitting) return;
-
-    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
-    const rawName = String(this.elements.skillNameInput?.value || this.buildTaskSkillDefaultName()).trim();
-    const skillName = buildTaskSkillNameSlug(rawName);
-    const savedDescription = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || this.buildTaskSkillSavedDescription()), 1024);
-
-    if (!agentName || !skillName || !savedDescription) {
-      this.setSkillDraftError('Skill name, description, and agent are required.');
-      return;
-    }
-
-    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
-    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = savedDescription;
-
-    const currentPrompt = String(this.elements.skillPromptInput?.value || '').trim();
-    if (force && currentPrompt && currentPrompt !== 'Generating prompt...') {
-      const confirmed = window.confirm('Replace the current prompt with a newly generated one?');
-      if (!confirmed) return;
-    }
-
-    if (this.skillDraftAbortController) {
-      this.skillDraftAbortController.abort();
-    }
-
-    const controller = new AbortController();
-    this.skillDraftAbortController = controller;
-    const requestId = ++this.skillDraftRequestId;
-    this.skillDraftGenerating = true;
-    this.setSkillDraftError('');
-    if (this.elements.skillPromptInput) {
-      this.elements.skillPromptInput.value = 'Generating prompt...';
-    }
-    this.updateSkillDraftButtons();
-
-    try {
-      const response = await fetch('/api/skills/generate-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agent: agentName,
-          name: skillName,
-          description: this.buildTaskSkillGenerationDescription(skillName, savedDescription),
-        }),
-        signal: controller.signal,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (requestId !== this.skillDraftRequestId) return;
-
-      const details = typeof data?.details === 'string' ? data.details.trim() : '';
-      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to generate skill prompt.';
-      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
-
-      const generated = extractGeneratedSkillPrompt(data?.prompt || '');
-      if (!generated) throw new Error('Assistant returned an empty skill prompt.');
-
-      if (this.elements.skillPromptInput) {
-        this.elements.skillPromptInput.value = generated;
-      }
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      console.error('Failed to generate task skill prompt:', error);
-      if (requestId !== this.skillDraftRequestId) return;
-
-      if (this.elements.skillPromptInput) {
-        this.elements.skillPromptInput.value = currentPrompt === 'Generating prompt...' ? '' : currentPrompt;
-      }
-      this.setSkillDraftError(error?.message || 'Failed to generate skill prompt.');
-    } finally {
-      if (requestId === this.skillDraftRequestId) {
-        this.skillDraftGenerating = false;
-        this.skillDraftAbortController = null;
-        this.updateSkillDraftButtons();
-      }
-    }
-  }
-
-  async submitTaskSkillDraft() {
-    if (this.skillDraftSubmitting) return;
-
-    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
-    const rawSkillName = String(this.elements.skillNameInput?.value || '').trim();
-    const skillName = rawSkillName ? buildTaskSkillNameSlug(rawSkillName) : '';
-    const description = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || ''), 1024);
-    const prompt = String(this.elements.skillPromptInput?.value || '').replace(/\r\n/g, '\n').trim();
-
-    if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
-    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = description;
-
-    if (!agentName) {
-      this.setSkillDraftError('Agent is required.');
-      return;
-    }
-    if (!skillName) {
-      this.setSkillDraftError('Skill name is required.');
-      return;
-    }
-    if (!description) {
-      this.setSkillDraftError('Description is required.');
-      return;
-    }
-    if (!prompt || prompt === 'Generating prompt...') {
-      this.setSkillDraftError('Wait for the AI draft to finish or enter a skill prompt manually.');
-      return;
-    }
-
-    this.skillDraftSubmitting = true;
-    this.setSkillDraftError('');
-    this.updateSkillDraftButtons();
-
-    try {
-      const response = await fetch('/api/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agent: agentName,
-          name: skillName,
-          description,
-          prompt,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      const details = typeof data?.details === 'string' ? data.details.trim() : '';
-      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to create skill.';
-      if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
-
-      if (this.elements.skillModal && typeof bootstrap !== 'undefined') {
-        const modal = bootstrap.Modal.getInstance(this.elements.skillModal);
-        modal?.hide();
-      }
-      this.notify('success', `Skill "${skillName}" created for ${agentName}`);
-    } catch (error) {
-      console.error('Failed to create skill from task:', error);
-      this.setSkillDraftError(error?.message || 'Failed to create skill.');
-    } finally {
-      this.skillDraftSubmitting = false;
-      this.updateSkillDraftButtons();
-    }
-  }
 
   buildResultNoteTitle(resultText) {
     const heading = String(resultText || '')
@@ -4078,45 +4613,85 @@ export class WorkspaceTaskPage {
 
       const fallbackAgent = String(this.task?.to || '').trim();
       const parentTaskId = String(this.task.id);
-      let createdCount = 0;
 
-      for (let index = 0; index < draft.subtasks.length; index++) {
-        const subtask = draft.subtasks[index];
+      // Atomic attach: post the whole batch of generated steps under the
+      // existing parent task in a single call. The server validates the
+      // graph as one batch and rolls back the entire draft on any
+      // validation error, so the user never ends up with a half-created
+      // step list to manually clean up.
+      const subtaskPayloads = draft.subtasks.map((subtask, index) => {
         const description = String(subtask?.description || '').trim() || `Step ${index + 1}`;
         const details = String(subtask?.details || '').trim();
         const agentFromDraft = this.agentNameFromAssignmentValue(subtask?.assignmentValue);
         const to = agentFromDraft || (fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '');
+        return {
+          id: this._generateClientTaskId(),
+          description,
+          details,
+          to,
+          subtask_index: index + 1,
+          priority: 3
+        };
+      });
 
-        const response = await fetch('/api/orchestration/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspace_id: this.workspaceId,
-            description,
-            details,
-            to,
-            parent_task_id: parentTaskId,
-            subtask_index: index + 1,
-            priority: 3
-          })
-        });
+      const response = await fetch('/api/orchestration/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          attach_to_parent_id: parentTaskId,
+          subtasks: subtaskPayloads
+        })
+      });
 
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to create step ${index + 1}`);
-        }
-        createdCount += 1;
+      if (!response.ok) {
+        throw await this._parseGraphError(response, 'Failed to generate steps');
       }
 
+      const createdCount = subtaskPayloads.length;
       this.notify('success', `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`);
       await this.refreshAfterStepChange();
     } catch (error) {
       console.error('Failed to generate steps from result:', error);
-      this.notify('error', error?.message || 'Failed to generate steps');
+      const summary = Array.isArray(error?.issues) && error.issues.length > 0
+        ? error.issues[0]?.message || error.message
+        : error?.message;
+      this.notify('error', summary || 'Failed to generate steps');
     } finally {
       this.workflowDraftPending = false;
       this.renderWorkflow();
     }
+  }
+
+  /**
+   * Generate a UUID for client-side task IDs so the workflow endpoint can
+   * receive a fully-formed batch with sibling input refs already wired up.
+   */
+  _generateClientTaskId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
+  }
+
+  /**
+   * Parse a non-2xx response from the task API and surface structured
+   * graph-validation issues via error.issues when present.
+   */
+  async _parseGraphError(response, fallbackMessage) {
+    let body = '';
+    try { body = await response.text(); } catch (_e) { body = ''; }
+    let parsed = null;
+    if (body) {
+      try { parsed = JSON.parse(body); } catch (_e) { parsed = null; }
+    }
+    const message = (parsed && (parsed.error || parsed.message)) || body || fallbackMessage;
+    const err = new Error(message || fallbackMessage);
+    if (parsed && Array.isArray(parsed.issues)) {
+      err.issues = parsed.issues;
+    }
+    return err;
   }
 
   openScheduleModal() {
@@ -4176,6 +4751,18 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleCronInput) {
       this.elements.scheduleCronInput.value = schedule?.cron_expr || '0 9 * * *';
     }
+    if (this.elements.scheduleSleepPolicyInput) {
+      this.elements.scheduleSleepPolicyInput.value = this.task?.sleep_policy || 'run_once_on_wake';
+    }
+    if (this.elements.scheduleWakeMacInput) {
+      this.elements.scheduleWakeMacInput.checked = Boolean(this.task?.wake_mac_enabled);
+    }
+    if (this.elements.scheduleWakeLeadInput) {
+      this.elements.scheduleWakeLeadInput.value = String(this.task?.wake_lead_minutes || 5);
+    }
+    if (this.elements.scheduleWakeFallbackInput) {
+      this.elements.scheduleWakeFallbackInput.value = this.task?.wake_fallback_policy || 'run_on_next_wake';
+    }
     if (this.elements.scheduleRemoveBtn) {
       this.elements.scheduleRemoveBtn.hidden = !hasSchedule;
     }
@@ -4195,6 +4782,14 @@ export class WorkspaceTaskPage {
     if (this.elements.scheduleTimeLabel) {
       this.elements.scheduleTimeLabel.textContent = type === 'weekdays' ? 'Weekday time' : 'Time of day';
     }
+    if (this.elements.scheduleWakeFields) {
+      this.elements.scheduleWakeFields.hidden = !this.elements.scheduleWakeMacInput?.checked;
+    }
+    if (this.elements.scheduleWakePermission) {
+      this.elements.scheduleWakePermission.textContent = this.elements.scheduleWakeMacInput?.checked
+        ? 'Mac wake scheduling also needs to be enabled in Settings -> Device Capabilities.'
+        : 'This task will only run while Ori is awake, or according to the selected sleep handling policy after Ori wakes.';
+    }
 
     this.updateSchedulePreview();
   }
@@ -4205,8 +4800,12 @@ export class WorkspaceTaskPage {
     try {
       const payload = this.buildScheduleUpdatePayload({ validate: false });
       const summary = this.describeSchedule(payload.schedule);
+      const sleepText = this.describeSleepPolicy(payload.sleep_policy);
+      const wakeText = payload.wake_mac_enabled
+        ? ` Ori will ask macOS to wake this Mac ${payload.wake_lead_minutes} minutes before the run.`
+        : '';
       this.elements.schedulePreview.textContent = payload.schedule_enabled
-        ? `This existing task will run ${summary}.`
+        ? `This existing task will run ${summary}. ${sleepText}.${wakeText}`.trim()
         : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
     } catch (_error) {
       this.elements.schedulePreview.textContent = 'Complete the schedule fields to preview the run cadence.';
@@ -4218,6 +4817,11 @@ export class WorkspaceTaskPage {
     const enabled = Boolean(this.elements.scheduleEnabledInput?.checked);
     const scheduleName = String(this.elements.scheduleNameInput?.value || '').trim();
     const schedule = { type };
+    const wakeMacEnabled = Boolean(this.elements.scheduleWakeMacInput?.checked);
+    const sleepPolicy = String(this.elements.scheduleSleepPolicyInput?.value || 'run_once_on_wake').trim();
+    const wakeFallbackPolicy = String(this.elements.scheduleWakeFallbackInput?.value || 'run_on_next_wake').trim();
+    const rawWakeLead = Number.parseInt(this.elements.scheduleWakeLeadInput?.value || '5', 10);
+    const wakeLeadMinutes = Number.isFinite(rawWakeLead) && rawWakeLead > 0 ? Math.min(rawWakeLead, 120) : 5;
 
     const assignee = String(this.task?.to || '').trim();
     if (enabled && validate && (!assignee || assignee === 'unassigned')) {
@@ -4281,7 +4885,11 @@ export class WorkspaceTaskPage {
     return {
       schedule,
       schedule_enabled: enabled,
-      schedule_name: scheduleName
+      schedule_name: scheduleName,
+      sleep_policy: sleepPolicy || 'run_once_on_wake',
+      wake_mac_enabled: enabled && wakeMacEnabled,
+      wake_lead_minutes: wakeLeadMinutes,
+      wake_fallback_policy: wakeFallbackPolicy || 'run_on_next_wake'
     };
   }
 
@@ -4305,7 +4913,11 @@ export class WorkspaceTaskPage {
     if (submitText) submitText.textContent = 'Saving...';
 
     try {
-      await this.updateTaskFields(payload);
+      // deferRender lets the modal close first; the page-wide re-render —
+      // which includes markdown / trace / schedule sub-renders that can take
+      // 100–300ms on a task with history — happens in the next frame so the
+      // "Saving..." spinner doesn't stay pinned to the screen waiting on it.
+      await this.updateTaskFields(payload, { deferRender: true });
       if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
       }
@@ -4333,7 +4945,7 @@ export class WorkspaceTaskPage {
         schedule: null,
         schedule_enabled: false,
         schedule_name: ''
-      });
+      }, { deferRender: true });
       if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
       }
@@ -4474,6 +5086,17 @@ export class WorkspaceTaskPage {
     }
   }
 
+  describeSleepPolicy(policy) {
+    const normalized = String(policy || '').trim().toLowerCase();
+    switch (normalized) {
+      case 'skip':
+        return 'If Ori was asleep, missed runs will be skipped';
+      case 'run_once_on_wake':
+      default:
+        return 'If Ori was asleep, one missed run will be queued when Ori wakes';
+    }
+  }
+
   formatIntervalMinutes(minutes) {
     const normalized = Math.max(1, Number.parseInt(minutes, 10) || 1);
     if (normalized >= 1440 && normalized % 1440 === 0) {
@@ -4513,6 +5136,9 @@ export class WorkspaceTaskPage {
     if (this.task?.last_run) {
       stats.push({ label: 'Last Run', value: formatDateTime(this.task.last_run) });
     }
+    if (this.task?.wake_mac_enabled) {
+      stats.push({ label: 'Mac Wake', value: `${this.task?.wake_lead_minutes || 5} min before` });
+    }
 
     const statsHtml = `
       <div class="workspace-task-schedule-stats">
@@ -4535,6 +5161,7 @@ export class WorkspaceTaskPage {
           <div class="workspace-task-schedule-banner-copy">
             ${this.escapeHtml(this.describeSchedule(this.task.schedule))}
             ${scheduleEnabled && this.task?.next_run ? ` · Next run ${this.escapeHtml(formatDateTime(this.task.next_run))}` : ''}
+            ${this.task?.wake_mac_enabled ? ` · ${this.escapeHtml('Mac wake on')}` : ''}
           </div>
         </div>
       </div>
@@ -4546,13 +5173,37 @@ export class WorkspaceTaskPage {
       historyHtml = `
         <div class="workspace-task-page-mini-label">Recent runs</div>
         <div class="workspace-task-schedule-history">
-          ${recentRuns.map((run) => {
+          ${recentRuns.map((run, idx) => {
             const runStatus = String(run?.status || 'completed').trim().toLowerCase();
             const statusClass = getStatusClass(runStatus);
+            // TaskExecution carries executed_at; completed_at/started_at are
+            // legacy fallbacks for any older history shape that may still be
+            // sitting in the workspace store.
+            const ts = run?.executed_at || run?.completed_at || run?.started_at;
+            const durationMs = Number(run?.duration) || 0;
+            const durationLabel = durationMs > 0
+              ? (durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`)
+              : '';
+            const summary = String(run?.summary || run?.error || '').trim();
+            // Result is the full body (capped server-side at 16 KiB). Older
+            // history rows recorded before that field existed only have
+            // summary; treat that as a "no full result available" case.
+            const fullResult = String(run?.result || '').trim();
+            const hasExpandable = fullResult && fullResult !== summary;
+            const panelId = `workspace-task-schedule-run-panel-${idx}`;
             return `
               <div class="workspace-task-schedule-run">
-                <span>${this.escapeHtml(formatDateTime(run?.completed_at || run?.started_at))}</span>
-                <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
+                <div class="workspace-task-schedule-run-row">
+                  <span class="workspace-task-schedule-run-meta">${this.escapeHtml(formatDateTime(ts))}${durationLabel ? ` <span class="workspace-task-schedule-run-duration">· ${this.escapeHtml(durationLabel)}</span>` : ''}${summary ? `<div class="workspace-task-schedule-run-summary" title="${this.escapeHtml(summary)}">${this.escapeHtml(summary)}</div>` : ''}</span>
+                  <div class="workspace-task-schedule-run-trail">
+                    <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
+                    ${hasExpandable ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7,10L12,15L17,10H7Z"/></svg>
+                      <span>Result</span>
+                    </button>` : ''}
+                  </div>
+                </div>
+                ${hasExpandable ? `<div id="${panelId}" class="workspace-task-schedule-run-panel" hidden><pre class="workspace-task-schedule-run-result">${this.escapeHtml(fullResult)}</pre></div>` : ''}
               </div>
             `;
           }).join('')}
@@ -4561,551 +5212,162 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.schedule.innerHTML = bannerHtml + statsHtml + historyHtml;
+
+    // Wire expand/collapse for run rows that captured a full result. The
+    // chevron flips and the <pre> below toggles between hidden and visible.
+    this.elements.schedule.querySelectorAll('[data-task-run-toggle]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const panelId = btn.getAttribute('aria-controls');
+        const panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+        const next = !panel.hidden ? false : true;
+        panel.hidden = !next;
+        btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+        btn.classList.toggle('is-open', next);
+        btn.title = next ? 'Hide full result' : 'Show full result';
+      });
+    });
   }
 
-  renderExecutionBreakdown() {
-    if (!this.elements.trace || !this.elements.traceCard) return;
 
-    const steps = this.getExecutionBreakdownSteps(this.task, this.getSubtasks());
-    if (steps.length === 0) {
-      this.elements.traceCard.hidden = true;
-      this.elements.trace.innerHTML = '';
+  // renderRunsCard owns the visibility + active-tab state of the merged
+  // Runs/Trace card. It delegates the inner HTML to renderExecutionBreakdown
+  // (Runs tab) and renderExecutionTrace (Trace tab); those methods only
+  // populate their inner panes — they no longer toggle card visibility on
+  // their own.
+  renderRunsCard() {
+    if (!this.elements.runsCard) return;
+
+    const breakdownSteps = this.getExecutionBreakdownSteps(this.task, this.getSubtasks());
+    const traceEntries = this.buildExecutionTraceEntries();
+    const hasBreakdown = breakdownSteps.length > 0;
+    const hasAnyTrace = traceEntries.length > 0;
+    const hasTraceSurface = hasAnyTrace || this.hasExecutionActivity();
+
+    if (!hasBreakdown && !hasTraceSurface) {
+      this.elements.runsCard.hidden = true;
+      if (this.elements.toolSummary) {
+        this.elements.toolSummary.hidden = true;
+        this.elements.toolSummary.innerHTML = '';
+      }
+      if (this.elements.trace) this.elements.trace.innerHTML = '';
+      if (this.elements.executionTrace) this.elements.executionTrace.innerHTML = '';
+      if (this.elements.executionTraceControls) this.elements.executionTraceControls.hidden = true;
       return;
     }
 
-    this.elements.traceCard.hidden = false;
-    this.elements.trace.innerHTML = steps.map((step, index) => {
-      const statusKey = String(step?.status || this.task?.status || 'pending').trim().toLowerCase();
-      const statusClass = getStatusClass(statusKey);
-      const detail = String(step?.detail || '').trim();
-      const defaultOpen = index < 2 ? ' open' : '';
-      const title = String(step?.title || `Run ${index + 1}`).trim() || `Run ${index + 1}`;
+    this.elements.runsCard.hidden = false;
+    if (typeof this.renderToolSummary === 'function') {
+      this.renderToolSummary();
+    }
 
-      return `
-        <details class="workspace-task-breakdown-step"${defaultOpen}>
-          <summary>
-            <span class="workspace-task-breakdown-title">
-              <span class="workspace-task-breakdown-index">${index + 1}</span>
-              <span class="workspace-task-breakdown-label">${this.escapeHtml(title)}</span>
-            </span>
-            <span class="workspace-task-step-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(statusClass))}</span>
-          </summary>
-          <div class="workspace-task-breakdown-body">${detail ? this.escapeHtml(detail) : 'No additional detail.'}</div>
-        </details>
-      `;
-    }).join('');
-  }
+    if (this.elements.runsTabRuns) this.elements.runsTabRuns.hidden = !hasBreakdown;
+    if (this.elements.runsTabTrace) this.elements.runsTabTrace.hidden = !hasTraceSurface;
 
-  renderRunHistory() {
+    let active = this._runsTab === 'trace' ? 'trace' : 'runs';
+    if (active === 'runs' && !hasBreakdown && hasTraceSurface) active = 'trace';
+    if (active === 'trace' && !hasTraceSurface && hasBreakdown) active = 'runs';
+    this._runsTab = active;
+
+    if (this.elements.runsTabRuns) {
+      this.elements.runsTabRuns.classList.toggle('is-active', active === 'runs');
+      this.elements.runsTabRuns.setAttribute('aria-selected', active === 'runs' ? 'true' : 'false');
+    }
+    if (this.elements.runsTabTrace) {
+      this.elements.runsTabTrace.classList.toggle('is-active', active === 'trace');
+      this.elements.runsTabTrace.setAttribute('aria-selected', active === 'trace' ? 'true' : 'false');
+    }
+
+    const setCount = (el, count) => {
+      if (!el) return;
+      if (!count) { el.hidden = true; el.textContent = ''; return; }
+      el.hidden = false;
+      el.textContent = String(count);
+    };
+    setCount(this.elements.runsTabRunsCount, breakdownSteps.length);
+    setCount(this.elements.runsTabTraceCount, traceEntries.length);
+
     this.renderExecutionBreakdown();
-  }
+    this.renderExecutionTrace();
 
-  getExecutionBreakdownSteps(task, subtasks = []) {
-    if (!task) return [];
-
-    const executionSteps = this.getExecutionStepBreakdownSteps(task);
-    if (executionSteps.length > 0) {
-      return executionSteps;
-    }
-
-    const sortedSubtasks = Array.isArray(subtasks)
-      ? [...subtasks].sort((a, b) => {
-          const aIndex = Number.isFinite(Number(a?.subtask_index))
-            ? Number(a.subtask_index)
-            : Number.MAX_SAFE_INTEGER;
-          const bIndex = Number.isFinite(Number(b?.subtask_index))
-            ? Number(b.subtask_index)
-            : Number.MAX_SAFE_INTEGER;
-          if (aIndex !== bIndex) return aIndex - bIndex;
-          const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
-          const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
-          return aTime - bTime;
-        })
-      : [];
-
-    if (sortedSubtasks.length > 0) {
-      return sortedSubtasks.map((subtask, index) => ({
-        title: String(subtask?.description || subtask?.name || `Step ${index + 1}`).trim(),
-        status: String(subtask?.status || task?.status || 'pending').trim(),
-        detail: this.buildExecutionBreakdownDetail(subtask, String(subtask?.details || '').trim())
-      }));
-    }
-
-    const retryHistorySteps = this.getRetryHistoryBreakdownSteps(task);
-    const historicalRunSteps = this.getExecutionHistoryBreakdownSteps(task, {
-      includeLatest: retryHistorySteps.length === 0
-    });
-    if (historicalRunSteps.length > 0) {
-      if (retryHistorySteps.length > 0) {
-        const currentRunNumber = historicalRunSteps.length + 1;
-        const currentRunSteps = retryHistorySteps.map((step) => ({
-          ...step,
-          title: `Run ${currentRunNumber} • ${step.title}`
-        }));
-        return [...historicalRunSteps, ...currentRunSteps];
-      }
-      return historicalRunSteps;
-    }
-
-    if (retryHistorySteps.length > 0) {
-      return retryHistorySteps;
-    }
-
-    return this.inferSyntheticBreakdownSteps(task);
-  }
-
-  getExecutionStepBreakdownSteps(task) {
-    const steps = Array.isArray(task?.execution_steps) ? task.execution_steps : [];
-    if (!steps.length) return [];
-
-    return steps.map((step, index) => {
-      const detailParts = [];
-      const detail = this.normalizeBreakdownField(step?.detail);
-      const result = this.normalizeBreakdownField(step?.result);
-      const errorText = this.normalizeBreakdownField(step?.error);
-      const startedAt = this.normalizeBreakdownField(step?.started_at);
-      const completedAt = this.normalizeBreakdownField(step?.completed_at);
-      const tag = this.normalizeBreakdownField(step?.tag);
-
-      if (detail) detailParts.push(detail);
-      if (tag) detailParts.push(`Type: ${tag}`);
-      if (startedAt) detailParts.push(`Started: ${formatDateTime(startedAt)}`);
-      if (completedAt) detailParts.push(`Completed: ${formatDateTime(completedAt)}`);
-      if (result) detailParts.push(`Result: ${this.truncateBreakdownText(result, 360)}`);
-      if (errorText) detailParts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
-
-      return {
-        title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
-        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
-        detail: detailParts.join('\n')
-      };
-    });
-  }
-
-  getRetryHistoryBreakdownSteps(task) {
-    const history = Array.isArray(task?.context?.execution_retry?.history)
-      ? task.context.execution_retry.history
-      : [];
-    if (!history.length) return [];
-
-    const outcomeToStatus = (outcome) => {
-      const normalized = String(outcome || '').trim().toLowerCase();
-      if (normalized === 'success') return 'completed';
-      if (normalized === 'error' || normalized === 'failed') return 'failed';
-      if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
-      return 'pending';
-    };
-
-    return history.map((item, index) => {
-      const attemptNumber = Number.isFinite(Number(item?.attempt))
-        ? Number(item.attempt)
-        : index + 1;
-      const outcome = String(item?.outcome || '').trim().toLowerCase();
-      const summary = this.normalizeBreakdownField(item?.summary);
-      const createdAt = this.normalizeBreakdownField(item?.created_at);
-      const detailParts = [];
-
-      if (createdAt) detailParts.push(`Recorded at: ${_formatRelativeDate(createdAt)}`);
-      if (outcome) detailParts.push(`Outcome: ${outcome.replace(/_/g, ' ')}`);
-      if (summary) detailParts.push(this.truncateBreakdownText(summary, 520));
-
-      return {
-        title: `Attempt ${attemptNumber}`,
-        status: outcomeToStatus(outcome),
-        detail: detailParts.join('\n')
-      };
-    });
-  }
-
-  getExecutionHistoryBreakdownSteps(task, options = {}) {
-    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
-    if (!history.length) return [];
-
-    const includeLatest = options.includeLatest !== false;
-    const relevantHistory = includeLatest ? history : history.slice(0, -1);
-    if (!relevantHistory.length) return [];
-
-    const startIndex =
-      Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
-        ? Number(options.startIndex)
-        : 1;
-
-    const mapRecordedStatus = (status) => {
-      const normalized = String(status || '').trim().toLowerCase();
-      if (normalized === 'success') return 'completed';
-      if (normalized === 'failed' || normalized === 'error') return 'failed';
-      if (normalized === 'blocked') return 'blocked';
-      return normalized || 'pending';
-    };
-
-    return relevantHistory.map((item, index) => {
-      const recordedAt = this.normalizeBreakdownField(item?.executed_at);
-      const rawStatus = String(item?.status || '').trim().toLowerCase();
-      const summary = this.normalizeBreakdownField(item?.summary);
-      const errorText = this.normalizeBreakdownField(item?.error);
-      const durationMs = Number(item?.duration) || 0;
-      const detailParts = [];
-
-      if (recordedAt) detailParts.push(`Recorded at: ${_formatRelativeDate(recordedAt)}`);
-      if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
-      if (durationMs > 0) detailParts.push(`Duration: ${Math.round(durationMs / 1000)}s`);
-      if (summary) {
-        detailParts.push(this.truncateBreakdownText(summary, 520));
-      } else if (errorText) {
-        detailParts.push(this.truncateBreakdownText(errorText, 520));
-      }
-
-      return {
-        title: `Run ${startIndex + index}`,
-        status: mapRecordedStatus(rawStatus),
-        detail: detailParts.join('\n')
-      };
-    });
-  }
-
-  buildExecutionBreakdownDetail(task, fallbackDetail = '') {
-    const parts = [];
-    const initialDetail = this.normalizeBreakdownField(fallbackDetail);
-    if (initialDetail) parts.push(initialDetail);
-
-    const currentStep = this.normalizeBreakdownField(task?.progress?.current_step);
-    if (currentStep) parts.push(`Execution: ${currentStep}`);
-
-    const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
-    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
-    if (attemptsUsed > 0 && maxAttempts > 0) {
-      parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
-    }
-
-    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
-    if (retryFinalOutcome) parts.push(`Final outcome: ${retryFinalOutcome}`);
-
-    const blockedReason = this.normalizeBreakdownField(task?.context?.human_loop?.reason);
-    const blockedQuestion = this.normalizeBreakdownField(task?.context?.human_loop?.question);
-    if (blockedReason) parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
-    if (blockedQuestion) parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
-
-    const errorText = this.normalizeBreakdownField(task?.error);
-    if (errorText) parts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
-
-    const resultText = this.normalizeBreakdownField(task?.result);
-    if (resultText) parts.push(`Result: ${this.truncateBreakdownText(resultText, 360)}`);
-
-    return parts.join('\n');
-  }
-
-  inferSyntheticBreakdownSteps(task) {
-    const description = String(task?.description || '').trim();
-    const lower = description.toLowerCase();
-    const toStep = (title, detail = '') => ({ title, detail });
-
-    let baseSteps = [];
-    if ((lower.includes('wear') && lower.includes('tomorrow')) || lower.includes('what should i wear')) {
-      baseSteps = [
-        toStep("Checking tomorrow's weather", 'Collect forecast details such as temperature, rain chance, and wind.'),
-        toStep('Recommendation for clothing based on the weather', 'Translate weather conditions into practical outfit guidance.')
-      ];
-    } else if (lower.includes('weather')) {
-      baseSteps = [
-        toStep('Checking weather conditions', 'Gather forecast or relevant weather signals.'),
-        toStep('Summarizing weather insight', 'Return a concise recommendation tailored to the request.')
-      ];
-    } else {
-      baseSteps = [
-        toStep('Understanding the request', 'Clarify intent and constraints from task context.'),
-        toStep('Producing final recommendation', 'Generate the final answer with clear reasoning.')
-      ];
-    }
-
-    const statusSequence = this.getSyntheticStepStatuses(String(task?.status || 'pending'), baseSteps.length);
-    return baseSteps.map((step, index) => ({
-      ...step,
-      status: statusSequence[index] || String(task?.status || 'pending')
-    }));
-  }
-
-  getSyntheticStepStatuses(status, count) {
-    const normalized = String(status || 'pending').trim().toLowerCase();
-    if (count <= 0) return [];
-    if (normalized === 'completed') return Array.from({ length: count }, () => 'completed');
-    if (normalized === 'in_progress') {
-      return Array.from({ length: count }, (_value, index) => index === 0 ? 'in_progress' : 'pending');
-    }
-    if (normalized === 'failed' || normalized === 'timeout') {
-      return Array.from({ length: count }, (_value, index) => index < Math.max(0, count - 1) ? 'completed' : 'failed');
-    }
-    if (normalized === 'blocked') {
-      return Array.from({ length: count }, (_value, index) => {
-        if (index === 0) return 'completed';
-        if (index === 1) return 'blocked';
-        return 'pending';
-      });
-    }
-    return Array.from({ length: count }, () => 'pending');
-  }
-
-  normalizeBreakdownField(value) {
-    if (value === undefined || value === null) return '';
-    if (typeof value === 'string') return value.trim();
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    try {
-      return JSON.stringify(value, null, 2).trim();
-    } catch (_error) {
-      return String(value).trim();
+    if (this.elements.trace) this.elements.trace.hidden = active !== 'runs';
+    if (this.elements.executionTrace) this.elements.executionTrace.hidden = active !== 'trace';
+    if (this.elements.executionTraceControls) {
+      // Filter chips only make sense while looking at the trace pane and
+      // only when we have at least 2 distinct buckets — bucketing logic in
+      // renderTraceFilterChips already handles the latter; here we just
+      // gate by which tab is visible.
+      const wantControls = active === 'trace' && hasAnyTrace;
+      // Don't force-show: the trace renderer may still hide it when there's
+      // only one bucket. Only force-hide when on the runs tab.
+      if (!wantControls) this.elements.executionTraceControls.hidden = true;
     }
   }
 
-  truncateBreakdownText(text, maxLength = 220) {
-    const normalized = this.normalizeBreakdownField(text);
-    if (!normalized) return '';
-    if (normalized.length <= maxLength) return normalized;
-    return `${normalized.slice(0, maxLength).trim()}...`;
+  setRunsTab(name) {
+    const next = name === 'trace' ? 'trace' : 'runs';
+    if (next === this._runsTab) return;
+    this._runsTab = next;
+    if (this._renderCache) delete this._renderCache.runs;
+    this.renderRunsCard();
   }
 
-  renderExecutionTrace() {
-    if (!this.elements.executionTrace || !this.elements.executionTraceCard) return;
-
-    const entries = this.buildExecutionTraceEntries();
-    if (entries.length === 0) {
-      if (!this.hasExecutionActivity()) {
-        this.elements.executionTraceCard.hidden = true;
-        this.elements.executionTrace.innerHTML = '';
-        return;
-      }
-
-      this.elements.executionTraceCard.hidden = false;
-      this.elements.executionTrace.innerHTML = `
-        <div class="workspace-task-trace-item">
-          <div class="workspace-task-trace-status">not captured</div>
-          <div>
-            <div class="workspace-task-trace-summary">No detailed execution trace was captured for this run.</div>
-            <div class="workspace-task-trace-meta">Re-run this task after the trace update is deployed to capture tool calls, progress events, and terminal status here.</div>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    this.elements.executionTraceCard.hidden = false;
-    this.elements.executionTrace.innerHTML = entries.slice(0, 32).map((entry) => `
-      <div class="workspace-task-trace-item">
-        <div class="workspace-task-trace-status">${this.escapeHtml(entry.status)}</div>
-        <div>
-          <div class="workspace-task-trace-summary">${this.escapeHtml(entry.summary)}</div>
-          ${entry.meta ? `<div class="workspace-task-trace-meta">${this.escapeHtml(entry.meta)}</div>` : ''}
-        </div>
-      </div>
-    `).join('');
-  }
-
-  buildExecutionTraceEntries() {
-    const persistedEntries = this.normalizePersistedExecutionTrace();
-    if (persistedEntries.length > 0) {
-      return persistedEntries;
-    }
-
-    const eventEntries = this.buildExecutionTraceEntriesFromEvents();
-    if (eventEntries.length > 0) {
-      return eventEntries;
-    }
-
-    return this.buildExecutionTraceEntriesFromSteps();
-  }
-
-  hasExecutionActivity() {
+  // defaultTaskTab returns which top-level tab should be active for a fresh
+  // page load given the task's current status. Failed/cancelled/timeout
+  // surface Activity (so debugging starts on the run history) and everything
+  // else opens to Overview.
+  defaultTaskTab() {
     const status = String(this.task?.status || '').trim().toLowerCase();
-    if (status && status !== 'pending' && status !== 'assigned') return true;
-    if (this.task?.started_at || this.task?.completed_at) return true;
-    if (Array.isArray(this.task?.execution_history) && this.task.execution_history.length > 0) return true;
-    if (this.task?.context?.execution_retry) return true;
-    return false;
+    if (status === 'failed' || status === 'cancelled' || status === 'timeout') {
+      return 'activity';
+    }
+    return 'overview';
   }
 
-  normalizePersistedExecutionTrace() {
-    const trace = Array.isArray(this.task?.execution_trace) ? this.task.execution_trace : [];
-    return trace
-      .map((entry) => {
-        const status = String(entry?.status || entry?.type || 'event').trim().replace(/_/g, ' ') || 'event';
-        const title = String(entry?.title || '').trim();
-        const detail = stringifyTraceValue(entry?.detail || entry?.summary || '', 1200);
-        const timestamp = formatDateTime(entry?.timestamp || entry?.created_at);
-        const source = String(entry?.source || '').trim();
-        const meta = [timestamp !== '—' ? timestamp : '', source].filter(Boolean).join(' • ');
-        const summary = [title, detail].filter(Boolean).join(detail && title ? '\n' : '');
-        if (!summary) return null;
-        return { status, summary, meta };
-      })
-      .filter(Boolean);
-  }
+  setTaskTab(name) {
+    const valid = ['overview', 'activity', 'developer'];
+    const next = valid.includes(name) ? name : 'overview';
+    this._taskTab = next;
 
-  buildExecutionTraceEntriesFromEvents() {
-    return this.getCurrentTaskEvents()
-      .map((event) => this.formatExecutionTraceEvent(event))
-      .filter(Boolean);
-  }
-
-  getCurrentTaskEvents() {
-    const events = Array.isArray(this.taskEvents) ? this.taskEvents : [];
-    const taskId = String(this.taskId || '').trim();
-    return events
-      .filter((event) => {
-        const eventTaskId = this.getEventTaskId(event);
-        return eventTaskId && eventTaskId === taskId;
-      })
-      .sort((left, right) => {
-        const leftTime = new Date(left?.timestamp || left?.created_at || 0).getTime();
-        const rightTime = new Date(right?.timestamp || right?.created_at || 0).getTime();
-        return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0);
+    if (Array.isArray(this.elements.tabButtons)) {
+      this.elements.tabButtons.forEach((btn) => {
+        const isActive = btn.getAttribute('data-task-tab') === next;
+        btn.classList.toggle('is-active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
       });
-  }
-
-  getEventTaskId(event) {
-    const data = getTaskEventData(event);
-    return String(data?.task_id || data?.id || data?.task?.id || '').trim();
-  }
-
-  formatExecutionTraceEvent(event) {
-    const type = String(event?.type || '').trim();
-    const data = getTaskEventData(event);
-    const toolName = String(data?.tool_name || '').trim();
-    const timestamp = formatDateTime(event?.timestamp || data?.updated_at);
-    const source = String(data?.agent || event?.source || '').trim();
-    const meta = [timestamp !== '—' ? timestamp : '', source].filter(Boolean).join(' • ');
-
-    switch (type) {
-      case 'task.started':
-        return {
-          status: 'started',
-          summary: stringifyTraceValue(data?.description || 'Task execution started.', 700),
-          meta: [meta, data?.manual ? 'manual run' : ''].filter(Boolean).join(' • ')
-        };
-      case 'task.progress': {
-        const progress = data?.progress || {};
-        const currentStep = String(progress?.current_step || data?.step_title || '').trim();
-        const waiting = data?.waiting_for_next_step === true;
-        return {
-          status: waiting ? 'waiting' : 'progress',
-          summary: stringifyTraceValue(currentStep || 'Task progress updated.', 900),
-          meta
-        };
-      }
-      case 'task.thinking':
-        return {
-          status: 'thinking',
-          summary: stringifyTraceValue(data?.message || data?.summary || 'Agent is analyzing the task.', 900),
-          meta
-        };
-      case 'task.tool_call': {
-        const args = stringifyTraceValue(data?.arguments, 900);
-        return {
-          status: 'tool call',
-          summary: [`Calling ${toolName || 'tool'}`, args ? `Arguments:\n${args}` : ''].filter(Boolean).join('\n'),
-          meta
-        };
-      }
-      case 'task.tool_result': {
-        const success = data?.success !== false;
-        const detail = success
-          ? stringifyTraceValue(data?.result_preview || 'Tool completed successfully.', 1000)
-          : stringifyTraceValue(data?.error || 'Tool failed.', 1000);
-        return {
-          status: success ? 'tool result' : 'tool error',
-          summary: [`${success ? 'Completed' : 'Failed'} ${toolName || 'tool'}`, detail].filter(Boolean).join('\n'),
-          meta
-        };
-      }
-      case 'task.completed':
-        return {
-          status: 'completed',
-          summary: stringifyTraceValue(data?.result || data?.description || 'Task completed.', 1000),
-          meta
-        };
-      case 'task.failed':
-        return {
-          status: 'failed',
-          summary: stringifyTraceValue(data?.error || 'Task failed.', 1000),
-          meta
-        };
-      case 'task.blocked':
-        return {
-          status: 'blocked',
-          summary: stringifyTraceValue(data?.reason || data?.agent_response || 'Task paused for user input.', 1000),
-          meta
-        };
-      case 'task.resumed':
-        return {
-          status: 'resumed',
-          summary: stringifyTraceValue(data?.message || 'Task resumed after user guidance.', 700),
-          meta
-        };
-      default:
-        if (!type.startsWith('task.')) return null;
-        return {
-          status: type.replace(/^task\./, '').replace(/_/g, ' '),
-          summary: stringifyTraceValue(data?.summary || data?.description || type, 900),
-          meta
-        };
-    }
-  }
-
-  buildExecutionTraceEntriesFromSteps() {
-    const steps = Array.isArray(this.task?.execution_steps) ? this.task.execution_steps : [];
-    return steps.map((step, index) => {
-      const status = String(step?.status || 'step').trim().replace(/_/g, ' ') || 'step';
-      const title = String(step?.title || `Step ${index + 1}`).trim();
-      const detail = String(step?.detail || '').trim();
-      const result = stringifyTraceValue(step?.result || step?.error || '', 900);
-      const startedAt = formatDateTime(step?.started_at);
-      const completedAt = formatDateTime(step?.completed_at);
-      const meta = [
-        startedAt !== '—' ? `Started ${startedAt}` : '',
-        completedAt !== '—' ? `Completed ${completedAt}` : '',
-        step?.tag ? String(step.tag).trim() : ''
-      ].filter(Boolean).join(' • ');
-      const summary = [title, detail, result].filter(Boolean).join('\n');
-      return summary ? { status, summary, meta } : null;
-    }).filter(Boolean);
-  }
-
-  renderExecutionSteps() {
-    if (!this.elements.steps || !this.elements.stepsCard) return;
-
-    const steps = Array.isArray(this.task?.execution_steps) ? this.task.execution_steps : [];
-    if (steps.length === 0) {
-      this.elements.stepsCard.hidden = true;
-      this.elements.steps.innerHTML = '';
-      return;
     }
 
-    this.elements.stepsCard.hidden = false;
-    this.elements.steps.innerHTML = steps.map((step, index) => {
-      const resultText = String(step?.result || '').trim();
-      const errorText = String(step?.error || '').trim();
-      const isLongResult = resultText.length > 400;
-      const isLongError = errorText.length > 400;
+    const panes = this.elements.tabPanes || {};
+    for (const key of valid) {
+      const pane = panes[key];
+      if (!pane) continue;
+      const isActive = key === next;
+      pane.hidden = !isActive;
+      pane.classList.toggle('is-active', isActive);
+    }
 
-      return `
-        <article class="workspace-task-step">
-          <div class="workspace-task-step-index">${index + 1}</div>
-          <div>
-            <div class="workspace-task-step-title-row">
-              <span class="workspace-task-step-title">${this.escapeHtml(String(step?.title || `Step ${index + 1}`).trim())}</span>
-              ${step?.tag ? `<span class="workspace-task-step-tag">${this.escapeHtml(String(step.tag).trim())}</span>` : ''}
-              <span class="workspace-task-step-status" data-state="${this.escapeHtml(getStatusClass(step?.status))}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
-            </div>
-            ${step?.detail ? `<div class="workspace-task-step-copy">${this.escapeHtml(String(step.detail).trim())}</div>` : ''}
-            ${resultText ? (isLongResult
-              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show result</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(resultText)}</pre></details>`
-              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(resultText)}</pre>`)
-            : ''}
-            ${errorText ? (isLongError
-              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show error</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(errorText)}</pre></details>`
-              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(errorText)}</pre>`)
-            : ''}
-          </div>
-        </article>
-      `;
-    }).join('');
+    this.refreshTaskTabEmptyStates();
+  }
+
+  // refreshTaskTabEmptyStates shows a small "nothing yet" message inside
+  // Activity / Developer when their cards are all hidden — without it those
+  // tabs would render as empty whitespace and feel broken.
+  refreshTaskTabEmptyStates() {
+    const visible = (el) => el && !el.hidden;
+
+    if (this.elements.activityEmpty) {
+      const anyActivity =
+        visible(document.getElementById('workspace-task-relationships-card')) ||
+        visible(document.getElementById('workspace-task-workflow-card')) ||
+        visible(document.getElementById('workspace-task-runs-card'));
+      this.elements.activityEmpty.hidden = anyActivity;
+    }
+
+    if (this.elements.developerEmpty) {
+      const anyDeveloper = visible(document.getElementById('workspace-task-context-card'));
+      this.elements.developerEmpty.hidden = anyDeveloper;
+    }
   }
 
   renderContext() {
@@ -5224,9 +5486,6 @@ export class WorkspaceTaskPage {
         this.isAssistActionSuggested('retry') ||
         this.isAssistActionSuggested('mark_failed');
       this.elements.assistMoreActions.hidden = !hasMoreActions;
-      if (!hasMoreActions) {
-        this.elements.assistMoreActions.open = false;
-      }
     }
 
     this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');
@@ -5890,6 +6149,32 @@ export class WorkspaceTaskPage {
 
     if (isRerun && !confirm(`${label} this task? Previous results will be replaced.`)) return;
 
+    // Inline assign-and-run for unassigned tasks. Without this the user
+    // would see the Run button do nothing meaningful (or a generic
+    // server error) when the task has no agent — they'd have to leave
+    // the hero, scroll to the snapshot card, change agent, then come
+    // back. The picker reuses the same dialog the canvas uses.
+    const currentAgent = String(this.task?.to || '').trim();
+    if (!currentAgent || currentAgent === 'unassigned') {
+      const agents = this.getAssignableAgentOptions();
+      if (agents.length === 0) {
+        this.notify('error', 'No agents in this workspace yet — add one before running tasks.');
+        return;
+      }
+      const picked = await showCanvasAgentPicker({
+        title: 'Assign an agent',
+        message: `This task is unassigned. Pick an agent to run "${this.getTaskDisplayLabel()}".`,
+        agents
+      });
+      if (!picked) return;
+      try {
+        await this.updateTaskFields({ to: picked.name });
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to assign agent');
+        return;
+      }
+    }
+
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
@@ -5908,7 +6193,64 @@ export class WorkspaceTaskPage {
     }
   }
 
+  /**
+   * Render or clear the inline disabled-reason hint for the workflow
+   * "Run all" button. Anchored after the card header (rather than
+   * alongside the buttons) so it never sits inside the header's flex
+   * row and disrupt the action-button layout.
+   */
+  renderWorkflowRunAllReason(reason) {
+    const card = this.elements.workflowCard;
+    if (!card) return;
+    const id = 'workspace-task-workflow-run-all-reason';
+    let el = document.getElementById(id);
+    if (!reason) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'workspace-task-workflow-run-all-reason';
+      const header = card.querySelector('.workspace-task-page-card-header');
+      if (header) {
+        header.insertAdjacentElement('afterend', el);
+      } else {
+        card.prepend(el);
+      }
+    }
+    el.textContent = reason;
+  }
+
+  /**
+   * Build the agent list for the inline assign-and-run picker, in the
+   * shape expected by showCanvasAgentPicker ([{ name, instanceNumber }]).
+   * Filters out the "unassigned" placeholder. Mirrors the existing
+   * snapshot-card agent dropdown so the user sees the same set in
+   * either place.
+   */
+  getAssignableAgentOptions() {
+    const names = this.getAssignableAgentNames('');
+    return names
+      .filter((name) => name && name !== 'unassigned')
+      .map((name) => ({ name }));
+  }
+
   async completeTask() {
+    // Confirm when overriding a running task. The server validates the
+    // transition (since the harden-completion commit) and will reject
+    // bad cases — but a silent client-side override on an in-flight
+    // execution still races the executor in confusing ways. Make the
+    // user opt in explicitly. The other allowed source statuses
+    // (pending / assigned / waiting_for_choice) don't risk losing
+    // execution work, so they skip the prompt.
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    if (status === 'in_progress') {
+      const proceed = window.confirm(
+        'This task is currently running. Marking it complete now will override the live execution and may discard any work the agent is mid-way through. Continue?'
+      );
+      if (!proceed) return;
+    }
     try {
       const response = await fetch(
         `/api/orchestration/tasks/${encodeURIComponent(this.taskId)}/complete`,
@@ -5916,7 +6258,7 @@ export class WorkspaceTaskPage {
       );
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || 'Failed to complete task');
+        throw new Error(this.parseResponseError(text, 'Failed to complete task'));
       }
       this.notify('success', 'Task marked as complete');
       await this.loadData();
@@ -6030,3 +6372,13 @@ export class WorkspaceTaskPage {
     }
   }
 }
+
+// Mix in the sibling-module method bundles. They live next door purely to
+// keep this file navigable; behaviorally they're indistinguishable from
+// declaring them inline because Object.assign places them on the prototype
+// before any instance is constructed.
+Object.assign(
+  WorkspaceTaskPage.prototype,
+  taskExecutionViewsMethods,
+  taskSkillDraftMethods,
+);

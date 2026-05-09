@@ -105,6 +105,74 @@ func TestCleanupOrphanedTasks_ResetsInProgress(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphanedTasks_AtomicAgainstConcurrentMutation pins down the
+// cross-instance race fix: while cleanup runs on one task, an unrelated
+// concurrent Store.Update on the same workspace mutating a DIFFERENT task
+// must not be lost. With the previous Get/mutate/Save (no per-workspace
+// lock) the cleanup's late Save could clobber the concurrent mutation;
+// now both mutations are serialized by Store.Update and both must land.
+func TestCleanupOrphanedTasks_AtomicAgainstConcurrentMutation(t *testing.T) {
+	store := newExecutorTestStore(t)
+	now := time.Now()
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "orphan", To: "agent-a", Status: TaskStatusInProgress, StartedAt: &now},
+		// "victim" starts in Pending so cleanup ignores it; the concurrent
+		// mutation flips its description.
+		{ID: "victim", To: "agent-a", Status: TaskStatusPending, Description: "before"},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	te := NewTaskExecutor(store, &fakeTaskHandler{}, ExecutorConfig{
+		PollInterval:  time.Hour,
+		MaxConcurrent: 5,
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		te.cleanupOrphanedTasks()
+	}()
+	go func() {
+		defer wg.Done()
+		// Repeatedly try to mutate so we maximize the chance of overlapping
+		// the cleanup's critical section. With Store.Update both calls
+		// serialize against each other; without it, the cleanup's blanket
+		// Save would clobber this whole-workspace write.
+		for i := 0; i < 10; i++ {
+			if err := store.Update(ws.ID, func(fresh *Workspace) error {
+				return fresh.MutateTask("victim", func(t *Task) error {
+					t.Description = "after"
+					return nil
+				})
+			}); err != nil {
+				t.Errorf("concurrent update: %v", err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+
+	got, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("final get: %v", err)
+	}
+	for _, task := range got.Tasks {
+		switch task.ID {
+		case "orphan":
+			if task.Status != TaskStatusPending {
+				t.Errorf("orphan: expected Pending, got %q", task.Status)
+			}
+		case "victim":
+			if task.Description != "after" {
+				t.Errorf("victim description clobbered by cleanup save: %q", task.Description)
+			}
+		}
+	}
+}
+
 // TestCheckAndExecuteTasks_SingleClaimPerTask exercises the claim path under
 // concurrent invocations of checkAndExecuteTasks. With the existing
 // runningTasks-map check inside te.mu.Lock, the same task ID must never be
