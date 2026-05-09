@@ -854,6 +854,10 @@ export class WorkspaceTaskPage {
     // true once a user clicks a tab, suppressing further auto-switching.
     this._taskTab = 'overview';
     this._taskTabUserPicked = false;
+    // Follow-up form lives inline under the result card; only one instance
+    // open at a time. _followupSubmitting prevents double-submits.
+    this._followupOpen = false;
+    this._followupSubmitting = false;
     this.boundResultSectionMenuDocumentClick = (event) => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
@@ -936,6 +940,14 @@ export class WorkspaceTaskPage {
       overview: document.getElementById('workspace-task-overview'),
       heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
       heroAgent: document.getElementById('workspace-task-hero-agent'),
+      outputFollowupBtn: document.getElementById('workspace-task-output-followup'),
+      followupPanel: document.getElementById('workspace-task-followup-panel'),
+      followupDescription: document.getElementById('workspace-task-followup-description'),
+      followupDetails: document.getElementById('workspace-task-followup-details'),
+      followupAgent: document.getElementById('workspace-task-followup-agent'),
+      followupError: document.getElementById('workspace-task-followup-error'),
+      followupSubmit: document.getElementById('workspace-task-followup-submit'),
+      followupCancel: document.getElementById('workspace-task-followup-cancel'),
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
@@ -1106,6 +1118,9 @@ export class WorkspaceTaskPage {
         }
       });
     }
+    this.elements.outputFollowupBtn?.addEventListener('click', () => this.toggleFollowupPanel(true));
+    this.elements.followupCancel?.addEventListener('click', () => this.toggleFollowupPanel(false));
+    this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
@@ -1715,6 +1730,126 @@ export class WorkspaceTaskPage {
       this.render();
     }
     return this.task;
+  }
+
+  // toggleFollowupPanel shows/hides the inline follow-up creation form
+  // beneath the Result card. When opening, it pre-fills the agent picker
+  // with the current task's agent (or the workspace's first available
+  // agent) and focuses the description input so the user can type
+  // immediately.
+  toggleFollowupPanel(open) {
+    const panel = this.elements.followupPanel;
+    if (!panel) return;
+    const next = open === undefined ? !this._followupOpen : Boolean(open);
+    this._followupOpen = next;
+    panel.hidden = !next;
+
+    if (this.elements.followupError) this.elements.followupError.hidden = true;
+    if (!next) return;
+
+    this.populateFollowupAgentOptions();
+    if (this.elements.followupDescription) {
+      this.elements.followupDescription.value = '';
+      // Defer focus to next frame so the panel is in the layout flow before
+      // we try to scroll/focus into it.
+      window.requestAnimationFrame(() => this.elements.followupDescription?.focus());
+    }
+    if (this.elements.followupDetails) this.elements.followupDetails.value = '';
+  }
+
+  populateFollowupAgentOptions() {
+    const select = this.elements.followupAgent;
+    if (!select) return;
+    const currentAgent = String(this.task?.to || '').trim();
+    const agents = this.getAssignableAgentNames(currentAgent);
+    const options = ['<option value="">Unassigned (auto-assign on run)</option>'];
+    let preselected = false;
+    for (const name of agents) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) continue;
+      const isCurrent = trimmed.toLowerCase() === currentAgent.toLowerCase();
+      if (isCurrent) preselected = true;
+      options.push(
+        `<option value="${this.escapeHtml(trimmed)}" ${isCurrent ? 'selected' : ''}>${this.escapeHtml(trimmed)}</option>`
+      );
+    }
+    if (currentAgent && !preselected && !this.isRunnableAgentName(currentAgent)) {
+      // Source task is assigned to an agent that no longer exists; don't
+      // auto-pick it for the follow-up.
+    }
+    select.innerHTML = options.join('');
+  }
+
+  setFollowupError(message = '') {
+    const el = this.elements.followupError;
+    if (!el) return;
+    const trimmed = String(message || '').trim();
+    el.textContent = trimmed;
+    el.hidden = !trimmed;
+  }
+
+  async submitFollowupTask() {
+    if (this._followupSubmitting) return;
+    const desc = String(this.elements.followupDescription?.value || '').trim();
+    if (!desc) {
+      this.setFollowupError('Describe what the follow-up task should do.');
+      this.elements.followupDescription?.focus();
+      return;
+    }
+    if (!this.task?.id) {
+      this.setFollowupError('Source task is not loaded yet — try again in a moment.');
+      return;
+    }
+    this.setFollowupError('');
+
+    const details = String(this.elements.followupDetails?.value || '').trim();
+    const agent = String(this.elements.followupAgent?.value || '').trim();
+
+    const submitBtn = this.elements.followupSubmit;
+    const submitText = submitBtn?.querySelector('span');
+    const originalText = submitText?.textContent || 'Create follow-up';
+    this._followupSubmitting = true;
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Creating…';
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          description: desc,
+          details: details || undefined,
+          status: 'pending',
+          to: agent || undefined,
+          input_task_ids: [this.task.id]
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(this.parseResponseError(text, 'Failed to create follow-up task.'));
+      }
+      const payload = await response.json();
+      const created = payload?.task || (payload?.id ? payload : null);
+      const newTaskId = String(created?.id || '').trim();
+
+      this.toggleFollowupPanel(false);
+      this.notify('success', 'Follow-up task created');
+
+      if (newTaskId) {
+        // Send the user straight to the new task page so they can run /
+        // edit it immediately. Using a full navigation (not history.push)
+        // because each task page bootstraps its own controller.
+        window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(newTaskId)}`;
+      }
+    } catch (error) {
+      console.error('Failed to create follow-up task:', error);
+      this.setFollowupError(error?.message || 'Failed to create follow-up task.');
+    } finally {
+      this._followupSubmitting = false;
+      if (submitBtn) submitBtn.disabled = false;
+      if (submitText) submitText.textContent = originalText;
+    }
   }
 
   parseResponseError(text, fallback) {

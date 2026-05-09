@@ -188,6 +188,10 @@
                       <i class="bi bi-magic" aria-hidden="true"></i>
                       <span>Create Skill</span>
                     </button>
+                    <button type="button" id="workspace-task-output-followup" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                      <i class="bi bi-arrow-down-right-circle" aria-hidden="true"></i>
+                      <span>Follow-up task</span>
+                    </button>
                     <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
                       <i class="bi bi-diagram-3" aria-hidden="true"></i>
                       <span>Create Workflow Task</span>
@@ -196,6 +200,29 @@
                 </div>
                 <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
                 <div id="workspace-task-output"></div>
+                <div id="workspace-task-followup-panel" class="workspace-task-followup-panel" hidden>
+                  <div class="workspace-task-followup-kicker">New follow-up task</div>
+                  <p class="workspace-task-followup-copy">Creates a new task that receives this task's result as input. The downstream agent reads it via runtime inputs at execution time.</p>
+                  <label class="workspace-task-followup-field">
+                    <span>What should the follow-up do?</span>
+                    <input type="text" id="workspace-task-followup-description" maxlength="500" placeholder="e.g. Draft a calendar reminder from this allergy report" />
+                  </label>
+                  <label class="workspace-task-followup-field">
+                    <span>Details <em>(optional)</em></span>
+                    <textarea id="workspace-task-followup-details" rows="3" placeholder="Any constraints, format, or extra context the downstream agent should know."></textarea>
+                  </label>
+                  <label class="workspace-task-followup-field">
+                    <span>Assign to</span>
+                    <select id="workspace-task-followup-agent"></select>
+                  </label>
+                  <div id="workspace-task-followup-error" class="workspace-task-followup-error" hidden></div>
+                  <div class="workspace-task-followup-actions">
+                    <button type="button" id="workspace-task-followup-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+                    <button type="button" id="workspace-task-followup-submit" class="modern-btn modern-btn-primary">
+                      <span>Create follow-up</span>
+                    </button>
+                  </div>
+                </div>
               </section>
 
               <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
@@ -1166,6 +1193,84 @@
       color: var(--text-secondary);
       font-size: 0.92rem;
       line-height: 1.4;
+    }
+
+    .workspace-task-followup-panel {
+      margin-top: 1.1rem;
+      padding: 1rem 1.1rem 1.15rem;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+
+    .workspace-task-followup-kicker {
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-followup-copy {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+
+    .workspace-task-followup-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.32rem;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-followup-field > span {
+      font-weight: 600;
+    }
+
+    .workspace-task-followup-field em {
+      color: var(--text-tertiary, var(--text-secondary));
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    .workspace-task-followup-field input,
+    .workspace-task-followup-field textarea,
+    .workspace-task-followup-field select {
+      width: 100%;
+      padding: 0.55rem 0.7rem;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    .workspace-task-followup-field input:focus,
+    .workspace-task-followup-field textarea:focus,
+    .workspace-task-followup-field select:focus {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 50%, transparent);
+      outline-offset: 1px;
+      border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-followup-error {
+      color: #c23b3b;
+      font-size: 0.84rem;
+    }
+
+    .workspace-task-followup-actions {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      flex-wrap: wrap;
     }
 
     .workspace-task-output-note-status-copy strong {
