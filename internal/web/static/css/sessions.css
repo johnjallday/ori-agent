@@ -2433,6 +2433,10 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   line-height: 1.6;
 }
 
+.note-live-editor {
+  cursor: text;
+}
+
 .note-preview-content h1,
 .note-preview-content h2,
 .note-preview-content h3,
@@ -2448,8 +2452,16 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-preview-content h2 { font-size: 1.3em; }
 .note-preview-content h3 { font-size: 1.15em; }
 
+.note-preview-content > :first-child {
+  margin-top: 0;
+}
+
 .note-preview-content p {
   margin-bottom: 1em;
+}
+
+.note-preview-content a {
+  color: var(--primary-color);
 }
 
 .note-preview-content code {
@@ -2479,11 +2491,119 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   padding-left: 1.5em;
 }
 
+.note-preview-content li {
+  margin: 0.3em 0;
+}
+
+.note-preview-content input[type="checkbox"] {
+  margin-right: 0.45em;
+}
+
 .note-preview-content blockquote {
   border-left: 3px solid var(--primary-color);
   padding-left: 12px;
   margin: 1em 0;
   color: var(--text-secondary);
+}
+
+.note-preview-content hr {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 1.4em 0;
+}
+
+.note-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.note-preview-content th,
+.note-preview-content td {
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-preview-content th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.note-live-line {
+  min-height: 1.6em;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.note-live-line-rendered {
+  outline: none;
+}
+
+.note-live-line-rendered:hover,
+.note-live-line-rendered:focus {
+  background: var(--bg-hover);
+}
+
+.note-live-line-rendered > :first-child {
+  margin-top: 0;
+}
+
+.note-live-line-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.note-live-line-rendered.is-empty {
+  min-height: 1.6em;
+}
+
+.note-live-line.is-editing {
+  padding: 0;
+}
+
+.note-live-line-input {
+  display: block;
+  width: 100%;
+  min-height: 1.6em;
+  padding: 1px 4px;
+  border: none;
+  border-radius: 4px;
+  outline: 1px solid transparent;
+  overflow: hidden;
+  resize: none;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-size: inherit;
+  line-height: 1.6;
+}
+
+.note-live-line-input:focus {
+  outline-color: rgba(99, 102, 241, 0.28);
+}
+
+.note-live-line-input.is-heading-1,
+.note-live-line-input.is-heading-2,
+.note-live-line-input.is-heading-3,
+.note-live-line-input.is-heading-4,
+.note-live-line-input.is-heading-5,
+.note-live-line-input.is-heading-6 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.note-live-line-input.is-heading-1 { font-size: 1.5em; }
+.note-live-line-input.is-heading-2 { font-size: 1.3em; }
+.note-live-line-input.is-heading-3 { font-size: 1.15em; }
+
+@media (max-width: 768px) {
+  .note-editor-container,
+  .note-content-input,
+  .note-preview-content {
+    max-height: 65vh;
+  }
 }
 
 /* Search results for notes */

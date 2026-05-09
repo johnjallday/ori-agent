@@ -4942,6 +4942,7 @@ const sessionManager = {
   currentNote: null,
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
+  noteLiveActiveLineIndex: null,
 
   // Auto-save state
   noteAutoSaveTimeout: null,
@@ -5274,7 +5275,12 @@ const sessionManager = {
 
     // Auto-save: listen for input changes on note title and content
     document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
-    document.getElementById('noteContentInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
+    document.getElementById('noteContentInput')?.addEventListener('input', () => {
+      this.scheduleNoteAutoSave();
+      if (this.isNotePreviewMode) {
+        this.refreshNotePreview();
+      }
+    });
 
     // Auto-save on modal close (if there are unsaved changes)
     document.getElementById('noteEditorModal')?.addEventListener('hidden.bs.modal', () => {
@@ -5476,18 +5482,14 @@ const sessionManager = {
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
-    const previewContent = document.getElementById('notePreviewContent');
-    const previewToggle = document.getElementById('notePreviewToggle');
     const lastSaved = document.getElementById('noteLastSaved');
     const saveBtn = document.getElementById('saveNoteBtn');
 
     if (nameInput) nameInput.value = '';
     if (contentInput) {
       contentInput.value = '';
-      contentInput.style.display = 'block';
     }
-    if (previewContent) previewContent.style.display = 'none';
-    if (previewToggle) previewToggle.classList.remove('active');
+    this.setNotePreviewMode(false);
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) saveBtn.textContent = 'Create Note';
     this.hideNoteVaultReferenceBadge();
@@ -5637,18 +5639,14 @@ const sessionManager = {
     const modal = document.getElementById('noteEditorModal');
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
-    const previewContent = document.getElementById('notePreviewContent');
-    const previewToggle = document.getElementById('notePreviewToggle');
     const lastSaved = document.getElementById('noteLastSaved');
     const saveBtn = document.getElementById('saveNoteBtn');
 
     if (nameInput) nameInput.value = note.name;
     if (contentInput) {
-      contentInput.value = note.content;
-      contentInput.style.display = 'block';
+      contentInput.value = note.content || '';
     }
-    if (previewContent) previewContent.style.display = 'none';
-    if (previewToggle) previewToggle.classList.remove('active');
+    this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
     }
@@ -6004,6 +6002,9 @@ const sessionManager = {
       if (contentInput && result.content) {
         contentInput.value = result.content;
       }
+      if (this.isNotePreviewMode) {
+        this.setNotePreviewMode(true);
+      }
 
       // Hide AI panel and show success
       this.hideNoteAIPanel();
@@ -6076,32 +6077,312 @@ const sessionManager = {
     return expandedMessage;
   },
 
-  // Toggle preview mode
-  toggleNotePreview() {
-    this.isNotePreviewMode = !this.isNotePreviewMode;
-
+  // Set preview mode for the note editor
+  setNotePreviewMode(enabled) {
+    this.isNotePreviewMode = Boolean(enabled);
+    const editorContainer = document.querySelector('.note-editor-container');
     const contentInput = document.getElementById('noteContentInput');
     const previewContent = document.getElementById('notePreviewContent');
     const previewToggle = document.getElementById('notePreviewToggle');
 
     if (this.isNotePreviewMode) {
-      contentInput.style.display = 'none';
-      previewContent.style.display = 'block';
-      previewToggle.classList.add('active');
-
-      // Simple markdown rendering (basic)
-      const markdown = contentInput.value;
-      previewContent.innerHTML = this.renderMarkdown(markdown);
+      editorContainer?.classList.add('is-previewing');
+      if (contentInput) contentInput.style.display = 'none';
+      if (previewContent) {
+        previewContent.style.display = 'block';
+        this.renderNoteLiveEditor();
+      }
+      if (previewToggle) {
+        previewToggle.classList.add('active');
+        previewToggle.setAttribute('aria-pressed', 'true');
+        previewToggle.title = 'Use plain Markdown editor';
+      }
     } else {
-      contentInput.style.display = 'block';
-      previewContent.style.display = 'none';
-      previewToggle.classList.remove('active');
+      this.noteLiveActiveLineIndex = null;
+      editorContainer?.classList.remove('is-previewing');
+      if (contentInput) contentInput.style.display = 'block';
+      if (previewContent) {
+        previewContent.style.display = 'none';
+        previewContent.innerHTML = '';
+        previewContent.onclick = null;
+        previewContent.onkeydown = null;
+        previewContent.oninput = null;
+        previewContent.onfocusout = null;
+      }
+      if (previewToggle) {
+        previewToggle.classList.remove('active');
+        previewToggle.setAttribute('aria-pressed', 'false');
+        previewToggle.title = 'Show live preview';
+      }
     }
   },
 
-  // Simple markdown renderer (basic implementation)
+  refreshNotePreview() {
+    this.renderNoteLiveEditor();
+  },
+
+  getNoteContentLines() {
+    const contentInput = document.getElementById('noteContentInput');
+    const value = String(contentInput?.value || '');
+    return value.length > 0 ? value.split('\n') : [''];
+  },
+
+  setNoteContentLines(lines) {
+    const contentInput = document.getElementById('noteContentInput');
+    if (!contentInput) return;
+    contentInput.value = lines.join('\n');
+  },
+
+  noteLineKindClass(line) {
+    const heading = String(line || '').match(/^(#{1,6})\s+/);
+    if (heading) return `is-heading-${heading[1].length}`;
+    if (/^\s*[-*+]\s+/.test(line)) return 'is-list';
+    if (/^\s*\d+\.\s+/.test(line)) return 'is-list';
+    if (/^\s*>\s+/.test(line)) return 'is-quote';
+    return '';
+  },
+
+  renderNoteLiveEditor(options = {}) {
+    const previewContent = document.getElementById('notePreviewContent');
+    if (!previewContent || !this.isNotePreviewMode) return;
+
+    const lines = this.getNoteContentLines();
+    const focusLineIndex = Number.isInteger(options.focusLineIndex)
+      ? options.focusLineIndex
+      : this.noteLiveActiveLineIndex;
+    const activeLineIndex = Number.isInteger(focusLineIndex)
+      ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
+      : null;
+    this.noteLiveActiveLineIndex = activeLineIndex;
+
+    previewContent.innerHTML = lines.map((line, index) => {
+      if (index === activeLineIndex) {
+        return this.renderNoteLiveInputLine(line, index);
+      }
+      return this.renderNoteLiveRenderedLine(line, index);
+    }).join('');
+
+    this.bindNoteLiveEditorEvents(previewContent);
+
+    if (activeLineIndex !== null) {
+      const input = previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`);
+      if (input) {
+        const cursorPosition = Number.isInteger(options.cursorPosition)
+          ? Math.max(0, Math.min(options.cursorPosition, input.value.length))
+          : input.value.length;
+        input.focus();
+        input.setSelectionRange(cursorPosition, cursorPosition);
+        this.resizeNoteLiveInput(input);
+      }
+    }
+  },
+
+  renderNoteLiveInputLine(line, index) {
+    const kindClass = this.noteLineKindClass(line);
+    const className = ['note-live-line-input', kindClass].filter(Boolean).join(' ');
+    return `
+      <div class="note-live-line is-editing" data-line-index="${index}">
+        <textarea class="${className}" data-line-index="${index}" rows="1" spellcheck="true">${this.escapeHtml(line)}</textarea>
+      </div>
+    `;
+  },
+
+  renderNoteLiveRenderedLine(line, index) {
+    const kindClass = this.noteLineKindClass(line);
+    const emptyClass = line ? '' : ' is-empty';
+    return `
+      <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
+        ${line ? this.renderMarkdownLine(line) : '<br>'}
+      </div>
+    `;
+  },
+
+  bindNoteLiveEditorEvents(previewContent) {
+    previewContent.onclick = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      if (target === previewContent) {
+        const lines = this.getNoteContentLines();
+        this.activateNoteLiveLine(lines.length - 1, (lines[lines.length - 1] || '').length);
+        return;
+      }
+      const renderedLine = target.closest('.note-live-line-rendered');
+      if (!renderedLine || !previewContent.contains(renderedLine)) return;
+      const lineIndex = Number(renderedLine.dataset.lineIndex);
+      if (Number.isInteger(lineIndex)) {
+        this.activateNoteLiveLine(lineIndex);
+      }
+    };
+
+    previewContent.onkeydown = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const input = target.closest('.note-live-line-input');
+      if (input && previewContent.contains(input)) {
+        this.handleNoteLiveInputKeydown(event, input);
+        return;
+      }
+
+      const renderedLine = target.closest('.note-live-line-rendered');
+      if (!renderedLine || !previewContent.contains(renderedLine)) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        const lineIndex = Number(renderedLine.dataset.lineIndex);
+        if (Number.isInteger(lineIndex)) {
+          this.activateNoteLiveLine(lineIndex);
+        }
+      }
+    };
+
+    previewContent.oninput = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const input = target.closest('.note-live-line-input');
+      if (input && previewContent.contains(input)) {
+        this.handleNoteLiveInputChange(input);
+      }
+    };
+
+    previewContent.onfocusout = (event) => {
+      if (event.relatedTarget && previewContent.contains(event.relatedTarget)) return;
+      window.setTimeout(() => {
+        const activeElement = document.activeElement;
+        if (activeElement && previewContent.contains(activeElement)) return;
+        if (this.isNotePreviewMode && this.noteLiveActiveLineIndex !== null) {
+          this.noteLiveActiveLineIndex = null;
+          this.renderNoteLiveEditor();
+        }
+      }, 0);
+    };
+  },
+
+  activateNoteLiveLine(lineIndex, cursorPosition = null) {
+    this.noteLiveActiveLineIndex = lineIndex;
+    this.renderNoteLiveEditor({ focusLineIndex: lineIndex, cursorPosition });
+  },
+
+  handleNoteLiveInputChange(input) {
+    const lineIndex = Number(input.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+
+    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
+    const lines = this.getNoteContentLines();
+    const parts = normalizedValue.split('\n');
+
+    if (parts.length > 1) {
+      lines.splice(lineIndex, 1, ...parts);
+      this.setNoteContentLines(lines);
+      this.noteLiveActiveLineIndex = lineIndex + parts.length - 1;
+      this.scheduleNoteAutoSave();
+      this.renderNoteLiveEditor({
+        focusLineIndex: this.noteLiveActiveLineIndex,
+        cursorPosition: parts[parts.length - 1].length
+      });
+      return;
+    }
+
+    lines[lineIndex] = normalizedValue;
+    this.setNoteContentLines(lines);
+    input.className = ['note-live-line-input', this.noteLineKindClass(normalizedValue)]
+      .filter(Boolean)
+      .join(' ');
+    this.resizeNoteLiveInput(input);
+    this.scheduleNoteAutoSave();
+  },
+
+  handleNoteLiveInputKeydown(event, input) {
+    const lineIndex = Number(input.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+
+    const lines = this.getNoteContentLines();
+    const value = input.value || '';
+    const selectionStart = input.selectionStart ?? value.length;
+    const selectionEnd = input.selectionEnd ?? selectionStart;
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const before = value.slice(0, selectionStart);
+      const after = value.slice(selectionEnd);
+      lines.splice(lineIndex, 1, before, after);
+      this.setNoteContentLines(lines);
+      this.scheduleNoteAutoSave();
+      this.activateNoteLiveLine(lineIndex + 1, 0);
+      return;
+    }
+
+    if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && lineIndex > 0) {
+      event.preventDefault();
+      const previousLine = lines[lineIndex - 1] || '';
+      lines.splice(lineIndex - 1, 2, previousLine + value);
+      this.setNoteContentLines(lines);
+      this.scheduleNoteAutoSave();
+      this.activateNoteLiveLine(lineIndex - 1, previousLine.length);
+      return;
+    }
+
+    if (event.key === 'Delete' && selectionStart === value.length && selectionEnd === value.length && lineIndex < lines.length - 1) {
+      event.preventDefault();
+      lines.splice(lineIndex, 2, value + (lines[lineIndex + 1] || ''));
+      this.setNoteContentLines(lines);
+      this.scheduleNoteAutoSave();
+      this.activateNoteLiveLine(lineIndex, value.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp' && selectionStart === 0 && lineIndex > 0) {
+      event.preventDefault();
+      const previousLine = lines[lineIndex - 1] || '';
+      this.activateNoteLiveLine(lineIndex - 1, previousLine.length);
+      return;
+    }
+
+    if (event.key === 'ArrowDown' && selectionStart === value.length && lineIndex < lines.length - 1) {
+      event.preventDefault();
+      this.activateNoteLiveLine(lineIndex + 1, Math.min((lines[lineIndex + 1] || '').length, selectionStart));
+    }
+  },
+
+  resizeNoteLiveInput(input) {
+    input.style.height = 'auto';
+    input.style.height = `${Math.max(input.scrollHeight, 24)}px`;
+  },
+
+  renderMarkdownLine(line) {
+    if (!line) return '<br>';
+
+    if (window.marked && typeof window.marked.parse === 'function') {
+      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
+      const rendered = window.marked.parse(canSanitize ? line : this.escapeHtml(line), {
+        breaks: true,
+        gfm: true
+      });
+      return canSanitize
+        ? window.DOMPurify.sanitize(rendered)
+        : rendered;
+    }
+
+    return this.renderMarkdown(line);
+  },
+
+  // Toggle preview mode
+  toggleNotePreview() {
+    this.setNotePreviewMode(!this.isNotePreviewMode);
+  },
+
+  // Render markdown for note previews
   renderMarkdown(text) {
     if (!text) return '<p style="color: var(--text-tertiary);">No content</p>';
+
+    if (window.marked && typeof window.marked.parse === 'function') {
+      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
+      const rendered = window.marked.parse(canSanitize ? text : this.escapeHtml(text), {
+        breaks: true,
+        gfm: true
+      });
+      return canSanitize
+        ? window.DOMPurify.sanitize(rendered)
+        : rendered;
+    }
 
     let html = this.escapeHtml(text);
 
