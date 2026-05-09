@@ -55,6 +55,14 @@ func NewHybridStore(ctx context.Context, cfg *HybridStoreConfig) (HybridStore, e
 		logger.Warn("Failed to enforce storage limits on startup", logger.Fields{"error": err})
 	}
 
+	// Backfill heading index for any notes that have not been indexed yet
+	// (idempotent — safe to run on every startup).
+	if indexed, err := store.sqlite.BackfillHeadingIndex(ctx); err != nil {
+		logger.Warn("Failed to backfill note heading index", logger.Fields{"error": err})
+	} else if indexed > 0 {
+		logger.Info("Backfilled note heading index", logger.Fields{"notes": indexed})
+	}
+
 	// Start periodic flush
 	if cfg.FlushInterval > 0 {
 		store.startPeriodicFlush(time.Duration(cfg.FlushInterval) * time.Second)
@@ -718,4 +726,9 @@ func (h *hybridStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 // SearchNotes performs full-text search across note names and content.
 func (h *hybridStore) SearchNotes(ctx context.Context, query string, limit int) ([]NoteSearchResult, error) {
 	return h.sqlite.SearchNotes(ctx, query, limit)
+}
+
+// SearchHeadings performs full-text search across note headings.
+func (h *hybridStore) SearchHeadings(ctx context.Context, query string, limit int) ([]HeadingSearchResult, error) {
+	return h.sqlite.SearchHeadings(ctx, query, limit)
 }

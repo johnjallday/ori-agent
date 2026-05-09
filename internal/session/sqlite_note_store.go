@@ -36,6 +36,10 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 		return fmt.Errorf("failed to create note: %w", err)
 	}
 
+	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
+		return fmt.Errorf("failed to index note headings: %w", err)
+	}
+
 	return nil
 }
 
@@ -77,6 +81,10 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error
 
 	if err := database.CheckRowsAffectedWithError(result, "note", ErrNoteNotFound); err != nil {
 		return err
+	}
+
+	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
+		return fmt.Errorf("failed to index note headings: %w", err)
 	}
 
 	return nil
@@ -151,6 +159,110 @@ func decodeNoteVaultReference(raw string) (*vaultref.Reference, error) {
 		return nil, err
 	}
 	return vaultref.Normalize(&ref), nil
+}
+
+// indexNoteHeadings re-indexes the note_headings + note_headings_fts rows for one note.
+// Old rows are deleted and fresh ones inserted in a single transaction so the FTS mirror
+// stays consistent with note_headings.
+func (s *SQLiteStore) indexNoteHeadings(ctx context.Context, noteID, content string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM note_headings WHERE note_id = ?`, noteID); err != nil {
+		return fmt.Errorf("delete existing headings: %w", err)
+	}
+
+	for _, h := range ParseHeadings(content) {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO note_headings (note_id, level, text, position) VALUES (?, ?, ?, ?)
+		`, noteID, h.Level, h.Text, h.Position); err != nil {
+			return fmt.Errorf("insert heading: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// SearchHeadings performs full-text search over note headings across all workspaces.
+// Results are joined back to the parent note and workspace for display context.
+func (s *SQLiteStore) SearchHeadings(ctx context.Context, query string, limit int) ([]HeadingSearchResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT h.note_id, n.name, n.workspace_id, w.name,
+		       h.level, h.text, h.position,
+		       snippet(note_headings_fts, 0, '<mark>', '</mark>', '...', 16) as snippet
+		FROM note_headings h
+		INNER JOIN note_headings_fts fts ON h.id = fts.rowid
+		INNER JOIN workspace_notes n ON h.note_id = n.id
+		LEFT JOIN workspaces w ON n.workspace_id = w.id
+		WHERE note_headings_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?
+	`, query, limit)
+	if err != nil {
+		if strings.Contains(err.Error(), "fts5") {
+			return []HeadingSearchResult{}, nil
+		}
+		return nil, fmt.Errorf("failed to search headings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	results := make([]HeadingSearchResult, 0)
+	for rows.Next() {
+		var r HeadingSearchResult
+		var workspaceName sql.NullString
+		if err := rows.Scan(&r.NoteID, &r.NoteName, &r.WorkspaceID, &workspaceName,
+			&r.Level, &r.Text, &r.Position, &r.Snippet); err != nil {
+			return nil, fmt.Errorf("failed to scan heading result: %w", err)
+		}
+		r.WorkspaceName = workspaceName.String
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// BackfillHeadingIndex indexes headings for any note that has no rows in note_headings.
+// Called once at startup after migration; idempotent for ongoing use.
+func (s *SQLiteStore) BackfillHeadingIndex(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT n.id, n.content
+		FROM workspace_notes n
+		LEFT JOIN note_headings h ON n.id = h.note_id
+		WHERE h.id IS NULL
+		GROUP BY n.id
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("query unindexed notes: %w", err)
+	}
+
+	type pair struct {
+		id, content string
+	}
+	var pending []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.id, &p.content); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("scan unindexed note: %w", err)
+		}
+		pending = append(pending, p)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	for _, p := range pending {
+		if err := s.indexNoteHeadings(ctx, p.id, p.content); err != nil {
+			return 0, fmt.Errorf("index note %s: %w", p.id, err)
+		}
+	}
+	return len(pending), nil
 }
 
 // SearchNotes performs full-text search across note names and content.

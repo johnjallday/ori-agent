@@ -1261,6 +1261,66 @@ func TestHandler_GetNoteNotFound(t *testing.T) {
 	}
 }
 
+// TestHandler_SearchHeadings tests GET /api/notes/search/headings.
+func TestHandler_SearchHeadings(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestWorkspace(t, handler, "Search Headings Folder")
+
+	createBody := `{"workspace_id": "` + folderID + `", "name": "Architecture", "content": "# Overview\n\n## Database layer\n\nbody\n\n## API design\n\nmore\n"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	handler.HandleNotes(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create note failed: %d %s", createW.Code, createW.Body.String())
+	}
+
+	// Match: "database" should hit one heading.
+	req := httptest.NewRequest(http.MethodGet, "/api/notes/search/headings?q=database", nil)
+	w := httptest.NewRecorder()
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Headings []session.HeadingSearchResult `json:"headings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Headings) != 1 {
+		t.Fatalf("expected 1 heading, got %d: %+v", len(resp.Headings), resp.Headings)
+	}
+	got := resp.Headings[0]
+	if got.Text != "Database layer" {
+		t.Errorf("expected 'Database layer', got %q", got.Text)
+	}
+	if got.NoteName != "Architecture" || got.WorkspaceName != "Search Headings Folder" {
+		t.Errorf("unexpected note/workspace metadata: %+v", got)
+	}
+	if got.Level != 2 {
+		t.Errorf("expected level 2, got %d", got.Level)
+	}
+}
+
+// TestHandler_SearchHeadingsRejectsShortQuery checks the 2-character minimum.
+func TestHandler_SearchHeadingsRejectsShortQuery(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notes/search/headings?q=a", nil)
+	w := httptest.NewRecorder()
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for 1-char query, got %d", w.Code)
+	}
+}
+
 // TestHandler_UpdateNote tests updating note metadata.
 func TestHandler_UpdateNote(t *testing.T) {
 	handler, cleanup := createTestHandler(t)

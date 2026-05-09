@@ -1124,6 +1124,150 @@ func TestSQLiteStore_SearchNotes(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_SearchHeadings(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{
+		ID:        "headings-folder",
+		Name:      "Headings Workspace",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	notes := []WorkspaceNote{
+		{
+			ID:          "h-1",
+			WorkspaceID: "headings-folder",
+			Name:        "Architecture",
+			Content:     "# Overview\n\n## Database layer\n\nSome content.\n\n## API design\n\nMore.\n",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+		{
+			ID:          "h-2",
+			WorkspaceID: "headings-folder",
+			Name:        "Roadmap",
+			Content:     "## Database migration plan\n\nDetails.\n",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+	}
+	for i := range notes {
+		if err := store.CreateNote(ctx, &notes[i]); err != nil {
+			t.Fatalf("create note %s: %v", notes[i].ID, err)
+		}
+	}
+
+	// "database" should match the two database-related headings.
+	results, err := store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results for 'database', got %d: %+v", len(results), results)
+	}
+	for _, r := range results {
+		if r.Level == 0 || r.Text == "" || r.NoteName == "" {
+			t.Errorf("malformed result: %+v", r)
+		}
+		if r.WorkspaceName != "Headings Workspace" {
+			t.Errorf("expected workspace name to be set, got %q", r.WorkspaceName)
+		}
+	}
+
+	// Updating a note should re-index its headings.
+	notes[0].Content = "# Overview\n\n## Storage layer\n\n## API design\n"
+	notes[0].UpdatedAt = time.Now()
+	if err := store.UpdateNote(ctx, &notes[0]); err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+	results, err = store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings after update: %v", err)
+	}
+	// Now only h-2 mentions database — h-1's "Database layer" became "Storage layer".
+	if len(results) != 1 || results[0].NoteID != "h-2" {
+		t.Fatalf("expected single result from h-2 after update, got %+v", results)
+	}
+
+	// Deleting a note should cascade-remove its headings via the FK.
+	if err := store.DeleteNote(ctx, "h-2"); err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+	results, err = store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings after delete: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected zero results after deletion, got %+v", results)
+	}
+}
+
+func TestSQLiteStore_BackfillHeadingIndex(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{
+		ID:        "backfill-folder",
+		Name:      "Backfill Workspace",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	// Create note normally so headings get indexed during CreateNote.
+	note := &WorkspaceNote{
+		ID: "bf-1", WorkspaceID: "backfill-folder", Name: "N",
+		Content:   "# Indexed already\n",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, note); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	// Simulate a pre-existing un-indexed note by deleting its rows.
+	if _, err := db.ExecContext(ctx, `DELETE FROM note_headings WHERE note_id = ?`, "bf-1"); err != nil {
+		t.Fatalf("clear heading rows: %v", err)
+	}
+
+	indexed, err := store.BackfillHeadingIndex(ctx)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if indexed != 1 {
+		t.Errorf("expected 1 indexed note, got %d", indexed)
+	}
+
+	results, err := store.SearchHeadings(ctx, "indexed", 10)
+	if err != nil {
+		t.Fatalf("search after backfill: %v", err)
+	}
+	if len(results) != 1 || results[0].NoteID != "bf-1" {
+		t.Fatalf("expected backfilled heading to be searchable, got %+v", results)
+	}
+
+	// Second backfill should be a no-op.
+	indexed, err = store.BackfillHeadingIndex(ctx)
+	if err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	if indexed != 0 {
+		t.Errorf("expected backfill to be idempotent (0), got %d", indexed)
+	}
+}
+
 func TestSQLiteStore_DeleteFolderCascadesNotes(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

@@ -519,6 +519,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Note AI generation endpoint
 		if s.Handlers.Note != nil {
 			mux.HandleFunc("/api/notes/generate", s.Handlers.Note.GenerateHandler)
+			mux.HandleFunc("/api/notes/assist", s.Handlers.Note.AssistHandler)
 		}
 		mux.HandleFunc("/api/notes/", s.Handlers.Session.HandleNotes)
 		mux.HandleFunc("/api/notes", s.Handlers.Session.HandleNotes)

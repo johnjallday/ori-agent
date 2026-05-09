@@ -20,9 +20,13 @@ func (h *Handler) HandleNotes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/notes")
 	path = strings.TrimPrefix(path, "/")
 
-	// Handle search endpoint
+	// Handle search endpoints
 	if path == "search" {
 		h.searchNotes(w, r)
+		return
+	}
+	if path == "search/headings" {
+		h.searchHeadings(w, r)
 		return
 	}
 
@@ -364,6 +368,27 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"notes": notes,
+	})
+}
+
+// searchHeadings handles GET /api/notes/search/headings.
+// Returns matching headings across all notes for use in the global search palette.
+func (h *Handler) searchHeadings(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) < 2 {
+		_ = orihttp.RespondBadRequest(w, "query must be at least 2 characters")
+		return
+	}
+
+	headings, err := h.store.SearchHeadings(r.Context(), query, 50)
+	if err != nil {
+		logger.Error("Failed to search headings", logger.Fields{"query": query, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to search headings")
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"headings": headings,
 	})
 }
 
