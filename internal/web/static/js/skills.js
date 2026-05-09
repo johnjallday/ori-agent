@@ -2,6 +2,7 @@
 
 let skillsAll = [];
 let skillsFiltered = [];
+let selectedSource = 'all';
 let selectedAgentName = '';
 let defaultAgentName = '';
 let editingSkillName = '';
@@ -150,6 +151,83 @@ function getSourceLabel(source) {
   return lower;
 }
 
+function getSourceTheme(source) {
+  switch (String(source || '').toLowerCase()) {
+    case 'agent':
+      return { bg: 'rgba(59, 130, 246, 0.18)', color: '#60a5fa' };
+    case 'repo':
+      return { bg: 'rgba(168, 85, 247, 0.18)', color: '#c084fc' };
+    case '.agents':
+      return { bg: 'rgba(16, 185, 129, 0.18)', color: '#34d399' };
+    case 'personal':
+      return { bg: 'rgba(249, 115, 22, 0.18)', color: '#fb923c' };
+    default:
+      return { bg: 'rgba(148, 163, 184, 0.18)', color: '#94a3b8' };
+  }
+}
+
+function renderSourceFilters() {
+  const container = document.getElementById('skillsSourceFilters');
+  if (!container) return;
+
+  if (!Array.isArray(skillsAll) || skillsAll.length === 0) {
+    container.classList.add('d-none');
+    container.innerHTML = '';
+    return;
+  }
+
+  const counts = new Map();
+  skillsAll.forEach(skill => {
+    const source = getSourceLabel(skill?.source);
+    counts.set(source, (counts.get(source) || 0) + 1);
+  });
+
+  // Hide filter row when only one source is present
+  if (counts.size <= 1) {
+    container.classList.add('d-none');
+    container.innerHTML = '';
+    if (selectedSource !== 'all') selectedSource = 'all';
+    return;
+  }
+
+  if (selectedSource !== 'all' && !counts.has(selectedSource)) {
+    selectedSource = 'all';
+  }
+
+  const sources = ['all', ...[...counts.keys()].sort()];
+  container.innerHTML = sources.map(source => {
+    const count = source === 'all' ? skillsAll.length : (counts.get(source) || 0);
+    const isActive = selectedSource === source;
+    const theme = source === 'all'
+      ? { bg: 'var(--bg-tertiary)', color: 'var(--text-primary)' }
+      : getSourceTheme(source);
+    const label = source === 'all' ? 'All' : source;
+    const style = [
+      'font-size: 12px',
+      'padding: 4px 12px',
+      'border-radius: 999px',
+      'cursor: pointer',
+      `border: 1px solid ${isActive ? theme.color : 'var(--border-color)'}`,
+      `background: ${isActive ? theme.bg : 'transparent'}`,
+      `color: ${isActive ? theme.color : 'var(--text-secondary)'}`,
+      'display: inline-flex',
+      'align-items: center',
+      'gap: 6px',
+      'transition: background 120ms ease, border-color 120ms ease, color 120ms ease',
+    ].join('; ');
+    return `<button type="button" class="skill-source-chip" data-source="${safeText(source)}" style="${style}">${safeText(label)}<span style="opacity: 0.7;">${count}</span></button>`;
+  }).join('');
+  container.classList.remove('d-none');
+
+  container.querySelectorAll('.skill-source-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedSource = btn.getAttribute('data-source') || 'all';
+      renderSourceFilters();
+      applySkillsFilter();
+    });
+  });
+}
+
 function renderSkills(skills) {
   const container = document.getElementById('skillsList');
   if (!container) return;
@@ -179,9 +257,11 @@ function renderSkills(skills) {
     card.style.display = 'flex';
     card.style.flexDirection = 'column';
     card.style.height = '100%';
+    card.style.overflow = 'visible';
 
+    const sourceTheme = getSourceTheme(source);
     const badges = [];
-    badges.push(`<span class="badge bg-secondary" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`);
+    badges.push(`<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`);
     if (hasErrors) {
       badges.push('<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>');
     }
@@ -189,37 +269,52 @@ function renderSkills(skills) {
       badges.push(`<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`);
     }
 
-    const errorHtml = hasErrors
-      ? `<div style="font-size: 11px; color: var(--danger-color); margin-top: 6px;">${safeText(validationErrors.join('; '))}</div>`
+    const errorSummary = hasErrors
+      ? `<div style="font-size: 11px; color: var(--danger-color); margin-top: 6px;">${validationErrors.length} validation error${validationErrors.length === 1 ? '' : 's'}</div>`
       : '';
 
     const skillPath = skill?.path || '';
     const pathHtml = skillPath
-      ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; word-break: break-all; opacity: 0.7;" title="${safeText(skillPath)}">
-           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 3px; flex-shrink: 0; vertical-align: middle;">
+      ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.7; display: flex; align-items: center; gap: 4px; min-width: 0;" title="${safeText(skillPath)}">
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0;">
              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-           </svg>${safeText(skillPath)}</div>`
+           </svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">${safeText(skillPath)}</span></div>`
       : '';
+
+    const cleanDescription = cleanSkillDescriptionForCard(description);
 
     card.innerHTML = `
       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
-        <div style="min-width: 0;">
+        <div style="min-width: 0; flex: 1;">
           <div style="font-weight: 600; color: var(--text-primary);">${safeText(name)}</div>
-          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${safeText(description)}</div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">${safeText(cleanDescription)}</div>
           ${pathHtml}
-          ${errorHtml}
+          ${errorSummary}
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges.join('')}</div>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
+        <button class="modern-btn modern-btn-primary btn-sm" data-action="details">Details</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
-        ${isEditable
-    ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="edit">Edit</button>
-           ${canDelete ? '<button class="modern-btn modern-btn-secondary btn-sm" data-action="delete">Delete</button>' : ''}`
-    : `<button class="modern-btn modern-btn-secondary btn-sm" data-action="clone">Clone & Edit</button>`}
-        ${hasScripts ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>` : ''}
+        <div class="dropdown" style="margin-left: auto;">
+          <button class="modern-btn modern-btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions" style="padding: 4px 8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"/></svg>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            ${isEditable
+    ? `<li><button class="dropdown-item" type="button" data-action="edit">Edit</button></li>
+               ${canDelete ? '<li><button class="dropdown-item text-danger" type="button" data-action="delete">Delete</button></li>' : ''}`
+    : '<li><button class="dropdown-item" type="button" data-action="clone">Clone & Edit</button></li>'}
+            ${hasScripts ? `<li><button class="dropdown-item" type="button" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button></li>` : ''}
+          </ul>
+        </div>
       </div>
     `;
+
+    const detailsBtn = card.querySelector('[data-action="details"]');
+    if (detailsBtn) {
+      detailsBtn.addEventListener('click', () => openSkillDetails(skill));
+    }
 
     const runBtn = card.querySelector('[data-action="run"]');
     if (runBtn) {
@@ -256,19 +351,22 @@ function applySkillsFilter() {
   const input = document.getElementById('skillsSearch');
   const query = input ? input.value.trim().toLowerCase() : '';
 
-  if (!query) {
-    skillsFiltered = [...skillsAll];
-    renderSkills(skillsFiltered);
-    return;
+  let filtered = skillsAll.slice();
+
+  if (selectedSource && selectedSource !== 'all') {
+    filtered = filtered.filter(skill => getSourceLabel(skill?.source) === selectedSource);
   }
 
-  skillsFiltered = skillsAll.filter(skill => {
-    const name = (skill?.name || '').toLowerCase();
-    const description = (skill?.description || '').toLowerCase();
-    const source = (skill?.source || '').toLowerCase();
-    return name.includes(query) || description.includes(query) || source.includes(query);
-  });
+  if (query) {
+    filtered = filtered.filter(skill => {
+      const name = (skill?.name || '').toLowerCase();
+      const description = (skill?.description || '').toLowerCase();
+      const source = (skill?.source || '').toLowerCase();
+      return name.includes(query) || description.includes(query) || source.includes(query);
+    });
+  }
 
+  skillsFiltered = filtered;
   renderSkills(skillsFiltered);
 }
 
@@ -293,6 +391,7 @@ async function loadSkills(agentName) {
       skillsAll = [];
       skillsFiltered = [];
       setSkillsCount(0);
+      renderSourceFilters();
       setSkillsMessage('Resolve skill conflicts to view skills.', true);
       return;
     }
@@ -302,12 +401,14 @@ async function loadSkills(agentName) {
     const data = await response.json();
     skillsAll = Array.isArray(data.skills) ? data.skills : [];
     skillsAll.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    renderSourceFilters();
     applySkillsFilter();
   } catch (error) {
     console.error('Failed to load skills:', error);
     skillsAll = [];
     skillsFiltered = [];
     setSkillsCount(0);
+    renderSourceFilters();
     setSkillsMessage('Failed to load skills.', true);
   }
 }
@@ -506,6 +607,156 @@ function setupSkillsEvents() {
         removeMarketplaceSkill(marketRemoveInput.value);
       }
     });
+  }
+}
+
+function cleanSkillDescriptionForCard(description) {
+  const text = String(description || '').trim();
+  if (!text) return 'No description';
+  return text
+    .replace(/<example>[\s\S]*?<\/example>/gi, '')
+    .replace(/<commentary>[\s\S]*?<\/commentary>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || text;
+}
+
+function getDetailsModal() {
+  const el = document.getElementById('skillsDetailsModal');
+  if (!el) return null;
+  return bootstrap.Modal.getOrCreateInstance(el);
+}
+
+async function openSkillDetails(skill) {
+  if (!skill) return;
+
+  const titleEl = document.getElementById('skillsDetailsTitle');
+  const badgesEl = document.getElementById('skillsDetailsBadges');
+  const descEl = document.getElementById('skillsDetailsDescription');
+  const pathRow = document.getElementById('skillsDetailsPathRow');
+  const pathEl = document.getElementById('skillsDetailsPath');
+  const errorsEl = document.getElementById('skillsDetailsErrors');
+  const promptEl = document.getElementById('skillsDetailsPrompt');
+  const promptStatus = document.getElementById('skillsDetailsPromptStatus');
+  const actionsEl = document.getElementById('skillsDetailsActions');
+
+  const name = skill?.name || '(unnamed skill)';
+  const description = skill?.description || 'No description';
+  const source = getSourceLabel(skill?.source);
+  const isEditable = source === 'agent' || source === '.agents' || source === 'personal';
+  const canDelete = source === 'agent';
+  const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
+  const hasErrors = validationErrors.length > 0;
+  const hasScripts = Boolean(skill?.has_scripts);
+  const isTrusted = Boolean(skill?.trusted);
+  const requiresTrust = hasScripts && !isTrusted;
+  const skillPath = skill?.path || '';
+
+  if (titleEl) titleEl.textContent = name;
+
+  if (badgesEl) {
+    const sourceTheme = getSourceTheme(source);
+    const badges = [`<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`];
+    if (hasErrors) {
+      badges.push('<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>');
+    }
+    if (hasScripts) {
+      badges.push(`<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`);
+    }
+    badgesEl.innerHTML = badges.join('');
+  }
+
+  if (descEl) descEl.textContent = description;
+
+  if (pathRow && pathEl) {
+    if (skillPath) {
+      pathEl.textContent = skillPath;
+      pathRow.classList.remove('d-none');
+    } else {
+      pathRow.classList.add('d-none');
+    }
+  }
+
+  if (errorsEl) {
+    if (hasErrors) {
+      errorsEl.innerHTML = `<strong>Validation errors</strong><ul class="mb-0 mt-1">${validationErrors.map(err => `<li>${safeText(err)}</li>`).join('')}</ul>`;
+      errorsEl.classList.remove('d-none');
+    } else {
+      errorsEl.classList.add('d-none');
+      errorsEl.innerHTML = '';
+    }
+  }
+
+  if (promptEl) promptEl.textContent = '';
+  if (promptStatus) promptStatus.textContent = 'Loading...';
+
+  if (actionsEl) {
+    const buttons = [];
+    buttons.push(`<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>`);
+    if (isEditable) {
+      buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="edit">Edit</button>');
+      if (canDelete) {
+        buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="delete">Delete</button>');
+      }
+    } else {
+      buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="clone">Clone & Edit</button>');
+    }
+    if (hasScripts) {
+      buttons.push(`<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>`);
+    }
+    actionsEl.innerHTML = buttons.join('');
+
+    actionsEl.querySelectorAll('[data-detail-action]').forEach((btn) => {
+      const action = btn.getAttribute('data-detail-action');
+      btn.addEventListener('click', () => {
+        const modal = getDetailsModal();
+        switch (action) {
+          case 'run':
+            if (modal) modal.hide();
+            runSkill(name);
+            break;
+          case 'edit':
+            if (modal) modal.hide();
+            openSkillEditor(skill);
+            break;
+          case 'delete':
+            if (modal) modal.hide();
+            deleteSkill(skill);
+            break;
+          case 'clone':
+            if (modal) modal.hide();
+            cloneSkillToAgent(skill);
+            break;
+          case 'trust':
+            toggleSkillTrust(skill);
+            if (modal) modal.hide();
+            break;
+        }
+      });
+    });
+  }
+
+  const modal = getDetailsModal();
+  if (modal) modal.show();
+
+  if (!skill?.name || !selectedAgentName) {
+    if (promptStatus) promptStatus.textContent = '';
+    if (promptEl) promptEl.textContent = 'Prompt unavailable.';
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`);
+    if (!response.ok) {
+      throw new Error('Failed to load skill prompt.');
+    }
+    const data = await response.json();
+    if (promptEl) promptEl.textContent = data?.prompt || '(empty prompt)';
+    if (promptStatus) promptStatus.textContent = '';
+  } catch (error) {
+    console.error('Failed to load skill details:', error);
+    if (promptEl) promptEl.textContent = '';
+    if (promptStatus) promptStatus.textContent = 'Failed to load prompt.';
   }
 }
 
