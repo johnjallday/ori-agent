@@ -402,24 +402,22 @@ func ensureServerBuilt(t *testing.T) {
 	t.Helper()
 
 	binaryPath := resolveBuiltBinaryPath()
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		t.Log("Server binary not found, building...")
+	projectRoot := resolveProjectRoot()
+	if projectRoot == "" {
+		projectRoot = filepath.Join("..", "..")
+	}
 
-		projectRoot := resolveProjectRoot()
-		if projectRoot == "" {
-			projectRoot = filepath.Join("..", "..")
-		}
+	// Always invoke `go build` — Go's build cache makes this near-instant
+	// when sources are unchanged, and it guarantees the binary matches the
+	// current source tree (avoids running tests against a stale binary
+	// left over from a prior branch).
+	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/server")
+	cmd.Dir = projectRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-		cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/server")
-		cmd.Dir = projectRoot
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("Failed to build server: %v", err)
-		}
-
-		t.Log("✓ Server built successfully")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to build server: %v", err)
 	}
 }
 
