@@ -2435,6 +2435,13 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .note-live-editor {
   cursor: text;
+  user-select: text;
+}
+
+.note-live-editor::selection,
+.note-live-editor *::selection {
+  background: rgba(99, 102, 241, 0.45);
+  color: var(--text-primary);
 }
 
 .note-preview-content h1,
@@ -2597,6 +2604,12 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-live-line-input.is-heading-1 { font-size: 1.5em; }
 .note-live-line-input.is-heading-2 { font-size: 1.3em; }
 .note-live-line-input.is-heading-3 { font-size: 1.15em; }
+
+.note-live-block-input {
+  min-height: 6.4em;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-size: 13px;
+}
 
 @media (max-width: 768px) {
   .note-editor-container,

@@ -4943,6 +4943,14 @@ const sessionManager = {
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
   noteLiveActiveLineIndex: null,
+  noteLiveActiveRange: null,
+  noteLiveSelectionAnchorIndex: null,
+  noteLiveSelectionFocusIndex: null,
+  noteLivePointerDown: null,
+  noteUndoStack: [],
+  noteRedoStack: [],
+  noteHistoryLimit: 100,
+  noteIsApplyingHistory: false,
 
   // Auto-save state
   noteAutoSaveTimeout: null,
@@ -5489,6 +5497,7 @@ const sessionManager = {
     if (contentInput) {
       contentInput.value = '';
     }
+    this.resetNoteHistory();
     this.setNotePreviewMode(false);
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) saveBtn.textContent = 'Create Note';
@@ -5646,6 +5655,7 @@ const sessionManager = {
     if (contentInput) {
       contentInput.value = note.content || '';
     }
+    this.resetNoteHistory();
     this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
@@ -6099,14 +6109,22 @@ const sessionManager = {
       }
     } else {
       this.noteLiveActiveLineIndex = null;
+      this.noteLiveActiveRange = null;
+      this.noteLiveSelectionAnchorIndex = null;
+      this.noteLiveSelectionFocusIndex = null;
+      this.noteLivePointerDown = null;
       editorContainer?.classList.remove('is-previewing');
       if (contentInput) contentInput.style.display = 'block';
       if (previewContent) {
         previewContent.style.display = 'none';
         previewContent.innerHTML = '';
+        previewContent.onmousedown = null;
+        previewContent.onmouseup = null;
         previewContent.onclick = null;
         previewContent.onkeydown = null;
         previewContent.oninput = null;
+        previewContent.onpaste = null;
+        previewContent.oncut = null;
         previewContent.onfocusout = null;
       }
       if (previewToggle) {
@@ -6115,6 +6133,104 @@ const sessionManager = {
         previewToggle.title = 'Show live preview';
       }
     }
+  },
+
+  resetNoteHistory() {
+    this.noteUndoStack = [];
+    this.noteRedoStack = [];
+    this.noteIsApplyingHistory = false;
+  },
+
+  getNoteContentValue() {
+    const contentInput = document.getElementById('noteContentInput');
+    return String(contentInput?.value || '');
+  },
+
+  setNoteContentValue(value) {
+    const contentInput = document.getElementById('noteContentInput');
+    if (!contentInput) return;
+    contentInput.value = String(value || '');
+  },
+
+  pushNoteUndoState() {
+    if (this.noteIsApplyingHistory) return;
+    const currentValue = this.getNoteContentValue();
+    if (this.noteUndoStack[this.noteUndoStack.length - 1] === currentValue) return;
+    this.noteUndoStack.push(currentValue);
+    if (this.noteUndoStack.length > this.noteHistoryLimit) {
+      this.noteUndoStack.shift();
+    }
+    this.noteRedoStack = [];
+  },
+
+  applyNoteHistoryState(value, options = {}) {
+    this.noteIsApplyingHistory = true;
+    this.setNoteContentValue(value);
+    this.noteLiveActiveRange = null;
+    this.noteLiveActiveLineIndex = null;
+    this.noteLiveSelectionAnchorIndex = null;
+    this.noteLiveSelectionFocusIndex = null;
+    this.noteLivePointerDown = null;
+    this.clearNoteLiveSelection();
+    this.scheduleNoteAutoSave();
+    this.noteIsApplyingHistory = false;
+
+    if (this.isNotePreviewMode) {
+      this.renderNoteLiveEditor();
+      const lines = this.getNoteContentLines();
+      const focusIndex = Math.max(0, Math.min(options.focusLineIndex ?? 0, lines.length - 1));
+      const focusLine = document.querySelector(`.note-live-line-rendered[data-line-index="${focusIndex}"]`);
+      focusLine?.focus({ preventScroll: true });
+    }
+  },
+
+  undoNoteEdit() {
+    if (this.noteUndoStack.length === 0) return false;
+    const currentValue = this.getNoteContentValue();
+    const previousValue = this.noteUndoStack.pop();
+    this.noteRedoStack.push(currentValue);
+    this.applyNoteHistoryState(previousValue);
+    return true;
+  },
+
+  redoNoteEdit() {
+    if (this.noteRedoStack.length === 0) return false;
+    const currentValue = this.getNoteContentValue();
+    const nextValue = this.noteRedoStack.pop();
+    this.noteUndoStack.push(currentValue);
+    this.applyNoteHistoryState(nextValue);
+    return true;
+  },
+
+  isNoteUndoShortcut(event) {
+    return (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z' && !event.shiftKey;
+  },
+
+  isNoteRedoShortcut(event) {
+    const key = event.key.toLowerCase();
+    return (event.metaKey || event.ctrlKey)
+      && !event.altKey
+      && ((key === 'z' && event.shiftKey) || key === 'y');
+  },
+
+  handleNoteHistoryShortcut(event) {
+    if (this.isNoteUndoShortcut(event)) {
+      if (this.undoNoteEdit()) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    if (this.isNoteRedoShortcut(event)) {
+      if (this.redoNoteEdit()) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    return false;
   },
 
   refreshNotePreview() {
@@ -6128,9 +6244,7 @@ const sessionManager = {
   },
 
   setNoteContentLines(lines) {
-    const contentInput = document.getElementById('noteContentInput');
-    if (!contentInput) return;
-    contentInput.value = lines.join('\n');
+    this.setNoteContentValue(lines.join('\n'));
   },
 
   noteLineKindClass(line) {
@@ -6147,24 +6261,48 @@ const sessionManager = {
     if (!previewContent || !this.isNotePreviewMode) return;
 
     const lines = this.getNoteContentLines();
+    const activeRange = this.noteLiveActiveRange
+      ? {
+          start: Math.max(0, Math.min(this.noteLiveActiveRange.start, lines.length - 1)),
+          end: Math.max(0, Math.min(this.noteLiveActiveRange.end, lines.length - 1))
+        }
+      : null;
     const focusLineIndex = Number.isInteger(options.focusLineIndex)
       ? options.focusLineIndex
       : this.noteLiveActiveLineIndex;
-    const activeLineIndex = Number.isInteger(focusLineIndex)
+    const activeLineIndex = !activeRange && Number.isInteger(focusLineIndex)
       ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
       : null;
     this.noteLiveActiveLineIndex = activeLineIndex;
 
-    previewContent.innerHTML = lines.map((line, index) => {
-      if (index === activeLineIndex) {
-        return this.renderNoteLiveInputLine(line, index);
+    const html = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      if (activeRange && index === activeRange.start) {
+        html.push(this.renderNoteLiveRangeInput(lines.slice(activeRange.start, activeRange.end + 1).join('\n'), activeRange.start, activeRange.end));
+        index = activeRange.end;
+        continue;
       }
-      return this.renderNoteLiveRenderedLine(line, index);
-    }).join('');
+      if (index === activeLineIndex) {
+        html.push(this.renderNoteLiveInputLine(lines[index], index));
+        continue;
+      }
+      html.push(this.renderNoteLiveRenderedLine(lines[index], index));
+    }
+    previewContent.innerHTML = html.join('');
 
     this.bindNoteLiveEditorEvents(previewContent);
 
-    if (activeLineIndex !== null) {
+    if (activeRange) {
+      const input = previewContent.querySelector('.note-live-block-input');
+      if (input) {
+        const cursorPosition = Number.isInteger(options.cursorPosition)
+          ? Math.max(0, Math.min(options.cursorPosition, input.value.length))
+          : input.value.length;
+        input.focus();
+        input.setSelectionRange(cursorPosition, cursorPosition);
+        this.resizeNoteLiveInput(input);
+      }
+    } else if (activeLineIndex !== null) {
       const input = previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`);
       if (input) {
         const cursorPosition = Number.isInteger(options.cursorPosition)
@@ -6187,6 +6325,14 @@ const sessionManager = {
     `;
   },
 
+  renderNoteLiveRangeInput(markdown, startIndex, endIndex) {
+    return `
+      <div class="note-live-line is-editing is-block-editing" data-line-index="${startIndex}" data-line-end="${endIndex}">
+        <textarea class="note-live-line-input note-live-block-input" data-line-start="${startIndex}" data-line-end="${endIndex}" spellcheck="true">${this.escapeHtml(markdown)}</textarea>
+      </div>
+    `;
+  },
+
   renderNoteLiveRenderedLine(line, index) {
     const kindClass = this.noteLineKindClass(line);
     const emptyClass = line ? '' : ' is-empty';
@@ -6198,10 +6344,35 @@ const sessionManager = {
   },
 
   bindNoteLiveEditorEvents(previewContent) {
+    previewContent.onmousedown = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') {
+        this.noteLivePointerDown = null;
+        return;
+      }
+      const renderedLine = target.closest('.note-live-line-rendered');
+      this.noteLivePointerDown = renderedLine && previewContent.contains(renderedLine)
+        ? {
+            lineIndex: Number(renderedLine.dataset.lineIndex),
+            x: event.clientX,
+            y: event.clientY
+          }
+        : null;
+    };
+
+    previewContent.onmouseup = () => {
+      window.setTimeout(() => {
+        if (this.hasNoteLiveTextSelection(previewContent)) {
+          previewContent.focus({ preventScroll: true });
+        }
+      }, 0);
+    };
+
     previewContent.onclick = (event) => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
       if (target === previewContent) {
+        if (this.hasNoteLiveTextSelection(previewContent)) return;
         const lines = this.getNoteContentLines();
         this.activateNoteLiveLine(lines.length - 1, (lines[lines.length - 1] || '').length);
         return;
@@ -6209,14 +6380,34 @@ const sessionManager = {
       const renderedLine = target.closest('.note-live-line-rendered');
       if (!renderedLine || !previewContent.contains(renderedLine)) return;
       const lineIndex = Number(renderedLine.dataset.lineIndex);
-      if (Number.isInteger(lineIndex)) {
-        this.activateNoteLiveLine(lineIndex);
+      if (!Number.isInteger(lineIndex)) return;
+
+      if (event.shiftKey) {
+        event.preventDefault();
+        this.selectNoteLiveLineRange(this.noteLiveSelectionAnchorIndex ?? lineIndex, lineIndex);
+        return;
       }
+
+      if (this.hasNoteLiveTextSelection(previewContent) || this.didNoteLivePointerDrag(event)) {
+        this.noteLiveSelectionAnchorIndex = lineIndex;
+        this.noteLivePointerDown = null;
+        return;
+      }
+
+      this.clearNoteLiveSelection();
+      this.activateNoteLiveLine(lineIndex);
     };
 
     previewContent.onkeydown = (event) => {
+      if (this.handleNoteHistoryShortcut(event)) return;
+
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
+      const blockInput = target.closest('.note-live-block-input');
+      if (blockInput && previewContent.contains(blockInput)) {
+        this.handleNoteLiveRangeInputKeydown(event, blockInput);
+        return;
+      }
       const input = target.closest('.note-live-line-input');
       if (input && previewContent.contains(input)) {
         this.handleNoteLiveInputKeydown(event, input);
@@ -6224,23 +6415,94 @@ const sessionManager = {
       }
 
       const renderedLine = target.closest('.note-live-line-rendered');
+      const selectedRange = this.getNoteLiveSelectedLineRange(previewContent);
+
+      if (selectedRange) {
+        if (event.key === 'Backspace' || event.key === 'Delete') {
+          event.preventDefault();
+          this.deleteNoteLiveLineRange(selectedRange);
+          return;
+        }
+
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.editNoteLiveLineRange(selectedRange);
+          return;
+        }
+
+        if (this.isNoteLivePrintableKey(event)) {
+          event.preventDefault();
+          this.replaceNoteLiveLineRange(selectedRange, event.key);
+          return;
+        }
+      }
+
       if (!renderedLine || !previewContent.contains(renderedLine)) return;
+      const lineIndex = Number(renderedLine.dataset.lineIndex);
+      if (!Number.isInteger(lineIndex)) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        const lines = this.getNoteContentLines();
+        this.selectNoteLiveLineRange(0, Math.max(0, lines.length - 1));
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        this.clearNoteLiveSelection();
+        return;
+      }
+
+      if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        const direction = event.key === 'ArrowUp' ? -1 : 1;
+        const lines = this.getNoteContentLines();
+        const nextIndex = Math.max(0, Math.min(lineIndex + direction, lines.length - 1));
+        this.selectNoteLiveLineRange(this.noteLiveSelectionAnchorIndex ?? lineIndex, nextIndex);
+        return;
+      }
+
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        const lineIndex = Number(renderedLine.dataset.lineIndex);
-        if (Number.isInteger(lineIndex)) {
-          this.activateNoteLiveLine(lineIndex);
-        }
+        this.clearNoteLiveSelection();
+        this.activateNoteLiveLine(lineIndex);
       }
     };
 
     previewContent.oninput = (event) => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
+      const blockInput = target.closest('.note-live-block-input');
+      if (blockInput && previewContent.contains(blockInput)) {
+        this.handleNoteLiveRangeInputChange(blockInput);
+        return;
+      }
       const input = target.closest('.note-live-line-input');
       if (input && previewContent.contains(input)) {
         this.handleNoteLiveInputChange(input);
       }
+    };
+
+    previewContent.onpaste = (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      const selectedRange = this.getNoteLiveSelectedLineRange(previewContent);
+      if (!selectedRange) return;
+      const pastedText = event.clipboardData?.getData('text/plain') || '';
+      event.preventDefault();
+      this.replaceNoteLiveLineRange(selectedRange, pastedText);
+    };
+
+    previewContent.oncut = (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      const selectedRange = this.getNoteLiveSelectedLineRange(previewContent);
+      if (!selectedRange) return;
+      const lines = this.getNoteContentLines();
+      const markdown = lines.slice(selectedRange.start, selectedRange.end + 1).join('\n');
+      event.clipboardData?.setData('text/plain', markdown);
+      event.preventDefault();
+      this.deleteNoteLiveLineRange(selectedRange);
     };
 
     previewContent.onfocusout = (event) => {
@@ -6248,15 +6510,153 @@ const sessionManager = {
       window.setTimeout(() => {
         const activeElement = document.activeElement;
         if (activeElement && previewContent.contains(activeElement)) return;
-        if (this.isNotePreviewMode && this.noteLiveActiveLineIndex !== null) {
+        if (this.isNotePreviewMode && (this.noteLiveActiveLineIndex !== null || this.noteLiveActiveRange !== null)) {
           this.noteLiveActiveLineIndex = null;
+          this.noteLiveActiveRange = null;
           this.renderNoteLiveEditor();
         }
       }, 0);
     };
   },
 
+  noteLiveSelectionContains(container, node) {
+    if (!container || !node) return false;
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return Boolean(element && container.contains(element));
+  },
+
+  hasNoteLiveTextSelection(container) {
+    const selection = window.getSelection?.();
+    if (!selection || selection.isCollapsed) return false;
+    return this.noteLiveSelectionContains(container, selection.anchorNode)
+      && this.noteLiveSelectionContains(container, selection.focusNode);
+  },
+
+  didNoteLivePointerDrag(event) {
+    const start = this.noteLivePointerDown;
+    if (!start) return false;
+    const distanceX = Math.abs(event.clientX - start.x);
+    const distanceY = Math.abs(event.clientY - start.y);
+    return distanceX > 4 || distanceY > 4;
+  },
+
+  clearNoteLiveSelection() {
+    const selection = window.getSelection?.();
+    if (selection && !selection.isCollapsed) {
+      selection.removeAllRanges();
+    }
+    this.noteLiveSelectionFocusIndex = null;
+  },
+
+  selectNoteLiveLineRange(anchorIndex, focusIndex) {
+    const previewContent = document.getElementById('notePreviewContent');
+    if (!previewContent) return;
+
+    if (this.noteLiveActiveLineIndex !== null) {
+      this.noteLiveActiveLineIndex = null;
+      this.renderNoteLiveEditor();
+    }
+
+    const lines = this.getNoteContentLines();
+    const maxIndex = Math.max(0, lines.length - 1);
+    const normalizedAnchor = Math.max(0, Math.min(anchorIndex, maxIndex));
+    const normalizedFocus = Math.max(0, Math.min(focusIndex, maxIndex));
+    const startIndex = Math.min(normalizedAnchor, normalizedFocus);
+    const endIndex = Math.max(normalizedAnchor, normalizedFocus);
+    const startLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${startIndex}"]`);
+    const endLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${endIndex}"]`);
+
+    if (!startLine || !endLine) return;
+
+    const range = document.createRange();
+    range.setStartBefore(startLine);
+    range.setEndAfter(endLine);
+
+    const selection = window.getSelection?.();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    const focusLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${normalizedFocus}"]`);
+    focusLine?.focus({ preventScroll: true });
+    this.noteLiveSelectionAnchorIndex = normalizedAnchor;
+    this.noteLiveSelectionFocusIndex = normalizedFocus;
+  },
+
+  getNoteLiveSelectedLineRange(container) {
+    const selection = window.getSelection?.();
+    if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+    if (!this.noteLiveSelectionContains(container, selection.anchorNode)
+      || !this.noteLiveSelectionContains(container, selection.focusNode)) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    const selectedIndexes = Array.from(container.querySelectorAll('.note-live-line-rendered'))
+      .filter(line => {
+        try {
+          return range.intersectsNode(line);
+        } catch {
+          return false;
+        }
+      })
+      .map(line => Number(line.dataset.lineIndex))
+      .filter(Number.isInteger);
+
+    if (selectedIndexes.length === 0) return null;
+    return {
+      start: Math.min(...selectedIndexes),
+      end: Math.max(...selectedIndexes)
+    };
+  },
+
+  isNoteLivePrintableKey(event) {
+    return event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
+  },
+
+  deleteNoteLiveLineRange(range) {
+    const lines = this.getNoteContentLines();
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.pushNoteUndoState();
+    lines.splice(start, end - start + 1);
+    if (lines.length === 0) lines.push('');
+    this.setNoteContentLines(lines);
+    this.noteLiveActiveRange = null;
+    this.clearNoteLiveSelection();
+    this.scheduleNoteAutoSave();
+    this.activateNoteLiveLine(Math.min(start, lines.length - 1), 0);
+  },
+
+  replaceNoteLiveLineRange(range, replacement) {
+    const lines = this.getNoteContentLines();
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.pushNoteUndoState();
+    lines.splice(start, end - start + 1, replacement);
+    this.setNoteContentLines(lines);
+    this.noteLiveActiveRange = null;
+    this.clearNoteLiveSelection();
+    this.scheduleNoteAutoSave();
+    this.activateNoteLiveLine(start, replacement.length);
+  },
+
+  editNoteLiveLineRange(range) {
+    const lines = this.getNoteContentLines();
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.clearNoteLiveSelection();
+    this.noteLiveActiveLineIndex = null;
+    this.noteLiveActiveRange = { start, end };
+    this.renderNoteLiveEditor({ cursorPosition: lines.slice(start, end + 1).join('\n').length });
+  },
+
   activateNoteLiveLine(lineIndex, cursorPosition = null) {
+    this.noteLiveSelectionAnchorIndex = lineIndex;
+    this.noteLiveSelectionFocusIndex = null;
+    this.noteLivePointerDown = null;
+    this.noteLiveActiveRange = null;
     this.noteLiveActiveLineIndex = lineIndex;
     this.renderNoteLiveEditor({ focusLineIndex: lineIndex, cursorPosition });
   },
@@ -6268,6 +6668,7 @@ const sessionManager = {
     const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
     const lines = this.getNoteContentLines();
     const parts = normalizedValue.split('\n');
+    this.pushNoteUndoState();
 
     if (parts.length > 1) {
       lines.splice(lineIndex, 1, ...parts);
@@ -6290,6 +6691,36 @@ const sessionManager = {
     this.scheduleNoteAutoSave();
   },
 
+  handleNoteLiveRangeInputChange(input) {
+    const start = Number(input.dataset.lineStart);
+    const end = Number(input.dataset.lineEnd);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return;
+
+    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
+    const parts = normalizedValue.split('\n');
+    const lines = this.getNoteContentLines();
+    this.pushNoteUndoState();
+    lines.splice(start, end - start + 1, ...parts);
+    this.setNoteContentLines(lines);
+
+    const newEnd = start + parts.length - 1;
+    input.dataset.lineEnd = String(newEnd);
+    input.closest('.note-live-line')?.setAttribute('data-line-end', String(newEnd));
+    this.noteLiveActiveRange = { start, end: newEnd };
+    this.resizeNoteLiveInput(input);
+    this.scheduleNoteAutoSave();
+  },
+
+  handleNoteLiveRangeInputKeydown(event, input) {
+    if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === 'Enter')) {
+      event.preventDefault();
+      this.handleNoteLiveRangeInputChange(input);
+      this.noteLiveActiveRange = null;
+      this.noteLiveActiveLineIndex = null;
+      this.renderNoteLiveEditor();
+    }
+  },
+
   handleNoteLiveInputKeydown(event, input) {
     const lineIndex = Number(input.dataset.lineIndex);
     if (!Number.isInteger(lineIndex)) return;
@@ -6303,6 +6734,7 @@ const sessionManager = {
       event.preventDefault();
       const before = value.slice(0, selectionStart);
       const after = value.slice(selectionEnd);
+      this.pushNoteUndoState();
       lines.splice(lineIndex, 1, before, after);
       this.setNoteContentLines(lines);
       this.scheduleNoteAutoSave();
@@ -6313,6 +6745,7 @@ const sessionManager = {
     if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && lineIndex > 0) {
       event.preventDefault();
       const previousLine = lines[lineIndex - 1] || '';
+      this.pushNoteUndoState();
       lines.splice(lineIndex - 1, 2, previousLine + value);
       this.setNoteContentLines(lines);
       this.scheduleNoteAutoSave();
@@ -6322,6 +6755,7 @@ const sessionManager = {
 
     if (event.key === 'Delete' && selectionStart === value.length && selectionEnd === value.length && lineIndex < lines.length - 1) {
       event.preventDefault();
+      this.pushNoteUndoState();
       lines.splice(lineIndex, 2, value + (lines[lineIndex + 1] || ''));
       this.setNoteContentLines(lines);
       this.scheduleNoteAutoSave();
