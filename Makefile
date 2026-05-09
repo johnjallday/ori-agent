@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
 
 # Default target
 .DEFAULT_GOAL := help
@@ -228,6 +228,11 @@ lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint
 	gofmt -r 'interface{} -> any' -w .
 	golangci-lint run --fix ./... || true
 	@echo "$(GREEN)✓ Auto-fix pass complete (review remaining unparam/modernize findings manually)$(NC)"
+
+test-js: ## Run JS unit tests (Node 18+ built-in test runner; no npm install needed)
+	@echo "$(BLUE)Running JS unit tests...$(NC)"
+	node --test internal/web/static/js/modules/*.test.js
+	@echo "$(GREEN)✓ JS tests passed$(NC)"
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"

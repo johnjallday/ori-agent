@@ -5288,6 +5288,7 @@ const sessionManager = {
       this.scheduleNoteAutoSave();
       if (this.isNotePreviewMode) {
         this.refreshNotePreview();
+        this._scheduleNoteTocRebuild();
       }
     });
 
@@ -5318,6 +5319,11 @@ const sessionManager = {
 
     // Note AI generation toggle
     document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => this.toggleNoteAIPanel());
+
+    // Rail collapse toggles (TOC + AI Assist). The buttons stay hidden until
+    // the corresponding feature (tasks 3.0 / 4.0) reveals them.
+    document.getElementById('noteTocToggle')?.addEventListener('click', () => this.toggleNoteTocRail());
+    document.getElementById('noteAssistToggle')?.addEventListener('click', () => this.toggleNoteAssistRail());
 
     // Note AI generation buttons
     document.getElementById('noteAIGenerateBtn')?.addEventListener('click', () => this.generateNoteWithAI());
@@ -5503,6 +5509,13 @@ const sessionManager = {
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) saveBtn.textContent = 'Create Note';
     this.hideNoteVaultReferenceBadge();
+    this._applyNoteRailState();
+    this._initNoteAIAssist();
+    window.NoteAIAssist?.onNoteOpened({
+      noteId: null,
+      workspaceId: workspaceId || null,
+      agentId: this._resolveWorkspaceAgentId(),
+    });
 
     if (workspaceId) {
       this.showNoteWorkspaceBadge(workspaceId, true);
@@ -5630,6 +5643,26 @@ const sessionManager = {
   },
 
   // Open note editor modal by ID
+  // Opens a note in live-preview mode and scrolls to a specific heading by
+  // text. Used by the global search palette (⌘K) when the user picks a
+  // heading result. Falls back to plain openNoteEditor if the heading can't
+  // be located in the loaded source.
+  async openNoteEditorWithHeading(noteId, headingText) {
+    await this.openNoteEditor(noteId);
+    if (!this.isNotePreviewMode) this.setNotePreviewMode(true);
+    const source = this.getNoteContentValue();
+    const lines = source.split('\n');
+    let cursor = 0;
+    for (const line of lines) {
+      if (/^#{1,6}\s+/.test(line) && line.includes(headingText)) {
+        // Wait one frame for live-preview render to settle, then scroll.
+        requestAnimationFrame(() => this._scrollNoteToHeading(cursor));
+        return;
+      }
+      cursor += line.length + 1;
+    }
+  },
+
   async openNoteEditor(noteId) {
     const note = await this.getNote(noteId);
     if (!note) return;
@@ -5657,6 +5690,13 @@ const sessionManager = {
       contentInput.value = note.content || '';
     }
     this.resetNoteHistory();
+    this._applyNoteRailState();
+    this._initNoteAIAssist();
+    window.NoteAIAssist?.onNoteOpened({
+      noteId: note.id,
+      workspaceId: this.noteModalWorkspaceId,
+      agentId: this._resolveWorkspaceAgentId(),
+    });
     this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
@@ -5903,21 +5943,449 @@ const sessionManager = {
   },
 
   // =============================================================================
+  // Note Editor Rails (TOC + AI Assist)
+  // =============================================================================
+  // Both rails are hidden by default. Tasks 3.0 (TOC) and 4.0 (AI Assist) call
+  // showNoteTocRail() / showNoteAssistRail() once they have content to display.
+  // The collapse toggle is per-rail and persisted in localStorage.
+
+  _NOTE_RAIL_STORAGE_KEYS: {
+    toc: 'note.toc.collapsed',
+    assist: 'note.aiAssist.collapsed',
+  },
+
+  _readNoteRailCollapsed(rail) {
+    try {
+      return localStorage.getItem(this._NOTE_RAIL_STORAGE_KEYS[rail]) === '1';
+    } catch (_) {
+      return false;
+    }
+  },
+
+  _writeNoteRailCollapsed(rail, collapsed) {
+    try {
+      localStorage.setItem(this._NOTE_RAIL_STORAGE_KEYS[rail], collapsed ? '1' : '0');
+    } catch (_) {
+      // ignore quota or privacy-mode failures
+    }
+  },
+
+  _applyNoteRailCollapsed(rail) {
+    const el = document.getElementById(rail === 'toc' ? 'noteTocRail' : 'noteAssistRail');
+    const btn = document.getElementById(rail === 'toc' ? 'noteTocToggle' : 'noteAssistToggle');
+    if (!el) return;
+    const collapsed = this._readNoteRailCollapsed(rail);
+    el.dataset.collapsed = collapsed ? 'true' : 'false';
+    if (btn) btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+  },
+
+  // Apply persisted rail state on modal open. Called from openNoteEditor* and
+  // openNoteCreateModal so the layout doesn't flash.
+  _applyNoteRailState() {
+    this._applyNoteRailCollapsed('toc');
+    this._applyNoteRailCollapsed('assist');
+  },
+
+  // Toggle handlers used by the toolbar buttons.
+  toggleNoteTocRail() {
+    const collapsed = !this._readNoteRailCollapsed('toc');
+    this._writeNoteRailCollapsed('toc', collapsed);
+    this._applyNoteRailCollapsed('toc');
+  },
+
+  toggleNoteAssistRail() {
+    const collapsed = !this._readNoteRailCollapsed('assist');
+    this._writeNoteRailCollapsed('assist', collapsed);
+    this._applyNoteRailCollapsed('assist');
+  },
+
+  // Show / hide methods are called by tasks 3.0 / 4.0 once they have content.
+  showNoteTocRail() {
+    const rail = document.getElementById('noteTocRail');
+    const btn = document.getElementById('noteTocToggle');
+    if (rail) rail.hidden = false;
+    if (btn) btn.hidden = false;
+    this._applyNoteRailCollapsed('toc');
+  },
+
+  hideNoteTocRail() {
+    const rail = document.getElementById('noteTocRail');
+    const btn = document.getElementById('noteTocToggle');
+    if (rail) rail.hidden = true;
+    if (btn) btn.hidden = true;
+  },
+
+  showNoteAssistRail() {
+    const rail = document.getElementById('noteAssistRail');
+    const btn = document.getElementById('noteAssistToggle');
+    if (rail) rail.hidden = false;
+    if (btn) btn.hidden = false;
+    this._applyNoteRailCollapsed('assist');
+  },
+
+  hideNoteAssistRail() {
+    const rail = document.getElementById('noteAssistRail');
+    const btn = document.getElementById('noteAssistToggle');
+    if (rail) rail.hidden = true;
+    if (btn) btn.hidden = true;
+  },
+
+  // =============================================================================
+  // Note AI Assist (selection action bar + sidebar wiring)
+  // =============================================================================
+
+  _initNoteAIAssist() {
+    if (this._aiAssistInitialized) return;
+    if (typeof window === 'undefined' || !window.NoteAIAssist) return;
+    const bar = document.getElementById('noteAIActionBar');
+    const rail = document.getElementById('noteAssistRail');
+    if (!bar || !rail) return;
+    window.NoteAIAssist.init({
+      bar,
+      rail,
+      sessionsApi: {
+        getNoteContent: () => this.getNoteContentValue(),
+        setNoteContent: (value) => {
+          this.setNoteContentValue(value);
+          if (this.isNotePreviewMode) this.renderNoteLiveEditor();
+          this._scheduleNoteTocRebuild?.();
+        },
+        pushUndo: () => this.pushNoteUndoState(),
+        scheduleAutoSave: () => this.scheduleNoteAutoSave(),
+        showToast: (msg, kind) => this.showToast?.(msg, kind),
+        showAssistRail: () => this.showNoteAssistRail(),
+        hideAssistRail: () => this.hideNoteAssistRail(),
+      },
+    });
+    this._wireNoteSelectionTracking();
+    this._wireNoteAIAgentChange();
+    // Populate the agent dropdown eagerly so AI Assist has something to use
+    // without requiring the user to open the whole-note Generate panel first.
+    this.loadNoteAIAgents().then(() => {
+      const select = document.getElementById('noteAIAgentSelect');
+      if (select && !select.value) {
+        const first = Array.from(select.options).find(o => o.value);
+        if (first) select.value = first.value;
+      }
+      window.NoteAIAssist?.onAgentChanged(this._resolveWorkspaceAgentId());
+    });
+    this._aiAssistInitialized = true;
+  },
+
+  _wireNoteAIAgentChange() {
+    if (this._aiAgentChangeWired) return;
+    document.getElementById('noteAIAgentSelect')?.addEventListener('change', () => {
+      window.NoteAIAssist?.onAgentChanged(this._resolveWorkspaceAgentId());
+    });
+    this._aiAgentChangeWired = true;
+  },
+
+  _resolveWorkspaceAgentId() {
+    // Prefer the agent dropdown the user already configured for whole-note
+    // generation; later we can replace this with a true workspace-default.
+    const select = document.getElementById('noteAIAgentSelect');
+    return select?.value || null;
+  },
+
+  _wireNoteSelectionTracking() {
+    if (this._aiAssistSelectionWired) return;
+    const update = () => {
+      if (typeof window === 'undefined' || !window.NoteAIAssist) return;
+      window.NoteAIAssist.onSelectionChanged(this._readNoteSelection());
+    };
+    document.addEventListener('selectionchange', () => update());
+    document.getElementById('noteContentInput')?.addEventListener('select', () => update());
+    document.getElementById('noteContentInput')?.addEventListener('keyup', () => update());
+    document.getElementById('noteContentInput')?.addEventListener('mouseup', () => update());
+    // Hide the bar on Esc.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') window.NoteAIAssist?.hideBar();
+    });
+    this._aiAssistSelectionWired = true;
+  },
+
+  // _readNoteSelection returns { text, source, range, anchorRect } or null.
+  // `source` is 'textarea' or 'preview'. `range` is { start, end } in source
+  // markdown coordinates if computable (preview path), else null.
+  _readNoteSelection() {
+    const modal = document.getElementById('noteEditorModal');
+    if (!modal || !modal.classList.contains('show')) return null;
+
+    // Plain-edit textarea path
+    if (!this.isNotePreviewMode) {
+      const ta = document.getElementById('noteContentInput');
+      if (!ta || document.activeElement !== ta) return null;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      if (start === end) return null;
+      const text = ta.value.slice(start, end);
+      const rect = ta.getBoundingClientRect();
+      return {
+        text,
+        source: 'textarea',
+        range: { start, end },
+        // Anchor at the top-right of the textarea — caret position inside a
+        // textarea isn't trivially available without canvas measurement.
+        anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
+      };
+    }
+
+    // Live-preview path — use document selection
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const previewPane = document.getElementById('notePreviewContent');
+    if (!previewPane) return null;
+    const range = sel.getRangeAt(0);
+    if (!previewPane.contains(range.commonAncestorContainer)) return null;
+    const text = sel.toString();
+    if (!text || !text.trim()) return null;
+    const anchorRect = range.getBoundingClientRect();
+
+    // Try to map selection text back to source markdown coordinates by string
+    // search. Cheap heuristic — good enough until v2 range stability lands.
+    const source = this.getNoteContentValue();
+    const idx = source.indexOf(text);
+    const sourceRange = idx >= 0 ? { start: idx, end: idx + text.length } : null;
+
+    return { text, source: 'preview', range: sourceRange, anchorRect };
+  },
+
+  // Called by AI Assist when the rail is collapsed by the user — keep state in sync.
+
+  // =============================================================================
+  // Note TOC (live-preview only)
+  // =============================================================================
+  // Builds an outline from the rendered Markdown headings via NoteTOC.buildOutline,
+  // renders it into the left rail, syncs the active-section indicator on scroll,
+  // and supports drag-reorder of sections in the underlying Markdown source.
+
+  // Debounced wrapper called from the input listener — TOC rebuild is cheap
+  // but we still avoid running on every keystroke.
+  _scheduleNoteTocRebuild() {
+    if (this._noteTocRebuildTimer) clearTimeout(this._noteTocRebuildTimer);
+    this._noteTocRebuildTimer = setTimeout(() => {
+      this._noteTocRebuildTimer = null;
+      this._renderNoteTocOutline();
+    }, 250);
+  },
+
+  _renderNoteTocOutline() {
+    if (!this.isNotePreviewMode) {
+      this.hideNoteTocRail();
+      this._teardownNoteTocActiveObserver();
+      return;
+    }
+    if (typeof window === 'undefined' || !window.NoteTOC) return;
+    const rail = document.getElementById('noteTocRail');
+    if (!rail) return;
+
+    const empty = rail.querySelector('[data-role="empty"]');
+    const content = rail.querySelector('[data-role="content"]');
+    if (!empty || !content) return;
+
+    const outline = window.NoteTOC.buildOutline(this.getNoteContentValue());
+    const flat = [];
+    const flatten = (nodes) => {
+      for (const n of nodes) {
+        flat.push(n);
+        if (n.children && n.children.length) flatten(n.children);
+      }
+    };
+    flatten(outline);
+
+    this.showNoteTocRail();
+    if (flat.length === 0) {
+      empty.style.display = '';
+      content.style.display = 'none';
+      content.innerHTML = '';
+      this._teardownNoteTocActiveObserver();
+      return;
+    }
+    empty.style.display = 'none';
+    content.style.display = '';
+
+    const list = document.createElement('ul');
+    list.className = 'note-toc-list';
+    for (const h of flat) {
+      const li = document.createElement('li');
+      li.className = 'note-toc-item';
+      li.dataset.level = String(h.level);
+      li.dataset.position = String(h.position);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'note-toc-entry';
+      btn.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
+      btn.textContent = h.text;
+      btn.title = h.text;
+      btn.draggable = true;
+      btn.addEventListener('click', () => this._scrollNoteToHeading(h.position));
+      btn.addEventListener('dragstart', (e) => this._onNoteTocDragStart(e, h.position));
+      btn.addEventListener('dragend', () => this._onNoteTocDragEnd());
+      btn.addEventListener('dragover', (e) => this._onNoteTocDragOver(e, h.position));
+      btn.addEventListener('drop', (e) => this._onNoteTocDrop(e, h.position));
+
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
+    content.replaceChildren(list);
+
+    this._attachNoteTocActiveObserver();
+  },
+
+  // Find the rendered heading element in the live-preview pane that matches
+  // the source Markdown position, and smooth-scroll it to the top of the view.
+  _scrollNoteToHeading(position) {
+    const previewPane = document.getElementById('notePreviewContent');
+    if (!previewPane) return;
+    const target = this._findRenderedHeadingByPosition(position);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  // Live-preview rendering attaches one element per source line. Heading lines
+  // carry `is-heading-N` plus `data-line-index` equal to the source line index;
+  // we look up by source position by scanning lines until we hit the right offset.
+  _findRenderedHeadingByPosition(position) {
+    const previewPane = document.getElementById('notePreviewContent');
+    if (!previewPane) return null;
+    const source = this.getNoteContentValue();
+    let lineIndex = 0;
+    let cursor = 0;
+    while (cursor < source.length && cursor < position) {
+      const nl = source.indexOf('\n', cursor);
+      if (nl < 0 || nl >= position) break;
+      cursor = nl + 1;
+      lineIndex++;
+    }
+    return previewPane.querySelector(`.note-live-line-rendered[data-line-index="${lineIndex}"]`);
+  },
+
+  _attachNoteTocActiveObserver() {
+    this._teardownNoteTocActiveObserver();
+    if (typeof IntersectionObserver === 'undefined') return;
+    const previewPane = document.getElementById('notePreviewContent');
+    if (!previewPane) return;
+    const headingEls = previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]');
+    if (!headingEls.length) return;
+
+    const visible = new Map();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.set(entry.target, entry.intersectionRatio);
+        else visible.delete(entry.target);
+      }
+      // Choose the topmost intersecting heading.
+      let top = null;
+      let topY = Infinity;
+      for (const el of visible.keys()) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < topY) {
+          topY = rect.top;
+          top = el;
+        }
+      }
+      if (top) this._setActiveTocEntry(top.dataset.lineIndex);
+    }, { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] });
+
+    headingEls.forEach(el => observer.observe(el));
+    this._noteTocActiveObserver = observer;
+  },
+
+  _teardownNoteTocActiveObserver() {
+    if (this._noteTocActiveObserver) {
+      this._noteTocActiveObserver.disconnect();
+      this._noteTocActiveObserver = null;
+    }
+  },
+
+  _setActiveTocEntry(lineIndex) {
+    if (lineIndex == null) return;
+    const rail = document.getElementById('noteTocRail');
+    if (!rail) return;
+    const source = this.getNoteContentValue();
+    let cursor = 0;
+    let line = 0;
+    while (line < Number(lineIndex) && cursor < source.length) {
+      const nl = source.indexOf('\n', cursor);
+      if (nl < 0) break;
+      cursor = nl + 1;
+      line++;
+    }
+    const target = rail.querySelector(`[data-position="${cursor}"]`);
+    rail.querySelectorAll('.note-toc-item').forEach(el => {
+      el.removeAttribute('aria-current');
+      el.classList.remove('is-active');
+    });
+    if (target) {
+      target.setAttribute('aria-current', 'location');
+      target.classList.add('is-active');
+    }
+  },
+
+  _onNoteTocDragStart(e, position) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(position));
+    this._noteTocDragSource = position;
+    e.currentTarget.closest('.note-toc-item')?.classList.add('is-dragging');
+  },
+
+  _onNoteTocDragOver(e, position) {
+    if (this._noteTocDragSource == null || this._noteTocDragSource === position) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const item = e.currentTarget.closest('.note-toc-item');
+    if (!item) return;
+    document.querySelectorAll('.note-toc-item.is-drop-target')
+      .forEach(el => el.classList.remove('is-drop-target'));
+    item.classList.add('is-drop-target');
+  },
+
+  _onNoteTocDragEnd() {
+    document.querySelectorAll('.note-toc-item.is-dragging, .note-toc-item.is-drop-target')
+      .forEach(el => el.classList.remove('is-dragging', 'is-drop-target'));
+    this._noteTocDragSource = null;
+  },
+
+  _onNoteTocDrop(e, targetPosition) {
+    e.preventDefault();
+    const source = this._noteTocDragSource;
+    this._onNoteTocDragEnd();
+    if (source == null || source === targetPosition) return;
+    if (typeof window === 'undefined' || !window.NoteTOC) return;
+    const next = window.NoteTOC.moveHeadingRange(this.getNoteContentValue(), source, targetPosition);
+    if (next == null || next === this.getNoteContentValue()) return;
+    this.pushNoteUndoState();
+    this.setNoteContentValue(next);
+    this.scheduleNoteAutoSave();
+    this.renderNoteLiveEditor();
+    this._renderNoteTocOutline();
+  },
+
+  // =============================================================================
   // Note AI Generation
   // =============================================================================
 
-  // Toggle AI generation panel visibility
+  // Toggle AI generation panel visibility. The panel now lives inside the
+  // right-side AI Assist rail; opening it temporarily hides the suggestion
+  // stack so the form is the only visible content.
   toggleNoteAIPanel() {
     const panel = document.getElementById('noteAIGeneratePanel');
     const toggle = document.getElementById('noteGenerateAIToggle');
     if (!panel) return;
 
     const isVisible = panel.style.display !== 'none';
-    panel.style.display = isVisible ? 'none' : 'block';
-    toggle?.classList.toggle('ai-active', !isVisible);
+    if (isVisible) {
+      this.hideNoteAIPanel();
+    } else {
+      panel.style.display = 'block';
+      toggle?.classList.add('ai-active');
+      this._showAssistRailForGenerate();
+    }
   },
 
-  // Hide AI generation panel
+  // Hide AI generation panel and restore the rail to its normal state.
   hideNoteAIPanel() {
     const panel = document.getElementById('noteAIGeneratePanel');
     const toggle = document.getElementById('noteGenerateAIToggle');
@@ -5932,6 +6400,28 @@ const sessionManager = {
     if (errorDiv) errorDiv.style.display = 'none';
     if (generatingDiv) generatingDiv.style.display = 'none';
     if (generateBtn) generateBtn.disabled = false;
+    this._restoreAssistRailFromGenerate();
+  },
+
+  // Show the rail in "generate" mode: hides cards/empty/status so only the
+  // generate panel is visible. Tracks whether we hid the rail entirely so
+  // we can restore it correctly.
+  _showAssistRailForGenerate() {
+    this.showNoteAssistRail();
+    const rail = document.getElementById('noteAssistRail');
+    if (!rail) return;
+    rail.classList.add('is-generating');
+    this._assistRailGenerateActive = true;
+  },
+
+  _restoreAssistRailFromGenerate() {
+    const rail = document.getElementById('noteAssistRail');
+    if (rail) rail.classList.remove('is-generating');
+    if (!this._assistRailGenerateActive) return;
+    this._assistRailGenerateActive = false;
+    // Let the AI Assist module decide whether to show the rail (cards present)
+    // or hide it (no cards). render() handles both.
+    window.NoteAIAssist?.render?.();
   },
 
   // Load agents for AI generation dropdown
@@ -6108,6 +6598,7 @@ const sessionManager = {
         previewToggle.setAttribute('aria-pressed', 'true');
         previewToggle.title = 'Use plain Markdown editor';
       }
+      this._renderNoteTocOutline();
     } else {
       this.noteLiveActiveLineIndex = null;
       this.noteLiveActiveRange = null;
@@ -6134,6 +6625,8 @@ const sessionManager = {
         previewToggle.setAttribute('aria-pressed', 'false');
         previewToggle.title = 'Show live preview';
       }
+      this.hideNoteTocRail();
+      this._teardownNoteTocActiveObserver();
     }
   },
 
