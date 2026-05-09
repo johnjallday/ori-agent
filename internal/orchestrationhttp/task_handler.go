@@ -1309,7 +1309,9 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 		if len(incompleteSubtasks) <= 3 {
 			message = fmt.Sprintf("%s: %s", message, strings.Join(incompleteSubtasks, ", "))
 		}
-		orihttp.RespondError(w, http.StatusConflict, message)
+		if err := orihttp.RespondError(w, http.StatusConflict, message); err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 

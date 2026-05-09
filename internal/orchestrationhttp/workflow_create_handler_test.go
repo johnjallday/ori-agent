@@ -11,7 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func newWorkflowTestHandler(t *testing.T) (*TaskHandler, *workspace.Workspace, workspace.Store) {
+func newWorkflowTestHandler(t *testing.T) (*TaskHandler, *workspace.Workspace) {
 	t.Helper()
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workflow Tests"})
@@ -23,7 +23,7 @@ func newWorkflowTestHandler(t *testing.T) (*TaskHandler, *workspace.Workspace, w
 		workspaceStore: store,
 		communicator:   agentcomm.NewCommunicator(store),
 	}
-	return handler, ws, store
+	return handler, ws
 }
 
 func postJSON(t *testing.T, handler *TaskHandler, body interface{}) *httptest.ResponseRecorder {
@@ -40,7 +40,7 @@ func postJSON(t *testing.T, handler *TaskHandler, body interface{}) *httptest.Re
 }
 
 func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
-	handler, ws, _ := newWorkflowTestHandler(t)
+	handler, ws := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id": ws.ID,
@@ -96,7 +96,7 @@ func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
 }
 
 func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
-	handler, ws, _ := newWorkflowTestHandler(t)
+	handler, ws := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id": ws.ID,
@@ -151,7 +151,7 @@ func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
 }
 
 func TestWorkflowCreate_RejectsUnknownInputWithStructuredIssue(t *testing.T) {
-	handler, _, _ := newWorkflowTestHandler(t)
+	handler, _ := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id": "ws-workflows",
@@ -189,7 +189,7 @@ func TestWorkflowCreate_RejectsUnknownInputWithStructuredIssue(t *testing.T) {
 }
 
 func TestWorkflowCreate_RejectsMissingParentID(t *testing.T) {
-	handler, _, _ := newWorkflowTestHandler(t)
+	handler, _ := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id": "ws-workflows",
@@ -210,7 +210,7 @@ func TestWorkflowCreate_RejectsMissingParentID(t *testing.T) {
 }
 
 func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
-	handler, ws, _ := newWorkflowTestHandler(t)
+	handler, ws := newWorkflowTestHandler(t)
 	if err := ws.AddTask(workspace.Task{ID: "existing-parent", Description: "Existing parent"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
 }
 
 func TestWorkflowCreate_AttachRejectsMissingParent(t *testing.T) {
-	handler, _, _ := newWorkflowTestHandler(t)
+	handler, _ := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id":        "ws-workflows",
@@ -271,7 +271,7 @@ func TestWorkflowCreate_AttachRejectsMissingParent(t *testing.T) {
 }
 
 func TestWorkflowCreate_RejectsBothParentAndAttach(t *testing.T) {
-	handler, _, _ := newWorkflowTestHandler(t)
+	handler, _ := newWorkflowTestHandler(t)
 
 	rec := postJSON(t, handler, map[string]interface{}{
 		"workspace_id":        "ws-workflows",
@@ -294,7 +294,7 @@ func TestWorkflowCreate_StructuredIssueOnSingleTaskEndpoint(t *testing.T) {
 	// The /tasks endpoint should also surface structured issues now that
 	// respondTaskGraphError is wired in. This exercises the path so a
 	// future regression in the flat-error fallback gets caught.
-	handler, ws, _ := newWorkflowTestHandler(t)
+	handler, ws := newWorkflowTestHandler(t)
 	if err := ws.AddTask(workspace.Task{ID: "anchor", Description: "anchor"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

@@ -126,7 +126,7 @@ func TestFormatInputResults_DeterministicOrder(t *testing.T) {
 	idxAlpha := strings.Index(first, "Task alpha")
 	idxMu := strings.Index(first, "Task mu")
 	idxZeta := strings.Index(first, "Task zeta")
-	if !(idxAlpha < idxMu && idxMu < idxZeta) {
+	if idxAlpha >= idxMu || idxMu >= idxZeta {
 		t.Fatalf("tasks not in sorted order:\nalpha=%d mu=%d zeta=%d\n%s", idxAlpha, idxMu, idxZeta, first)
 	}
 }

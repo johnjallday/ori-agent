@@ -133,7 +133,10 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-file-modal.js',
       'internal/web/static/js/modules/workspace-detail-mcp.js',
       'internal/web/static/js/modules/workspace-detail-skills.js',
-      'internal/web/static/js/modules/workspace-task.js'
+      'internal/web/static/js/modules/workspace-task.js',
+      'internal/web/static/js/modules/agent-canvas-dialogs.js',
+      'internal/web/static/js/modules/workspace-task-execution-views.js',
+      'internal/web/static/js/modules/workspace-task-skill-draft.js'
     ],
     languageOptions: {
       sourceType: 'module'
@@ -149,6 +152,6 @@ export default defineConfig([
   { files: ['**/*.md'], plugins: { markdown }, language: 'markdown/gfm', extends: ['markdown/recommended'] },
   { files: ['**/*.css'], plugins: { css }, language: 'css/css', extends: ['css/recommended'] },
   {
-    ignores: ['node_modules/', 'vendor/', '*.min.js', 'dist/', 'example_plugins/']
+    ignores: ['node_modules/', 'vendor/', '*.min.js', '**/*.min.js', 'internal/web/static/js/vendor/**', 'dist/', 'example_plugins/']
   }
 ]);

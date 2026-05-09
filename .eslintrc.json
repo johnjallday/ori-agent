@@ -60,6 +60,8 @@
     "node_modules/",
     "vendor/",
     "*.min.js",
+    "**/*.min.js",
+    "internal/web/static/js/vendor/",
     "dist/"
   ]
 }

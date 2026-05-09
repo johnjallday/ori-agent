@@ -8019,7 +8019,7 @@
     return false;
   }
 
-  function promptHasSchedulingIntent(prompt) {
+  function _promptHasSchedulingIntent(prompt) {
     var text = normalizeToken(prompt);
     if (!text) return false;
     if (hasRecurringScheduleLanguage(text)) return true;
