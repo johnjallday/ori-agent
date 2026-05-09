@@ -53,10 +53,11 @@
 
         <div class="modern-card p-4">
           <div id="skillsError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
-          <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <h5 class="mb-0" style="color: var(--text-primary);">Available Skills</h5>
             <span id="skillsCount" class="badge bg-secondary" style="font-size: 12px;">0</span>
           </div>
+          <div id="skillsSourceFilters" class="d-flex gap-2 flex-wrap mb-3 d-none"></div>
           <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
             <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>
           </div>
@@ -114,6 +115,42 @@
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="skillsSaveBtn" class="modern-btn modern-btn-primary">Save Skill</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="skillsDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header align-items-start" style="border-bottom: 1px solid var(--border-color);">
+          <div style="min-width: 0; flex: 1;">
+            <h5 class="modal-title" id="skillsDetailsTitle" style="color: var(--text-primary); word-break: break-word;">Skill</h5>
+            <div id="skillsDetailsBadges" class="d-flex gap-2 flex-wrap mt-2"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" style="color: var(--text-primary);">
+          <div id="skillsDetailsErrors" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
+          <div class="mb-3">
+            <div class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Description</div>
+            <div id="skillsDetailsDescription" style="white-space: pre-wrap; word-break: break-word; font-size: 0.9em; line-height: 1.5;"></div>
+          </div>
+          <div class="mb-3" id="skillsDetailsPathRow">
+            <div class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Path</div>
+            <div id="skillsDetailsPath" style="font-size: 12px; word-break: break-all; color: var(--text-secondary); font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;"></div>
+          </div>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="form-label mb-0" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Prompt</div>
+              <small id="skillsDetailsPromptStatus" style="color: var(--text-secondary);"></small>
+            </div>
+            <pre id="skillsDetailsPrompt" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; font-size: 0.85em; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); margin: 0;"></pre>
+          </div>
+        </div>
+        <div class="modal-footer justify-content-between" style="border-top: 1px solid var(--border-color);">
+          <div id="skillsDetailsActions" class="d-flex gap-2 flex-wrap"></div>
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
