@@ -8301,7 +8301,15 @@
   async function parseWorkspaceTaskScheduleDraft(prompt, workspaceId) {
     var description = String(prompt || '').trim();
     var draft = {
-      hasSchedulingIntent: promptHasSchedulingIntent(description),
+      // hasSchedulingIntent is now derived from the auto-parse LLM (below),
+      // not from a regex over the raw prompt. The previous regex gate had
+      // false positives on adjectival/possessive uses of time words —
+      // "monthly fridge cleaning", "today's pollen count", "the cleaning
+      // schedule" — which all routed users into the schedule modal even
+      // though they never asked to schedule anything. Routing every
+      // Task-mode prompt through the LLM costs +500ms-1s per submission but
+      // makes intent detection actually accurate.
+      hasSchedulingIntent: false,
       schedule_enabled: false,
       schedule: null,
       schedule_name: '',
@@ -8309,7 +8317,8 @@
       needsFrequencyChoice: false,
       dailyAlternative: null
     };
-    if (!draft.hasSchedulingIntent) return draft;
+
+    if (!description) return draft;
 
     var parsed = null;
     if (typeof API !== 'undefined' && typeof API.post === 'function') {
@@ -8339,19 +8348,30 @@
       }
     }
 
-    if (parsed && typeof parsed === 'object') {
-      draft.parsedAgentName = String(parsed.agent_name || '').trim();
-      if (parsed.schedule_enabled && parsed.schedule) {
-        var normalized = normalizeScheduleConfigForTaskCreation(parsed.schedule);
-        if (normalized) {
-          draft.schedule_enabled = true;
-          draft.schedule = normalized;
-          draft.schedule_name = String(parsed.schedule_name || '').trim();
-        }
+    // If the LLM is unreachable, fail closed: treat as a regular task with no
+    // scheduling intent. Users can always open the schedule modal manually.
+    // Better to under-flag than spuriously interrupt with a configure dialog.
+    if (!parsed || typeof parsed !== 'object') {
+      return draft;
+    }
+
+    draft.parsedAgentName = String(parsed.agent_name || '').trim();
+    draft.hasSchedulingIntent = parsed.schedule_enabled === true;
+
+    if (parsed.schedule_enabled && parsed.schedule) {
+      var normalized = normalizeScheduleConfigForTaskCreation(parsed.schedule);
+      if (normalized) {
+        draft.schedule_enabled = true;
+        draft.schedule = normalized;
+        draft.schedule_name = String(parsed.schedule_name || '').trim();
       }
     }
 
-    if (!draft.schedule_enabled || !draft.schedule) {
+    // Regex fallback only runs when the LLM confirmed scheduling intent but
+    // didn't produce a concrete schedule object. We never let the regex
+    // create scheduling intent on its own — that's exactly the false-positive
+    // path we just removed.
+    if (draft.hasSchedulingIntent && (!draft.schedule_enabled || !draft.schedule)) {
       var fallback = inferScheduleFromPromptFallback(description);
       if (fallback && fallback.schedule) {
         var normalizedFallback = normalizeScheduleConfigForTaskCreation(fallback.schedule);
