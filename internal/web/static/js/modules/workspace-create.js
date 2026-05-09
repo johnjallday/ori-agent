@@ -1,6 +1,9 @@
 /**
  * Workspace Creation Module
  * Handles workspace creation modal and agent selection
+ *
+ * Workspace template cards (Blank / Travels / Daily Briefings) are defined
+ * in workspace-templates.js and exposed via window.WorkspaceTemplates.
  */
 
 // State for workspace creation (using shared variables from window object)
@@ -10,7 +13,10 @@ const workspaceCreateState = {
   allowDuplicateImport: false,
   duplicateWorkspaceId: '',
   duplicateWorkspaceName: '',
-  entryPoint: 'create_modal'
+  entryPoint: 'create_modal',
+  // Currently picked template; populated when the modal opens. Falls back
+  // to the first template (Blank) when the user hasn't interacted.
+  template: null
 };
 
 function resetImportState() {
@@ -371,6 +377,30 @@ function openCreateWorkspaceModal(options = {}) {
     window.WorkspaceBootstrapReview.reset();
   }
 
+  // Render the template card grid and pre-fill name/description from the
+  // chosen template when the user hasn't typed anything custom yet. The
+  // first template (Blank) is the default selection; for it both
+  // defaultName and defaultDescription are empty so nothing is auto-filled.
+  const templateGrid = document.getElementById('folderTemplateGrid');
+  if (templateGrid && window.WorkspaceTemplates) {
+    const initial = window.WorkspaceTemplates.render(templateGrid, {
+      onSelect: (template) => {
+        workspaceCreateState.template = template;
+        // Only autofill if the user hasn't already typed something — never
+        // overwrite their input.
+        if (nameInput && !nameInput.value && template.defaultName) {
+          nameInput.value = template.defaultName;
+        }
+        if (descriptionInput && !descriptionInput.value && template.defaultDescription) {
+          descriptionInput.value = template.defaultDescription;
+        }
+      }
+    });
+    workspaceCreateState.template = initial;
+  } else {
+    workspaceCreateState.template = null;
+  }
+
   const wantsImport = Boolean(options && options.importMode);
   if (options && typeof options.entryPoint === 'string' && options.entryPoint.trim()) {
     workspaceCreateState.entryPoint = options.entryPoint.trim();
@@ -582,6 +612,20 @@ async function createWorkspace() {
       }
     }
 
+    // Seed starter tasks from the picked template. Errors are non-fatal —
+    // the workspace is already created and partial seeding is fine.
+    let seededTaskCount = 0;
+    if (workspaceId && workspaceCreateState.template && window.WorkspaceTemplates) {
+      try {
+        seededTaskCount = await window.WorkspaceTemplates.seedStarterTasks(
+          workspaceId,
+          workspaceCreateState.template
+        );
+      } catch (error) {
+        console.warn('Failed to seed workspace starter tasks:', error);
+      }
+    }
+
     // Close modal
     const modalElement = document.getElementById('addFolderModal');
     const modal = bootstrap.Modal.getInstance(modalElement);
@@ -607,6 +651,7 @@ async function createWorkspace() {
       if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
       if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
       if (bootstrapApplyResult.attachedSkills > 0) successMessageParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
+      if (seededTaskCount > 0) successMessageParts.push(`${seededTaskCount} starter task${seededTaskCount === 1 ? '' : 's'} added`);
       if (typeof window.showToast === 'function') {
         if (bootstrapApplyResult.failures.length > 0) {
           window.showToast(
