@@ -4947,6 +4947,7 @@ const sessionManager = {
   noteLiveSelectionAnchorIndex: null,
   noteLiveSelectionFocusIndex: null,
   noteLivePointerDown: null,
+  noteLiveCollapsedHeadings: new Set(),
   noteUndoStack: [],
   noteRedoStack: [],
   noteHistoryLimit: 100,
@@ -6123,6 +6124,7 @@ const sessionManager = {
         previewContent.onclick = null;
         previewContent.onkeydown = null;
         previewContent.oninput = null;
+        previewContent.onchange = null;
         previewContent.onpaste = null;
         previewContent.oncut = null;
         previewContent.onfocusout = null;
@@ -6139,6 +6141,7 @@ const sessionManager = {
     this.noteUndoStack = [];
     this.noteRedoStack = [];
     this.noteIsApplyingHistory = false;
+    this.noteLiveCollapsedHeadings = new Set();
   },
 
   getNoteContentValue() {
@@ -6171,6 +6174,7 @@ const sessionManager = {
     this.noteLiveSelectionAnchorIndex = null;
     this.noteLiveSelectionFocusIndex = null;
     this.noteLivePointerDown = null;
+    this.noteLiveCollapsedHeadings = new Set();
     this.clearNoteLiveSelection();
     this.scheduleNoteAutoSave();
     this.noteIsApplyingHistory = false;
@@ -6247,13 +6251,45 @@ const sessionManager = {
     this.setNoteContentValue(lines.join('\n'));
   },
 
-  noteLineKindClass(line) {
+  noteHeadingLevel(line) {
     const heading = String(line || '').match(/^(#{1,6})\s+/);
-    if (heading) return `is-heading-${heading[1].length}`;
+    return heading ? heading[1].length : 0;
+  },
+
+  pruneNoteCollapsedHeadings(lines) {
+    for (const index of Array.from(this.noteLiveCollapsedHeadings || [])) {
+      if (!Number.isInteger(index) || index < 0 || index >= lines.length || this.noteHeadingLevel(lines[index]) === 0) {
+        this.noteLiveCollapsedHeadings.delete(index);
+      }
+    }
+  },
+
+  noteLineKindClass(line) {
+    const headingLevel = this.noteHeadingLevel(line);
+    if (headingLevel > 0) return `is-heading-${headingLevel}`;
+    if (this.parseNoteTaskLine(line)) return 'is-task-list';
     if (/^\s*[-*+]\s+/.test(line)) return 'is-list';
     if (/^\s*\d+\.\s+/.test(line)) return 'is-list';
     if (/^\s*>\s+/.test(line)) return 'is-quote';
     return '';
+  },
+
+  parseNoteTaskLine(line) {
+    const match = String(line || '').match(/^(\s*)([-*+])(\s+)\[( |x|X)?\](\s*)(.*)$/);
+    if (!match) return null;
+    return {
+      indent: match[1] || '',
+      bullet: match[2] || '-',
+      gap: match[3] || ' ',
+      checked: String(match[4] || '').toLowerCase() === 'x',
+      compactUnchecked: match[4] === '',
+      afterGap: match[5] || '',
+      text: match[6] || ''
+    };
+  },
+
+  normalizeCompactTaskListMarkdown(text) {
+    return String(text || '').replace(/^(\s*[-*+]\s+)\[\](?=\s|$)/gm, '$1[ ]');
   },
 
   renderNoteLiveEditor(options = {}) {
@@ -6261,6 +6297,7 @@ const sessionManager = {
     if (!previewContent || !this.isNotePreviewMode) return;
 
     const lines = this.getNoteContentLines();
+    this.pruneNoteCollapsedHeadings(lines);
     const activeRange = this.noteLiveActiveRange
       ? {
           start: Math.max(0, Math.min(this.noteLiveActiveRange.start, lines.length - 1)),
@@ -6276,7 +6313,17 @@ const sessionManager = {
     this.noteLiveActiveLineIndex = activeLineIndex;
 
     const html = [];
+    let hiddenByHeadingLevel = 0;
     for (let index = 0; index < lines.length; index += 1) {
+      const headingLevel = this.noteHeadingLevel(lines[index]);
+      if (hiddenByHeadingLevel > 0) {
+        if (headingLevel > 0 && headingLevel <= hiddenByHeadingLevel) {
+          hiddenByHeadingLevel = 0;
+        } else {
+          continue;
+        }
+      }
+
       if (activeRange && index === activeRange.start) {
         html.push(this.renderNoteLiveRangeInput(lines.slice(activeRange.start, activeRange.end + 1).join('\n'), activeRange.start, activeRange.end));
         index = activeRange.end;
@@ -6287,6 +6334,10 @@ const sessionManager = {
         continue;
       }
       html.push(this.renderNoteLiveRenderedLine(lines[index], index));
+
+      if (headingLevel > 0 && this.noteLiveCollapsedHeadings.has(index)) {
+        hiddenByHeadingLevel = headingLevel;
+      }
     }
     previewContent.innerHTML = html.join('');
 
@@ -6336,10 +6387,42 @@ const sessionManager = {
   renderNoteLiveRenderedLine(line, index) {
     const kindClass = this.noteLineKindClass(line);
     const emptyClass = line ? '' : ' is-empty';
+    const headingLine = this.renderNoteHeadingLine(line, index);
+    const taskLine = this.renderNoteTaskLine(line, index);
     return `
       <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
-        ${line ? this.renderMarkdownLine(line) : '<br>'}
+        ${line ? (headingLine || taskLine || this.renderMarkdownLine(line)) : '<br>'}
       </div>
+    `;
+  },
+
+  renderNoteHeadingLine(line, index) {
+    const headingLevel = this.noteHeadingLevel(line);
+    if (headingLevel === 0) return '';
+    const collapsed = this.noteLiveCollapsedHeadings.has(index);
+    const expandedValue = collapsed ? 'false' : 'true';
+    const summary = collapsed ? '<span class="note-heading-fold-summary">...</span>' : '';
+    return `
+      <div class="note-heading-line">
+        <button type="button" class="note-heading-fold" data-line-index="${index}" aria-expanded="${expandedValue}" title="${collapsed ? 'Expand section' : 'Collapse section'}">
+          <span aria-hidden="true">${collapsed ? '›' : '⌄'}</span>
+        </button>
+        <div class="note-heading-content">${this.renderMarkdownLine(line)}</div>
+        ${summary}
+      </div>
+    `;
+  },
+
+  renderNoteTaskLine(line, index) {
+    const task = this.parseNoteTaskLine(line);
+    if (!task) return '';
+    const checked = task.checked ? ' checked' : '';
+    const content = task.text ? this.renderInlineMarkdown(task.text) : '';
+    return `
+      <span class="note-task-line">
+        <input type="checkbox" class="note-task-checkbox" data-line-index="${index}"${checked} aria-label="Toggle checkbox">
+        <span class="note-task-content">${content}</span>
+      </span>
     `;
   },
 
@@ -6371,6 +6454,17 @@ const sessionManager = {
     previewContent.onclick = (event) => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
+      const headingFold = target.closest('.note-heading-fold');
+      if (headingFold && previewContent.contains(headingFold)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleNoteHeadingFold(Number(headingFold.dataset.lineIndex));
+        return;
+      }
+      if (target.closest('.note-task-checkbox')) {
+        event.stopPropagation();
+        return;
+      }
       if (target === previewContent) {
         if (this.hasNoteLiveTextSelection(previewContent)) return;
         const lines = this.getNoteContentLines();
@@ -6403,6 +6497,15 @@ const sessionManager = {
 
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
+      if (target.closest('.note-heading-fold')) return;
+      const checkbox = target.closest('.note-task-checkbox');
+      if (checkbox && previewContent.contains(checkbox)) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.toggleNoteTaskLine(Number(checkbox.dataset.lineIndex), !checkbox.checked);
+        }
+        return;
+      }
       const blockInput = target.closest('.note-live-block-input');
       if (blockInput && previewContent.contains(blockInput)) {
         this.handleNoteLiveRangeInputKeydown(event, blockInput);
@@ -6481,6 +6584,14 @@ const sessionManager = {
       if (input && previewContent.contains(input)) {
         this.handleNoteLiveInputChange(input);
       }
+    };
+
+    previewContent.onchange = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const checkbox = target.closest('.note-task-checkbox');
+      if (!checkbox || !previewContent.contains(checkbox)) return;
+      this.toggleNoteTaskLine(Number(checkbox.dataset.lineIndex), checkbox.checked);
     };
 
     previewContent.onpaste = (event) => {
@@ -6613,6 +6724,48 @@ const sessionManager = {
 
   isNoteLivePrintableKey(event) {
     return event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
+  },
+
+  toggleNoteHeadingFold(lineIndex) {
+    if (!Number.isInteger(lineIndex)) return;
+    const lines = this.getNoteContentLines();
+    if (lineIndex < 0 || lineIndex >= lines.length || this.noteHeadingLevel(lines[lineIndex]) === 0) return;
+
+    if (this.noteLiveCollapsedHeadings.has(lineIndex)) {
+      this.noteLiveCollapsedHeadings.delete(lineIndex);
+    } else {
+      this.noteLiveCollapsedHeadings.add(lineIndex);
+    }
+
+    this.noteLiveActiveLineIndex = null;
+    this.noteLiveActiveRange = null;
+    this.clearNoteLiveSelection();
+    this.renderNoteLiveEditor();
+
+    const foldButton = document.querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`);
+    foldButton?.focus({ preventScroll: true });
+  },
+
+  toggleNoteTaskLine(lineIndex, checked) {
+    if (!Number.isInteger(lineIndex)) return;
+    const lines = this.getNoteContentLines();
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+
+    const task = this.parseNoteTaskLine(lines[lineIndex]);
+    if (!task) return;
+
+    this.pushNoteUndoState();
+    const marker = checked ? '[x]' : '[]';
+    lines[lineIndex] = `${task.indent}${task.bullet}${task.gap}${marker}${task.afterGap}${task.text}`;
+    this.setNoteContentLines(lines);
+    this.noteLiveActiveLineIndex = null;
+    this.noteLiveActiveRange = null;
+    this.clearNoteLiveSelection();
+    this.scheduleNoteAutoSave();
+    this.renderNoteLiveEditor();
+
+    const checkbox = document.querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`);
+    checkbox?.focus({ preventScroll: true });
   },
 
   deleteNoteLiveLineRange(range) {
@@ -6786,7 +6939,8 @@ const sessionManager = {
 
     if (window.marked && typeof window.marked.parse === 'function') {
       const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
-      const rendered = window.marked.parse(canSanitize ? line : this.escapeHtml(line), {
+      const normalizedLine = this.normalizeCompactTaskListMarkdown(line);
+      const rendered = window.marked.parse(canSanitize ? normalizedLine : this.escapeHtml(normalizedLine), {
         breaks: true,
         gfm: true
       });
@@ -6796,6 +6950,23 @@ const sessionManager = {
     }
 
     return this.renderMarkdown(line);
+  },
+
+  renderInlineMarkdown(text) {
+    if (!text) return '';
+
+    if (window.marked && typeof window.marked.parseInline === 'function') {
+      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
+      const rendered = window.marked.parseInline(canSanitize ? text : this.escapeHtml(text), {
+        breaks: true,
+        gfm: true
+      });
+      return canSanitize
+        ? window.DOMPurify.sanitize(rendered)
+        : rendered;
+    }
+
+    return this.escapeHtml(text);
   },
 
   // Toggle preview mode
@@ -6809,7 +6980,8 @@ const sessionManager = {
 
     if (window.marked && typeof window.marked.parse === 'function') {
       const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
-      const rendered = window.marked.parse(canSanitize ? text : this.escapeHtml(text), {
+      const normalizedText = this.normalizeCompactTaskListMarkdown(text);
+      const rendered = window.marked.parse(canSanitize ? normalizedText : this.escapeHtml(normalizedText), {
         breaks: true,
         gfm: true
       });
