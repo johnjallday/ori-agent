@@ -36,6 +36,101 @@ export function escapeHtml(text) {
 }
 
 // =============================================================================
+// Markdown renderers — pure functions of input strings
+// =============================================================================
+// All three depend on browser globals window.marked and window.DOMPurify when
+// available. Without them, renderMarkdown falls back to a hand-rolled regex
+// pipeline; renderMarkdownLine and renderInlineMarkdown fall back to escaped
+// text. Behavior preserved exactly from the original sessionManager methods.
+
+function _marked() {
+  return typeof window !== 'undefined' && window.marked;
+}
+function _domPurify() {
+  return typeof window !== 'undefined' && window.DOMPurify;
+}
+
+// renderMarkdown converts a multi-paragraph Markdown string to HTML. Used
+// by the legacy whole-note preview path (not the live editor).
+export function renderMarkdown(text) {
+  if (!text) return '<p style="color: var(--text-tertiary);">No content</p>';
+
+  const marked = _marked();
+  if (marked && typeof marked.parse === 'function') {
+    const dp = _domPurify();
+    const canSanitize = dp && typeof dp.sanitize === 'function';
+    const normalized = normalizeCompactTaskListMarkdown(text);
+    const rendered = marked.parse(canSanitize ? normalized : escapeHtml(normalized), {
+      breaks: true,
+      gfm: true,
+    });
+    return canSanitize ? dp.sanitize(rendered) : rendered;
+  }
+
+  // Fallback when marked.js isn't loaded — minimal regex pipeline.
+  let html = escapeHtml(text);
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<h[1-6]>)/g, '$1');
+  html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<pre>)/g, '$1');
+  html = html.replace(/(<\/pre>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<blockquote>)/g, '$1');
+  html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
+  return html;
+}
+
+// renderMarkdownLine renders a single line of Markdown. Used by the live
+// preview's per-line rendering path. Returns `<br>` for an empty line.
+export function renderMarkdownLine(line) {
+  if (!line) return '<br>';
+
+  const marked = _marked();
+  if (marked && typeof marked.parse === 'function') {
+    const dp = _domPurify();
+    const canSanitize = dp && typeof dp.sanitize === 'function';
+    const normalized = normalizeCompactTaskListMarkdown(line);
+    const rendered = marked.parse(canSanitize ? normalized : escapeHtml(normalized), {
+      breaks: true,
+      gfm: true,
+    });
+    return canSanitize ? dp.sanitize(rendered) : rendered;
+  }
+  return renderMarkdown(line);
+}
+
+// renderInlineMarkdown renders inline-only Markdown (bold/italic/code, no
+// blocks). Used by task-line content where we don't want a `<p>` wrapper.
+export function renderInlineMarkdown(text) {
+  if (!text) return '';
+
+  const marked = _marked();
+  if (marked && typeof marked.parseInline === 'function') {
+    const dp = _domPurify();
+    const canSanitize = dp && typeof dp.sanitize === 'function';
+    const rendered = marked.parseInline(canSanitize ? text : escapeHtml(text), {
+      breaks: true,
+      gfm: true,
+    });
+    return canSanitize ? dp.sanitize(rendered) : rendered;
+  }
+  return escapeHtml(text);
+}
+
+// =============================================================================
 // Live-preview line renderers — templating for editable / rendered lines
 // =============================================================================
 
@@ -60,6 +155,61 @@ export function renderEditingRange(markdown, startIndex, endIndex) {
   return `
       <div class="note-live-line is-editing is-block-editing" data-line-index="${startIndex}" data-line-end="${endIndex}">
         <textarea class="note-live-line-input note-live-block-input" data-line-start="${startIndex}" data-line-end="${endIndex}" spellcheck="true">${escapeHtml(markdown)}</textarea>
+      </div>
+    `;
+}
+
+// renderHeadingLine wraps a heading line with the fold chevron. `isCollapsed`
+// is the host's view of whether this section is currently folded — host owns
+// that state (a Set of line indices) and passes the bool here.
+export function renderHeadingLine(line, index, isCollapsed) {
+  const level = parseHeadingLevel(line);
+  if (level === 0) return '';
+  const expandedValue = isCollapsed ? 'false' : 'true';
+  const summary = isCollapsed ? '<span class="note-heading-fold-summary">...</span>' : '';
+  return `
+      <div class="note-heading-line">
+        <button type="button" class="note-heading-fold" data-line-index="${index}" aria-expanded="${expandedValue}" title="${isCollapsed ? 'Expand section' : 'Collapse section'}">
+          <span aria-hidden="true">${isCollapsed ? '›' : '⌄'}</span>
+        </button>
+        <div class="note-heading-content">${renderMarkdownLine(line)}</div>
+        ${summary}
+      </div>
+    `;
+}
+
+// renderTaskLine wraps a `- [ ] task` line with a checkbox plus inline-rendered
+// content. Returns empty string if `line` isn't a task list item.
+export function renderTaskLine(line, index) {
+  const task = parseTaskLine(line);
+  if (!task) return '';
+  const checked = task.checked ? ' checked' : '';
+  const content = task.text ? renderInlineMarkdown(task.text) : '';
+  return `
+      <span class="note-task-line">
+        <input type="checkbox" class="note-task-checkbox" data-line-index="${index}"${checked} aria-label="Toggle checkbox">
+        <span class="note-task-content">${content}</span>
+      </span>
+    `;
+}
+
+// renderRenderedLine composes the final wrapper for one source line in the
+// live preview. Heading lines win over task lines; task lines win over plain
+// markdown. An empty line collapses to `<br>` for spacing.
+export function renderRenderedLine(line, index, isCollapsed) {
+  const kindClass = lineKindClass(line);
+  const emptyClass = line ? '' : ' is-empty';
+  if (!line) {
+    return `
+      <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
+        <br>
+      </div>
+    `;
+  }
+  const inner = renderHeadingLine(line, index, isCollapsed) || renderTaskLine(line, index) || renderMarkdownLine(line);
+  return `
+      <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
+        ${inner}
       </div>
     `;
 }
@@ -453,6 +603,12 @@ const api = {
   escapeHtml,
   renderEditingLine,
   renderEditingRange,
+  renderMarkdown,
+  renderMarkdownLine,
+  renderInlineMarkdown,
+  renderHeadingLine,
+  renderTaskLine,
+  renderRenderedLine,
 };
 
 if (typeof window !== 'undefined') {

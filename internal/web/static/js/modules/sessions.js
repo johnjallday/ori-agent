@@ -6783,45 +6783,15 @@ const sessionManager = {
   },
 
   renderNoteLiveRenderedLine(line, index) {
-    const kindClass = this.noteLineKindClass(line);
-    const emptyClass = line ? '' : ' is-empty';
-    const headingLine = this.renderNoteHeadingLine(line, index);
-    const taskLine = this.renderNoteTaskLine(line, index);
-    return `
-      <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
-        ${line ? (headingLine || taskLine || this.renderMarkdownLine(line)) : '<br>'}
-      </div>
-    `;
-  },
-
-  renderNoteHeadingLine(line, index) {
-    const headingLevel = this.noteHeadingLevel(line);
-    if (headingLevel === 0) return '';
     const collapsed = this.noteLiveCollapsedHeadings.has(index);
-    const expandedValue = collapsed ? 'false' : 'true';
-    const summary = collapsed ? '<span class="note-heading-fold-summary">...</span>' : '';
-    return `
-      <div class="note-heading-line">
-        <button type="button" class="note-heading-fold" data-line-index="${index}" aria-expanded="${expandedValue}" title="${collapsed ? 'Expand section' : 'Collapse section'}">
-          <span aria-hidden="true">${collapsed ? '›' : '⌄'}</span>
-        </button>
-        <div class="note-heading-content">${this.renderMarkdownLine(line)}</div>
-        ${summary}
-      </div>
-    `;
+    return window.NoteEditor?.renderRenderedLine(line, index, collapsed) ?? '';
   },
-
+  renderNoteHeadingLine(line, index) {
+    const collapsed = this.noteLiveCollapsedHeadings.has(index);
+    return window.NoteEditor?.renderHeadingLine(line, index, collapsed) ?? '';
+  },
   renderNoteTaskLine(line, index) {
-    const task = this.parseNoteTaskLine(line);
-    if (!task) return '';
-    const checked = task.checked ? ' checked' : '';
-    const content = task.text ? this.renderInlineMarkdown(task.text) : '';
-    return `
-      <span class="note-task-line">
-        <input type="checkbox" class="note-task-checkbox" data-line-index="${index}"${checked} aria-label="Toggle checkbox">
-        <span class="note-task-content">${content}</span>
-      </span>
-    `;
+    return window.NoteEditor?.renderTaskLine(line, index) ?? '';
   },
 
   bindNoteLiveEditorEvents(previewContent) {
@@ -7316,101 +7286,15 @@ const sessionManager = {
     input.style.height = `${Math.max(input.scrollHeight, 24)}px`;
   },
 
-  renderMarkdownLine(line) {
-    if (!line) return '<br>';
-
-    if (window.marked && typeof window.marked.parse === 'function') {
-      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
-      const normalizedLine = this.normalizeCompactTaskListMarkdown(line);
-      const rendered = window.marked.parse(canSanitize ? normalizedLine : this.escapeHtml(normalizedLine), {
-        breaks: true,
-        gfm: true
-      });
-      return canSanitize
-        ? window.DOMPurify.sanitize(rendered)
-        : rendered;
-    }
-
-    return this.renderMarkdown(line);
-  },
-
-  renderInlineMarkdown(text) {
-    if (!text) return '';
-
-    if (window.marked && typeof window.marked.parseInline === 'function') {
-      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
-      const rendered = window.marked.parseInline(canSanitize ? text : this.escapeHtml(text), {
-        breaks: true,
-        gfm: true
-      });
-      return canSanitize
-        ? window.DOMPurify.sanitize(rendered)
-        : rendered;
-    }
-
-    return this.escapeHtml(text);
-  },
+  renderMarkdownLine(line) { return window.NoteEditor?.renderMarkdownLine(line) ?? ''; },
+  renderInlineMarkdown(text) { return window.NoteEditor?.renderInlineMarkdown(text) ?? ''; },
 
   // Toggle preview mode
   toggleNotePreview() {
     this.setNotePreviewMode(!this.isNotePreviewMode);
   },
 
-  // Render markdown for note previews
-  renderMarkdown(text) {
-    if (!text) return '<p style="color: var(--text-tertiary);">No content</p>';
-
-    if (window.marked && typeof window.marked.parse === 'function') {
-      const canSanitize = window.DOMPurify && typeof window.DOMPurify.sanitize === 'function';
-      const normalizedText = this.normalizeCompactTaskListMarkdown(text);
-      const rendered = window.marked.parse(canSanitize ? normalizedText : this.escapeHtml(normalizedText), {
-        breaks: true,
-        gfm: true
-      });
-      return canSanitize
-        ? window.DOMPurify.sanitize(rendered)
-        : rendered;
-    }
-
-    let html = this.escapeHtml(text);
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-    // Bold and italic
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Code blocks
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // Lists
-    html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-    // Blockquotes
-    html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
-
-    // Paragraphs
-    html = html.replace(/\n\n/g, '</p><p>');
-    html = '<p>' + html + '</p>';
-
-    // Clean up empty paragraphs
-    html = html.replace(/<p><\/p>/g, '');
-    html = html.replace(/<p>(<h[1-6]>)/g, '$1');
-    html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<ul>)/g, '$1');
-    html = html.replace(/(<\/ul>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<pre>)/g, '$1');
-    html = html.replace(/(<\/pre>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<blockquote>)/g, '$1');
-    html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
-
-    return html;
-  },
+  renderMarkdown(text) { return window.NoteEditor?.renderMarkdown(text) ?? ''; },
 
   // Prompt to rename note
   async promptRenameNote(noteId) {

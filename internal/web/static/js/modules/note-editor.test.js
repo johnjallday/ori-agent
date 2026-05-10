@@ -17,6 +17,12 @@ import {
   escapeHtml,
   renderEditingLine,
   renderEditingRange,
+  renderMarkdown,
+  renderMarkdownLine,
+  renderInlineMarkdown,
+  renderHeadingLine,
+  renderTaskLine,
+  renderRenderedLine,
 } from './note-editor.js';
 
 // =============================================================================
@@ -529,4 +535,110 @@ test('renderEditingRange: includes start and end indices on textarea', () => {
 test('renderEditingRange: escapes HTML in the markdown content', () => {
   const html = renderEditingRange('<b>bold</b>', 0, 0);
   assert.match(html, /&lt;b&gt;bold&lt;\/b&gt;/);
+});
+
+// =============================================================================
+// renderMarkdown* (fallback path — node has no window.marked)
+// =============================================================================
+
+test('renderMarkdown: empty text returns the No-content placeholder', () => {
+  assert.match(renderMarkdown(''), /No content/);
+  assert.match(renderMarkdown(null), /No content/);
+});
+
+test('renderMarkdown fallback: converts headings and bold/italic', () => {
+  const html = renderMarkdown('# Title\n\nSome **bold** and *italic*.');
+  assert.match(html, /<h1>Title<\/h1>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<em>italic<\/em>/);
+});
+
+test('renderMarkdown fallback: produces inline code', () => {
+  const html = renderMarkdown('Use `foo()` to call.');
+  assert.match(html, /<code>foo\(\)<\/code>/);
+});
+
+test('renderMarkdownLine: empty line returns <br>', () => {
+  assert.equal(renderMarkdownLine(''), '<br>');
+  assert.equal(renderMarkdownLine(null), '<br>');
+});
+
+test('renderMarkdownLine fallback: delegates to renderMarkdown', () => {
+  // No window.marked in node, so fallback path runs.
+  const html = renderMarkdownLine('# Hello');
+  assert.match(html, /<h1>Hello<\/h1>/);
+});
+
+test('renderInlineMarkdown: empty input returns empty string', () => {
+  assert.equal(renderInlineMarkdown(''), '');
+  assert.equal(renderInlineMarkdown(null), '');
+});
+
+test('renderInlineMarkdown fallback: just escapes HTML', () => {
+  assert.equal(renderInlineMarkdown('<b>bold</b>'), '&lt;b&gt;bold&lt;/b&gt;');
+});
+
+// =============================================================================
+// renderHeadingLine / renderTaskLine / renderRenderedLine
+// =============================================================================
+
+test('renderHeadingLine: returns empty string for non-headings', () => {
+  assert.equal(renderHeadingLine('plain text', 0, false), '');
+  assert.equal(renderHeadingLine('- bullet', 0, false), '');
+});
+
+test('renderHeadingLine: emits expanded chevron when not collapsed', () => {
+  const html = renderHeadingLine('# Heading', 5, false);
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /Collapse section/);
+  assert.match(html, /⌄/);
+  assert.doesNotMatch(html, /note-heading-fold-summary/);
+});
+
+test('renderHeadingLine: emits collapsed chevron + summary when collapsed', () => {
+  const html = renderHeadingLine('## Heading', 5, true);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /Expand section/);
+  assert.match(html, /›/);
+  assert.match(html, /note-heading-fold-summary/);
+});
+
+test('renderTaskLine: returns empty string for non-task lines', () => {
+  assert.equal(renderTaskLine('plain', 0), '');
+  assert.equal(renderTaskLine('- bullet', 0), '');
+});
+
+test('renderTaskLine: unchecked task has no checked attribute', () => {
+  const html = renderTaskLine('- [ ] do thing', 3);
+  assert.match(html, /<input[^>]*type="checkbox"/);
+  assert.doesNotMatch(html, /<input[^>]*\schecked\s/);
+  assert.match(html, /data-line-index="3"/);
+});
+
+test('renderTaskLine: checked task includes the checked attribute', () => {
+  const html = renderTaskLine('- [x] done', 0);
+  assert.match(html, /\schecked\s/);
+});
+
+test('renderRenderedLine: empty line collapses to <br> wrapper', () => {
+  const html = renderRenderedLine('', 0, false);
+  assert.match(html, /<br>/);
+  assert.match(html, /is-empty/);
+});
+
+test('renderRenderedLine: heading wins over task / plain', () => {
+  const html = renderRenderedLine('# H', 0, false);
+  assert.match(html, /note-heading-line/);
+  assert.doesNotMatch(html, /note-task-line/);
+});
+
+test('renderRenderedLine: task line precedes plain', () => {
+  const html = renderRenderedLine('- [ ] task', 0, false);
+  assert.match(html, /note-task-line/);
+  assert.doesNotMatch(html, /note-heading-line/);
+});
+
+test('renderRenderedLine: data-line-index propagated', () => {
+  const html = renderRenderedLine('plain text', 7, false);
+  assert.match(html, /data-line-index="7"/);
 });
