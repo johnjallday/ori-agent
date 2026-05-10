@@ -431,6 +431,34 @@ export function clearWindowSelection() {
   if (selection && !selection.isCollapsed) selection.removeAllRanges();
 }
 
+// getSelectedLineRange returns { start, end } describing the inclusive line-
+// index range covered by the user's current text selection inside `container`,
+// or null if there's no selection / the selection extends outside container /
+// no rendered lines are selected.
+//
+// Used by the live-preview pane to translate a multi-line text selection
+// into a "selected lines" range so subsequent typing replaces those lines.
+export function getSelectedLineRange(container) {
+  if (typeof window === 'undefined' || !container) return null;
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  if (!selectionContains(container, selection.anchorNode)
+      || !selectionContains(container, selection.focusNode)) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const selectedIndexes = Array.from(container.querySelectorAll('.note-live-line-rendered'))
+    .filter((line) => {
+      try { return range.intersectsNode(line); } catch (_) { return false; }
+    })
+    .map((line) => Number(line.dataset.lineIndex))
+    .filter(Number.isInteger);
+
+  if (selectedIndexes.length === 0) return null;
+  return { start: Math.min(...selectedIndexes), end: Math.max(...selectedIndexes) };
+}
+
 // =============================================================================
 // TOC navigation helpers — locate / scroll / mark-active
 // =============================================================================
@@ -1301,6 +1329,7 @@ const api = {
   hasTextSelectionInside,
   pointerDragged,
   clearWindowSelection,
+  getSelectedLineRange,
   escapeHtml,
   renderEditingLine,
   renderEditingRange,

@@ -6571,30 +6571,7 @@ const sessionManager = {
   },
 
   getNoteLiveSelectedLineRange(container) {
-    const selection = window.getSelection?.();
-    if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-    if (!this.noteLiveSelectionContains(container, selection.anchorNode)
-      || !this.noteLiveSelectionContains(container, selection.focusNode)) {
-      return null;
-    }
-
-    const range = selection.getRangeAt(0);
-    const selectedIndexes = Array.from(container.querySelectorAll('.note-live-line-rendered'))
-      .filter(line => {
-        try {
-          return range.intersectsNode(line);
-        } catch {
-          return false;
-        }
-      })
-      .map(line => Number(line.dataset.lineIndex))
-      .filter(Number.isInteger);
-
-    if (selectedIndexes.length === 0) return null;
-    return {
-      start: Math.min(...selectedIndexes),
-      end: Math.max(...selectedIndexes)
-    };
+    return window.NoteEditor?.getSelectedLineRange(container) ?? null;
   },
 
   isNoteLivePrintableKey(event) { return window.NoteEditor?.isPrintableKey(event) ?? false; },
