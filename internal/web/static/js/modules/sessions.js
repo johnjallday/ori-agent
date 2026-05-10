@@ -4938,9 +4938,14 @@ const sessionManager = {
   currentNote: null,
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
-  // Live-editor state + actions live in a NoteLiveEditor controller from
-  // note-editor.js. Lazily created so window.NoteEditor has loaded.
-  noteLive: null,
+  // The note editor's four controllers (history / autosave / toc / live)
+  // live in a single mount bundle from note-editor.js. Lazily built via
+  // _ensureMount the first time anything needs them. Backward-compat
+  // getters below (noteHistory, noteAutoSave, noteToc, noteLive) keep
+  // existing call sites working.
+  noteMount: null,
+  get noteLive() { return this._ensureMount()?.live ?? null; },
+  set noteLive(_v) { /* no-op — mount owns the live instance */ },
   // Back-compat: the original sessionManager exposed `noteLiveState` as a
   // bare object. That alias still resolves to the controller's state.
   get noteLiveState() { return this._ensureLive()?.state; },
@@ -4962,33 +4967,34 @@ const sessionManager = {
   },
   set noteLiveCollapsedHeadings(v) { const s = this._ensureLive()?.state; if (s) s.collapsedHeadings = v; },
 
-  _ensureLive() {
-    if (this.noteLive) return this.noteLive;
+  // _ensureMount builds the four-controller bundle on first access. The
+  // mount factory wires history/autosave/toc/live to a shared sub-host.
+  _ensureMount() {
+    if (this.noteMount) return this.noteMount;
     if (!window.NoteEditor) return null;
-    this.noteLive = new window.NoteEditor.NoteLiveEditor({
+    this.noteMount = window.NoteEditor.mount({
       getContent: () => this.getNoteContentValue(),
       setContent: (v) => this.setNoteContentValue(v),
       getContentLines: () => this.getNoteContentLines(),
       setContentLines: (lines) => this.setNoteContentLines(lines),
-      pushUndo: () => this.pushNoteUndoState(),
-      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
-      render: (opts) => this.renderNoteLiveEditor(opts),
-      clearWindowSelection: () => window.NoteEditor.clearWindowSelection(),
       isPreviewMode: () => this.isNotePreviewMode,
-      handleHistoryShortcut: (event) => this.handleNoteHistoryShortcut(event),
+      render: (opts) => this.renderNoteLiveEditor(opts),
+      onAutosaveFlush: () => this.autoSaveNote(),
     });
-    return this.noteLive;
+    return this.noteMount;
   },
+
+  _ensureLive() { return this._ensureMount()?.live ?? null; },
   // Compat alias kept for any sites that still spell it _ensureLiveState.
   _ensureLiveState() { return this._ensureLive()?.state; },
-  // Undo/redo lives in a NoteHistory instance (see note-editor.js). Lazily
-  // created in resetNoteHistory so it's always defined before first use.
-  noteHistory: null,
-
-  // Auto-save lives in a NoteAutoSaveTimer instance (see note-editor.js).
-  // Lazily created in resetNoteAutoSaveState. The save callback (see
-  // _performNoteAutoSave) closes over `this` and runs the actual API call.
-  noteAutoSave: null,
+  // History / autosave / toc all live in the mount bundle. Backward-compat
+  // getters/setters keep call sites that read `this.note*` working.
+  get noteHistory() { return this._ensureMount()?.history ?? null; },
+  set noteHistory(_v) { /* no-op — mount owns it */ },
+  get noteAutoSave() { return this._ensureMount()?.autosave ?? null; },
+  set noteAutoSave(_v) { /* no-op — mount owns it */ },
+  get noteToc() { return this._ensureMount()?.toc ?? null; },
+  set noteToc(_v) { /* no-op — mount owns it */ },
 
   // Load notes for a folder
   async loadFolderNotes(folderId) {
@@ -5825,19 +5831,7 @@ const sessionManager = {
   // =============================================================================
 
   // Schedule auto-save with debounce
-  // Lazily build the autosave timer the first time we need it. The save
-  // callback runs the actual create/update against the API; the timer
-  // tracks dirty state and the 3s debounce.
-  _ensureNoteAutoSave() {
-    if (this.noteAutoSave) return this.noteAutoSave;
-    if (!window.NoteEditor) return null;
-    this.noteAutoSave = new window.NoteEditor.NoteAutoSaveTimer({
-      delayMs: 3000,
-      onFlush: () => this.autoSaveNote(),
-      onStatusChange: (status) => window.NoteEditor.updateSaveStatus(status),
-    });
-    return this.noteAutoSave;
-  },
+  _ensureNoteAutoSave() { return this._ensureMount()?.autosave ?? null; },
 
   scheduleNoteAutoSave() { this._ensureNoteAutoSave()?.schedule(); },
 
@@ -5962,23 +5956,7 @@ const sessionManager = {
 
   // Debounced wrapper called from the input listener — TOC rebuild is cheap
   // but we still avoid running on every keystroke.
-  // TOC state lives in a NoteTocController instance (note-editor.js). Lazily
-  // built so the controller can read window.NoteEditor at call time.
-  noteToc: null,
-
-  _ensureNoteToc() {
-    if (this.noteToc) return this.noteToc;
-    if (!window.NoteEditor) return null;
-    this.noteToc = new window.NoteEditor.NoteTocController({
-      getContent: () => this.getNoteContentValue(),
-      setContent: (v) => this.setNoteContentValue(v),
-      isPreviewMode: () => this.isNotePreviewMode,
-      pushUndo: () => this.pushNoteUndoState(),
-      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
-      render: () => this.renderNoteLiveEditor(),
-    });
-    return this.noteToc;
-  },
+  _ensureNoteToc() { return this._ensureMount()?.toc ?? null; },
 
   _scheduleNoteTocRebuild() { this._ensureNoteToc()?.scheduleRebuild(); },
   _renderNoteTocOutline() { this._ensureNoteToc()?.rebuild(); },
@@ -6184,11 +6162,7 @@ const sessionManager = {
   },
 
   resetNoteHistory() {
-    if (!this.noteHistory && window.NoteEditor) {
-      this.noteHistory = new window.NoteEditor.NoteHistory({ limit: 100 });
-    } else if (this.noteHistory) {
-      this.noteHistory.reset();
-    }
+    this._ensureMount()?.history?.reset();
     this.noteLiveCollapsedHeadings = new Set();
   },
 

@@ -1,22 +1,20 @@
 // note-editor.js — shared note editor surface.
 //
-// Status: SCAFFOLD. Task 1.0 of the v2 plan extracts the ~80 note-related
-// methods on sessionManager into this module so both the modal (today) and
-// the upcoming dedicated page (`/notes/<id>`) can mount the same editor
-// without code duplication. The full extraction is a multi-round refactor;
-// this file grows as each sub-task lands.
+// Task 1.0 of the v2 plan extracted the ~80 note-related methods on
+// sessionManager into this module so both the modal (today) and the
+// dedicated page (`/notes/<id>`, v2 task 3.0) can mount the same editor
+// without code duplication.
 //
-// What lives here today:
-//   - Pure line-level helpers (heading-level detection, task-line parsing,
-//     line-kind class assignment) used by the live-preview renderer.
-//
-// What's still in sessions.js (will migrate in subsequent rounds):
-//   - Live-preview rendering pipeline (renderNoteLiveEditor + helpers).
-//   - Autosave + history (scheduleNoteAutoSave, undo/redo stack).
-//   - AI Assist wiring (selection tracking, agent resolution).
-//   - TOC integration.
-//   - Generate-with-AI panel.
-//   - Modal-specific glue (open/close/show/hide).
+// Module surface:
+//   - Pure helpers — line parsers, markdown renderers, escapeHtml,
+//     keyboard-shortcut probes, TOC nav helpers, selection helpers,
+//     line-renderer templates, buildLiveEditorHTML.
+//   - Stateful classes — NoteHistory, NoteAutoSaveTimer, NoteTocController,
+//     NoteLiveEditorState, NoteLiveEditor. Each owns its own lifecycle
+//     state so the host (modal or page) doesn't carry it.
+//   - mount(host) — composite factory at the bottom of the file. Builds
+//     all four controllers from a single host config and returns handles
+//     plus a destroy() that tears them down.
 //
 // ESM module loaded via <script type="module"> from base.tmpl. Exposed as
 // `window.NoteEditor` for the non-module sessions.js to consume.
@@ -1090,6 +1088,107 @@ export function resizeLiveInput(input) {
 }
 
 // =============================================================================
+// mount — composite factory that wires the four controllers together
+// =============================================================================
+// Single entry point for hosting the full note editor. The modal and the v2
+// dedicated page both call this; they only differ in the host they pass.
+//
+// host shape (callbacks marked optional are best-effort):
+//   getContent()              — string
+//   setContent(value)         — void
+//   getContentLines()         — string[]
+//   setContentLines(lines)    — void
+//   isPreviewMode()           — bool
+//   render(opts?)             — void (host owns the render path; usually
+//                                delegates back to sessionManager's
+//                                renderNoteLiveEditor today, or NoteLiveEditor's
+//                                bindEvents path when 3.0 lands)
+//   onAutosaveFlush?()        — fires when the autosave timer trips. The
+//                                host runs the actual save API call and is
+//                                responsible for calling autosave.markSaving /
+//                                markClean / markError. Default no-op.
+//   onAutosaveStatusChange?(s) — receives 'unsaved'|'saving'|'saved'|'error'.
+//                                Defaults to updateSaveStatus(s).
+//   historyLimit?             — number, default 100.
+//   autosaveDelayMs?          — number, default 3000.
+//
+// Returns: { history, autosave, toc, live, destroy() }.
+//
+// Each controller is wired so that internal events flow naturally without the
+// host needing to coordinate. For example, NoteLiveEditor's pushUndo callback
+// pushes onto the history instance; its scheduleAutoSave callback fires the
+// timer. The host only supplies content I/O and the render hook.
+export function mount(host = {}) {
+  const history = new NoteHistory({ limit: host.historyLimit ?? 100 });
+
+  // Autosave: host owns onFlush (the actual save API call + state-update
+  // logic). mount() just provides the timer plumbing. The default
+  // onStatusChange wires the indicator in the modal/page footer.
+  const autosave = new NoteAutoSaveTimer({
+    delayMs: host.autosaveDelayMs ?? 3000,
+    onFlush: host.onAutosaveFlush || (() => {}),
+    onStatusChange: host.onAutosaveStatusChange || ((status) => updateSaveStatus(status)),
+  });
+
+  // Shared sub-host wiring — both live and toc need most of these callbacks.
+  const sharedHost = {
+    getContent: host.getContent,
+    setContent: host.setContent,
+    getContentLines: host.getContentLines,
+    setContentLines: host.setContentLines,
+    isPreviewMode: host.isPreviewMode,
+    pushUndo: () => history.push(host.getContent?.() || ''),
+    scheduleAutoSave: () => autosave.schedule(),
+    render: (opts) => host.render?.(opts),
+    clearWindowSelection,
+  };
+
+  const live = new NoteLiveEditor({
+    ...sharedHost,
+    handleHistoryShortcut: (event) => {
+      if (isUndoShortcut(event)) {
+        const previous = history.undo(host.getContent?.() || '');
+        if (previous !== null) {
+          history.applying = true;
+          host.setContent?.(previous);
+          live.state.reset();
+          autosave.schedule();
+          history.applying = false;
+          host.render?.();
+          return true;
+        }
+      }
+      if (isRedoShortcut(event)) {
+        const next = history.redo(host.getContent?.() || '');
+        if (next !== null) {
+          history.applying = true;
+          host.setContent?.(next);
+          live.state.reset();
+          autosave.schedule();
+          history.applying = false;
+          host.render?.();
+          return true;
+        }
+      }
+      return false;
+    },
+  });
+
+  const toc = new NoteTocController(sharedHost);
+
+  return {
+    history,
+    autosave,
+    toc,
+    live,
+    destroy() {
+      autosave.cancel();
+      toc.destroy();
+    },
+  };
+}
+
+// =============================================================================
 // NoteTocController — state container for the TOC rail
 // =============================================================================
 // Owns the IntersectionObserver, the debounce timer, and the drag-source
@@ -1920,6 +2019,7 @@ const api = {
   NoteLiveEditorState,
   NoteLiveEditor,
   resizeLiveInput,
+  mount,
 };
 
 if (typeof window !== 'undefined') {

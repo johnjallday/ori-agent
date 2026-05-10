@@ -29,6 +29,7 @@ import {
   buildLiveEditorHTML,
   NoteLiveEditorState,
   NoteLiveEditor,
+  mount,
 } from './note-editor.js';
 
 // =============================================================================
@@ -977,4 +978,95 @@ test('NoteLiveEditor: clearSelection clears window selection AND state focus', (
   ed.clearSelection();
   assert.equal(ed.state.selectionFocusIndex, null);
   assert.equal(calls.clearWindowSelection, 1);
+});
+
+// =============================================================================
+// mount — composite factory
+// =============================================================================
+
+test('mount: returns the four controller handles', () => {
+  let content = '# Hello';
+  const bundle = mount({
+    getContent: () => content,
+    setContent: (v) => { content = v; },
+    getContentLines: () => content.split('\n'),
+    setContentLines: (lines) => { content = lines.join('\n'); },
+    isPreviewMode: () => true,
+    render: () => {},
+  });
+  assert.ok(bundle.history);
+  assert.ok(bundle.autosave);
+  assert.ok(bundle.toc);
+  assert.ok(bundle.live);
+  assert.equal(typeof bundle.destroy, 'function');
+});
+
+test('mount: live.pushUndo records into history; undo/redo round-trip via shortcut', () => {
+  let content = 'first';
+  const renderCalls = [];
+  const bundle = mount({
+    getContent: () => content,
+    setContent: (v) => { content = v; },
+    getContentLines: () => content.split('\n'),
+    setContentLines: (lines) => { content = lines.join('\n'); },
+    isPreviewMode: () => true,
+    render: (opts) => { renderCalls.push(opts || null); },
+  });
+
+  // Simulate two edits with undo entries pushed in between.
+  bundle.history.push('first');
+  content = 'second';
+  bundle.history.push('second');
+  content = 'third';
+
+  // Undo via the host shortcut (Cmd+Z synthesized).
+  const undoEvent = { key: 'z', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, preventDefault: () => {} };
+  assert.equal(bundle.live.host.handleHistoryShortcut(undoEvent), true);
+  assert.equal(content, 'second');
+
+  const redoEvent = { key: 'z', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, preventDefault: () => {} };
+  assert.equal(bundle.live.host.handleHistoryShortcut(redoEvent), true);
+  assert.equal(content, 'third');
+});
+
+test('mount: live.host.scheduleAutoSave fires the autosave timer', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const bundle = mount({
+    getContent: () => '',
+    setContent: () => {},
+    getContentLines: () => [''],
+    setContentLines: () => {},
+    isPreviewMode: () => true,
+    render: () => {},
+    onAutosaveFlush: () => { flushed += 1; },
+    autosaveDelayMs: 100,
+  });
+  bundle.live.host.scheduleAutoSave();
+  mock.timers.tick(99);
+  assert.equal(flushed, 0);
+  mock.timers.tick(1);
+  assert.equal(flushed, 1);
+  mock.timers.reset();
+  bundle.destroy();
+});
+
+test('mount: destroy cancels pending timers and tears down toc observer', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const bundle = mount({
+    getContent: () => '',
+    setContent: () => {},
+    getContentLines: () => [''],
+    setContentLines: () => {},
+    isPreviewMode: () => true,
+    render: () => {},
+    onAutosaveFlush: () => { flushed += 1; },
+    autosaveDelayMs: 100,
+  });
+  bundle.autosave.schedule();
+  bundle.destroy();
+  mock.timers.tick(1000);
+  assert.equal(flushed, 0, 'autosave should not have fired after destroy');
+  mock.timers.reset();
 });
