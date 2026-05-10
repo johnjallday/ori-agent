@@ -6731,16 +6731,8 @@ const sessionManager = {
     return true;
   },
 
-  isNoteUndoShortcut(event) {
-    return (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z' && !event.shiftKey;
-  },
-
-  isNoteRedoShortcut(event) {
-    const key = event.key.toLowerCase();
-    return (event.metaKey || event.ctrlKey)
-      && !event.altKey
-      && ((key === 'z' && event.shiftKey) || key === 'y');
-  },
+  isNoteUndoShortcut(event) { return window.NoteEditor?.isUndoShortcut(event) ?? false; },
+  isNoteRedoShortcut(event) { return window.NoteEditor?.isRedoShortcut(event) ?? false; },
 
   handleNoteHistoryShortcut(event) {
     if (this.isNoteUndoShortcut(event)) {
@@ -7219,9 +7211,7 @@ const sessionManager = {
     };
   },
 
-  isNoteLivePrintableKey(event) {
-    return event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
-  },
+  isNoteLivePrintableKey(event) { return window.NoteEditor?.isPrintableKey(event) ?? false; },
 
   toggleNoteHeadingFold(lineIndex) {
     if (!Number.isInteger(lineIndex)) return;

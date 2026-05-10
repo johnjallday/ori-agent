@@ -7,6 +7,9 @@ import {
   parseTaskLine,
   lineKindClass,
   normalizeCompactTaskListMarkdown,
+  isUndoShortcut,
+  isRedoShortcut,
+  isPrintableKey,
 } from './note-editor.js';
 
 // =============================================================================
@@ -136,4 +139,69 @@ test('normalizeCompactTaskListMarkdown: preserves indent and bullet flavor', () 
     normalizeCompactTaskListMarkdown('  * [] indented\n+ [] plus'),
     '  * [ ] indented\n+ [ ] plus',
   );
+});
+
+// =============================================================================
+// isUndoShortcut / isRedoShortcut / isPrintableKey
+// =============================================================================
+
+const evt = (overrides = {}) => ({
+  key: '',
+  metaKey: false,
+  ctrlKey: false,
+  altKey: false,
+  shiftKey: false,
+  ...overrides,
+});
+
+test('isUndoShortcut: matches Cmd+Z / Ctrl+Z', () => {
+  assert.equal(isUndoShortcut(evt({ key: 'z', metaKey: true })), true);
+  assert.equal(isUndoShortcut(evt({ key: 'z', ctrlKey: true })), true);
+  assert.equal(isUndoShortcut(evt({ key: 'Z', metaKey: true })), true); // case-insensitive
+});
+
+test('isUndoShortcut: rejects when Shift or Alt is pressed', () => {
+  assert.equal(isUndoShortcut(evt({ key: 'z', metaKey: true, shiftKey: true })), false);
+  assert.equal(isUndoShortcut(evt({ key: 'z', metaKey: true, altKey: true })), false);
+});
+
+test('isUndoShortcut: rejects unmodified Z', () => {
+  assert.equal(isUndoShortcut(evt({ key: 'z' })), false);
+});
+
+test('isUndoShortcut: rejects null/undefined event', () => {
+  assert.equal(isUndoShortcut(null), false);
+  assert.equal(isUndoShortcut(undefined), false);
+});
+
+test('isRedoShortcut: matches Cmd+Shift+Z and Ctrl+Y', () => {
+  assert.equal(isRedoShortcut(evt({ key: 'z', metaKey: true, shiftKey: true })), true);
+  assert.equal(isRedoShortcut(evt({ key: 'y', ctrlKey: true })), true);
+  assert.equal(isRedoShortcut(evt({ key: 'Y', metaKey: true })), true);
+});
+
+test('isRedoShortcut: rejects Cmd+Z without Shift', () => {
+  assert.equal(isRedoShortcut(evt({ key: 'z', metaKey: true })), false);
+});
+
+test('isRedoShortcut: rejects Alt-modified', () => {
+  assert.equal(isRedoShortcut(evt({ key: 'y', ctrlKey: true, altKey: true })), false);
+});
+
+test('isPrintableKey: single-char without modifiers', () => {
+  assert.equal(isPrintableKey(evt({ key: 'a' })), true);
+  assert.equal(isPrintableKey(evt({ key: ' ' })), true);
+  assert.equal(isPrintableKey(evt({ key: '1' })), true);
+});
+
+test('isPrintableKey: rejects multi-char keys (Enter, ArrowLeft, etc.)', () => {
+  assert.equal(isPrintableKey(evt({ key: 'Enter' })), false);
+  assert.equal(isPrintableKey(evt({ key: 'ArrowLeft' })), false);
+  assert.equal(isPrintableKey(evt({ key: 'Backspace' })), false);
+});
+
+test('isPrintableKey: rejects single-char with Cmd/Ctrl/Alt', () => {
+  assert.equal(isPrintableKey(evt({ key: 'a', metaKey: true })), false);
+  assert.equal(isPrintableKey(evt({ key: 'a', ctrlKey: true })), false);
+  assert.equal(isPrintableKey(evt({ key: 'a', altKey: true })), false);
 });

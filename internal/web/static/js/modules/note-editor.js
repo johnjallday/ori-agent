@@ -100,6 +100,38 @@ export function setContentLines(lines) {
 }
 
 // =============================================================================
+// Keyboard shortcuts (pure event-shape checks)
+// =============================================================================
+
+// isUndoShortcut returns true for ⌘Z / Ctrl+Z (without Shift).
+export function isUndoShortcut(event) {
+  if (!event) return false;
+  return (event.metaKey || event.ctrlKey)
+    && !event.altKey
+    && !event.shiftKey
+    && String(event.key || '').toLowerCase() === 'z';
+}
+
+// isRedoShortcut returns true for ⌘⇧Z / Ctrl+Shift+Z / Ctrl+Y / ⌘Y.
+export function isRedoShortcut(event) {
+  if (!event) return false;
+  const key = String(event.key || '').toLowerCase();
+  return (event.metaKey || event.ctrlKey)
+    && !event.altKey
+    && ((key === 'z' && event.shiftKey) || key === 'y');
+}
+
+// isPrintableKey returns true if the key would normally insert a character
+// into a textarea (single-character key, no command modifiers).
+export function isPrintableKey(event) {
+  if (!event) return false;
+  return String(event.key || '').length === 1
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey;
+}
+
+// =============================================================================
 // Save status — visual indicator in the modal/page footer
 // =============================================================================
 
@@ -135,6 +167,9 @@ const api = {
   getContentLines,
   setContentLines,
   updateSaveStatus,
+  isUndoShortcut,
+  isRedoShortcut,
+  isPrintableKey,
 };
 
 if (typeof window !== 'undefined') {
