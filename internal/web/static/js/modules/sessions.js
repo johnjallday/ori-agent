@@ -5558,45 +5558,9 @@ const sessionManager = {
     if (changeBtn) changeBtn.style.display = allowChange ? 'inline-flex' : 'none';
   },
 
-  normalizeNoteVaultReference(ref) {
-    if (!ref || typeof ref !== 'object') return null;
-    const normalized = {
-      vaultName: String(ref.vault_name || ref.vaultName || '').trim(),
-      recordLabel: String(ref.record_label || ref.recordLabel || '').trim(),
-      recordId: String(ref.record_id || ref.recordId || '').trim()
-    };
-    if (!normalized.recordId) return null;
-    return normalized;
-  },
-
-  showNoteVaultReferenceBadge(ref) {
-    const badge = document.getElementById('noteVaultReferenceBadge');
-    const nameSpan = document.getElementById('noteVaultReferenceName');
-    if (!badge || !nameSpan) return;
-
-    const normalized = this.normalizeNoteVaultReference(ref);
-    if (!normalized) {
-      this.hideNoteVaultReferenceBadge();
-      return;
-    }
-
-    const vaultName = normalized.vaultName || 'Private Vault';
-    nameSpan.textContent = `From Vault: ${vaultName}`;
-    badge.title = normalized.recordLabel
-      ? `Vault entry: ${normalized.recordLabel}`
-      : 'Imported from a private vault';
-    badge.style.display = 'block';
-  },
-
-  hideNoteVaultReferenceBadge() {
-    const badge = document.getElementById('noteVaultReferenceBadge');
-    const nameSpan = document.getElementById('noteVaultReferenceName');
-    if (badge) {
-      badge.style.display = 'none';
-      badge.removeAttribute('title');
-    }
-    if (nameSpan) nameSpan.textContent = '';
-  },
+  normalizeNoteVaultReference(ref) { return window.NoteEditor?.normalizeVaultReference(ref) ?? null; },
+  showNoteVaultReferenceBadge(ref) { window.NoteEditor?.showVaultReferenceBadge(ref); },
+  hideNoteVaultReferenceBadge() { window.NoteEditor?.hideVaultReferenceBadge(); },
 
   showNoteWorkspaceSelector() {
     const badge = document.getElementById('noteWorkspaceBadge');

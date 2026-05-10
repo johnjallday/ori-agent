@@ -10,6 +10,7 @@ import {
   isUndoShortcut,
   isRedoShortcut,
   isPrintableKey,
+  normalizeVaultReference,
 } from './note-editor.js';
 
 // =============================================================================
@@ -204,4 +205,48 @@ test('isPrintableKey: rejects single-char with Cmd/Ctrl/Alt', () => {
   assert.equal(isPrintableKey(evt({ key: 'a', metaKey: true })), false);
   assert.equal(isPrintableKey(evt({ key: 'a', ctrlKey: true })), false);
   assert.equal(isPrintableKey(evt({ key: 'a', altKey: true })), false);
+});
+
+// =============================================================================
+// normalizeVaultReference
+// =============================================================================
+
+test('normalizeVaultReference: returns null for null/undefined/non-object', () => {
+  assert.equal(normalizeVaultReference(null), null);
+  assert.equal(normalizeVaultReference(undefined), null);
+  assert.equal(normalizeVaultReference('not an object'), null);
+  assert.equal(normalizeVaultReference(42), null);
+});
+
+test('normalizeVaultReference: snake_case fields are accepted', () => {
+  const got = normalizeVaultReference({
+    vault_name: 'Personal',
+    record_label: 'Login',
+    record_id: 'rec_123',
+  });
+  assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
+});
+
+test('normalizeVaultReference: camelCase fields also work', () => {
+  const got = normalizeVaultReference({
+    vaultName: 'Personal',
+    recordLabel: 'Login',
+    recordId: 'rec_123',
+  });
+  assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
+});
+
+test('normalizeVaultReference: missing record id returns null', () => {
+  assert.equal(normalizeVaultReference({ vault_name: 'Personal' }), null);
+  assert.equal(normalizeVaultReference({ record_id: '' }), null);
+  assert.equal(normalizeVaultReference({ record_id: '   ' }), null);
+});
+
+test('normalizeVaultReference: trims whitespace from each field', () => {
+  const got = normalizeVaultReference({
+    vault_name: '  Personal  ',
+    record_label: '\tLogin\t',
+    record_id: '  rec_123  ',
+  });
+  assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
 });

@@ -132,6 +132,59 @@ export function isPrintableKey(event) {
 }
 
 // =============================================================================
+// Vault reference badge — toggles `#noteVaultReferenceBadge` for notes that
+// were imported from a private vault.
+// =============================================================================
+
+const VAULT_BADGE_ID = 'noteVaultReferenceBadge';
+const VAULT_NAME_ID = 'noteVaultReferenceName';
+
+// normalizeVaultReference accepts either snake_case (server shape) or
+// camelCase (legacy) inputs and returns a uniform `{ vaultName, recordLabel,
+// recordId }` shape. Returns null if `recordId` is missing — callers treat
+// that as "no vault reference".
+export function normalizeVaultReference(ref) {
+  if (!ref || typeof ref !== 'object') return null;
+  const normalized = {
+    vaultName: String(ref.vault_name || ref.vaultName || '').trim(),
+    recordLabel: String(ref.record_label || ref.recordLabel || '').trim(),
+    recordId: String(ref.record_id || ref.recordId || '').trim(),
+  };
+  if (!normalized.recordId) return null;
+  return normalized;
+}
+
+export function showVaultReferenceBadge(ref) {
+  if (typeof document === 'undefined') return;
+  const badge = document.getElementById(VAULT_BADGE_ID);
+  const nameSpan = document.getElementById(VAULT_NAME_ID);
+  if (!badge || !nameSpan) return;
+
+  const normalized = normalizeVaultReference(ref);
+  if (!normalized) {
+    hideVaultReferenceBadge();
+    return;
+  }
+  const vaultName = normalized.vaultName || 'Private Vault';
+  nameSpan.textContent = `From Vault: ${vaultName}`;
+  badge.title = normalized.recordLabel
+    ? `Vault entry: ${normalized.recordLabel}`
+    : 'Imported from a private vault';
+  badge.style.display = 'block';
+}
+
+export function hideVaultReferenceBadge() {
+  if (typeof document === 'undefined') return;
+  const badge = document.getElementById(VAULT_BADGE_ID);
+  const nameSpan = document.getElementById(VAULT_NAME_ID);
+  if (badge) {
+    badge.style.display = 'none';
+    badge.removeAttribute('title');
+  }
+  if (nameSpan) nameSpan.textContent = '';
+}
+
+// =============================================================================
 // Save status — visual indicator in the modal/page footer
 // =============================================================================
 
@@ -170,6 +223,9 @@ const api = {
   isUndoShortcut,
   isRedoShortcut,
   isPrintableKey,
+  normalizeVaultReference,
+  showVaultReferenceBadge,
+  hideVaultReferenceBadge,
 };
 
 if (typeof window !== 'undefined') {
