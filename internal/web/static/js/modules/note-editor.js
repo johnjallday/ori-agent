@@ -813,6 +813,215 @@ export class NoteLiveEditor {
     }
   }
 
+  // bindEvents installs all the event handlers on the live-preview container.
+  // Replaces every existing on*-style handler (idempotent — safe to call on
+  // every render). The host supplies callbacks that depend on session-scoped
+  // state the controller doesn't own (history shortcut handler + the
+  // preview-mode probe used in focusout).
+  bindEvents(previewContent) {
+    if (!previewContent) return;
+
+    previewContent.onmousedown = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') {
+        this.state.pointerDown = null;
+        return;
+      }
+      const renderedLine = target.closest('.note-live-line-rendered');
+      this.state.pointerDown = renderedLine && previewContent.contains(renderedLine)
+        ? {
+            lineIndex: Number(renderedLine.dataset.lineIndex),
+            x: event.clientX,
+            y: event.clientY,
+          }
+        : null;
+    };
+
+    previewContent.onmouseup = () => {
+      window.setTimeout(() => {
+        if (hasTextSelectionInside(previewContent)) {
+          previewContent.focus({ preventScroll: true });
+        }
+      }, 0);
+    };
+
+    previewContent.onclick = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const headingFold = target.closest('.note-heading-fold');
+      if (headingFold && previewContent.contains(headingFold)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleHeadingFold(Number(headingFold.dataset.lineIndex));
+        return;
+      }
+      if (target.closest('.note-task-checkbox')) {
+        event.stopPropagation();
+        return;
+      }
+      if (target === previewContent) {
+        if (hasTextSelectionInside(previewContent)) return;
+        const lines = this.host.getContentLines?.() || [];
+        this.activate(lines.length - 1, (lines[lines.length - 1] || '').length);
+        return;
+      }
+      const renderedLine = target.closest('.note-live-line-rendered');
+      if (!renderedLine || !previewContent.contains(renderedLine)) return;
+      const lineIndex = Number(renderedLine.dataset.lineIndex);
+      if (!Number.isInteger(lineIndex)) return;
+
+      if (event.shiftKey) {
+        event.preventDefault();
+        this.selectLineRange(this.state.selectionAnchorIndex ?? lineIndex, lineIndex, previewContent);
+        return;
+      }
+
+      if (hasTextSelectionInside(previewContent) || pointerDragged(this.state.pointerDown, event)) {
+        this.state.selectionAnchorIndex = lineIndex;
+        this.state.pointerDown = null;
+        return;
+      }
+
+      this.clearSelection();
+      this.activate(lineIndex);
+    };
+
+    previewContent.onkeydown = (event) => {
+      if (this.host.handleHistoryShortcut?.(event)) return;
+
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      if (target.closest('.note-heading-fold')) return;
+      const checkbox = target.closest('.note-task-checkbox');
+      if (checkbox && previewContent.contains(checkbox)) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.toggleTaskLine(Number(checkbox.dataset.lineIndex), !checkbox.checked);
+        }
+        return;
+      }
+      const blockInput = target.closest('.note-live-block-input');
+      if (blockInput && previewContent.contains(blockInput)) {
+        this.handleRangeInputKeydown(event, blockInput);
+        return;
+      }
+      const input = target.closest('.note-live-line-input');
+      if (input && previewContent.contains(input)) {
+        this.handleInputKeydown(event, input);
+        return;
+      }
+
+      const renderedLine = target.closest('.note-live-line-rendered');
+      const selectedRange = getSelectedLineRange(previewContent);
+
+      if (selectedRange) {
+        if (event.key === 'Backspace' || event.key === 'Delete') {
+          event.preventDefault();
+          this.deleteRange(selectedRange);
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.editRange(selectedRange);
+          return;
+        }
+        if (isPrintableKey(event)) {
+          event.preventDefault();
+          this.replaceRange(selectedRange, event.key);
+          return;
+        }
+      }
+
+      if (!renderedLine || !previewContent.contains(renderedLine)) return;
+      const lineIndex = Number(renderedLine.dataset.lineIndex);
+      if (!Number.isInteger(lineIndex)) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        const lines = this.host.getContentLines?.() || [];
+        this.selectLineRange(0, Math.max(0, lines.length - 1), previewContent);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        this.clearSelection();
+        return;
+      }
+
+      if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        const direction = event.key === 'ArrowUp' ? -1 : 1;
+        const lines = this.host.getContentLines?.() || [];
+        const nextIndex = Math.max(0, Math.min(lineIndex + direction, lines.length - 1));
+        this.selectLineRange(this.state.selectionAnchorIndex ?? lineIndex, nextIndex, previewContent);
+        return;
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.clearSelection();
+        this.activate(lineIndex);
+      }
+    };
+
+    previewContent.oninput = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const blockInput = target.closest('.note-live-block-input');
+      if (blockInput && previewContent.contains(blockInput)) {
+        this.handleRangeInputChange(blockInput);
+        return;
+      }
+      const input = target.closest('.note-live-line-input');
+      if (input && previewContent.contains(input)) {
+        this.handleInputChange(input);
+      }
+    };
+
+    previewContent.onchange = (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const checkbox = target.closest('.note-task-checkbox');
+      if (!checkbox || !previewContent.contains(checkbox)) return;
+      this.toggleTaskLine(Number(checkbox.dataset.lineIndex), checkbox.checked);
+    };
+
+    previewContent.onpaste = (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      const selectedRange = getSelectedLineRange(previewContent);
+      if (!selectedRange) return;
+      const pastedText = event.clipboardData?.getData('text/plain') || '';
+      event.preventDefault();
+      this.replaceRange(selectedRange, pastedText);
+    };
+
+    previewContent.oncut = (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      const selectedRange = getSelectedLineRange(previewContent);
+      if (!selectedRange) return;
+      const lines = this.host.getContentLines?.() || [];
+      const markdown = lines.slice(selectedRange.start, selectedRange.end + 1).join('\n');
+      event.clipboardData?.setData('text/plain', markdown);
+      event.preventDefault();
+      this.deleteRange(selectedRange);
+    };
+
+    previewContent.onfocusout = (event) => {
+      if (event.relatedTarget && previewContent.contains(event.relatedTarget)) return;
+      window.setTimeout(() => {
+        const activeElement = document.activeElement;
+        if (activeElement && previewContent.contains(activeElement)) return;
+        if (this.host.isPreviewMode?.() && this.state.hasActiveEdit()) {
+          this.state.activeLineIndex = null;
+          this.state.activeRange = null;
+          this.host.render?.();
+        }
+      }, 0);
+    };
+  }
+
   // handleInputKeydown — single-line keyboard shortcuts: Enter splits, Backspace
   // at start joins with previous line, Delete at end joins with next line,
   // Arrow keys move between lines.
