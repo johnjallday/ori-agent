@@ -11,6 +11,7 @@ import {
   isRedoShortcut,
   isPrintableKey,
   normalizeVaultReference,
+  NoteHistory,
 } from './note-editor.js';
 
 // =============================================================================
@@ -249,4 +250,84 @@ test('normalizeVaultReference: trims whitespace from each field', () => {
     record_id: '  rec_123  ',
   });
   assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
+});
+
+// =============================================================================
+// NoteHistory
+// =============================================================================
+
+test('NoteHistory: push records new entries', () => {
+  const h = new NoteHistory();
+  assert.equal(h.push('a'), true);
+  assert.equal(h.push('b'), true);
+  assert.deepEqual(h.undoStack, ['a', 'b']);
+});
+
+test('NoteHistory: push de-dupes consecutive identical values', () => {
+  const h = new NoteHistory();
+  h.push('a');
+  assert.equal(h.push('a'), false);
+  assert.deepEqual(h.undoStack, ['a']);
+});
+
+test('NoteHistory: push respects the limit by dropping oldest', () => {
+  const h = new NoteHistory({ limit: 3 });
+  h.push('a'); h.push('b'); h.push('c'); h.push('d');
+  assert.deepEqual(h.undoStack, ['b', 'c', 'd']);
+});
+
+test('NoteHistory: push is suppressed while applying', () => {
+  const h = new NoteHistory();
+  h.applying = true;
+  assert.equal(h.push('a'), false);
+  assert.deepEqual(h.undoStack, []);
+});
+
+test('NoteHistory: push clears the redo stack', () => {
+  const h = new NoteHistory();
+  h.push('a');
+  h.undo('current');
+  assert.equal(h.redoStack.length, 1);
+  h.push('b');
+  assert.deepEqual(h.redoStack, []);
+});
+
+test('NoteHistory: undo returns previous and shifts redo', () => {
+  const h = new NoteHistory();
+  h.push('a'); h.push('b');
+  const prev = h.undo('c'); // current is 'c', stacks become undo=[a], redo=[c]
+  assert.equal(prev, 'b');
+  assert.deepEqual(h.undoStack, ['a']);
+  assert.deepEqual(h.redoStack, ['c']);
+});
+
+test('NoteHistory: undo returns null when empty', () => {
+  const h = new NoteHistory();
+  assert.equal(h.undo('current'), null);
+});
+
+test('NoteHistory: redo replays correctly', () => {
+  const h = new NoteHistory();
+  h.push('a'); h.push('b');
+  const prev = h.undo('c'); // prev = 'b', undo=[a], redo=[c]
+  assert.equal(prev, 'b');
+  const next = h.redo('b'); // next = 'c', undo=[a, b], redo=[]
+  assert.equal(next, 'c');
+  assert.deepEqual(h.undoStack, ['a', 'b']);
+  assert.deepEqual(h.redoStack, []);
+});
+
+test('NoteHistory: redo returns null when empty', () => {
+  const h = new NoteHistory();
+  assert.equal(h.redo('current'), null);
+});
+
+test('NoteHistory: reset clears everything', () => {
+  const h = new NoteHistory();
+  h.push('a'); h.push('b'); h.undo('c');
+  h.applying = true;
+  h.reset();
+  assert.deepEqual(h.undoStack, []);
+  assert.deepEqual(h.redoStack, []);
+  assert.equal(h.applying, false);
 });

@@ -4948,10 +4948,9 @@ const sessionManager = {
   noteLiveSelectionFocusIndex: null,
   noteLivePointerDown: null,
   noteLiveCollapsedHeadings: new Set(),
-  noteUndoStack: [],
-  noteRedoStack: [],
-  noteHistoryLimit: 100,
-  noteIsApplyingHistory: false,
+  // Undo/redo lives in a NoteHistory instance (see note-editor.js). Lazily
+  // created in resetNoteHistory so it's always defined before first use.
+  noteHistory: null,
 
   // Auto-save state
   noteAutoSaveTimeout: null,
@@ -6635,9 +6634,11 @@ const sessionManager = {
   },
 
   resetNoteHistory() {
-    this.noteUndoStack = [];
-    this.noteRedoStack = [];
-    this.noteIsApplyingHistory = false;
+    if (!this.noteHistory && window.NoteEditor) {
+      this.noteHistory = new window.NoteEditor.NoteHistory({ limit: 100 });
+    } else if (this.noteHistory) {
+      this.noteHistory.reset();
+    }
     this.noteLiveCollapsedHeadings = new Set();
   },
 
@@ -6645,18 +6646,13 @@ const sessionManager = {
   setNoteContentValue(value) { window.NoteEditor?.setContentValue(value); },
 
   pushNoteUndoState() {
-    if (this.noteIsApplyingHistory) return;
-    const currentValue = this.getNoteContentValue();
-    if (this.noteUndoStack[this.noteUndoStack.length - 1] === currentValue) return;
-    this.noteUndoStack.push(currentValue);
-    if (this.noteUndoStack.length > this.noteHistoryLimit) {
-      this.noteUndoStack.shift();
-    }
-    this.noteRedoStack = [];
+    if (!this.noteHistory) this.resetNoteHistory();
+    if (!this.noteHistory) return;
+    this.noteHistory.push(this.getNoteContentValue());
   },
 
   applyNoteHistoryState(value, options = {}) {
-    this.noteIsApplyingHistory = true;
+    if (this.noteHistory) this.noteHistory.applying = true;
     this.setNoteContentValue(value);
     this.noteLiveActiveRange = null;
     this.noteLiveActiveLineIndex = null;
@@ -6666,7 +6662,7 @@ const sessionManager = {
     this.noteLiveCollapsedHeadings = new Set();
     this.clearNoteLiveSelection();
     this.scheduleNoteAutoSave();
-    this.noteIsApplyingHistory = false;
+    if (this.noteHistory) this.noteHistory.applying = false;
 
     if (this.isNotePreviewMode) {
       this.renderNoteLiveEditor();
@@ -6678,20 +6674,18 @@ const sessionManager = {
   },
 
   undoNoteEdit() {
-    if (this.noteUndoStack.length === 0) return false;
-    const currentValue = this.getNoteContentValue();
-    const previousValue = this.noteUndoStack.pop();
-    this.noteRedoStack.push(currentValue);
-    this.applyNoteHistoryState(previousValue);
+    if (!this.noteHistory) return false;
+    const previous = this.noteHistory.undo(this.getNoteContentValue());
+    if (previous == null) return false;
+    this.applyNoteHistoryState(previous);
     return true;
   },
 
   redoNoteEdit() {
-    if (this.noteRedoStack.length === 0) return false;
-    const currentValue = this.getNoteContentValue();
-    const nextValue = this.noteRedoStack.pop();
-    this.noteUndoStack.push(currentValue);
-    this.applyNoteHistoryState(nextValue);
+    if (!this.noteHistory) return false;
+    const next = this.noteHistory.redo(this.getNoteContentValue());
+    if (next == null) return false;
+    this.applyNoteHistoryState(next);
     return true;
   },
 

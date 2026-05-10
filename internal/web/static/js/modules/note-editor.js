@@ -132,6 +132,59 @@ export function isPrintableKey(event) {
 }
 
 // =============================================================================
+// History — undo/redo stacks for note content edits
+// =============================================================================
+// State container — instantiated per editor surface. `applying` is set true
+// while the editor is programmatically applying a previous state so that the
+// resulting input event doesn't push another entry onto the stack.
+
+export class NoteHistory {
+  constructor({ limit = 100 } = {}) {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.applying = false;
+    this.limit = limit;
+  }
+
+  // push records `value` as a new undo entry. Returns true if a new entry was
+  // pushed; false if the value matches the top of the stack or applying is
+  // currently true (caller should treat both as no-ops).
+  push(value) {
+    if (this.applying) return false;
+    if (this.undoStack[this.undoStack.length - 1] === value) return false;
+    this.undoStack.push(value);
+    if (this.undoStack.length > this.limit) this.undoStack.shift();
+    this.redoStack = [];
+    return true;
+  }
+
+  // undo pops the most recent entry off the undo stack and returns its value;
+  // simultaneously pushes `currentValue` onto the redo stack. Returns null
+  // when the undo stack is empty.
+  undo(currentValue) {
+    if (this.undoStack.length === 0) return null;
+    const previous = this.undoStack.pop();
+    this.redoStack.push(currentValue);
+    return previous;
+  }
+
+  // redo is the symmetric pop from the redo stack, pushing `currentValue` onto
+  // the undo stack. Returns null when the redo stack is empty.
+  redo(currentValue) {
+    if (this.redoStack.length === 0) return null;
+    const next = this.redoStack.pop();
+    this.undoStack.push(currentValue);
+    return next;
+  }
+
+  reset() {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.applying = false;
+  }
+}
+
+// =============================================================================
 // Vault reference badge — toggles `#noteVaultReferenceBadge` for notes that
 // were imported from a private vault.
 // =============================================================================
@@ -226,6 +279,7 @@ const api = {
   normalizeVaultReference,
   showVaultReferenceBadge,
   hideVaultReferenceBadge,
+  NoteHistory,
 };
 
 if (typeof window !== 'undefined') {
