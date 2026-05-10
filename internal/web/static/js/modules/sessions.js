@@ -5916,80 +5916,24 @@ const sessionManager = {
     return window.NoteEditor?.applyAgentDefaultForWorkspace(workspaceId);
   },
 
-  _wireNoteAIAgentChange() {
-    if (this._aiAgentChangeWired) return;
-    document.getElementById('noteAIAgentSelect')?.addEventListener('change', () => {
-      window.NoteAIAssist?.onAgentChanged(this._resolveWorkspaceAgentId());
-    });
-    this._aiAgentChangeWired = true;
-  },
-
+  _wireNoteAIAgentChange() { window.NoteEditor?.wireAgentChangeHandler(); },
   _resolveWorkspaceAgentId() { return window.NoteEditor?.getSelectedAgentId() ?? null; },
-
   _wireNoteSelectionTracking() {
-    if (this._aiAssistSelectionWired) return;
-    const update = () => {
-      if (typeof window === 'undefined' || !window.NoteAIAssist) return;
-      window.NoteAIAssist.onSelectionChanged(this._readNoteSelection());
-    };
-    document.addEventListener('selectionchange', () => update());
-    document.getElementById('noteContentInput')?.addEventListener('select', () => update());
-    document.getElementById('noteContentInput')?.addEventListener('keyup', () => update());
-    document.getElementById('noteContentInput')?.addEventListener('mouseup', () => update());
-    // Hide the bar on Esc.
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') window.NoteAIAssist?.hideBar();
+    window.NoteEditor?.wireSelectionTracking({
+      onChange: () => window.NoteAIAssist?.onSelectionChanged(this._readNoteSelection()),
     });
-    this._aiAssistSelectionWired = true;
   },
 
-  // _readNoteSelection returns { text, source, range, anchorRect } or null.
-  // `source` is 'textarea' or 'preview'. `range` is { start, end } in source
-  // markdown coordinates if computable (preview path), else null.
+  // Reads the current text selection in the note editor (modal or page). The
+  // modal-show check is local because the page surface won't have it.
   _readNoteSelection() {
     const modal = document.getElementById('noteEditorModal');
     if (!modal || !modal.classList.contains('show')) return null;
-
-    // Plain-edit textarea path
-    if (!this.isNotePreviewMode) {
-      const ta = document.getElementById('noteContentInput');
-      if (!ta || document.activeElement !== ta) return null;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      if (start === end) return null;
-      const text = ta.value.slice(start, end);
-      const rect = ta.getBoundingClientRect();
-      return {
-        text,
-        source: 'textarea',
-        range: { start, end },
-        // Anchor at the top-right of the textarea — caret position inside a
-        // textarea isn't trivially available without canvas measurement.
-        anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
-      };
-    }
-
-    // Live-preview path — use document selection
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
-    const previewPane = document.getElementById('notePreviewContent');
-    if (!previewPane) return null;
-    const range = sel.getRangeAt(0);
-    if (!previewPane.contains(range.commonAncestorContainer)) return null;
-    const text = sel.toString();
-    if (!text || !text.trim()) return null;
-    const anchorRect = range.getBoundingClientRect();
-
-    // Try to map selection text back to source markdown coordinates by string
-    // search. Cheap heuristic — good enough until v2 range stability lands.
-    const source = this.getNoteContentValue();
-    const idx = source.indexOf(text);
-    const sourceRange = idx >= 0 ? { start: idx, end: idx + text.length } : null;
-
-    return { text, source: 'preview', range: sourceRange, anchorRect };
+    return window.NoteEditor?.readSelection({
+      getContent: () => this.getNoteContentValue(),
+      isPreviewMode: () => this.isNotePreviewMode,
+    }) ?? null;
   },
-
-  // Called by AI Assist when the rail is collapsed by the user — keep state in sync.
 
   // =============================================================================
   // Note TOC (live-preview only)

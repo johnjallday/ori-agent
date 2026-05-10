@@ -750,6 +750,97 @@ export function getSelectedAgentId() {
   return select?.value || null;
 }
 
+// =============================================================================
+// Selection tracking — for the AI Assist floating action bar
+// =============================================================================
+// readSelection inspects the editor surface and returns a structured
+// description of the user's current text selection (or null if nothing is
+// selected). The result feeds NoteAIAssist.onSelectionChanged so the action
+// bar knows when to appear and where.
+//
+// The function handles both editor modes:
+//   - Plain-edit (textarea): selectionStart/selectionEnd directly map to
+//     source-markdown offsets.
+//   - Live-preview (rendered DOM): uses window.getSelection(), then maps
+//     the selected text back to a source range via string.indexOf as a
+//     cheap heuristic. Good enough until v2 range-stability lands.
+//
+// Returns { text, source, range: { start, end } | null, anchorRect } or null.
+
+export function readSelection({ getContent, isPreviewMode, textareaId = 'noteContentInput', previewPaneId = PREVIEW_PANE_ID } = {}) {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+
+  if (!isPreviewMode?.()) {
+    const ta = document.getElementById(textareaId);
+    if (!ta || document.activeElement !== ta) return null;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    if (start === end) return null;
+    const text = ta.value.slice(start, end);
+    const rect = ta.getBoundingClientRect();
+    return {
+      text,
+      source: 'textarea',
+      range: { start, end },
+      // Caret position inside a textarea isn't trivially available without
+      // canvas measurement, so anchor the bar near the textarea's top-right.
+      anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
+    };
+  }
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const previewPane = document.getElementById(previewPaneId);
+  if (!previewPane) return null;
+  const range = sel.getRangeAt(0);
+  if (!previewPane.contains(range.commonAncestorContainer)) return null;
+  const text = sel.toString();
+  if (!text || !text.trim()) return null;
+  const anchorRect = range.getBoundingClientRect();
+
+  const content = getContent?.() || '';
+  const idx = content.indexOf(text);
+  const sourceRange = idx >= 0 ? { start: idx, end: idx + text.length } : null;
+
+  return { text, source: 'preview', range: sourceRange, anchorRect };
+}
+
+let _selectionTrackingWired = false;
+
+// wireSelectionTracking installs the listeners that drive the AI Assist
+// action bar's visibility. Idempotent — safe to call multiple times.
+// `onChange` is invoked on every selectionchange / keyup / mouseup; the
+// caller typically reads readSelection() inside it and forwards the result
+// to NoteAIAssist.onSelectionChanged.
+export function wireSelectionTracking({ onChange, textareaId = 'noteContentInput' } = {}) {
+  if (_selectionTrackingWired || typeof document === 'undefined') return;
+  const update = () => { try { onChange?.(); } catch (_) { /* ignore */ } };
+  document.addEventListener('selectionchange', update);
+  const ta = document.getElementById(textareaId);
+  ta?.addEventListener('select', update);
+  ta?.addEventListener('keyup', update);
+  ta?.addEventListener('mouseup', update);
+  // Esc dismisses the action bar without changing the selection.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && typeof window !== 'undefined') window.NoteAIAssist?.hideBar();
+  });
+  _selectionTrackingWired = true;
+}
+
+let _agentChangeWired = false;
+
+// wireAgentChangeHandler attaches a `change` listener to the agent dropdown
+// that forwards the new selection to NoteAIAssist. Idempotent.
+export function wireAgentChangeHandler() {
+  if (_agentChangeWired || typeof document === 'undefined') return;
+  document.getElementById(AGENT_SELECT_ID)?.addEventListener('change', () => {
+    if (typeof window !== 'undefined') {
+      window.NoteAIAssist?.onAgentChanged(getSelectedAgentId());
+    }
+  });
+  _agentChangeWired = true;
+}
+
 // applyAgentDefaultForWorkspace picks the agent that should be preselected
 // when a note in `workspaceId` opens. Order of preference:
 //   1. The workspace's `entry_agent_name`, if it exists in the dropdown.
@@ -1128,6 +1219,9 @@ const api = {
   loadAgentsIntoDropdown,
   getSelectedAgentId,
   applyAgentDefaultForWorkspace,
+  readSelection,
+  wireSelectionTracking,
+  wireAgentChangeHandler,
   isGeneratePanelOpen,
   openGeneratePanel,
   closeGeneratePanel,
