@@ -370,6 +370,46 @@ export function clearWindowSelection() {
 }
 
 // =============================================================================
+// Agent dropdown — populates `#noteAIAgentSelect` from /api/agents
+// =============================================================================
+
+const AGENT_SELECT_ID = 'noteAIAgentSelect';
+
+// loadAgentsIntoDropdown fetches the agent list from /api/agents and rebuilds
+// the editor's agent <select>. Logs but does not throw on network failure so
+// modal-open paths don't have to handle errors. Returns a promise that
+// resolves when the dropdown is ready (or empty).
+export async function loadAgentsIntoDropdown() {
+  if (typeof document === 'undefined') return;
+  const select = document.getElementById(AGENT_SELECT_ID);
+  if (!select) return;
+  try {
+    const response = await fetch('/api/agents');
+    if (!response.ok) throw new Error('Failed to load agents');
+    const data = await response.json();
+    select.innerHTML = '<option value="">Select an agent...</option>';
+    const agents = data.agents || [];
+    agents.forEach((agent) => {
+      const option = document.createElement('option');
+      option.value = agent.name;
+      option.textContent = agent.name;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to load agents for note AI:', error);
+  }
+}
+
+// getSelectedAgentId returns the currently-selected agent name from
+// `#noteAIAgentSelect`, or null if the dropdown is empty / unselected.
+export function getSelectedAgentId() {
+  if (typeof document === 'undefined') return null;
+  const select = document.getElementById(AGENT_SELECT_ID);
+  return select?.value || null;
+}
+
+// =============================================================================
 // Rails — left (TOC) and right (AI Assist) sidebar visibility + collapse state
 // =============================================================================
 // Each rail has two boolean modes the host can toggle independently:
@@ -700,6 +740,8 @@ const api = {
   toggleRail,
   showRail,
   hideRail,
+  loadAgentsIntoDropdown,
+  getSelectedAgentId,
 };
 
 if (typeof window !== 'undefined') {

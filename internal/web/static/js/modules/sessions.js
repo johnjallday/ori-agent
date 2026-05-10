@@ -5961,12 +5961,7 @@ const sessionManager = {
     this._aiAgentChangeWired = true;
   },
 
-  _resolveWorkspaceAgentId() {
-    // Prefer the agent dropdown the user already configured for whole-note
-    // generation; later we can replace this with a true workspace-default.
-    const select = document.getElementById('noteAIAgentSelect');
-    return select?.value || null;
-  },
+  _resolveWorkspaceAgentId() { return window.NoteEditor?.getSelectedAgentId() ?? null; },
 
   _wireNoteSelectionTracking() {
     if (this._aiAssistSelectionWired) return;
@@ -6319,28 +6314,7 @@ const sessionManager = {
 
   // Load agents for AI generation dropdown
   async loadNoteAIAgents() {
-    const select = document.getElementById('noteAIAgentSelect');
-    if (!select) return;
-
-    try {
-      const response = await fetch('/api/agents');
-      if (!response.ok) throw new Error('Failed to load agents');
-      const data = await response.json();
-
-      // Clear existing options (keep first placeholder)
-      select.innerHTML = '<option value="">Select an agent...</option>';
-
-      // Add agents
-      const agents = data.agents || [];
-      agents.forEach(agent => {
-        const option = document.createElement('option');
-        option.value = agent.name;
-        option.textContent = agent.name;
-        select.appendChild(option);
-      });
-    } catch (error) {
-      console.error('Failed to load agents for note AI:', error);
-    }
+    return window.NoteEditor?.loadAgentsIntoDropdown();
   },
 
   // Generate note content with AI
