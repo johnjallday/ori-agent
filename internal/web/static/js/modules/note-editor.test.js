@@ -13,6 +13,7 @@ import {
   normalizeVaultReference,
   NoteHistory,
   NoteAutoSaveTimer,
+  pointerDragged,
 } from './note-editor.js';
 
 // =============================================================================
@@ -427,4 +428,37 @@ test('NoteAutoSaveTimer: reset cancels timer and clears dirty', () => {
   assert.equal(flushed, 0);
   assert.equal(t.isDirty(), false);
   mock.timers.reset();
+});
+
+// =============================================================================
+// pointerDragged
+// =============================================================================
+
+test('pointerDragged: returns false when origin is null', () => {
+  assert.equal(pointerDragged(null, { clientX: 10, clientY: 10 }), false);
+  assert.equal(pointerDragged(undefined, { clientX: 10, clientY: 10 }), false);
+});
+
+test('pointerDragged: returns false for movement within threshold', () => {
+  const origin = { x: 100, y: 100 };
+  assert.equal(pointerDragged(origin, { clientX: 100, clientY: 100 }), false);
+  assert.equal(pointerDragged(origin, { clientX: 102, clientY: 103 }), false);
+  assert.equal(pointerDragged(origin, { clientX: 104, clientY: 104 }), false);
+});
+
+test('pointerDragged: returns true once movement exceeds 4px in either axis', () => {
+  const origin = { x: 100, y: 100 };
+  assert.equal(pointerDragged(origin, { clientX: 105, clientY: 100 }), true);
+  assert.equal(pointerDragged(origin, { clientX: 100, clientY: 105 }), true);
+  assert.equal(pointerDragged(origin, { clientX: 95, clientY: 95 }), true);
+});
+
+test('pointerDragged: respects custom threshold', () => {
+  const origin = { x: 100, y: 100 };
+  assert.equal(pointerDragged(origin, { clientX: 105, clientY: 100 }, 10), false);
+  assert.equal(pointerDragged(origin, { clientX: 111, clientY: 100 }, 10), true);
+});
+
+test('pointerDragged: returns false for null event', () => {
+  assert.equal(pointerDragged({ x: 0, y: 0 }, null), false);
 });

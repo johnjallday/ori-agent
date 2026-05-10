@@ -7044,31 +7044,17 @@ const sessionManager = {
   },
 
   noteLiveSelectionContains(container, node) {
-    if (!container || !node) return false;
-    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-    return Boolean(element && container.contains(element));
+    return window.NoteEditor?.selectionContains(container, node) ?? false;
   },
-
   hasNoteLiveTextSelection(container) {
-    const selection = window.getSelection?.();
-    if (!selection || selection.isCollapsed) return false;
-    return this.noteLiveSelectionContains(container, selection.anchorNode)
-      && this.noteLiveSelectionContains(container, selection.focusNode);
+    return window.NoteEditor?.hasTextSelectionInside(container) ?? false;
   },
-
   didNoteLivePointerDrag(event) {
-    const start = this.noteLivePointerDown;
-    if (!start) return false;
-    const distanceX = Math.abs(event.clientX - start.x);
-    const distanceY = Math.abs(event.clientY - start.y);
-    return distanceX > 4 || distanceY > 4;
+    return window.NoteEditor?.pointerDragged(this.noteLivePointerDown, event) ?? false;
   },
 
   clearNoteLiveSelection() {
-    const selection = window.getSelection?.();
-    if (selection && !selection.isCollapsed) {
-      selection.removeAllRanges();
-    }
+    window.NoteEditor?.clearWindowSelection();
     this.noteLiveSelectionFocusIndex = null;
   },
 

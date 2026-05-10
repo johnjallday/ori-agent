@@ -132,6 +132,51 @@ export function isPrintableKey(event) {
 }
 
 // =============================================================================
+// Live-preview selection helpers
+// =============================================================================
+// Pure DOM helpers used by the live-preview pane to decide whether the user
+// has highlighted multiple lines, whether a pointer event represents a drag,
+// and to clear the browser's text selection on demand.
+
+// selectionContains reports whether `node` (or its parent if it's a text node)
+// is contained within `container`. Returns false for missing inputs so it's
+// safe to call with `selection.anchorNode` etc.
+export function selectionContains(container, node) {
+  if (!container || !node) return false;
+  const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  return Boolean(element && container.contains(element));
+}
+
+// hasTextSelectionInside returns true if the browser's current text selection
+// is non-collapsed and both endpoints sit inside `container`.
+export function hasTextSelectionInside(container) {
+  if (typeof window === 'undefined') return false;
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed) return false;
+  return selectionContains(container, selection.anchorNode)
+    && selectionContains(container, selection.focusNode);
+}
+
+// pointerDragged returns true if `event`'s position has moved more than 4
+// pixels from `origin` (the pointer-down coordinates). Used by the live-
+// preview to distinguish clicks from drags so a double-click doesn't accidentally
+// open block-edit mode.
+export function pointerDragged(origin, event, threshold = 4) {
+  if (!origin || !event) return false;
+  const dx = Math.abs((event.clientX ?? 0) - (origin.x ?? 0));
+  const dy = Math.abs((event.clientY ?? 0) - (origin.y ?? 0));
+  return dx > threshold || dy > threshold;
+}
+
+// clearWindowSelection collapses the browser's current text selection if any.
+// No-op when there's no selection.
+export function clearWindowSelection() {
+  if (typeof window === 'undefined') return;
+  const selection = window.getSelection?.();
+  if (selection && !selection.isCollapsed) selection.removeAllRanges();
+}
+
+// =============================================================================
 // History — undo/redo stacks for note content edits
 // =============================================================================
 // State container — instantiated per editor surface. `applying` is set true
@@ -358,6 +403,10 @@ const api = {
   hideVaultReferenceBadge,
   NoteHistory,
   NoteAutoSaveTimer,
+  selectionContains,
+  hasTextSelectionInside,
+  pointerDragged,
+  clearWindowSelection,
 };
 
 if (typeof window !== 'undefined') {
