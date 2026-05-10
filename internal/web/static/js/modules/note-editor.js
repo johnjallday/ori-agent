@@ -370,6 +370,90 @@ export function clearWindowSelection() {
 }
 
 // =============================================================================
+// Rails — left (TOC) and right (AI Assist) sidebar visibility + collapse state
+// =============================================================================
+// Each rail has two boolean modes the host can toggle independently:
+//   1. Hidden vs shown (the rail and its toolbar toggle button) — driven by
+//      whether the surrounding feature has anything to display.
+//   2. Collapsed vs expanded (when shown) — user preference persisted to
+//      localStorage so the choice survives reloads.
+
+const RAIL_CONFIG = {
+  toc: { railId: 'noteTocRail', toggleId: 'noteTocToggle', storageKey: 'note.toc.collapsed' },
+  assist: { railId: 'noteAssistRail', toggleId: 'noteAssistToggle', storageKey: 'note.aiAssist.collapsed' },
+};
+
+function _railCfg(name) { return RAIL_CONFIG[name] || null; }
+
+export function getRailCollapsed(name) {
+  const cfg = _railCfg(name);
+  if (!cfg || typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(cfg.storageKey) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+export function setRailCollapsed(name, collapsed) {
+  const cfg = _railCfg(name);
+  if (!cfg || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(cfg.storageKey, collapsed ? '1' : '0');
+  } catch (_) {
+    // ignore quota / privacy-mode failures
+  }
+}
+
+// applyRailCollapsed reads the persisted bool and reflects it onto the DOM
+// (rail's `data-collapsed` attribute and the toggle button's `aria-pressed`).
+export function applyRailCollapsed(name) {
+  const cfg = _railCfg(name);
+  if (!cfg || typeof document === 'undefined') return;
+  const el = document.getElementById(cfg.railId);
+  if (!el) return;
+  const collapsed = getRailCollapsed(name);
+  el.dataset.collapsed = collapsed ? 'true' : 'false';
+  const btn = document.getElementById(cfg.toggleId);
+  if (btn) btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+}
+
+// applyAllRailState refreshes both rails — host calls this when opening a
+// note so the layout doesn't flash before persisted state takes effect.
+export function applyAllRailState() {
+  applyRailCollapsed('toc');
+  applyRailCollapsed('assist');
+}
+
+// toggleRail flips the collapsed state and re-applies it to the DOM.
+export function toggleRail(name) {
+  setRailCollapsed(name, !getRailCollapsed(name));
+  applyRailCollapsed(name);
+}
+
+// showRail unhides the rail + its toolbar toggle, then re-applies the
+// persisted collapse state. Hosts call this when the rail's feature has
+// content (e.g., TOC has at least one heading; AI Assist has a card).
+export function showRail(name) {
+  const cfg = _railCfg(name);
+  if (!cfg || typeof document === 'undefined') return;
+  const el = document.getElementById(cfg.railId);
+  const btn = document.getElementById(cfg.toggleId);
+  if (el) el.hidden = false;
+  if (btn) btn.hidden = false;
+  applyRailCollapsed(name);
+}
+
+export function hideRail(name) {
+  const cfg = _railCfg(name);
+  if (!cfg || typeof document === 'undefined') return;
+  const el = document.getElementById(cfg.railId);
+  const btn = document.getElementById(cfg.toggleId);
+  if (el) el.hidden = true;
+  if (btn) btn.hidden = true;
+}
+
+// =============================================================================
 // History — undo/redo stacks for note content edits
 // =============================================================================
 // State container — instantiated per editor surface. `applying` is set true
@@ -609,6 +693,13 @@ const api = {
   renderHeadingLine,
   renderTaskLine,
   renderRenderedLine,
+  getRailCollapsed,
+  setRailCollapsed,
+  applyRailCollapsed,
+  applyAllRailState,
+  toggleRail,
+  showRail,
+  hideRail,
 };
 
 if (typeof window !== 'undefined') {

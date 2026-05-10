@@ -5866,86 +5866,14 @@ const sessionManager = {
   // showNoteTocRail() / showNoteAssistRail() once they have content to display.
   // The collapse toggle is per-rail and persisted in localStorage.
 
-  _NOTE_RAIL_STORAGE_KEYS: {
-    toc: 'note.toc.collapsed',
-    assist: 'note.aiAssist.collapsed',
-  },
-
-  _readNoteRailCollapsed(rail) {
-    try {
-      return localStorage.getItem(this._NOTE_RAIL_STORAGE_KEYS[rail]) === '1';
-    } catch (_) {
-      return false;
-    }
-  },
-
-  _writeNoteRailCollapsed(rail, collapsed) {
-    try {
-      localStorage.setItem(this._NOTE_RAIL_STORAGE_KEYS[rail], collapsed ? '1' : '0');
-    } catch (_) {
-      // ignore quota or privacy-mode failures
-    }
-  },
-
-  _applyNoteRailCollapsed(rail) {
-    const el = document.getElementById(rail === 'toc' ? 'noteTocRail' : 'noteAssistRail');
-    const btn = document.getElementById(rail === 'toc' ? 'noteTocToggle' : 'noteAssistToggle');
-    if (!el) return;
-    const collapsed = this._readNoteRailCollapsed(rail);
-    el.dataset.collapsed = collapsed ? 'true' : 'false';
-    if (btn) btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
-  },
-
-  // Apply persisted rail state on modal open. Called from openNoteEditor* and
-  // openNoteCreateModal so the layout doesn't flash.
-  _applyNoteRailState() {
-    this._applyNoteRailCollapsed('toc');
-    this._applyNoteRailCollapsed('assist');
-  },
-
-  // Toggle handlers used by the toolbar buttons.
-  toggleNoteTocRail() {
-    const collapsed = !this._readNoteRailCollapsed('toc');
-    this._writeNoteRailCollapsed('toc', collapsed);
-    this._applyNoteRailCollapsed('toc');
-  },
-
-  toggleNoteAssistRail() {
-    const collapsed = !this._readNoteRailCollapsed('assist');
-    this._writeNoteRailCollapsed('assist', collapsed);
-    this._applyNoteRailCollapsed('assist');
-  },
-
-  // Show / hide methods are called by tasks 3.0 / 4.0 once they have content.
-  showNoteTocRail() {
-    const rail = document.getElementById('noteTocRail');
-    const btn = document.getElementById('noteTocToggle');
-    if (rail) rail.hidden = false;
-    if (btn) btn.hidden = false;
-    this._applyNoteRailCollapsed('toc');
-  },
-
-  hideNoteTocRail() {
-    const rail = document.getElementById('noteTocRail');
-    const btn = document.getElementById('noteTocToggle');
-    if (rail) rail.hidden = true;
-    if (btn) btn.hidden = true;
-  },
-
-  showNoteAssistRail() {
-    const rail = document.getElementById('noteAssistRail');
-    const btn = document.getElementById('noteAssistToggle');
-    if (rail) rail.hidden = false;
-    if (btn) btn.hidden = false;
-    this._applyNoteRailCollapsed('assist');
-  },
-
-  hideNoteAssistRail() {
-    const rail = document.getElementById('noteAssistRail');
-    const btn = document.getElementById('noteAssistToggle');
-    if (rail) rail.hidden = true;
-    if (btn) btn.hidden = true;
-  },
+  _applyNoteRailState() { window.NoteEditor?.applyAllRailState(); },
+  _applyNoteRailCollapsed(rail) { window.NoteEditor?.applyRailCollapsed(rail); },
+  toggleNoteTocRail() { window.NoteEditor?.toggleRail('toc'); },
+  toggleNoteAssistRail() { window.NoteEditor?.toggleRail('assist'); },
+  showNoteTocRail() { window.NoteEditor?.showRail('toc'); },
+  hideNoteTocRail() { window.NoteEditor?.hideRail('toc'); },
+  showNoteAssistRail() { window.NoteEditor?.showRail('assist'); },
+  hideNoteAssistRail() { window.NoteEditor?.hideRail('assist'); },
 
   // =============================================================================
   // Note AI Assist (selection action bar + sidebar wiring)
