@@ -4952,10 +4952,10 @@ const sessionManager = {
   // created in resetNoteHistory so it's always defined before first use.
   noteHistory: null,
 
-  // Auto-save state
-  noteAutoSaveTimeout: null,
-  noteIsDirty: false,
-  noteAutoSaveDelay: 3000, // 3 seconds
+  // Auto-save lives in a NoteAutoSaveTimer instance (see note-editor.js).
+  // Lazily created in resetNoteAutoSaveState. The save callback (see
+  // _performNoteAutoSave) closes over `this` and runs the actual API call.
+  noteAutoSave: null,
 
   // Load notes for a folder
   async loadFolderNotes(folderId) {
@@ -5732,18 +5732,14 @@ const sessionManager = {
 
   // Save current note
   async saveCurrentNote() {
-    // Clear any pending auto-save
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
+    // Cancel any pending auto-save (we're saving now).
+    this.noteAutoSave?.cancel();
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
 
-    // Show saving status
     this.updateNoteSaveStatus('saving');
 
     if (!this.currentNote) {
@@ -5758,8 +5754,7 @@ const sessionManager = {
       const created = await this.createNote(workspaceId, noteName, noteContent);
       if (created) {
         this.currentNote = created;
-        this.noteIsDirty = false;
-        this.updateNoteSaveStatus('saved');
+        this.noteAutoSave?.markClean();
         this.showToast('Note created', 'success');
 
         const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
@@ -5778,8 +5773,7 @@ const sessionManager = {
     const updated = await this.updateNote(this.currentNote.id, updates);
     if (updated) {
       this.currentNote = { ...this.currentNote, ...updated };
-      this.noteIsDirty = false;
-      this.updateNoteSaveStatus('saved');
+      this.noteAutoSave?.markClean();
       this.showToast('Note saved', 'success');
 
       // Refresh folder tree to show updated note name
@@ -5798,104 +5792,76 @@ const sessionManager = {
   // =============================================================================
 
   // Schedule auto-save with debounce
-  scheduleNoteAutoSave() {
-    // Clear any existing timeout
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-    }
-
-    // Mark as dirty and show unsaved status
-    this.noteIsDirty = true;
-    this.updateNoteSaveStatus('unsaved');
-
-    // Schedule auto-save after delay
-    this.noteAutoSaveTimeout = setTimeout(() => {
-      this.autoSaveNote();
-    }, this.noteAutoSaveDelay);
+  // Lazily build the autosave timer the first time we need it. The save
+  // callback runs the actual create/update against the API; the timer
+  // tracks dirty state and the 3s debounce.
+  _ensureNoteAutoSave() {
+    if (this.noteAutoSave) return this.noteAutoSave;
+    if (!window.NoteEditor) return null;
+    this.noteAutoSave = new window.NoteEditor.NoteAutoSaveTimer({
+      delayMs: 3000,
+      onFlush: () => this.autoSaveNote(),
+      onStatusChange: (status) => window.NoteEditor.updateSaveStatus(status),
+    });
+    return this.noteAutoSave;
   },
 
-  // Perform auto-save
+  scheduleNoteAutoSave() { this._ensureNoteAutoSave()?.schedule(); },
+
+  // Performs one autosave attempt. Called by the timer or by handleNoteModalClose.
   async autoSaveNote() {
-    if (!this.noteIsDirty) return;
+    const timer = this._ensureNoteAutoSave();
+    if (!timer || !timer.isDirty()) return;
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
 
-    // Show saving status
-    this.updateNoteSaveStatus('saving');
+    timer.markSaving();
 
     try {
       if (this.currentNote?.id) {
-        // Update existing note
         const updates = { name: noteName, content: noteContent };
         const updated = await this.updateNote(this.currentNote.id, updates);
         if (updated) {
           this.currentNote = { ...this.currentNote, ...updated };
-          this.noteIsDirty = false;
-          this.updateNoteSaveStatus('saved');
-          // Refresh folder tree to show updated note name
+          timer.markClean();
           this.renderFolderTree();
         } else {
-          this.updateNoteSaveStatus('error');
+          timer.markError();
         }
       } else {
-        // Create new note (auto-create on first auto-save)
         const workspaceId = this.noteModalWorkspaceId;
         if (!workspaceId) {
-          // Can't auto-create without workspace - show unsaved status
-          this.updateNoteSaveStatus('unsaved');
+          // Can't auto-create without workspace; revert to unsaved state.
+          window.NoteEditor.updateSaveStatus('unsaved');
           return;
         }
         const created = await this.createNote(workspaceId, noteName, noteContent);
         if (created) {
           this.currentNote = created;
-          this.noteIsDirty = false;
-          this.updateNoteSaveStatus('saved');
-          // Update save button text since we now have a note
+          timer.markClean();
           const saveBtn = document.getElementById('saveNoteBtn');
           if (saveBtn) saveBtn.textContent = 'Save';
         } else {
-          this.updateNoteSaveStatus('error');
+          timer.markError();
         }
       }
     } catch (error) {
       console.error('Auto-save failed:', error);
-      this.updateNoteSaveStatus('error');
+      timer.markError();
     }
   },
 
-  // Update save status indicator
   updateNoteSaveStatus(status) { window.NoteEditor?.updateSaveStatus(status); },
 
-  // Handle modal close - save any unsaved changes
   handleNoteModalClose() {
-    // Clear any pending auto-save timeout
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
-
-    // If there are unsaved changes, save immediately (don't wait)
-    if (this.noteIsDirty) {
-      this.autoSaveNote();
-    }
-
-    // Reset dirty state
-    this.noteIsDirty = false;
-    this.updateNoteSaveStatus('saved');
+    this.noteAutoSave?.flushImmediate();
+    this.noteAutoSave?.markClean();
   },
 
-  // Reset auto-save state (called when opening a note)
-  resetNoteAutoSaveState() {
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
-    this.noteIsDirty = false;
-    this.updateNoteSaveStatus('saved');
-  },
+  resetNoteAutoSaveState() { this._ensureNoteAutoSave()?.reset(); },
 
   // =============================================================================
   // Note Editor Rails (TOC + AI Assist)

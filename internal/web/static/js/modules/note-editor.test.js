@@ -1,5 +1,5 @@
 // Tests for note-editor.js pure helpers — run with `node --test`.
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -12,6 +12,7 @@ import {
   isPrintableKey,
   normalizeVaultReference,
   NoteHistory,
+  NoteAutoSaveTimer,
 } from './note-editor.js';
 
 // =============================================================================
@@ -330,4 +331,100 @@ test('NoteHistory: reset clears everything', () => {
   assert.deepEqual(h.undoStack, []);
   assert.deepEqual(h.redoStack, []);
   assert.equal(h.applying, false);
+});
+
+// =============================================================================
+// NoteAutoSaveTimer
+// =============================================================================
+
+test('NoteAutoSaveTimer: schedule fires onFlush after delayMs', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.schedule();
+  assert.equal(flushed, 0);
+  mock.timers.tick(999);
+  assert.equal(flushed, 0);
+  mock.timers.tick(1);
+  assert.equal(flushed, 1);
+  mock.timers.reset();
+});
+
+test('NoteAutoSaveTimer: schedule replaces a pending timer', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.schedule();
+  mock.timers.tick(500);
+  t.schedule(); // resets the clock
+  mock.timers.tick(500);
+  assert.equal(flushed, 0, 'should not have fired — timer was reset');
+  mock.timers.tick(500);
+  assert.equal(flushed, 1);
+  mock.timers.reset();
+});
+
+test('NoteAutoSaveTimer: schedule emits unsaved status and marks dirty', () => {
+  const statuses = [];
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => {},
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule();
+  assert.deepEqual(statuses, ['unsaved']);
+  assert.equal(t.isDirty(), true);
+  t.cancel();
+});
+
+test('NoteAutoSaveTimer: flushImmediate fires onFlush right away when dirty', () => {
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.schedule();
+  t.flushImmediate();
+  assert.equal(flushed, 1);
+});
+
+test('NoteAutoSaveTimer: flushImmediate is a no-op when clean', () => {
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.flushImmediate();
+  assert.equal(flushed, 0);
+});
+
+test('NoteAutoSaveTimer: cancel stops a pending timer without flushing', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.schedule();
+  t.cancel();
+  mock.timers.tick(2000);
+  assert.equal(flushed, 0);
+  mock.timers.reset();
+});
+
+test('NoteAutoSaveTimer: markClean clears dirty and emits saved status', () => {
+  const statuses = [];
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => {},
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule(); // dirty + 'unsaved'
+  t.markClean();
+  assert.deepEqual(statuses, ['unsaved', 'saved']);
+  assert.equal(t.isDirty(), false);
+  t.cancel();
+});
+
+test('NoteAutoSaveTimer: reset cancels timer and clears dirty', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let flushed = 0;
+  const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });
+  t.schedule();
+  t.reset();
+  mock.timers.tick(2000);
+  assert.equal(flushed, 0);
+  assert.equal(t.isDirty(), false);
+  mock.timers.reset();
 });

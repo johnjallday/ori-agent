@@ -185,6 +185,83 @@ export class NoteHistory {
 }
 
 // =============================================================================
+// Auto-save timer — debounces note saves and tracks the dirty flag
+// =============================================================================
+// The actual save (POST/PUT to the API) lives on the editor host because it
+// needs access to currentNote / workspaceId. This class encapsulates the
+// timer + dirty state and emits status transitions ('unsaved' / 'saving' /
+// 'saved' / 'error') via the onStatusChange callback so the host can keep
+// the save-status indicator in sync without owning timer state.
+
+export class NoteAutoSaveTimer {
+  constructor({ delayMs = 3000, onFlush, onStatusChange } = {}) {
+    this.delayMs = delayMs;
+    this.onFlush = onFlush;
+    this.onStatusChange = onStatusChange;
+    this.timer = null;
+    this.dirty = false;
+  }
+
+  // schedule arms the timer (replacing any pending one) and marks the editor
+  // dirty. After delayMs the onFlush callback runs.
+  schedule() {
+    this.cancel();
+    this.dirty = true;
+    this.onStatusChange?.('unsaved');
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.onFlush?.();
+    }, this.delayMs);
+  }
+
+  // flushImmediate cancels the pending timer and runs onFlush right away if
+  // dirty. Useful for modal close — don't wait, save now.
+  flushImmediate() {
+    this.cancel();
+    if (this.dirty) this.onFlush?.();
+  }
+
+  // cancel stops the pending timer without firing onFlush.
+  cancel() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  // markClean tells the timer the host has successfully saved. Status flips
+  // to 'saved' for the indicator.
+  markClean() {
+    this.dirty = false;
+    this.onStatusChange?.('saved');
+  }
+
+  // markError tells the timer a save failed. Dirty stays true so a future
+  // schedule still fires.
+  markError() {
+    this.onStatusChange?.('error');
+  }
+
+  // markSaving flips the indicator to 'saving' before the host's async work
+  // begins. The host calls this from inside its onFlush implementation.
+  markSaving() {
+    this.onStatusChange?.('saving');
+  }
+
+  // reset cancels timers and clears dirty + status. Called when opening a
+  // new note so leftover state doesn't bleed across sessions.
+  reset() {
+    this.cancel();
+    this.dirty = false;
+    this.onStatusChange?.('saved');
+  }
+
+  isDirty() {
+    return this.dirty;
+  }
+}
+
+// =============================================================================
 // Vault reference badge — toggles `#noteVaultReferenceBadge` for notes that
 // were imported from a private vault.
 // =============================================================================
@@ -280,6 +357,7 @@ const api = {
   showVaultReferenceBadge,
   hideVaultReferenceBadge,
   NoteHistory,
+  NoteAutoSaveTimer,
 };
 
 if (typeof window !== 'undefined') {
