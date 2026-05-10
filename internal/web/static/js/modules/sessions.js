@@ -4854,11 +4854,7 @@ const sessionManager = {
   },
 
   // Escape HTML
-  escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  },
+  escapeHtml(text) { return window.NoteEditor?.escapeHtml(text) ?? String(text ?? ''); },
 
   // Convert hex color to rgba string
   hexToRgba(hex, alpha) {
@@ -6780,21 +6776,10 @@ const sessionManager = {
   },
 
   renderNoteLiveInputLine(line, index) {
-    const kindClass = this.noteLineKindClass(line);
-    const className = ['note-live-line-input', kindClass].filter(Boolean).join(' ');
-    return `
-      <div class="note-live-line is-editing" data-line-index="${index}">
-        <textarea class="${className}" data-line-index="${index}" rows="1" spellcheck="true">${this.escapeHtml(line)}</textarea>
-      </div>
-    `;
+    return window.NoteEditor?.renderEditingLine(line, index) ?? '';
   },
-
   renderNoteLiveRangeInput(markdown, startIndex, endIndex) {
-    return `
-      <div class="note-live-line is-editing is-block-editing" data-line-index="${startIndex}" data-line-end="${endIndex}">
-        <textarea class="note-live-line-input note-live-block-input" data-line-start="${startIndex}" data-line-end="${endIndex}" spellcheck="true">${this.escapeHtml(markdown)}</textarea>
-      </div>
-    `;
+    return window.NoteEditor?.renderEditingRange(markdown, startIndex, endIndex) ?? '';
   },
 
   renderNoteLiveRenderedLine(line, index) {

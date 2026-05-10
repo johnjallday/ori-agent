@@ -14,6 +14,9 @@ import {
   NoteHistory,
   NoteAutoSaveTimer,
   pointerDragged,
+  escapeHtml,
+  renderEditingLine,
+  renderEditingRange,
 } from './note-editor.js';
 
 // =============================================================================
@@ -461,4 +464,69 @@ test('pointerDragged: respects custom threshold', () => {
 
 test('pointerDragged: returns false for null event', () => {
   assert.equal(pointerDragged({ x: 0, y: 0 }, null), false);
+});
+
+// =============================================================================
+// escapeHtml
+// =============================================================================
+
+test('escapeHtml: escapes the five HTML special characters', () => {
+  assert.equal(escapeHtml('& < > " \''), '&amp; &lt; &gt; &quot; &#39;');
+});
+
+test('escapeHtml: leaves plain text alone', () => {
+  assert.equal(escapeHtml('Hello world 123'), 'Hello world 123');
+});
+
+test('escapeHtml: handles null and undefined as empty string', () => {
+  assert.equal(escapeHtml(null), '');
+  assert.equal(escapeHtml(undefined), '');
+});
+
+test('escapeHtml: stringifies non-string inputs', () => {
+  assert.equal(escapeHtml(42), '42');
+  assert.equal(escapeHtml(true), 'true');
+});
+
+test('escapeHtml: prevents XSS via injected tags', () => {
+  assert.equal(
+    escapeHtml('<script>alert("x")</script>'),
+    '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;',
+  );
+});
+
+// =============================================================================
+// renderEditingLine / renderEditingRange
+// =============================================================================
+
+test('renderEditingLine: contains data-line-index and the kind class', () => {
+  const html = renderEditingLine('# Heading', 5);
+  assert.match(html, /data-line-index="5"/);
+  assert.match(html, /is-heading-1/);
+  assert.match(html, /<textarea/);
+});
+
+test('renderEditingLine: escapes HTML in the line content', () => {
+  const html = renderEditingLine('<script>', 0);
+  assert.match(html, /&lt;script&gt;/);
+  // Make sure no unescaped <script> tag leaked in.
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test('renderEditingLine: empty line still emits a textarea', () => {
+  const html = renderEditingLine('', 0);
+  assert.match(html, /<textarea/);
+  assert.match(html, /data-line-index="0"/);
+});
+
+test('renderEditingRange: includes start and end indices on textarea', () => {
+  const html = renderEditingRange('line one\nline two', 3, 4);
+  assert.match(html, /data-line-start="3"/);
+  assert.match(html, /data-line-end="4"/);
+  assert.match(html, /is-block-editing/);
+});
+
+test('renderEditingRange: escapes HTML in the markdown content', () => {
+  const html = renderEditingRange('<b>bold</b>', 0, 0);
+  assert.match(html, /&lt;b&gt;bold&lt;\/b&gt;/);
 });

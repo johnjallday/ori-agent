@@ -22,6 +22,49 @@
 // `window.NoteEditor` for the non-module sessions.js to consume.
 
 // =============================================================================
+// HTML escape — pure string version (replaces sessionManager's DOM-based one)
+// =============================================================================
+// The original sessionManager.escapeHtml used document.createElement; this
+// pure version produces the same output for our use case (escaping `< > & " '`)
+// without needing the DOM. Used by render helpers below and shared with
+// non-DOM contexts (e.g., tests).
+
+const HTML_ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+export function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c]);
+}
+
+// =============================================================================
+// Live-preview line renderers — templating for editable / rendered lines
+// =============================================================================
+
+// renderEditingLine produces the HTML for a single line being actively edited
+// (textarea wrapped in a .note-live-line.is-editing div). The textarea's
+// `data-line-index` lets event handlers map back to the source line.
+export function renderEditingLine(line, index) {
+  const kindClass = lineKindClass(line);
+  const className = ['note-live-line-input', kindClass].filter(Boolean).join(' ');
+  return `
+      <div class="note-live-line is-editing" data-line-index="${index}">
+        <textarea class="${className}" data-line-index="${index}" rows="1" spellcheck="true">${escapeHtml(line)}</textarea>
+      </div>
+    `;
+}
+
+// renderEditingRange produces the HTML for an inclusive range of lines being
+// edited as one block (e.g., when the user multi-selects and starts typing).
+// `markdown` is the joined content of the range; `startIndex`..`endIndex` are
+// the source line indices the textarea covers.
+export function renderEditingRange(markdown, startIndex, endIndex) {
+  return `
+      <div class="note-live-line is-editing is-block-editing" data-line-index="${startIndex}" data-line-end="${endIndex}">
+        <textarea class="note-live-line-input note-live-block-input" data-line-start="${startIndex}" data-line-end="${endIndex}" spellcheck="true">${escapeHtml(markdown)}</textarea>
+      </div>
+    `;
+}
+
+// =============================================================================
 // Pure line-level helpers (PRD §4.1, task 1.0 first slice)
 // =============================================================================
 
@@ -407,6 +450,9 @@ const api = {
   hasTextSelectionInside,
   pointerDragged,
   clearWindowSelection,
+  escapeHtml,
+  renderEditingLine,
+  renderEditingRange,
 };
 
 if (typeof window !== 'undefined') {
