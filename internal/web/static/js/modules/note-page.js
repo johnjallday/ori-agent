@@ -13,10 +13,26 @@ let bundle = null;
 async function fetchNote(noteId) {
   try {
     const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      // eslint-disable-next-line no-console
+      console.error('Note fetch failed:', resp.status, resp.statusText);
+      return null;
+    }
     return await resp.json();
-  } catch (_) {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Note fetch errored:', err);
     return null;
+  }
+}
+
+function showLoadError(message) {
+  const previewContent = document.getElementById('notePreviewContent');
+  if (previewContent) {
+    previewContent.innerHTML = `<div class="note-page-error">${
+      String(message || 'Could not load this note.')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    }</div>`;
   }
 }
 
@@ -84,10 +100,12 @@ function showToast(msg, kind) {
 
 async function bootstrap() {
   if (!NOTE_ID) {
+    showLoadError('No note ID in URL.');
     showToast('No note ID in URL', 'error');
     return;
   }
   if (!window.NoteEditor) {
+    showLoadError('NoteEditor module failed to load.');
     // eslint-disable-next-line no-console
     console.error('NoteEditor module not loaded');
     return;
@@ -96,15 +114,17 @@ async function bootstrap() {
   // 1. Load the note.
   currentNote = await fetchNote(NOTE_ID);
   if (!currentNote) {
+    showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
     showToast('Note not found', 'error');
     return;
   }
 
-  // 2. Populate the editor inputs.
+  // 2. Populate the editor inputs + document title.
   const titleInput = document.getElementById('noteNameInput');
   const contentInput = document.getElementById('noteContentInput');
   if (titleInput) titleInput.value = currentNote.name || '';
   if (contentInput) contentInput.value = currentNote.content || '';
+  if (currentNote.name) document.title = `${currentNote.name} - Ori Agent`;
 
   // 3. Fetch the workspace name for the breadcrumb (best effort).
   fetchWorkspaceName(currentNote.workspace_id).then((name) => populateBreadcrumb(currentNote, name));

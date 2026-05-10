@@ -69,8 +69,12 @@
 
       <div class="note-editor-center">
         <div class="note-editor-container">
-          <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..."></textarea>
-          <div id="notePreviewContent" class="note-preview-content note-live-editor" style="display: none;" role="textbox" aria-label="Markdown live preview editor" tabindex="0"></div>
+          <!-- Source-of-truth textarea, hidden on the page (the preview is the
+               only visible editor; click a rendered line to edit inline). -->
+          <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..." style="display: none;"></textarea>
+          <div id="notePreviewContent" class="note-preview-content note-live-editor" role="textbox" aria-label="Markdown live preview editor" tabindex="0">
+            <div class="note-page-loading">Loading note…</div>
+          </div>
         </div>
       </div>
 

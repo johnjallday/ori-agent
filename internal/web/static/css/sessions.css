@@ -5078,6 +5078,27 @@ body.task-modal-open {
   max-height: none;
 }
 
+/* The page is always in live-preview mode — make the preview pane visible by
+   default. The textarea inside is hidden via inline style. */
+.note-page-editor-grid .note-preview-content {
+  display: block !important;
+}
+
+.note-page-loading,
+.note-page-error {
+  padding: 24px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.note-page-error {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.06);
+  border-radius: 6px;
+  margin: 16px;
+}
+
 /* =============================================================================
    Search Palette (⌘K)
    ============================================================================= */
