@@ -6798,45 +6798,24 @@ const sessionManager = {
     this.setNoteContentValue(lines.join('\n'));
   },
 
-  noteHeadingLevel(line) {
-    const heading = String(line || '').match(/^(#{1,6})\s+/);
-    return heading ? heading[1].length : 0;
+  // The following four helpers were moved to note-editor.js as the first slice
+  // of the v2 task 1.0 extraction. The thin delegators stay here so existing
+  // callers (this.noteHeadingLevel(...), etc.) keep working untouched.
+  noteHeadingLevel(line) { return window.NoteEditor?.parseHeadingLevel(line) ?? 0; },
+  noteLineKindClass(line) { return window.NoteEditor?.lineKindClass(line) ?? ''; },
+  parseNoteTaskLine(line) { return window.NoteEditor?.parseTaskLine(line) ?? null; },
+  normalizeCompactTaskListMarkdown(text) {
+    return window.NoteEditor?.normalizeCompactTaskListMarkdown(text) ?? String(text || '');
   },
 
+  // pruneNoteCollapsedHeadings still touches `this.noteLiveCollapsedHeadings`
+  // (state that hasn't been migrated yet), so it stays here for now.
   pruneNoteCollapsedHeadings(lines) {
     for (const index of Array.from(this.noteLiveCollapsedHeadings || [])) {
       if (!Number.isInteger(index) || index < 0 || index >= lines.length || this.noteHeadingLevel(lines[index]) === 0) {
         this.noteLiveCollapsedHeadings.delete(index);
       }
     }
-  },
-
-  noteLineKindClass(line) {
-    const headingLevel = this.noteHeadingLevel(line);
-    if (headingLevel > 0) return `is-heading-${headingLevel}`;
-    if (this.parseNoteTaskLine(line)) return 'is-task-list';
-    if (/^\s*[-*+]\s+/.test(line)) return 'is-list';
-    if (/^\s*\d+\.\s+/.test(line)) return 'is-list';
-    if (/^\s*>\s+/.test(line)) return 'is-quote';
-    return '';
-  },
-
-  parseNoteTaskLine(line) {
-    const match = String(line || '').match(/^(\s*)([-*+])(\s+)\[( |x|X)?\](\s*)(.*)$/);
-    if (!match) return null;
-    return {
-      indent: match[1] || '',
-      bullet: match[2] || '-',
-      gap: match[3] || ' ',
-      checked: String(match[4] || '').toLowerCase() === 'x',
-      compactUnchecked: match[4] === '',
-      afterGap: match[5] || '',
-      text: match[6] || ''
-    };
-  },
-
-  normalizeCompactTaskListMarkdown(text) {
-    return String(text || '').replace(/^(\s*[-*+]\s+)\[\](?=\s|$)/gm, '$1[ ]');
   },
 
   renderNoteLiveEditor(options = {}) {
