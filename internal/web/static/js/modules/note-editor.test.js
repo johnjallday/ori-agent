@@ -23,6 +23,8 @@ import {
   renderHeadingLine,
   renderTaskLine,
   renderRenderedLine,
+  lineIndexAtPosition,
+  startOfLine,
 } from './note-editor.js';
 
 // =============================================================================
@@ -641,4 +643,55 @@ test('renderRenderedLine: task line precedes plain', () => {
 test('renderRenderedLine: data-line-index propagated', () => {
   const html = renderRenderedLine('plain text', 7, false);
   assert.match(html, /data-line-index="7"/);
+});
+
+// =============================================================================
+// lineIndexAtPosition / startOfLine — round-trip helpers for TOC nav
+// =============================================================================
+
+test('lineIndexAtPosition: position 0 returns line 0', () => {
+  assert.equal(lineIndexAtPosition('# A\nbody\n# B', 0), 0);
+});
+
+test('lineIndexAtPosition: position on second line returns 1', () => {
+  const src = '# A\nbody';
+  assert.equal(lineIndexAtPosition(src, src.indexOf('body')), 1);
+});
+
+test('lineIndexAtPosition: position past end returns last line', () => {
+  const src = '# A\n# B\n# C';
+  assert.equal(lineIndexAtPosition(src, src.length), 2);
+});
+
+test('lineIndexAtPosition: counts \\n correctly across multiple lines', () => {
+  const src = '0\n1\n2\n3\n4';
+  assert.equal(lineIndexAtPosition(src, src.indexOf('3')), 3);
+});
+
+test('startOfLine: line 0 returns 0', () => {
+  assert.equal(startOfLine('# A\nbody', 0), 0);
+});
+
+test('startOfLine: returns offset of first char on requested line', () => {
+  const src = '# A\nbody\n# B';
+  assert.equal(startOfLine(src, 1), 4);
+  assert.equal(startOfLine(src, 2), 9);
+});
+
+test('startOfLine: lineIndex past last line clamps to start of final line', () => {
+  // Behavior: walk newlines until we run out, then return wherever the cursor
+  // landed. Effectively "start of the last reachable line". Used by the TOC
+  // active-section lookup which queries by data-position — the final line's
+  // start matches the last TOC entry, which is what we want.
+  const src = '# A\n# B';
+  assert.equal(startOfLine(src, 99), 4); // start of "# B"
+});
+
+test('lineIndexAtPosition + startOfLine round-trip on heading positions', () => {
+  const src = '# Title\nbody\n## Sub\nmore\n### Detail\n';
+  for (const heading of ['# Title', '## Sub', '### Detail']) {
+    const pos = src.indexOf(heading);
+    const line = lineIndexAtPosition(src, pos);
+    assert.equal(startOfLine(src, line), pos, `round-trip failed for ${heading}`);
+  }
 });

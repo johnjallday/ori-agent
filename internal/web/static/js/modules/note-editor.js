@@ -370,6 +370,85 @@ export function clearWindowSelection() {
 }
 
 // =============================================================================
+// TOC navigation helpers — locate / scroll / mark-active
+// =============================================================================
+// The live-preview pane renders one DOM element per source-Markdown line, with
+// each carrying `data-line-index`. These helpers map between source positions
+// (byte offsets in the textarea content) and the rendered elements so the TOC
+// rail can scroll the preview into view and highlight the active section.
+
+const PREVIEW_PANE_ID = 'notePreviewContent';
+const TOC_RAIL_ID = 'noteTocRail';
+
+// lineIndexAtPosition returns the 0-based line number containing source byte
+// offset `position` within `content`. Used to translate a heading's source
+// position into the line-index attribute that rendered DOM elements carry.
+export function lineIndexAtPosition(content, position) {
+  let lineIndex = 0;
+  let cursor = 0;
+  while (cursor < content.length && cursor < position) {
+    const nl = content.indexOf('\n', cursor);
+    if (nl < 0 || nl >= position) break;
+    cursor = nl + 1;
+    lineIndex++;
+  }
+  return lineIndex;
+}
+
+// startOfLine returns the byte offset of the first character on line
+// `lineIndex` (0-based) within `content`. Used to map back from line index
+// to source position when wiring the TOC rail's active-section indicator.
+export function startOfLine(content, lineIndex) {
+  let cursor = 0;
+  let line = 0;
+  while (line < Number(lineIndex) && cursor < content.length) {
+    const nl = content.indexOf('\n', cursor);
+    if (nl < 0) break;
+    cursor = nl + 1;
+    line++;
+  }
+  return cursor;
+}
+
+// findRenderedHeadingByPosition locates the rendered live-preview element for
+// the heading at source byte offset `position`. Returns null when the live
+// preview isn't mounted or no rendered line matches.
+export function findRenderedHeadingByPosition(content, position) {
+  if (typeof document === 'undefined') return null;
+  const previewPane = document.getElementById(PREVIEW_PANE_ID);
+  if (!previewPane) return null;
+  const lineIndex = lineIndexAtPosition(content, position);
+  return previewPane.querySelector(`.note-live-line-rendered[data-line-index="${lineIndex}"]`);
+}
+
+// scrollToHeadingPosition smooth-scrolls the preview pane so the heading at
+// `position` sits at the top of the visible area. No-op when the preview
+// isn't mounted or the heading isn't rendered.
+export function scrollToHeadingPosition(content, position) {
+  const target = findRenderedHeadingByPosition(content, position);
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// setActiveTocEntry marks the TOC rail entry corresponding to `lineIndex` as
+// the currently-active section (sets `aria-current="location"` and the
+// `.is-active` class). Clears the marker on every other entry first.
+export function setActiveTocEntry(lineIndex, content) {
+  if (typeof document === 'undefined' || lineIndex == null) return;
+  const rail = document.getElementById(TOC_RAIL_ID);
+  if (!rail) return;
+  const cursor = startOfLine(content, lineIndex);
+  const target = rail.querySelector(`[data-position="${cursor}"]`);
+  rail.querySelectorAll('.note-toc-item').forEach((el) => {
+    el.removeAttribute('aria-current');
+    el.classList.remove('is-active');
+  });
+  if (target) {
+    target.setAttribute('aria-current', 'location');
+    target.classList.add('is-active');
+  }
+}
+
+// =============================================================================
 // Generate-with-AI panel — visibility + rail "generating" mode coordination
 // =============================================================================
 
@@ -874,6 +953,11 @@ const api = {
   closeGeneratePanel,
   toggleGeneratePanel,
   openGeneratePanelByDefault,
+  findRenderedHeadingByPosition,
+  scrollToHeadingPosition,
+  setActiveTocEntry,
+  lineIndexAtPosition,
+  startOfLine,
 };
 
 if (typeof window !== 'undefined') {

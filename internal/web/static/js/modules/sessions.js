@@ -6075,29 +6075,10 @@ const sessionManager = {
   // Find the rendered heading element in the live-preview pane that matches
   // the source Markdown position, and smooth-scroll it to the top of the view.
   _scrollNoteToHeading(position) {
-    const previewPane = document.getElementById('notePreviewContent');
-    if (!previewPane) return;
-    const target = this._findRenderedHeadingByPosition(position);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.NoteEditor?.scrollToHeadingPosition(this.getNoteContentValue(), position);
   },
-
-  // Live-preview rendering attaches one element per source line. Heading lines
-  // carry `is-heading-N` plus `data-line-index` equal to the source line index;
-  // we look up by source position by scanning lines until we hit the right offset.
   _findRenderedHeadingByPosition(position) {
-    const previewPane = document.getElementById('notePreviewContent');
-    if (!previewPane) return null;
-    const source = this.getNoteContentValue();
-    let lineIndex = 0;
-    let cursor = 0;
-    while (cursor < source.length && cursor < position) {
-      const nl = source.indexOf('\n', cursor);
-      if (nl < 0 || nl >= position) break;
-      cursor = nl + 1;
-      lineIndex++;
-    }
-    return previewPane.querySelector(`.note-live-line-rendered[data-line-index="${lineIndex}"]`);
+    return window.NoteEditor?.findRenderedHeadingByPosition(this.getNoteContentValue(), position) ?? null;
   },
 
   _attachNoteTocActiveObserver() {
@@ -6139,27 +6120,7 @@ const sessionManager = {
   },
 
   _setActiveTocEntry(lineIndex) {
-    if (lineIndex == null) return;
-    const rail = document.getElementById('noteTocRail');
-    if (!rail) return;
-    const source = this.getNoteContentValue();
-    let cursor = 0;
-    let line = 0;
-    while (line < Number(lineIndex) && cursor < source.length) {
-      const nl = source.indexOf('\n', cursor);
-      if (nl < 0) break;
-      cursor = nl + 1;
-      line++;
-    }
-    const target = rail.querySelector(`[data-position="${cursor}"]`);
-    rail.querySelectorAll('.note-toc-item').forEach(el => {
-      el.removeAttribute('aria-current');
-      el.classList.remove('is-active');
-    });
-    if (target) {
-      target.setAttribute('aria-current', 'location');
-      target.classList.add('is-active');
-    }
+    window.NoteEditor?.setActiveTocEntry(lineIndex, this.getNoteContentValue());
   },
 
   _onNoteTocDragStart(e, position) {
