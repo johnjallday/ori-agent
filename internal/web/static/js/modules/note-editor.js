@@ -1143,7 +1143,63 @@ export function mount(host = {}) {
     clearWindowSelection,
   };
 
-  const live = new NoteLiveEditor({
+  // The render function is owned by mount() — it composes buildLiveEditorHTML
+  // with the live-editor state and focuses the right textarea. The host's
+  // render callback (if any) is ignored; sessionManager (and the v2 page)
+  // call bundle.render directly via `sharedHost.render` injected below.
+  let live;
+  let toc;
+  function render(opts = {}) {
+    if (typeof document === 'undefined') return;
+    if (!host.isPreviewMode?.()) return;
+    const previewContent = document.getElementById(PREVIEW_PANE_ID);
+    if (!previewContent || !live) return;
+
+    const lines = host.getContentLines?.() || [];
+    pruneCollapsedHeadings(lines, live.state.collapsedHeadings);
+
+    const activeRange = live.state.activeRange
+      ? {
+          start: Math.max(0, Math.min(live.state.activeRange.start, lines.length - 1)),
+          end: Math.max(0, Math.min(live.state.activeRange.end, lines.length - 1)),
+        }
+      : null;
+    const focusLineIndex = Number.isInteger(opts.focusLineIndex)
+      ? opts.focusLineIndex
+      : live.state.activeLineIndex;
+    const activeLineIndex = !activeRange && Number.isInteger(focusLineIndex)
+      ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
+      : null;
+    live.state.activeLineIndex = activeLineIndex;
+
+    previewContent.innerHTML = buildLiveEditorHTML(lines, {
+      activeRange,
+      activeLineIndex,
+      collapsedHeadings: live.state.collapsedHeadings,
+    });
+    live.bindEvents(previewContent);
+
+    const focusInput = activeRange
+      ? previewContent.querySelector('.note-live-block-input')
+      : (activeLineIndex !== null
+          ? previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`)
+          : null);
+    if (focusInput) {
+      const cursorPosition = Number.isInteger(opts.cursorPosition)
+        ? Math.max(0, Math.min(opts.cursorPosition, focusInput.value.length))
+        : focusInput.value.length;
+      focusInput.focus();
+      focusInput.setSelectionRange(cursorPosition, cursorPosition);
+      resizeLiveInput(focusInput);
+    }
+  }
+
+  // sharedHost.render is hot-wired to the local render so live/toc invoke it
+  // when actions complete. Live's own action methods read `this.host.render`
+  // and find the post-mount function.
+  sharedHost.render = (opts) => render(opts);
+
+  live = new NoteLiveEditor({
     ...sharedHost,
     handleHistoryShortcut: (event) => {
       if (isUndoShortcut(event)) {
@@ -1154,7 +1210,7 @@ export function mount(host = {}) {
           live.state.reset();
           autosave.schedule();
           history.applying = false;
-          host.render?.();
+          render();
           return true;
         }
       }
@@ -1166,7 +1222,7 @@ export function mount(host = {}) {
           live.state.reset();
           autosave.schedule();
           history.applying = false;
-          host.render?.();
+          render();
           return true;
         }
       }
@@ -1174,13 +1230,14 @@ export function mount(host = {}) {
     },
   });
 
-  const toc = new NoteTocController(sharedHost);
+  toc = new NoteTocController(sharedHost);
 
   return {
     history,
     autosave,
     toc,
     live,
+    render,
     destroy() {
       autosave.cancel();
       toc.destroy();

@@ -4972,13 +4972,14 @@ const sessionManager = {
   _ensureMount() {
     if (this.noteMount) return this.noteMount;
     if (!window.NoteEditor) return null;
+    // Note: `render` is owned by mount() itself; we don't pass one through.
+    // sessionManager.renderNoteLiveEditor delegates to bundle.render below.
     this.noteMount = window.NoteEditor.mount({
       getContent: () => this.getNoteContentValue(),
       setContent: (v) => this.setNoteContentValue(v),
       getContentLines: () => this.getNoteContentLines(),
       setContentLines: (lines) => this.setNoteContentLines(lines),
       isPreviewMode: () => this.isNotePreviewMode,
-      render: (opts) => this.renderNoteLiveEditor(opts),
       onAutosaveFlush: () => this.autoSaveNote(),
     });
     return this.noteMount;
@@ -6252,51 +6253,7 @@ const sessionManager = {
     window.NoteEditor?.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
   },
 
-  renderNoteLiveEditor(options = {}) {
-    const previewContent = document.getElementById('notePreviewContent');
-    if (!previewContent || !this.isNotePreviewMode) return;
-    if (!window.NoteEditor) return;
-
-    const lines = this.getNoteContentLines();
-    window.NoteEditor.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
-
-    const activeRange = this.noteLiveActiveRange
-      ? {
-          start: Math.max(0, Math.min(this.noteLiveActiveRange.start, lines.length - 1)),
-          end: Math.max(0, Math.min(this.noteLiveActiveRange.end, lines.length - 1)),
-        }
-      : null;
-    const focusLineIndex = Number.isInteger(options.focusLineIndex)
-      ? options.focusLineIndex
-      : this.noteLiveActiveLineIndex;
-    const activeLineIndex = !activeRange && Number.isInteger(focusLineIndex)
-      ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
-      : null;
-    this.noteLiveActiveLineIndex = activeLineIndex;
-
-    previewContent.innerHTML = window.NoteEditor.buildLiveEditorHTML(lines, {
-      activeRange,
-      activeLineIndex,
-      collapsedHeadings: this.noteLiveCollapsedHeadings,
-    });
-
-    this.bindNoteLiveEditorEvents(previewContent);
-
-    // Focus and position the cursor in whichever editing input was rendered.
-    const focusInput = activeRange
-      ? previewContent.querySelector('.note-live-block-input')
-      : (activeLineIndex !== null
-        ? previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`)
-        : null);
-    if (focusInput) {
-      const cursorPosition = Number.isInteger(options.cursorPosition)
-        ? Math.max(0, Math.min(options.cursorPosition, focusInput.value.length))
-        : focusInput.value.length;
-      focusInput.focus();
-      focusInput.setSelectionRange(cursorPosition, cursorPosition);
-      this.resizeNoteLiveInput(focusInput);
-    }
-  },
+  renderNoteLiveEditor(options = {}) { this._ensureMount()?.render(options); },
 
   renderNoteLiveInputLine(line, index) {
     return window.NoteEditor?.renderEditingLine(line, index) ?? '';
