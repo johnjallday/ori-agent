@@ -5505,7 +5505,7 @@ const sessionManager = {
       contentInput.value = '';
     }
     this.resetNoteHistory();
-    this.setNotePreviewMode(false);
+    this.setNotePreviewMode(true);
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) saveBtn.textContent = 'Create Note';
     this.hideNoteVaultReferenceBadge();
@@ -5517,6 +5517,7 @@ const sessionManager = {
         workspaceId: workspaceId || null,
         agentId: this._resolveWorkspaceAgentId(),
       });
+      this._openGeneratePanelByDefault();
     });
 
     if (workspaceId) {
@@ -5700,6 +5701,7 @@ const sessionManager = {
         workspaceId: this.noteModalWorkspaceId,
         agentId: this._resolveWorkspaceAgentId(),
       });
+      this._openGeneratePanelByDefault();
     });
     this.setNotePreviewMode(true);
     if (lastSaved) {
@@ -6406,6 +6408,18 @@ const sessionManager = {
   // =============================================================================
   // Note AI Generation
   // =============================================================================
+
+  // _openGeneratePanelByDefault opens the Generate-with-AI panel on each note
+  // modal open. The panel lives in the right rail and is the user's primary
+  // entry point for AI-driven note creation/editing. If the user closes it,
+  // it stays closed for the rest of that modal's lifetime.
+  _openGeneratePanelByDefault() {
+    const panel = document.getElementById('noteAIGeneratePanel');
+    if (!panel) return;
+    if (panel.style.display === 'none' || panel.style.display === '') {
+      this.toggleNoteAIPanel();
+    }
+  },
 
   // Toggle AI generation panel visibility. The panel now lives inside the
   // right-side AI Assist rail; opening it temporarily hides the suggestion
