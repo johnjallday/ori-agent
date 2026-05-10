@@ -707,6 +707,177 @@ export class NoteLiveEditor {
     this.state.activeRange = { start, end };
     this.host.render?.({ cursorPosition: lines.slice(start, end + 1).join('\n').length });
   }
+
+  // selectLineRange marks an inclusive line span as selected and updates the
+  // browser's text selection to match. Cancels any active inline edit first
+  // (so the selection can paint over the rendered text). DOM-coupled but
+  // belongs with the controller because the resulting state lives there.
+  selectLineRange(anchorIndex, focusIndex, containerEl = null) {
+    if (typeof document === 'undefined') return;
+    const container = containerEl || document.getElementById(PREVIEW_PANE_ID);
+    if (!container) return;
+
+    if (this.state.activeLineIndex !== null) {
+      this.state.activeLineIndex = null;
+      this.host.render?.();
+    }
+
+    const lines = this.host.getContentLines?.() || [];
+    const maxIndex = Math.max(0, lines.length - 1);
+    const normalizedAnchor = Math.max(0, Math.min(anchorIndex, maxIndex));
+    const normalizedFocus = Math.max(0, Math.min(focusIndex, maxIndex));
+    const startIndex = Math.min(normalizedAnchor, normalizedFocus);
+    const endIndex = Math.max(normalizedAnchor, normalizedFocus);
+    const startLine = container.querySelector(`.note-live-line-rendered[data-line-index="${startIndex}"]`);
+    const endLine = container.querySelector(`.note-live-line-rendered[data-line-index="${endIndex}"]`);
+    if (!startLine || !endLine) return;
+
+    const range = document.createRange();
+    range.setStartBefore(startLine);
+    range.setEndAfter(endLine);
+    const selection = typeof window !== 'undefined' ? window.getSelection?.() : null;
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    container.querySelector(`.note-live-line-rendered[data-line-index="${normalizedFocus}"]`)
+      ?.focus({ preventScroll: true });
+    this.state.selectionAnchorIndex = normalizedAnchor;
+    this.state.selectionFocusIndex = normalizedFocus;
+  }
+
+  // handleInputChange mutates content from a single-line textarea's input
+  // event. Newlines split the line into multiple source lines.
+  handleInputChange(input) {
+    const lineIndex = Number(input.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+
+    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
+    const lines = this.host.getContentLines?.() || [];
+    const parts = normalizedValue.split('\n');
+    this.host.pushUndo?.();
+
+    if (parts.length > 1) {
+      lines.splice(lineIndex, 1, ...parts);
+      this.host.setContentLines?.(lines);
+      this.state.activeLineIndex = lineIndex + parts.length - 1;
+      this.host.scheduleAutoSave?.();
+      this.host.render?.({
+        focusLineIndex: this.state.activeLineIndex,
+        cursorPosition: parts[parts.length - 1].length,
+      });
+      return;
+    }
+
+    lines[lineIndex] = normalizedValue;
+    this.host.setContentLines?.(lines);
+    input.className = ['note-live-line-input', lineKindClass(normalizedValue)]
+      .filter(Boolean).join(' ');
+    resizeLiveInput(input);
+    this.host.scheduleAutoSave?.();
+  }
+
+  // handleRangeInputChange mutates content from a block-edit textarea's
+  // input event. The active range may grow (more lines) or shrink (fewer)
+  // depending on the user's edits.
+  handleRangeInputChange(input) {
+    const start = Number(input.dataset.lineStart);
+    const end = Number(input.dataset.lineEnd);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return;
+
+    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
+    const parts = normalizedValue.split('\n');
+    const lines = this.host.getContentLines?.() || [];
+    this.host.pushUndo?.();
+    lines.splice(start, end - start + 1, ...parts);
+    this.host.setContentLines?.(lines);
+
+    const newEnd = start + parts.length - 1;
+    input.dataset.lineEnd = String(newEnd);
+    input.closest('.note-live-line')?.setAttribute('data-line-end', String(newEnd));
+    this.state.activeRange = { start, end: newEnd };
+    resizeLiveInput(input);
+    this.host.scheduleAutoSave?.();
+  }
+
+  // handleRangeInputKeydown — Esc / Cmd-Enter dismisses block edit, applying
+  // the latest input first.
+  handleRangeInputKeydown(event, input) {
+    if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === 'Enter')) {
+      event.preventDefault();
+      this.handleRangeInputChange(input);
+      this.state.activeRange = null;
+      this.state.activeLineIndex = null;
+      this.host.render?.();
+    }
+  }
+
+  // handleInputKeydown — single-line keyboard shortcuts: Enter splits, Backspace
+  // at start joins with previous line, Delete at end joins with next line,
+  // Arrow keys move between lines.
+  handleInputKeydown(event, input) {
+    const lineIndex = Number(input.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+
+    const lines = this.host.getContentLines?.() || [];
+    const value = input.value || '';
+    const selectionStart = input.selectionStart ?? value.length;
+    const selectionEnd = input.selectionEnd ?? selectionStart;
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const before = value.slice(0, selectionStart);
+      const after = value.slice(selectionEnd);
+      this.host.pushUndo?.();
+      lines.splice(lineIndex, 1, before, after);
+      this.host.setContentLines?.(lines);
+      this.host.scheduleAutoSave?.();
+      this.activate(lineIndex + 1, 0);
+      return;
+    }
+
+    if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && lineIndex > 0) {
+      event.preventDefault();
+      const previousLine = lines[lineIndex - 1] || '';
+      this.host.pushUndo?.();
+      lines.splice(lineIndex - 1, 2, previousLine + value);
+      this.host.setContentLines?.(lines);
+      this.host.scheduleAutoSave?.();
+      this.activate(lineIndex - 1, previousLine.length);
+      return;
+    }
+
+    if (event.key === 'Delete' && selectionStart === value.length && selectionEnd === value.length && lineIndex < lines.length - 1) {
+      event.preventDefault();
+      this.host.pushUndo?.();
+      lines.splice(lineIndex, 2, value + (lines[lineIndex + 1] || ''));
+      this.host.setContentLines?.(lines);
+      this.host.scheduleAutoSave?.();
+      this.activate(lineIndex, value.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp' && selectionStart === 0 && lineIndex > 0) {
+      event.preventDefault();
+      const previousLine = lines[lineIndex - 1] || '';
+      this.activate(lineIndex - 1, previousLine.length);
+      return;
+    }
+
+    if (event.key === 'ArrowDown' && selectionStart === value.length && lineIndex < lines.length - 1) {
+      event.preventDefault();
+      this.activate(lineIndex + 1, Math.min((lines[lineIndex + 1] || '').length, selectionStart));
+    }
+  }
+}
+
+// resizeLiveInput auto-grows a textarea to fit its content. Floor at 24px so
+// the row height matches a normal line of text.
+export function resizeLiveInput(input) {
+  if (!input || typeof input.style === 'undefined') return;
+  input.style.height = 'auto';
+  input.style.height = `${Math.max(input.scrollHeight, 24)}px`;
 }
 
 // =============================================================================
@@ -1539,6 +1710,7 @@ const api = {
   NoteTocController,
   NoteLiveEditorState,
   NoteLiveEditor,
+  resizeLiveInput,
 };
 
 if (typeof window !== 'undefined') {

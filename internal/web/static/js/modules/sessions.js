@@ -6561,39 +6561,7 @@ const sessionManager = {
   },
 
   selectNoteLiveLineRange(anchorIndex, focusIndex) {
-    const previewContent = document.getElementById('notePreviewContent');
-    if (!previewContent) return;
-
-    if (this.noteLiveActiveLineIndex !== null) {
-      this.noteLiveActiveLineIndex = null;
-      this.renderNoteLiveEditor();
-    }
-
-    const lines = this.getNoteContentLines();
-    const maxIndex = Math.max(0, lines.length - 1);
-    const normalizedAnchor = Math.max(0, Math.min(anchorIndex, maxIndex));
-    const normalizedFocus = Math.max(0, Math.min(focusIndex, maxIndex));
-    const startIndex = Math.min(normalizedAnchor, normalizedFocus);
-    const endIndex = Math.max(normalizedAnchor, normalizedFocus);
-    const startLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${startIndex}"]`);
-    const endLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${endIndex}"]`);
-
-    if (!startLine || !endLine) return;
-
-    const range = document.createRange();
-    range.setStartBefore(startLine);
-    range.setEndAfter(endLine);
-
-    const selection = window.getSelection?.();
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-
-    const focusLine = previewContent.querySelector(`.note-live-line-rendered[data-line-index="${normalizedFocus}"]`);
-    focusLine?.focus({ preventScroll: true });
-    this.noteLiveSelectionAnchorIndex = normalizedAnchor;
-    this.noteLiveSelectionFocusIndex = normalizedFocus;
+    this._ensureLive()?.selectLineRange(anchorIndex, focusIndex);
   },
 
   getNoteLiveSelectedLineRange(container) {
@@ -6623,125 +6591,11 @@ const sessionManager = {
   },
 
 
-  handleNoteLiveInputChange(input) {
-    const lineIndex = Number(input.dataset.lineIndex);
-    if (!Number.isInteger(lineIndex)) return;
-
-    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
-    const lines = this.getNoteContentLines();
-    const parts = normalizedValue.split('\n');
-    this.pushNoteUndoState();
-
-    if (parts.length > 1) {
-      lines.splice(lineIndex, 1, ...parts);
-      this.setNoteContentLines(lines);
-      this.noteLiveActiveLineIndex = lineIndex + parts.length - 1;
-      this.scheduleNoteAutoSave();
-      this.renderNoteLiveEditor({
-        focusLineIndex: this.noteLiveActiveLineIndex,
-        cursorPosition: parts[parts.length - 1].length
-      });
-      return;
-    }
-
-    lines[lineIndex] = normalizedValue;
-    this.setNoteContentLines(lines);
-    input.className = ['note-live-line-input', this.noteLineKindClass(normalizedValue)]
-      .filter(Boolean)
-      .join(' ');
-    this.resizeNoteLiveInput(input);
-    this.scheduleNoteAutoSave();
-  },
-
-  handleNoteLiveRangeInputChange(input) {
-    const start = Number(input.dataset.lineStart);
-    const end = Number(input.dataset.lineEnd);
-    if (!Number.isInteger(start) || !Number.isInteger(end)) return;
-
-    const normalizedValue = String(input.value || '').replace(/\r\n?/g, '\n');
-    const parts = normalizedValue.split('\n');
-    const lines = this.getNoteContentLines();
-    this.pushNoteUndoState();
-    lines.splice(start, end - start + 1, ...parts);
-    this.setNoteContentLines(lines);
-
-    const newEnd = start + parts.length - 1;
-    input.dataset.lineEnd = String(newEnd);
-    input.closest('.note-live-line')?.setAttribute('data-line-end', String(newEnd));
-    this.noteLiveActiveRange = { start, end: newEnd };
-    this.resizeNoteLiveInput(input);
-    this.scheduleNoteAutoSave();
-  },
-
-  handleNoteLiveRangeInputKeydown(event, input) {
-    if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === 'Enter')) {
-      event.preventDefault();
-      this.handleNoteLiveRangeInputChange(input);
-      this.noteLiveActiveRange = null;
-      this.noteLiveActiveLineIndex = null;
-      this.renderNoteLiveEditor();
-    }
-  },
-
-  handleNoteLiveInputKeydown(event, input) {
-    const lineIndex = Number(input.dataset.lineIndex);
-    if (!Number.isInteger(lineIndex)) return;
-
-    const lines = this.getNoteContentLines();
-    const value = input.value || '';
-    const selectionStart = input.selectionStart ?? value.length;
-    const selectionEnd = input.selectionEnd ?? selectionStart;
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const before = value.slice(0, selectionStart);
-      const after = value.slice(selectionEnd);
-      this.pushNoteUndoState();
-      lines.splice(lineIndex, 1, before, after);
-      this.setNoteContentLines(lines);
-      this.scheduleNoteAutoSave();
-      this.activateNoteLiveLine(lineIndex + 1, 0);
-      return;
-    }
-
-    if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && lineIndex > 0) {
-      event.preventDefault();
-      const previousLine = lines[lineIndex - 1] || '';
-      this.pushNoteUndoState();
-      lines.splice(lineIndex - 1, 2, previousLine + value);
-      this.setNoteContentLines(lines);
-      this.scheduleNoteAutoSave();
-      this.activateNoteLiveLine(lineIndex - 1, previousLine.length);
-      return;
-    }
-
-    if (event.key === 'Delete' && selectionStart === value.length && selectionEnd === value.length && lineIndex < lines.length - 1) {
-      event.preventDefault();
-      this.pushNoteUndoState();
-      lines.splice(lineIndex, 2, value + (lines[lineIndex + 1] || ''));
-      this.setNoteContentLines(lines);
-      this.scheduleNoteAutoSave();
-      this.activateNoteLiveLine(lineIndex, value.length);
-      return;
-    }
-
-    if (event.key === 'ArrowUp' && selectionStart === 0 && lineIndex > 0) {
-      event.preventDefault();
-      const previousLine = lines[lineIndex - 1] || '';
-      this.activateNoteLiveLine(lineIndex - 1, previousLine.length);
-      return;
-    }
-
-    if (event.key === 'ArrowDown' && selectionStart === value.length && lineIndex < lines.length - 1) {
-      event.preventDefault();
-      this.activateNoteLiveLine(lineIndex + 1, Math.min((lines[lineIndex + 1] || '').length, selectionStart));
-    }
-  },
-
-  resizeNoteLiveInput(input) {
-    input.style.height = 'auto';
-    input.style.height = `${Math.max(input.scrollHeight, 24)}px`;
-  },
+  handleNoteLiveInputChange(input) { this._ensureLive()?.handleInputChange(input); },
+  handleNoteLiveRangeInputChange(input) { this._ensureLive()?.handleRangeInputChange(input); },
+  handleNoteLiveRangeInputKeydown(event, input) { this._ensureLive()?.handleRangeInputKeydown(event, input); },
+  handleNoteLiveInputKeydown(event, input) { this._ensureLive()?.handleInputKeydown(event, input); },
+  resizeNoteLiveInput(input) { window.NoteEditor?.resizeLiveInput(input); },
 
   renderMarkdownLine(line) { return window.NoteEditor?.renderMarkdownLine(line) ?? ''; },
   renderInlineMarkdown(text) { return window.NoteEditor?.renderInlineMarkdown(text) ?? ''; },
