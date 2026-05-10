@@ -5912,45 +5912,8 @@ const sessionManager = {
     this._aiAssistInitialized = true;
   },
 
-  // _setNoteAIAgentDefault picks the right agent for the dropdown given the
-  // current workspace. Prefers the workspace's entry agent (if set and present
-  // in the loaded options); otherwise falls back to the first available agent.
-  // Called from openNoteCreateModal and _openNoteEditorWithNote so the picker
-  // tracks the workspace, not the modal lifetime.
   async _setNoteAIAgentDefault(workspaceId) {
-    // Make sure the dropdown is populated before we try to select.
-    await this.loadNoteAIAgents();
-    const select = document.getElementById('noteAIAgentSelect');
-    if (!select) return;
-
-    let entryAgent = null;
-    if (workspaceId) {
-      try {
-        const r = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
-        if (r.ok) {
-          const data = await r.json();
-          entryAgent = data?.entry_agent_name || data?.workspace?.entry_agent_name || null;
-        }
-      } catch (_) {
-        // network error — fall back to first-available below
-      }
-    }
-
-    if (entryAgent) {
-      const match = Array.from(select.options).find(o => o.value === entryAgent);
-      if (match) {
-        select.value = entryAgent;
-        window.NoteAIAssist?.onAgentChanged(entryAgent);
-        return;
-      }
-    }
-
-    // Fall back: pick the first non-placeholder option if nothing is selected.
-    if (!select.value) {
-      const first = Array.from(select.options).find(o => o.value);
-      if (first) select.value = first.value;
-    }
-    window.NoteAIAssist?.onAgentChanged(this._resolveWorkspaceAgentId());
+    return window.NoteEditor?.applyAgentDefaultForWorkspace(workspaceId);
   },
 
   _wireNoteAIAgentChange() {

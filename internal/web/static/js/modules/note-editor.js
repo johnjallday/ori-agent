@@ -491,6 +491,50 @@ export function getSelectedAgentId() {
   return select?.value || null;
 }
 
+// applyAgentDefaultForWorkspace picks the agent that should be preselected
+// when a note in `workspaceId` opens. Order of preference:
+//   1. The workspace's `entry_agent_name`, if it exists in the dropdown.
+//   2. The first non-placeholder option, if no agent is currently selected.
+// Either way, NoteAIAssist.onAgentChanged is notified at the end so the
+// inline AI surface reflects the choice. Network failures fall back silently
+// to the first-available rule.
+export async function applyAgentDefaultForWorkspace(workspaceId) {
+  await loadAgentsIntoDropdown();
+  if (typeof document === 'undefined') return;
+  const select = document.getElementById(AGENT_SELECT_ID);
+  if (!select) return;
+
+  let entryAgent = null;
+  if (workspaceId) {
+    try {
+      const r = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+      if (r.ok) {
+        const data = await r.json();
+        entryAgent = data?.entry_agent_name || data?.workspace?.entry_agent_name || null;
+      }
+    } catch (_) {
+      // network error — fall through to first-available below
+    }
+  }
+
+  if (entryAgent) {
+    const match = Array.from(select.options).find((o) => o.value === entryAgent);
+    if (match) {
+      select.value = entryAgent;
+      if (typeof window !== 'undefined') window.NoteAIAssist?.onAgentChanged(entryAgent);
+      return;
+    }
+  }
+
+  if (!select.value) {
+    const first = Array.from(select.options).find((o) => o.value);
+    if (first) select.value = first.value;
+  }
+  if (typeof window !== 'undefined') {
+    window.NoteAIAssist?.onAgentChanged(getSelectedAgentId());
+  }
+}
+
 // =============================================================================
 // Rails — left (TOC) and right (AI Assist) sidebar visibility + collapse state
 // =============================================================================
@@ -824,6 +868,7 @@ const api = {
   hideRail,
   loadAgentsIntoDropdown,
   getSelectedAgentId,
+  applyAgentDefaultForWorkspace,
   isGeneratePanelOpen,
   openGeneratePanel,
   closeGeneratePanel,
