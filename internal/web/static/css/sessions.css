@@ -5001,6 +5001,84 @@ body.task-modal-open {
 }
 
 /* =============================================================================
+   Dedicated note page (/notes/<id>)
+   ============================================================================= */
+
+.note-page {
+  display: flex;
+  flex-direction: column;
+  /* Full viewport minus navbar; the editor grid expands inside this. */
+  height: calc(100vh - 56px);
+  background: var(--bg-primary);
+}
+
+.note-page-top-bar {
+  flex: 0 0 auto;
+  padding: 12px 20px 0 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.note-page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.note-page-breadcrumb .breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.note-page-breadcrumb .breadcrumb-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.note-page-breadcrumb .breadcrumb-sep {
+  color: var(--text-tertiary);
+}
+
+.note-page-breadcrumb .breadcrumb-current {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.note-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 10px 0;
+}
+
+.note-page-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.note-page-editor-grid {
+  flex: 1 1 auto;
+  /* Override the modal cap so the page fills the viewport. */
+  max-height: none;
+  min-height: 0;
+  height: 100%;
+}
+
+/* Editor center should fill its grid track. */
+.note-page-editor-grid .note-editor-center,
+.note-page-editor-grid .note-editor-container,
+.note-page-editor-grid .note-content-input,
+.note-page-editor-grid .note-preview-content {
+  height: 100%;
+  max-height: none;
+}
+
+/* =============================================================================
    Search Palette (⌘K)
    ============================================================================= */
 

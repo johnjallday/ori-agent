@@ -336,6 +336,33 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handleNotesPageRoute serves the dedicated `/notes/<id>` page.
+// API endpoints under /api/notes/* are routed separately in routes.go.
+func (s *Server) handleNotesPageRoute(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/notes/")
+	if path == "" || path == r.URL.Path {
+		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		return
+	}
+	// Strip any sub-path (no /notes/<id>/<thing> routes today).
+	parts := strings.Split(path, "/")
+	noteID := strings.TrimSpace(parts[0])
+	if noteID == "" {
+		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		return
+	}
+	s.serveNotePage(w, noteID)
+}
+
+func (s *Server) serveNotePage(w http.ResponseWriter, noteID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Note - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = false
+	data.Extra["NoteID"] = noteID
+	s.renderAndWritePage(w, "note-page", data)
+}
+
 func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
