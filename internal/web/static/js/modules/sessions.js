@@ -6243,74 +6243,9 @@ const sessionManager = {
   // Note AI Generation
   // =============================================================================
 
-  // _openGeneratePanelByDefault opens the Generate-with-AI panel on each note
-  // modal open. The panel lives in the right rail and is the user's primary
-  // entry point for AI-driven note creation/editing. If the user closes it,
-  // it stays closed for the rest of that modal's lifetime.
-  _openGeneratePanelByDefault() {
-    const panel = document.getElementById('noteAIGeneratePanel');
-    if (!panel) return;
-    if (panel.style.display === 'none' || panel.style.display === '') {
-      this.toggleNoteAIPanel();
-    }
-  },
-
-  // Toggle AI generation panel visibility. The panel now lives inside the
-  // right-side AI Assist rail; opening it temporarily hides the suggestion
-  // stack so the form is the only visible content.
-  toggleNoteAIPanel() {
-    const panel = document.getElementById('noteAIGeneratePanel');
-    const toggle = document.getElementById('noteGenerateAIToggle');
-    if (!panel) return;
-
-    const isVisible = panel.style.display !== 'none';
-    if (isVisible) {
-      this.hideNoteAIPanel();
-    } else {
-      panel.style.display = 'block';
-      toggle?.classList.add('ai-active');
-      this._showAssistRailForGenerate();
-    }
-  },
-
-  // Hide AI generation panel and restore the rail to its normal state.
-  hideNoteAIPanel() {
-    const panel = document.getElementById('noteAIGeneratePanel');
-    const toggle = document.getElementById('noteGenerateAIToggle');
-    const promptInput = document.getElementById('noteAIPromptInput');
-    const errorDiv = document.getElementById('noteAIError');
-    const generatingDiv = document.getElementById('noteAIGenerating');
-    const generateBtn = document.getElementById('noteAIGenerateBtn');
-
-    if (panel) panel.style.display = 'none';
-    if (toggle) toggle.classList.remove('ai-active');
-    if (promptInput) promptInput.value = '';
-    if (errorDiv) errorDiv.style.display = 'none';
-    if (generatingDiv) generatingDiv.style.display = 'none';
-    if (generateBtn) generateBtn.disabled = false;
-    this._restoreAssistRailFromGenerate();
-  },
-
-  // Show the rail in "generate" mode: hides cards/empty/status so only the
-  // generate panel is visible. Tracks whether we hid the rail entirely so
-  // we can restore it correctly.
-  _showAssistRailForGenerate() {
-    this.showNoteAssistRail();
-    const rail = document.getElementById('noteAssistRail');
-    if (!rail) return;
-    rail.classList.add('is-generating');
-    this._assistRailGenerateActive = true;
-  },
-
-  _restoreAssistRailFromGenerate() {
-    const rail = document.getElementById('noteAssistRail');
-    if (rail) rail.classList.remove('is-generating');
-    if (!this._assistRailGenerateActive) return;
-    this._assistRailGenerateActive = false;
-    // Let the AI Assist module decide whether to show the rail (cards present)
-    // or hide it (no cards). render() handles both.
-    window.NoteAIAssist?.render?.();
-  },
+  _openGeneratePanelByDefault() { window.NoteEditor?.openGeneratePanelByDefault(); },
+  toggleNoteAIPanel() { window.NoteEditor?.toggleGeneratePanel(); },
+  hideNoteAIPanel() { window.NoteEditor?.closeGeneratePanel(); },
 
   // Load agents for AI generation dropdown
   async loadNoteAIAgents() {

@@ -370,6 +370,88 @@ export function clearWindowSelection() {
 }
 
 // =============================================================================
+// Generate-with-AI panel — visibility + rail "generating" mode coordination
+// =============================================================================
+
+const GEN_PANEL_ID = 'noteAIGeneratePanel';
+const GEN_TOGGLE_ID = 'noteGenerateAIToggle';
+const ASSIST_RAIL_ID = 'noteAssistRail';
+
+// Tracks whether the Generate panel is currently the active rail mode so
+// closeGeneratePanel knows to delegate to NoteAIAssist.render() afterward.
+let _generatePanelActive = false;
+
+function _genPanelEl() {
+  return typeof document !== 'undefined' ? document.getElementById(GEN_PANEL_ID) : null;
+}
+function _genToggleEl() {
+  return typeof document !== 'undefined' ? document.getElementById(GEN_TOGGLE_ID) : null;
+}
+
+// isGeneratePanelOpen reports whether the panel is currently visible.
+export function isGeneratePanelOpen() {
+  const panel = _genPanelEl();
+  if (!panel) return false;
+  return panel.style.display !== 'none' && panel.style.display !== '';
+}
+
+// openGeneratePanel reveals the Generate-with-AI form and sets the rail to
+// "generating" mode (which hides the suggestion stack so the form is the
+// only visible rail content).
+export function openGeneratePanel() {
+  const panel = _genPanelEl();
+  if (!panel) return;
+  panel.style.display = 'block';
+  _genToggleEl()?.classList.add('ai-active');
+  showRail('assist');
+  if (typeof document !== 'undefined') {
+    const rail = document.getElementById(ASSIST_RAIL_ID);
+    if (rail) rail.classList.add('is-generating');
+  }
+  _generatePanelActive = true;
+}
+
+// closeGeneratePanel hides the panel, clears its inputs, and restores the
+// rail to whatever the AI Assist module wants (cards, empty state, or
+// hidden entirely).
+export function closeGeneratePanel() {
+  if (typeof document === 'undefined') return;
+  const panel = _genPanelEl();
+  const toggle = _genToggleEl();
+  const promptInput = document.getElementById('noteAIPromptInput');
+  const errorDiv = document.getElementById('noteAIError');
+  const generatingDiv = document.getElementById('noteAIGenerating');
+  const generateBtn = document.getElementById('noteAIGenerateBtn');
+
+  if (panel) panel.style.display = 'none';
+  if (toggle) toggle.classList.remove('ai-active');
+  if (promptInput) promptInput.value = '';
+  if (errorDiv) errorDiv.style.display = 'none';
+  if (generatingDiv) generatingDiv.style.display = 'none';
+  if (generateBtn) generateBtn.disabled = false;
+
+  const rail = document.getElementById(ASSIST_RAIL_ID);
+  if (rail) rail.classList.remove('is-generating');
+  if (!_generatePanelActive) return;
+  _generatePanelActive = false;
+  // Let AI Assist decide whether the rail should now show cards or hide.
+  if (typeof window !== 'undefined') window.NoteAIAssist?.render?.();
+}
+
+// toggleGeneratePanel flips open ↔ closed.
+export function toggleGeneratePanel() {
+  if (isGeneratePanelOpen()) closeGeneratePanel();
+  else openGeneratePanel();
+}
+
+// openGeneratePanelByDefault is the modal-open hook — opens the panel if
+// it's currently closed, no-op if already open. Called once per modal open
+// so the Generate form is the user's primary entry point for AI work.
+export function openGeneratePanelByDefault() {
+  if (!isGeneratePanelOpen()) openGeneratePanel();
+}
+
+// =============================================================================
 // Agent dropdown — populates `#noteAIAgentSelect` from /api/agents
 // =============================================================================
 
@@ -742,6 +824,11 @@ const api = {
   hideRail,
   loadAgentsIntoDropdown,
   getSelectedAgentId,
+  isGeneratePanelOpen,
+  openGeneratePanel,
+  closeGeneratePanel,
+  toggleGeneratePanel,
+  openGeneratePanelByDefault,
 };
 
 if (typeof window !== 'undefined') {
