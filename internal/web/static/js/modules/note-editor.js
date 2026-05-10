@@ -827,6 +827,45 @@ export function wireSelectionTracking({ onChange, textareaId = 'noteContentInput
   _selectionTrackingWired = true;
 }
 
+let _aiAssistInitialized = false;
+
+// initAIAssist wires up the NoteAIAssist sidebar against the editor surface.
+// One-shot — subsequent calls are no-ops. The host supplies callbacks that
+// connect the assist sidebar to the rest of the editor (content I/O, render,
+// undo/save, toast, selection-read).
+export function initAIAssist(host = {}) {
+  if (_aiAssistInitialized) return;
+  if (typeof window === 'undefined' || !window.NoteAIAssist || typeof document === 'undefined') return;
+  const bar = document.getElementById('noteAIActionBar');
+  const rail = document.getElementById(ASSIST_RAIL_ID);
+  if (!bar || !rail) return;
+
+  window.NoteAIAssist.init({
+    bar,
+    rail,
+    sessionsApi: {
+      getNoteContent: () => host.getContent?.() || '',
+      setNoteContent: (value) => {
+        host.setContent?.(value);
+        if (host.isPreviewMode?.()) host.render?.();
+        host.scheduleTocRebuild?.();
+      },
+      pushUndo: () => host.pushUndo?.(),
+      scheduleAutoSave: () => host.scheduleAutoSave?.(),
+      showToast: (msg, kind) => host.showToast?.(msg, kind),
+      showAssistRail: () => showRail('assist'),
+      hideAssistRail: () => hideRail('assist'),
+    },
+  });
+
+  wireSelectionTracking({
+    onChange: () => window.NoteAIAssist?.onSelectionChanged(host.readSelection?.()),
+  });
+  wireAgentChangeHandler();
+  loadAgentsIntoDropdown();
+  _aiAssistInitialized = true;
+}
+
 let _agentChangeWired = false;
 
 // wireAgentChangeHandler attaches a `change` listener to the agent dropdown
@@ -1222,6 +1261,7 @@ const api = {
   readSelection,
   wireSelectionTracking,
   wireAgentChangeHandler,
+  initAIAssist,
   isGeneratePanelOpen,
   openGeneratePanel,
   closeGeneratePanel,

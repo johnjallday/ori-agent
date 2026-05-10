@@ -5880,36 +5880,17 @@ const sessionManager = {
   // =============================================================================
 
   _initNoteAIAssist() {
-    if (this._aiAssistInitialized) return;
-    if (typeof window === 'undefined' || !window.NoteAIAssist) return;
-    const bar = document.getElementById('noteAIActionBar');
-    const rail = document.getElementById('noteAssistRail');
-    if (!bar || !rail) return;
-    window.NoteAIAssist.init({
-      bar,
-      rail,
-      sessionsApi: {
-        getNoteContent: () => this.getNoteContentValue(),
-        setNoteContent: (value) => {
-          this.setNoteContentValue(value);
-          if (this.isNotePreviewMode) this.renderNoteLiveEditor();
-          this._scheduleNoteTocRebuild?.();
-        },
-        pushUndo: () => this.pushNoteUndoState(),
-        scheduleAutoSave: () => this.scheduleNoteAutoSave(),
-        showToast: (msg, kind) => this.showToast?.(msg, kind),
-        showAssistRail: () => this.showNoteAssistRail(),
-        hideAssistRail: () => this.hideNoteAssistRail(),
-      },
+    window.NoteEditor?.initAIAssist({
+      getContent: () => this.getNoteContentValue(),
+      setContent: (v) => this.setNoteContentValue(v),
+      isPreviewMode: () => this.isNotePreviewMode,
+      render: () => this.renderNoteLiveEditor(),
+      scheduleTocRebuild: () => this._scheduleNoteTocRebuild(),
+      pushUndo: () => this.pushNoteUndoState(),
+      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
+      showToast: (msg, kind) => this.showToast?.(msg, kind),
+      readSelection: () => this._readNoteSelection(),
     });
-    this._wireNoteSelectionTracking();
-    this._wireNoteAIAgentChange();
-    // Populate the agent dropdown eagerly so AI Assist has something to use
-    // without requiring the user to open the whole-note Generate panel first.
-    // Per-workspace preselect happens via _setNoteAIAgentDefault (called from
-    // each modal-open path so the workspace's entry agent wins).
-    this.loadNoteAIAgents();
-    this._aiAssistInitialized = true;
   },
 
   async _setNoteAIAgentDefault(workspaceId) {
