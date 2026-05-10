@@ -72,6 +72,56 @@ export function normalizeCompactTaskListMarkdown(text) {
 }
 
 // =============================================================================
+// Content I/O — DOM accessors for the note textarea
+// =============================================================================
+// These wrap `#noteContentInput` reads/writes so callers can stop poking at the
+// element directly. No `this`-state; safe to share between modal and page.
+
+const NOTE_CONTENT_ID = 'noteContentInput';
+
+export function getContentValue() {
+  const el = typeof document !== 'undefined' ? document.getElementById(NOTE_CONTENT_ID) : null;
+  return String(el?.value || '');
+}
+
+export function setContentValue(value) {
+  const el = typeof document !== 'undefined' ? document.getElementById(NOTE_CONTENT_ID) : null;
+  if (!el) return;
+  el.value = String(value || '');
+}
+
+export function getContentLines() {
+  const value = getContentValue();
+  return value.length > 0 ? value.split('\n') : [''];
+}
+
+export function setContentLines(lines) {
+  setContentValue((lines || []).join('\n'));
+}
+
+// =============================================================================
+// Save status — visual indicator in the modal/page footer
+// =============================================================================
+
+const SAVE_STATUS_CONTAINER_ID = 'noteSaveStatus';
+const SAVE_STATUS_VALUES = new Set(['saved', 'saving', 'unsaved', 'error']);
+
+// updateSaveStatus toggles which `.note-status-{name}` element is visible inside
+// `#noteSaveStatus`. Unknown statuses are ignored (caller bug, not crash).
+export function updateSaveStatus(status) {
+  if (typeof document === 'undefined') return;
+  const container = document.getElementById(SAVE_STATUS_CONTAINER_ID);
+  if (!container) return;
+
+  container.querySelectorAll('span[class^="note-status-"]').forEach((el) => {
+    el.style.display = 'none';
+  });
+  if (!SAVE_STATUS_VALUES.has(status)) return;
+  const target = container.querySelector(`.note-status-${status}`);
+  if (target) target.style.display = 'inline-flex';
+}
+
+// =============================================================================
 // Browser bridge
 // =============================================================================
 
@@ -80,6 +130,11 @@ const api = {
   parseTaskLine,
   lineKindClass,
   normalizeCompactTaskListMarkdown,
+  getContentValue,
+  setContentValue,
+  getContentLines,
+  setContentLines,
+  updateSaveStatus,
 };
 
 if (typeof window !== 'undefined') {

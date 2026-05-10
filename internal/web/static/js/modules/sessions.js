@@ -5904,21 +5904,7 @@ const sessionManager = {
   },
 
   // Update save status indicator
-  updateNoteSaveStatus(status) {
-    const statusContainer = document.getElementById('noteSaveStatus');
-    if (!statusContainer) return;
-
-    // Hide all status elements
-    statusContainer.querySelectorAll('span[class^="note-status-"]').forEach(el => {
-      el.style.display = 'none';
-    });
-
-    // Show the appropriate status
-    const statusEl = statusContainer.querySelector(`.note-status-${status}`);
-    if (statusEl) {
-      statusEl.style.display = 'inline-flex';
-    }
-  },
+  updateNoteSaveStatus(status) { window.NoteEditor?.updateSaveStatus(status); },
 
   // Handle modal close - save any unsaved changes
   handleNoteModalClose() {
@@ -6691,16 +6677,8 @@ const sessionManager = {
     this.noteLiveCollapsedHeadings = new Set();
   },
 
-  getNoteContentValue() {
-    const contentInput = document.getElementById('noteContentInput');
-    return String(contentInput?.value || '');
-  },
-
-  setNoteContentValue(value) {
-    const contentInput = document.getElementById('noteContentInput');
-    if (!contentInput) return;
-    contentInput.value = String(value || '');
-  },
+  getNoteContentValue() { return window.NoteEditor?.getContentValue() ?? ''; },
+  setNoteContentValue(value) { window.NoteEditor?.setContentValue(value); },
 
   pushNoteUndoState() {
     if (this.noteIsApplyingHistory) return;
@@ -6788,15 +6766,8 @@ const sessionManager = {
     this.renderNoteLiveEditor();
   },
 
-  getNoteContentLines() {
-    const contentInput = document.getElementById('noteContentInput');
-    const value = String(contentInput?.value || '');
-    return value.length > 0 ? value.split('\n') : [''];
-  },
-
-  setNoteContentLines(lines) {
-    this.setNoteContentValue(lines.join('\n'));
-  },
+  getNoteContentLines() { return window.NoteEditor?.getContentLines() ?? ['']; },
+  setNoteContentLines(lines) { window.NoteEditor?.setContentLines(lines); },
 
   // The following four helpers were moved to note-editor.js as the first slice
   // of the v2 task 1.0 extraction. The thin delegators stay here so existing
