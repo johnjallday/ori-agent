@@ -6,7 +6,19 @@
 // #notePreviewContent, etc.) so the same controllers and event handlers
 // work without modification.
 
-const NOTE_ID = (typeof window !== 'undefined' && window.PAGE_NOTE_ID) || '';
+// Note ID comes from the URL path: /notes/<uuid>. Reading it client-side
+// avoids html/template script-context escaping issues that previously wrapped
+// the value in literal quotes.
+function readNoteIdFromPath() {
+  if (typeof window === 'undefined') return '';
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  // ['notes', '<uuid>'] — take the segment immediately after 'notes'.
+  const idx = parts.indexOf('notes');
+  if (idx < 0 || idx + 1 >= parts.length) return '';
+  return decodeURIComponent(parts[idx + 1] || '');
+}
+
+const NOTE_ID = readNoteIdFromPath();
 let currentNote = null;
 let bundle = null;
 
