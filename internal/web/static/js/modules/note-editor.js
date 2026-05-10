@@ -1099,10 +1099,6 @@ export function resizeLiveInput(input) {
 //   getContentLines()         — string[]
 //   setContentLines(lines)    — void
 //   isPreviewMode()           — bool
-//   render(opts?)             — void (host owns the render path; usually
-//                                delegates back to sessionManager's
-//                                renderNoteLiveEditor today, or NoteLiveEditor's
-//                                bindEvents path when 3.0 lands)
 //   onAutosaveFlush?()        — fires when the autosave timer trips. The
 //                                host runs the actual save API call and is
 //                                responsible for calling autosave.markSaving /
@@ -1111,6 +1107,12 @@ export function resizeLiveInput(input) {
 //                                Defaults to updateSaveStatus(s).
 //   historyLimit?             — number, default 100.
 //   autosaveDelayMs?          — number, default 3000.
+//   aiAssist?                 — optional sub-config to wire NoteAIAssist in
+//                                the same call: { readSelection, showToast }.
+//                                Omitting it skips the AI Assist setup; the
+//                                page can still call initAIAssist() later if
+//                                it wants the same wiring without going
+//                                through mount.
 //
 // Returns: { history, autosave, toc, live, destroy() }.
 //
@@ -1231,6 +1233,23 @@ export function mount(host = {}) {
   });
 
   toc = new NoteTocController(sharedHost);
+
+  // Optional: wire the inline AI Assist sidebar in the same call. The
+  // selection-read callback is host-supplied because surfaces differ on
+  // whether they have a modal-show gate (modal does; page doesn't).
+  if (host.aiAssist) {
+    initAIAssist({
+      getContent: host.getContent,
+      setContent: host.setContent,
+      isPreviewMode: host.isPreviewMode,
+      render,
+      scheduleTocRebuild: () => toc.scheduleRebuild(),
+      pushUndo: () => history.push(host.getContent?.() || ''),
+      scheduleAutoSave: () => autosave.schedule(),
+      showToast: host.aiAssist.showToast,
+      readSelection: host.aiAssist.readSelection,
+    });
+  }
 
   return {
     history,

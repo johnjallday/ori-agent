@@ -4972,8 +4972,10 @@ const sessionManager = {
   _ensureMount() {
     if (this.noteMount) return this.noteMount;
     if (!window.NoteEditor) return null;
-    // Note: `render` is owned by mount() itself; we don't pass one through.
-    // sessionManager.renderNoteLiveEditor delegates to bundle.render below.
+    // mount() owns the render path; sessionManager.renderNoteLiveEditor
+    // delegates to bundle.render. The aiAssist sub-config wires the AI
+    // selection sidebar in the same call (modal-show check stays here via
+    // _readNoteSelection).
     this.noteMount = window.NoteEditor.mount({
       getContent: () => this.getNoteContentValue(),
       setContent: (v) => this.setNoteContentValue(v),
@@ -4981,6 +4983,10 @@ const sessionManager = {
       setContentLines: (lines) => this.setNoteContentLines(lines),
       isPreviewMode: () => this.isNotePreviewMode,
       onAutosaveFlush: () => this.autoSaveNote(),
+      aiAssist: {
+        readSelection: () => this._readNoteSelection(),
+        showToast: (msg, kind) => this.showToast?.(msg, kind),
+      },
     });
     return this.noteMount;
   },
@@ -5911,19 +5917,10 @@ const sessionManager = {
   // Note AI Assist (selection action bar + sidebar wiring)
   // =============================================================================
 
-  _initNoteAIAssist() {
-    window.NoteEditor?.initAIAssist({
-      getContent: () => this.getNoteContentValue(),
-      setContent: (v) => this.setNoteContentValue(v),
-      isPreviewMode: () => this.isNotePreviewMode,
-      render: () => this.renderNoteLiveEditor(),
-      scheduleTocRebuild: () => this._scheduleNoteTocRebuild(),
-      pushUndo: () => this.pushNoteUndoState(),
-      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
-      showToast: (msg, kind) => this.showToast?.(msg, kind),
-      readSelection: () => this._readNoteSelection(),
-    });
-  },
+  // AI Assist is now wired through the mount() call (see _ensureMount).
+  // _initNoteAIAssist stays as a no-op for any historical callers; the
+  // first time `_ensureMount` runs, NoteAIAssist is hooked up.
+  _initNoteAIAssist() { this._ensureMount(); },
 
   async _setNoteAIAgentDefault(workspaceId) {
     return window.NoteEditor?.applyAgentDefaultForWorkspace(workspaceId);
