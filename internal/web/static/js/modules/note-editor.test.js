@@ -28,6 +28,7 @@ import {
   pruneCollapsedHeadings,
   buildLiveEditorHTML,
   NoteLiveEditorState,
+  NoteLiveEditor,
 } from './note-editor.js';
 
 // =============================================================================
@@ -868,4 +869,112 @@ test('NoteLiveEditorState: hasActiveEdit checks both activeLineIndex and activeR
   s.activeLineIndex = null;
   s.activeRange = { start: 1, end: 2 };
   assert.equal(s.hasActiveEdit(), true);
+});
+
+// =============================================================================
+// NoteLiveEditor — mock-host tests
+// =============================================================================
+
+function mockHost(initialLines) {
+  let lines = [...initialLines];
+  const calls = { pushUndo: 0, scheduleAutoSave: 0, clearWindowSelection: 0, render: [] };
+  return {
+    host: {
+      getContent: () => lines.join('\n'),
+      getContentLines: () => lines,
+      setContentLines: (next) => { lines = [...next]; },
+      pushUndo: () => { calls.pushUndo += 1; },
+      scheduleAutoSave: () => { calls.scheduleAutoSave += 1; },
+      render: (opts) => { calls.render.push(opts || null); },
+      clearWindowSelection: () => { calls.clearWindowSelection += 1; },
+    },
+    get lines() { return lines; },
+    calls,
+  };
+}
+
+test('NoteLiveEditor: activate sets active line and renders with focus opts', () => {
+  const { host, calls } = mockHost(['# A', 'body', '# B']);
+  const ed = new NoteLiveEditor(host);
+  ed.activate(2, 3);
+  assert.equal(ed.state.activeLineIndex, 2);
+  assert.equal(ed.state.selectionAnchorIndex, 2);
+  assert.equal(ed.state.activeRange, null);
+  assert.deepEqual(calls.render, [{ focusLineIndex: 2, cursorPosition: 3 }]);
+});
+
+test('NoteLiveEditor: toggleHeadingFold flips on heading lines, no-op on plain lines', () => {
+  const { host, calls } = mockHost(['# A', 'plain', '## B']);
+  const ed = new NoteLiveEditor(host);
+  ed.toggleHeadingFold(0);
+  assert.ok(ed.state.collapsedHeadings.has(0));
+  assert.equal(calls.render.length, 1);
+
+  ed.toggleHeadingFold(1); // not a heading
+  assert.equal(ed.state.collapsedHeadings.size, 1);
+  assert.equal(calls.render.length, 1, 'render should not have fired');
+});
+
+test('NoteLiveEditor: toggleTaskLine flips marker and pushes undo', () => {
+  const { host, lines, calls } = mockHost(['- [ ] task', 'plain']);
+  const ed = new NoteLiveEditor(host);
+  ed.toggleTaskLine(0, true);
+  assert.equal(host.getContentLines()[0], '- [x] task');
+  assert.equal(calls.pushUndo, 1);
+  assert.equal(calls.scheduleAutoSave, 1);
+});
+
+test('NoteLiveEditor: toggleTaskLine no-ops on non-task lines', () => {
+  const { host, calls } = mockHost(['plain']);
+  const ed = new NoteLiveEditor(host);
+  ed.toggleTaskLine(0, true);
+  assert.equal(calls.pushUndo, 0);
+  assert.equal(host.getContentLines()[0], 'plain');
+});
+
+test('NoteLiveEditor: deleteRange removes lines and reactivates start', () => {
+  const { host, calls } = mockHost(['line0', 'line1', 'line2', 'line3']);
+  const ed = new NoteLiveEditor(host);
+  ed.deleteRange({ start: 1, end: 2 });
+  assert.deepEqual(host.getContentLines(), ['line0', 'line3']);
+  assert.equal(calls.pushUndo, 1);
+  // activate at clamped start with cursorPosition 0
+  assert.equal(ed.state.activeLineIndex, 1);
+});
+
+test('NoteLiveEditor: deleteRange leaves at least one (empty) line', () => {
+  const { host } = mockHost(['only']);
+  const ed = new NoteLiveEditor(host);
+  ed.deleteRange({ start: 0, end: 0 });
+  assert.deepEqual(host.getContentLines(), ['']);
+});
+
+test('NoteLiveEditor: replaceRange swaps multi-line span for single replacement', () => {
+  const { host, calls } = mockHost(['a', 'b', 'c', 'd']);
+  const ed = new NoteLiveEditor(host);
+  ed.replaceRange({ start: 1, end: 2 }, 'replacement');
+  assert.deepEqual(host.getContentLines(), ['a', 'replacement', 'd']);
+  assert.equal(calls.pushUndo, 1);
+  assert.equal(ed.state.activeLineIndex, 1);
+});
+
+test('NoteLiveEditor: editRange enters block-edit mode without mutating content', () => {
+  const { host, calls } = mockHost(['a', 'b', 'c']);
+  const ed = new NoteLiveEditor(host);
+  ed.editRange({ start: 0, end: 1 });
+  assert.deepEqual(host.getContentLines(), ['a', 'b', 'c']);
+  assert.deepEqual(ed.state.activeRange, { start: 0, end: 1 });
+  assert.equal(ed.state.activeLineIndex, null);
+  assert.equal(calls.pushUndo, 0);
+  // render fires with cursorPosition at end of joined content ("a\nb" length = 3)
+  assert.equal(calls.render[0]?.cursorPosition, 3);
+});
+
+test('NoteLiveEditor: clearSelection clears window selection AND state focus', () => {
+  const { host, calls } = mockHost(['a']);
+  const ed = new NoteLiveEditor(host);
+  ed.state.selectionFocusIndex = 5;
+  ed.clearSelection();
+  assert.equal(ed.state.selectionFocusIndex, null);
+  assert.equal(calls.clearWindowSelection, 1);
 });

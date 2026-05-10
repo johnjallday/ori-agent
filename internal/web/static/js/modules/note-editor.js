@@ -599,6 +599,117 @@ export class NoteLiveEditorState {
 }
 
 // =============================================================================
+// NoteLiveEditor — controller for the live-preview pane's user actions
+// =============================================================================
+// Wraps a NoteLiveEditorState with the user-facing actions that mutate it
+// (activate a line for inline edit, toggle a heading fold, toggle a task
+// checkbox, delete/replace/edit a multi-line selection range). Each action
+// updates state, mutates content via the host, then asks the host to re-
+// render. The host config supplies the content I/O + lifecycle callbacks
+// the modal and page implementations differ on.
+
+export class NoteLiveEditor {
+  constructor(host = {}) {
+    this.host = host;
+    this.state = new NoteLiveEditorState();
+  }
+
+  // clearSelection clears the browser's text selection AND the state's
+  // selection-focus index. Used as the common "discard the active range"
+  // operation across actions.
+  clearSelection() {
+    this.host.clearWindowSelection?.();
+    this.state.clearSelectionFocus();
+  }
+
+  // activate puts `lineIndex` into single-line edit mode, optionally
+  // positioning the textarea cursor.
+  activate(lineIndex, cursorPosition = null) {
+    this.state.selectionAnchorIndex = lineIndex;
+    this.state.selectionFocusIndex = null;
+    this.state.pointerDown = null;
+    this.state.activeRange = null;
+    this.state.activeLineIndex = lineIndex;
+    this.host.render?.({ focusLineIndex: lineIndex, cursorPosition });
+  }
+
+  // toggleHeadingFold flips whether `lineIndex` is folded. No-op when the
+  // index doesn't point at a heading line in the current content.
+  toggleHeadingFold(lineIndex) {
+    if (!Number.isInteger(lineIndex)) return;
+    const lines = this.host.getContentLines?.() || [];
+    if (lineIndex < 0 || lineIndex >= lines.length || parseHeadingLevel(lines[lineIndex]) === 0) return;
+    this.state.toggleHeadingFold(lineIndex);
+    this.state.activeLineIndex = null;
+    this.state.activeRange = null;
+    this.clearSelection();
+    this.host.render?.();
+  }
+
+  // toggleTaskLine flips the `[ ]` / `[x]` marker on a task-list line and
+  // re-renders. No-op when the line isn't a task line.
+  toggleTaskLine(lineIndex, checked) {
+    if (!Number.isInteger(lineIndex)) return;
+    const lines = this.host.getContentLines?.() || [];
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+    const task = parseTaskLine(lines[lineIndex]);
+    if (!task) return;
+    this.host.pushUndo?.();
+    const marker = checked ? '[x]' : '[]';
+    lines[lineIndex] = `${task.indent}${task.bullet}${task.gap}${marker}${task.afterGap}${task.text}`;
+    this.host.setContentLines?.(lines);
+    this.state.activeLineIndex = null;
+    this.state.activeRange = null;
+    this.clearSelection();
+    this.host.scheduleAutoSave?.();
+    this.host.render?.();
+  }
+
+  // deleteRange removes the inclusive [range.start..range.end] line span.
+  // Always leaves at least one line in the buffer so subsequent edits work.
+  deleteRange(range) {
+    const lines = this.host.getContentLines?.() || [];
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.host.pushUndo?.();
+    lines.splice(start, end - start + 1);
+    if (lines.length === 0) lines.push('');
+    this.host.setContentLines?.(lines);
+    this.state.activeRange = null;
+    this.clearSelection();
+    this.host.scheduleAutoSave?.();
+    this.activate(Math.min(start, lines.length - 1), 0);
+  }
+
+  // replaceRange swaps the inclusive [range.start..range.end] line span
+  // with a single `replacement` string.
+  replaceRange(range, replacement) {
+    const lines = this.host.getContentLines?.() || [];
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.host.pushUndo?.();
+    lines.splice(start, end - start + 1, replacement);
+    this.host.setContentLines?.(lines);
+    this.state.activeRange = null;
+    this.clearSelection();
+    this.host.scheduleAutoSave?.();
+    this.activate(start, replacement.length);
+  }
+
+  // editRange enters block-edit mode for a multi-line range, joining the
+  // lines into one big textarea so the user can edit them as a block.
+  editRange(range) {
+    const lines = this.host.getContentLines?.() || [];
+    const start = Math.max(0, Math.min(range.start, lines.length - 1));
+    const end = Math.max(start, Math.min(range.end, lines.length - 1));
+    this.clearSelection();
+    this.state.activeLineIndex = null;
+    this.state.activeRange = { start, end };
+    this.host.render?.({ cursorPosition: lines.slice(start, end + 1).join('\n').length });
+  }
+}
+
+// =============================================================================
 // NoteTocController — state container for the TOC rail
 // =============================================================================
 // Owns the IntersectionObserver, the debounce timer, and the drag-source
@@ -1427,6 +1538,7 @@ const api = {
   startOfLine,
   NoteTocController,
   NoteLiveEditorState,
+  NoteLiveEditor,
 };
 
 if (typeof window !== 'undefined') {

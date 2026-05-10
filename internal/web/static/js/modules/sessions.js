@@ -4938,44 +4938,47 @@ const sessionManager = {
   currentNote: null,
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
-  // Live-editor state (active line/range, selection anchors, pointer origin,
-  // collapsed-heading set) lives in a NoteLiveEditorState instance. Lazily
-  // created on first access so window.NoteEditor has loaded.
-  noteLiveState: null,
-  // Backward-compat field accessors. The original sessionManager exposed
-  // these as flat fields; many call sites (and the v1 live-preview render
-  // path) read/write them as `this.noteLive*`. Defining them as getters/
-  // setters here lets the underlying state move into note-editor.js without
-  // touching the ~64 existing references.
-  get noteLiveActiveLineIndex() { return this._ensureLiveState().activeLineIndex; },
-  set noteLiveActiveLineIndex(v) { this._ensureLiveState().activeLineIndex = v; },
-  get noteLiveActiveRange() { return this._ensureLiveState().activeRange; },
-  set noteLiveActiveRange(v) { this._ensureLiveState().activeRange = v; },
-  get noteLiveSelectionAnchorIndex() { return this._ensureLiveState().selectionAnchorIndex; },
-  set noteLiveSelectionAnchorIndex(v) { this._ensureLiveState().selectionAnchorIndex = v; },
-  get noteLiveSelectionFocusIndex() { return this._ensureLiveState().selectionFocusIndex; },
-  set noteLiveSelectionFocusIndex(v) { this._ensureLiveState().selectionFocusIndex = v; },
-  get noteLivePointerDown() { return this._ensureLiveState().pointerDown; },
-  set noteLivePointerDown(v) { this._ensureLiveState().pointerDown = v; },
-  get noteLiveCollapsedHeadings() { return this._ensureLiveState().collapsedHeadings; },
-  set noteLiveCollapsedHeadings(v) { this._ensureLiveState().collapsedHeadings = v; },
-
-  _ensureLiveState() {
-    if (this.noteLiveState) return this.noteLiveState;
-    if (window.NoteEditor) {
-      this.noteLiveState = new window.NoteEditor.NoteLiveEditorState();
-    } else {
-      // Fallback bag if note-editor.js hasn't loaded yet (script ordering
-      // means this can happen before DOMContentLoaded). Same shape as the
-      // class so the getters/setters keep working.
-      this.noteLiveState = {
-        activeLineIndex: null, activeRange: null,
-        selectionAnchorIndex: null, selectionFocusIndex: null,
-        pointerDown: null, collapsedHeadings: new Set(),
-      };
-    }
-    return this.noteLiveState;
+  // Live-editor state + actions live in a NoteLiveEditor controller from
+  // note-editor.js. Lazily created so window.NoteEditor has loaded.
+  noteLive: null,
+  // Back-compat: the original sessionManager exposed `noteLiveState` as a
+  // bare object. That alias still resolves to the controller's state.
+  get noteLiveState() { return this._ensureLive()?.state; },
+  // Field-level back-compat. Callers that read/write `this.noteLive*` keep
+  // working — the getters/setters target the controller's state.
+  get noteLiveActiveLineIndex() { return this._ensureLive()?.state.activeLineIndex ?? null; },
+  set noteLiveActiveLineIndex(v) { const s = this._ensureLive()?.state; if (s) s.activeLineIndex = v; },
+  get noteLiveActiveRange() { return this._ensureLive()?.state.activeRange ?? null; },
+  set noteLiveActiveRange(v) { const s = this._ensureLive()?.state; if (s) s.activeRange = v; },
+  get noteLiveSelectionAnchorIndex() { return this._ensureLive()?.state.selectionAnchorIndex ?? null; },
+  set noteLiveSelectionAnchorIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionAnchorIndex = v; },
+  get noteLiveSelectionFocusIndex() { return this._ensureLive()?.state.selectionFocusIndex ?? null; },
+  set noteLiveSelectionFocusIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionFocusIndex = v; },
+  get noteLivePointerDown() { return this._ensureLive()?.state.pointerDown ?? null; },
+  set noteLivePointerDown(v) { const s = this._ensureLive()?.state; if (s) s.pointerDown = v; },
+  get noteLiveCollapsedHeadings() {
+    const s = this._ensureLive()?.state;
+    return s ? s.collapsedHeadings : new Set();
   },
+  set noteLiveCollapsedHeadings(v) { const s = this._ensureLive()?.state; if (s) s.collapsedHeadings = v; },
+
+  _ensureLive() {
+    if (this.noteLive) return this.noteLive;
+    if (!window.NoteEditor) return null;
+    this.noteLive = new window.NoteEditor.NoteLiveEditor({
+      getContent: () => this.getNoteContentValue(),
+      setContent: (v) => this.setNoteContentValue(v),
+      getContentLines: () => this.getNoteContentLines(),
+      setContentLines: (lines) => this.setNoteContentLines(lines),
+      pushUndo: () => this.pushNoteUndoState(),
+      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
+      render: (opts) => this.renderNoteLiveEditor(opts),
+      clearWindowSelection: () => window.NoteEditor.clearWindowSelection(),
+    });
+    return this.noteLive;
+  },
+  // Compat alias kept for any sites that still spell it _ensureLiveState.
+  _ensureLiveState() { return this._ensureLive()?.state; },
   // Undo/redo lives in a NoteHistory instance (see note-editor.js). Lazily
   // created in resetNoteHistory so it's always defined before first use.
   noteHistory: null,
@@ -6600,92 +6603,25 @@ const sessionManager = {
   isNoteLivePrintableKey(event) { return window.NoteEditor?.isPrintableKey(event) ?? false; },
 
   toggleNoteHeadingFold(lineIndex) {
-    if (!Number.isInteger(lineIndex)) return;
-    const lines = this.getNoteContentLines();
-    if (lineIndex < 0 || lineIndex >= lines.length || this.noteHeadingLevel(lines[lineIndex]) === 0) return;
-
-    if (this.noteLiveCollapsedHeadings.has(lineIndex)) {
-      this.noteLiveCollapsedHeadings.delete(lineIndex);
-    } else {
-      this.noteLiveCollapsedHeadings.add(lineIndex);
-    }
-
-    this.noteLiveActiveLineIndex = null;
-    this.noteLiveActiveRange = null;
-    this.clearNoteLiveSelection();
-    this.renderNoteLiveEditor();
-
-    const foldButton = document.querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`);
-    foldButton?.focus({ preventScroll: true });
+    this._ensureLive()?.toggleHeadingFold(lineIndex);
+    // Restore focus to the fold button so keyboard users keep their place.
+    document.querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`)
+      ?.focus({ preventScroll: true });
   },
 
   toggleNoteTaskLine(lineIndex, checked) {
-    if (!Number.isInteger(lineIndex)) return;
-    const lines = this.getNoteContentLines();
-    if (lineIndex < 0 || lineIndex >= lines.length) return;
-
-    const task = this.parseNoteTaskLine(lines[lineIndex]);
-    if (!task) return;
-
-    this.pushNoteUndoState();
-    const marker = checked ? '[x]' : '[]';
-    lines[lineIndex] = `${task.indent}${task.bullet}${task.gap}${marker}${task.afterGap}${task.text}`;
-    this.setNoteContentLines(lines);
-    this.noteLiveActiveLineIndex = null;
-    this.noteLiveActiveRange = null;
-    this.clearNoteLiveSelection();
-    this.scheduleNoteAutoSave();
-    this.renderNoteLiveEditor();
-
-    const checkbox = document.querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`);
-    checkbox?.focus({ preventScroll: true });
+    this._ensureLive()?.toggleTaskLine(lineIndex, checked);
+    document.querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`)
+      ?.focus({ preventScroll: true });
   },
 
-  deleteNoteLiveLineRange(range) {
-    const lines = this.getNoteContentLines();
-    const start = Math.max(0, Math.min(range.start, lines.length - 1));
-    const end = Math.max(start, Math.min(range.end, lines.length - 1));
-    this.pushNoteUndoState();
-    lines.splice(start, end - start + 1);
-    if (lines.length === 0) lines.push('');
-    this.setNoteContentLines(lines);
-    this.noteLiveActiveRange = null;
-    this.clearNoteLiveSelection();
-    this.scheduleNoteAutoSave();
-    this.activateNoteLiveLine(Math.min(start, lines.length - 1), 0);
-  },
-
-  replaceNoteLiveLineRange(range, replacement) {
-    const lines = this.getNoteContentLines();
-    const start = Math.max(0, Math.min(range.start, lines.length - 1));
-    const end = Math.max(start, Math.min(range.end, lines.length - 1));
-    this.pushNoteUndoState();
-    lines.splice(start, end - start + 1, replacement);
-    this.setNoteContentLines(lines);
-    this.noteLiveActiveRange = null;
-    this.clearNoteLiveSelection();
-    this.scheduleNoteAutoSave();
-    this.activateNoteLiveLine(start, replacement.length);
-  },
-
-  editNoteLiveLineRange(range) {
-    const lines = this.getNoteContentLines();
-    const start = Math.max(0, Math.min(range.start, lines.length - 1));
-    const end = Math.max(start, Math.min(range.end, lines.length - 1));
-    this.clearNoteLiveSelection();
-    this.noteLiveActiveLineIndex = null;
-    this.noteLiveActiveRange = { start, end };
-    this.renderNoteLiveEditor({ cursorPosition: lines.slice(start, end + 1).join('\n').length });
-  },
-
+  deleteNoteLiveLineRange(range) { this._ensureLive()?.deleteRange(range); },
+  replaceNoteLiveLineRange(range, replacement) { this._ensureLive()?.replaceRange(range, replacement); },
+  editNoteLiveLineRange(range) { this._ensureLive()?.editRange(range); },
   activateNoteLiveLine(lineIndex, cursorPosition = null) {
-    this.noteLiveSelectionAnchorIndex = lineIndex;
-    this.noteLiveSelectionFocusIndex = null;
-    this.noteLivePointerDown = null;
-    this.noteLiveActiveRange = null;
-    this.noteLiveActiveLineIndex = lineIndex;
-    this.renderNoteLiveEditor({ focusLineIndex: lineIndex, cursorPosition });
+    this._ensureLive()?.activate(lineIndex, cursorPosition);
   },
+
 
   handleNoteLiveInputChange(input) {
     const lineIndex = Number(input.dataset.lineIndex);
