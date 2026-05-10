@@ -539,6 +539,66 @@ export function setActiveTocEntry(lineIndex, content) {
 }
 
 // =============================================================================
+// NoteLiveEditorState — the live-preview pane's per-instance state
+// =============================================================================
+// Centralizes the bundle of fields that drive the live-editor render loop:
+// which line/range is currently being edited, where text-selection anchors
+// are pinned, the most recent pointer-down origin (so click vs drag can be
+// distinguished), and which heading sections are folded.
+//
+// Defined as a class so each editor instance (modal today, page tomorrow)
+// has its own independent state. The class itself is logic-light: it's a
+// state container with a `reset()` for note-open and a `clearSelectionFocus()`
+// for the common "discard the active range" operation.
+
+export class NoteLiveEditorState {
+  constructor() {
+    this.activeLineIndex = null;
+    this.activeRange = null;
+    this.selectionAnchorIndex = null;
+    this.selectionFocusIndex = null;
+    this.pointerDown = null;
+    this.collapsedHeadings = new Set();
+  }
+
+  // reset clears all state. Called when a note is opened so leftover state
+  // from a previously-edited note doesn't bleed across sessions.
+  reset() {
+    this.activeLineIndex = null;
+    this.activeRange = null;
+    this.selectionAnchorIndex = null;
+    this.selectionFocusIndex = null;
+    this.pointerDown = null;
+    this.collapsedHeadings = new Set();
+  }
+
+  // clearSelectionFocus mirrors the original sessionManager behavior of
+  // clearing the focus index without touching the anchor — keeps the
+  // multi-select origin intact while dismissing the tail.
+  clearSelectionFocus() {
+    this.selectionFocusIndex = null;
+  }
+
+  // toggleHeadingFold flips whether `lineIndex` is folded. Returns the new
+  // collapsed-state of that index.
+  toggleHeadingFold(lineIndex) {
+    if (this.collapsedHeadings.has(lineIndex)) {
+      this.collapsedHeadings.delete(lineIndex);
+      return false;
+    }
+    this.collapsedHeadings.add(lineIndex);
+    return true;
+  }
+
+  // hasActiveEdit returns true if any kind of inline edit is in progress
+  // (single line or range). Used by focusout handlers to decide whether to
+  // dismiss the active state.
+  hasActiveEdit() {
+    return this.activeLineIndex !== null || this.activeRange !== null;
+  }
+}
+
+// =============================================================================
 // NoteTocController — state container for the TOC rail
 // =============================================================================
 // Owns the IntersectionObserver, the debounce timer, and the drag-source
@@ -1366,6 +1426,7 @@ const api = {
   lineIndexAtPosition,
   startOfLine,
   NoteTocController,
+  NoteLiveEditorState,
 };
 
 if (typeof window !== 'undefined') {

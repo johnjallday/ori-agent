@@ -4938,12 +4938,44 @@ const sessionManager = {
   currentNote: null,
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
-  noteLiveActiveLineIndex: null,
-  noteLiveActiveRange: null,
-  noteLiveSelectionAnchorIndex: null,
-  noteLiveSelectionFocusIndex: null,
-  noteLivePointerDown: null,
-  noteLiveCollapsedHeadings: new Set(),
+  // Live-editor state (active line/range, selection anchors, pointer origin,
+  // collapsed-heading set) lives in a NoteLiveEditorState instance. Lazily
+  // created on first access so window.NoteEditor has loaded.
+  noteLiveState: null,
+  // Backward-compat field accessors. The original sessionManager exposed
+  // these as flat fields; many call sites (and the v1 live-preview render
+  // path) read/write them as `this.noteLive*`. Defining them as getters/
+  // setters here lets the underlying state move into note-editor.js without
+  // touching the ~64 existing references.
+  get noteLiveActiveLineIndex() { return this._ensureLiveState().activeLineIndex; },
+  set noteLiveActiveLineIndex(v) { this._ensureLiveState().activeLineIndex = v; },
+  get noteLiveActiveRange() { return this._ensureLiveState().activeRange; },
+  set noteLiveActiveRange(v) { this._ensureLiveState().activeRange = v; },
+  get noteLiveSelectionAnchorIndex() { return this._ensureLiveState().selectionAnchorIndex; },
+  set noteLiveSelectionAnchorIndex(v) { this._ensureLiveState().selectionAnchorIndex = v; },
+  get noteLiveSelectionFocusIndex() { return this._ensureLiveState().selectionFocusIndex; },
+  set noteLiveSelectionFocusIndex(v) { this._ensureLiveState().selectionFocusIndex = v; },
+  get noteLivePointerDown() { return this._ensureLiveState().pointerDown; },
+  set noteLivePointerDown(v) { this._ensureLiveState().pointerDown = v; },
+  get noteLiveCollapsedHeadings() { return this._ensureLiveState().collapsedHeadings; },
+  set noteLiveCollapsedHeadings(v) { this._ensureLiveState().collapsedHeadings = v; },
+
+  _ensureLiveState() {
+    if (this.noteLiveState) return this.noteLiveState;
+    if (window.NoteEditor) {
+      this.noteLiveState = new window.NoteEditor.NoteLiveEditorState();
+    } else {
+      // Fallback bag if note-editor.js hasn't loaded yet (script ordering
+      // means this can happen before DOMContentLoaded). Same shape as the
+      // class so the getters/setters keep working.
+      this.noteLiveState = {
+        activeLineIndex: null, activeRange: null,
+        selectionAnchorIndex: null, selectionFocusIndex: null,
+        pointerDown: null, collapsedHeadings: new Set(),
+      };
+    }
+    return this.noteLiveState;
+  },
   // Undo/redo lives in a NoteHistory instance (see note-editor.js). Lazily
   // created in resetNoteHistory so it's always defined before first use.
   noteHistory: null,
@@ -6120,11 +6152,7 @@ const sessionManager = {
       }
       this._renderNoteTocOutline();
     } else {
-      this.noteLiveActiveLineIndex = null;
-      this.noteLiveActiveRange = null;
-      this.noteLiveSelectionAnchorIndex = null;
-      this.noteLiveSelectionFocusIndex = null;
-      this.noteLivePointerDown = null;
+      this._ensureLiveState().reset();
       editorContainer?.classList.remove('is-previewing');
       if (contentInput) contentInput.style.display = 'block';
       if (previewContent) {
@@ -6171,12 +6199,7 @@ const sessionManager = {
   applyNoteHistoryState(value, options = {}) {
     if (this.noteHistory) this.noteHistory.applying = true;
     this.setNoteContentValue(value);
-    this.noteLiveActiveRange = null;
-    this.noteLiveActiveLineIndex = null;
-    this.noteLiveSelectionAnchorIndex = null;
-    this.noteLiveSelectionFocusIndex = null;
-    this.noteLivePointerDown = null;
-    this.noteLiveCollapsedHeadings = new Set();
+    this._ensureLiveState().reset();
     this.clearNoteLiveSelection();
     this.scheduleNoteAutoSave();
     if (this.noteHistory) this.noteHistory.applying = false;

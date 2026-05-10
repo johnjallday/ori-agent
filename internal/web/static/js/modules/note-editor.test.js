@@ -27,6 +27,7 @@ import {
   startOfLine,
   pruneCollapsedHeadings,
   buildLiveEditorHTML,
+  NoteLiveEditorState,
 } from './note-editor.js';
 
 // =============================================================================
@@ -805,4 +806,66 @@ test('buildLiveEditorHTML: deeper-than-collapsed heading stays hidden, shallower
   assert.doesNotMatch(html, /data-line-index="2"/);
   assert.doesNotMatch(html, /data-line-index="3"/);
   assert.match(html, /data-line-index="4"/);
+});
+
+// =============================================================================
+// NoteLiveEditorState
+// =============================================================================
+
+test('NoteLiveEditorState: defaults are all null/empty', () => {
+  const s = new NoteLiveEditorState();
+  assert.equal(s.activeLineIndex, null);
+  assert.equal(s.activeRange, null);
+  assert.equal(s.selectionAnchorIndex, null);
+  assert.equal(s.selectionFocusIndex, null);
+  assert.equal(s.pointerDown, null);
+  assert.ok(s.collapsedHeadings instanceof Set);
+  assert.equal(s.collapsedHeadings.size, 0);
+});
+
+test('NoteLiveEditorState: reset clears every field', () => {
+  const s = new NoteLiveEditorState();
+  s.activeLineIndex = 3;
+  s.activeRange = { start: 1, end: 4 };
+  s.selectionAnchorIndex = 1;
+  s.selectionFocusIndex = 4;
+  s.pointerDown = { x: 10, y: 20, lineIndex: 0 };
+  s.collapsedHeadings.add(0);
+  s.collapsedHeadings.add(2);
+
+  s.reset();
+
+  assert.equal(s.activeLineIndex, null);
+  assert.equal(s.activeRange, null);
+  assert.equal(s.selectionAnchorIndex, null);
+  assert.equal(s.selectionFocusIndex, null);
+  assert.equal(s.pointerDown, null);
+  assert.equal(s.collapsedHeadings.size, 0);
+});
+
+test('NoteLiveEditorState: clearSelectionFocus clears focus only, not anchor', () => {
+  const s = new NoteLiveEditorState();
+  s.selectionAnchorIndex = 2;
+  s.selectionFocusIndex = 5;
+  s.clearSelectionFocus();
+  assert.equal(s.selectionAnchorIndex, 2);
+  assert.equal(s.selectionFocusIndex, null);
+});
+
+test('NoteLiveEditorState: toggleHeadingFold flips and returns the new state', () => {
+  const s = new NoteLiveEditorState();
+  assert.equal(s.toggleHeadingFold(3), true);
+  assert.ok(s.collapsedHeadings.has(3));
+  assert.equal(s.toggleHeadingFold(3), false);
+  assert.equal(s.collapsedHeadings.has(3), false);
+});
+
+test('NoteLiveEditorState: hasActiveEdit checks both activeLineIndex and activeRange', () => {
+  const s = new NoteLiveEditorState();
+  assert.equal(s.hasActiveEdit(), false);
+  s.activeLineIndex = 0;
+  assert.equal(s.hasActiveEdit(), true);
+  s.activeLineIndex = null;
+  s.activeRange = { start: 1, end: 2 };
+  assert.equal(s.hasActiveEdit(), true);
 });
