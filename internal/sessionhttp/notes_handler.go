@@ -36,6 +36,12 @@ func (h *Handler) HandleNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /api/notes/{id}/backlinks
+	if parts := strings.SplitN(path, "/", 3); len(parts) == 2 && parts[1] == "backlinks" {
+		h.getBacklinks(w, r, parts[0])
+		return
+	}
+
 	// Handle collection-level requests
 	switch r.Method {
 	case http.MethodPost:
@@ -368,6 +374,31 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"notes": notes,
+	})
+}
+
+// getBacklinks handles GET /api/notes/{id}/backlinks.
+// Returns notes that link to {id} via wikilinks, with a context snippet for each.
+func (h *Handler) getBacklinks(w http.ResponseWriter, r *http.Request, noteID string) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	noteID = strings.TrimSpace(noteID)
+	if noteID == "" {
+		_ = orihttp.RespondBadRequest(w, "note id is required")
+		return
+	}
+
+	results, err := h.store.SearchBacklinks(r.Context(), noteID, 50)
+	if err != nil {
+		logger.Error("Failed to search backlinks", logger.Fields{"note_id": noteID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to load backlinks")
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"backlinks": results,
 	})
 }
 

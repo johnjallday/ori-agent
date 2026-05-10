@@ -96,28 +96,4 @@ func matchATXHeading(line string) (int, string, bool) {
 	return i, text, true
 }
 
-// detectFence reports whether `line` opens or closes a fenced code block.
-// A fence is three or more consecutive backticks or tildes at the start of the
-// line (after up to three spaces of indentation, per CommonMark).
-func detectFence(line string) (bool, byte, int) {
-	i := 0
-	for i < 3 && i < len(line) && line[i] == ' ' {
-		i++
-	}
-	if i >= len(line) {
-		return false, 0, 0
-	}
-	mark := line[i]
-	if mark != '`' && mark != '~' {
-		return false, 0, 0
-	}
-	count := 0
-	for i < len(line) && line[i] == mark {
-		i++
-		count++
-	}
-	if count < 3 {
-		return false, 0, 0
-	}
-	return true, mark, count
-}
+// detectFence lives in note_text.go (shared with the wikilink parser).

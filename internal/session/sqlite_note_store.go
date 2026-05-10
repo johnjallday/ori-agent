@@ -39,6 +39,12 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
 		return fmt.Errorf("failed to index note headings: %w", err)
 	}
+	if err := s.indexNoteLinks(ctx, note.ID, note.Content, note.WorkspaceID); err != nil {
+		return fmt.Errorf("failed to index note links: %w", err)
+	}
+	if err := s.retroResolveBrokenLinks(ctx, note.ID, note.WorkspaceID, note.Name); err != nil {
+		return fmt.Errorf("failed to retro-resolve note links: %w", err)
+	}
 
 	return nil
 }
@@ -85,6 +91,15 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error
 
 	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
 		return fmt.Errorf("failed to index note headings: %w", err)
+	}
+	if err := s.indexNoteLinks(ctx, note.ID, note.Content, note.WorkspaceID); err != nil {
+		return fmt.Errorf("failed to index note links: %w", err)
+	}
+	// Retro-resolve previously-broken links elsewhere in the workspace whose
+	// target_text now matches this note's name. This handles both create and
+	// rename — both go through here.
+	if err := s.retroResolveBrokenLinks(ctx, note.ID, note.WorkspaceID, note.Name); err != nil {
+		return fmt.Errorf("failed to retro-resolve note links: %w", err)
 	}
 
 	return nil
@@ -259,6 +274,199 @@ func (s *SQLiteStore) BackfillHeadingIndex(ctx context.Context) (int, error) {
 
 	for _, p := range pending {
 		if err := s.indexNoteHeadings(ctx, p.id, p.content); err != nil {
+			return 0, fmt.Errorf("index note %s: %w", p.id, err)
+		}
+	}
+	return len(pending), nil
+}
+
+// indexNoteLinks rebuilds the note_links rows for one note. Each `[[…]]`
+// reference becomes one row, with target_note_id resolved against the
+// workspace's notes (exact title match, case-insensitive fallback). Broken
+// links keep target_note_id NULL so they're easy to find later.
+func (s *SQLiteStore) indexNoteLinks(ctx context.Context, noteID, content, workspaceID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM note_links WHERE source_note_id = ?`, noteID); err != nil {
+		return fmt.Errorf("delete existing note_links: %w", err)
+	}
+
+	for _, link := range ParseWikilinks(content) {
+		var targetID *string
+		if workspaceID != "" {
+			id, _ := s.resolveWikilinkTargetTx(ctx, tx, link.Target, workspaceID)
+			if id != "" {
+				targetID = &id
+			}
+		}
+		var display *string
+		if link.Display != "" {
+			d := link.Display
+			display = &d
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO note_links (source_note_id, target_note_id, target_text, display_text, position)
+			VALUES (?, ?, ?, ?, ?)
+		`, noteID, targetID, link.Target, display, link.Position); err != nil {
+			return fmt.Errorf("insert note_link: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// resolveWikilinkTargetTx is the transactional twin of resolveWikilinkTarget
+// in note_links.go — it lets indexNoteLinks see uncommitted writes inside the
+// same transaction (relevant when batches span multiple notes).
+func (s *SQLiteStore) resolveWikilinkTargetTx(ctx context.Context, tx interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}, target, workspaceID string) (string, error) {
+	if target == "" || workspaceID == "" {
+		return "", nil
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM workspace_notes WHERE workspace_id = ? AND name = ? LIMIT 1`,
+		workspaceID, target).Scan(&id); err == nil {
+		return id, nil
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM workspace_notes WHERE workspace_id = ? AND LOWER(name) = LOWER(?) LIMIT 1`,
+		workspaceID, target).Scan(&id); err == nil {
+		return id, nil
+	}
+	return "", nil
+}
+
+// retroResolveBrokenLinks looks for note_links rows in `workspaceID` whose
+// target_note_id IS NULL and whose target_text matches `noteName` (case-
+// insensitive), and points them at `noteID`. Called from CreateNote and
+// UpdateNote so that creating or renaming a note retroactively fixes broken
+// references in the workspace.
+func (s *SQLiteStore) retroResolveBrokenLinks(ctx context.Context, noteID, workspaceID, noteName string) error {
+	if noteID == "" || workspaceID == "" || noteName == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE note_links
+		SET target_note_id = ?
+		WHERE target_note_id IS NULL
+		  AND LOWER(target_text) = LOWER(?)
+		  AND source_note_id IN (SELECT id FROM workspace_notes WHERE workspace_id = ?)
+	`, noteID, noteName, workspaceID)
+	if err != nil {
+		return fmt.Errorf("retro-resolve broken links: %w", err)
+	}
+	return nil
+}
+
+// SearchBacklinks returns notes that link TO the given note via wikilinks.
+// Each result includes a context snippet pulled from the source note's body
+// around the link position so users have something to read in the panel.
+func (s *SQLiteStore) SearchBacklinks(ctx context.Context, noteID string, limit int) ([]BacklinkResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT l.source_note_id, n.name, n.workspace_id, w.name,
+		       l.target_text, COALESCE(l.display_text, ''), l.position,
+		       n.content
+		FROM note_links l
+		INNER JOIN workspace_notes n ON l.source_note_id = n.id
+		LEFT JOIN workspaces w ON n.workspace_id = w.id
+		WHERE l.target_note_id = ?
+		ORDER BY n.updated_at DESC
+		LIMIT ?
+	`, noteID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query backlinks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	results := make([]BacklinkResult, 0)
+	for rows.Next() {
+		var r BacklinkResult
+		var workspaceName sql.NullString
+		var content string
+		if err := rows.Scan(&r.SourceNoteID, &r.SourceNoteName, &r.WorkspaceID,
+			&workspaceName, &r.TargetText, &r.DisplayText, &r.Position, &content); err != nil {
+			return nil, fmt.Errorf("scan backlink row: %w", err)
+		}
+		r.WorkspaceName = workspaceName.String
+		r.ContextSnippet = backlinkContextSnippet(content, r.Position, 120)
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// backlinkContextSnippet returns up to `width` characters of context around
+// `position` in `content`. Trims to whitespace boundaries so the snippet
+// doesn't start or end mid-word.
+func backlinkContextSnippet(content string, position, width int) string {
+	if content == "" || position < 0 || position >= len(content) {
+		return ""
+	}
+	half := width / 2
+	start := position - half
+	if start < 0 {
+		start = 0
+	}
+	end := position + half
+	if end > len(content) {
+		end = len(content)
+	}
+	// Snap to whitespace boundaries when possible.
+	for start > 0 && content[start] != ' ' && content[start] != '\n' {
+		start--
+	}
+	for end < len(content) && content[end] != ' ' && content[end] != '\n' {
+		end++
+	}
+	snippet := strings.TrimSpace(content[start:end])
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	if end < len(content) {
+		snippet = snippet + "…"
+	}
+	return snippet
+}
+
+// BackfillNoteLinks indexes wikilinks for any note whose content contains
+// `[[…]]` syntax but has no rows in note_links yet. Called once at startup;
+// idempotent. The `content LIKE '%[[%'` filter avoids re-indexing notes that
+// legitimately have zero links.
+func (s *SQLiteStore) BackfillNoteLinks(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT n.id, n.content, n.workspace_id
+		FROM workspace_notes n
+		LEFT JOIN note_links l ON n.id = l.source_note_id
+		WHERE l.id IS NULL AND n.content LIKE '%[[%'
+		GROUP BY n.id
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("query unindexed notes: %w", err)
+	}
+
+	type pair struct{ id, content, workspace string }
+	var pending []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.id, &p.content, &p.workspace); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("scan unindexed note: %w", err)
+		}
+		pending = append(pending, p)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	for _, p := range pending {
+		if err := s.indexNoteLinks(ctx, p.id, p.content, p.workspace); err != nil {
 			return 0, fmt.Errorf("index note %s: %w", p.id, err)
 		}
 	}

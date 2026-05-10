@@ -1307,6 +1307,66 @@ func TestHandler_SearchHeadings(t *testing.T) {
 	}
 }
 
+// TestHandler_GetBacklinks tests GET /api/notes/{id}/backlinks.
+func TestHandler_GetBacklinks(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestWorkspace(t, handler, "Backlinks Folder")
+
+	// Target note that backlinks point to.
+	targetBody := `{"workspace_id": "` + folderID + `", "name": "Target Note", "content": "Just a target."}`
+	targetReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(targetBody))
+	targetReq.Header.Set("Content-Type", "application/json")
+	targetW := httptest.NewRecorder()
+	handler.HandleNotes(targetW, targetReq)
+	if targetW.Code != http.StatusCreated {
+		t.Fatalf("create target failed: %d %s", targetW.Code, targetW.Body.String())
+	}
+	var targetResp struct {
+		Note session.WorkspaceNote `json:"note"`
+	}
+	_ = json.Unmarshal(targetW.Body.Bytes(), &targetResp)
+
+	// Source note that links to the target.
+	srcBody := `{"workspace_id": "` + folderID + `", "name": "Source Note", "content": "Reference [[Target Note]] for details."}`
+	srcReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(srcBody))
+	srcReq.Header.Set("Content-Type", "application/json")
+	srcW := httptest.NewRecorder()
+	handler.HandleNotes(srcW, srcReq)
+	if srcW.Code != http.StatusCreated {
+		t.Fatalf("create source failed: %d %s", srcW.Code, srcW.Body.String())
+	}
+
+	// Now query backlinks for the target.
+	req := httptest.NewRequest(http.MethodGet, "/api/notes/"+targetResp.Note.ID+"/backlinks", nil)
+	w := httptest.NewRecorder()
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Backlinks []session.BacklinkResult `json:"backlinks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Backlinks) != 1 {
+		t.Fatalf("expected 1 backlink, got %d: %+v", len(resp.Backlinks), resp.Backlinks)
+	}
+	got := resp.Backlinks[0]
+	if got.SourceNoteName != "Source Note" {
+		t.Errorf("expected source name 'Source Note', got %q", got.SourceNoteName)
+	}
+	if got.TargetText != "Target Note" {
+		t.Errorf("expected target text 'Target Note', got %q", got.TargetText)
+	}
+	if got.WorkspaceName != "Backlinks Folder" {
+		t.Errorf("expected workspace 'Backlinks Folder', got %q", got.WorkspaceName)
+	}
+}
+
 // TestHandler_SearchHeadingsRejectsShortQuery checks the 2-character minimum.
 func TestHandler_SearchHeadingsRejectsShortQuery(t *testing.T) {
 	handler, cleanup := createTestHandler(t)

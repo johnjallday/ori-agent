@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 16
+const schemaVersion = 17
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -97,6 +97,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration015WorkspaceVersion(ctx)
 	case 16:
 		return db.migration016NoteHeadingsIndex(ctx)
+	case 17:
+		return db.migration017NoteLinks(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -874,6 +876,47 @@ func (db *DB) migration013RemoveLegacyVaultCatalogRows(ctx context.Context) erro
 	}
 
 	return tx.Commit()
+}
+
+// migration017NoteLinks creates the note_links table that powers wikilinks
+// (`[[Other Note]]` references) and the Backlinks panel. Each row is one
+// outbound link from a note. target_note_id is nullable for broken links —
+// references to titles that don't currently match any note.
+func (db *DB) migration017NoteLinks(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_notes")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS note_links (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_note_id TEXT NOT NULL,
+			target_note_id TEXT,
+			target_text TEXT NOT NULL,
+			display_text TEXT,
+			position INTEGER NOT NULL,
+			FOREIGN KEY (source_note_id) REFERENCES workspace_notes(id) ON DELETE CASCADE,
+			FOREIGN KEY (target_note_id) REFERENCES workspace_notes(id) ON DELETE SET NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_links table: %w", err)
+	}
+
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_note_links_source ON note_links(source_note_id)",
+		"CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_note_id)",
+		"CREATE INDEX IF NOT EXISTS idx_note_links_target_text ON note_links(target_text)",
+	}
+	for _, stmt := range indexes {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create note_links index: %w", err)
+		}
+	}
+	return nil
 }
 
 // migration016NoteHeadingsIndex creates the note_headings table, its FTS5 mirror,
