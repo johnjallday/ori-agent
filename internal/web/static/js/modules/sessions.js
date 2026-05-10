@@ -6246,26 +6246,22 @@ const sessionManager = {
     return window.NoteEditor?.normalizeCompactTaskListMarkdown(text) ?? String(text || '');
   },
 
-  // pruneNoteCollapsedHeadings still touches `this.noteLiveCollapsedHeadings`
-  // (state that hasn't been migrated yet), so it stays here for now.
   pruneNoteCollapsedHeadings(lines) {
-    for (const index of Array.from(this.noteLiveCollapsedHeadings || [])) {
-      if (!Number.isInteger(index) || index < 0 || index >= lines.length || this.noteHeadingLevel(lines[index]) === 0) {
-        this.noteLiveCollapsedHeadings.delete(index);
-      }
-    }
+    window.NoteEditor?.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
   },
 
   renderNoteLiveEditor(options = {}) {
     const previewContent = document.getElementById('notePreviewContent');
     if (!previewContent || !this.isNotePreviewMode) return;
+    if (!window.NoteEditor) return;
 
     const lines = this.getNoteContentLines();
-    this.pruneNoteCollapsedHeadings(lines);
+    window.NoteEditor.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
+
     const activeRange = this.noteLiveActiveRange
       ? {
           start: Math.max(0, Math.min(this.noteLiveActiveRange.start, lines.length - 1)),
-          end: Math.max(0, Math.min(this.noteLiveActiveRange.end, lines.length - 1))
+          end: Math.max(0, Math.min(this.noteLiveActiveRange.end, lines.length - 1)),
         }
       : null;
     const focusLineIndex = Number.isInteger(options.focusLineIndex)
@@ -6276,57 +6272,27 @@ const sessionManager = {
       : null;
     this.noteLiveActiveLineIndex = activeLineIndex;
 
-    const html = [];
-    let hiddenByHeadingLevel = 0;
-    for (let index = 0; index < lines.length; index += 1) {
-      const headingLevel = this.noteHeadingLevel(lines[index]);
-      if (hiddenByHeadingLevel > 0) {
-        if (headingLevel > 0 && headingLevel <= hiddenByHeadingLevel) {
-          hiddenByHeadingLevel = 0;
-        } else {
-          continue;
-        }
-      }
-
-      if (activeRange && index === activeRange.start) {
-        html.push(this.renderNoteLiveRangeInput(lines.slice(activeRange.start, activeRange.end + 1).join('\n'), activeRange.start, activeRange.end));
-        index = activeRange.end;
-        continue;
-      }
-      if (index === activeLineIndex) {
-        html.push(this.renderNoteLiveInputLine(lines[index], index));
-        continue;
-      }
-      html.push(this.renderNoteLiveRenderedLine(lines[index], index));
-
-      if (headingLevel > 0 && this.noteLiveCollapsedHeadings.has(index)) {
-        hiddenByHeadingLevel = headingLevel;
-      }
-    }
-    previewContent.innerHTML = html.join('');
+    previewContent.innerHTML = window.NoteEditor.buildLiveEditorHTML(lines, {
+      activeRange,
+      activeLineIndex,
+      collapsedHeadings: this.noteLiveCollapsedHeadings,
+    });
 
     this.bindNoteLiveEditorEvents(previewContent);
 
-    if (activeRange) {
-      const input = previewContent.querySelector('.note-live-block-input');
-      if (input) {
-        const cursorPosition = Number.isInteger(options.cursorPosition)
-          ? Math.max(0, Math.min(options.cursorPosition, input.value.length))
-          : input.value.length;
-        input.focus();
-        input.setSelectionRange(cursorPosition, cursorPosition);
-        this.resizeNoteLiveInput(input);
-      }
-    } else if (activeLineIndex !== null) {
-      const input = previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`);
-      if (input) {
-        const cursorPosition = Number.isInteger(options.cursorPosition)
-          ? Math.max(0, Math.min(options.cursorPosition, input.value.length))
-          : input.value.length;
-        input.focus();
-        input.setSelectionRange(cursorPosition, cursorPosition);
-        this.resizeNoteLiveInput(input);
-      }
+    // Focus and position the cursor in whichever editing input was rendered.
+    const focusInput = activeRange
+      ? previewContent.querySelector('.note-live-block-input')
+      : (activeLineIndex !== null
+        ? previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`)
+        : null);
+    if (focusInput) {
+      const cursorPosition = Number.isInteger(options.cursorPosition)
+        ? Math.max(0, Math.min(options.cursorPosition, focusInput.value.length))
+        : focusInput.value.length;
+      focusInput.focus();
+      focusInput.setSelectionRange(cursorPosition, cursorPosition);
+      this.resizeNoteLiveInput(focusInput);
     }
   },
 

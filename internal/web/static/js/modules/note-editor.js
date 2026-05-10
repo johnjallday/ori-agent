@@ -193,6 +193,68 @@ export function renderTaskLine(line, index) {
     `;
 }
 
+// pruneCollapsedHeadings drops Set entries that no longer point at a heading
+// in `lines`. Mutates the Set in place. Called before rendering so stale
+// indexes (from prior content) don't keep folding the wrong sections.
+export function pruneCollapsedHeadings(lines, collapsedHeadings) {
+  if (!collapsedHeadings || typeof collapsedHeadings.delete !== 'function') return;
+  for (const index of Array.from(collapsedHeadings)) {
+    if (!Number.isInteger(index)
+        || index < 0
+        || index >= lines.length
+        || parseHeadingLevel(lines[index]) === 0) {
+      collapsedHeadings.delete(index);
+    }
+  }
+}
+
+// buildLiveEditorHTML assembles the full HTML string for the live-preview pane.
+// Each source line becomes one wrapper element; lines under a folded heading
+// are skipped. The single line being edited (activeLineIndex) renders as a
+// textarea; a multi-line range renders as a single block textarea.
+//
+// Inputs:
+//   lines              — current source content split on '\n'
+//   activeRange        — { start, end } for block-edit mode, else null
+//   activeLineIndex    — line currently being edited as a textarea, or null
+//   collapsedHeadings  — Set of line indexes whose section is folded
+//
+// Returns: HTML string ready to assign to innerHTML.
+export function buildLiveEditorHTML(lines, { activeRange = null, activeLineIndex = null, collapsedHeadings = new Set() } = {}) {
+  const html = [];
+  let hiddenByHeadingLevel = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const headingLevel = parseHeadingLevel(lines[index]);
+    if (hiddenByHeadingLevel > 0) {
+      if (headingLevel > 0 && headingLevel <= hiddenByHeadingLevel) {
+        hiddenByHeadingLevel = 0;
+      } else {
+        continue;
+      }
+    }
+
+    if (activeRange && index === activeRange.start) {
+      html.push(renderEditingRange(
+        lines.slice(activeRange.start, activeRange.end + 1).join('\n'),
+        activeRange.start,
+        activeRange.end,
+      ));
+      index = activeRange.end;
+      continue;
+    }
+    if (index === activeLineIndex) {
+      html.push(renderEditingLine(lines[index], index));
+      continue;
+    }
+    html.push(renderRenderedLine(lines[index], index, collapsedHeadings.has(index)));
+
+    if (headingLevel > 0 && collapsedHeadings.has(index)) {
+      hiddenByHeadingLevel = headingLevel;
+    }
+  }
+  return html.join('');
+}
+
 // renderRenderedLine composes the final wrapper for one source line in the
 // live preview. Heading lines win over task lines; task lines win over plain
 // markdown. An empty line collapses to `<br>` for spacing.
@@ -1248,6 +1310,8 @@ const api = {
   renderHeadingLine,
   renderTaskLine,
   renderRenderedLine,
+  pruneCollapsedHeadings,
+  buildLiveEditorHTML,
   getRailCollapsed,
   setRailCollapsed,
   applyRailCollapsed,

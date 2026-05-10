@@ -25,6 +25,8 @@ import {
   renderRenderedLine,
   lineIndexAtPosition,
   startOfLine,
+  pruneCollapsedHeadings,
+  buildLiveEditorHTML,
 } from './note-editor.js';
 
 // =============================================================================
@@ -694,4 +696,113 @@ test('lineIndexAtPosition + startOfLine round-trip on heading positions', () => 
     const line = lineIndexAtPosition(src, pos);
     assert.equal(startOfLine(src, line), pos, `round-trip failed for ${heading}`);
   }
+});
+
+// =============================================================================
+// pruneCollapsedHeadings
+// =============================================================================
+
+test('pruneCollapsedHeadings: drops indexes outside the array', () => {
+  const lines = ['# A', 'body', '# B'];
+  const set = new Set([0, 2, 5, 99]);
+  pruneCollapsedHeadings(lines, set);
+  assert.deepEqual([...set].sort((a, b) => a - b), [0, 2]);
+});
+
+test('pruneCollapsedHeadings: drops indexes that no longer point at headings', () => {
+  // Index 1 used to be a heading; current content has plain text there.
+  const lines = ['# A', 'body', '# B'];
+  const set = new Set([0, 1, 2]);
+  pruneCollapsedHeadings(lines, set);
+  assert.deepEqual([...set].sort((a, b) => a - b), [0, 2]);
+});
+
+test('pruneCollapsedHeadings: keeps valid heading indexes intact', () => {
+  const lines = ['# A', '## B', '### C'];
+  const set = new Set([0, 1, 2]);
+  pruneCollapsedHeadings(lines, set);
+  assert.equal(set.size, 3);
+});
+
+test('pruneCollapsedHeadings: handles missing set argument gracefully', () => {
+  // No assertion — just shouldn't throw.
+  pruneCollapsedHeadings(['# A'], null);
+  pruneCollapsedHeadings(['# A'], undefined);
+});
+
+test('pruneCollapsedHeadings: drops non-integer entries', () => {
+  const lines = ['# A'];
+  const set = new Set([0, '0', 1.5, NaN]);
+  pruneCollapsedHeadings(lines, set);
+  assert.deepEqual([...set], [0]);
+});
+
+// =============================================================================
+// buildLiveEditorHTML
+// =============================================================================
+
+test('buildLiveEditorHTML: every line gets a wrapper when nothing is folded or active', () => {
+  const html = buildLiveEditorHTML(['# A', 'body', '# B']);
+  assert.match(html, /data-line-index="0"/);
+  assert.match(html, /data-line-index="1"/);
+  assert.match(html, /data-line-index="2"/);
+  // No editing inputs since no active line/range was passed.
+  assert.doesNotMatch(html, /<textarea/);
+});
+
+test('buildLiveEditorHTML: hides lines under a collapsed heading until next sibling-or-shallower', () => {
+  const lines = ['# A', 'body A', '## A.1', 'body A1', '# B', 'body B'];
+  const collapsed = new Set([0]); // collapse the first heading
+  const html = buildLiveEditorHTML(lines, { collapsedHeadings: collapsed });
+  // Indices 0 (the heading itself) and 4 (next # heading) are visible;
+  // indices 1, 2, 3 are hidden (under the collapsed h1).
+  assert.match(html, /data-line-index="0"/);
+  assert.doesNotMatch(html, /data-line-index="1"/);
+  assert.doesNotMatch(html, /data-line-index="2"/);
+  assert.doesNotMatch(html, /data-line-index="3"/);
+  assert.match(html, /data-line-index="4"/);
+  assert.match(html, /data-line-index="5"/);
+});
+
+test('buildLiveEditorHTML: activeLineIndex renders that line as a textarea', () => {
+  const html = buildLiveEditorHTML(['# A', 'body'], { activeLineIndex: 1 });
+  // Active line gets a single-line input; the other stays rendered.
+  assert.match(html, /<textarea[^>]*data-line-index="1"/);
+  assert.doesNotMatch(html, /<textarea[^>]*data-line-index="0"/);
+});
+
+test('buildLiveEditorHTML: activeRange renders one block textarea covering the range', () => {
+  const html = buildLiveEditorHTML(['line0', 'line1', 'line2', 'line3'], {
+    activeRange: { start: 1, end: 2 },
+  });
+  // Block textarea spans lines 1..2.
+  assert.match(html, /data-line-start="1"[^>]*data-line-end="2"/);
+  // Lines 0 and 3 stay rendered (not in editing mode).
+  assert.match(html, /note-live-line-rendered[^"]*"\s+data-line-index="0"/);
+  assert.match(html, /note-live-line-rendered[^"]*"\s+data-line-index="3"/);
+});
+
+test('buildLiveEditorHTML: collapsed heading at the same level reopens visibility on the next sibling', () => {
+  // h1 collapsed → all under it hidden until the next h1.
+  const lines = ['# A', 'body A', '## A.1', 'body A1', '# B'];
+  const collapsed = new Set([0]);
+  const html = buildLiveEditorHTML(lines, { collapsedHeadings: collapsed });
+  assert.match(html, /data-line-index="0"/);
+  assert.match(html, /data-line-index="4"/);
+  // Anything between is hidden.
+  assert.doesNotMatch(html, /data-line-index="1"/);
+  assert.doesNotMatch(html, /data-line-index="2"/);
+  assert.doesNotMatch(html, /data-line-index="3"/);
+});
+
+test('buildLiveEditorHTML: deeper-than-collapsed heading stays hidden, shallower-or-equal reopens', () => {
+  // h2 collapsed → its h3 child is hidden, but the next h1 is still visible.
+  const lines = ['## A', 'body', '### A.1', 'body A1', '# Top'];
+  const collapsed = new Set([0]);
+  const html = buildLiveEditorHTML(lines, { collapsedHeadings: collapsed });
+  assert.match(html, /data-line-index="0"/);
+  assert.doesNotMatch(html, /data-line-index="1"/);
+  assert.doesNotMatch(html, /data-line-index="2"/);
+  assert.doesNotMatch(html, /data-line-index="3"/);
+  assert.match(html, /data-line-index="4"/);
 });
