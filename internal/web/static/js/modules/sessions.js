@@ -5326,6 +5326,7 @@ const sessionManager = {
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
     document.getElementById('noteCopyBtn')?.addEventListener('click', () => this.copyCurrentNoteContent());
+    document.getElementById('noteOpenInPageBtn')?.addEventListener('click', () => this.openCurrentNoteAsPage());
 
     // Auto-save: listen for input changes on note title and content
     document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
@@ -5774,6 +5775,23 @@ const sessionManager = {
       console.error('Failed to copy note content:', error);
       this.showToast('Failed to copy note', 'error');
     }
+  },
+
+  // Navigate to the dedicated `/notes/<id>` page for the currently-open
+  // note. If the note hasn't been saved yet (no id), flush autosave first
+  // so the URL has something to resolve. Saves the modal's pending edits
+  // before navigating so they aren't lost.
+  async openCurrentNoteAsPage() {
+    // Trigger immediate save so unsaved edits land before navigation.
+    try {
+      await this.noteAutoSave?.flushImmediate?.();
+    } catch (_) { /* ignore */ }
+
+    if (!this.currentNote?.id) {
+      this.showToast('Save the note first to get a shareable URL', 'warning');
+      return;
+    }
+    window.location.href = `/notes/${encodeURIComponent(this.currentNote.id)}`;
   },
 
   // Save current note
