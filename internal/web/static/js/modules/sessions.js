@@ -6000,167 +6000,36 @@ const sessionManager = {
 
   // Debounced wrapper called from the input listener — TOC rebuild is cheap
   // but we still avoid running on every keystroke.
-  _scheduleNoteTocRebuild() {
-    if (this._noteTocRebuildTimer) clearTimeout(this._noteTocRebuildTimer);
-    this._noteTocRebuildTimer = setTimeout(() => {
-      this._noteTocRebuildTimer = null;
-      this._renderNoteTocOutline();
-    }, 250);
+  // TOC state lives in a NoteTocController instance (note-editor.js). Lazily
+  // built so the controller can read window.NoteEditor at call time.
+  noteToc: null,
+
+  _ensureNoteToc() {
+    if (this.noteToc) return this.noteToc;
+    if (!window.NoteEditor) return null;
+    this.noteToc = new window.NoteEditor.NoteTocController({
+      getContent: () => this.getNoteContentValue(),
+      setContent: (v) => this.setNoteContentValue(v),
+      isPreviewMode: () => this.isNotePreviewMode,
+      pushUndo: () => this.pushNoteUndoState(),
+      scheduleAutoSave: () => this.scheduleNoteAutoSave(),
+      render: () => this.renderNoteLiveEditor(),
+    });
+    return this.noteToc;
   },
 
-  _renderNoteTocOutline() {
-    if (!this.isNotePreviewMode) {
-      this.hideNoteTocRail();
-      this._teardownNoteTocActiveObserver();
-      return;
-    }
-    if (typeof window === 'undefined' || !window.NoteTOC) return;
-    const rail = document.getElementById('noteTocRail');
-    if (!rail) return;
-
-    const empty = rail.querySelector('[data-role="empty"]');
-    const content = rail.querySelector('[data-role="content"]');
-    if (!empty || !content) return;
-
-    const outline = window.NoteTOC.buildOutline(this.getNoteContentValue());
-    const flat = [];
-    const flatten = (nodes) => {
-      for (const n of nodes) {
-        flat.push(n);
-        if (n.children && n.children.length) flatten(n.children);
-      }
-    };
-    flatten(outline);
-
-    this.showNoteTocRail();
-    if (flat.length === 0) {
-      empty.style.display = '';
-      content.style.display = 'none';
-      content.innerHTML = '';
-      this._teardownNoteTocActiveObserver();
-      return;
-    }
-    empty.style.display = 'none';
-    content.style.display = '';
-
-    const list = document.createElement('ul');
-    list.className = 'note-toc-list';
-    for (const h of flat) {
-      const li = document.createElement('li');
-      li.className = 'note-toc-item';
-      li.dataset.level = String(h.level);
-      li.dataset.position = String(h.position);
-
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'note-toc-entry';
-      btn.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
-      btn.textContent = h.text;
-      btn.title = h.text;
-      btn.draggable = true;
-      btn.addEventListener('click', () => this._scrollNoteToHeading(h.position));
-      btn.addEventListener('dragstart', (e) => this._onNoteTocDragStart(e, h.position));
-      btn.addEventListener('dragend', () => this._onNoteTocDragEnd());
-      btn.addEventListener('dragover', (e) => this._onNoteTocDragOver(e, h.position));
-      btn.addEventListener('drop', (e) => this._onNoteTocDrop(e, h.position));
-
-      li.appendChild(btn);
-      list.appendChild(li);
-    }
-    content.replaceChildren(list);
-
-    this._attachNoteTocActiveObserver();
-  },
-
-  // Find the rendered heading element in the live-preview pane that matches
-  // the source Markdown position, and smooth-scroll it to the top of the view.
+  _scheduleNoteTocRebuild() { this._ensureNoteToc()?.scheduleRebuild(); },
+  _renderNoteTocOutline() { this._ensureNoteToc()?.rebuild(); },
   _scrollNoteToHeading(position) {
     window.NoteEditor?.scrollToHeadingPosition(this.getNoteContentValue(), position);
   },
   _findRenderedHeadingByPosition(position) {
     return window.NoteEditor?.findRenderedHeadingByPosition(this.getNoteContentValue(), position) ?? null;
   },
-
-  _attachNoteTocActiveObserver() {
-    this._teardownNoteTocActiveObserver();
-    if (typeof IntersectionObserver === 'undefined') return;
-    const previewPane = document.getElementById('notePreviewContent');
-    if (!previewPane) return;
-    const headingEls = previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]');
-    if (!headingEls.length) return;
-
-    const visible = new Map();
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) visible.set(entry.target, entry.intersectionRatio);
-        else visible.delete(entry.target);
-      }
-      // Choose the topmost intersecting heading.
-      let top = null;
-      let topY = Infinity;
-      for (const el of visible.keys()) {
-        const rect = el.getBoundingClientRect();
-        if (rect.top < topY) {
-          topY = rect.top;
-          top = el;
-        }
-      }
-      if (top) this._setActiveTocEntry(top.dataset.lineIndex);
-    }, { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] });
-
-    headingEls.forEach(el => observer.observe(el));
-    this._noteTocActiveObserver = observer;
-  },
-
-  _teardownNoteTocActiveObserver() {
-    if (this._noteTocActiveObserver) {
-      this._noteTocActiveObserver.disconnect();
-      this._noteTocActiveObserver = null;
-    }
-  },
-
+  _attachNoteTocActiveObserver() { this._ensureNoteToc()?.attachObserver(); },
+  _teardownNoteTocActiveObserver() { this.noteToc?.detachObserver(); },
   _setActiveTocEntry(lineIndex) {
     window.NoteEditor?.setActiveTocEntry(lineIndex, this.getNoteContentValue());
-  },
-
-  _onNoteTocDragStart(e, position) {
-    if (!e.dataTransfer) return;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(position));
-    this._noteTocDragSource = position;
-    e.currentTarget.closest('.note-toc-item')?.classList.add('is-dragging');
-  },
-
-  _onNoteTocDragOver(e, position) {
-    if (this._noteTocDragSource == null || this._noteTocDragSource === position) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    const item = e.currentTarget.closest('.note-toc-item');
-    if (!item) return;
-    document.querySelectorAll('.note-toc-item.is-drop-target')
-      .forEach(el => el.classList.remove('is-drop-target'));
-    item.classList.add('is-drop-target');
-  },
-
-  _onNoteTocDragEnd() {
-    document.querySelectorAll('.note-toc-item.is-dragging, .note-toc-item.is-drop-target')
-      .forEach(el => el.classList.remove('is-dragging', 'is-drop-target'));
-    this._noteTocDragSource = null;
-  },
-
-  _onNoteTocDrop(e, targetPosition) {
-    e.preventDefault();
-    const source = this._noteTocDragSource;
-    this._onNoteTocDragEnd();
-    if (source == null || source === targetPosition) return;
-    if (typeof window === 'undefined' || !window.NoteTOC) return;
-    const next = window.NoteTOC.moveHeadingRange(this.getNoteContentValue(), source, targetPosition);
-    if (next == null || next === this.getNoteContentValue()) return;
-    this.pushNoteUndoState();
-    this.setNoteContentValue(next);
-    this.scheduleNoteAutoSave();
-    this.renderNoteLiveEditor();
-    this._renderNoteTocOutline();
   },
 
   // =============================================================================

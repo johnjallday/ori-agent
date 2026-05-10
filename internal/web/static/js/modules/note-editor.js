@@ -449,6 +449,186 @@ export function setActiveTocEntry(lineIndex, content) {
 }
 
 // =============================================================================
+// NoteTocController — state container for the TOC rail
+// =============================================================================
+// Owns the IntersectionObserver, the debounce timer, and the drag-source
+// position. The host (modal or page) supplies callbacks for content I/O,
+// preview-mode probing, undo/save, and re-rendering the live preview after
+// drag-reorder mutates the source. Pure rendering helpers (showRail/hideRail,
+// scrollToHeadingPosition, setActiveTocEntry) are imported from this same
+// module — keeps the controller small and testable.
+
+export class NoteTocController {
+  constructor(host = {}) {
+    // host: { getContent(), setContent(value), isPreviewMode(), pushUndo(),
+    //         scheduleAutoSave(), render() }
+    this.host = host;
+    this.observer = null;
+    this.rebuildTimer = null;
+    this.dragSource = null;
+  }
+
+  scheduleRebuild() {
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      this.rebuild();
+    }, 250);
+  }
+
+  rebuild() {
+    if (typeof document === 'undefined') return;
+    if (!this.host.isPreviewMode?.()) {
+      hideRail('toc');
+      this.detachObserver();
+      return;
+    }
+    if (typeof window === 'undefined' || !window.NoteTOC) return;
+    const rail = document.getElementById(TOC_RAIL_ID);
+    if (!rail) return;
+
+    const empty = rail.querySelector('[data-role="empty"]');
+    const content = rail.querySelector('[data-role="content"]');
+    if (!empty || !content) return;
+
+    const outline = window.NoteTOC.buildOutline(this.host.getContent?.() || '');
+    const flat = [];
+    const flatten = (nodes) => {
+      for (const n of nodes) {
+        flat.push(n);
+        if (n.children?.length) flatten(n.children);
+      }
+    };
+    flatten(outline);
+
+    showRail('toc');
+    if (flat.length === 0) {
+      empty.style.display = '';
+      content.style.display = 'none';
+      content.innerHTML = '';
+      this.detachObserver();
+      return;
+    }
+    empty.style.display = 'none';
+    content.style.display = '';
+
+    const list = document.createElement('ul');
+    list.className = 'note-toc-list';
+    for (const h of flat) {
+      const li = document.createElement('li');
+      li.className = 'note-toc-item';
+      li.dataset.level = String(h.level);
+      li.dataset.position = String(h.position);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'note-toc-entry';
+      btn.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
+      btn.textContent = h.text;
+      btn.title = h.text;
+      btn.draggable = true;
+      btn.addEventListener('click', () => scrollToHeadingPosition(this.host.getContent?.() || '', h.position));
+      btn.addEventListener('dragstart', (e) => this._onDragStart(e, h.position));
+      btn.addEventListener('dragend', () => this._onDragEnd());
+      btn.addEventListener('dragover', (e) => this._onDragOver(e, h.position));
+      btn.addEventListener('drop', (e) => this._onDrop(e, h.position));
+
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
+    content.replaceChildren(list);
+
+    this.attachObserver();
+  }
+
+  attachObserver() {
+    this.detachObserver();
+    if (typeof IntersectionObserver === 'undefined' || typeof document === 'undefined') return;
+    const previewPane = document.getElementById(PREVIEW_PANE_ID);
+    if (!previewPane) return;
+    const headingEls = previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]');
+    if (!headingEls.length) return;
+
+    const visible = new Map();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.set(entry.target, entry.intersectionRatio);
+        else visible.delete(entry.target);
+      }
+      let top = null;
+      let topY = Infinity;
+      for (const el of visible.keys()) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < topY) { topY = rect.top; top = el; }
+      }
+      if (top) setActiveTocEntry(top.dataset.lineIndex, this.host.getContent?.() || '');
+    }, { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] });
+
+    headingEls.forEach((el) => observer.observe(el));
+    this.observer = observer;
+  }
+
+  detachObserver() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+  }
+
+  destroy() {
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = null;
+    this.detachObserver();
+    this.dragSource = null;
+  }
+
+  _onDragStart(e, position) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(position));
+    this.dragSource = position;
+    e.currentTarget.closest('.note-toc-item')?.classList.add('is-dragging');
+  }
+
+  _onDragOver(e, position) {
+    if (this.dragSource == null || this.dragSource === position) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const item = e.currentTarget.closest('.note-toc-item');
+    if (!item) return;
+    if (typeof document !== 'undefined') {
+      document.querySelectorAll('.note-toc-item.is-drop-target')
+        .forEach((el) => el.classList.remove('is-drop-target'));
+    }
+    item.classList.add('is-drop-target');
+  }
+
+  _onDragEnd() {
+    if (typeof document !== 'undefined') {
+      document.querySelectorAll('.note-toc-item.is-dragging, .note-toc-item.is-drop-target')
+        .forEach((el) => el.classList.remove('is-dragging', 'is-drop-target'));
+    }
+    this.dragSource = null;
+  }
+
+  _onDrop(e, targetPosition) {
+    e.preventDefault();
+    const source = this.dragSource;
+    this._onDragEnd();
+    if (source == null || source === targetPosition) return;
+    if (typeof window === 'undefined' || !window.NoteTOC) return;
+    const current = this.host.getContent?.() || '';
+    const next = window.NoteTOC.moveHeadingRange(current, source, targetPosition);
+    if (next == null || next === current) return;
+    this.host.pushUndo?.();
+    this.host.setContent?.(next);
+    this.host.scheduleAutoSave?.();
+    this.host.render?.();
+    this.rebuild();
+  }
+}
+
+// =============================================================================
 // Generate-with-AI panel — visibility + rail "generating" mode coordination
 // =============================================================================
 
@@ -958,6 +1138,7 @@ const api = {
   setActiveTocEntry,
   lineIndexAtPosition,
   startOfLine,
+  NoteTocController,
 };
 
 if (typeof window !== 'undefined') {
