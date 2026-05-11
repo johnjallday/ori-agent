@@ -5267,6 +5267,14 @@ body.task-modal-open {
   border-color: var(--border-color, #e5e7eb);
 }
 
+.note-tab.is-dragging {
+  opacity: 0.4;
+}
+
+.note-tab.is-drop-target {
+  box-shadow: inset 2px 0 0 var(--primary-color, #6366f1);
+}
+
 .note-tab-button {
   background: none;
   border: none;

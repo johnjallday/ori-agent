@@ -187,10 +187,10 @@ function renderTabStrip() {
   const pane = state.panes[0];
   if (!pane) { list.innerHTML = ''; return; }
 
-  list.innerHTML = pane.tabs.map((id) => {
+  list.innerHTML = pane.tabs.map((id, i) => {
     const isActive = id === pane.activeId;
     const label = escapeText(tabLabel(id));
-    return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" role="presentation">
+    return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="0" data-index="${i}" role="presentation" draggable="true">
       <button type="button" class="note-tab-button" role="tab" aria-selected="${isActive}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
@@ -219,10 +219,10 @@ async function renderSecondaryPane() {
   grid.classList.add('is-split');
 
   const pane = state.panes[1];
-  tabsEl.innerHTML = pane.tabs.map((id) => {
+  tabsEl.innerHTML = pane.tabs.map((id, i) => {
     const isActive = id === pane.activeId;
     const label = escapeText(tabLabel(id));
-    return `<button type="button" class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" title="${label}">
+    return `<button type="button" class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" title="${label}" draggable="true">
       <span class="note-tab-label">${label}</span>
       <span class="note-tab-close-inline" data-action="close" data-note-id="${escapeAttr(id)}" title="Close">×</span>
     </button>`;
@@ -388,6 +388,61 @@ async function unsplit() {
   await renderSecondaryPane();
 }
 
+// installDragReorder wires HTML5 drag events on a tab container so users can
+// drag-reorder tabs within a single pane. Dragging across panes is a no-op
+// in this iteration (a future slice can add cross-pane drop targets).
+function installDragReorder(container, paneIndex) {
+  if (!container) return;
+
+  let dragState = null;
+  const tabSelector = '.note-tab[draggable="true"]';
+
+  container.addEventListener('dragstart', (e) => {
+    const tab = e.target.closest(tabSelector);
+    if (!tab) return;
+    const fromIdx = Number(tab.dataset.index);
+    const fromPane = Number(tab.dataset.pane);
+    if (Number.isNaN(fromIdx) || fromPane !== paneIndex) return;
+    dragState = { fromIdx };
+    tab.classList.add('is-dragging');
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(fromIdx));
+    } catch (_) {}
+  });
+
+  container.addEventListener('dragend', () => {
+    container.querySelectorAll('.is-dragging, .is-drop-target').forEach((el) => {
+      el.classList.remove('is-dragging', 'is-drop-target');
+    });
+    dragState = null;
+  });
+
+  container.addEventListener('dragover', (e) => {
+    if (!dragState) return;
+    const tab = e.target.closest(tabSelector);
+    if (!tab) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    container.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+    tab.classList.add('is-drop-target');
+  });
+
+  container.addEventListener('drop', (e) => {
+    if (!dragState) return;
+    const tab = e.target.closest(tabSelector);
+    if (!tab) return;
+    e.preventDefault();
+    const toIdx = Number(tab.dataset.index);
+    const { fromIdx } = dragState;
+    if (Number.isNaN(toIdx) || toIdx === fromIdx) return;
+    state = window.NoteTabs.reorder(state, paneIndex, fromIdx, toIdx);
+    persistState();
+    if (paneIndex === 0) renderTabStrip();
+    else renderSecondaryPane();
+  });
+}
+
 // promoteSecondary swaps the two panes so the secondary's active note
 // becomes the editable one. The editor markup is fixed in pane 0, so
 // "promote" really means "swap panes."
@@ -526,6 +581,10 @@ async function bootstrap() {
     }
   });
 
+  // HTML5 drag-to-reorder for the primary tab strip. Drag stays within the
+  // same pane in this iteration; cross-pane drag is a follow-up.
+  installDragReorder(document.getElementById('notePageTabList'), 0);
+
   // Delegated handlers for the secondary pane (pane 1).
   document.getElementById('notePageSecondaryTabs')?.addEventListener('click', (e) => {
     const closeAction = e.target.closest('[data-action="close"]');
@@ -541,6 +600,9 @@ async function bootstrap() {
       switchToTab(tab.dataset.noteId, 1);
     }
   });
+
+  // Drag-to-reorder for the secondary pane's tabs too.
+  installDragReorder(document.getElementById('notePageSecondaryTabs'), 1);
 
   // Wire split-right / unsplit / promote buttons.
   document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);
