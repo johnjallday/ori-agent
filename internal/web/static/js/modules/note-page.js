@@ -93,6 +93,8 @@ async function savePageNote() {
     if (!resp.ok) return false;
     const data = await resp.json();
     if (data?.note) currentNote = { ...currentNote, ...data.note };
+    // Notify other tabs so any open Backlinks panel can re-fetch.
+    window.NoteBacklinks?.announceNoteSaved?.(currentNote.id, content.includes('[['));
     return true;
   } catch (_) {
     return false;

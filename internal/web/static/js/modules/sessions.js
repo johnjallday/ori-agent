@@ -5942,6 +5942,8 @@ const sessionManager = {
           this.currentNote = { ...this.currentNote, ...updated };
           timer.markClean();
           this.renderFolderTree();
+          // Notify other tabs so any open Backlinks panel can re-fetch.
+          window.NoteBacklinks?.announceNoteSaved?.(this.currentNote.id, noteContent.includes('[['));
         } else {
           timer.markError();
         }
@@ -5958,6 +5960,7 @@ const sessionManager = {
           timer.markClean();
           const saveBtn = document.getElementById('saveNoteBtn');
           if (saveBtn) saveBtn.textContent = 'Save';
+          window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
         } else {
           timer.markError();
         }

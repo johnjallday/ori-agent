@@ -9,6 +9,10 @@ const SECTION_ID = 'noteBacklinksSection';
 const LIST_ID = 'noteBacklinksList';
 const COUNT_ID = 'noteBacklinksCount';
 
+// Tracks which note the panel is currently displaying so the cross-tab edit
+// handler at the bottom of this file knows what to re-fetch.
+let _currentNoteId = null;
+
 function escapeText(s) {
   return String(s ?? '').replace(/[&<>]/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
@@ -84,6 +88,7 @@ export function renderBacklinksInto(scopeRoot, backlinks) {
 // loadBacklinksFor fetches /api/notes/{id}/backlinks and renders the result.
 // Returns the array of backlinks for callers that want to do more with it.
 export async function loadBacklinksFor(noteId, scopeRoot) {
+  _currentNoteId = noteId || null;
   if (!noteId) {
     renderBacklinksInto(scopeRoot, []);
     return [];
@@ -111,7 +116,41 @@ export async function loadBacklinksFor(noteId, scopeRoot) {
 // clearBacklinks is the modal's "new note" path — there's no note ID yet,
 // so the section should be hidden.
 export function clearBacklinks(scopeRoot) {
+  _currentNoteId = null;
   renderBacklinksInto(scopeRoot, []);
+}
+
+// =============================================================================
+// Cross-tab live refresh: when another tab saves a note containing wikilinks,
+// this tab might be displaying that note's target — re-fetch the backlinks for
+// the note we're currently showing.
+// =============================================================================
+
+let _channel = null;
+try {
+  if (typeof BroadcastChannel === 'function') {
+    _channel = new BroadcastChannel('note-edits');
+  }
+} catch (_) { _channel = null; }
+
+if (_channel) {
+  _channel.addEventListener('message', (ev) => {
+    const msg = ev?.data;
+    if (!msg || msg.type !== 'saved' || !msg.hasWikilinks) return;
+    if (!_currentNoteId) return;
+    // The saved note might newly link to the one we're showing. Re-fetch.
+    loadBacklinksFor(_currentNoteId);
+  });
+}
+
+// announceNoteSaved is what host save paths call after a successful save so
+// other tabs can react. hasWikilinks tells subscribers whether the change
+// could affect any other note's backlinks.
+export function announceNoteSaved(noteId, hasWikilinks) {
+  if (!_channel || !noteId) return;
+  try {
+    _channel.postMessage({ type: 'saved', noteId, hasWikilinks: !!hasWikilinks });
+  } catch (_) {}
 }
 
 if (typeof window !== 'undefined') {
@@ -121,6 +160,7 @@ if (typeof window !== 'undefined') {
     renderBacklinksInto,
     loadBacklinksFor,
     clearBacklinks,
+    announceNoteSaved,
   };
 }
 
@@ -130,4 +170,5 @@ export default {
   renderBacklinksInto,
   loadBacklinksFor,
   clearBacklinks,
+  announceNoteSaved,
 };
