@@ -257,6 +257,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
+	// Notes open-behavior preference: "modal" (default), "page", "page-new-tab".
+	mux.HandleFunc("/api/notes-open-behavior", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.Handlers.Onboarding.GetNotesOpenBehavior(w, r)
+		case http.MethodPost:
+			s.Handlers.Onboarding.SetNotesOpenBehavior(w, r)
+		default:
+			orihttp.MethodNotAllowed(w)
+		}
+	})
+
 	mux.HandleFunc("/api/device/info", s.Handlers.Device.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.Handlers.Device.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.Handlers.Device.GetCurrentWiFi)

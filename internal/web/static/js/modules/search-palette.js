@@ -307,14 +307,23 @@ function activateIndex(idx) {
   pushRecent(state.query);
   close();
   if (row.kind === 'note') {
-    window.sessionManager?.openNoteEditor?.(row.item.id);
+    // Route through openNote so the user's notes_open_behavior pref applies.
+    window.sessionManager?.openNote?.(row.item.id);
   } else {
     const noteId = row.item.note_id;
     const headingText = row.item.text;
-    if (window.sessionManager?.openNoteEditorWithHeading) {
+    // Heading results — only the modal flow has the heading-anchor helper.
+    // For "page" / "page-new-tab" preference, navigate with a #hash so the
+    // page can scroll to it.
+    const behavior = window.sessionManager?._readNotesOpenBehavior?.() || 'modal';
+    if (behavior === 'modal' && window.sessionManager?.openNoteEditorWithHeading) {
       window.sessionManager.openNoteEditorWithHeading(noteId, headingText);
-    } else if (window.sessionManager?.openNoteEditor) {
-      window.sessionManager.openNoteEditor(noteId);
+    } else if (behavior === 'page') {
+      window.location.href = `/notes/${encodeURIComponent(noteId)}#${encodeURIComponent(headingText)}`;
+    } else if (behavior === 'page-new-tab') {
+      window.open(`/notes/${encodeURIComponent(noteId)}#${encodeURIComponent(headingText)}`, '_blank', 'noopener');
+    } else if (window.sessionManager?.openNote) {
+      window.sessionManager.openNote(noteId);
     }
   }
 }

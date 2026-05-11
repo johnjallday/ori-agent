@@ -406,6 +406,34 @@ func (m *Manager) SetMenuBarPort(port int) error {
 	return m.saveUnlocked()
 }
 
+// GetNotesOpenBehavior returns the user's preferred way to open a note:
+// "modal" (default), "page" (navigate to /notes/<id>), or "page-new-tab".
+func (m *Manager) GetNotesOpenBehavior() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.state.NotesOpenBehavior == "" {
+		return "modal"
+	}
+	return m.state.NotesOpenBehavior
+}
+
+// SetNotesOpenBehavior persists the user's preferred note-opening behavior.
+// Accepts "modal", "page", or "page-new-tab".
+func (m *Manager) SetNotesOpenBehavior(behavior string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	switch behavior {
+	case "modal", "page", "page-new-tab":
+		// valid
+	default:
+		return errors.New("notes_open_behavior must be 'modal', 'page', or 'page-new-tab'")
+	}
+
+	m.state.NotesOpenBehavior = behavior
+	return m.saveUnlocked()
+}
+
 // GetUserProfile returns the stored user profile (may be nil)
 func (m *Manager) GetUserProfile() *types.UserProfile {
 	m.mu.RLock()

@@ -79,6 +79,14 @@
               </span>
               <span class="settings-nav-item-text">Display Density</span>
             </a>
+            <a href="#notes" class="settings-nav-item" data-section="notes">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Notes</span>
+            </a>
           </div>
 
           <!-- Integrations Category -->
@@ -632,6 +640,51 @@
             </div>
 
             <span id="uiDensityPreview" class="settings-help mt-2">Auto: Responsive spacing and typography.</span>
+          </section>
+
+          <!-- Notes Section -->
+          <section id="notes" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Notes</h2>
+            </div>
+
+            <p class="settings-section-description">
+              Choose how clicking a note opens it. The dedicated page is bookmarkable and
+              supports a fuller layout; the modal stays inside your current view.
+            </p>
+
+            <div class="ui-density-options" role="radiogroup" aria-label="How to open notes">
+              <label class="ui-density-option" for="notesOpenBehaviorModal">
+                <input type="radio" id="notesOpenBehaviorModal" name="notesOpenBehavior" value="modal" checked>
+                <div class="ui-density-option-content">
+                  <span class="ui-density-option-title">Open in modal</span>
+                  <span class="ui-density-option-description">Quick edit inside your current page. Default.</span>
+                </div>
+              </label>
+
+              <label class="ui-density-option" for="notesOpenBehaviorPage">
+                <input type="radio" id="notesOpenBehaviorPage" name="notesOpenBehavior" value="page">
+                <div class="ui-density-option-content">
+                  <span class="ui-density-option-title">Open as page</span>
+                  <span class="ui-density-option-description">Navigates to /notes/&lt;id&gt;. Bookmarkable, full-viewport editor.</span>
+                </div>
+              </label>
+
+              <label class="ui-density-option" for="notesOpenBehaviorNewTab">
+                <input type="radio" id="notesOpenBehaviorNewTab" name="notesOpenBehavior" value="page-new-tab">
+                <div class="ui-density-option-content">
+                  <span class="ui-density-option-title">Open in new browser tab</span>
+                  <span class="ui-density-option-description">Each note opens in its own browser tab.</span>
+                </div>
+              </label>
+            </div>
+
+            <span id="notesOpenBehaviorStatus" class="settings-help mt-2" aria-live="polite"></span>
           </section>
 
           <!-- ==================== INTEGRATIONS SECTION ==================== -->

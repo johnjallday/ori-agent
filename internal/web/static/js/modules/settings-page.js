@@ -3063,3 +3063,78 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   setMode(readStoredMode(), false);
 })();
+
+// Notes Open Behavior preference (server-persisted via /api/notes-open-behavior,
+// mirrored to localStorage so the page-load routing path stays synchronous).
+(function() {
+  const STORAGE_KEY = 'note.openBehavior';
+  const VALID = new Set(['modal', 'page', 'page-new-tab']);
+  const radios = Array.from(document.querySelectorAll('input[name="notesOpenBehavior"]'));
+  const statusEl = document.getElementById('notesOpenBehaviorStatus');
+  if (!radios.length) return;
+
+  function refreshOptionState() {
+    document.querySelectorAll('label.ui-density-option').forEach((el) => {
+      const input = el.querySelector('input[name="notesOpenBehavior"]');
+      if (!input) return;
+      el.classList.toggle('is-selected', Boolean(input.checked));
+    });
+  }
+
+  function setLocal(value) {
+    try { localStorage.setItem(STORAGE_KEY, value); } catch (_) {}
+  }
+
+  function readLocal() {
+    try {
+      const v = localStorage.getItem(STORAGE_KEY);
+      return VALID.has(v) ? v : null;
+    } catch (_) { return null; }
+  }
+
+  function select(value, showNotice = false) {
+    const v = VALID.has(value) ? value : 'modal';
+    radios.forEach((r) => { r.checked = r.value === v; });
+    refreshOptionState();
+    setLocal(v);
+    if (showNotice && statusEl) {
+      statusEl.textContent = 'Saved.';
+      setTimeout(() => { if (statusEl.textContent === 'Saved.') statusEl.textContent = ''; }, 1500);
+    }
+  }
+
+  async function persist(value) {
+    try {
+      const resp = await fetch('/api/notes-open-behavior', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ behavior: value }),
+      });
+      if (!resp.ok) {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to persist notes_open_behavior:', resp.status);
+        if (statusEl) statusEl.textContent = 'Could not save preference.';
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('notes_open_behavior save errored', err);
+      if (statusEl) statusEl.textContent = 'Could not save preference.';
+    }
+  }
+
+  radios.forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      select(input.value, true);
+      persist(input.value);
+    });
+  });
+
+  // Initial paint: local mirror first (instant), then reconcile with the server.
+  const local = readLocal();
+  if (local) select(local, false);
+  fetch('/api/notes-open-behavior').then((r) => r.ok ? r.json() : null).then((data) => {
+    const v = data?.behavior;
+    if (VALID.has(v)) select(v, false);
+  }).catch(() => {});
+})();

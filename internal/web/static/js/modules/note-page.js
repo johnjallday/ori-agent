@@ -191,12 +191,15 @@ async function bootstrap() {
     });
   }
 
-  // 8. "Open in modal" button — navigate back to the workspace's notes list
-  //    where the modal flow can be triggered. (A future enhancement could open
-  //    the modal as an overlay over the page.)
-  document.getElementById('noteOpenInModal')?.addEventListener('click', () => {
-    if (currentNote?.workspace_id) {
-      location.href = `/workspaces/${encodeURIComponent(currentNote.workspace_id)}`;
+  // 8. "Open in modal" button — flush autosave then navigate to the workspace
+  //    page with ?open=<noteId>. The workspace boot hook opens the modal
+  //    automatically when that query param is present.
+  document.getElementById('noteOpenInModal')?.addEventListener('click', async () => {
+    try { await bundle?.autosave?.flushImmediate?.(); } catch (_) {}
+    if (currentNote?.workspace_id && currentNote.id) {
+      const wsId = encodeURIComponent(currentNote.workspace_id);
+      const noteId = encodeURIComponent(currentNote.id);
+      location.href = `/workspaces/${wsId}?open=${noteId}`;
     }
   });
 }

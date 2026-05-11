@@ -5284,14 +5284,15 @@ const sessionManager = {
 
   // Bind note events
   bindNoteEvents() {
-    // Note click to open editor (folder tree items)
+    // Note click to open editor (folder tree items). Routes via openNote so
+    // it respects the user's notes_open_behavior preference.
     document.addEventListener('click', (e) => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         e.preventDefault();
         e.stopPropagation();
         const noteId = noteItem.dataset.noteId;
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
       }
 
       // Search result note click
@@ -5300,7 +5301,7 @@ const sessionManager = {
         e.preventDefault();
         e.stopPropagation();
         const noteId = searchNoteItem.dataset.noteId;
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
       }
 
     });
@@ -5434,7 +5435,7 @@ const sessionManager = {
 
     switch (action) {
       case 'edit':
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
         break;
       case 'attach':
         this.attachNoteFileToChat(noteId);
@@ -5686,6 +5687,37 @@ const sessionManager = {
     if (!note) return;
 
     return this._openNoteEditorWithNote(note);
+  },
+
+  // openNote consults the user's `notes_open_behavior` preference and routes
+  // the click to either the modal (default), the dedicated /notes/<id> page,
+  // or a new browser tab. Centralized so every entry point (workspace hub,
+  // ⌘K palette, etc.) routes through the same logic.
+  //
+  // Pass `{ force: 'modal'|'page'|'page-new-tab' }` to override the preference
+  // for affordances like "Open in page" / "Open in modal" buttons.
+  async openNote(noteId, options = {}) {
+    if (!noteId) return;
+    const behavior = options.force || this._readNotesOpenBehavior();
+    if (behavior === 'page') {
+      window.location.href = `/notes/${encodeURIComponent(noteId)}`;
+      return;
+    }
+    if (behavior === 'page-new-tab') {
+      window.open(`/notes/${encodeURIComponent(noteId)}`, '_blank', 'noopener');
+      return;
+    }
+    return this.openNoteEditor(noteId);
+  },
+
+  // _readNotesOpenBehavior pulls from the localStorage mirror written by the
+  // Settings page. Falls back to "modal" when unset or invalid.
+  _readNotesOpenBehavior() {
+    try {
+      const v = localStorage.getItem('note.openBehavior');
+      if (v === 'modal' || v === 'page' || v === 'page-new-tab') return v;
+    } catch (_) {}
+    return 'modal';
   },
 
   // Internal: Open note editor with a full note object
@@ -7729,4 +7761,21 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('sessionSidebar') || document.getElementById('createChatModal')) {
     sessionManager.init();
   }
+
+  // ?open=<noteId> — opens the note's modal after navigation. Used by the
+  // dedicated /notes/<id> page's "Open in modal" button so the cross-affordance
+  // round-trips without a server change. One-shot: scrubbed from history once
+  // the modal opens.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const openNoteId = params.get('open');
+    if (openNoteId) {
+      // Strip from the URL before opening to keep refresh idempotent.
+      params.delete('open');
+      const qs = params.toString();
+      const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', cleanUrl);
+      sessionManager.openNoteEditor(openNoteId);
+    }
+  } catch (_) { /* non-fatal */ }
 });
