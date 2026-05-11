@@ -252,9 +252,22 @@
           </button>
         </div>
         <div class="note-editor-grid" id="noteEditorGrid">
-          <aside class="note-toc-rail" id="noteTocRail" hidden aria-label="Note outline">
-            <div class="note-rail-empty" data-role="empty">Add a heading to build an outline</div>
-            <div class="note-rail-content" data-role="content"></div>
+          <aside class="note-toc-rail" id="noteTocRail" hidden aria-label="Notes &amp; outline">
+            <div class="note-rail-tab-strip" role="tablist" aria-label="Left rail tabs">
+              <button type="button" class="note-rail-tab" data-tab="notes" role="tab" aria-selected="false">Notes</button>
+              <button type="button" class="note-rail-tab is-active" data-tab="outline" role="tab" aria-selected="true">Outline</button>
+            </div>
+            <div class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel" hidden>
+              <div class="note-rail-notes-search">
+                <input type="search" id="noteRailNotesSearch" class="modern-input" placeholder="Filter notes…" aria-label="Filter notes">
+              </div>
+              <div id="noteRailNotesList" class="note-rail-notes-list" role="list"></div>
+              <button type="button" id="noteRailNewNoteBtn" class="note-rail-new-note">+ New note</button>
+            </div>
+            <div class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel">
+              <div class="note-rail-empty" data-role="empty">Add a heading to build an outline</div>
+              <div class="note-rail-content" data-role="content"></div>
+            </div>
           </aside>
           <div class="note-editor-center">
             <div class="note-editor-container">

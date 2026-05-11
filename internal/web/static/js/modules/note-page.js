@@ -149,6 +149,12 @@ async function bootstrap() {
   // stays hidden if there are none.
   window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
 
+  // Left-rail Notes tab: lazy-init with this page's workspace context.
+  window.NoteRailNotes?.initRail({
+    workspaceIdResolver: () => currentNote?.workspace_id || null,
+    activeNoteId: currentNote.id,
+  });
+
   // Cross-tab presence: tell other tabs we hold this note on the "page"
   // surface, so a modal-open elsewhere can warn before duplicating.
   window.NotePresence?.claimOpenNote(currentNote.id, 'page');

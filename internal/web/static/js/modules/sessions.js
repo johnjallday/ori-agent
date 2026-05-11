@@ -4991,6 +4991,13 @@ const sessionManager = {
     window.NoteWikilinks?.setWorkspaceContext(
       () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
     );
+    // Left-rail Notes tab: lazy-init the list. The rail is always shown when
+    // the editor is in preview mode, so the user can switch to Notes even
+    // when this note has no headings.
+    window.NoteRailNotes?.initRail({
+      workspaceIdResolver: () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+      activeNoteId: this.currentNote?.id || null,
+    });
     return this.noteMount;
   },
 
@@ -5766,6 +5773,8 @@ const sessionManager = {
     });
     // Backlinks: notes referencing this one via [[wikilinks]]. Hidden when none.
     window.NoteBacklinks?.loadBacklinksFor(note.id);
+    // Left-rail Notes tab: keep the active highlight in sync.
+    window.NoteRailNotes?.setActiveNoteId(note.id);
     this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;

@@ -1317,8 +1317,18 @@ export class NoteTocController {
   rebuild() {
     if (typeof document === 'undefined') return;
     if (!this.host.isPreviewMode?.()) {
-      hideRail('toc');
+      // Outline empty doesn't hide the rail anymore — the Notes tab also
+      // lives in this rail, so hiding it would strand that surface.
+      // Just clear the outline pane and detach the active-section observer.
       this.detachObserver();
+      const rail = document.getElementById(TOC_RAIL_ID);
+      const emptyEl = rail?.querySelector('[data-role="empty"]');
+      const contentEl = rail?.querySelector('[data-role="content"]');
+      if (emptyEl) emptyEl.style.display = '';
+      if (contentEl) {
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+      }
       return;
     }
     if (typeof window === 'undefined' || !window.NoteTOC) return;
@@ -1339,6 +1349,8 @@ export class NoteTocController {
     };
     flatten(outline);
 
+    // Rail stays visible whenever the editor is in preview mode — the Notes
+    // tab needs to be reachable even when the outline is empty.
     showRail('toc');
     if (flat.length === 0) {
       empty.style.display = '';
