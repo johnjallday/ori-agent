@@ -5461,10 +5461,55 @@ body.task-modal-open {
   margin: 0 0 12px;
 }
 
+.note-page-secondary-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.note-page-secondary-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 16px 24px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #111827);
+}
+
+.note-page-secondary-editor[readonly] {
+  background: var(--bg-tertiary, #f9fafb);
+  color: var(--text-secondary, #64748b);
+}
+
+.note-page-secondary-banner {
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+}
+
+.note-page-secondary-status {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  padding: 0 8px;
+  align-self: center;
+  min-width: 60px;
+  text-align: right;
+}
+
 .note-page-secondary-empty {
   color: var(--text-secondary, #64748b);
   font-size: 13px;
   font-style: italic;
+  padding: 16px 24px;
 }
 
 /* =============================================================================

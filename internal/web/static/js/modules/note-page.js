@@ -199,19 +199,81 @@ function renderTabStrip() {
   }).join('');
 }
 
-// renderSecondaryPane paints the second pane's tab strip + rendered
-// markdown preview when split mode is on. The secondary pane is read-only
-// in this slice — clicking a tab switches its preview content.
+// Secondary pane's local state. Its note is independent of pane 0's currentNote.
+let secondaryNote = null;       // the full note object loaded in pane 1
+let secondaryDirty = false;     // unsaved-changes flag for the secondary editor
+let secondarySaveTimer = null;  // debounce handle for the secondary autosave
+
+function setSecondaryStatus(text) {
+  const el = document.getElementById('notePageSecondaryStatus');
+  if (el) el.textContent = text || '';
+}
+
+// scheduleSecondarySave debounces secondary-pane PATCHes by 800ms. Calls
+// announceNoteSaved on success so other tabs (and the primary pane, if it
+// somehow has the same note open) can reconcile.
+function scheduleSecondarySave() {
+  secondaryDirty = true;
+  setSecondaryStatus('Unsaved');
+  if (secondarySaveTimer) clearTimeout(secondarySaveTimer);
+  secondarySaveTimer = setTimeout(() => { secondarySaveTimer = null; flushSecondarySave(); }, 800);
+}
+
+async function flushSecondarySave() {
+  if (!secondaryNote?.id || !secondaryDirty) return;
+  const textarea = document.getElementById('notePageSecondaryEditor');
+  if (!textarea) return;
+  const content = textarea.value;
+  setSecondaryStatus('Saving…');
+  try {
+    const resp = await fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content }),
+    });
+    if (!resp.ok) { setSecondaryStatus('Save failed'); return; }
+    const data = await resp.json();
+    if (data?.note) secondaryNote = { ...secondaryNote, ...data.note };
+    secondaryDirty = false;
+    setSecondaryStatus('Saved');
+    setTimeout(() => { if (!secondaryDirty) setSecondaryStatus(''); }, 1200);
+    window.NoteBacklinks?.announceNoteSaved?.(secondaryNote.id, content.includes('[['));
+    // If the primary editor has the SAME note open, refresh its content so
+    // the user doesn't lose pane 1's edits the next time pane 0 autosaves.
+    if (currentNote?.id === secondaryNote.id) {
+      const titleInput = document.getElementById('noteNameInput');
+      const contentInput = document.getElementById('noteContentInput');
+      if (titleInput && secondaryNote.name) titleInput.value = secondaryNote.name;
+      if (contentInput) contentInput.value = content;
+      currentNote = { ...currentNote, content };
+      bundle?.history?.reset?.();
+      bundle?.autosave?.markClean?.();
+      bundle?.render?.();
+    }
+  } catch (_) {
+    setSecondaryStatus('Save failed');
+  }
+}
+
+// renderSecondaryPane paints the secondary pane's tab strip + Markdown
+// textarea when split mode is on. The secondary is editable — typing in the
+// textarea debounces an autosave PATCH. When pane 1's active note matches
+// pane 0's, the textarea is read-only and a banner explains why.
 async function renderSecondaryPane() {
   const aside = document.getElementById('notePageSecondaryPane');
   const tabsEl = document.getElementById('notePageSecondaryTabs');
-  const contentEl = document.getElementById('notePageSecondaryContent');
   const grid = document.getElementById('notePagePaneGrid');
-  if (!aside || !tabsEl || !contentEl || !grid || !state) return;
+  const textarea = document.getElementById('notePageSecondaryEditor');
+  const banner = document.getElementById('notePageSecondaryBanner');
+  const emptyEl = document.getElementById('notePageSecondaryEmpty');
+  if (!aside || !tabsEl || !grid || !textarea || !banner || !emptyEl || !state) return;
 
   if (state.splitMode === 'none' || !state.panes[1]) {
+    // Flush any pending save before tearing down.
+    if (secondaryDirty) await flushSecondarySave();
     aside.hidden = true;
     grid.classList.remove('is-split');
+    secondaryNote = null;
     return;
   }
 
@@ -229,35 +291,41 @@ async function renderSecondaryPane() {
   }).join('');
 
   if (!pane.activeId) {
-    contentEl.innerHTML = '<div class="note-page-secondary-empty">No note selected.</div>';
+    textarea.hidden = true;
+    banner.hidden = true;
+    emptyEl.hidden = false;
+    secondaryNote = null;
+    setSecondaryStatus('');
     return;
   }
 
-  // Fetch + render the active note's markdown into the preview area. Use
-  // marked + DOMPurify when available; fall back to escaped text otherwise.
-  const note = currentNote?.id === pane.activeId ? currentNote : await fetchNote(pane.activeId);
+  // Flush previous secondary save before loading a different note.
+  if (secondaryNote && secondaryNote.id !== pane.activeId && secondaryDirty) {
+    await flushSecondarySave();
+  }
+
+  const note = await fetchNote(pane.activeId);
   if (!note) {
-    contentEl.innerHTML = '<div class="note-page-secondary-empty">Could not load this note.</div>';
+    textarea.hidden = true;
+    banner.hidden = true;
+    emptyEl.hidden = false;
+    emptyEl.textContent = 'Could not load this note.';
+    secondaryNote = null;
     return;
   }
-  if (note.id !== currentNote?.id) _tabLabelCache.set(note.id, note.name || 'Untitled');
+  _tabLabelCache.set(note.id, note.name || 'Untitled');
+  secondaryNote = note;
+  secondaryDirty = false;
+  emptyEl.hidden = true;
+  textarea.value = note.content || '';
+  setSecondaryStatus('');
 
-  const md = String(note.content || '');
-  let html = '';
-  if (typeof window.marked?.parse === 'function') {
-    try { html = window.marked.parse(md); } catch (_) { html = escapeText(md); }
-  } else {
-    html = `<pre>${escapeText(md)}</pre>`;
-  }
-  if (typeof window.DOMPurify?.sanitize === 'function') {
-    html = window.DOMPurify.sanitize(html);
-  }
-  // Post-process wikilinks so they render as clickable anchors.
-  if (typeof window.NoteWikilinks?.applyWikilinksToHtml === 'function') {
-    html = window.NoteWikilinks.applyWikilinksToHtml(html, () => 'pending');
-  }
-  const title = escapeText(note.name || 'Untitled');
-  contentEl.innerHTML = `<h2 class="note-page-secondary-title">${title}</h2>${html}`;
+  // If the same note is in pane 0's editor, lock the secondary to avoid
+  // diverging edits. Otherwise it's freely editable.
+  const sameAsPrimary = currentNote?.id === note.id;
+  textarea.readOnly = sameAsPrimary;
+  banner.hidden = !sameAsPrimary;
+  textarea.hidden = false;
 }
 
 // =============================================================================
@@ -733,6 +801,29 @@ async function bootstrap() {
 
   // Detach drop zone — appears during drag when not split.
   installDetachZone();
+
+  // Secondary pane editor input → debounced autosave. Bound once on the
+  // textarea; the textarea persists across re-renders.
+  document.getElementById('notePageSecondaryEditor')?.addEventListener('input', scheduleSecondarySave);
+
+  // Flush the secondary pane's pending save before the page unloads.
+  window.addEventListener('beforeunload', () => {
+    if (secondaryDirty && secondarySaveTimer) {
+      clearTimeout(secondarySaveTimer);
+      // beforeunload can't await fetch; fire-and-forget keepalive PATCH.
+      const textarea = document.getElementById('notePageSecondaryEditor');
+      if (secondaryNote?.id && textarea) {
+        try {
+          fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content: textarea.value }),
+            keepalive: true,
+          });
+        } catch (_) {}
+      }
+    }
+  });
 
   // Wire split-right / unsplit / promote buttons.
   document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);
