@@ -5128,6 +5128,96 @@ body.task-modal-open {
 }
 
 /* =============================================================================
+   Backlinks panel (notes that reference this one via [[wikilinks]])
+   ============================================================================= */
+
+.note-backlinks-section {
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  margin-top: 12px;
+  padding: 10px 4px 4px;
+}
+
+.note-backlinks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding: 0 6px;
+}
+
+.note-backlinks-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+.note-backlinks-count {
+  font-size: 10px;
+  color: var(--text-secondary, #64748b);
+  background: var(--bg-tertiary, rgba(99, 102, 241, 0.08));
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.note-backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-backlink-item {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.note-backlink-item:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.06));
+  border-color: var(--border-color, #e5e7eb);
+  text-decoration: none;
+}
+
+.note-backlink-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #111827);
+}
+
+.note-backlink-ws {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+}
+
+.note-backlink-snippet {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary, #64748b);
+  margin-top: 2px;
+  /* Clamp long snippets to two lines so the rail stays scannable. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.note-backlink-mark {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--primary-color, #6366f1);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* =============================================================================
    Search Palette (⌘K)
    ============================================================================= */
 

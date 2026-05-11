@@ -145,6 +145,10 @@ async function bootstrap() {
   // mounting (renders may run synchronously and attach click handlers).
   window.NoteWikilinks?.setWorkspaceContext(() => currentNote?.workspace_id || null);
 
+  // Backlinks: notes that reference this one via [[wikilinks]]. Section
+  // stays hidden if there are none.
+  window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
+
   // 4. Mount the full editor.
   bundle = window.NoteEditor.mount({
     getContent: () => contentInput?.value || '',

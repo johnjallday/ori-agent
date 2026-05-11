@@ -265,6 +265,15 @@
           <aside class="note-assist-rail" id="noteAssistRail" hidden aria-label="AI assist">
             <div class="note-rail-empty" data-role="empty">Highlight text and choose an AI action to start.</div>
             <div class="note-rail-content" data-role="content"></div>
+            <!-- Backlinks: notes that reference this one via [[wikilinks]]. The
+                 section stays hidden until note-backlinks.js finds any. -->
+            <section id="noteBacklinksSection" class="note-backlinks-section" hidden aria-label="Backlinks">
+              <div class="note-backlinks-header">
+                <span class="note-backlinks-title">Backlinks</span>
+                <span id="noteBacklinksCount" class="note-backlinks-count"></span>
+              </div>
+              <div id="noteBacklinksList" class="note-backlinks-list"></div>
+            </section>
             <!-- Whole-note Generate-with-AI form. Hidden by default; the toolbar
                  button toggles it. Lives inside the rail so AI controls are
                  unified in one column. -->

@@ -81,6 +81,13 @@
       <aside class="note-assist-rail" id="noteAssistRail" hidden aria-label="AI assist">
         <div class="note-rail-empty" data-role="empty">Highlight text and choose an AI action to start.</div>
         <div class="note-rail-content" data-role="content"></div>
+        <section id="noteBacklinksSection" class="note-backlinks-section" hidden aria-label="Backlinks">
+          <div class="note-backlinks-header">
+            <span class="note-backlinks-title">Backlinks</span>
+            <span id="noteBacklinksCount" class="note-backlinks-count"></span>
+          </div>
+          <div id="noteBacklinksList" class="note-backlinks-list"></div>
+        </section>
         <div id="noteAIGeneratePanel" class="note-ai-panel" style="display: none;">
           <div class="note-ai-panel-header">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
@@ -129,6 +136,7 @@
   <script type="module" src="/js/modules/note-toc.js"></script>
   <script type="module" src="/js/modules/note-staging.js"></script>
   <script type="module" src="/js/modules/note-wikilinks.js"></script>
+  <script type="module" src="/js/modules/note-backlinks.js"></script>
   <script type="module" src="/js/modules/note-ai-assist.js"></script>
   <script type="module" src="/js/modules/search-palette.js"></script>
   <script type="module" src="/js/modules/note-page.js"></script>

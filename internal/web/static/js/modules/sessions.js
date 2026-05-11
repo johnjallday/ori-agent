@@ -5540,6 +5540,8 @@ const sessionManager = {
     this.currentNote = null;
     this.noteModalWorkspaceId = workspaceId;
     this.isNotePreviewMode = false;
+    // New note has no ID yet — keep the backlinks section hidden.
+    window.NoteBacklinks?.clearBacklinks();
 
     const modal = document.getElementById('noteEditorModal');
     if (!modal) return;
@@ -5716,6 +5718,8 @@ const sessionManager = {
       });
       this._openGeneratePanelByDefault();
     });
+    // Backlinks: notes referencing this one via [[wikilinks]]. Hidden when none.
+    window.NoteBacklinks?.loadBacklinksFor(note.id);
     this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
