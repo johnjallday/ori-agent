@@ -1,42 +1,80 @@
 // note-page.js — bootstrap for the dedicated /notes/<id> page.
 //
 // Loads the note via the API, populates the textarea + title, and calls
-// NoteEditor.mount with a host adapter for the page surface. The page reuses
-// the editor markup IDs the modal uses (#noteContentInput, #noteNameInput,
-// #notePreviewContent, etc.) so the same controllers and event handlers
-// work without modification.
+// NoteEditor.mount with a host adapter for the page surface. As of task 4.0
+// (slice B), the page also owns multi-tab state via window.NoteTabs — the
+// tab strip above the editor shows all open notes in the active pane. The
+// editor is a single instance whose content is swapped when the active tab
+// changes (no remount, so autosave/history controllers persist across
+// tab switches).
 
-// Note ID comes from the URL path: /notes/<uuid>. Reading it client-side
-// avoids html/template script-context escaping issues that previously wrapped
-// the value in literal quotes.
+const STATE_KEY = 'note.tabs';
+
 function readNoteIdFromPath() {
   if (typeof window === 'undefined') return '';
   const parts = window.location.pathname.split('/').filter(Boolean);
-  // ['notes', '<uuid>'] — take the segment immediately after 'notes'.
   const idx = parts.indexOf('notes');
   if (idx < 0 || idx + 1 >= parts.length) return '';
   return decodeURIComponent(parts[idx + 1] || '');
 }
 
 const NOTE_ID = readNoteIdFromPath();
-let currentNote = null;
-let bundle = null;
+let currentNote = null;          // the note shown in the active pane
+let bundle = null;                // NoteEditor.mount return value (single instance)
+let state = null;                 // NoteTabs reducer state
+let switching = false;            // re-entrancy guard while swapping content
+
+// =============================================================================
+// State persistence (localStorage)
+// =============================================================================
+
+function loadSavedState(fallbackNoteId) {
+  if (!window.NoteTabs) return null;
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (!raw) return window.NoteTabs.initialState(fallbackNoteId);
+    const parsed = JSON.parse(raw);
+    return window.NoteTabs.hydrate(parsed, fallbackNoteId);
+  } catch (_) {
+    return window.NoteTabs.initialState(fallbackNoteId);
+  }
+}
+
+function persistState() {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+
+// =============================================================================
+// API
+// =============================================================================
 
 async function fetchNote(noteId) {
   try {
     const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
     if (!resp.ok) {
-      // eslint-disable-next-line no-console
       console.error('Note fetch failed:', resp.status, resp.statusText);
       return null;
     }
     return await resp.json();
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('Note fetch errored:', err);
     return null;
   }
 }
+
+async function fetchWorkspaceName(workspaceId) {
+  if (!workspaceId) return null;
+  try {
+    const resp = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data?.name || data?.workspace?.name || null;
+  } catch (_) { return null; }
+}
+
+// =============================================================================
+// DOM helpers
+// =============================================================================
 
 function showLoadError(message) {
   const previewContent = document.getElementById('notePreviewContent');
@@ -48,18 +86,6 @@ function showLoadError(message) {
   }
 }
 
-async function fetchWorkspaceName(workspaceId) {
-  if (!workspaceId) return null;
-  try {
-    const resp = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return data?.name || data?.workspace?.name || null;
-  } catch (_) {
-    return null;
-  }
-}
-
 function populateBreadcrumb(note, workspaceName) {
   const link = document.getElementById('notePageWorkspaceLink');
   if (link && note?.workspace_id) {
@@ -68,20 +94,36 @@ function populateBreadcrumb(note, workspaceName) {
   }
 }
 
-// Page-specific selection reader. No modal-show check — the page is always
-// "open" when this code runs.
+function showToast(msg, kind) {
+  if (typeof window?.showToast === 'function') window.showToast(msg, kind);
+  else console.log(`[${kind || 'info'}] ${msg}`);
+}
+
+function escapeText(s) {
+  return String(s ?? '').replace(/[&<>]/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
+  ));
+}
+function escapeAttr(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 function readPageSelection() {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
   if (!window.NoteEditor) return null;
   return window.NoteEditor.readSelection({
     getContent: () => document.getElementById('noteContentInput')?.value || '',
-    // The page is always in preview mode; no toggle exists.
     isPreviewMode: () => true,
   });
 }
 
 async function savePageNote() {
   if (!currentNote?.id) return false;
+  // Mid-switch saves would write the new content under the old note's ID.
+  // Block until the swap completes.
+  if (switching) return false;
   const name = document.getElementById('noteNameInput')?.value?.trim() || 'Untitled Note';
   const content = document.getElementById('noteContentInput')?.value || '';
   try {
@@ -93,24 +135,186 @@ async function savePageNote() {
     if (!resp.ok) return false;
     const data = await resp.json();
     if (data?.note) currentNote = { ...currentNote, ...data.note };
-    // Notify other tabs so any open Backlinks panel can re-fetch.
     window.NoteBacklinks?.announceNoteSaved?.(currentNote.id, content.includes('[['));
+    // Refresh the tab label in case the title changed.
+    renderTabStrip();
     return true;
-  } catch (_) {
-    return false;
+  } catch (_) { return false; }
+}
+
+// =============================================================================
+// Tab strip rendering
+// =============================================================================
+
+const _tabLabelCache = new Map(); // noteId → resolved title (best effort cache)
+
+function tabLabel(noteId) {
+  if (currentNote?.id === noteId) return currentNote.name || 'Untitled';
+  return _tabLabelCache.get(noteId) || 'Loading…';
+}
+
+async function prefetchTabLabels() {
+  if (!state) return;
+  const ids = window.NoteTabs.allOpenNoteIds(state);
+  for (const id of ids) {
+    if (_tabLabelCache.has(id) || id === currentNote?.id) continue;
+    fetchNote(id).then((n) => {
+      if (n?.name) {
+        _tabLabelCache.set(n.id, n.name);
+        renderTabStrip();
+      }
+    });
   }
 }
 
-function showToast(msg, kind) {
-  if (typeof window === 'undefined') return;
-  // Toast helper from /js/modules/toast.js, loaded on the page.
-  if (typeof window.showToast === 'function') {
-    window.showToast(msg, kind);
-  } else {
-    // eslint-disable-next-line no-console
-    console.log(`[${kind || 'info'}] ${msg}`);
+function renderTabStrip() {
+  const strip = document.getElementById('notePageTabStrip');
+  const list = document.getElementById('notePageTabList');
+  const splitBtn = document.getElementById('notePageSplitRightBtn');
+  const unsplitBtn = document.getElementById('notePageUnsplitBtn');
+  if (!strip || !list || !state) return;
+
+  // Hide the strip when only a single tab in a single pane is open. The
+  // strip only earns its keep when there's more than one to switch between
+  // or when split mode is active.
+  const totalTabs = state.panes.reduce((sum, p) => sum + p.tabs.length, 0);
+  const showStrip = totalTabs > 1 || state.splitMode !== 'none';
+  strip.hidden = !showStrip;
+
+  // Split button visibility — only meaningful when not already split.
+  if (splitBtn) splitBtn.hidden = state.splitMode !== 'none';
+  if (unsplitBtn) unsplitBtn.hidden = state.splitMode === 'none';
+
+  // For slice B (single-pane), render only the focused pane's tabs.
+  const pane = state.panes[state.focusedPaneIndex];
+  if (!pane) { list.innerHTML = ''; return; }
+
+  list.innerHTML = pane.tabs.map((id) => {
+    const isActive = id === pane.activeId;
+    const label = escapeText(tabLabel(id));
+    return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" role="presentation">
+      <button type="button" class="note-tab-button" role="tab" aria-selected="${isActive}" title="${label}">
+        <span class="note-tab-label">${label}</span>
+      </button>
+      <button type="button" class="note-tab-close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
+    </li>`;
+  }).join('');
+}
+
+// =============================================================================
+// Editor content swap
+// =============================================================================
+
+async function loadNoteIntoActivePane(noteId) {
+  if (!noteId) return false;
+  switching = true;
+
+  // 1. Save current note first so the swap doesn't lose unsaved edits.
+  try { await bundle?.autosave?.flushImmediate?.(); } catch (_) {}
+
+  // 2. Release presence on the outgoing note, fetch the new one.
+  if (currentNote?.id && currentNote.id !== noteId) {
+    window.NotePresence?.releaseOpenNote(currentNote.id);
+  }
+  const next = await fetchNote(noteId);
+  if (!next) {
+    switching = false;
+    showLoadError(`Note not found (id: ${noteId}).`);
+    return false;
+  }
+
+  // 3. Swap inputs + caches + history.
+  const titleInput = document.getElementById('noteNameInput');
+  const contentInput = document.getElementById('noteContentInput');
+  if (titleInput) titleInput.value = next.name || '';
+  if (contentInput) contentInput.value = next.content || '';
+  if (next.name) document.title = `${next.name} - Ori Agent`;
+  _tabLabelCache.set(next.id, next.name || 'Untitled');
+
+  currentNote = next;
+
+  // 4. Reset history so undo doesn't cross note boundaries.
+  bundle?.history?.reset?.();
+  bundle?.autosave?.markClean?.();
+
+  // 5. Update URL so refresh / share / browser back work intuitively.
+  if (window.location.pathname !== `/notes/${encodeURIComponent(next.id)}`) {
+    const url = `/notes/${encodeURIComponent(next.id)}` + window.location.hash;
+    window.history.pushState(null, '', url);
+  }
+
+  // 6. Re-render preview, refresh side panels.
+  bundle?.render?.();
+  window.NoteBacklinks?.loadBacklinksFor(next.id);
+  window.NoteRailNotes?.setActiveNoteId(next.id);
+  window.NotePresence?.claimOpenNote(next.id, 'page');
+
+  switching = false;
+  return true;
+}
+
+// =============================================================================
+// Action wrappers (mutate state + persist + re-render)
+// =============================================================================
+
+async function openInTab(noteId) {
+  if (!noteId || !window.NoteTabs) return;
+  state = window.NoteTabs.openTab(state, noteId);
+  persistState();
+  renderTabStrip();
+  prefetchTabLabels();
+  // openTab makes the noteId active in the focused pane; load it.
+  if (currentNote?.id !== noteId) {
+    await loadNoteIntoActivePane(noteId);
   }
 }
+
+async function switchToTab(noteId, paneIndex) {
+  if (!window.NoteTabs) return;
+  const next = window.NoteTabs.setActiveTab(state, paneIndex, noteId);
+  if (next === state) return;
+  state = next;
+  persistState();
+  renderTabStrip();
+  await loadNoteIntoActivePane(noteId);
+}
+
+async function closeTab(noteId, paneIndex) {
+  if (!window.NoteTabs) return;
+  const before = state;
+  state = window.NoteTabs.closeTab(state, noteId, paneIndex);
+  if (state === before) return;
+  persistState();
+  renderTabStrip();
+  const pane = state.panes[state.focusedPaneIndex];
+  if (!pane || !pane.activeId) {
+    // Pane is empty — navigate back to the workspace if we know it,
+    // otherwise to the global workspaces hub.
+    const wsId = currentNote?.workspace_id;
+    window.NotePresence?.releaseOpenNote(currentNote?.id);
+    window.location.href = wsId ? `/workspaces/${encodeURIComponent(wsId)}/notes` : '/workspaces';
+    return;
+  }
+  if (pane.activeId !== currentNote?.id) {
+    await loadNoteIntoActivePane(pane.activeId);
+  }
+}
+
+// =============================================================================
+// Public surface for other modules (e.g. note-wikilinks → open as tab)
+// =============================================================================
+
+function bindPublicAPI() {
+  if (typeof window === 'undefined') return;
+  window.NotePage = {
+    openNoteInTab: openInTab,
+    getActiveNoteId: () => currentNote?.id || null,
+  };
+}
+
+// =============================================================================
+// Bootstrap
+// =============================================================================
 
 async function bootstrap() {
   if (!NOTE_ID) {
@@ -120,51 +324,62 @@ async function bootstrap() {
   }
   if (!window.NoteEditor) {
     showLoadError('NoteEditor module failed to load.');
-    // eslint-disable-next-line no-console
     console.error('NoteEditor module not loaded');
     return;
   }
 
-  // 1. Load the note.
+  // 1. Initialize tab state. If saved state matches the URL note, restore it;
+  //    otherwise start fresh with the URL note as the single tab.
+  if (window.NoteTabs) {
+    state = loadSavedState(NOTE_ID);
+    // Make sure the URL's note is open + active in the focused pane.
+    if (state) {
+      const pane = state.panes[state.focusedPaneIndex];
+      if (!pane?.tabs?.includes(NOTE_ID)) {
+        state = window.NoteTabs.openTab(state, NOTE_ID, state.focusedPaneIndex);
+      } else if (pane.activeId !== NOTE_ID) {
+        state = window.NoteTabs.setActiveTab(state, state.focusedPaneIndex, NOTE_ID);
+      }
+    } else {
+      state = window.NoteTabs.initialState(NOTE_ID);
+    }
+    persistState();
+  } else {
+    state = { panes: [{ activeId: NOTE_ID, tabs: [NOTE_ID] }], splitMode: 'none', focusedPaneIndex: 0 };
+  }
+
+  // 2. Load the initial note.
   currentNote = await fetchNote(NOTE_ID);
   if (!currentNote) {
     showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
     showToast('Note not found', 'error');
     return;
   }
+  _tabLabelCache.set(currentNote.id, currentNote.name || 'Untitled');
 
-  // 2. Populate the editor inputs + document title.
+  // 3. Populate the editor inputs + document title.
   const titleInput = document.getElementById('noteNameInput');
   const contentInput = document.getElementById('noteContentInput');
   if (titleInput) titleInput.value = currentNote.name || '';
   if (contentInput) contentInput.value = currentNote.content || '';
   if (currentNote.name) document.title = `${currentNote.name} - Ori Agent`;
 
-  // 3. Fetch the workspace name for the breadcrumb (best effort).
+  // 4. Breadcrumb workspace name (best effort).
   fetchWorkspaceName(currentNote.workspace_id).then((name) => populateBreadcrumb(currentNote, name));
 
-  // Register the workspace context for wikilink click resolution before
-  // mounting (renders may run synchronously and attach click handlers).
+  // 5. Cross-module hooks (wikilinks, backlinks, rail, presence).
   window.NoteWikilinks?.setWorkspaceContext(() => currentNote?.workspace_id || null);
-
-  // Backlinks: notes that reference this one via [[wikilinks]]. Section
-  // stays hidden if there are none.
   window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
-
-  // Left-rail Notes tab: lazy-init with this page's workspace context.
   window.NoteRailNotes?.initRail({
     workspaceIdResolver: () => currentNote?.workspace_id || null,
     activeNoteId: currentNote.id,
   });
-
-  // Cross-tab presence: tell other tabs we hold this note on the "page"
-  // surface, so a modal-open elsewhere can warn before duplicating.
   window.NotePresence?.claimOpenNote(currentNote.id, 'page');
   window.addEventListener('beforeunload', () => {
     if (currentNote?.id) window.NotePresence?.releaseOpenNote(currentNote.id);
   });
 
-  // 4. Mount the full editor.
+  // 6. Mount the editor.
   bundle = window.NoteEditor.mount({
     getContent: () => contentInput?.value || '',
     setContent: (v) => { if (contentInput) contentInput.value = String(v || ''); },
@@ -182,14 +397,30 @@ async function bootstrap() {
       showToast,
     },
   });
-
-  // 5. First render. The render call also binds the live-preview events.
   bundle.render();
-
-  // 6. Wire title input → autosave on change.
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
 
-  // 7. Hash-anchor scroll: if URL has #heading-text, scroll to that heading.
+  // 7. Render the tab strip + prefetch labels for non-current tabs.
+  renderTabStrip();
+  prefetchTabLabels();
+
+  // 8. Delegated handlers for the tab strip.
+  document.getElementById('notePageTabList')?.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('.note-tab-close');
+    if (closeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeTab(closeBtn.dataset.noteId, state.focusedPaneIndex);
+      return;
+    }
+    const tab = e.target.closest('.note-tab');
+    if (tab) {
+      e.preventDefault();
+      switchToTab(tab.dataset.noteId, state.focusedPaneIndex);
+    }
+  });
+
+  // 9. Hash-anchor scroll.
   if (location.hash) {
     const headingText = decodeURIComponent(location.hash.slice(1));
     requestAnimationFrame(() => {
@@ -206,9 +437,7 @@ async function bootstrap() {
     });
   }
 
-  // 8. "Open in modal" button — flush autosave then navigate to the workspace
-  //    page with ?open=<noteId>. The workspace boot hook opens the modal
-  //    automatically when that query param is present.
+  // 10. "Open in modal" button.
   document.getElementById('noteOpenInModal')?.addEventListener('click', async () => {
     try { await bundle?.autosave?.flushImmediate?.(); } catch (_) {}
     if (currentNote?.workspace_id && currentNote.id) {
@@ -217,10 +446,15 @@ async function bootstrap() {
       location.href = `/workspaces/${wsId}?open=${noteId}`;
     }
   });
+
+  // 11. Expose the public API for other modules (wikilinks → open in tab).
+  bindPublicAPI();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
 }

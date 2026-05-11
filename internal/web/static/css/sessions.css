@@ -5218,6 +5218,119 @@ body.task-modal-open {
 }
 
 /* =============================================================================
+   Page-level multi-note tab strip (above the editor area)
+   ============================================================================= */
+
+.note-tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-tertiary, #f9fafb);
+  overflow-x: auto;
+}
+
+.note-tab-strip[hidden] {
+  display: none;
+}
+
+.note-tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  position: relative;
+  top: 1px; /* tuck into the bottom border when active */
+  max-width: 220px;
+  font-size: 12px;
+}
+
+.note-tab.is-active {
+  background: var(--bg-secondary, #ffffff);
+  border-color: var(--border-color, #e5e7eb);
+}
+
+.note-tab-button {
+  background: none;
+  border: none;
+  padding: 6px 4px 6px 10px;
+  font: inherit;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  max-width: 180px;
+  text-align: left;
+}
+
+.note-tab.is-active .note-tab-button {
+  color: var(--text-primary, #111827);
+  font-weight: 500;
+}
+
+.note-tab-label {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.note-tab-close {
+  background: none;
+  border: none;
+  padding: 2px 8px 2px 4px;
+  color: var(--text-secondary, #64748b);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.note-tab-close:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.1));
+  color: var(--text-primary, #111827);
+}
+
+.note-tab-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.note-tab-strip-action {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.note-tab-strip-action:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
+  color: var(--primary-color, #6366f1);
+}
+
+/* =============================================================================
    Left rail tabs (Notes / Outline)
    ============================================================================= */
 

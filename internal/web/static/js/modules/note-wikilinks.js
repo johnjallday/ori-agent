@@ -245,7 +245,13 @@ function installClickHandler() {
     const notes = await fetchWorkspaceNotes(workspaceId);
     const match = resolveTarget(target, notes);
     if (match?.id) {
-      window.location.href = `/notes/${encodeURIComponent(match.id)}`;
+      // Prefer opening as a new tab on the page; fall back to navigation
+      // (modal context, or NotePage not yet ready).
+      if (typeof window.NotePage?.openNoteInTab === 'function') {
+        window.NotePage.openNoteInTab(match.id);
+      } else {
+        window.location.href = `/notes/${encodeURIComponent(match.id)}`;
+      }
       return;
     }
 
@@ -253,7 +259,11 @@ function installClickHandler() {
     if (!window.confirm(`Create new note "${target}" in this workspace?`)) return;
     const created = await createNoteWithName(workspaceId, target);
     if (created?.id) {
-      window.location.href = `/notes/${encodeURIComponent(created.id)}`;
+      if (typeof window.NotePage?.openNoteInTab === 'function') {
+        window.NotePage.openNoteInTab(created.id);
+      } else {
+        window.location.href = `/notes/${encodeURIComponent(created.id)}`;
+      }
     }
   });
 }
