@@ -5275,6 +5275,45 @@ body.task-modal-open {
   box-shadow: inset 2px 0 0 var(--primary-color, #6366f1);
 }
 
+.note-tab-list.is-drop-target,
+.note-page-secondary-tabs.is-drop-target {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+/* Detach drop zone — overlays the right edge of the editor area during a
+   tab drag so the user can drop a tab there to split the pane right. */
+.note-page-detach-zone {
+  position: fixed;
+  top: 25%;
+  right: 0;
+  width: 220px;
+  height: 50%;
+  background: rgba(99, 102, 241, 0.08);
+  border: 2px dashed var(--primary-color, #6366f1);
+  border-right: none;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color, #6366f1);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  padding: 0 16px;
+  pointer-events: auto;
+  transition: background-color 120ms ease;
+}
+
+.note-page-detach-zone[hidden] {
+  display: none;
+}
+
+.note-page-detach-zone.is-drop-target {
+  background: rgba(99, 102, 241, 0.18);
+}
+
 .note-tab-button {
   background: none;
   border: none;

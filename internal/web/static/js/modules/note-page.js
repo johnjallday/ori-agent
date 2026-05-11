@@ -424,6 +424,68 @@ function clearDragVisuals() {
   });
 }
 
+function showDetachZoneIfApplicable() {
+  // The zone only makes sense when not already split AND the source pane
+  // has more than one tab (detaching the only tab would just be a no-op).
+  if (!state || state.splitMode !== 'none') return;
+  const sourcePane = state.panes[_dragState?.fromPane ?? 0];
+  if (!sourcePane || sourcePane.tabs.length < 2) return;
+  const zone = document.getElementById('notePageDetachZone');
+  if (zone) zone.hidden = false;
+}
+
+function hideDetachZone() {
+  const zone = document.getElementById('notePageDetachZone');
+  if (zone) {
+    zone.hidden = true;
+    zone.classList.remove('is-drop-target');
+  }
+}
+
+function installDetachZone() {
+  const zone = document.getElementById('notePageDetachZone');
+  if (!zone) return;
+
+  zone.addEventListener('dragover', (e) => {
+    if (!_dragState) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    zone.classList.add('is-drop-target');
+  });
+
+  zone.addEventListener('dragleave', () => {
+    zone.classList.remove('is-drop-target');
+  });
+
+  zone.addEventListener('drop', async (e) => {
+    if (!_dragState || !window.NoteTabs) return;
+    e.preventDefault();
+    const { fromPane, fromIdx } = _dragState;
+    const draggedNoteId = state.panes[fromPane]?.tabs?.[fromIdx];
+    if (!draggedNoteId) return;
+    if (state.splitMode !== 'none') return; // already split, ignore
+
+    // Split right (clones the source's active tab into pane 1), then move
+    // the actual dragged tab into pane 1 at the end. If the dragged tab
+    // happens to be the source's active tab, the clone + move-into-self
+    // sequence is handled by moveTab's dedupe pass.
+    state = window.NoteTabs.splitRight(state);
+    state = window.NoteTabs.focusPane(state, 0); // keep editor in pane 0
+    // Recompute the source index (splitRight may have changed pane 0's
+    // active tab; the source tabs array itself is unchanged though).
+    const targetIdx = state.panes[1]?.tabs?.length ?? 0;
+    state = window.NoteTabs.moveTab(state, fromPane, 1, fromIdx, targetIdx);
+    persistState();
+    renderTabStrip();
+    await renderSecondaryPane();
+
+    const editorActive = state.panes[0]?.activeId || null;
+    if (editorActive && editorActive !== currentNote?.id) {
+      await loadNoteIntoActivePane(editorActive);
+    }
+  });
+}
+
 // installDragReorder wires HTML5 drag events on one tab container. Together
 // with the module-level _dragState, drag-reorder works within a pane and
 // drag-move works across panes (dropping a pane-0 tab onto a pane-1 tab
@@ -444,31 +506,52 @@ function installDragReorder(container, paneIndex) {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', `${paneIndex}:${fromIdx}`);
     } catch (_) {}
+    // Reveal the detach drop zone when not already split — dropping there
+    // splits the pane right with the dragged tab.
+    showDetachZoneIfApplicable();
   });
 
   container.addEventListener('dragend', () => {
     clearDragVisuals();
+    hideDetachZone();
     _dragState = null;
   });
 
   container.addEventListener('dragover', (e) => {
     if (!_dragState) return;
-    const tab = e.target.closest(tabSelector);
-    if (!tab) return;
+    // Accept drops anywhere inside the container, not just on a .note-tab —
+    // an empty-area drop appends to the end of that pane's tabs.
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
     document.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
-    tab.classList.add('is-drop-target');
+    const tab = e.target.closest(tabSelector);
+    if (tab) {
+      tab.classList.add('is-drop-target');
+    } else {
+      container.classList.add('is-drop-target');
+    }
+  });
+
+  container.addEventListener('dragleave', (e) => {
+    // Only clear when leaving the container itself (not its children).
+    if (e.target === container) container.classList.remove('is-drop-target');
   });
 
   container.addEventListener('drop', async (e) => {
     if (!_dragState || !window.NoteTabs) return;
-    const tab = e.target.closest(tabSelector);
-    if (!tab) return;
     e.preventDefault();
-    const toIdx = Number(tab.dataset.index);
-    if (Number.isNaN(toIdx)) return;
     const { fromPane, fromIdx } = _dragState;
+
+    // Drop target index: the tab we dropped on, or the end of the pane's
+    // list if the drop landed on the container's empty area.
+    const tab = e.target.closest(tabSelector);
+    let toIdx;
+    if (tab) {
+      toIdx = Number(tab.dataset.index);
+      if (Number.isNaN(toIdx)) return;
+    } else {
+      toIdx = state.panes[paneIndex]?.tabs?.length ?? 0;
+    }
 
     if (fromPane === paneIndex) {
       if (toIdx === fromIdx) return;
@@ -477,12 +560,9 @@ function installDragReorder(container, paneIndex) {
       state = window.NoteTabs.moveTab(state, fromPane, paneIndex, fromIdx, toIdx);
     }
     persistState();
-    // Both panes can change in a cross-pane move: re-render both.
     renderTabStrip();
     await renderSecondaryPane();
 
-    // If the editor pane's active note changed (e.g., dropping a tab into
-    // pane 0 made it active), reload the editor with that note.
     const editorActive = state.panes[0]?.activeId || null;
     if (editorActive && editorActive !== currentNote?.id) {
       await loadNoteIntoActivePane(editorActive);
@@ -650,6 +730,9 @@ async function bootstrap() {
 
   // Drag-to-reorder for the secondary pane's tabs too.
   installDragReorder(document.getElementById('notePageSecondaryTabs'), 1);
+
+  // Detach drop zone — appears during drag when not split.
+  installDetachZone();
 
   // Wire split-right / unsplit / promote buttons.
   document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);

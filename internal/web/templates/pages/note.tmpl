@@ -161,6 +161,12 @@
 
     <!-- Floating AI selection action bar (positioned via JS) -->
     <div id="noteAIActionBar" class="note-ai-action-bar" role="toolbar" aria-label="AI selection actions"></div>
+
+    <!-- Detach drop zone — appears while dragging a tab when not split.
+         Drop on this zone splits the pane right and places the tab there. -->
+    <div id="notePageDetachZone" class="note-page-detach-zone" hidden aria-hidden="true">
+      <span>Drop here to split right</span>
+    </div>
   </main>
 
   <!-- Shared scripts (head loads bootstrap, marked, dompurify, etc.) -->
