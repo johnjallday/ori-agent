@@ -182,11 +182,11 @@ function renderTabStrip() {
   strip.hidden = !showStrip;
 
   // Split button visibility — only meaningful when not already split.
-  if (splitBtn) splitBtn.hidden = state.splitMode !== 'none';
+  if (splitBtn) splitBtn.hidden = state.splitMode !== 'none' || (state.panes[0]?.tabs?.length ?? 0) === 0;
   if (unsplitBtn) unsplitBtn.hidden = state.splitMode === 'none';
 
-  // For slice B (single-pane), render only the focused pane's tabs.
-  const pane = state.panes[state.focusedPaneIndex];
+  // The primary tab strip shows pane 0's tabs (the editable pane).
+  const pane = state.panes[0];
   if (!pane) { list.innerHTML = ''; return; }
 
   list.innerHTML = pane.tabs.map((id) => {
@@ -199,6 +199,67 @@ function renderTabStrip() {
       <button type="button" class="note-tab-close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
     </li>`;
   }).join('');
+}
+
+// renderSecondaryPane paints the second pane's tab strip + rendered
+// markdown preview when split mode is on. The secondary pane is read-only
+// in this slice — clicking a tab switches its preview content.
+async function renderSecondaryPane() {
+  const aside = document.getElementById('notePageSecondaryPane');
+  const tabsEl = document.getElementById('notePageSecondaryTabs');
+  const contentEl = document.getElementById('notePageSecondaryContent');
+  const grid = document.getElementById('notePagePaneGrid');
+  if (!aside || !tabsEl || !contentEl || !grid || !state) return;
+
+  if (state.splitMode === 'none' || !state.panes[1]) {
+    aside.hidden = true;
+    grid.classList.remove('is-split');
+    return;
+  }
+
+  aside.hidden = false;
+  grid.classList.add('is-split');
+
+  const pane = state.panes[1];
+  tabsEl.innerHTML = pane.tabs.map((id) => {
+    const isActive = id === pane.activeId;
+    const label = escapeText(tabLabel(id));
+    return `<button type="button" class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" title="${label}">
+      <span class="note-tab-label">${label}</span>
+      <span class="note-tab-close-inline" data-action="close" data-note-id="${escapeAttr(id)}" title="Close">×</span>
+    </button>`;
+  }).join('');
+
+  if (!pane.activeId) {
+    contentEl.innerHTML = '<div class="note-page-secondary-empty">No note selected.</div>';
+    return;
+  }
+
+  // Fetch + render the active note's markdown into the preview area. Use
+  // marked + DOMPurify when available; fall back to escaped text otherwise.
+  const note = currentNote?.id === pane.activeId ? currentNote : await fetchNote(pane.activeId);
+  if (!note) {
+    contentEl.innerHTML = '<div class="note-page-secondary-empty">Could not load this note.</div>';
+    return;
+  }
+  if (note.id !== currentNote?.id) _tabLabelCache.set(note.id, note.name || 'Untitled');
+
+  const md = String(note.content || '');
+  let html = '';
+  if (typeof window.marked?.parse === 'function') {
+    try { html = window.marked.parse(md); } catch (_) { html = escapeText(md); }
+  } else {
+    html = `<pre>${escapeText(md)}</pre>`;
+  }
+  if (typeof window.DOMPurify?.sanitize === 'function') {
+    html = window.DOMPurify.sanitize(html);
+  }
+  // Post-process wikilinks so they render as clickable anchors.
+  if (typeof window.NoteWikilinks?.applyWikilinksToHtml === 'function') {
+    html = window.NoteWikilinks.applyWikilinksToHtml(html, () => 'pending');
+  }
+  const title = escapeText(note.name || 'Untitled');
+  contentEl.innerHTML = `<h2 class="note-page-secondary-title">${title}</h2>${html}`;
 }
 
 // =============================================================================
@@ -259,11 +320,13 @@ async function loadNoteIntoActivePane(noteId) {
 
 async function openInTab(noteId) {
   if (!noteId || !window.NoteTabs) return;
-  state = window.NoteTabs.openTab(state, noteId);
+  // openTab targets pane 0 (the editor pane) explicitly — splitting routes
+  // the editor's main flow through pane 0, with pane 1 being read-only.
+  state = window.NoteTabs.openTab(state, noteId, 0);
   persistState();
   renderTabStrip();
+  renderSecondaryPane();
   prefetchTabLabels();
-  // openTab makes the noteId active in the focused pane; load it.
   if (currentNote?.id !== noteId) {
     await loadNoteIntoActivePane(noteId);
   }
@@ -276,7 +339,12 @@ async function switchToTab(noteId, paneIndex) {
   state = next;
   persistState();
   renderTabStrip();
-  await loadNoteIntoActivePane(noteId);
+  if (paneIndex === 0 && currentNote?.id !== noteId) {
+    await loadNoteIntoActivePane(noteId);
+  } else if (paneIndex === 1) {
+    // Just re-render the secondary preview; editor stays on pane 0.
+    await renderSecondaryPane();
+  }
 }
 
 async function closeTab(noteId, paneIndex) {
@@ -286,18 +354,40 @@ async function closeTab(noteId, paneIndex) {
   if (state === before) return;
   persistState();
   renderTabStrip();
-  const pane = state.panes[state.focusedPaneIndex];
-  if (!pane || !pane.activeId) {
-    // Pane is empty — navigate back to the workspace if we know it,
-    // otherwise to the global workspaces hub.
+  await renderSecondaryPane();
+  // If the user closed every tab in pane 0, navigate away. The reducer
+  // may also have collapsed split mode if pane 1 emptied out.
+  const pane0 = state.panes[0];
+  if (!pane0?.activeId) {
     const wsId = currentNote?.workspace_id;
     window.NotePresence?.releaseOpenNote(currentNote?.id);
     window.location.href = wsId ? `/workspaces/${encodeURIComponent(wsId)}/notes` : '/workspaces';
     return;
   }
-  if (pane.activeId !== currentNote?.id) {
-    await loadNoteIntoActivePane(pane.activeId);
+  // If the editor pane's active note changed, load it.
+  if (paneIndex === 0 && pane0.activeId !== currentNote?.id) {
+    await loadNoteIntoActivePane(pane0.activeId);
   }
+}
+
+async function splitRight() {
+  if (!window.NoteTabs || !currentNote?.id) return;
+  // Clone the editor pane's active note into a new pane on the right.
+  state = window.NoteTabs.splitRight(state);
+  // Keep focus on the editor pane (slice C constraint: pane 0 is the only
+  // editable pane). The reducer would otherwise focus the new right pane.
+  state = window.NoteTabs.focusPane(state, 0);
+  persistState();
+  renderTabStrip();
+  await renderSecondaryPane();
+}
+
+async function unsplit() {
+  if (!window.NoteTabs) return;
+  state = window.NoteTabs.unsplit(state);
+  persistState();
+  renderTabStrip();
+  await renderSecondaryPane();
 }
 
 // =============================================================================
@@ -400,25 +490,47 @@ async function bootstrap() {
   bundle.render();
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
 
-  // 7. Render the tab strip + prefetch labels for non-current tabs.
+  // 7. Render the tab strip + secondary pane (if split state was restored)
+  //    + prefetch labels for non-current tabs.
   renderTabStrip();
+  renderSecondaryPane();
   prefetchTabLabels();
 
-  // 8. Delegated handlers for the tab strip.
+  // 8. Delegated handlers for the primary tab strip (pane 0).
   document.getElementById('notePageTabList')?.addEventListener('click', (e) => {
     const closeBtn = e.target.closest('.note-tab-close');
     if (closeBtn) {
       e.preventDefault();
       e.stopPropagation();
-      closeTab(closeBtn.dataset.noteId, state.focusedPaneIndex);
+      closeTab(closeBtn.dataset.noteId, 0);
       return;
     }
     const tab = e.target.closest('.note-tab');
     if (tab) {
       e.preventDefault();
-      switchToTab(tab.dataset.noteId, state.focusedPaneIndex);
+      switchToTab(tab.dataset.noteId, 0);
     }
   });
+
+  // Delegated handlers for the secondary pane (pane 1).
+  document.getElementById('notePageSecondaryTabs')?.addEventListener('click', (e) => {
+    const closeAction = e.target.closest('[data-action="close"]');
+    if (closeAction) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeTab(closeAction.dataset.noteId, 1);
+      return;
+    }
+    const tab = e.target.closest('.note-tab');
+    if (tab) {
+      e.preventDefault();
+      switchToTab(tab.dataset.noteId, 1);
+    }
+  });
+
+  // Wire split-right / unsplit buttons.
+  document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);
+  document.getElementById('notePageUnsplitBtn')?.addEventListener('click', unsplit);
 
   // 9. Hash-anchor scroll.
   if (location.hash) {

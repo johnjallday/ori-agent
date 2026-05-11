@@ -94,13 +94,20 @@
       </aside>
 
       <div class="note-editor-center">
-        <div class="note-editor-container">
-          <!-- Source-of-truth textarea, hidden on the page (the preview is the
-               only visible editor; click a rendered line to edit inline). -->
-          <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..." style="display: none;"></textarea>
-          <div id="notePreviewContent" class="note-preview-content note-live-editor" role="textbox" aria-label="Markdown live preview editor" tabindex="0">
-            <div class="note-page-loading">Loading note…</div>
+        <div class="note-page-pane-grid" id="notePagePaneGrid">
+          <div class="note-editor-container note-page-pane note-page-pane-primary">
+            <!-- Source-of-truth textarea, hidden on the page (the preview is the
+                 only visible editor; click a rendered line to edit inline). -->
+            <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..." style="display: none;"></textarea>
+            <div id="notePreviewContent" class="note-preview-content note-live-editor" role="textbox" aria-label="Markdown live preview editor" tabindex="0">
+              <div class="note-page-loading">Loading note…</div>
+            </div>
           </div>
+          <!-- Secondary read-only pane shown when split mode is active. -->
+          <aside class="note-page-pane note-page-pane-secondary" id="notePageSecondaryPane" hidden aria-label="Secondary pane">
+            <nav class="note-page-secondary-tabs" id="notePageSecondaryTabs" aria-label="Secondary pane tabs"></nav>
+            <div class="note-page-secondary-content" id="notePageSecondaryContent"></div>
+          </aside>
         </div>
       </div>
 
