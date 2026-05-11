@@ -174,12 +174,10 @@ function renderTabStrip() {
   const unsplitBtn = document.getElementById('notePageUnsplitBtn');
   if (!strip || !list || !state) return;
 
-  // Hide the strip when only a single tab in a single pane is open. The
-  // strip only earns its keep when there's more than one to switch between
-  // or when split mode is active.
-  const totalTabs = state.panes.reduce((sum, p) => sum + p.tabs.length, 0);
-  const showStrip = totalTabs > 1 || state.splitMode !== 'none';
-  strip.hidden = !showStrip;
+  // Always show the strip: the "+" button is the entry point to opening
+  // additional notes in tabs, so it needs to be reachable even when the
+  // current page has just one open tab.
+  strip.hidden = false;
 
   // Split button visibility — only meaningful when not already split.
   if (splitBtn) splitBtn.hidden = state.splitMode !== 'none' || (state.panes[0]?.tabs?.length ?? 0) === 0;
@@ -531,6 +529,13 @@ async function bootstrap() {
   // Wire split-right / unsplit buttons.
   document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);
   document.getElementById('notePageUnsplitBtn')?.addEventListener('click', unsplit);
+
+  // The "+" button opens the global ⌘K search palette so the user can pick
+  // any note in any workspace; palette selection then routes through
+  // window.NotePage.openNoteInTab (set up in bindPublicAPI below).
+  document.getElementById('notePageNewTabBtn')?.addEventListener('click', () => {
+    window.SearchPalette?.open?.();
+  });
 
   // 9. Hash-anchor scroll.
   if (location.hash) {

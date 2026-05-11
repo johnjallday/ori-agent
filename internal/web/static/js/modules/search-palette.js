@@ -307,14 +307,26 @@ function activateIndex(idx) {
   pushRecent(state.query);
   close();
   if (row.kind === 'note') {
-    // Route through openNote so the user's notes_open_behavior pref applies.
-    window.sessionManager?.openNote?.(row.item.id);
+    // On the note page, open as a new tab. On other pages, route via
+    // sessionManager.openNote so notes_open_behavior applies.
+    if (typeof window.NotePage?.openNoteInTab === 'function') {
+      window.NotePage.openNoteInTab(row.item.id);
+    } else {
+      window.sessionManager?.openNote?.(row.item.id);
+    }
   } else {
     const noteId = row.item.note_id;
     const headingText = row.item.text;
-    // Heading results — only the modal flow has the heading-anchor helper.
-    // For "page" / "page-new-tab" preference, navigate with a #hash so the
-    // page can scroll to it.
+    if (typeof window.NotePage?.openNoteInTab === 'function') {
+      // Opening as a tab loses the heading anchor — set the hash before
+      // openNoteInTab triggers the editor swap so the hash-scroll path
+      // (if implemented for tab swaps) can pick it up. For now the page
+      // just opens the note.
+      window.location.hash = encodeURIComponent(headingText);
+      window.NotePage.openNoteInTab(noteId);
+      return;
+    }
+    // Off-page contexts: respect notes_open_behavior.
     const behavior = window.sessionManager?._readNotesOpenBehavior?.() || 'modal';
     if (behavior === 'modal' && window.sessionManager?.openNoteEditorWithHeading) {
       window.sessionManager.openNoteEditorWithHeading(noteId, headingText);
