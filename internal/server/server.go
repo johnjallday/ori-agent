@@ -326,6 +326,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Notes hub: /workspaces/{id}/notes — sortable list of all notes in the workspace.
+	if len(parts) == 2 && parts[1] == "notes" {
+		s.serveWorkspaceNotesHub(w, workspaceID)
+		return
+	}
+
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
 		s.serveWorkspaceDetail(w, workspaceID)
@@ -370,6 +376,15 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string)
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
+}
+
+func (s *Server) serveWorkspaceNotesHub(w http.ResponseWriter, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace Notes - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	s.renderAndWritePage(w, "workspace-notes", data)
 }
 
 func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {
