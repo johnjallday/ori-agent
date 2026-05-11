@@ -149,6 +149,13 @@ async function bootstrap() {
   // stays hidden if there are none.
   window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
 
+  // Cross-tab presence: tell other tabs we hold this note on the "page"
+  // surface, so a modal-open elsewhere can warn before duplicating.
+  window.NotePresence?.claimOpenNote(currentNote.id, 'page');
+  window.addEventListener('beforeunload', () => {
+    if (currentNote?.id) window.NotePresence?.releaseOpenNote(currentNote.id);
+  });
+
   // 4. Mount the full editor.
   bundle = window.NoteEditor.mount({
     getContent: () => contentInput?.value || '',

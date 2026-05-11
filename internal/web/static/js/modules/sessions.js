@@ -5683,6 +5683,20 @@ const sessionManager = {
   },
 
   async openNoteEditor(noteId) {
+    // Cross-tab presence: if this note is already open in another tab (page
+    // surface), let the user decide whether to open a duplicate copy here.
+    // The check is fast (~150ms timeout) and degrades gracefully when
+    // BroadcastChannel is unsupported.
+    try {
+      const elsewhere = await window.NotePresence?.isOpenElsewhere?.(noteId);
+      if (elsewhere?.open && elsewhere.surface === 'page') {
+        const proceed = window.confirm(
+          'This note is already open in another browser tab. Open it here too?',
+        );
+        if (!proceed) return;
+      }
+    } catch (_) { /* non-fatal */ }
+
     const note = await this.getNote(noteId);
     if (!note) return;
 
