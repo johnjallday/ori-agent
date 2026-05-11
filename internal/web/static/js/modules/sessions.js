@@ -5793,6 +5793,15 @@ const sessionManager = {
     this.loadNoteAIAgents();
 
     const bsModal = new bootstrap.Modal(modal);
+    // Bootstrap fires 'shown.bs.modal' once the modal is fully visible. The
+    // editor's render runs synchronously before show() but some layout-
+    // dependent measurements (e.g., scrollHeight) only become valid once the
+    // modal is on-screen; re-render then to guarantee content is painted.
+    const onShown = () => {
+      this.renderNoteLiveEditor();
+      modal.removeEventListener('shown.bs.modal', onShown);
+    };
+    modal.addEventListener('shown.bs.modal', onShown);
     bsModal.show();
   },
 

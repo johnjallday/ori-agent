@@ -2417,6 +2417,15 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   transition: width 0.15s ease;
 }
 
+/* The `display: flex` rule above wins over the user-agent stylesheet's
+   `[hidden] { display: none }` (same specificity, author wins). Make the
+   rail respect its `hidden` attribute explicitly so showRail/hideRail
+   actually toggle visibility. */
+.note-toc-rail[hidden],
+.note-assist-rail[hidden] {
+  display: none;
+}
+
 .note-assist-rail {
   width: 320px;
 }
@@ -2569,6 +2578,24 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-live-editor {
   cursor: text;
   user-select: text;
+}
+
+/* When the note is empty the single rendered line is just a <br> — hard to
+   see and hard to click. Show a placeholder hint inside it and give the
+   preview enough height to act as a comfortable click target. */
+.note-preview-content > .note-live-line.is-empty:only-child {
+  min-height: 60px;
+  position: relative;
+}
+
+.note-preview-content > .note-live-line.is-empty:only-child::before {
+  content: "Click here to start writing in Markdown…";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--text-tertiary, #9ca3af);
+  font-style: italic;
+  pointer-events: none;
 }
 
 .note-live-editor::selection,
