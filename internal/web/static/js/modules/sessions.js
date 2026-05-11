@@ -5793,16 +5793,35 @@ const sessionManager = {
     this.loadNoteAIAgents();
 
     const bsModal = new bootstrap.Modal(modal);
-    // Bootstrap fires 'shown.bs.modal' once the modal is fully visible. The
-    // editor's render runs synchronously before show() but some layout-
-    // dependent measurements (e.g., scrollHeight) only become valid once the
-    // modal is on-screen; re-render then to guarantee content is painted.
+    // Re-render once the modal finishes animating in, then verify the
+    // preview actually painted. If it ended up empty for any reason (a
+    // render-path bug, a CSS regression, an empty note), fall back to
+    // showing the textarea so the user can at least see + edit the
+    // Markdown source.
     const onShown = () => {
-      this.renderNoteLiveEditor();
       modal.removeEventListener('shown.bs.modal', onShown);
+      this.renderNoteLiveEditor();
+      requestAnimationFrame(() => this._verifyNotePreviewVisible());
     };
     modal.addEventListener('shown.bs.modal', onShown);
     bsModal.show();
+  },
+
+  // _verifyNotePreviewVisible inspects the preview pane after the modal is
+  // shown. If the textarea has content but the preview rendered nothing (an
+  // unexpected state), exit preview mode so the textarea becomes visible —
+  // the user gets a working editor instead of staring at a blank dark area.
+  _verifyNotePreviewVisible() {
+    const contentInput = document.getElementById('noteContentInput');
+    const previewContent = document.getElementById('notePreviewContent');
+    if (!contentInput || !previewContent) return;
+    const hasContent = (contentInput.value || '').trim().length > 0;
+    const previewEmpty = !previewContent.innerHTML || previewContent.innerHTML.trim() === '';
+    if (hasContent && previewEmpty) {
+      // eslint-disable-next-line no-console
+      console.warn('[note-modal] preview render produced empty HTML; falling back to textarea');
+      this.setNotePreviewMode(false);
+    }
   },
 
   // Create new note for folder (called from folder context menu)
