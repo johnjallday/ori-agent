@@ -264,6 +264,28 @@ async function renderSecondaryPane() {
 // Editor content swap
 // =============================================================================
 
+// scrollToHashHeading: if location.hash is non-empty, scroll the editor to
+// the matching heading. Shared by the initial bootstrap and tab swaps so
+// palette → tab transitions can still anchor to a heading.
+function scrollToHashHeading() {
+  if (!location.hash || !window.NoteEditor) return;
+  const headingText = decodeURIComponent(location.hash.slice(1));
+  if (!headingText) return;
+  const contentInput = document.getElementById('noteContentInput');
+  requestAnimationFrame(() => {
+    const source = contentInput?.value || '';
+    const lines = source.split('\n');
+    let cursor = 0;
+    for (const line of lines) {
+      if (/^#{1,6}\s+/.test(line) && line.includes(headingText)) {
+        window.NoteEditor.scrollToHeadingPosition(source, cursor);
+        break;
+      }
+      cursor += line.length + 1;
+    }
+  });
+}
+
 async function loadNoteIntoActivePane(noteId) {
   if (!noteId) return false;
   switching = true;
@@ -307,6 +329,9 @@ async function loadNoteIntoActivePane(noteId) {
   window.NoteBacklinks?.loadBacklinksFor(next.id);
   window.NoteRailNotes?.setActiveNoteId(next.id);
   window.NotePresence?.claimOpenNote(next.id, 'page');
+
+  // 7. If the URL carries a heading hash (e.g., palette → tab), scroll to it.
+  scrollToHashHeading();
 
   switching = false;
   return true;
@@ -616,22 +641,8 @@ async function bootstrap() {
     window.SearchPalette?.open?.();
   });
 
-  // 9. Hash-anchor scroll.
-  if (location.hash) {
-    const headingText = decodeURIComponent(location.hash.slice(1));
-    requestAnimationFrame(() => {
-      const source = contentInput?.value || '';
-      const lines = source.split('\n');
-      let cursor = 0;
-      for (const line of lines) {
-        if (/^#{1,6}\s+/.test(line) && line.includes(headingText)) {
-          window.NoteEditor.scrollToHeadingPosition(source, cursor);
-          break;
-        }
-        cursor += line.length + 1;
-      }
-    });
-  }
+  // 9. Hash-anchor scroll (shared helper — also runs on tab swaps).
+  scrollToHashHeading();
 
   // 10. "Open in modal" button.
   document.getElementById('noteOpenInModal')?.addEventListener('click', async () => {
