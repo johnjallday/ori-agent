@@ -141,6 +141,10 @@ async function bootstrap() {
   // 3. Fetch the workspace name for the breadcrumb (best effort).
   fetchWorkspaceName(currentNote.workspace_id).then((name) => populateBreadcrumb(currentNote, name));
 
+  // Register the workspace context for wikilink click resolution before
+  // mounting (renders may run synchronously and attach click handlers).
+  window.NoteWikilinks?.setWorkspaceContext(() => currentNote?.workspace_id || null);
+
   // 4. Mount the full editor.
   bundle = window.NoteEditor.mount({
     getContent: () => contentInput?.value || '',

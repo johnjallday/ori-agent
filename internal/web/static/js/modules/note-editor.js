@@ -93,9 +93,14 @@ export function renderMarkdown(text) {
 
 // renderMarkdownLine renders a single line of Markdown. Used by the live
 // preview's per-line rendering path. Returns `<br>` for an empty line.
+// After marked.js produces HTML, wikilink syntax (`[[…]]`) is rewritten into
+// clickable `<a class="note-wikilink">` elements if window.NoteWikilinks is
+// loaded. The resolver is null today (all links render in the "needs lookup"
+// state); click handling resolves on demand.
 export function renderMarkdownLine(line) {
   if (!line) return '<br>';
 
+  let html;
   const marked = _marked();
   if (marked && typeof marked.parse === 'function') {
     const dp = _domPurify();
@@ -105,16 +110,20 @@ export function renderMarkdownLine(line) {
       breaks: true,
       gfm: true,
     });
-    return canSanitize ? dp.sanitize(rendered) : rendered;
+    html = canSanitize ? dp.sanitize(rendered) : rendered;
+  } else {
+    html = renderMarkdown(line);
   }
-  return renderMarkdown(line);
+  return applyWikilinksHook(html);
 }
 
 // renderInlineMarkdown renders inline-only Markdown (bold/italic/code, no
 // blocks). Used by task-line content where we don't want a `<p>` wrapper.
+// Same wikilink post-processing as renderMarkdownLine.
 export function renderInlineMarkdown(text) {
   if (!text) return '';
 
+  let html;
   const marked = _marked();
   if (marked && typeof marked.parseInline === 'function') {
     const dp = _domPurify();
@@ -123,9 +132,22 @@ export function renderInlineMarkdown(text) {
       breaks: true,
       gfm: true,
     });
-    return canSanitize ? dp.sanitize(rendered) : rendered;
+    html = canSanitize ? dp.sanitize(rendered) : rendered;
+  } else {
+    html = escapeHtml(text);
   }
-  return escapeHtml(text);
+  return applyWikilinksHook(html);
+}
+
+// applyWikilinksHook rewrites `[[…]]` in `html` if window.NoteWikilinks is
+// loaded. With no resolver registered the result is always the
+// "note-wikilink" base class (no broken styling); a future slice can
+// register a resolver that classifies links as broken at render time.
+function applyWikilinksHook(html) {
+  if (typeof window === 'undefined' || !window.NoteWikilinks) return html;
+  // Pass `() => 'pending'` as the resolver — truthy result means "not broken"
+  // styling. Real resolution happens on click (see note-wikilinks click handler).
+  return window.NoteWikilinks.applyWikilinksToHtml(html, () => 'pending');
 }
 
 // =============================================================================

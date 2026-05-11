@@ -4988,6 +4988,9 @@ const sessionManager = {
         showToast: (msg, kind) => this.showToast?.(msg, kind),
       },
     });
+    window.NoteWikilinks?.setWorkspaceContext(
+      () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+    );
     return this.noteMount;
   },
 

@@ -5100,6 +5100,34 @@ body.task-modal-open {
 }
 
 /* =============================================================================
+   Wikilinks ([[Other Note]] references rendered as inline links)
+   ============================================================================= */
+
+.note-wikilink {
+  display: inline;
+  color: var(--primary-color, #6366f1);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--primary-color, #6366f1);
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.note-wikilink:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom-style: solid;
+}
+
+.note-wikilink.note-wikilink-broken {
+  color: #ea580c;
+  border-bottom-color: #ea580c;
+  border-bottom-style: dashed;
+}
+
+.note-wikilink.note-wikilink-broken:hover {
+  background: rgba(234, 88, 12, 0.08);
+}
+
+/* =============================================================================
    Search Palette (⌘K)
    ============================================================================= */
 
