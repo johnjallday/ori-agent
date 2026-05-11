@@ -851,6 +851,7 @@ export class WorkspaceDetailPage {
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
+      viewAllNotesLink: document.getElementById('workspace-detail-view-all-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
       refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
@@ -1157,6 +1158,12 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
+
+    // "View all" → workspace notes hub. The href is set here (not in the
+    // template) because the workspace ID isn't known at server-render time.
+    if (this.elements.viewAllNotesLink && this.workspaceId) {
+      this.elements.viewAllNotesLink.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/notes`;
+    }
 
     // "Open task editor" icon button: opens the task modal in auto mode with whatever
     // text is currently in the entry-prompt input, so users can review/configure before saving.
