@@ -145,6 +145,58 @@ export function focusPane(state, paneIndex) {
   return next;
 }
 
+// moveTab moves a tab from one pane to another at the given target index.
+// If source and target panes are the same, delegates to reorder. The moved
+// tab becomes active in the target pane; the source pane's active tab is
+// recomputed (next-in-line if the moved tab was active, otherwise unchanged).
+// If the source pane is the right pane and becomes empty after the move,
+// the split collapses just like closeTab does.
+export function moveTab(state, fromPaneIdx, toPaneIdx, fromIdx, toIdx) {
+  if (!validPaneIndex(state, fromPaneIdx)) return state;
+  if (!validPaneIndex(state, toPaneIdx)) return state;
+  if (fromPaneIdx === toPaneIdx) return reorder(state, fromPaneIdx, fromIdx, toIdx);
+
+  const fromPane = state.panes[fromPaneIdx];
+  if (fromIdx < 0 || fromIdx >= fromPane.tabs.length) return state;
+  const moved = fromPane.tabs[fromIdx];
+
+  const next = cloneState(state);
+  const nextFrom = next.panes[fromPaneIdx];
+  const nextTo = next.panes[toPaneIdx];
+
+  // Remove from source.
+  nextFrom.tabs.splice(fromIdx, 1);
+  if (nextFrom.activeId === moved) {
+    if (nextFrom.tabs.length === 0) {
+      nextFrom.activeId = null;
+    } else if (fromIdx > 0) {
+      nextFrom.activeId = nextFrom.tabs[fromIdx - 1];
+    } else {
+      nextFrom.activeId = nextFrom.tabs[0];
+    }
+  }
+
+  // Insert into target. If the tab already exists there (duplicate move),
+  // remove the existing copy first so we don't end up with two.
+  const existing = nextTo.tabs.indexOf(moved);
+  if (existing >= 0) nextTo.tabs.splice(existing, 1);
+  let insertAt = Math.max(0, Math.min(toIdx, nextTo.tabs.length));
+  nextTo.tabs.splice(insertAt, 0, moved);
+  nextTo.activeId = moved;
+
+  // Collapse split when the right pane is now empty.
+  if (next.splitMode !== 'none' && next.panes.length === 2 && next.panes[1].tabs.length === 0) {
+    next.panes.pop();
+    next.splitMode = 'none';
+    next.focusedPaneIndex = 0;
+  } else {
+    // Keep focus on the destination pane so the user sees their dropped tab.
+    next.focusedPaneIndex = toPaneIdx < next.panes.length ? toPaneIdx : 0;
+  }
+
+  return next;
+}
+
 // swapPanes flips the order of the two panes. Useful when the UI promotes
 // the secondary (read-only) pane to be the editing pane — since the editor
 // markup is fixed in pane 0, "promote" really means "swap." Noop when there
@@ -225,6 +277,7 @@ if (typeof window !== 'undefined') {
     swapPanes,
     focusPane,
     reorder,
+    moveTab,
     hydrate,
     allOpenNoteIds,
     activeNoteIdFor,
@@ -242,6 +295,7 @@ export default {
   swapPanes,
   focusPane,
   reorder,
+  moveTab,
   hydrate,
   allOpenNoteIds,
   activeNoteIdFor,

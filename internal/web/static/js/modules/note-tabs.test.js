@@ -16,6 +16,7 @@ const {
   swapPanes,
   focusPane,
   reorder,
+  moveTab,
   hydrate,
   allOpenNoteIds,
   activeNoteIdFor,
@@ -173,6 +174,62 @@ test('unsplit: keeps first pane, drops split mode', () => {
 test('unsplit: noop when not split', () => {
   const s = initialState('a');
   const s2 = unsplit(s);
+  assert.equal(s, s2);
+});
+
+test('moveTab: cross-pane move removes from source and inserts in target', () => {
+  let s = initialState('a');
+  s = openTab(s, 'b'); // pane 0: [a,b]/b
+  s = splitRight(s);   // pane 1: [b]/b; focus = 1
+  s = openTab(s, 'c', 1); // pane 1: [b,c]/c
+  // Move 'b' from pane 0 → pane 1 at index 0.
+  s = moveTab(s, 0, 1, 1, 0);
+  assert.deepEqual(s.panes[0].tabs, ['a']);
+  assert.equal(s.panes[0].activeId, 'a');
+  assert.deepEqual(s.panes[1].tabs, ['b', 'c']);
+  assert.equal(s.panes[1].activeId, 'b');
+  assert.equal(s.focusedPaneIndex, 1);
+});
+
+test('moveTab: same pane delegates to reorder', () => {
+  let s = initialState('a');
+  s = openTab(s, 'b');
+  s = openTab(s, 'c'); // ['a','b','c']
+  const reordered = moveTab(s, 0, 0, 0, 2); // a → end
+  assert.deepEqual(reordered.panes[0].tabs, ['b', 'c', 'a']);
+});
+
+test('moveTab: collapses split when source (right pane) empties', () => {
+  let s = initialState('a');
+  s = splitRight(s); // 2 panes; both have 'a'; right was the new one
+  // Move pane 1's only tab to pane 0 — pane 1 now empty → collapse.
+  s = moveTab(s, 1, 0, 0, 0);
+  assert.equal(s.panes.length, 1);
+  assert.equal(s.splitMode, 'none');
+});
+
+test('moveTab: deduplicates if target already has the tab', () => {
+  let s = initialState('a');
+  s = openTab(s, 'b'); // pane 0: [a,b]
+  s = splitRight(s);   // pane 1: [b] (cloned active)
+  // Move 'b' from pane 0 → pane 1 at index 0. Target already has 'b';
+  // result should still have a single 'b' in pane 1.
+  s = moveTab(s, 0, 1, 1, 0);
+  assert.deepEqual(s.panes[0].tabs, ['a']);
+  assert.deepEqual(s.panes[1].tabs, ['b']);
+});
+
+test('moveTab: out-of-range source index is a no-op', () => {
+  let s = initialState('a');
+  s = splitRight(s);
+  const before = s;
+  s = moveTab(s, 0, 1, 9, 0);
+  assert.equal(s, before);
+});
+
+test('moveTab: invalid pane index is a no-op', () => {
+  const s = initialState('a');
+  const s2 = moveTab(s, 0, 5, 0, 0);
   assert.equal(s, s2);
 });
 

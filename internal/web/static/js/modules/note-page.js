@@ -413,13 +413,23 @@ async function unsplit() {
   await renderSecondaryPane();
 }
 
-// installDragReorder wires HTML5 drag events on a tab container so users can
-// drag-reorder tabs within a single pane. Dragging across panes is a no-op
-// in this iteration (a future slice can add cross-pane drop targets).
+// Cross-pane drag state — shared between both tab containers so a dragstart
+// in pane A and a drop in pane B can resolve the source. Module-scoped
+// because separate per-container closures couldn't see each other.
+let _dragState = null; // { fromPane: 0|1, fromIdx: number } | null
+
+function clearDragVisuals() {
+  document.querySelectorAll('.is-dragging, .is-drop-target').forEach((el) => {
+    el.classList.remove('is-dragging', 'is-drop-target');
+  });
+}
+
+// installDragReorder wires HTML5 drag events on one tab container. Together
+// with the module-level _dragState, drag-reorder works within a pane and
+// drag-move works across panes (dropping a pane-0 tab onto a pane-1 tab
+// moves it via NoteTabs.moveTab).
 function installDragReorder(container, paneIndex) {
   if (!container) return;
-
-  let dragState = null;
   const tabSelector = '.note-tab[draggable="true"]';
 
   container.addEventListener('dragstart', (e) => {
@@ -428,43 +438,55 @@ function installDragReorder(container, paneIndex) {
     const fromIdx = Number(tab.dataset.index);
     const fromPane = Number(tab.dataset.pane);
     if (Number.isNaN(fromIdx) || fromPane !== paneIndex) return;
-    dragState = { fromIdx };
+    _dragState = { fromPane: paneIndex, fromIdx };
     tab.classList.add('is-dragging');
     try {
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(fromIdx));
+      e.dataTransfer.setData('text/plain', `${paneIndex}:${fromIdx}`);
     } catch (_) {}
   });
 
   container.addEventListener('dragend', () => {
-    container.querySelectorAll('.is-dragging, .is-drop-target').forEach((el) => {
-      el.classList.remove('is-dragging', 'is-drop-target');
-    });
-    dragState = null;
+    clearDragVisuals();
+    _dragState = null;
   });
 
   container.addEventListener('dragover', (e) => {
-    if (!dragState) return;
+    if (!_dragState) return;
     const tab = e.target.closest(tabSelector);
     if (!tab) return;
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    container.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+    document.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
     tab.classList.add('is-drop-target');
   });
 
-  container.addEventListener('drop', (e) => {
-    if (!dragState) return;
+  container.addEventListener('drop', async (e) => {
+    if (!_dragState || !window.NoteTabs) return;
     const tab = e.target.closest(tabSelector);
     if (!tab) return;
     e.preventDefault();
     const toIdx = Number(tab.dataset.index);
-    const { fromIdx } = dragState;
-    if (Number.isNaN(toIdx) || toIdx === fromIdx) return;
-    state = window.NoteTabs.reorder(state, paneIndex, fromIdx, toIdx);
+    if (Number.isNaN(toIdx)) return;
+    const { fromPane, fromIdx } = _dragState;
+
+    if (fromPane === paneIndex) {
+      if (toIdx === fromIdx) return;
+      state = window.NoteTabs.reorder(state, paneIndex, fromIdx, toIdx);
+    } else {
+      state = window.NoteTabs.moveTab(state, fromPane, paneIndex, fromIdx, toIdx);
+    }
     persistState();
-    if (paneIndex === 0) renderTabStrip();
-    else renderSecondaryPane();
+    // Both panes can change in a cross-pane move: re-render both.
+    renderTabStrip();
+    await renderSecondaryPane();
+
+    // If the editor pane's active note changed (e.g., dropping a tab into
+    // pane 0 made it active), reload the editor with that note.
+    const editorActive = state.panes[0]?.activeId || null;
+    if (editorActive && editorActive !== currentNote?.id) {
+      await loadNoteIntoActivePane(editorActive);
+    }
   });
 }
 
