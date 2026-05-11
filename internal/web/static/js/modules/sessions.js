@@ -5818,8 +5818,20 @@ const sessionManager = {
     const hasContent = (contentInput.value || '').trim().length > 0;
     const previewEmpty = !previewContent.innerHTML || previewContent.innerHTML.trim() === '';
     if (hasContent && previewEmpty) {
+      // Diagnostic info — share this output to narrow down the render-path bug.
+      const bundle = this.noteMount;
       // eslint-disable-next-line no-console
-      console.warn('[note-modal] preview render produced empty HTML; falling back to textarea');
+      console.warn('[note-modal] preview empty; diag:', {
+        noteEditorLoaded: !!window.NoteEditor,
+        bundleExists: !!bundle,
+        bundleKeys: bundle ? Object.keys(bundle) : null,
+        bundleLiveType: bundle ? typeof bundle.live : 'no-bundle',
+        bundleRenderType: bundle ? typeof bundle.render : 'no-bundle',
+        isPreviewMode: this.isNotePreviewMode,
+        textareaLen: (contentInput.value || '').length,
+        previewDisplay: previewContent.style.display,
+        previewInnerHTMLLen: previewContent.innerHTML.length,
+      });
       this.setNotePreviewMode(false);
     }
   },
@@ -6244,7 +6256,10 @@ const sessionManager = {
       }
       this._renderNoteTocOutline();
     } else {
-      this._ensureLiveState().reset();
+      // Optional chaining — _ensureLiveState() can be undefined if the
+      // mount bundle never initialized (which is exactly what _verify…
+      // calls into us for as a fallback).
+      this._ensureLiveState()?.reset();
       editorContainer?.classList.remove('is-previewing');
       if (contentInput) contentInput.style.display = 'block';
       if (previewContent) {
