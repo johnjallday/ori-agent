@@ -388,6 +388,22 @@ async function unsplit() {
   await renderSecondaryPane();
 }
 
+// promoteSecondary swaps the two panes so the secondary's active note
+// becomes the editable one. The editor markup is fixed in pane 0, so
+// "promote" really means "swap panes."
+async function promoteSecondary() {
+  if (!window.NoteTabs || state?.splitMode === 'none') return;
+  const newPrimaryId = state.panes[1]?.activeId;
+  if (!newPrimaryId) return;
+  state = window.NoteTabs.swapPanes(state);
+  persistState();
+  renderTabStrip();
+  await renderSecondaryPane();
+  if (currentNote?.id !== newPrimaryId) {
+    await loadNoteIntoActivePane(newPrimaryId);
+  }
+}
+
 // =============================================================================
 // Public surface for other modules (e.g. note-wikilinks → open as tab)
 // =============================================================================
@@ -526,9 +542,10 @@ async function bootstrap() {
     }
   });
 
-  // Wire split-right / unsplit buttons.
+  // Wire split-right / unsplit / promote buttons.
   document.getElementById('notePageSplitRightBtn')?.addEventListener('click', splitRight);
   document.getElementById('notePageUnsplitBtn')?.addEventListener('click', unsplit);
+  document.getElementById('notePagePromoteBtn')?.addEventListener('click', promoteSecondary);
 
   // The "+" button opens the global ⌘K search palette so the user can pick
   // any note in any workspace; palette selection then routes through

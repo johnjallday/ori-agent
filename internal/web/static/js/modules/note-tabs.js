@@ -145,6 +145,21 @@ export function focusPane(state, paneIndex) {
   return next;
 }
 
+// swapPanes flips the order of the two panes. Useful when the UI promotes
+// the secondary (read-only) pane to be the editing pane — since the editor
+// markup is fixed in pane 0, "promote" really means "swap." Noop when there
+// aren't two panes.
+export function swapPanes(state) {
+  if (state.panes.length !== 2) return state;
+  const next = cloneState(state);
+  const [a, b] = next.panes;
+  next.panes = [b, a];
+  // focusedPaneIndex stays pointing at the same logical slot — the editing
+  // pane after a swap is still index 0.
+  next.focusedPaneIndex = 0;
+  return next;
+}
+
 export function reorder(state, paneIndex, fromIdx, toIdx) {
   if (!validPaneIndex(state, paneIndex)) return state;
   const pane = state.panes[paneIndex];
@@ -207,6 +222,7 @@ if (typeof window !== 'undefined') {
     closeTab,
     splitRight,
     unsplit,
+    swapPanes,
     focusPane,
     reorder,
     hydrate,
@@ -223,6 +239,7 @@ export default {
   closeTab,
   splitRight,
   unsplit,
+  swapPanes,
   focusPane,
   reorder,
   hydrate,

@@ -13,6 +13,7 @@ const {
   closeTab,
   splitRight,
   unsplit,
+  swapPanes,
   focusPane,
   reorder,
   hydrate,
@@ -172,6 +173,26 @@ test('unsplit: keeps first pane, drops split mode', () => {
 test('unsplit: noop when not split', () => {
   const s = initialState('a');
   const s2 = unsplit(s);
+  assert.equal(s, s2);
+});
+
+test('swapPanes: flips left and right pane', () => {
+  let s = initialState('a');
+  s = openTab(s, 'b');
+  s = splitRight(s); // pane 0: [a,b]/b, pane 1: [b]/b, focused = 1
+  // Make pane 1 distinct:
+  s = openTab(s, 'c', 1); // pane 1: [b,c]/c
+  s = swapPanes(s);
+  assert.equal(s.panes[0].activeId, 'c');
+  assert.deepEqual(s.panes[0].tabs, ['b', 'c']);
+  assert.equal(s.panes[1].activeId, 'b');
+  assert.deepEqual(s.panes[1].tabs, ['a', 'b']);
+  assert.equal(s.focusedPaneIndex, 0);
+});
+
+test('swapPanes: noop when not split', () => {
+  const s = initialState('a');
+  const s2 = swapPanes(s);
   assert.equal(s, s2);
 });
 

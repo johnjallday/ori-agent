@@ -5367,12 +5367,18 @@ body.task-modal-open {
   display: none;
 }
 
+.note-page-secondary-header {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-color, #f3f4f6);
+  background: var(--bg-tertiary, #f9fafb);
+}
+
 .note-page-secondary-tabs {
   display: flex;
   gap: 2px;
   padding: 6px 8px 0;
-  border-bottom: 1px solid var(--border-color, #f3f4f6);
-  background: var(--bg-tertiary, #f9fafb);
+  flex: 1 1 auto;
   overflow-x: auto;
 }
 
