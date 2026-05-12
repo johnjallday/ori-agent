@@ -2393,10 +2393,174 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   color: var(--primary-color);
 }
 
-.note-editor-container {
+.note-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.note-editor-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: stretch;
   position: relative;
   min-height: 400px;
   max-height: 60vh;
+}
+
+.note-modal-editor-grid {
+  grid-template-columns: 1fr;
+}
+
+.note-modal-editor-grid .note-editor-center {
+  grid-column: 1;
+}
+
+.note-toc-rail {
+  grid-column: 1;
+}
+
+.note-editor-center {
+  grid-column: 2;
+}
+
+.note-assist-rail {
+  grid-column: 3;
+}
+
+.note-toc-rail,
+.note-assist-rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  width: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.15s ease;
+}
+
+/* The `display: flex` rule above wins over the user-agent stylesheet's
+   `[hidden] { display: none }` (same specificity, author wins). Make the
+   rail respect its `hidden` attribute explicitly so showRail/hideRail
+   actually toggle visibility. */
+.note-toc-rail[hidden],
+.note-assist-rail[hidden] {
+  display: none;
+}
+
+.note-assist-rail {
+  width: 320px;
+}
+
+.note-toc-rail {
+  border-right: 1px solid var(--border-color);
+}
+
+.note-assist-rail {
+  border-left: 1px solid var(--border-color);
+}
+
+.note-toc-rail[data-collapsed="true"],
+.note-assist-rail[data-collapsed="true"] {
+  width: 36px;
+}
+
+.note-toc-rail[data-collapsed="true"] .note-rail-content,
+.note-toc-rail[data-collapsed="true"] .note-rail-empty,
+.note-assist-rail[data-collapsed="true"] .note-rail-content,
+.note-assist-rail[data-collapsed="true"] .note-rail-empty {
+  display: none;
+}
+
+.note-rail-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.note-rail-content {
+  flex: 1 1 auto;
+  padding: 8px 0;
+}
+
+.note-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.note-toc-item {
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid transparent;
+}
+
+.note-toc-item.is-active {
+  border-left-color: var(--primary-color, #6366f1);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.note-toc-item.is-dragging {
+  opacity: 0.4;
+}
+
+.note-toc-item.is-drop-target {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.note-toc-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px 12px 4px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.note-toc-entry:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.note-toc-item.is-active .note-toc-entry {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.note-editor-center {
+  position: relative;
+  min-width: 0; /* allow grid track to shrink below content size */
+  width: 100%;
+}
+
+.note-editor-container {
+  position: relative;
+  width: 100%;
+  min-height: 400px;
+  max-height: 60vh;
+}
+
+@media (max-width: 1100px) {
+  /* On narrower viewports, the AI assist rail floats over the editor instead
+     of pushing it narrow. The TOC rail stays in the grid (it's smaller). */
+  .note-editor-grid {
+    grid-template-columns: auto 1fr 0;
+  }
+  .note-assist-rail:not([hidden]) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.18);
+  }
 }
 
 .note-content-input {
@@ -2433,6 +2597,35 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   line-height: 1.6;
 }
 
+.note-live-editor {
+  cursor: text;
+  user-select: text;
+}
+
+/* When the note is empty the single rendered line is just a <br> — hard to
+   see and hard to click. Show a placeholder hint inside it and give the
+   preview enough height to act as a comfortable click target. */
+.note-preview-content > .note-live-line.is-empty:only-child {
+  min-height: 60px;
+  position: relative;
+}
+
+.note-preview-content > .note-live-line.is-empty:only-child::before {
+  content: "Click here to start writing in Markdown…";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--text-tertiary, #9ca3af);
+  font-style: italic;
+  pointer-events: none;
+}
+
+.note-live-editor::selection,
+.note-live-editor *::selection {
+  background: rgba(99, 102, 241, 0.45);
+  color: var(--text-primary);
+}
+
 .note-preview-content h1,
 .note-preview-content h2,
 .note-preview-content h3,
@@ -2448,8 +2641,16 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-preview-content h2 { font-size: 1.3em; }
 .note-preview-content h3 { font-size: 1.15em; }
 
+.note-preview-content > :first-child {
+  margin-top: 0;
+}
+
 .note-preview-content p {
   margin-bottom: 1em;
+}
+
+.note-preview-content a {
+  color: var(--primary-color);
 }
 
 .note-preview-content code {
@@ -2479,11 +2680,202 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   padding-left: 1.5em;
 }
 
+.note-preview-content li {
+  margin: 0.3em 0;
+}
+
+.note-preview-content input[type="checkbox"] {
+  margin-right: 0.45em;
+}
+
 .note-preview-content blockquote {
   border-left: 3px solid var(--primary-color);
   padding-left: 12px;
   margin: 1em 0;
   color: var(--text-secondary);
+}
+
+.note-preview-content hr {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 1.4em 0;
+}
+
+.note-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.note-preview-content th,
+.note-preview-content td {
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-preview-content th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.note-live-line {
+  min-height: 1.6em;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.note-live-line-rendered {
+  outline: none;
+}
+
+.note-live-line-rendered:hover,
+.note-live-line-rendered:focus {
+  background: var(--bg-hover);
+}
+
+.note-live-line-rendered > :first-child {
+  margin-top: 0;
+}
+
+.note-live-line-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.note-live-line-rendered.is-empty {
+  min-height: 1.6em;
+}
+
+.note-heading-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.note-heading-fold {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-left: -0.15rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--primary-color);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-heading-fold:hover,
+.note-heading-fold:focus {
+  background: rgba(99, 102, 241, 0.14);
+  outline: none;
+}
+
+.note-heading-content {
+  min-width: 0;
+}
+
+.note-heading-content > :first-child {
+  margin-top: 0;
+}
+
+.note-heading-content > :last-child {
+  margin-bottom: 0;
+}
+
+.note-heading-fold-summary {
+  color: var(--text-tertiary);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.note-task-line {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  max-width: 100%;
+  cursor: text;
+}
+
+.note-task-checkbox {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  margin-top: 0.3em;
+  cursor: pointer;
+  accent-color: var(--primary-color);
+}
+
+.note-task-content {
+  min-width: 0;
+}
+
+.note-task-content > :first-child {
+  margin-top: 0;
+}
+
+.note-task-content > :last-child {
+  margin-bottom: 0;
+}
+
+.note-live-line.is-editing {
+  padding: 0;
+}
+
+.note-live-line-input {
+  display: block;
+  width: 100%;
+  min-height: 1.6em;
+  padding: 1px 4px;
+  border: none;
+  border-radius: 4px;
+  outline: 1px solid transparent;
+  overflow: hidden;
+  resize: none;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-size: inherit;
+  line-height: 1.6;
+}
+
+.note-live-line-input:focus {
+  outline-color: rgba(99, 102, 241, 0.28);
+}
+
+.note-live-line-input.is-heading-1,
+.note-live-line-input.is-heading-2,
+.note-live-line-input.is-heading-3,
+.note-live-line-input.is-heading-4,
+.note-live-line-input.is-heading-5,
+.note-live-line-input.is-heading-6 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.note-live-line-input.is-heading-1 { font-size: 1.5em; }
+.note-live-line-input.is-heading-2 { font-size: 1.3em; }
+.note-live-line-input.is-heading-3 { font-size: 1.15em; }
+
+.note-live-block-input {
+  min-height: 6.4em;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .note-editor-container,
+  .note-content-input,
+  .note-preview-content {
+    max-height: 65vh;
+  }
 }
 
 /* Search results for notes */
@@ -4009,33 +4401,145 @@ body.task-modal-open {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(99, 102, 241, 0.02) 100%);
 }
 
+.note-ai-panel[hidden],
+.note-ai-message[hidden],
+.note-ai-generating[hidden],
+.note-ai-draft[hidden],
+.note-ai-draft-actions[hidden] {
+  display: none !important;
+}
+
+.note-modal-ai-panel {
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary));
+}
+
 .note-ai-panel-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-color);
 }
 
 .note-ai-panel-body {
-  padding: 16px;
+  padding: 10px 12px;
+}
+
+.note-ai-form-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+  gap: 10px;
+}
+
+.note-ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.note-ai-field label,
+.note-ai-field > span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.note-ai-message {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-ai-message-error {
+  color: #ef4444;
+}
+
+.note-ai-generating {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-ai-draft {
+  margin-top: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.note-ai-draft-title {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-ai-draft-content {
+  max-height: 180px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: var(--text-primary);
+  background: transparent;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .note-ai-panel-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
+}
+
+.note-ai-draft-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* When the rail is hosting the Generate-with-AI panel, hide the suggestion
+   stack / empty state / status bar so the form is the focal content. */
+.note-assist-rail.is-generating > [data-role="empty"],
+.note-assist-rail.is-generating > [data-role="content"],
+.note-assist-rail.is-generating > .note-ai-status-bar {
+  display: none !important;
 }
 
 .note-toolbar-btn.ai-active {
   background: rgba(99, 102, 241, 0.15);
   color: var(--primary-color);
+}
+
+@media (max-width: 760px) {
+  .note-ai-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .note-ai-panel-footer {
+    justify-content: stretch;
+  }
+
+  .note-ai-panel-footer .modern-btn,
+  .note-ai-draft-actions,
+  .note-ai-draft-actions .modern-btn {
+    width: 100%;
+  }
 }
 
 /* =============================================================================
@@ -4213,4 +4717,1438 @@ body.task-modal-open {
 .task-file-remove:hover {
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
+}
+
+/* =============================================================================
+   Note AI Assist — selection action bar + suggestion cards
+   ============================================================================= */
+
+.note-ai-action-bar {
+  position: fixed;
+  z-index: 1080; /* above bootstrap modal (1055) */
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+}
+
+.note-ai-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.note-ai-action-btn:hover {
+  background: var(--bg-hover);
+}
+
+.note-ai-ask-wrap {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border-color);
+}
+
+.note-ai-action-bar.is-asking .note-ai-ask-wrap {
+  display: flex;
+}
+
+.note-ai-action-bar.is-asking .note-ai-action-btn {
+  display: none;
+}
+
+.note-ai-ask-input {
+  width: 240px;
+  padding: 4px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.note-ai-ask-send {
+  background: var(--primary-color, #6366f1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* --- Suggestion cards in the assist rail --- */
+
+.note-ai-card {
+  margin: 8px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  position: relative;
+}
+
+.note-ai-card.is-staged {
+  border-left: 3px solid var(--primary-color, #6366f1);
+}
+
+.note-ai-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.note-ai-card-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.note-ai-card-time {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.note-ai-card-discard {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.note-ai-card-discard:hover {
+  color: #ef4444;
+}
+
+.note-ai-card-original {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  max-height: 4.4em;
+  overflow: hidden;
+}
+
+.note-ai-card-original-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.note-ai-card-original-text {
+  margin: 4px 0 0;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+
+.note-ai-card-output {
+  margin-bottom: 8px;
+}
+
+.note-ai-card-output-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.note-ai-card-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  padding: 8px 0;
+}
+
+.note-ai-card-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.note-ai-card-retry {
+  align-self: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.note-ai-card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color);
+  margin-bottom: 6px;
+}
+
+.note-ai-card-mode {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-ai-card-mode select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.note-ai-card-stage,
+.note-ai-card-copy {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.note-ai-card.is-staged .note-ai-card-stage {
+  background: var(--primary-color, #6366f1);
+  color: white;
+  border-color: var(--primary-color, #6366f1);
+}
+
+.note-ai-card-refine {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.note-ai-card-refine-input {
+  flex: 1 1 auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.note-ai-card-refine-send {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.note-ai-status-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.note-ai-review-btn {
+  margin-left: auto;
+  background: var(--primary-color, #6366f1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.note-ai-review-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- Review & Commit pane --- */
+
+.note-ai-review-pane {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.note-ai-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.note-ai-review-back {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.note-ai-review-back:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.note-ai-review-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.note-ai-review-hunk {
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.note-ai-review-hunk.has-conflict {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.note-ai-review-hunk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.note-ai-review-hunk-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.note-ai-review-unstage {
+  margin-left: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.note-ai-review-diff {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.note-ai-review-diff .note-ai-diff-added {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.08);
+  display: block;
+}
+
+.note-ai-review-diff .note-ai-diff-removed {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+  display: block;
+}
+
+.note-ai-review-conflict {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  color: #dc2626;
+  font-size: 11px;
+}
+
+.note-ai-review-footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 8px;
+}
+
+.note-ai-discard-all {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.note-ai-commit {
+  margin-left: auto;
+  background: var(--primary-color, #6366f1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note-ai-commit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.note-ai-card-quick {
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.note-ai-card-quick:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* =============================================================================
+   Dedicated note page (/notes/<id>)
+   ============================================================================= */
+
+.note-page {
+  display: flex;
+  flex-direction: column;
+  /* Full viewport minus navbar; the editor grid expands inside this. */
+  height: calc(100vh - 56px);
+  background: var(--bg-primary);
+}
+
+.note-page-top-bar {
+  flex: 0 0 auto;
+  padding: 12px 20px 0 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.note-page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.note-page-breadcrumb .breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.note-page-breadcrumb .breadcrumb-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.note-page-breadcrumb .breadcrumb-sep {
+  color: var(--text-tertiary);
+}
+
+.note-page-breadcrumb .breadcrumb-current {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.note-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 10px 0;
+}
+
+.note-page-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.note-page-editor-grid {
+  flex: 1 1 auto;
+  /* Override the modal cap so the page fills the viewport. */
+  max-height: none;
+  min-height: 0;
+  height: 100%;
+}
+
+/* Editor center should fill its grid track. */
+.note-page-editor-grid .note-editor-center,
+.note-page-editor-grid .note-editor-container,
+.note-page-editor-grid .note-content-input,
+.note-page-editor-grid .note-preview-content {
+  height: 100%;
+  max-height: none;
+}
+
+/* The page is always in live-preview mode — make the preview pane visible by
+   default. The textarea inside is hidden via inline style. */
+.note-page-editor-grid .note-preview-content {
+  display: block !important;
+}
+
+.note-page-loading,
+.note-page-error {
+  padding: 24px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.note-page-error {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.06);
+  border-radius: 6px;
+  margin: 16px;
+}
+
+/* =============================================================================
+   Wikilinks ([[Other Note]] references rendered as inline links)
+   ============================================================================= */
+
+.note-wikilink {
+  display: inline;
+  color: var(--primary-color, #6366f1);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--primary-color, #6366f1);
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.note-wikilink:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom-style: solid;
+}
+
+.note-wikilink.note-wikilink-broken {
+  color: #ea580c;
+  border-bottom-color: #ea580c;
+  border-bottom-style: dashed;
+}
+
+.note-wikilink.note-wikilink-broken:hover {
+  background: rgba(234, 88, 12, 0.08);
+}
+
+/* =============================================================================
+   Backlinks panel (notes that reference this one via [[wikilinks]])
+   ============================================================================= */
+
+.note-backlinks-section {
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  margin-top: 12px;
+  padding: 10px 4px 4px;
+}
+
+.note-backlinks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding: 0 6px;
+}
+
+.note-backlinks-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+.note-backlinks-count {
+  font-size: 10px;
+  color: var(--text-secondary, #64748b);
+  background: var(--bg-tertiary, rgba(99, 102, 241, 0.08));
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.note-backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-backlink-item {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.note-backlink-item:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.06));
+  border-color: var(--border-color, #e5e7eb);
+  text-decoration: none;
+}
+
+.note-backlink-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #111827);
+}
+
+.note-backlink-ws {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+}
+
+.note-backlink-snippet {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary, #64748b);
+  margin-top: 2px;
+  /* Clamp long snippets to two lines so the rail stays scannable. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.note-backlink-mark {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--primary-color, #6366f1);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* =============================================================================
+   Page-level multi-note tab strip (above the editor area)
+   ============================================================================= */
+
+.note-tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-tertiary, #f9fafb);
+  overflow-x: auto;
+}
+
+.note-tab-strip[hidden] {
+  display: none;
+}
+
+.note-tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  position: relative;
+  top: 1px; /* tuck into the bottom border when active */
+  max-width: 220px;
+  font-size: 12px;
+}
+
+.note-tab.is-active {
+  background: var(--bg-secondary, #ffffff);
+  border-color: var(--border-color, #e5e7eb);
+}
+
+.note-tab.is-dragging {
+  opacity: 0.4;
+}
+
+.note-tab.is-drop-target {
+  box-shadow: inset 2px 0 0 var(--primary-color, #6366f1);
+}
+
+.note-tab-list.is-drop-target,
+.note-page-secondary-tabs.is-drop-target {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+/* Detach drop zone — overlays the right edge of the editor area during a
+   tab drag so the user can drop a tab there to split the pane right. */
+.note-page-detach-zone {
+  position: fixed;
+  top: 25%;
+  right: 0;
+  width: 220px;
+  height: 50%;
+  background: rgba(99, 102, 241, 0.08);
+  border: 2px dashed var(--primary-color, #6366f1);
+  border-right: none;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color, #6366f1);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  padding: 0 16px;
+  pointer-events: auto;
+  transition: background-color 120ms ease;
+}
+
+.note-page-detach-zone[hidden] {
+  display: none;
+}
+
+.note-page-detach-zone.is-drop-target {
+  background: rgba(99, 102, 241, 0.18);
+}
+
+.note-tab-button {
+  background: none;
+  border: none;
+  padding: 6px 4px 6px 10px;
+  font: inherit;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  max-width: 180px;
+  text-align: left;
+}
+
+.note-tab.is-active .note-tab-button {
+  color: var(--text-primary, #111827);
+  font-weight: 500;
+}
+
+.note-tab-label {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.note-tab-close {
+  background: none;
+  border: none;
+  padding: 2px 8px 2px 4px;
+  color: var(--text-secondary, #64748b);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.note-tab-close:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.1));
+  color: var(--text-primary, #111827);
+}
+
+.note-tab-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.note-tab-strip-action {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.note-tab-strip-action:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
+  color: var(--primary-color, #6366f1);
+}
+
+.note-tab-strip-action:disabled,
+.note-tab-strip-action[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+/* Split-pane grid (single pane by default; two columns when split). */
+.note-page-pane-grid {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.note-page-pane-grid.is-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+.note-page-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.note-page-pane-primary {
+  flex: 1 1 auto;
+}
+
+.note-page-pane-secondary {
+  border-left: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-primary, #ffffff);
+  display: flex;
+  flex-direction: column;
+}
+
+.note-page-pane-secondary[hidden] {
+  display: none;
+}
+
+.note-page-secondary-header {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-color, #f3f4f6);
+  background: var(--bg-tertiary, #f9fafb);
+}
+
+.note-page-secondary-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+
+.note-page-secondary-tabs .note-tab {
+  cursor: pointer;
+}
+
+.note-tab-close-inline {
+  margin-left: 6px;
+  padding: 0 4px;
+  color: var(--text-secondary, #64748b);
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 50%;
+}
+
+.note-tab-close-inline:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.1));
+  color: var(--text-primary, #111827);
+}
+
+.note-page-secondary-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 24px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.note-page-secondary-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.note-page-secondary-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.note-page-secondary-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 16px 24px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #111827);
+}
+
+.note-page-secondary-editor[readonly] {
+  background: var(--bg-tertiary, #f9fafb);
+  color: var(--text-secondary, #64748b);
+}
+
+.note-page-secondary-banner {
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+}
+
+.note-page-secondary-status {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  padding: 0 8px;
+  align-self: center;
+  min-width: 60px;
+  text-align: right;
+}
+
+.note-page-secondary-empty {
+  color: var(--text-secondary, #64748b);
+  font-size: 13px;
+  font-style: italic;
+  padding: 16px 24px;
+}
+
+/* =============================================================================
+   Left rail tabs (Notes / Outline)
+   ============================================================================= */
+
+.note-rail-tab-strip {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px 0;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.note-rail-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.note-rail-tab:hover {
+  color: var(--text-primary, #111827);
+}
+
+.note-rail-tab.is-active {
+  color: var(--primary-color, #6366f1);
+  border-bottom-color: var(--primary-color, #6366f1);
+}
+
+.note-rail-tab-pane {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.note-rail-tab-pane[hidden] {
+  display: none;
+}
+
+.note-rail-notes-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color, #f3f4f6);
+}
+
+.note-rail-notes-search input {
+  width: 100%;
+  font-size: 12px;
+}
+
+.note-rail-notes-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.note-rail-note-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-primary, #111827);
+  cursor: pointer;
+}
+
+.note-rail-note-item:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.06));
+  border-color: var(--border-color, #e5e7eb);
+}
+
+.note-rail-note-item.is-active {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #6366f1);
+  font-weight: 500;
+}
+
+.note-rail-note-name {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-rail-new-note {
+  margin: 6px 8px 10px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+}
+
+.note-rail-new-note:hover {
+  border-color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #6366f1);
+}
+
+/* When the rail is collapsed the tab strip and panes should hide too. The
+   existing .note-toc-rail[data-collapsed="true"] rule already hides the
+   inner content; explicit reinforcement keeps the strip from leaking when
+   collapsed. */
+.note-toc-rail[data-collapsed="true"] .note-rail-tab-strip,
+.note-toc-rail[data-collapsed="true"] .note-rail-tab-pane {
+  display: none;
+}
+
+/* =============================================================================
+   Workspace Notes Hub (/workspaces/<id>/notes)
+   ============================================================================= */
+
+.workspace-notes-hub {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.workspace-notes-hub-header {
+  margin-bottom: 16px;
+}
+
+.workspace-notes-hub-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-notes-hub-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.workspace-notes-hub-count {
+  color: var(--text-secondary, #64748b);
+  font-size: 13px;
+}
+
+.workspace-notes-hub-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-notes-hub-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.workspace-notes-hub-search svg {
+  position: absolute;
+  left: 8px;
+  color: var(--text-secondary, #64748b);
+  pointer-events: none;
+}
+.workspace-notes-hub-search input {
+  padding-left: 28px;
+  min-width: 240px;
+}
+
+.workspace-notes-hub-body {
+  background: var(--bg-secondary, #ffffff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.workspace-notes-hub-loading,
+.workspace-notes-hub-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-secondary, #64748b);
+  font-size: 13px;
+}
+
+.workspace-notes-hub-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.workspace-notes-hub-table thead {
+  background: var(--bg-tertiary, #f9fafb);
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.workspace-notes-hub-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.workspace-notes-hub-th-checkbox,
+.workspace-notes-hub-td-checkbox {
+  width: 32px;
+  text-align: center;
+}
+
+.workspace-notes-hub-th-actions,
+.workspace-notes-hub-td-actions {
+  width: 48px;
+  text-align: right;
+}
+
+.hub-sort-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+.hub-sort-arrow {
+  font-size: 9px;
+  color: var(--primary-color, #6366f1);
+  margin-left: 4px;
+}
+
+.workspace-notes-hub-row {
+  border-top: 1px solid var(--border-color, #f3f4f6);
+}
+
+.workspace-notes-hub-row:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.04));
+}
+
+.workspace-notes-hub-row.is-selected {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.workspace-notes-hub-table td {
+  padding: 10px 12px;
+  vertical-align: top;
+}
+
+.workspace-notes-hub-title-link {
+  font-weight: 500;
+  color: var(--text-primary, #111827);
+  text-decoration: none;
+}
+.workspace-notes-hub-title-link:hover {
+  color: var(--primary-color, #6366f1);
+  text-decoration: underline;
+}
+
+.workspace-notes-hub-snippet {
+  margin-top: 3px;
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-notes-hub-td-time {
+  color: var(--text-secondary, #64748b);
+  white-space: nowrap;
+}
+
+.hub-row-action {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+}
+.hub-row-action:hover {
+  background: var(--bg-tertiary, #f3f4f6);
+  color: var(--primary-color, #6366f1);
+}
+
+/* =============================================================================
+   Search Palette (⌘K)
+   ============================================================================= */
+
+.search-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 1090; /* above bootstrap modal (1055) and our action bar (1080) */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.search-palette[hidden] {
+  display: none;
+}
+
+.search-palette-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.search-palette-dialog {
+  position: relative;
+  width: min(620px, 92vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.search-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.search-palette-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+}
+
+.search-palette-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.search-palette-kbd {
+  font-size: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-secondary);
+}
+
+.search-palette-status {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.06);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.search-palette-results {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.search-palette-empty {
+  padding: 20px 14px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.search-palette-section + .search-palette-section {
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.search-palette-section-label {
+  padding: 6px 14px 4px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.search-palette-row,
+.search-palette-recent-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.search-palette-row.is-selected {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.search-palette-row-icon {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  min-width: 18px;
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.search-palette-row-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.search-palette-row-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-palette-row-title mark,
+.search-palette-row-snippet mark {
+  background: rgba(99, 102, 241, 0.25);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.search-palette-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.search-palette-row-ws {
+  color: var(--text-secondary);
+}
+
+.search-palette-row-snippet {
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.search-palette-recent-row {
+  color: var(--text-secondary);
+}
+
+.search-palette-recent-row:hover {
+  background: var(--bg-hover);
+}
+
+.search-palette-recent-icon {
+  color: var(--text-tertiary);
+  width: 18px;
+  text-align: center;
 }

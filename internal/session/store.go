@@ -129,6 +129,12 @@ type NoteStore interface {
 	// SearchNotes performs full-text search across note names and content.
 	// Returns results with matching text snippets for display.
 	SearchNotes(ctx context.Context, query string, limit int) ([]NoteSearchResult, error)
+
+	// SearchHeadings performs full-text search across note headings across all workspaces.
+	SearchHeadings(ctx context.Context, query string, limit int) ([]HeadingSearchResult, error)
+
+	// SearchBacklinks returns notes that link to the given note via wikilinks.
+	SearchBacklinks(ctx context.Context, noteID string, limit int) ([]BacklinkResult, error)
 }
 
 // HybridStore combines SessionStore, WorkspaceStore, and NoteStore with caching capabilities.

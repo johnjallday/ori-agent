@@ -20,15 +20,25 @@ func (h *Handler) HandleNotes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/notes")
 	path = strings.TrimPrefix(path, "/")
 
-	// Handle search endpoint
+	// Handle search endpoints
 	if path == "search" {
 		h.searchNotes(w, r)
+		return
+	}
+	if path == "search/headings" {
+		h.searchHeadings(w, r)
 		return
 	}
 
 	if path != "" && !strings.Contains(path, "/") {
 		// This is a request for a specific note
 		h.handleNote(w, r, path)
+		return
+	}
+
+	// /api/notes/{id}/backlinks
+	if parts := strings.SplitN(path, "/", 3); len(parts) == 2 && parts[1] == "backlinks" {
+		h.getBacklinks(w, r, parts[0])
 		return
 	}
 
@@ -364,6 +374,52 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"notes": notes,
+	})
+}
+
+// getBacklinks handles GET /api/notes/{id}/backlinks.
+// Returns notes that link to {id} via wikilinks, with a context snippet for each.
+func (h *Handler) getBacklinks(w http.ResponseWriter, r *http.Request, noteID string) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	noteID = strings.TrimSpace(noteID)
+	if noteID == "" {
+		_ = orihttp.RespondBadRequest(w, "note id is required")
+		return
+	}
+
+	results, err := h.store.SearchBacklinks(r.Context(), noteID, 50)
+	if err != nil {
+		logger.Error("Failed to search backlinks", logger.Fields{"note_id": noteID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to load backlinks")
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"backlinks": results,
+	})
+}
+
+// searchHeadings handles GET /api/notes/search/headings.
+// Returns matching headings across all notes for use in the global search palette.
+func (h *Handler) searchHeadings(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) < 2 {
+		_ = orihttp.RespondBadRequest(w, "query must be at least 2 characters")
+		return
+	}
+
+	headings, err := h.store.SearchHeadings(r.Context(), query, 50)
+	if err != nil {
+		logger.Error("Failed to search headings", logger.Fields{"query": query, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to search headings")
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"headings": headings,
 	})
 }
 

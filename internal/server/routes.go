@@ -57,6 +57,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	// Workspaces page routes (primary)
 	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
+	mux.HandleFunc("/notes/", s.handleNotesPageRoute)        // Dedicated note page: /notes/{id}
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
@@ -253,6 +254,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			// =============================================================================
 			// Device Endpoints
 			// =============================================================================
+		}
+	})
+
+	// Notes open-behavior preference: "modal" (default), "page", "page-new-tab".
+	mux.HandleFunc("/api/notes-open-behavior", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.Handlers.Onboarding.GetNotesOpenBehavior(w, r)
+		case http.MethodPost:
+			s.Handlers.Onboarding.SetNotesOpenBehavior(w, r)
+		default:
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 
@@ -519,6 +532,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Note AI generation endpoint
 		if s.Handlers.Note != nil {
 			mux.HandleFunc("/api/notes/generate", s.Handlers.Note.GenerateHandler)
+			mux.HandleFunc("/api/notes/assist", s.Handlers.Note.AssistHandler)
 		}
 		mux.HandleFunc("/api/notes/", s.Handlers.Session.HandleNotes)
 		mux.HandleFunc("/api/notes", s.Handlers.Session.HandleNotes)

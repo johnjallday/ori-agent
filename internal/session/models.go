@@ -397,6 +397,30 @@ type NoteSearchResult struct {
 	Snippets []string `json:"snippets,omitempty"`
 }
 
+// BacklinkResult is one note that links TO the queried note via a wikilink.
+type BacklinkResult struct {
+	SourceNoteID   string `json:"source_note_id"`
+	SourceNoteName string `json:"source_note_name"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkspaceName  string `json:"workspace_name,omitempty"`
+	TargetText     string `json:"target_text"`
+	DisplayText    string `json:"display_text,omitempty"`
+	Position       int    `json:"position"`
+	ContextSnippet string `json:"context_snippet,omitempty"`
+}
+
+// HeadingSearchResult is one matching heading from full-text search across notes.
+type HeadingSearchResult struct {
+	NoteID        string `json:"note_id"`
+	NoteName      string `json:"note_name"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	Level         int    `json:"level"`
+	Text          string `json:"text"`
+	Position      int    `json:"position"`
+	Snippet       string `json:"snippet,omitempty"`
+}
+
 // SessionListItem is a lightweight representation of a session for list views.
 // It omits the full message content to reduce payload size.
 type SessionListItem struct {

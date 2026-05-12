@@ -330,3 +330,58 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
+
+// NotesOpenBehaviorResponse / SetNotesOpenBehaviorRequest carry the
+// preference for how note-open clicks route in the UI.
+type NotesOpenBehaviorResponse struct {
+	Behavior string `json:"behavior"`
+}
+
+type SetNotesOpenBehaviorRequest struct {
+	Behavior string `json:"behavior"`
+}
+
+// GetNotesOpenBehavior returns the current notes-open-behavior preference.
+// GET /api/notes-open-behavior
+func (h *Handler) GetNotesOpenBehavior(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	behavior := h.onboardingMgr.GetNotesOpenBehavior()
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(NotesOpenBehaviorResponse{Behavior: behavior}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SetNotesOpenBehavior persists the user's notes-open-behavior preference.
+// POST /api/notes-open-behavior  body: {"behavior":"modal|page|page-new-tab"}
+func (h *Handler) SetNotesOpenBehavior(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req SetNotesOpenBehaviorRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.Behavior == "" {
+		orihttp.BadRequest(w, "behavior is required")
+		return
+	}
+
+	if err := h.onboardingMgr.SetNotesOpenBehavior(req.Behavior); err != nil {
+		orihttp.BadRequest(w, "Failed to set notes_open_behavior: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(NotesOpenBehaviorResponse{Behavior: req.Behavior}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}

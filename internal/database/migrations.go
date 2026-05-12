@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 15
+const schemaVersion = 17
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -95,6 +95,10 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration014WorkspaceNoteVaultReferences(ctx)
 	case 15:
 		return db.migration015WorkspaceVersion(ctx)
+	case 16:
+		return db.migration016NoteHeadingsIndex(ctx)
+	case 17:
+		return db.migration017NoteLinks(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -872,6 +876,107 @@ func (db *DB) migration013RemoveLegacyVaultCatalogRows(ctx context.Context) erro
 	}
 
 	return tx.Commit()
+}
+
+// migration017NoteLinks creates the note_links table that powers wikilinks
+// (`[[Other Note]]` references) and the Backlinks panel. Each row is one
+// outbound link from a note. target_note_id is nullable for broken links —
+// references to titles that don't currently match any note.
+func (db *DB) migration017NoteLinks(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_notes")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS note_links (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_note_id TEXT NOT NULL,
+			target_note_id TEXT,
+			target_text TEXT NOT NULL,
+			display_text TEXT,
+			position INTEGER NOT NULL,
+			FOREIGN KEY (source_note_id) REFERENCES workspace_notes(id) ON DELETE CASCADE,
+			FOREIGN KEY (target_note_id) REFERENCES workspace_notes(id) ON DELETE SET NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_links table: %w", err)
+	}
+
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_note_links_source ON note_links(source_note_id)",
+		"CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_note_id)",
+		"CREATE INDEX IF NOT EXISTS idx_note_links_target_text ON note_links(target_text)",
+	}
+	for _, stmt := range indexes {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create note_links index: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration016NoteHeadingsIndex creates the note_headings table, its FTS5 mirror,
+// and the delete trigger that keeps the FTS in sync. Backfill of existing notes
+// happens at runtime in session.NewHybridStore (database cannot import session).
+func (db *DB) migration016NoteHeadingsIndex(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_notes")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS note_headings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			note_id TEXT NOT NULL,
+			level INTEGER NOT NULL,
+			text TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			FOREIGN KEY (note_id) REFERENCES workspace_notes(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_headings table: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_note_headings_note_id ON note_headings(note_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_headings index: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE VIRTUAL TABLE IF NOT EXISTS note_headings_fts USING fts5(
+			text,
+			note_id UNINDEXED,
+			tokenize='porter unicode61'
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_headings FTS table: %w", err)
+	}
+
+	// Triggers: insert/delete pairs on note_headings keep note_headings_fts in sync.
+	// Updates are not needed because callers always delete-then-insert per note.
+	headingTriggers := []string{
+		`CREATE TRIGGER IF NOT EXISTS note_headings_ai AFTER INSERT ON note_headings BEGIN
+			INSERT INTO note_headings_fts(rowid, text, note_id) VALUES (new.id, new.text, new.note_id);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS note_headings_ad AFTER DELETE ON note_headings BEGIN
+			DELETE FROM note_headings_fts WHERE rowid = old.id;
+		END`,
+	}
+	for _, trigger := range headingTriggers {
+		if _, err := db.ExecContext(ctx, trigger); err != nil {
+			return fmt.Errorf("failed to create note_headings trigger: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (db *DB) migration015WorkspaceVersion(ctx context.Context) error {

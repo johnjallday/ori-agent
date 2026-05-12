@@ -128,3 +128,43 @@ func TestManager_SetNames_DefaultAssistantName(t *testing.T) {
 		t.Fatalf("expected default assistant name %s, got %q", DefaultAssistantName, assistantName)
 	}
 }
+
+func TestManager_NotesOpenBehavior_DefaultsToModal(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+	if got := mgr.GetNotesOpenBehavior(); got != "modal" {
+		t.Fatalf("expected default notes_open_behavior 'modal', got %q", got)
+	}
+}
+
+func TestManager_NotesOpenBehavior_RoundTrip(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+
+	if err := mgr.SetNotesOpenBehavior("page"); err != nil {
+		t.Fatalf("SetNotesOpenBehavior(page) failed: %v", err)
+	}
+	if got := mgr.GetNotesOpenBehavior(); got != "page" {
+		t.Fatalf("expected 'page', got %q", got)
+	}
+
+	if err := mgr.SetNotesOpenBehavior("page-new-tab"); err != nil {
+		t.Fatalf("SetNotesOpenBehavior(page-new-tab) failed: %v", err)
+	}
+
+	// Reload should preserve the value.
+	reloaded := NewManager(statePath)
+	if got := reloaded.GetNotesOpenBehavior(); got != "page-new-tab" {
+		t.Fatalf("expected persisted 'page-new-tab', got %q", got)
+	}
+}
+
+func TestManager_NotesOpenBehavior_RejectsInvalid(t *testing.T) {
+	mgr := NewManager(filepath.Join(t.TempDir(), "app_state.json"))
+	if err := mgr.SetNotesOpenBehavior("inline"); err == nil {
+		t.Fatalf("expected error for invalid value, got nil")
+	}
+	if got := mgr.GetNotesOpenBehavior(); got != "modal" {
+		t.Fatalf("expected fallback to 'modal' after rejection, got %q", got)
+	}
+}

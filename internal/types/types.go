@@ -168,6 +168,10 @@ type AppState struct {
 	Version           string             `json:"version"`
 	Theme             string             `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
 	MenuBar           *MenuBarSettings   `json:"menubar,omitempty"` // Menu bar app settings
+	// NotesOpenBehavior controls how clicking a note in the UI opens it.
+	// "modal" (default) preserves the v1 behavior; "page" navigates to /notes/<id>;
+	// "page-new-tab" opens /notes/<id> in a new browser tab.
+	NotesOpenBehavior string `json:"notes_open_behavior,omitempty"`
 }
 
 // AgentRole represents the role of an agent in collaborative workflows

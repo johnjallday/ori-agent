@@ -144,6 +144,162 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteJSON(w, generated)
 }
 
+// AssistRequest is a selection-based AI request. Used by the inline AI Assist
+// sidebar in the notes UI. Unlike GenerateRequest it operates on a text
+// selection within an existing note rather than producing a whole note.
+type AssistRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	AgentID     string `json:"agent_id"`
+	// Action is one of: expand, summarize, rewrite, counter, cite, ask.
+	Action string `json:"action"`
+	// Selection is the highlighted text the action should operate on.
+	Selection string `json:"selection"`
+	// Context is the rest of the note, sent so the model can ground itself.
+	Context string `json:"context,omitempty"`
+	// Prompt is required for action="ask" and ignored otherwise.
+	Prompt string `json:"prompt,omitempty"`
+	// History (optional) is used by refinement requests — prior assistant outputs
+	// for the same selection so the model can iterate.
+	History []AssistHistoryEntry `json:"history,omitempty"`
+}
+
+// AssistHistoryEntry represents a previous suggestion in a refinement chain.
+type AssistHistoryEntry struct {
+	Prompt string `json:"prompt"`
+	Output string `json:"output"`
+}
+
+// AssistResponse is the model's reply.
+type AssistResponse struct {
+	Content string `json:"content"`
+}
+
+// assistActionPromptTemplates maps each preset action to a short instruction the
+// model receives in addition to the selection + context. They live server-side
+// per PRD §9 Open Q4 so they can be tuned without a frontend release.
+var assistActionPromptTemplates = map[string]string{
+	"expand":    "Extend the selected passage with more detail. Stay in the same voice and tone. Do not introduce facts that contradict the surrounding context. Output ONLY the rewritten passage in markdown — no preamble, no commentary.",
+	"summarize": "Produce a tighter, shorter version of the selected passage. Preserve every claim and key detail. Output ONLY the summarized passage in markdown — no preamble, no commentary.",
+	"rewrite":   "Rewrite the selected passage for clarity, flow, and consistency with the surrounding context. Preserve meaning. Output ONLY the rewritten passage in markdown — no preamble, no commentary.",
+	"counter":   "Generate concise counterargument bullets relating to the selected passage. Each bullet must challenge a specific claim and be defensible. Output a markdown bullet list (using `-`). No preamble.",
+	"cite":      "Generate a 'Sources' sub-list with citations relevant to the selected passage. Each entry should be a markdown bullet of the form `- [Title or claim]: brief justification`. If you cannot identify reliable sources, say so explicitly in one bullet. No preamble outside the list.",
+}
+
+// AssistHandler handles POST /api/notes/assist.
+func (h *Handler) AssistHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req AssistRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if strings.TrimSpace(req.Selection) == "" {
+		_ = orihttp.RespondBadRequest(w, "selection is required")
+		return
+	}
+	if req.Action == "ask" {
+		if strings.TrimSpace(req.Prompt) == "" {
+			_ = orihttp.RespondBadRequest(w, "prompt is required for action=ask")
+			return
+		}
+	} else if _, ok := assistActionPromptTemplates[req.Action]; !ok {
+		_ = orihttp.RespondBadRequest(w, "unknown action: "+req.Action)
+		return
+	}
+
+	provider, model, reasoningEffort, maxTokens, err := h.resolveProvider(req.AgentID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
+			"No LLM provider available. Please configure a system model in Settings.", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), GenerateTimeout)
+	defer cancel()
+
+	content, err := h.runAssist(ctx, provider, model, reasoningEffort, &req, maxTokens)
+	if err != nil {
+		logger.Error("Note assist failed", logger.Fields{"action": req.Action, "error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError,
+			"Failed to run AI assist: "+err.Error(), err)
+		return
+	}
+
+	orihttp.WriteJSON(w, AssistResponse{Content: content})
+}
+
+// resolveProvider picks the LLM provider for either an agent (if available)
+// or the system fallback. Mirrors the logic in GenerateHandler.
+func (h *Handler) resolveProvider(agentID string) (llm.Provider, string, string, int, error) {
+	maxTokens := DefaultOutputTokens
+	if agentID != "" {
+		agent, ok := h.store.GetAgent(agentID)
+		if ok && agent != nil && agent.Settings.Provider != "" && agent.Settings.Model != "" {
+			p, err := h.llmFactory.GetProvider(agent.Settings.Provider)
+			if err == nil {
+				if agent.Settings.MaxOutputTokens >= MinOutputTokens {
+					maxTokens = agent.Settings.MaxOutputTokens
+				}
+				return p, agent.Settings.Model,
+					agent.Settings.EffectiveReasoningEffort(agent.Settings.Provider), maxTokens, nil
+			}
+		}
+	}
+	systemProvider, systemModel := h.configManager.GetSystemModel()
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		return nil, "", "", maxTokens, err
+	}
+	return result.Provider, result.Model, h.configManager.GetSystemReasoningEffort(), maxTokens, nil
+}
+
+// runAssist builds the chat messages for an assist request and invokes the LLM.
+// Refinement chains are passed through req.History so the model sees its prior
+// outputs and the user's refinement instructions.
+func (h *Handler) runAssist(ctx context.Context, provider llm.Provider, model, reasoningEffort string, req *AssistRequest, maxTokens int) (string, error) {
+	systemPrompt := `You are an AI writing assistant inside a Markdown note editor. The user has highlighted a passage and asked you to act on it. Always output ONLY the new content in Markdown — never preamble, never JSON, never quoted code blocks unless they are part of the actual content.`
+
+	var actionInstruction string
+	if req.Action == "ask" {
+		actionInstruction = strings.TrimSpace(req.Prompt)
+	} else {
+		actionInstruction = assistActionPromptTemplates[req.Action]
+	}
+
+	userText := actionInstruction + "\n\n"
+	if strings.TrimSpace(req.Context) != "" {
+		userText += "Surrounding note context (for grounding only — do NOT include in your output):\n---\n" + req.Context + "\n---\n\n"
+	}
+	userText += "Selected passage:\n---\n" + req.Selection + "\n---"
+
+	messages := []llm.Message{{Role: llm.RoleUser, Content: userText}}
+	for _, h := range req.History {
+		messages = append(messages, llm.Message{Role: llm.RoleAssistant, Content: h.Output})
+		if strings.TrimSpace(h.Prompt) != "" {
+			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: h.Prompt})
+		}
+	}
+
+	chatReq := llm.ChatRequest{
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+		SystemPrompt:    systemPrompt,
+		Messages:        messages,
+		Temperature:     0.5,
+		MaxTokens:       maxTokens,
+	}
+
+	resp, err := provider.Chat(ctx, chatReq)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.Content), nil
+}
+
 // generateNoteContent uses the LLM to generate note title and content
 func (h *Handler) generateNoteContent(ctx context.Context, provider llm.Provider, model, reasoningEffort, prompt string, maxTokens int) (*GenerateResponse, error) {
 	systemPrompt := `You are a note generation assistant. Based on the user's prompt, generate a note with a title and content.

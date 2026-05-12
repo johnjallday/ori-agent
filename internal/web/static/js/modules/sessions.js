@@ -4854,11 +4854,7 @@ const sessionManager = {
   },
 
   // Escape HTML
-  escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  },
+  escapeHtml(text) { return window.NoteEditor?.escapeHtml(text) ?? String(text ?? ''); },
 
   // Convert hex color to rgba string
   hexToRgba(hex, alpha) {
@@ -4942,11 +4938,83 @@ const sessionManager = {
   currentNote: null,
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
+  // The note editor's four controllers (history / autosave / toc / live)
+  // live in a single mount bundle from note-editor.js. Lazily built via
+  // _ensureMount the first time anything needs them. Backward-compat
+  // getters below (noteHistory, noteAutoSave, noteToc, noteLive) keep
+  // existing call sites working.
+  noteMount: null,
+  noteModalHideInProgress: false,
+  noteModalAllowHide: false,
+  noteAIGeneratedDraft: null,
+  get noteLive() { return this._ensureMount()?.live ?? null; },
+  set noteLive(_v) { /* no-op — mount owns the live instance */ },
+  // Back-compat: the original sessionManager exposed `noteLiveState` as a
+  // bare object. That alias still resolves to the controller's state.
+  get noteLiveState() { return this._ensureLive()?.state; },
+  // Field-level back-compat. Callers that read/write `this.noteLive*` keep
+  // working — the getters/setters target the controller's state.
+  get noteLiveActiveLineIndex() { return this._ensureLive()?.state.activeLineIndex ?? null; },
+  set noteLiveActiveLineIndex(v) { const s = this._ensureLive()?.state; if (s) s.activeLineIndex = v; },
+  get noteLiveActiveRange() { return this._ensureLive()?.state.activeRange ?? null; },
+  set noteLiveActiveRange(v) { const s = this._ensureLive()?.state; if (s) s.activeRange = v; },
+  get noteLiveSelectionAnchorIndex() { return this._ensureLive()?.state.selectionAnchorIndex ?? null; },
+  set noteLiveSelectionAnchorIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionAnchorIndex = v; },
+  get noteLiveSelectionFocusIndex() { return this._ensureLive()?.state.selectionFocusIndex ?? null; },
+  set noteLiveSelectionFocusIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionFocusIndex = v; },
+  get noteLivePointerDown() { return this._ensureLive()?.state.pointerDown ?? null; },
+  set noteLivePointerDown(v) { const s = this._ensureLive()?.state; if (s) s.pointerDown = v; },
+  get noteLiveCollapsedHeadings() {
+    const s = this._ensureLive()?.state;
+    return s ? s.collapsedHeadings : new Set();
+  },
+  set noteLiveCollapsedHeadings(v) { const s = this._ensureLive()?.state; if (s) s.collapsedHeadings = v; },
 
-  // Auto-save state
-  noteAutoSaveTimeout: null,
-  noteIsDirty: false,
-  noteAutoSaveDelay: 3000, // 3 seconds
+  // _ensureMount builds the four-controller bundle on first access. The
+  // mount factory wires history/autosave/toc/live to a shared sub-host.
+  _ensureMount() {
+    if (this.noteMount) return this.noteMount;
+    if (!window.NoteEditor) return null;
+    // mount() owns the render path; sessionManager.renderNoteLiveEditor
+    // delegates to bundle.render. The aiAssist sub-config wires the AI
+    // selection sidebar in the same call (modal-show check stays here via
+    // _readNoteSelection).
+    this.noteMount = window.NoteEditor.mount({
+      getContent: () => this.getNoteContentValue(),
+      setContent: (v) => this.setNoteContentValue(v),
+      getContentLines: () => this.getNoteContentLines(),
+      setContentLines: (lines) => this.setNoteContentLines(lines),
+      isPreviewMode: () => this.isNotePreviewMode,
+      onAutosaveFlush: () => this.autoSaveNote(),
+      aiAssist: {
+        readSelection: () => this._readNoteSelection(),
+        showToast: (msg, kind) => this.showToast?.(msg, kind),
+      },
+    });
+    window.NoteWikilinks?.setWorkspaceContext(
+      () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+    );
+    // Left-rail Notes tab: lazy-init the list. The rail is always shown when
+    // the editor is in preview mode, so the user can switch to Notes even
+    // when this note has no headings.
+    window.NoteRailNotes?.initRail({
+      workspaceIdResolver: () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+      activeNoteId: this.currentNote?.id || null,
+    });
+    return this.noteMount;
+  },
+
+  _ensureLive() { return this._ensureMount()?.live ?? null; },
+  // Compat alias kept for any sites that still spell it _ensureLiveState.
+  _ensureLiveState() { return this._ensureLive()?.state; },
+  // History / autosave / toc all live in the mount bundle. Backward-compat
+  // getters/setters keep call sites that read `this.note*` working.
+  get noteHistory() { return this._ensureMount()?.history ?? null; },
+  set noteHistory(_v) { /* no-op — mount owns it */ },
+  get noteAutoSave() { return this._ensureMount()?.autosave ?? null; },
+  set noteAutoSave(_v) { /* no-op — mount owns it */ },
+  get noteToc() { return this._ensureMount()?.toc ?? null; },
+  set noteToc(_v) { /* no-op — mount owns it */ },
 
   // Load notes for a folder
   async loadFolderNotes(folderId) {
@@ -5226,14 +5294,15 @@ const sessionManager = {
 
   // Bind note events
   bindNoteEvents() {
-    // Note click to open editor (folder tree items)
+    // Note click to open editor (folder tree items). Routes via openNote so
+    // it respects the user's notes_open_behavior preference.
     document.addEventListener('click', (e) => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         e.preventDefault();
         e.stopPropagation();
         const noteId = noteItem.dataset.noteId;
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
       }
 
       // Search result note click
@@ -5242,7 +5311,7 @@ const sessionManager = {
         e.preventDefault();
         e.stopPropagation();
         const noteId = searchNoteItem.dataset.noteId;
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
       }
 
     });
@@ -5271,14 +5340,25 @@ const sessionManager = {
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
     document.getElementById('noteCopyBtn')?.addEventListener('click', () => this.copyCurrentNoteContent());
+    document.getElementById('noteOpenInPageBtn')?.addEventListener('click', () => this.openCurrentNoteAsPage());
 
     // Auto-save: listen for input changes on note title and content
     document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
-    document.getElementById('noteContentInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
+    document.getElementById('noteContentInput')?.addEventListener('input', () => {
+      this.scheduleNoteAutoSave();
+      if (this.isNotePreviewMode) {
+        this.refreshNotePreview();
+        this._scheduleNoteTocRebuild();
+      }
+    });
 
-    // Auto-save on modal close (if there are unsaved changes)
+    // Auto-save before modal close (if there are unsaved changes). The hide
+    // event is cancellable; hidden.bs.modal is too late to protect edits.
+    document.getElementById('noteEditorModal')?.addEventListener('hide.bs.modal', (event) => {
+      this.handleNoteModalBeforeHide(event);
+    });
     document.getElementById('noteEditorModal')?.addEventListener('hidden.bs.modal', () => {
-      this.handleNoteModalClose();
+      this.handleNoteModalHidden();
     });
 
     // Note workspace selector
@@ -5304,9 +5384,17 @@ const sessionManager = {
     // Note AI generation toggle
     document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => this.toggleNoteAIPanel());
 
+    // Rail collapse toggles (TOC + AI Assist). The buttons stay hidden until
+    // the corresponding feature (tasks 3.0 / 4.0) reveals them.
+    document.getElementById('noteTocToggle')?.addEventListener('click', () => this.toggleNoteTocRail());
+    document.getElementById('noteAssistToggle')?.addEventListener('click', () => this.toggleNoteAssistRail());
+
     // Note AI generation buttons
     document.getElementById('noteAIGenerateBtn')?.addEventListener('click', () => this.generateNoteWithAI());
     document.getElementById('noteAICancelBtn')?.addEventListener('click', () => this.hideNoteAIPanel());
+    document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('replace'));
+    document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('append'));
+    document.getElementById('noteAIInsertBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('insert'));
 
     // Note drag start
     document.addEventListener('dragstart', (e) => {
@@ -5364,7 +5452,7 @@ const sessionManager = {
 
     switch (action) {
       case 'edit':
-        this.openNoteEditor(noteId);
+        this.openNote(noteId);
         break;
       case 'attach':
         this.attachNoteFileToChat(noteId);
@@ -5470,27 +5558,36 @@ const sessionManager = {
     this.currentNote = null;
     this.noteModalWorkspaceId = workspaceId;
     this.isNotePreviewMode = false;
+    this.noteAIGeneratedDraft = null;
+    // New note has no ID yet — keep the backlinks section hidden.
+    window.NoteBacklinks?.clearBacklinks();
 
     const modal = document.getElementById('noteEditorModal');
     if (!modal) return;
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
-    const previewContent = document.getElementById('notePreviewContent');
-    const previewToggle = document.getElementById('notePreviewToggle');
     const lastSaved = document.getElementById('noteLastSaved');
     const saveBtn = document.getElementById('saveNoteBtn');
 
     if (nameInput) nameInput.value = '';
     if (contentInput) {
       contentInput.value = '';
-      contentInput.style.display = 'block';
     }
-    if (previewContent) previewContent.style.display = 'none';
-    if (previewToggle) previewToggle.classList.remove('active');
+    this.resetNoteHistory();
+    this.setNotePreviewMode(true);
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) saveBtn.textContent = 'Create Note';
     this.hideNoteVaultReferenceBadge();
+    this._applyNoteRailState();
+    this._initNoteAIAssist();
+    this._setNoteAIAgentDefault(workspaceId).then(() => {
+      window.NoteAIAssist?.onNoteOpened({
+        noteId: null,
+        workspaceId: workspaceId || null,
+        agentId: this._resolveWorkspaceAgentId(),
+      });
+    });
 
     if (workspaceId) {
       this.showNoteWorkspaceBadge(workspaceId, true);
@@ -5530,45 +5627,9 @@ const sessionManager = {
     if (changeBtn) changeBtn.style.display = allowChange ? 'inline-flex' : 'none';
   },
 
-  normalizeNoteVaultReference(ref) {
-    if (!ref || typeof ref !== 'object') return null;
-    const normalized = {
-      vaultName: String(ref.vault_name || ref.vaultName || '').trim(),
-      recordLabel: String(ref.record_label || ref.recordLabel || '').trim(),
-      recordId: String(ref.record_id || ref.recordId || '').trim()
-    };
-    if (!normalized.recordId) return null;
-    return normalized;
-  },
-
-  showNoteVaultReferenceBadge(ref) {
-    const badge = document.getElementById('noteVaultReferenceBadge');
-    const nameSpan = document.getElementById('noteVaultReferenceName');
-    if (!badge || !nameSpan) return;
-
-    const normalized = this.normalizeNoteVaultReference(ref);
-    if (!normalized) {
-      this.hideNoteVaultReferenceBadge();
-      return;
-    }
-
-    const vaultName = normalized.vaultName || 'Private Vault';
-    nameSpan.textContent = `From Vault: ${vaultName}`;
-    badge.title = normalized.recordLabel
-      ? `Vault entry: ${normalized.recordLabel}`
-      : 'Imported from a private vault';
-    badge.style.display = 'block';
-  },
-
-  hideNoteVaultReferenceBadge() {
-    const badge = document.getElementById('noteVaultReferenceBadge');
-    const nameSpan = document.getElementById('noteVaultReferenceName');
-    if (badge) {
-      badge.style.display = 'none';
-      badge.removeAttribute('title');
-    }
-    if (nameSpan) nameSpan.textContent = '';
-  },
+  normalizeNoteVaultReference(ref) { return window.NoteEditor?.normalizeVaultReference(ref) ?? null; },
+  showNoteVaultReferenceBadge(ref) { window.NoteEditor?.showVaultReferenceBadge(ref); },
+  hideNoteVaultReferenceBadge() { window.NoteEditor?.hideVaultReferenceBadge(); },
 
   showNoteWorkspaceSelector() {
     const badge = document.getElementById('noteWorkspaceBadge');
@@ -5618,11 +5679,76 @@ const sessionManager = {
   },
 
   // Open note editor modal by ID
+  // Opens a note in live-preview mode and scrolls to a specific heading by
+  // text. Used by the global search palette (⌘K) when the user picks a
+  // heading result. Falls back to plain openNoteEditor if the heading can't
+  // be located in the loaded source.
+  async openNoteEditorWithHeading(noteId, headingText) {
+    await this.openNoteEditor(noteId);
+    if (!this.isNotePreviewMode) this.setNotePreviewMode(true);
+    const source = this.getNoteContentValue();
+    const lines = source.split('\n');
+    let cursor = 0;
+    for (const line of lines) {
+      if (/^#{1,6}\s+/.test(line) && line.includes(headingText)) {
+        // Wait one frame for live-preview render to settle, then scroll.
+        requestAnimationFrame(() => this._scrollNoteToHeading(cursor));
+        return;
+      }
+      cursor += line.length + 1;
+    }
+  },
+
   async openNoteEditor(noteId) {
+    // Cross-tab presence: if this note is already open in another tab (page
+    // surface), let the user decide whether to open a duplicate copy here.
+    // The check is fast (~150ms timeout) and degrades gracefully when
+    // BroadcastChannel is unsupported.
+    try {
+      const elsewhere = await window.NotePresence?.isOpenElsewhere?.(noteId);
+      if (elsewhere?.open && elsewhere.surface === 'page') {
+        const proceed = window.confirm(
+          'This note is already open in another browser tab. Open it here too?',
+        );
+        if (!proceed) return;
+      }
+    } catch (_) { /* non-fatal */ }
+
     const note = await this.getNote(noteId);
     if (!note) return;
 
     return this._openNoteEditorWithNote(note);
+  },
+
+  // openNote consults the user's `notes_open_behavior` preference and routes
+  // the click to either the modal (default), the dedicated /notes/<id> page,
+  // or a new browser tab. Centralized so every entry point (workspace hub,
+  // ⌘K palette, etc.) routes through the same logic.
+  //
+  // Pass `{ force: 'modal'|'page'|'page-new-tab' }` to override the preference
+  // for affordances like "Open in page" / "Open in modal" buttons.
+  async openNote(noteId, options = {}) {
+    if (!noteId) return;
+    const behavior = options.force || this._readNotesOpenBehavior();
+    if (behavior === 'page') {
+      window.location.href = `/notes/${encodeURIComponent(noteId)}`;
+      return;
+    }
+    if (behavior === 'page-new-tab') {
+      window.open(`/notes/${encodeURIComponent(noteId)}`, '_blank', 'noopener');
+      return;
+    }
+    return this.openNoteEditor(noteId);
+  },
+
+  // _readNotesOpenBehavior pulls from the localStorage mirror written by the
+  // Settings page. Falls back to "modal" when unset or invalid.
+  _readNotesOpenBehavior() {
+    try {
+      const v = localStorage.getItem('note.openBehavior');
+      if (v === 'modal' || v === 'page' || v === 'page-new-tab') return v;
+    } catch (_) {}
+    return 'modal';
   },
 
   // Internal: Open note editor with a full note object
@@ -5633,22 +5759,33 @@ const sessionManager = {
     this.currentNote = note;
     this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;
     this.isNotePreviewMode = false;
+    this.noteAIGeneratedDraft = null;
 
     const modal = document.getElementById('noteEditorModal');
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
-    const previewContent = document.getElementById('notePreviewContent');
-    const previewToggle = document.getElementById('notePreviewToggle');
     const lastSaved = document.getElementById('noteLastSaved');
     const saveBtn = document.getElementById('saveNoteBtn');
 
     if (nameInput) nameInput.value = note.name;
     if (contentInput) {
-      contentInput.value = note.content;
-      contentInput.style.display = 'block';
+      contentInput.value = note.content || '';
     }
-    if (previewContent) previewContent.style.display = 'none';
-    if (previewToggle) previewToggle.classList.remove('active');
+    this.resetNoteHistory();
+    this._applyNoteRailState();
+    this._initNoteAIAssist();
+    this._setNoteAIAgentDefault(this.noteModalWorkspaceId).then(() => {
+      window.NoteAIAssist?.onNoteOpened({
+        noteId: note.id,
+        workspaceId: this.noteModalWorkspaceId,
+        agentId: this._resolveWorkspaceAgentId(),
+      });
+    });
+    // Backlinks: notes referencing this one via [[wikilinks]]. Hidden when none.
+    window.NoteBacklinks?.loadBacklinksFor(note.id);
+    // Left-rail Notes tab: keep the active highlight in sync.
+    window.NoteRailNotes?.setActiveNoteId(note.id);
+    this.setNotePreviewMode(true);
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
     }
@@ -5666,7 +5803,47 @@ const sessionManager = {
     this.loadNoteAIAgents();
 
     const bsModal = new bootstrap.Modal(modal);
+    // Re-render once the modal finishes animating in, then verify the
+    // preview actually painted. If it ended up empty for any reason (a
+    // render-path bug, a CSS regression, an empty note), fall back to
+    // showing the textarea so the user can at least see + edit the
+    // Markdown source.
+    const onShown = () => {
+      modal.removeEventListener('shown.bs.modal', onShown);
+      this.renderNoteLiveEditor();
+      requestAnimationFrame(() => this._verifyNotePreviewVisible());
+    };
+    modal.addEventListener('shown.bs.modal', onShown);
     bsModal.show();
+  },
+
+  // _verifyNotePreviewVisible inspects the preview pane after the modal is
+  // shown. If the textarea has content but the preview rendered nothing (an
+  // unexpected state), exit preview mode so the textarea becomes visible —
+  // the user gets a working editor instead of staring at a blank dark area.
+  _verifyNotePreviewVisible() {
+    const contentInput = document.getElementById('noteContentInput');
+    const previewContent = document.getElementById('notePreviewContent');
+    if (!contentInput || !previewContent) return;
+    const hasContent = (contentInput.value || '').trim().length > 0;
+    const previewEmpty = !previewContent.innerHTML || previewContent.innerHTML.trim() === '';
+    if (hasContent && previewEmpty) {
+      // Diagnostic info — share this output to narrow down the render-path bug.
+      const bundle = this.noteMount;
+      // eslint-disable-next-line no-console
+      console.warn('[note-modal] preview empty; diag:', {
+        noteEditorLoaded: !!window.NoteEditor,
+        bundleExists: !!bundle,
+        bundleKeys: bundle ? Object.keys(bundle) : null,
+        bundleLiveType: bundle ? typeof bundle.live : 'no-bundle',
+        bundleRenderType: bundle ? typeof bundle.render : 'no-bundle',
+        isPreviewMode: this.isNotePreviewMode,
+        textareaLen: (contentInput.value || '').length,
+        previewDisplay: previewContent.style.display,
+        previewInnerHTMLLen: previewContent.innerHTML.length,
+      });
+      this.setNotePreviewMode(false);
+    }
   },
 
   // Create new note for folder (called from folder context menu)
@@ -5712,20 +5889,35 @@ const sessionManager = {
     }
   },
 
+  // Navigate to the dedicated `/notes/<id>` page for the currently-open
+  // note. If the note hasn't been saved yet (no id), flush autosave first
+  // so the URL has something to resolve. Saves the modal's pending edits
+  // before navigating so they aren't lost.
+  async openCurrentNoteAsPage() {
+    // Trigger immediate save so unsaved edits land before navigation.
+    const saved = await this.noteAutoSave?.flushImmediate?.();
+    if (saved === false) {
+      this.showToast('Save failed. Retry before opening this note as a page.', 'error');
+      return;
+    }
+
+    if (!this.currentNote?.id) {
+      this.showToast('Save the note first to get a shareable URL', 'warning');
+      return;
+    }
+    window.location.href = `/notes/${encodeURIComponent(this.currentNote.id)}`;
+  },
+
   // Save current note
   async saveCurrentNote() {
-    // Clear any pending auto-save
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
+    // Cancel any pending auto-save (we're saving now).
+    this.noteAutoSave?.cancel();
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
 
-    // Show saving status
     this.updateNoteSaveStatus('saving');
 
     if (!this.currentNote) {
@@ -5740,8 +5932,7 @@ const sessionManager = {
       const created = await this.createNote(workspaceId, noteName, noteContent);
       if (created) {
         this.currentNote = created;
-        this.noteIsDirty = false;
-        this.updateNoteSaveStatus('saved');
+        this.noteAutoSave?.markClean();
         this.showToast('Note created', 'success');
 
         const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
@@ -5760,8 +5951,7 @@ const sessionManager = {
     const updated = await this.updateNote(this.currentNote.id, updates);
     if (updated) {
       this.currentNote = { ...this.currentNote, ...updated };
-      this.noteIsDirty = false;
-      this.updateNoteSaveStatus('saved');
+      this.noteAutoSave?.markClean();
       this.showToast('Note saved', 'success');
 
       // Refresh folder tree to show updated note name
@@ -5780,186 +5970,188 @@ const sessionManager = {
   // =============================================================================
 
   // Schedule auto-save with debounce
-  scheduleNoteAutoSave() {
-    // Clear any existing timeout
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-    }
+  _ensureNoteAutoSave() { return this._ensureMount()?.autosave ?? null; },
 
-    // Mark as dirty and show unsaved status
-    this.noteIsDirty = true;
-    this.updateNoteSaveStatus('unsaved');
+  scheduleNoteAutoSave() { this._ensureNoteAutoSave()?.schedule(); },
 
-    // Schedule auto-save after delay
-    this.noteAutoSaveTimeout = setTimeout(() => {
-      this.autoSaveNote();
-    }, this.noteAutoSaveDelay);
-  },
-
-  // Perform auto-save
+  // Performs one autosave attempt. Called by the timer or by handleNoteModalClose.
   async autoSaveNote() {
-    if (!this.noteIsDirty) return;
+    const timer = this._ensureNoteAutoSave();
+    if (!timer || !timer.isDirty()) return true;
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
 
-    // Show saving status
-    this.updateNoteSaveStatus('saving');
-
     try {
       if (this.currentNote?.id) {
-        // Update existing note
         const updates = { name: noteName, content: noteContent };
         const updated = await this.updateNote(this.currentNote.id, updates);
         if (updated) {
           this.currentNote = { ...this.currentNote, ...updated };
-          this.noteIsDirty = false;
-          this.updateNoteSaveStatus('saved');
-          // Refresh folder tree to show updated note name
           this.renderFolderTree();
+          // Notify other tabs so any open Backlinks panel can re-fetch.
+          window.NoteBacklinks?.announceNoteSaved?.(this.currentNote.id, noteContent.includes('[['));
+          return true;
         } else {
-          this.updateNoteSaveStatus('error');
+          return false;
         }
       } else {
-        // Create new note (auto-create on first auto-save)
         const workspaceId = this.noteModalWorkspaceId;
         if (!workspaceId) {
-          // Can't auto-create without workspace - show unsaved status
-          this.updateNoteSaveStatus('unsaved');
-          return;
+          // Can't auto-create without workspace; revert to unsaved state.
+          window.NoteEditor.updateSaveStatus('unsaved');
+          return false;
         }
         const created = await this.createNote(workspaceId, noteName, noteContent);
         if (created) {
           this.currentNote = created;
-          this.noteIsDirty = false;
-          this.updateNoteSaveStatus('saved');
-          // Update save button text since we now have a note
           const saveBtn = document.getElementById('saveNoteBtn');
           if (saveBtn) saveBtn.textContent = 'Save';
+          window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
+          return true;
         } else {
-          this.updateNoteSaveStatus('error');
+          return false;
         }
       }
     } catch (error) {
       console.error('Auto-save failed:', error);
+      return false;
+    }
+  },
+
+  updateNoteSaveStatus(status) { window.NoteEditor?.updateSaveStatus(status); },
+
+  handleNoteModalBeforeHide(event) {
+    const timer = this.noteAutoSave;
+    if (this.noteModalAllowHide || !timer?.isDirty?.()) {
+      this.noteModalAllowHide = false;
+      return;
+    }
+
+    event.preventDefault();
+    if (this.noteModalHideInProgress) return;
+    this.noteModalHideInProgress = true;
+
+    timer.flushImmediate().then((saved) => {
+      if (saved === false) {
+        this.showToast('Save failed. Retry save before closing this note.', 'error');
+        this.updateNoteSaveStatus('error');
+        return;
+      }
+      this.noteModalAllowHide = true;
+      const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
+      modal?.hide();
+    }).catch((error) => {
+      console.error('Auto-save before modal close failed:', error);
+      this.showToast('Save failed. Retry save before closing this note.', 'error');
       this.updateNoteSaveStatus('error');
-    }
-  },
-
-  // Update save status indicator
-  updateNoteSaveStatus(status) {
-    const statusContainer = document.getElementById('noteSaveStatus');
-    if (!statusContainer) return;
-
-    // Hide all status elements
-    statusContainer.querySelectorAll('span[class^="note-status-"]').forEach(el => {
-      el.style.display = 'none';
+    }).finally(() => {
+      this.noteModalHideInProgress = false;
     });
-
-    // Show the appropriate status
-    const statusEl = statusContainer.querySelector(`.note-status-${status}`);
-    if (statusEl) {
-      statusEl.style.display = 'inline-flex';
-    }
   },
 
-  // Handle modal close - save any unsaved changes
-  handleNoteModalClose() {
-    // Clear any pending auto-save timeout
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
-
-    // If there are unsaved changes, save immediately (don't wait)
-    if (this.noteIsDirty) {
-      this.autoSaveNote();
-    }
-
-    // Reset dirty state
-    this.noteIsDirty = false;
-    this.updateNoteSaveStatus('saved');
+  handleNoteModalHidden() {
+    this.noteModalAllowHide = false;
+    this.noteModalHideInProgress = false;
   },
 
-  // Reset auto-save state (called when opening a note)
-  resetNoteAutoSaveState() {
-    if (this.noteAutoSaveTimeout) {
-      clearTimeout(this.noteAutoSaveTimeout);
-      this.noteAutoSaveTimeout = null;
-    }
-    this.noteIsDirty = false;
-    this.updateNoteSaveStatus('saved');
+  resetNoteAutoSaveState() { this._ensureNoteAutoSave()?.reset(); },
+
+  // =============================================================================
+  // Note Editor Rails (TOC + AI Assist)
+  // =============================================================================
+  // Both rails are hidden by default. Tasks 3.0 (TOC) and 4.0 (AI Assist) call
+  // showNoteTocRail() / showNoteAssistRail() once they have content to display.
+  // The collapse toggle is per-rail and persisted in localStorage.
+
+  _applyNoteRailState() { window.NoteEditor?.applyAllRailState(); },
+  _applyNoteRailCollapsed(rail) { window.NoteEditor?.applyRailCollapsed(rail); },
+  toggleNoteTocRail() { window.NoteEditor?.toggleRail('toc'); },
+  toggleNoteAssistRail() { window.NoteEditor?.toggleRail('assist'); },
+  showNoteTocRail() { window.NoteEditor?.showRail('toc'); },
+  hideNoteTocRail() { window.NoteEditor?.hideRail('toc'); },
+  showNoteAssistRail() { window.NoteEditor?.showRail('assist'); },
+  hideNoteAssistRail() { window.NoteEditor?.hideRail('assist'); },
+
+  // =============================================================================
+  // Note AI Assist (selection action bar + sidebar wiring)
+  // =============================================================================
+
+  // AI Assist is now wired through the mount() call (see _ensureMount).
+  // _initNoteAIAssist stays as a no-op for any historical callers; the
+  // first time `_ensureMount` runs, NoteAIAssist is hooked up.
+  _initNoteAIAssist() { this._ensureMount(); },
+
+  async _setNoteAIAgentDefault(workspaceId) {
+    return window.NoteEditor?.applyAgentDefaultForWorkspace(workspaceId);
+  },
+
+  _wireNoteAIAgentChange() { window.NoteEditor?.wireAgentChangeHandler(); },
+  _resolveWorkspaceAgentId() { return window.NoteEditor?.getSelectedAgentId() ?? null; },
+  _wireNoteSelectionTracking() {
+    window.NoteEditor?.wireSelectionTracking({
+      onChange: () => window.NoteAIAssist?.onSelectionChanged(this._readNoteSelection()),
+    });
+  },
+
+  // Reads the current text selection in the note editor (modal or page). The
+  // modal-show check is local because the page surface won't have it.
+  _readNoteSelection() {
+    const modal = document.getElementById('noteEditorModal');
+    if (!modal || !modal.classList.contains('show')) return null;
+    return window.NoteEditor?.readSelection({
+      getContent: () => this.getNoteContentValue(),
+      isPreviewMode: () => this.isNotePreviewMode,
+    }) ?? null;
+  },
+
+  // =============================================================================
+  // Note TOC (live-preview only)
+  // =============================================================================
+  // Builds an outline from the rendered Markdown headings via NoteTOC.buildOutline,
+  // renders it into the left rail, syncs the active-section indicator on scroll,
+  // and supports drag-reorder of sections in the underlying Markdown source.
+
+  // Debounced wrapper called from the input listener — TOC rebuild is cheap
+  // but we still avoid running on every keystroke.
+  _ensureNoteToc() { return this._ensureMount()?.toc ?? null; },
+
+  _scheduleNoteTocRebuild() { this._ensureNoteToc()?.scheduleRebuild(); },
+  _renderNoteTocOutline() { this._ensureNoteToc()?.rebuild(); },
+  _scrollNoteToHeading(position) {
+    window.NoteEditor?.scrollToHeadingPosition(this.getNoteContentValue(), position);
+  },
+  _findRenderedHeadingByPosition(position) {
+    return window.NoteEditor?.findRenderedHeadingByPosition(this.getNoteContentValue(), position) ?? null;
+  },
+  _attachNoteTocActiveObserver() { this._ensureNoteToc()?.attachObserver(); },
+  _teardownNoteTocActiveObserver() { this.noteToc?.detachObserver(); },
+  _setActiveTocEntry(lineIndex) {
+    window.NoteEditor?.setActiveTocEntry(lineIndex, this.getNoteContentValue());
   },
 
   // =============================================================================
   // Note AI Generation
   // =============================================================================
 
-  // Toggle AI generation panel visibility
-  toggleNoteAIPanel() {
-    const panel = document.getElementById('noteAIGeneratePanel');
-    const toggle = document.getElementById('noteGenerateAIToggle');
-    if (!panel) return;
-
-    const isVisible = panel.style.display !== 'none';
-    panel.style.display = isVisible ? 'none' : 'block';
-    toggle?.classList.toggle('ai-active', !isVisible);
-  },
-
-  // Hide AI generation panel
+  _openGeneratePanelByDefault() { window.NoteEditor?.openGeneratePanelByDefault(); },
+  toggleNoteAIPanel() { window.NoteEditor?.toggleGeneratePanel(); },
   hideNoteAIPanel() {
-    const panel = document.getElementById('noteAIGeneratePanel');
-    const toggle = document.getElementById('noteGenerateAIToggle');
-    const promptInput = document.getElementById('noteAIPromptInput');
-    const errorDiv = document.getElementById('noteAIError');
-    const generatingDiv = document.getElementById('noteAIGenerating');
-    const generateBtn = document.getElementById('noteAIGenerateBtn');
-
-    if (panel) panel.style.display = 'none';
-    if (toggle) toggle.classList.remove('ai-active');
-    if (promptInput) promptInput.value = '';
-    if (errorDiv) errorDiv.style.display = 'none';
-    if (generatingDiv) generatingDiv.style.display = 'none';
-    if (generateBtn) generateBtn.disabled = false;
+    this.noteAIGeneratedDraft = null;
+    window.NoteEditor?.closeGeneratePanel();
   },
 
   // Load agents for AI generation dropdown
   async loadNoteAIAgents() {
-    const select = document.getElementById('noteAIAgentSelect');
-    if (!select) return;
-
-    try {
-      const response = await fetch('/api/agents');
-      if (!response.ok) throw new Error('Failed to load agents');
-      const data = await response.json();
-
-      // Clear existing options (keep first placeholder)
-      select.innerHTML = '<option value="">Select an agent...</option>';
-
-      // Add agents
-      const agents = data.agents || [];
-      agents.forEach(agent => {
-        const option = document.createElement('option');
-        option.value = agent.name;
-        option.textContent = agent.name;
-        select.appendChild(option);
-      });
-    } catch (error) {
-      console.error('Failed to load agents for note AI:', error);
-    }
+    return window.NoteEditor?.loadAgentsIntoDropdown();
   },
 
   // Generate note content with AI
   async generateNoteWithAI() {
     const agentSelect = document.getElementById('noteAIAgentSelect');
     const promptInput = document.getElementById('noteAIPromptInput');
-    const errorDiv = document.getElementById('noteAIError');
-    const generatingDiv = document.getElementById('noteAIGenerating');
-    const generateBtn = document.getElementById('noteAIGenerateBtn');
-    const nameInput = document.getElementById('noteNameInput');
-    const contentInput = document.getElementById('noteContentInput');
 
     const agentId = agentSelect?.value || '';
     const prompt = promptInput?.value?.trim() || '';
@@ -5967,17 +6159,15 @@ const sessionManager = {
 
     // Validate prompt
     if (!prompt) {
-      if (errorDiv) {
-        errorDiv.textContent = 'Please enter a prompt describing what you want the note to contain.';
-        errorDiv.style.display = 'block';
-      }
+      window.NoteEditor?.setGenerateError?.('Please enter a prompt describing what you want the note to contain.');
       return;
     }
 
     // Hide error, show loading
-    if (errorDiv) errorDiv.style.display = 'none';
-    if (generatingDiv) generatingDiv.style.display = 'block';
-    if (generateBtn) generateBtn.disabled = true;
+    window.NoteEditor?.setGenerateError?.('');
+    window.NoteEditor?.setGenerateStatus?.('');
+    window.NoteEditor?.clearGenerateDraft?.();
+    window.NoteEditor?.setGenerateBusy?.(true);
 
     try {
       const response = await fetch('/api/notes/generate', {
@@ -5991,34 +6181,78 @@ const sessionManager = {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to generate note');
+        let payload = null;
+        try { payload = await response.json(); } catch (_) {}
+        throw new Error(payload?.error || 'Failed to generate note');
       }
 
       const result = await response.json();
-
-      // Update the note fields with generated content
-      if (nameInput && result.title) {
-        nameInput.value = result.title;
-      }
-      if (contentInput && result.content) {
-        contentInput.value = result.content;
-      }
-
-      // Hide AI panel and show success
-      this.hideNoteAIPanel();
-      this.showToast('Note content generated', 'success');
-
+      this.noteAIGeneratedDraft = {
+        title: result.title || '',
+        content: result.content || '',
+      };
+      window.NoteEditor?.setGenerateDraft?.(this.noteAIGeneratedDraft);
+      this.showToast('AI draft generated', 'success');
     } catch (error) {
       console.error('Note AI generation failed:', error);
-      if (errorDiv) {
-        errorDiv.textContent = error.message || 'Failed to generate note content. Please try again.';
-        errorDiv.style.display = 'block';
-      }
+      window.NoteEditor?.setGenerateError?.(error.message || 'Failed to generate note content. Please try again.');
     } finally {
-      if (generatingDiv) generatingDiv.style.display = 'none';
-      if (generateBtn) generateBtn.disabled = false;
+      window.NoteEditor?.setGenerateBusy?.(false);
     }
+  },
+
+  applyGeneratedNoteDraft(mode = 'replace') {
+    const draft = this.noteAIGeneratedDraft;
+    if (!draft?.content) {
+      window.NoteEditor?.setGenerateError?.('Generate a draft before applying it.');
+      return;
+    }
+
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+    if (!contentInput) return;
+
+    const currentContent = contentInput.value || '';
+    const draftContent = String(draft.content || '').trim();
+    const draftTitle = String(draft.title || '').trim();
+    let nextContent = draftContent;
+
+    this.pushNoteUndoState();
+
+    if (mode === 'append') {
+      nextContent = currentContent.trim()
+        ? `${currentContent.replace(/\s+$/, '')}\n\n${draftContent}`
+        : draftContent;
+    } else if (mode === 'insert') {
+      const start = Number.isInteger(contentInput.selectionStart) ? contentInput.selectionStart : currentContent.length;
+      const end = Number.isInteger(contentInput.selectionEnd) ? contentInput.selectionEnd : start;
+      nextContent = `${currentContent.slice(0, start)}${draftContent}${currentContent.slice(end)}`;
+      const cursor = start + draftContent.length;
+      const restoreCursor = () => {
+        try {
+          contentInput.focus();
+          contentInput.setSelectionRange(cursor, cursor);
+        } catch (_) {}
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreCursor);
+      else restoreCursor();
+    } else if (draftTitle && nameInput) {
+      nameInput.value = draftTitle;
+    }
+
+    if (mode !== 'replace' && draftTitle && nameInput && !nameInput.value.trim()) {
+      nameInput.value = draftTitle;
+    }
+    contentInput.value = nextContent;
+
+    if (this.isNotePreviewMode) {
+      this.setNotePreviewMode(true);
+    }
+    this.scheduleNoteAutoSave();
+    this._scheduleNoteTocRebuild();
+    this.noteAIGeneratedDraft = null;
+    this.hideNoteAIPanel();
+    this.showToast('AI draft applied', 'success');
   },
 
   // Expand @notename references in a message with note content
@@ -6076,72 +6310,232 @@ const sessionManager = {
     return expandedMessage;
   },
 
-  // Toggle preview mode
-  toggleNotePreview() {
-    this.isNotePreviewMode = !this.isNotePreviewMode;
-
+  // Set preview mode for the note editor
+  setNotePreviewMode(enabled) {
+    this.isNotePreviewMode = Boolean(enabled);
+    const editorContainer = document.querySelector('.note-editor-container');
     const contentInput = document.getElementById('noteContentInput');
     const previewContent = document.getElementById('notePreviewContent');
     const previewToggle = document.getElementById('notePreviewToggle');
 
     if (this.isNotePreviewMode) {
-      contentInput.style.display = 'none';
-      previewContent.style.display = 'block';
-      previewToggle.classList.add('active');
-
-      // Simple markdown rendering (basic)
-      const markdown = contentInput.value;
-      previewContent.innerHTML = this.renderMarkdown(markdown);
+      editorContainer?.classList.add('is-previewing');
+      if (contentInput) contentInput.style.display = 'none';
+      if (previewContent) {
+        previewContent.style.display = 'block';
+        this.renderNoteLiveEditor();
+      }
+      if (previewToggle) {
+        previewToggle.classList.add('active');
+        previewToggle.setAttribute('aria-pressed', 'true');
+        previewToggle.title = 'Use plain Markdown editor';
+      }
+      this._renderNoteTocOutline();
     } else {
-      contentInput.style.display = 'block';
-      previewContent.style.display = 'none';
-      previewToggle.classList.remove('active');
+      // Optional chaining — _ensureLiveState() can be undefined if the
+      // mount bundle never initialized (which is exactly what _verify…
+      // calls into us for as a fallback).
+      this._ensureLiveState()?.reset();
+      editorContainer?.classList.remove('is-previewing');
+      if (contentInput) contentInput.style.display = 'block';
+      if (previewContent) {
+        previewContent.style.display = 'none';
+        previewContent.innerHTML = '';
+        previewContent.onmousedown = null;
+        previewContent.onmouseup = null;
+        previewContent.onclick = null;
+        previewContent.onkeydown = null;
+        previewContent.oninput = null;
+        previewContent.onchange = null;
+        previewContent.onpaste = null;
+        previewContent.oncut = null;
+        previewContent.onfocusout = null;
+      }
+      if (previewToggle) {
+        previewToggle.classList.remove('active');
+        previewToggle.setAttribute('aria-pressed', 'false');
+        previewToggle.title = 'Show live preview';
+      }
+      this.hideNoteTocRail();
+      this._teardownNoteTocActiveObserver();
     }
   },
 
-  // Simple markdown renderer (basic implementation)
-  renderMarkdown(text) {
-    if (!text) return '<p style="color: var(--text-tertiary);">No content</p>';
-
-    let html = this.escapeHtml(text);
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-    // Bold and italic
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Code blocks
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // Lists
-    html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-    // Blockquotes
-    html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
-
-    // Paragraphs
-    html = html.replace(/\n\n/g, '</p><p>');
-    html = '<p>' + html + '</p>';
-
-    // Clean up empty paragraphs
-    html = html.replace(/<p><\/p>/g, '');
-    html = html.replace(/<p>(<h[1-6]>)/g, '$1');
-    html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<ul>)/g, '$1');
-    html = html.replace(/(<\/ul>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<pre>)/g, '$1');
-    html = html.replace(/(<\/pre>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<blockquote>)/g, '$1');
-    html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
-
-    return html;
+  resetNoteHistory() {
+    this._ensureMount()?.history?.reset();
+    this.noteLiveCollapsedHeadings = new Set();
   },
+
+  getNoteContentValue() { return window.NoteEditor?.getContentValue() ?? ''; },
+  setNoteContentValue(value) { window.NoteEditor?.setContentValue(value); },
+
+  pushNoteUndoState() {
+    if (!this.noteHistory) this.resetNoteHistory();
+    if (!this.noteHistory) return;
+    this.noteHistory.push(this.getNoteContentValue());
+  },
+
+  applyNoteHistoryState(value, options = {}) {
+    if (this.noteHistory) this.noteHistory.applying = true;
+    this.setNoteContentValue(value);
+    this._ensureLiveState().reset();
+    this.clearNoteLiveSelection();
+    this.scheduleNoteAutoSave();
+    if (this.noteHistory) this.noteHistory.applying = false;
+
+    if (this.isNotePreviewMode) {
+      this.renderNoteLiveEditor();
+      const lines = this.getNoteContentLines();
+      const focusIndex = Math.max(0, Math.min(options.focusLineIndex ?? 0, lines.length - 1));
+      const focusLine = document.querySelector(`.note-live-line-rendered[data-line-index="${focusIndex}"]`);
+      focusLine?.focus({ preventScroll: true });
+    }
+  },
+
+  undoNoteEdit() {
+    if (!this.noteHistory) return false;
+    const previous = this.noteHistory.undo(this.getNoteContentValue());
+    if (previous == null) return false;
+    this.applyNoteHistoryState(previous);
+    return true;
+  },
+
+  redoNoteEdit() {
+    if (!this.noteHistory) return false;
+    const next = this.noteHistory.redo(this.getNoteContentValue());
+    if (next == null) return false;
+    this.applyNoteHistoryState(next);
+    return true;
+  },
+
+  isNoteUndoShortcut(event) { return window.NoteEditor?.isUndoShortcut(event) ?? false; },
+  isNoteRedoShortcut(event) { return window.NoteEditor?.isRedoShortcut(event) ?? false; },
+
+  handleNoteHistoryShortcut(event) {
+    if (this.isNoteUndoShortcut(event)) {
+      if (this.undoNoteEdit()) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    if (this.isNoteRedoShortcut(event)) {
+      if (this.redoNoteEdit()) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    return false;
+  },
+
+  refreshNotePreview() {
+    this.renderNoteLiveEditor();
+  },
+
+  getNoteContentLines() { return window.NoteEditor?.getContentLines() ?? ['']; },
+  setNoteContentLines(lines) { window.NoteEditor?.setContentLines(lines); },
+
+  // The following four helpers were moved to note-editor.js as the first slice
+  // of the v2 task 1.0 extraction. The thin delegators stay here so existing
+  // callers (this.noteHeadingLevel(...), etc.) keep working untouched.
+  noteHeadingLevel(line) { return window.NoteEditor?.parseHeadingLevel(line) ?? 0; },
+  noteLineKindClass(line) { return window.NoteEditor?.lineKindClass(line) ?? ''; },
+  parseNoteTaskLine(line) { return window.NoteEditor?.parseTaskLine(line) ?? null; },
+  normalizeCompactTaskListMarkdown(text) {
+    return window.NoteEditor?.normalizeCompactTaskListMarkdown(text) ?? String(text || '');
+  },
+
+  pruneNoteCollapsedHeadings(lines) {
+    window.NoteEditor?.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
+  },
+
+  renderNoteLiveEditor(options = {}) { this._ensureMount()?.render(options); },
+
+  renderNoteLiveInputLine(line, index) {
+    return window.NoteEditor?.renderEditingLine(line, index) ?? '';
+  },
+  renderNoteLiveRangeInput(markdown, startIndex, endIndex) {
+    return window.NoteEditor?.renderEditingRange(markdown, startIndex, endIndex) ?? '';
+  },
+
+  renderNoteLiveRenderedLine(line, index) {
+    const collapsed = this.noteLiveCollapsedHeadings.has(index);
+    return window.NoteEditor?.renderRenderedLine(line, index, collapsed) ?? '';
+  },
+  renderNoteHeadingLine(line, index) {
+    const collapsed = this.noteLiveCollapsedHeadings.has(index);
+    return window.NoteEditor?.renderHeadingLine(line, index, collapsed) ?? '';
+  },
+  renderNoteTaskLine(line, index) {
+    return window.NoteEditor?.renderTaskLine(line, index) ?? '';
+  },
+
+  bindNoteLiveEditorEvents(previewContent) { this._ensureLive()?.bindEvents(previewContent); },
+
+  noteLiveSelectionContains(container, node) {
+    return window.NoteEditor?.selectionContains(container, node) ?? false;
+  },
+  hasNoteLiveTextSelection(container) {
+    return window.NoteEditor?.hasTextSelectionInside(container) ?? false;
+  },
+  didNoteLivePointerDrag(event) {
+    return window.NoteEditor?.pointerDragged(this.noteLivePointerDown, event) ?? false;
+  },
+
+  clearNoteLiveSelection() {
+    window.NoteEditor?.clearWindowSelection();
+    this.noteLiveSelectionFocusIndex = null;
+  },
+
+  selectNoteLiveLineRange(anchorIndex, focusIndex) {
+    this._ensureLive()?.selectLineRange(anchorIndex, focusIndex);
+  },
+
+  getNoteLiveSelectedLineRange(container) {
+    return window.NoteEditor?.getSelectedLineRange(container) ?? null;
+  },
+
+  isNoteLivePrintableKey(event) { return window.NoteEditor?.isPrintableKey(event) ?? false; },
+
+  toggleNoteHeadingFold(lineIndex) {
+    this._ensureLive()?.toggleHeadingFold(lineIndex);
+    // Restore focus to the fold button so keyboard users keep their place.
+    document.querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`)
+      ?.focus({ preventScroll: true });
+  },
+
+  toggleNoteTaskLine(lineIndex, checked) {
+    this._ensureLive()?.toggleTaskLine(lineIndex, checked);
+    document.querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`)
+      ?.focus({ preventScroll: true });
+  },
+
+  deleteNoteLiveLineRange(range) { this._ensureLive()?.deleteRange(range); },
+  replaceNoteLiveLineRange(range, replacement) { this._ensureLive()?.replaceRange(range, replacement); },
+  editNoteLiveLineRange(range) { this._ensureLive()?.editRange(range); },
+  activateNoteLiveLine(lineIndex, cursorPosition = null) {
+    this._ensureLive()?.activate(lineIndex, cursorPosition);
+  },
+
+
+  handleNoteLiveInputChange(input) { this._ensureLive()?.handleInputChange(input); },
+  handleNoteLiveRangeInputChange(input) { this._ensureLive()?.handleRangeInputChange(input); },
+  handleNoteLiveRangeInputKeydown(event, input) { this._ensureLive()?.handleRangeInputKeydown(event, input); },
+  handleNoteLiveInputKeydown(event, input) { this._ensureLive()?.handleInputKeydown(event, input); },
+  resizeNoteLiveInput(input) { window.NoteEditor?.resizeLiveInput(input); },
+
+  renderMarkdownLine(line) { return window.NoteEditor?.renderMarkdownLine(line) ?? ''; },
+  renderInlineMarkdown(text) { return window.NoteEditor?.renderInlineMarkdown(text) ?? ''; },
+
+  // Toggle preview mode
+  toggleNotePreview() {
+    this.setNotePreviewMode(!this.isNotePreviewMode);
+  },
+
+  renderMarkdown(text) { return window.NoteEditor?.renderMarkdown(text) ?? ''; },
 
   // Prompt to rename note
   async promptRenameNote(noteId) {
@@ -7512,4 +7906,21 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('sessionSidebar') || document.getElementById('createChatModal')) {
     sessionManager.init();
   }
+
+  // ?open=<noteId> — opens the note's modal after navigation. Used by the
+  // dedicated /notes/<id> page's "Open in modal" button so the cross-affordance
+  // round-trips without a server change. One-shot: scrubbed from history once
+  // the modal opens.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const openNoteId = params.get('open');
+    if (openNoteId) {
+      // Strip from the URL before opening to keep refresh idempotent.
+      params.delete('open');
+      const qs = params.toString();
+      const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', cleanUrl);
+      sessionManager.openNoteEditor(openNoteId);
+    }
+  } catch (_) { /* non-fatal */ }
 });

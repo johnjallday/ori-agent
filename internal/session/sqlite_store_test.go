@@ -392,6 +392,67 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspacesParseStringTimestamps(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 5, 12, 8, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(5 * time.Minute)
+	fixedZoneCreatedAt := time.Date(2026, 4, 29, 9, 10, 12, 153866000, time.FixedZone("-0400", -4*60*60))
+	fixedZoneUpdatedAt := fixedZoneCreatedAt.Add(5 * time.Minute)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, "string-time-workspace", "String Time Workspace", createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339)); err != nil {
+		t.Fatalf("failed to insert raw workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, "fixed-zone-string-workspace", "Fixed Zone String Workspace", fixedZoneCreatedAt.String(), fixedZoneUpdatedAt.String()); err != nil {
+		t.Fatalf("failed to insert fixed-zone string workspace: %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, "string-time-workspace")
+	if err != nil {
+		t.Fatalf("failed to get workspace with string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected created_at %s, got %s", createdAt, got.CreatedAt)
+	}
+	if !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("expected updated_at %s, got %s", updatedAt, got.UpdatedAt)
+	}
+	got, err = store.GetWorkspace(ctx, "fixed-zone-string-workspace")
+	if err != nil {
+		t.Fatalf("failed to get workspace with fixed-zone string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(fixedZoneCreatedAt) {
+		t.Fatalf("expected fixed-zone created_at %s, got %s", fixedZoneCreatedAt, got.CreatedAt)
+	}
+
+	workspaces, err := store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("failed to list workspaces with string timestamps: %v", err)
+	}
+	if len(workspaces) != 2 {
+		t.Fatalf("expected 2 workspaces, got %d", len(workspaces))
+	}
+	createdByID := make(map[string]time.Time, len(workspaces))
+	for _, workspace := range workspaces {
+		createdByID[workspace.ID] = workspace.CreatedAt
+	}
+	if !createdByID["string-time-workspace"].Equal(createdAt) {
+		t.Fatalf("expected listed created_at %s, got %s", createdAt, createdByID["string-time-workspace"])
+	}
+	if !createdByID["fixed-zone-string-workspace"].Equal(fixedZoneCreatedAt) {
+		t.Fatalf("expected listed fixed-zone created_at %s, got %s", fixedZoneCreatedAt, createdByID["fixed-zone-string-workspace"])
+	}
+}
+
 func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -837,6 +898,49 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_NotesParseStringTimestamps(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	folder := &Workspace{ID: "string-note-folder", Name: "String Note Folder", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	createdAt := time.Date(2026, 4, 29, 9, 10, 12, 153866000, time.FixedZone("-0400", -4*60*60))
+	updatedAt := createdAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_notes (id, workspace_id, name, content, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "string-time-note", folder.ID, "String Time Note", "content", createdAt.String(), updatedAt.String()); err != nil {
+		t.Fatalf("failed to insert raw note: %v", err)
+	}
+
+	got, err := store.GetNote(ctx, "string-time-note")
+	if err != nil {
+		t.Fatalf("failed to get note with string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected created_at %s, got %s", createdAt, got.CreatedAt)
+	}
+	if !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("expected updated_at %s, got %s", updatedAt, got.UpdatedAt)
+	}
+
+	listed, err := store.ListNotesByWorkspace(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("failed to list notes with string timestamps: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 note, got %d", len(listed))
+	}
+	if !listed[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected listed created_at %s, got %s", createdAt, listed[0].CreatedAt)
+	}
+}
+
 func TestSQLiteStore_NoteNotFound(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -1121,6 +1225,344 @@ func TestSQLiteStore_SearchNotes(t *testing.T) {
 
 	if len(results) != 0 {
 		t.Errorf("Expected 0 results for 'nonexistent', got %d", len(results))
+	}
+}
+
+func TestSQLiteStore_SearchHeadings(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{
+		ID:        "headings-folder",
+		Name:      "Headings Workspace",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	notes := []WorkspaceNote{
+		{
+			ID:          "h-1",
+			WorkspaceID: "headings-folder",
+			Name:        "Architecture",
+			Content:     "# Overview\n\n## Database layer\n\nSome content.\n\n## API design\n\nMore.\n",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+		{
+			ID:          "h-2",
+			WorkspaceID: "headings-folder",
+			Name:        "Roadmap",
+			Content:     "## Database migration plan\n\nDetails.\n",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+	}
+	for i := range notes {
+		if err := store.CreateNote(ctx, &notes[i]); err != nil {
+			t.Fatalf("create note %s: %v", notes[i].ID, err)
+		}
+	}
+
+	// "database" should match the two database-related headings.
+	results, err := store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results for 'database', got %d: %+v", len(results), results)
+	}
+	for _, r := range results {
+		if r.Level == 0 || r.Text == "" || r.NoteName == "" {
+			t.Errorf("malformed result: %+v", r)
+		}
+		if r.WorkspaceName != "Headings Workspace" {
+			t.Errorf("expected workspace name to be set, got %q", r.WorkspaceName)
+		}
+	}
+
+	// Updating a note should re-index its headings.
+	notes[0].Content = "# Overview\n\n## Storage layer\n\n## API design\n"
+	notes[0].UpdatedAt = time.Now()
+	if err := store.UpdateNote(ctx, &notes[0]); err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+	results, err = store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings after update: %v", err)
+	}
+	// Now only h-2 mentions database — h-1's "Database layer" became "Storage layer".
+	if len(results) != 1 || results[0].NoteID != "h-2" {
+		t.Fatalf("expected single result from h-2 after update, got %+v", results)
+	}
+
+	// Deleting a note should cascade-remove its headings via the FK.
+	if err := store.DeleteNote(ctx, "h-2"); err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+	results, err = store.SearchHeadings(ctx, "database", 10)
+	if err != nil {
+		t.Fatalf("search headings after delete: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected zero results after deletion, got %+v", results)
+	}
+}
+
+func TestSQLiteStore_BackfillHeadingIndex(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{
+		ID:        "backfill-folder",
+		Name:      "Backfill Workspace",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	// Create note normally so headings get indexed during CreateNote.
+	note := &WorkspaceNote{
+		ID: "bf-1", WorkspaceID: "backfill-folder", Name: "N",
+		Content:   "# Indexed already\n",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, note); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	// Simulate a pre-existing un-indexed note by deleting its rows.
+	if _, err := db.ExecContext(ctx, `DELETE FROM note_headings WHERE note_id = ?`, "bf-1"); err != nil {
+		t.Fatalf("clear heading rows: %v", err)
+	}
+
+	indexed, err := store.BackfillHeadingIndex(ctx)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if indexed != 1 {
+		t.Errorf("expected 1 indexed note, got %d", indexed)
+	}
+
+	results, err := store.SearchHeadings(ctx, "indexed", 10)
+	if err != nil {
+		t.Fatalf("search after backfill: %v", err)
+	}
+	if len(results) != 1 || results[0].NoteID != "bf-1" {
+		t.Fatalf("expected backfilled heading to be searchable, got %+v", results)
+	}
+
+	// Second backfill should be a no-op.
+	indexed, err = store.BackfillHeadingIndex(ctx)
+	if err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	if indexed != 0 {
+		t.Errorf("expected backfill to be idempotent (0), got %d", indexed)
+	}
+}
+
+func TestSQLiteStore_NoteLinks_Resolution(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{ID: "wl-folder", Name: "Wikilinks Workspace", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	// Create the target first so the source's link resolves immediately.
+	target := &WorkspaceNote{
+		ID: "target", WorkspaceID: "wl-folder", Name: "Brand Kit",
+		Content:   "# Brand Kit\nbody",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	source := &WorkspaceNote{
+		ID: "source", WorkspaceID: "wl-folder", Name: "Roadmap",
+		Content:   "See [[Brand Kit]] and [[Missing Note]] for details.",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	// Two rows expected: one resolved to "target", one broken.
+	results, err := store.SearchBacklinks(ctx, "target", 10)
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 backlink, got %d: %+v", len(results), results)
+	}
+	if results[0].SourceNoteID != "source" {
+		t.Errorf("expected source 'source', got %q", results[0].SourceNoteID)
+	}
+	if results[0].WorkspaceName != "Wikilinks Workspace" {
+		t.Errorf("expected workspace name to be set, got %q", results[0].WorkspaceName)
+	}
+	if results[0].ContextSnippet == "" {
+		t.Error("expected non-empty context snippet")
+	}
+}
+
+func TestSQLiteStore_NoteLinks_RetroResolveOnCreate(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{ID: "retro-folder", Name: "Retro WS", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	// Source links to a target that doesn't exist yet.
+	source := &WorkspaceNote{
+		ID: "src", WorkspaceID: "retro-folder", Name: "Source",
+		Content:   "Will link to [[Cool Stuff]] when it exists.",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	// At this point the link is broken — no backlinks for any note.
+	if results, err := store.SearchBacklinks(ctx, "cool", 10); err != nil || len(results) != 0 {
+		t.Fatalf("expected 0 broken-link backlinks, got %d (err=%v)", len(results), err)
+	}
+
+	// Now create the target with the matching name. Retro-resolution should
+	// update the broken row to point at it.
+	target := &WorkspaceNote{
+		ID: "target", WorkspaceID: "retro-folder", Name: "Cool Stuff",
+		Content:   "body",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	results, err := store.SearchBacklinks(ctx, "target", 10)
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	if len(results) != 1 || results[0].SourceNoteID != "src" {
+		t.Fatalf("expected single retro-resolved backlink from src, got %+v", results)
+	}
+}
+
+func TestSQLiteStore_NoteLinks_RetroResolveOnRename(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{ID: "rename-folder", Name: "Rename WS", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	target := &WorkspaceNote{
+		ID: "target", WorkspaceID: "rename-folder", Name: "Old Name",
+		Content:   "body",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	// Source links to the future name.
+	source := &WorkspaceNote{
+		ID: "src", WorkspaceID: "rename-folder", Name: "Source",
+		Content:   "Will link to [[New Name]] eventually.",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	// Rename target to match.
+	target.Name = "New Name"
+	target.UpdatedAt = time.Now()
+	if err := store.UpdateNote(ctx, target); err != nil {
+		t.Fatalf("rename target: %v", err)
+	}
+
+	// Backlink should now resolve.
+	results, err := store.SearchBacklinks(ctx, "target", 10)
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+	if len(results) != 1 || results[0].SourceNoteID != "src" {
+		t.Fatalf("expected backlink after rename, got %+v", results)
+	}
+}
+
+func TestSQLiteStore_BackfillNoteLinks(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	folder := &Workspace{ID: "bf-links", Name: "BF Links WS", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	target := &WorkspaceNote{
+		ID: "tgt", WorkspaceID: "bf-links", Name: "Target",
+		Content: "body", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	source := &WorkspaceNote{
+		ID: "src", WorkspaceID: "bf-links", Name: "Source",
+		Content: "Refs [[Target]].", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := store.CreateNote(ctx, source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	// Simulate an un-indexed pre-existing note by clearing its link rows.
+	if _, err := db.ExecContext(ctx, `DELETE FROM note_links WHERE source_note_id = ?`, "src"); err != nil {
+		t.Fatalf("clear link rows: %v", err)
+	}
+
+	indexed, err := store.BackfillNoteLinks(ctx)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if indexed != 1 {
+		t.Errorf("expected 1 indexed note, got %d", indexed)
+	}
+	if results, err := store.SearchBacklinks(ctx, "tgt", 10); err != nil || len(results) != 1 {
+		t.Fatalf("expected backfilled link to resolve, got %d (err=%v)", len(results), err)
+	}
+
+	// Second run should be a no-op.
+	if indexed, err = store.BackfillNoteLinks(ctx); err != nil || indexed != 0 {
+		t.Errorf("expected idempotent backfill (0), got %d (err=%v)", indexed, err)
 	}
 }
 
