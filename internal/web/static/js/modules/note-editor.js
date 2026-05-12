@@ -1216,6 +1216,12 @@ export function mount(host = {}) {
       focusInput.setSelectionRange(cursorPosition, cursorPosition);
       resizeLiveInput(focusInput);
     }
+
+    // Keep the Outline rail in sync with the latest content. Debounced inside
+    // scheduleRebuild so per-keystroke cost is bounded. Modal hosts also call
+    // this externally on preview-toggle — the duplicate is a no-op due to the
+    // debounce.
+    toc?.scheduleRebuild?.();
   }
 
   // sharedHost.render is hot-wired to the local render so live/toc invoke it

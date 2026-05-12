@@ -1097,6 +1097,9 @@ async function bootstrap() {
     },
   });
   bundle.render();
+  // Build the Outline immediately on first paint so users see headings
+  // without waiting for the scheduleRebuild debounce inside render().
+  bundle.toc?.rebuild?.();
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
   bindGenerateWithAIControls();
 
