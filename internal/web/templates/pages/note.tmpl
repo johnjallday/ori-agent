@@ -67,7 +67,7 @@
           Generate with AI
         </button>
         <div class="note-toolbar-spacer"></div>
-        <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle outline" aria-pressed="false" hidden>
+        <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle sidebar" aria-pressed="false">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/></svg>
           Outline
         </button>
@@ -119,19 +119,19 @@
 
     <!-- Editor grid (same structure as the modal's body) -->
     <div class="note-editor-grid note-page-editor-grid" id="noteEditorGrid">
-      <aside class="note-toc-rail" id="noteTocRail" hidden aria-label="Notes &amp; outline">
+      <aside class="note-toc-rail" id="noteTocRail" aria-label="Notes &amp; outline">
         <div class="note-rail-tab-strip" role="tablist" aria-label="Left rail tabs">
-          <button type="button" class="note-rail-tab" data-tab="notes" role="tab" aria-selected="false">Notes</button>
-          <button type="button" class="note-rail-tab is-active" data-tab="outline" role="tab" aria-selected="true">Outline</button>
+          <button type="button" class="note-rail-tab is-active" data-tab="notes" role="tab" aria-selected="true">Notes</button>
+          <button type="button" class="note-rail-tab" data-tab="outline" role="tab" aria-selected="false">Outline</button>
         </div>
-        <div class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel" hidden>
+        <div class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel">
           <div class="note-rail-notes-search">
             <input type="search" id="noteRailNotesSearch" class="modern-input" placeholder="Filter notes…" aria-label="Filter notes">
           </div>
           <div id="noteRailNotesList" class="note-rail-notes-list" role="list"></div>
           <button type="button" id="noteRailNewNoteBtn" class="note-rail-new-note">+ New note</button>
         </div>
-        <div class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel">
+        <div class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel" hidden>
           <div class="note-rail-empty" data-role="empty">Add a heading to build an outline</div>
           <div class="note-rail-content" data-role="content"></div>
         </div>

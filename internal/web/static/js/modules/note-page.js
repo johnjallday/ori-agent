@@ -1067,6 +1067,9 @@ async function bootstrap() {
     workspaceIdResolver: () => currentNote?.workspace_id || null,
     activeNoteId: currentNote.id,
   });
+  // Apply persisted collapse state so the rail doesn't flash expanded on
+  // first paint when the user previously collapsed it.
+  window.NoteEditor?.applyAllRailState?.();
   window.NotePresence?.claimOpenNote(currentNote.id, 'page');
   window.addEventListener('beforeunload', () => {
     if (currentNote?.id) window.NotePresence?.releaseOpenNote(currentNote.id);
@@ -1180,6 +1183,12 @@ async function bootstrap() {
   document.getElementById('notePagePromoteBtn')?.addEventListener('click', promoteSecondary);
 
   document.getElementById('notePageNewTabBtn')?.addEventListener('click', createNoteFromTabStrip);
+
+  // Sidebar toggle (Notes/Outline rail). The modal context wires this in
+  // sessions.js, but sessions.js isn't loaded on the dedicated note page.
+  document.getElementById('noteTocToggle')?.addEventListener('click', () => {
+    window.NoteEditor?.toggleRail?.('toc');
+  });
 
   // 9. Hash-anchor scroll (shared helper — also runs on tab swaps).
   scrollToHashHeading();

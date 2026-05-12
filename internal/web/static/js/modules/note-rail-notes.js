@@ -32,7 +32,7 @@ export function readActiveTab() {
     const v = localStorage.getItem(STORAGE_KEY_TAB);
     if (v === 'notes' || v === 'outline') return v;
   } catch (_) {}
-  return 'outline';
+  return 'notes';
 }
 
 export function writeActiveTab(tab) {
