@@ -1502,6 +1502,9 @@ function _genPanelEl() {
 function _genToggleEl() {
   return typeof document !== 'undefined' ? document.getElementById(GEN_TOGGLE_ID) : null;
 }
+function _genPanelUsesAssistRail(panel = _genPanelEl()) {
+  return Boolean(panel?.closest?.(`#${ASSIST_RAIL_ID}`));
+}
 function _setGenerateExpanded(expanded) {
   const panel = _genPanelEl();
   const toggle = _genToggleEl();
@@ -1520,7 +1523,7 @@ export function isGeneratePanelOpen() {
   const panel = _genPanelEl();
   if (!panel) return false;
   const rail = typeof document !== 'undefined' ? document.getElementById(ASSIST_RAIL_ID) : null;
-  if (rail?.hidden) return false;
+  if (_genPanelUsesAssistRail(panel) && rail?.hidden) return false;
   return !panel.hidden && panel.style.display !== 'none';
 }
 
@@ -1531,8 +1534,9 @@ export function openGeneratePanel() {
   const panel = _genPanelEl();
   if (!panel) return;
   _setGenerateExpanded(true);
-  showRail('assist');
-  if (typeof document !== 'undefined') {
+  const usesAssistRail = _genPanelUsesAssistRail(panel);
+  if (usesAssistRail) showRail('assist');
+  if (usesAssistRail && typeof document !== 'undefined') {
     const rail = document.getElementById(ASSIST_RAIL_ID);
     if (rail) rail.classList.add('is-generating');
   }
@@ -1562,8 +1566,11 @@ export function closeGeneratePanel() {
   if (rail) rail.classList.remove('is-generating');
   if (!_generatePanelActive) return;
   _generatePanelActive = false;
-  // Let AI Assist decide whether the rail should now show cards or hide.
-  if (typeof window !== 'undefined') window.NoteAIAssist?.render?.();
+  // Let AI Assist decide whether the rail should now show cards or hide when
+  // the Generate panel actually lives in that rail. On the page it is inline.
+  if (_genPanelUsesAssistRail(panel) && typeof window !== 'undefined') {
+    window.NoteAIAssist?.render?.();
+  }
 }
 
 // toggleGeneratePanel flips open ↔ closed.

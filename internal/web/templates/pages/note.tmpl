@@ -21,25 +21,27 @@
       </nav>
 
       <div class="note-page-title-row">
-        <div class="d-flex align-items-center gap-2 flex-grow-1">
+        <div class="note-page-title-main">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);" aria-hidden="true">
             <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
           </svg>
-          <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title">
+          <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title" aria-label="Note title" autocomplete="off">
         </div>
 
-        <span id="noteSaveStatus" class="note-page-status" aria-live="polite">
-          <span class="note-status-saved text-success" style="display: none;">✓ Saved</span>
-          <span class="note-status-saving text-muted" style="display: none;">
-            <span class="spinner-border spinner-border-sm me-1" style="width: 12px; height: 12px;"></span>Saving…
+        <div class="note-page-title-actions">
+          <span id="noteSaveStatus" class="note-page-status" aria-live="polite">
+            <span class="note-status-saved text-success" style="display: none;">✓ Saved</span>
+            <span class="note-status-saving text-muted" style="display: none;">
+              <span class="spinner-border spinner-border-sm me-1" style="width: 12px; height: 12px;"></span>Saving…
+            </span>
+            <span class="note-status-unsaved text-warning" style="display: none;">● Unsaved</span>
+            <span class="note-status-error text-danger" style="display: none;">⚠ Save failed</span>
           </span>
-          <span class="note-status-unsaved text-warning" style="display: none;">● Unsaved</span>
-          <span class="note-status-error text-danger" style="display: none;">⚠ Save failed</span>
-        </span>
 
-        <button type="button" id="noteOpenInModal" class="modern-btn modern-btn-secondary btn-sm" title="Open in modal">
-          Open in modal
-        </button>
+          <button type="button" id="noteOpenInModal" class="modern-btn modern-btn-secondary btn-sm" title="Open in modal">
+            Open in modal
+          </button>
+        </div>
       </div>
 
       <!-- Multi-note tab strip (task 4.0) -->
@@ -74,6 +76,45 @@
           Assist
         </button>
       </div>
+      <section id="noteAIGeneratePanel" class="note-ai-panel note-page-ai-panel" aria-label="Generate with AI" hidden>
+        <div class="note-ai-panel-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary" aria-hidden="true"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
+          <span>Generate with AI</span>
+        </div>
+        <div class="note-ai-panel-body">
+          <div class="note-ai-form-grid">
+            <label for="noteAIAgentSelect" class="note-ai-field">
+              <span>Agent</span>
+              <select id="noteAIAgentSelect" class="modern-input w-100">
+                <option value="">Use workspace agent</option>
+              </select>
+            </label>
+            <label for="noteAIPromptInput" class="note-ai-field note-ai-field-prompt">
+              <span>Prompt</span>
+              <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="Describe the note you want…"></textarea>
+            </label>
+          </div>
+          <div id="noteAIError" class="note-ai-message note-ai-message-error" role="alert" aria-live="assertive" hidden></div>
+          <div id="noteAIStatus" class="note-ai-message" aria-live="polite" aria-atomic="true" hidden></div>
+          <div id="noteAIGenerating" class="note-ai-generating" aria-live="polite" hidden>
+            <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
+            <span>Generating draft…</span>
+          </div>
+          <div id="noteAIDraftPanel" class="note-ai-draft" hidden>
+            <div id="noteAIDraftTitle" class="note-ai-draft-title"></div>
+            <pre id="noteAIDraftContent" class="note-ai-draft-content"></pre>
+          </div>
+        </div>
+        <div class="note-ai-panel-footer">
+          <button type="button" id="noteAICancelBtn" class="modern-btn modern-btn-secondary btn-sm">Close</button>
+          <div id="noteAIDraftActions" class="note-ai-draft-actions" hidden>
+            <button type="button" id="noteAIInsertBtn" class="modern-btn modern-btn-secondary btn-sm">Insert at Cursor</button>
+            <button type="button" id="noteAIAppendBtn" class="modern-btn modern-btn-secondary btn-sm">Append</button>
+            <button type="button" id="noteAIReplaceBtn" class="modern-btn modern-btn-primary btn-sm">Replace Note</button>
+          </div>
+          <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Generate Draft</button>
+        </div>
+      </section>
     </header>
 
     <!-- Editor grid (same structure as the modal's body) -->
@@ -98,7 +139,7 @@
 
       <div class="note-editor-center">
         <div class="note-page-pane-grid" id="notePagePaneGrid">
-          <div class="note-editor-container note-page-pane note-page-pane-primary">
+          <div class="note-editor-container note-page-pane note-page-pane-primary" id="notePagePrimaryPane">
             <!-- Source-of-truth textarea, hidden on the page (the preview is the
                  only visible editor; click a rendered line to edit inline). -->
             <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in Markdown…" style="display: none;"></textarea>
@@ -111,7 +152,7 @@
                the primary pane keeps the fancier live-preview editor. -->
           <aside class="note-page-pane note-page-pane-secondary" id="notePageSecondaryPane" hidden aria-label="Secondary pane">
             <div class="note-page-secondary-header">
-              <nav class="note-page-secondary-tabs" id="notePageSecondaryTabs" aria-label="Secondary pane tabs"></nav>
+              <nav class="note-page-secondary-tabs" id="notePageSecondaryTabs" role="tablist" aria-label="Secondary pane tabs"></nav>
               <span id="notePageSecondaryStatus" class="note-page-secondary-status" aria-live="polite"></span>
               <button type="button" id="notePagePromoteBtn" class="note-tab-strip-action" title="Edit this note (swap panes)" aria-label="Edit this note">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/></svg>
@@ -138,43 +179,6 @@
           </div>
           <div id="noteBacklinksList" class="note-backlinks-list"></div>
         </section>
-        <div id="noteAIGeneratePanel" class="note-ai-panel" aria-label="Generate with AI" hidden>
-          <div class="note-ai-panel-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary" aria-hidden="true"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
-            <span>Generate with AI</span>
-          </div>
-          <div class="note-ai-panel-body">
-            <div class="mb-2 note-ai-field">
-              <label for="noteAIAgentSelect">Agent</label>
-              <select id="noteAIAgentSelect" class="modern-input w-100">
-                <option value="">Use workspace agent</option>
-              </select>
-            </div>
-            <div class="mb-2 note-ai-field">
-              <label for="noteAIPromptInput">Prompt</label>
-              <textarea id="noteAIPromptInput" class="modern-input w-100" rows="4" placeholder="Describe the note you want…"></textarea>
-            </div>
-            <div id="noteAIError" class="note-ai-message note-ai-message-error" role="alert" aria-live="assertive" hidden></div>
-            <div id="noteAIStatus" class="note-ai-message" aria-live="polite" aria-atomic="true" hidden></div>
-            <div id="noteAIGenerating" class="note-ai-generating" aria-live="polite" hidden>
-              <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
-              <span>Generating draft…</span>
-            </div>
-            <div id="noteAIDraftPanel" class="note-ai-draft" hidden>
-              <div id="noteAIDraftTitle" class="note-ai-draft-title"></div>
-              <pre id="noteAIDraftContent" class="note-ai-draft-content"></pre>
-            </div>
-          </div>
-          <div class="note-ai-panel-footer">
-            <button type="button" id="noteAICancelBtn" class="modern-btn modern-btn-secondary btn-sm">Close</button>
-            <div id="noteAIDraftActions" class="note-ai-draft-actions" hidden>
-              <button type="button" id="noteAIInsertBtn" class="modern-btn modern-btn-secondary btn-sm">Insert at Cursor</button>
-              <button type="button" id="noteAIAppendBtn" class="modern-btn modern-btn-secondary btn-sm">Append</button>
-              <button type="button" id="noteAIReplaceBtn" class="modern-btn modern-btn-primary btn-sm">Replace Note</button>
-            </div>
-            <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Generate Draft</button>
-          </div>
-        </div>
       </aside>
     </div>
 

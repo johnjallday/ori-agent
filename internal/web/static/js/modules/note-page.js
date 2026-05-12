@@ -126,6 +126,39 @@ function escapeAttr(s) {
   ));
 }
 
+function noteTabButtonId(paneIndex, noteId) {
+  const safeId = String(noteId || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+  return `note-tab-${paneIndex}-${safeId}`;
+}
+
+function tabContainerForPane(paneIndex) {
+  return document.getElementById(paneIndex === 0 ? 'notePageTabList' : 'notePageSecondaryTabs');
+}
+
+function tabButtonForElement(tabEl) {
+  if (!tabEl) return null;
+  if (tabEl.matches?.('[role="tab"]')) return tabEl;
+  return tabEl.querySelector?.('[role="tab"]') || null;
+}
+
+function tabButtonsForPane(paneIndex) {
+  const container = tabContainerForPane(paneIndex);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('[role="tab"]'));
+}
+
+function focusActiveTab(paneIndex) {
+  if (!state?.panes?.[paneIndex]) return;
+  const activeId = state.panes[paneIndex].activeId;
+  const focus = () => {
+    const buttons = tabButtonsForPane(paneIndex);
+    const button = buttons.find((btn) => btn.closest('.note-tab')?.dataset.noteId === activeId);
+    button?.focus?.();
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
+  else focus();
+}
+
 function readPageSelection() {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
   if (!window.NoteEditor) return null;
@@ -156,6 +189,34 @@ async function savePageNote() {
     renderTabStrip();
     return true;
   } catch (_) { return false; }
+}
+
+function primaryNoteIsDirty() {
+  return Boolean(currentNote?.id && bundle?.autosave?.isDirty?.() && !switching);
+}
+
+function sendPrimaryKeepaliveSave() {
+  if (!primaryNoteIsDirty()) return;
+  const name = document.getElementById('noteNameInput')?.value?.trim() || 'Untitled Note';
+  const content = document.getElementById('noteContentInput')?.value || '';
+  const body = JSON.stringify({ name, content });
+  try {
+    bundle?.autosave?.cancel?.();
+    fetch(`/api/notes/${encodeURIComponent(currentNote.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    });
+  } catch (_) {
+    // Page is closing; there is no useful recovery surface here.
+  }
+}
+
+function flushPrimaryWhenBackgrounded() {
+  if (document.visibilityState === 'hidden' && primaryNoteIsDirty()) {
+    void bundle?.autosave?.flushImmediate?.();
+  }
 }
 
 function setGenerateError(message) {
@@ -309,6 +370,8 @@ function refreshSecondaryTabLabels() {
     tab.title = label;
     const labelEl = tab.querySelector('.note-tab-label');
     if (labelEl) labelEl.textContent = label;
+    const tabButton = tabButtonForElement(tab);
+    if (tabButton) tabButton.title = label;
   });
 }
 
@@ -350,8 +413,9 @@ function renderTabStrip() {
   list.innerHTML = pane.tabs.map((id, i) => {
     const isActive = id === pane.activeId;
     const label = escapeText(tabLabel(id));
+    const buttonId = escapeAttr(noteTabButtonId(0, id));
     return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="0" data-index="${i}" role="presentation" draggable="true">
-      <button type="button" class="note-tab-button" role="tab" aria-selected="${isActive}" title="${label}">
+      <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePagePrimaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
       <button type="button" class="note-tab-close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
@@ -448,10 +512,13 @@ async function renderSecondaryPane() {
   tabsEl.innerHTML = pane.tabs.map((id, i) => {
     const isActive = id === pane.activeId;
     const label = escapeText(tabLabel(id));
-    return `<button type="button" class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" title="${label}" draggable="true">
-      <span class="note-tab-label">${label}</span>
-      <span class="note-tab-close-inline" data-action="close" data-note-id="${escapeAttr(id)}" title="Close">×</span>
-    </button>`;
+    const buttonId = escapeAttr(noteTabButtonId(1, id));
+    return `<div class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" role="presentation" title="${label}" draggable="true">
+      <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePageSecondaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
+        <span class="note-tab-label">${label}</span>
+      </button>
+      <button type="button" class="note-tab-close note-tab-close-secondary" data-action="close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
+    </div>`;
   }).join('');
 
   if (!pane.activeId) {
@@ -655,6 +722,7 @@ async function switchToTab(noteId, paneIndex) {
     // Just re-render the secondary preview; editor stays on pane 0.
     await renderSecondaryPane();
   }
+  focusActiveTab(paneIndex);
 }
 
 async function closeTab(noteId, paneIndex) {
@@ -677,6 +745,60 @@ async function closeTab(noteId, paneIndex) {
   // If the editor pane's active note changed, load it.
   if (paneIndex === 0 && pane0.activeId !== currentNote?.id) {
     await loadNoteIntoActivePane(pane0.activeId);
+  }
+  focusActiveTab(Math.min(paneIndex, state.panes.length - 1));
+}
+
+function focusTabByOffset(paneIndex, fromButton, offset) {
+  const buttons = tabButtonsForPane(paneIndex);
+  if (buttons.length === 0) return;
+  const currentIndex = Math.max(0, buttons.indexOf(fromButton));
+  const nextIndex = (currentIndex + offset + buttons.length) % buttons.length;
+  buttons[nextIndex]?.focus?.();
+}
+
+function focusTabAtEdge(paneIndex, edge) {
+  const buttons = tabButtonsForPane(paneIndex);
+  if (buttons.length === 0) return;
+  const index = edge === 'end' ? buttons.length - 1 : 0;
+  buttons[index]?.focus?.();
+}
+
+async function handleTabListKeydown(event, paneIndex) {
+  const tabButton = event.target.closest?.('[role="tab"]');
+  if (!tabButton) return;
+  const tabEl = tabButton.closest('.note-tab');
+  const noteId = tabEl?.dataset.noteId;
+
+  if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    focusTabByOffset(paneIndex, tabButton, 1);
+    return;
+  }
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    focusTabByOffset(paneIndex, tabButton, -1);
+    return;
+  }
+  if (event.key === 'Home') {
+    event.preventDefault();
+    focusTabAtEdge(paneIndex, 'start');
+    return;
+  }
+  if (event.key === 'End') {
+    event.preventDefault();
+    focusTabAtEdge(paneIndex, 'end');
+    return;
+  }
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    if (noteId) await switchToTab(noteId, paneIndex);
+    focusActiveTab(paneIndex);
+    return;
+  }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && noteId) {
+    event.preventDefault();
+    await closeTab(noteId, paneIndex);
   }
 }
 
@@ -951,6 +1073,9 @@ async function bootstrap() {
   window.addEventListener('beforeunload', () => {
     if (currentNote?.id) window.NotePresence?.releaseOpenNote(currentNote.id);
   });
+  document.addEventListener('visibilitychange', flushPrimaryWhenBackgrounded);
+  window.addEventListener('pagehide', sendPrimaryKeepaliveSave);
+  window.addEventListener('beforeunload', sendPrimaryKeepaliveSave);
 
   // 6. Mount the editor.
   bundle = window.NoteEditor.mount({
@@ -995,6 +1120,9 @@ async function bootstrap() {
       switchToTab(tab.dataset.noteId, 0);
     }
   });
+  document.getElementById('notePageTabList')?.addEventListener('keydown', (e) => {
+    handleTabListKeydown(e, 0);
+  });
 
   // HTML5 drag-to-reorder for the primary tab strip. Drag stays within the
   // same pane in this iteration; cross-pane drag is a follow-up.
@@ -1014,6 +1142,9 @@ async function bootstrap() {
       e.preventDefault();
       switchToTab(tab.dataset.noteId, 1);
     }
+  });
+  document.getElementById('notePageSecondaryTabs')?.addEventListener('keydown', (e) => {
+    handleTabListKeydown(e, 1);
   });
 
   // Drag-to-reorder for the secondary pane's tabs too.
