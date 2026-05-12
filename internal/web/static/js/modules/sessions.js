@@ -5382,7 +5382,7 @@ const sessionManager = {
     document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
 
     // Note AI generation toggle
-    document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => this.toggleNoteAIPanel());
+    window.NoteEditor?.bindGenerateToggleButton?.();
 
     // Rail collapse toggles (TOC + AI Assist). The buttons stay hidden until
     // the corresponding feature (tasks 3.0 / 4.0) reveals them.
@@ -5577,7 +5577,11 @@ const sessionManager = {
     this.resetNoteHistory();
     this.setNotePreviewMode(true);
     if (lastSaved) lastSaved.textContent = '';
-    if (saveBtn) saveBtn.textContent = 'Create Note';
+    if (saveBtn) {
+      saveBtn.textContent = 'Create note';
+      saveBtn.hidden = false;
+      saveBtn.disabled = false;
+    }
     this.hideNoteVaultReferenceBadge();
     this._applyNoteRailState();
     this._initNoteAIAssist();
@@ -5789,7 +5793,11 @@ const sessionManager = {
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
     }
-    if (saveBtn) saveBtn.textContent = 'Save';
+    if (saveBtn) {
+      saveBtn.textContent = 'Save now';
+      saveBtn.hidden = true;
+      saveBtn.disabled = false;
+    }
 
     if (this.noteModalWorkspaceId) {
       this.showNoteWorkspaceBadge(this.noteModalWorkspaceId, false);
@@ -5934,9 +5942,10 @@ const sessionManager = {
         this.currentNote = created;
         this.noteAutoSave?.markClean();
         this.showToast('Note created', 'success');
-
-        const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
-        modal?.hide();
+        this.showNoteWorkspaceBadge(workspaceId, false);
+        window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
+        const lastSaved = document.getElementById('noteLastSaved');
+        if (lastSaved) lastSaved.textContent = `Last saved: ${this.formatDateTime(created.updated_at || created.created_at)}`;
       } else {
         this.updateNoteSaveStatus('error');
       }
@@ -5953,13 +5962,11 @@ const sessionManager = {
       this.currentNote = { ...this.currentNote, ...updated };
       this.noteAutoSave?.markClean();
       this.showToast('Note saved', 'success');
+      const lastSaved = document.getElementById('noteLastSaved');
+      if (lastSaved) lastSaved.textContent = `Last saved: ${this.formatDateTime(updated.updated_at || this.currentNote.updated_at)}`;
 
       // Refresh folder tree to show updated note name
       this.renderFolderTree();
-
-      // Close the modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
-      modal?.hide();
     } else {
       this.updateNoteSaveStatus('error');
     }
@@ -6008,7 +6015,7 @@ const sessionManager = {
         if (created) {
           this.currentNote = created;
           const saveBtn = document.getElementById('saveNoteBtn');
-          if (saveBtn) saveBtn.textContent = 'Save';
+          if (saveBtn) saveBtn.textContent = 'Save now';
           window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
           return true;
         } else {
@@ -6021,7 +6028,21 @@ const sessionManager = {
     }
   },
 
-  updateNoteSaveStatus(status) { window.NoteEditor?.updateSaveStatus(status); },
+  syncNoteSaveNowButton(status) {
+    const saveBtn = document.getElementById('saveNoteBtn');
+    if (!saveBtn) return;
+    const isCreate = !this.currentNote?.id;
+    saveBtn.textContent = isCreate
+      ? 'Create note'
+      : (status === 'error' ? 'Retry save' : 'Save now');
+    saveBtn.hidden = !isCreate && !(status === 'unsaved' || status === 'error' || status === 'saving');
+    saveBtn.disabled = status === 'saving';
+  },
+
+  updateNoteSaveStatus(status) {
+    window.NoteEditor?.updateSaveStatus(status);
+    this.syncNoteSaveNowButton(status);
+  },
 
   handleNoteModalBeforeHide(event) {
     const timer = this.noteAutoSave;

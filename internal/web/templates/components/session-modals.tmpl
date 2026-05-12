@@ -196,7 +196,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
             </svg>
-            <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title">
+            <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title" aria-label="Note title" autocomplete="off">
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
             <div id="noteWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
@@ -320,8 +320,8 @@
           Open in page
         </button>
         <button type="button" id="noteCopyBtn" class="modern-btn modern-btn-secondary">Copy</button>
-        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Done</button>
-        <button type="button" id="saveNoteBtn" class="modern-btn modern-btn-primary">Save</button>
+        <button type="button" id="saveNoteBtn" class="modern-btn modern-btn-secondary note-save-now-btn" hidden>Save now</button>
+        <button type="button" class="modern-btn modern-btn-primary" data-bs-dismiss="modal">Done</button>
       </div>
     </div>
   </div>

@@ -2356,6 +2356,11 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   background: var(--bg-hover);
 }
 
+.note-title-input:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .note-title-input::placeholder {
   color: var(--text-tertiary);
 }
@@ -2386,6 +2391,21 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-toolbar-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.note-toolbar-btn:focus-visible,
+.note-tab-button:focus-visible,
+.note-tab-close:focus-visible,
+.note-tab-strip-action:focus-visible,
+.note-rail-tab:focus-visible,
+.note-rail-note-item:focus-visible,
+.note-rail-new-note:focus-visible,
+.note-backlink-item:focus-visible,
+.note-live-line-rendered:focus-visible,
+.note-page-secondary-editor:focus-visible,
+.note-content-input:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .note-toolbar-btn.active {
@@ -4415,6 +4435,11 @@ body.task-modal-open {
   background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary));
 }
 
+.note-page-ai-panel {
+  border-top: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 78%, var(--bg-primary));
+}
+
 .note-ai-panel-header {
   display: flex;
   align-items: center;
@@ -5162,12 +5187,13 @@ body.task-modal-open {
   flex-direction: column;
   /* Full viewport minus navbar; the editor grid expands inside this. */
   height: calc(100vh - 56px);
+  height: calc(100dvh - 56px);
   background: var(--bg-primary);
 }
 
 .note-page-top-bar {
   flex: 0 0 auto;
-  padding: 12px 20px 0 20px;
+  padding: 8px 20px 0;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -5178,7 +5204,7 @@ body.task-modal-open {
   gap: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .note-page-breadcrumb .breadcrumb-link {
@@ -5204,7 +5230,22 @@ body.task-modal-open {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 0 10px 0;
+  padding: 4px 0 8px;
+}
+
+.note-page-title-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 220px;
+}
+
+.note-page-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
 }
 
 .note-page-status {
@@ -5476,6 +5517,7 @@ body.task-modal-open {
   cursor: pointer;
   max-width: 180px;
   text-align: left;
+  min-height: 28px;
 }
 
 .note-tab.is-active .note-tab-button {
@@ -5502,6 +5544,8 @@ body.task-modal-open {
   cursor: pointer;
   border-radius: 50%;
   margin-right: 4px;
+  min-width: 28px;
+  min-height: 28px;
 }
 
 .note-tab-close:hover {
@@ -5590,6 +5634,10 @@ body.task-modal-open {
 
 .note-page-secondary-tabs .note-tab {
   cursor: pointer;
+}
+
+.note-tab-close-secondary {
+  padding-inline: 6px;
 }
 
 .note-tab-close-inline {
@@ -5788,6 +5836,88 @@ body.task-modal-open {
 .note-toc-rail[data-collapsed="true"] .note-rail-tab-strip,
 .note-toc-rail[data-collapsed="true"] .note-rail-tab-pane {
   display: none;
+}
+
+@media (max-width: 900px) {
+  .note-page-top-bar {
+    padding: 8px 12px 0;
+  }
+
+  .note-page-title-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .note-page-title-main,
+  .note-page-title-actions {
+    width: 100%;
+  }
+
+  .note-page-title-actions {
+    justify-content: space-between;
+  }
+
+  .note-tab-strip {
+    padding: 0 8px;
+  }
+
+  .note-page-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .note-page-editor-grid .note-editor-center {
+    grid-column: 1;
+  }
+
+  .note-toc-rail,
+  .note-assist-rail {
+    grid-column: 1;
+    width: 100%;
+    max-height: 220px;
+    border-left: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .note-page-pane-grid.is-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(240px, 40dvh);
+  }
+
+  .note-page-pane-secondary {
+    border-left: none;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+  }
+}
+
+@media (max-width: 640px) {
+  .note-page-breadcrumb {
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .note-page-breadcrumb .breadcrumb-link,
+  .note-page-breadcrumb .breadcrumb-current {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .note-tab {
+    max-width: 170px;
+  }
+
+  .note-tab-label {
+    max-width: 110px;
+  }
+
+  .note-page-secondary-status {
+    display: none;
+  }
+
+  .note-page-title-actions .modern-btn {
+    min-width: 0;
+  }
 }
 
 /* =============================================================================
