@@ -5382,7 +5382,7 @@ const sessionManager = {
     document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
 
     // Note AI generation toggle
-    document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => this.toggleNoteAIPanel());
+    window.NoteEditor?.bindGenerateToggleButton?.();
 
     // Rail collapse toggles (TOC + AI Assist). The buttons stay hidden until
     // the corresponding feature (tasks 3.0 / 4.0) reveals them.

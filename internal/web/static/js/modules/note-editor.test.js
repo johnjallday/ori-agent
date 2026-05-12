@@ -30,6 +30,7 @@ import {
   NoteLiveEditorState,
   NoteLiveEditor,
   mount,
+  bindGenerateToggleButton,
 } from './note-editor.js';
 
 // =============================================================================
@@ -1130,4 +1131,33 @@ test('mount: destroy cancels pending timers and tears down toc observer', () => 
   mock.timers.tick(1000);
   assert.equal(flushed, 0, 'autosave should not have fired after destroy');
   mock.timers.reset();
+});
+
+test('bindGenerateToggleButton: binds the Generate toggle once', () => {
+  const previousDocument = globalThis.document;
+  let boundCount = 0;
+  const toggle = {
+    dataset: {},
+    addEventListener(type, handler) {
+      assert.equal(type, 'click');
+      assert.equal(typeof handler, 'function');
+      boundCount += 1;
+    },
+  };
+  globalThis.document = {
+    getElementById(id) {
+      return id === 'noteGenerateAIToggle' ? toggle : null;
+    },
+  };
+
+  try {
+    bindGenerateToggleButton(globalThis.document);
+    bindGenerateToggleButton(globalThis.document);
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+
+  assert.equal(boundCount, 1);
+  assert.equal(toggle.dataset.noteGenerateToggleBound, '1');
 });

@@ -1579,6 +1579,20 @@ export function toggleGeneratePanel() {
   else openGeneratePanel();
 }
 
+export function bindGenerateToggleButton(root = document) {
+  if (typeof document === 'undefined') return;
+  const scope = root || document;
+  const toggle = typeof scope.getElementById === 'function'
+    ? scope.getElementById(GEN_TOGGLE_ID)
+    : scope.querySelector?.(`#${GEN_TOGGLE_ID}`);
+  if (!toggle || toggle.dataset.noteGenerateToggleBound === '1') return;
+  toggle.dataset.noteGenerateToggleBound = '1';
+  toggle.addEventListener('click', (event) => {
+    event.preventDefault();
+    toggleGeneratePanel();
+  });
+}
+
 // openGeneratePanelByDefault is the modal-open hook — opens the panel if
 // it's currently closed, no-op if already open. Called once per modal open
 // so the Generate form is the user's primary entry point for AI work.
@@ -2247,6 +2261,7 @@ const api = {
   openGeneratePanel,
   closeGeneratePanel,
   toggleGeneratePanel,
+  bindGenerateToggleButton,
   openGeneratePanelByDefault,
   setGenerateBusy,
   setGenerateError,
@@ -2267,6 +2282,14 @@ const api = {
 
 if (typeof window !== 'undefined') {
   window.NoteEditor = api;
+}
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => bindGenerateToggleButton());
+  } else {
+    bindGenerateToggleButton();
+  }
 }
 
 export default api;

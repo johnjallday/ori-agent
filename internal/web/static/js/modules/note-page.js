@@ -335,9 +335,7 @@ function applyPageGenerateDraft(mode = 'replace') {
 }
 
 function bindGenerateWithAIControls() {
-  document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => {
-    window.NoteEditor?.toggleGeneratePanel?.();
-  });
+  window.NoteEditor?.bindGenerateToggleButton?.();
   document.getElementById('noteAIGenerateBtn')?.addEventListener('click', generatePageNoteWithAI);
   document.getElementById('noteAICancelBtn')?.addEventListener('click', () => {
     pendingGenerateDraft = null;
