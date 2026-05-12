@@ -23,6 +23,8 @@ let currentNote = null;          // the note shown in the active pane
 let bundle = null;                // NoteEditor.mount return value (single instance)
 let state = null;                 // NoteTabs reducer state
 let switching = false;            // re-entrancy guard while swapping content
+let pendingGenerateDraft = null;   // last whole-note AI draft waiting to apply
+let creatingNoteFromTabStrip = false;
 
 // =============================================================================
 // State persistence (localStorage)
@@ -70,6 +72,20 @@ async function fetchWorkspaceName(workspaceId) {
     const data = await resp.json();
     return data?.name || data?.workspace?.name || null;
   } catch (_) { return null; }
+}
+
+export async function createWorkspaceNote(workspaceId, fetchImpl = fetch) {
+  if (!workspaceId) throw new Error('No workspace selected');
+  const resp = await fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Untitled', content: '' }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to create note: ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data?.note || data;
 }
 
 // =============================================================================
@@ -142,6 +158,135 @@ async function savePageNote() {
   } catch (_) { return false; }
 }
 
+function setGenerateError(message) {
+  window.NoteEditor?.setGenerateError?.(message || '');
+}
+
+function setGenerateBusy(isBusy) {
+  window.NoteEditor?.setGenerateBusy?.(isBusy);
+}
+
+async function generatePageNoteWithAI() {
+  const promptInput = document.getElementById('noteAIPromptInput');
+  const prompt = promptInput?.value?.trim() || '';
+  const agentId = window.NoteEditor?.getSelectedAgentId?.() || '';
+  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
+
+  if (!prompt) {
+    setGenerateError('Please enter a prompt describing what you want the note to contain.');
+    return;
+  }
+
+  setGenerateError('');
+  window.NoteEditor?.setGenerateStatus?.('');
+  window.NoteEditor?.clearGenerateDraft?.();
+  setGenerateBusy(true);
+
+  try {
+    const response = await fetch('/api/notes/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        workspace_id: workspaceId,
+        agent_id: agentId,
+      }),
+    });
+
+    if (!response.ok) {
+      let payload = null;
+      try { payload = await response.json(); } catch (_) {}
+      throw new Error(payload?.error || 'Failed to generate note');
+    }
+
+    const result = await response.json();
+    pendingGenerateDraft = {
+      title: result.title || '',
+      content: result.content || '',
+    };
+    window.NoteEditor?.setGenerateDraft?.(pendingGenerateDraft);
+    showToast('AI draft generated', 'success');
+  } catch (error) {
+    console.error('Note AI generation failed:', error);
+    setGenerateError(error?.message || 'Failed to generate note content. Please try again.');
+  } finally {
+    setGenerateBusy(false);
+  }
+}
+
+function applyPageGenerateDraft(mode = 'replace') {
+  const draft = pendingGenerateDraft;
+  if (!draft?.content) {
+    setGenerateError('Generate a draft before applying it.');
+    return;
+  }
+
+  const titleInput = document.getElementById('noteNameInput');
+  const contentInput = document.getElementById('noteContentInput');
+  if (!contentInput) return;
+
+  const currentContent = contentInput.value || '';
+  const draftContent = String(draft.content || '').trim();
+  const draftTitle = String(draft.title || '').trim();
+  let nextContent = draftContent;
+
+  bundle?.history?.push?.(currentContent);
+
+  if (mode === 'append') {
+    nextContent = currentContent.trim()
+      ? `${currentContent.replace(/\s+$/, '')}\n\n${draftContent}`
+      : draftContent;
+  } else if (mode === 'insert') {
+    const start = Number.isInteger(contentInput.selectionStart) ? contentInput.selectionStart : currentContent.length;
+    const end = Number.isInteger(contentInput.selectionEnd) ? contentInput.selectionEnd : start;
+    nextContent = `${currentContent.slice(0, start)}${draftContent}${currentContent.slice(end)}`;
+    const cursor = start + draftContent.length;
+    const restoreCursor = () => {
+      try {
+        contentInput.focus();
+        contentInput.setSelectionRange(cursor, cursor);
+      } catch (_) {}
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreCursor);
+    else restoreCursor();
+  } else if (draftTitle && titleInput) {
+    titleInput.value = draftTitle;
+  }
+
+  if (mode !== 'replace' && draftTitle && titleInput && !titleInput.value.trim()) {
+    titleInput.value = draftTitle;
+  }
+  if (titleInput?.value?.trim() && currentNote) {
+    const name = titleInput.value.trim();
+    currentNote = { ...currentNote, name };
+    document.title = `${name} - Ori Agent`;
+    _tabLabelCache.set(currentNote.id, name);
+    renderTabStrip();
+  }
+
+  contentInput.value = nextContent;
+  bundle?.render?.();
+  bundle?.toc?.scheduleRebuild?.();
+  bundle?.autosave?.schedule?.();
+  pendingGenerateDraft = null;
+  window.NoteEditor?.closeGeneratePanel?.();
+  showToast('AI draft applied', 'success');
+}
+
+function bindGenerateWithAIControls() {
+  document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => {
+    window.NoteEditor?.toggleGeneratePanel?.();
+  });
+  document.getElementById('noteAIGenerateBtn')?.addEventListener('click', generatePageNoteWithAI);
+  document.getElementById('noteAICancelBtn')?.addEventListener('click', () => {
+    pendingGenerateDraft = null;
+    window.NoteEditor?.closeGeneratePanel?.();
+  });
+  document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => applyPageGenerateDraft('replace'));
+  document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => applyPageGenerateDraft('append'));
+  document.getElementById('noteAIInsertBtn')?.addEventListener('click', () => applyPageGenerateDraft('insert'));
+}
+
 // =============================================================================
 // Tab strip rendering
 // =============================================================================
@@ -153,6 +298,20 @@ function tabLabel(noteId) {
   return _tabLabelCache.get(noteId) || 'Loading…';
 }
 
+function refreshSecondaryTabLabels() {
+  if (!state?.panes?.[1]) return;
+  const tabsEl = document.getElementById('notePageSecondaryTabs');
+  if (!tabsEl) return;
+  tabsEl.querySelectorAll('[data-note-id]').forEach((tab) => {
+    const id = tab.dataset.noteId;
+    if (!id) return;
+    const label = tabLabel(id);
+    tab.title = label;
+    const labelEl = tab.querySelector('.note-tab-label');
+    if (labelEl) labelEl.textContent = label;
+  });
+}
+
 async function prefetchTabLabels() {
   if (!state) return;
   const ids = window.NoteTabs.allOpenNoteIds(state);
@@ -162,6 +321,7 @@ async function prefetchTabLabels() {
       if (n?.name) {
         _tabLabelCache.set(n.id, n.name);
         renderTabStrip();
+        refreshSecondaryTabLabels();
       }
     });
   }
@@ -233,7 +393,11 @@ async function flushSecondarySave() {
     });
     if (!resp.ok) { setSecondaryStatus('Save failed'); return; }
     const data = await resp.json();
-    if (data?.note) secondaryNote = { ...secondaryNote, ...data.note };
+    if (data?.note) {
+      secondaryNote = { ...secondaryNote, ...data.note };
+      _tabLabelCache.set(secondaryNote.id, secondaryNote.name || 'Untitled');
+      refreshSecondaryTabLabels();
+    }
     secondaryDirty = false;
     setSecondaryStatus('Saved');
     setTimeout(() => { if (!secondaryDirty) setSecondaryStatus(''); }, 1200);
@@ -314,6 +478,7 @@ async function renderSecondaryPane() {
     return;
   }
   _tabLabelCache.set(note.id, note.name || 'Untitled');
+  refreshSecondaryTabLabels();
   secondaryNote = note;
   secondaryDirty = false;
   emptyEl.hidden = true;
@@ -356,10 +521,17 @@ function scrollToHashHeading() {
 
 async function loadNoteIntoActivePane(noteId) {
   if (!noteId) return false;
-  switching = true;
 
   // 1. Save current note first so the swap doesn't lose unsaved edits.
-  try { await bundle?.autosave?.flushImmediate?.(); } catch (_) {}
+  const saved = await bundle?.autosave?.flushImmediate?.();
+  if (saved === false) {
+    showToast('Save failed. Retry before switching notes.', 'error');
+    return false;
+  }
+  pendingGenerateDraft = null;
+  window.NoteEditor?.closeGeneratePanel?.();
+
+  switching = true;
 
   // 2. Release presence on the outgoing note, fetch the new one.
   if (currentNote?.id && currentNote.id !== noteId) {
@@ -420,6 +592,53 @@ async function openInTab(noteId) {
   prefetchTabLabels();
   if (currentNote?.id !== noteId) {
     await loadNoteIntoActivePane(noteId);
+  }
+}
+
+async function createNoteFromTabStrip() {
+  if (creatingNoteFromTabStrip) return;
+  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
+  if (!workspaceId) {
+    showToast('Cannot create a note without a workspace.', 'error');
+    return;
+  }
+
+  const saved = await bundle?.autosave?.flushImmediate?.();
+  if (saved === false) {
+    showToast('Save failed. Retry before creating another note.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('notePageNewTabBtn');
+  creatingNoteFromTabStrip = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.title = 'Creating note...';
+  }
+
+  try {
+    const note = await createWorkspaceNote(workspaceId);
+    if (!note?.id) throw new Error('Create note response did not include an id');
+    _tabLabelCache.set(note.id, note.name || 'Untitled');
+    window.NoteRailNotes?.invalidate?.();
+    await openInTab(note.id);
+    const titleInput = document.getElementById('noteNameInput');
+    if (titleInput) {
+      titleInput.focus();
+      titleInput.select();
+    }
+    showToast('New note created', 'success');
+  } catch (err) {
+    console.error('Create note failed', err);
+    showToast('Failed to create note', 'error');
+  } finally {
+    creatingNoteFromTabStrip = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.title = 'Create new note';
+    }
   }
 }
 
@@ -753,6 +972,7 @@ async function bootstrap() {
   });
   bundle.render();
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
+  bindGenerateWithAIControls();
 
   // 7. Render the tab strip + secondary pane (if split state was restored)
   //    + prefetch labels for non-current tabs.
@@ -830,19 +1050,18 @@ async function bootstrap() {
   document.getElementById('notePageUnsplitBtn')?.addEventListener('click', unsplit);
   document.getElementById('notePagePromoteBtn')?.addEventListener('click', promoteSecondary);
 
-  // The "+" button opens the global ⌘K search palette so the user can pick
-  // any note in any workspace; palette selection then routes through
-  // window.NotePage.openNoteInTab (set up in bindPublicAPI below).
-  document.getElementById('notePageNewTabBtn')?.addEventListener('click', () => {
-    window.SearchPalette?.open?.();
-  });
+  document.getElementById('notePageNewTabBtn')?.addEventListener('click', createNoteFromTabStrip);
 
   // 9. Hash-anchor scroll (shared helper — also runs on tab swaps).
   scrollToHashHeading();
 
   // 10. "Open in modal" button.
   document.getElementById('noteOpenInModal')?.addEventListener('click', async () => {
-    try { await bundle?.autosave?.flushImmediate?.(); } catch (_) {}
+    const saved = await bundle?.autosave?.flushImmediate?.();
+    if (saved === false) {
+      showToast('Save failed. Retry before opening this note in the modal.', 'error');
+      return;
+    }
     if (currentNote?.workspace_id && currentNote.id) {
       const wsId = encodeURIComponent(currentNote.workspace_id);
       const noteId = encodeURIComponent(currentNote.id);

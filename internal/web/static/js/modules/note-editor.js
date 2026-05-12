@@ -1123,8 +1123,8 @@ export function resizeLiveInput(input) {
 //   isPreviewMode()           — bool
 //   onAutosaveFlush?()        — fires when the autosave timer trips. The
 //                                host runs the actual save API call and is
-//                                responsible for calling autosave.markSaving /
-//                                markClean / markError. Default no-op.
+//                                expected to return false on failure. The
+//                                timer owns status/dirty transitions.
 //   onAutosaveStatusChange?(s) — receives 'unsaved'|'saving'|'saved'|'error'.
 //                                Defaults to updateSaveStatus(s).
 //   historyLimit?             — number, default 100.
@@ -1485,6 +1485,12 @@ export class NoteTocController {
 const GEN_PANEL_ID = 'noteAIGeneratePanel';
 const GEN_TOGGLE_ID = 'noteGenerateAIToggle';
 const ASSIST_RAIL_ID = 'noteAssistRail';
+const GEN_DRAFT_PANEL_ID = 'noteAIDraftPanel';
+const GEN_DRAFT_ACTIONS_ID = 'noteAIDraftActions';
+const GEN_STATUS_ID = 'noteAIStatus';
+const GEN_ERROR_ID = 'noteAIError';
+const GEN_BUSY_ID = 'noteAIGenerating';
+const GEN_BUTTON_ID = 'noteAIGenerateBtn';
 
 // Tracks whether the Generate panel is currently the active rail mode so
 // closeGeneratePanel knows to delegate to NoteAIAssist.render() afterward.
@@ -1496,12 +1502,26 @@ function _genPanelEl() {
 function _genToggleEl() {
   return typeof document !== 'undefined' ? document.getElementById(GEN_TOGGLE_ID) : null;
 }
+function _setGenerateExpanded(expanded) {
+  const panel = _genPanelEl();
+  const toggle = _genToggleEl();
+  if (panel) {
+    panel.hidden = !expanded;
+    panel.style.display = expanded ? 'block' : 'none';
+  }
+  if (toggle) {
+    toggle.classList.toggle('ai-active', Boolean(expanded));
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+}
 
 // isGeneratePanelOpen reports whether the panel is currently visible.
 export function isGeneratePanelOpen() {
   const panel = _genPanelEl();
   if (!panel) return false;
-  return panel.style.display !== 'none' && panel.style.display !== '';
+  const rail = typeof document !== 'undefined' ? document.getElementById(ASSIST_RAIL_ID) : null;
+  if (rail?.hidden) return false;
+  return !panel.hidden && panel.style.display !== 'none';
 }
 
 // openGeneratePanel reveals the Generate-with-AI form and sets the rail to
@@ -1510,13 +1530,16 @@ export function isGeneratePanelOpen() {
 export function openGeneratePanel() {
   const panel = _genPanelEl();
   if (!panel) return;
-  panel.style.display = 'block';
-  _genToggleEl()?.classList.add('ai-active');
+  _setGenerateExpanded(true);
   showRail('assist');
   if (typeof document !== 'undefined') {
     const rail = document.getElementById(ASSIST_RAIL_ID);
     if (rail) rail.classList.add('is-generating');
   }
+  void loadAgentsIntoDropdown();
+  const focusPrompt = () => document.getElementById('noteAIPromptInput')?.focus?.();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusPrompt);
+  else focusPrompt();
   _generatePanelActive = true;
 }
 
@@ -1526,18 +1549,14 @@ export function openGeneratePanel() {
 export function closeGeneratePanel() {
   if (typeof document === 'undefined') return;
   const panel = _genPanelEl();
-  const toggle = _genToggleEl();
   const promptInput = document.getElementById('noteAIPromptInput');
-  const errorDiv = document.getElementById('noteAIError');
-  const generatingDiv = document.getElementById('noteAIGenerating');
-  const generateBtn = document.getElementById('noteAIGenerateBtn');
 
-  if (panel) panel.style.display = 'none';
-  if (toggle) toggle.classList.remove('ai-active');
+  if (panel) _setGenerateExpanded(false);
   if (promptInput) promptInput.value = '';
-  if (errorDiv) errorDiv.style.display = 'none';
-  if (generatingDiv) generatingDiv.style.display = 'none';
-  if (generateBtn) generateBtn.disabled = false;
+  clearGenerateDraft();
+  setGenerateError('');
+  setGenerateStatus('');
+  setGenerateBusy(false);
 
   const rail = document.getElementById(ASSIST_RAIL_ID);
   if (rail) rail.classList.remove('is-generating');
@@ -1560,6 +1579,60 @@ export function openGeneratePanelByDefault() {
   if (!isGeneratePanelOpen()) openGeneratePanel();
 }
 
+export function setGenerateBusy(isBusy) {
+  if (typeof document === 'undefined') return;
+  const generatingDiv = document.getElementById(GEN_BUSY_ID);
+  const generateBtn = document.getElementById(GEN_BUTTON_ID);
+  if (generatingDiv) generatingDiv.hidden = !isBusy;
+  if (generateBtn) generateBtn.disabled = Boolean(isBusy);
+}
+
+export function setGenerateError(message) {
+  if (typeof document === 'undefined') return;
+  const errorDiv = document.getElementById(GEN_ERROR_ID);
+  if (!errorDiv) return;
+  errorDiv.textContent = message || '';
+  errorDiv.hidden = !message;
+}
+
+export function setGenerateStatus(message) {
+  if (typeof document === 'undefined') return;
+  const status = document.getElementById(GEN_STATUS_ID);
+  if (!status) return;
+  status.textContent = message || '';
+  status.hidden = !message;
+}
+
+export function clearGenerateDraft() {
+  if (typeof document === 'undefined') return;
+  const draftPanel = document.getElementById(GEN_DRAFT_PANEL_ID);
+  const draftActions = document.getElementById(GEN_DRAFT_ACTIONS_ID);
+  const titleEl = document.getElementById('noteAIDraftTitle');
+  const contentEl = document.getElementById('noteAIDraftContent');
+  if (draftPanel) draftPanel.hidden = true;
+  if (draftActions) draftActions.hidden = true;
+  if (titleEl) titleEl.textContent = '';
+  if (contentEl) contentEl.textContent = '';
+}
+
+export function setGenerateDraft({ title = '', content = '' } = {}) {
+  if (typeof document === 'undefined') return;
+  const draftPanel = document.getElementById(GEN_DRAFT_PANEL_ID);
+  const draftActions = document.getElementById(GEN_DRAFT_ACTIONS_ID);
+  const titleEl = document.getElementById('noteAIDraftTitle');
+  const contentEl = document.getElementById('noteAIDraftContent');
+  const cleanedTitle = String(title || '').trim();
+  const cleanedContent = String(content || '').trim();
+  if (titleEl) {
+    titleEl.textContent = cleanedTitle || 'Untitled draft';
+    titleEl.hidden = !cleanedTitle;
+  }
+  if (contentEl) contentEl.textContent = cleanedContent || 'No draft content returned.';
+  if (draftPanel) draftPanel.hidden = false;
+  if (draftActions) draftActions.hidden = false;
+  setGenerateStatus(cleanedContent ? 'Draft ready' : 'No draft content returned');
+}
+
 // =============================================================================
 // Agent dropdown — populates `#noteAIAgentSelect` from /api/agents
 // =============================================================================
@@ -1574,11 +1647,14 @@ export async function loadAgentsIntoDropdown() {
   if (typeof document === 'undefined') return;
   const select = document.getElementById(AGENT_SELECT_ID);
   if (!select) return;
+  const previousValue = select.value || '';
+  select.disabled = true;
+  select.innerHTML = '<option value="">Loading agents…</option>';
   try {
     const response = await fetch('/api/agents');
     if (!response.ok) throw new Error('Failed to load agents');
     const data = await response.json();
-    select.innerHTML = '<option value="">Select an agent...</option>';
+    select.innerHTML = '<option value="">Use workspace agent</option>';
     const agents = data.agents || [];
     agents.forEach((agent) => {
       const option = document.createElement('option');
@@ -1586,7 +1662,13 @@ export async function loadAgentsIntoDropdown() {
       option.textContent = agent.name;
       select.appendChild(option);
     });
+    if (previousValue && Array.from(select.options).some((option) => option.value === previousValue)) {
+      select.value = previousValue;
+    }
+    select.disabled = false;
   } catch (error) {
+    select.innerHTML = '<option value="">Use workspace agent</option>';
+    select.disabled = false;
     // eslint-disable-next-line no-console
     console.error('Failed to load agents for note AI:', error);
   }
@@ -1927,6 +2009,8 @@ export class NoteAutoSaveTimer {
     this.onStatusChange = onStatusChange;
     this.timer = null;
     this.dirty = false;
+    this.revision = 0;
+    this.flushing = null;
   }
 
   // schedule arms the timer (replacing any pending one) and marks the editor
@@ -1934,18 +2018,54 @@ export class NoteAutoSaveTimer {
   schedule() {
     this.cancel();
     this.dirty = true;
+    this.revision += 1;
     this.onStatusChange?.('unsaved');
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.onFlush?.();
+      void this.flushImmediate();
     }, this.delayMs);
   }
 
   // flushImmediate cancels the pending timer and runs onFlush right away if
   // dirty. Useful for modal close — don't wait, save now.
-  flushImmediate() {
+  async flushImmediate() {
     this.cancel();
-    if (this.dirty) this.onFlush?.();
+    if (!this.dirty) return true;
+
+    if (this.flushing) {
+      await this.flushing;
+      return this.dirty ? this.flushImmediate() : true;
+    }
+
+    const flushRevision = this.revision;
+    this.markSaving();
+
+    const run = (async () => {
+      try {
+        const result = await this.onFlush?.();
+        if (result === false) {
+          this.markError();
+          return false;
+        }
+        if (this.revision === flushRevision) {
+          this.markClean();
+          return true;
+        }
+        this.dirty = true;
+        this.onStatusChange?.('unsaved');
+        return false;
+      } catch (_) {
+        this.markError();
+        return false;
+      }
+    })();
+
+    this.flushing = run;
+    try {
+      return await run;
+    } finally {
+      if (this.flushing === run) this.flushing = null;
+    }
   }
 
   // cancel stops the pending timer without firing onFlush.
@@ -1969,8 +2089,7 @@ export class NoteAutoSaveTimer {
     this.onStatusChange?.('error');
   }
 
-  // markSaving flips the indicator to 'saving' before the host's async work
-  // begins. The host calls this from inside its onFlush implementation.
+  // markSaving flips the indicator to 'saving' before async flush work begins.
   markSaving() {
     this.onStatusChange?.('saving');
   }
@@ -1980,6 +2099,8 @@ export class NoteAutoSaveTimer {
   reset() {
     this.cancel();
     this.dirty = false;
+    this.revision = 0;
+    this.flushing = null;
     this.onStatusChange?.('saved');
   }
 
@@ -2120,6 +2241,11 @@ const api = {
   closeGeneratePanel,
   toggleGeneratePanel,
   openGeneratePanelByDefault,
+  setGenerateBusy,
+  setGenerateError,
+  setGenerateStatus,
+  clearGenerateDraft,
+  setGenerateDraft,
   findRenderedHeadingByPosition,
   scrollToHeadingPosition,
   setActiveTocEntry,

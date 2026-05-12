@@ -227,114 +227,79 @@
             </select>
           </div>
         </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close note editor"></button>
       </div>
       <div class="modal-body p-0">
         <div class="note-editor-toolbar">
-          <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Generate with AI">
+          <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Generate with AI" aria-controls="noteAIGeneratePanel" aria-expanded="false">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
             </svg>
             Generate with AI
           </button>
           <div class="note-toolbar-spacer"></div>
-          <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle outline" aria-pressed="false" hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
-            </svg>
-            Outline
-          </button>
-          <button type="button" id="noteAssistToggle" class="note-toolbar-btn" title="Toggle AI assist" aria-pressed="false" hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12,3A9,9 0 0,0 3,12H0L4,16L8,12H5A7,7 0 0,1 12,5A7,7 0 0,1 19,12A7,7 0 0,1 12,19C10.5,19 9.09,18.5 7.94,17.7L6.5,19.14C8.04,20.3 9.94,21 12,21A9,9 0 0,0 21,12A9,9 0 0,0 12,3M11,7V13L15.25,15.5L16,14.25L12.5,12.25V7H11Z"/>
-            </svg>
-            Assist
-          </button>
         </div>
-        <div class="note-editor-grid" id="noteEditorGrid">
-          <aside class="note-toc-rail" id="noteTocRail" hidden aria-label="Notes &amp; outline">
-            <div class="note-rail-tab-strip" role="tablist" aria-label="Left rail tabs">
-              <button type="button" class="note-rail-tab" data-tab="notes" role="tab" aria-selected="false">Notes</button>
-              <button type="button" class="note-rail-tab is-active" data-tab="outline" role="tab" aria-selected="true">Outline</button>
+        <section id="noteAIGeneratePanel" class="note-ai-panel note-modal-ai-panel" aria-label="Generate with AI" hidden>
+          <div class="note-ai-panel-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary" aria-hidden="true">
+              <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
+            </svg>
+            <span>Generate with AI</span>
+          </div>
+          <div class="note-ai-panel-body">
+            <div class="note-ai-form-grid">
+              <label for="noteAIAgentSelect" class="note-ai-field">
+                <span>Agent</span>
+                <select id="noteAIAgentSelect" class="modern-input w-100">
+                  <option value="">Use workspace agent</option>
+                </select>
+              </label>
+              <label for="noteAIPromptInput" class="note-ai-field note-ai-field-prompt">
+                <span>Prompt</span>
+                <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="Describe the note you want…"></textarea>
+              </label>
             </div>
-            <div class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel" hidden>
-              <div class="note-rail-notes-search">
-                <input type="search" id="noteRailNotesSearch" class="modern-input" placeholder="Filter notes…" aria-label="Filter notes">
-              </div>
-              <div id="noteRailNotesList" class="note-rail-notes-list" role="list"></div>
-              <button type="button" id="noteRailNewNoteBtn" class="note-rail-new-note">+ New note</button>
+            <div id="noteAIError" class="note-ai-message note-ai-message-error" role="alert" aria-live="assertive" hidden></div>
+            <div id="noteAIStatus" class="note-ai-message" aria-live="polite" aria-atomic="true" hidden></div>
+            <div id="noteAIGenerating" class="note-ai-generating" aria-live="polite" hidden>
+              <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
+              <span>Generating draft…</span>
             </div>
-            <div class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel">
-              <div class="note-rail-empty" data-role="empty">Add a heading to build an outline</div>
-              <div class="note-rail-content" data-role="content"></div>
+            <div id="noteAIDraftPanel" class="note-ai-draft" hidden>
+              <div id="noteAIDraftTitle" class="note-ai-draft-title"></div>
+              <pre id="noteAIDraftContent" class="note-ai-draft-content"></pre>
             </div>
-          </aside>
+          </div>
+          <div class="note-ai-panel-footer">
+            <button type="button" id="noteAICancelBtn" class="modern-btn modern-btn-secondary btn-sm">Close</button>
+            <div id="noteAIDraftActions" class="note-ai-draft-actions" hidden>
+              <button type="button" id="noteAIInsertBtn" class="modern-btn modern-btn-secondary btn-sm">Insert at Cursor</button>
+              <button type="button" id="noteAIAppendBtn" class="modern-btn modern-btn-secondary btn-sm">Append</button>
+              <button type="button" id="noteAIReplaceBtn" class="modern-btn modern-btn-primary btn-sm">Replace Note</button>
+            </div>
+            <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Generate Draft</button>
+          </div>
+        </section>
+        <div class="note-editor-grid note-modal-editor-grid" id="noteEditorGrid">
           <div class="note-editor-center">
             <div class="note-editor-container">
-              <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..."></textarea>
+              <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in Markdown…"></textarea>
               <div id="notePreviewContent" class="note-preview-content note-live-editor" style="display: none;" role="textbox" aria-label="Markdown live preview editor" tabindex="0"></div>
             </div>
           </div>
-          <aside class="note-assist-rail" id="noteAssistRail" hidden aria-label="AI assist">
-            <div class="note-rail-empty" data-role="empty">Highlight text and choose an AI action to start.</div>
-            <div class="note-rail-content" data-role="content"></div>
-            <!-- Backlinks: notes that reference this one via [[wikilinks]]. The
-                 section stays hidden until note-backlinks.js finds any. -->
-            <section id="noteBacklinksSection" class="note-backlinks-section" hidden aria-label="Backlinks">
-              <div class="note-backlinks-header">
-                <span class="note-backlinks-title">Backlinks</span>
-                <span id="noteBacklinksCount" class="note-backlinks-count"></span>
-              </div>
-              <div id="noteBacklinksList" class="note-backlinks-list"></div>
-            </section>
-            <!-- Whole-note Generate-with-AI form. Hidden by default; the toolbar
-                 button toggles it. Lives inside the rail so AI controls are
-                 unified in one column. -->
-            <div id="noteAIGeneratePanel" class="note-ai-panel" style="display: none;">
-              <div class="note-ai-panel-header">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary">
-                  <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
-                </svg>
-                <span>Generate with AI</span>
-              </div>
-              <div class="note-ai-panel-body">
-                <div class="mb-2">
-                  <label for="noteAIAgentSelect" class="form-label" style="font-size: 11px; color: var(--text-secondary);">Agent</label>
-                  <select id="noteAIAgentSelect" class="modern-input w-100">
-                    <option value="">Select an agent...</option>
-                  </select>
-                </div>
-                <div class="mb-2">
-                  <label for="noteAIPromptInput" class="form-label" style="font-size: 11px; color: var(--text-secondary);">Prompt</label>
-                  <textarea id="noteAIPromptInput" class="modern-input w-100" rows="4" placeholder="Describe what you want the note to contain..."></textarea>
-                </div>
-                <div id="noteAIError" class="alert alert-danger mb-2" style="display: none; font-size: 11px; padding: 6px 8px;"></div>
-                <div id="noteAIGenerating" class="text-center py-2" style="display: none;">
-                  <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                  <span style="font-size: 11px; color: var(--text-secondary);">Generating…</span>
-                </div>
-              </div>
-              <div class="note-ai-panel-footer">
-                <button type="button" id="noteAICancelBtn" class="modern-btn modern-btn-secondary btn-sm">Cancel</button>
-                <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Generate</button>
-              </div>
-            </div>
-          </aside>
         </div>
-        <!-- Floating selection action bar — positioned via JS, fixed to viewport. -->
-        <div id="noteAIActionBar" class="note-ai-action-bar" role="toolbar" aria-label="AI selection actions"></div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
         <span class="me-auto d-flex align-items-center gap-2" style="font-size: 12px;">
           <span id="noteLastSaved" class="text-muted"></span>
-          <span id="noteSaveStatus">
+          <span id="noteSaveStatus" aria-live="polite" aria-atomic="true">
             <span class="note-status-saved text-success" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
               </svg>Saved
             </span>
             <span class="note-status-saving text-muted" style="display: none;">
-              <span class="spinner-border spinner-border-sm me-1" style="width: 12px; height: 12px;"></span>Saving...
+              <span class="spinner-border spinner-border-sm me-1" style="width: 12px; height: 12px;"></span>Saving…
             </span>
             <span class="note-status-unsaved text-warning" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -344,7 +309,7 @@
             <span class="note-status-error text-danger" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-              </svg>Error
+              </svg>Save failed
             </span>
           </span>
         </span>
@@ -355,7 +320,7 @@
           Open in page
         </button>
         <button type="button" id="noteCopyBtn" class="modern-btn modern-btn-secondary">Copy</button>
-        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Done</button>
         <button type="button" id="saveNoteBtn" class="modern-btn modern-btn-primary">Save</button>
       </div>
     </div>

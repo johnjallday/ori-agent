@@ -4944,6 +4944,9 @@ const sessionManager = {
   // getters below (noteHistory, noteAutoSave, noteToc, noteLive) keep
   // existing call sites working.
   noteMount: null,
+  noteModalHideInProgress: false,
+  noteModalAllowHide: false,
+  noteAIGeneratedDraft: null,
   get noteLive() { return this._ensureMount()?.live ?? null; },
   set noteLive(_v) { /* no-op — mount owns the live instance */ },
   // Back-compat: the original sessionManager exposed `noteLiveState` as a
@@ -5349,9 +5352,13 @@ const sessionManager = {
       }
     });
 
-    // Auto-save on modal close (if there are unsaved changes)
+    // Auto-save before modal close (if there are unsaved changes). The hide
+    // event is cancellable; hidden.bs.modal is too late to protect edits.
+    document.getElementById('noteEditorModal')?.addEventListener('hide.bs.modal', (event) => {
+      this.handleNoteModalBeforeHide(event);
+    });
     document.getElementById('noteEditorModal')?.addEventListener('hidden.bs.modal', () => {
-      this.handleNoteModalClose();
+      this.handleNoteModalHidden();
     });
 
     // Note workspace selector
@@ -5385,6 +5392,9 @@ const sessionManager = {
     // Note AI generation buttons
     document.getElementById('noteAIGenerateBtn')?.addEventListener('click', () => this.generateNoteWithAI());
     document.getElementById('noteAICancelBtn')?.addEventListener('click', () => this.hideNoteAIPanel());
+    document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('replace'));
+    document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('append'));
+    document.getElementById('noteAIInsertBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('insert'));
 
     // Note drag start
     document.addEventListener('dragstart', (e) => {
@@ -5548,6 +5558,7 @@ const sessionManager = {
     this.currentNote = null;
     this.noteModalWorkspaceId = workspaceId;
     this.isNotePreviewMode = false;
+    this.noteAIGeneratedDraft = null;
     // New note has no ID yet — keep the backlinks section hidden.
     window.NoteBacklinks?.clearBacklinks();
 
@@ -5576,7 +5587,6 @@ const sessionManager = {
         workspaceId: workspaceId || null,
         agentId: this._resolveWorkspaceAgentId(),
       });
-      this._openGeneratePanelByDefault();
     });
 
     if (workspaceId) {
@@ -5749,6 +5759,7 @@ const sessionManager = {
     this.currentNote = note;
     this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;
     this.isNotePreviewMode = false;
+    this.noteAIGeneratedDraft = null;
 
     const modal = document.getElementById('noteEditorModal');
     const nameInput = document.getElementById('noteNameInput');
@@ -5769,7 +5780,6 @@ const sessionManager = {
         workspaceId: this.noteModalWorkspaceId,
         agentId: this._resolveWorkspaceAgentId(),
       });
-      this._openGeneratePanelByDefault();
     });
     // Backlinks: notes referencing this one via [[wikilinks]]. Hidden when none.
     window.NoteBacklinks?.loadBacklinksFor(note.id);
@@ -5885,9 +5895,11 @@ const sessionManager = {
   // before navigating so they aren't lost.
   async openCurrentNoteAsPage() {
     // Trigger immediate save so unsaved edits land before navigation.
-    try {
-      await this.noteAutoSave?.flushImmediate?.();
-    } catch (_) { /* ignore */ }
+    const saved = await this.noteAutoSave?.flushImmediate?.();
+    if (saved === false) {
+      this.showToast('Save failed. Retry before opening this note as a page.', 'error');
+      return;
+    }
 
     if (!this.currentNote?.id) {
       this.showToast('Save the note first to get a shareable URL', 'warning');
@@ -5965,14 +5977,12 @@ const sessionManager = {
   // Performs one autosave attempt. Called by the timer or by handleNoteModalClose.
   async autoSaveNote() {
     const timer = this._ensureNoteAutoSave();
-    if (!timer || !timer.isDirty()) return;
+    if (!timer || !timer.isDirty()) return true;
 
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
-
-    timer.markSaving();
 
     try {
       if (this.currentNote?.id) {
@@ -5980,42 +5990,71 @@ const sessionManager = {
         const updated = await this.updateNote(this.currentNote.id, updates);
         if (updated) {
           this.currentNote = { ...this.currentNote, ...updated };
-          timer.markClean();
           this.renderFolderTree();
           // Notify other tabs so any open Backlinks panel can re-fetch.
           window.NoteBacklinks?.announceNoteSaved?.(this.currentNote.id, noteContent.includes('[['));
+          return true;
         } else {
-          timer.markError();
+          return false;
         }
       } else {
         const workspaceId = this.noteModalWorkspaceId;
         if (!workspaceId) {
           // Can't auto-create without workspace; revert to unsaved state.
           window.NoteEditor.updateSaveStatus('unsaved');
-          return;
+          return false;
         }
         const created = await this.createNote(workspaceId, noteName, noteContent);
         if (created) {
           this.currentNote = created;
-          timer.markClean();
           const saveBtn = document.getElementById('saveNoteBtn');
           if (saveBtn) saveBtn.textContent = 'Save';
           window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
+          return true;
         } else {
-          timer.markError();
+          return false;
         }
       }
     } catch (error) {
       console.error('Auto-save failed:', error);
-      timer.markError();
+      return false;
     }
   },
 
   updateNoteSaveStatus(status) { window.NoteEditor?.updateSaveStatus(status); },
 
-  handleNoteModalClose() {
-    this.noteAutoSave?.flushImmediate();
-    this.noteAutoSave?.markClean();
+  handleNoteModalBeforeHide(event) {
+    const timer = this.noteAutoSave;
+    if (this.noteModalAllowHide || !timer?.isDirty?.()) {
+      this.noteModalAllowHide = false;
+      return;
+    }
+
+    event.preventDefault();
+    if (this.noteModalHideInProgress) return;
+    this.noteModalHideInProgress = true;
+
+    timer.flushImmediate().then((saved) => {
+      if (saved === false) {
+        this.showToast('Save failed. Retry save before closing this note.', 'error');
+        this.updateNoteSaveStatus('error');
+        return;
+      }
+      this.noteModalAllowHide = true;
+      const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
+      modal?.hide();
+    }).catch((error) => {
+      console.error('Auto-save before modal close failed:', error);
+      this.showToast('Save failed. Retry save before closing this note.', 'error');
+      this.updateNoteSaveStatus('error');
+    }).finally(() => {
+      this.noteModalHideInProgress = false;
+    });
+  },
+
+  handleNoteModalHidden() {
+    this.noteModalAllowHide = false;
+    this.noteModalHideInProgress = false;
   },
 
   resetNoteAutoSaveState() { this._ensureNoteAutoSave()?.reset(); },
@@ -6099,7 +6138,10 @@ const sessionManager = {
 
   _openGeneratePanelByDefault() { window.NoteEditor?.openGeneratePanelByDefault(); },
   toggleNoteAIPanel() { window.NoteEditor?.toggleGeneratePanel(); },
-  hideNoteAIPanel() { window.NoteEditor?.closeGeneratePanel(); },
+  hideNoteAIPanel() {
+    this.noteAIGeneratedDraft = null;
+    window.NoteEditor?.closeGeneratePanel();
+  },
 
   // Load agents for AI generation dropdown
   async loadNoteAIAgents() {
@@ -6110,11 +6152,6 @@ const sessionManager = {
   async generateNoteWithAI() {
     const agentSelect = document.getElementById('noteAIAgentSelect');
     const promptInput = document.getElementById('noteAIPromptInput');
-    const errorDiv = document.getElementById('noteAIError');
-    const generatingDiv = document.getElementById('noteAIGenerating');
-    const generateBtn = document.getElementById('noteAIGenerateBtn');
-    const nameInput = document.getElementById('noteNameInput');
-    const contentInput = document.getElementById('noteContentInput');
 
     const agentId = agentSelect?.value || '';
     const prompt = promptInput?.value?.trim() || '';
@@ -6122,17 +6159,15 @@ const sessionManager = {
 
     // Validate prompt
     if (!prompt) {
-      if (errorDiv) {
-        errorDiv.textContent = 'Please enter a prompt describing what you want the note to contain.';
-        errorDiv.style.display = 'block';
-      }
+      window.NoteEditor?.setGenerateError?.('Please enter a prompt describing what you want the note to contain.');
       return;
     }
 
     // Hide error, show loading
-    if (errorDiv) errorDiv.style.display = 'none';
-    if (generatingDiv) generatingDiv.style.display = 'block';
-    if (generateBtn) generateBtn.disabled = true;
+    window.NoteEditor?.setGenerateError?.('');
+    window.NoteEditor?.setGenerateStatus?.('');
+    window.NoteEditor?.clearGenerateDraft?.();
+    window.NoteEditor?.setGenerateBusy?.(true);
 
     try {
       const response = await fetch('/api/notes/generate', {
@@ -6146,37 +6181,78 @@ const sessionManager = {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to generate note');
+        let payload = null;
+        try { payload = await response.json(); } catch (_) {}
+        throw new Error(payload?.error || 'Failed to generate note');
       }
 
       const result = await response.json();
-
-      // Update the note fields with generated content
-      if (nameInput && result.title) {
-        nameInput.value = result.title;
-      }
-      if (contentInput && result.content) {
-        contentInput.value = result.content;
-      }
-      if (this.isNotePreviewMode) {
-        this.setNotePreviewMode(true);
-      }
-
-      // Hide AI panel and show success
-      this.hideNoteAIPanel();
-      this.showToast('Note content generated', 'success');
-
+      this.noteAIGeneratedDraft = {
+        title: result.title || '',
+        content: result.content || '',
+      };
+      window.NoteEditor?.setGenerateDraft?.(this.noteAIGeneratedDraft);
+      this.showToast('AI draft generated', 'success');
     } catch (error) {
       console.error('Note AI generation failed:', error);
-      if (errorDiv) {
-        errorDiv.textContent = error.message || 'Failed to generate note content. Please try again.';
-        errorDiv.style.display = 'block';
-      }
+      window.NoteEditor?.setGenerateError?.(error.message || 'Failed to generate note content. Please try again.');
     } finally {
-      if (generatingDiv) generatingDiv.style.display = 'none';
-      if (generateBtn) generateBtn.disabled = false;
+      window.NoteEditor?.setGenerateBusy?.(false);
     }
+  },
+
+  applyGeneratedNoteDraft(mode = 'replace') {
+    const draft = this.noteAIGeneratedDraft;
+    if (!draft?.content) {
+      window.NoteEditor?.setGenerateError?.('Generate a draft before applying it.');
+      return;
+    }
+
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+    if (!contentInput) return;
+
+    const currentContent = contentInput.value || '';
+    const draftContent = String(draft.content || '').trim();
+    const draftTitle = String(draft.title || '').trim();
+    let nextContent = draftContent;
+
+    this.pushNoteUndoState();
+
+    if (mode === 'append') {
+      nextContent = currentContent.trim()
+        ? `${currentContent.replace(/\s+$/, '')}\n\n${draftContent}`
+        : draftContent;
+    } else if (mode === 'insert') {
+      const start = Number.isInteger(contentInput.selectionStart) ? contentInput.selectionStart : currentContent.length;
+      const end = Number.isInteger(contentInput.selectionEnd) ? contentInput.selectionEnd : start;
+      nextContent = `${currentContent.slice(0, start)}${draftContent}${currentContent.slice(end)}`;
+      const cursor = start + draftContent.length;
+      const restoreCursor = () => {
+        try {
+          contentInput.focus();
+          contentInput.setSelectionRange(cursor, cursor);
+        } catch (_) {}
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreCursor);
+      else restoreCursor();
+    } else if (draftTitle && nameInput) {
+      nameInput.value = draftTitle;
+    }
+
+    if (mode !== 'replace' && draftTitle && nameInput && !nameInput.value.trim()) {
+      nameInput.value = draftTitle;
+    }
+    contentInput.value = nextContent;
+
+    if (this.isNotePreviewMode) {
+      this.setNotePreviewMode(true);
+    }
+    this.scheduleNoteAutoSave();
+    this._scheduleNoteTocRebuild();
+    this.noteAIGeneratedDraft = null;
+    this.hideNoteAIPanel();
+    this.showToast('AI draft applied', 'success');
   },
 
   // Expand @notename references in a message with note content

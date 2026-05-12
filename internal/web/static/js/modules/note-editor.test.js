@@ -402,6 +402,67 @@ test('NoteAutoSaveTimer: flushImmediate fires onFlush right away when dirty', ()
   assert.equal(flushed, 1);
 });
 
+test('NoteAutoSaveTimer: flushImmediate resolves true and marks clean on successful flush', async () => {
+  const statuses = [];
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => true,
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule();
+  const ok = await t.flushImmediate();
+  assert.equal(ok, true);
+  assert.equal(t.isDirty(), false);
+  assert.deepEqual(statuses, ['unsaved', 'saving', 'saved']);
+});
+
+test('NoteAutoSaveTimer: flushImmediate resolves false and stays dirty when flush returns false', async () => {
+  const statuses = [];
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => false,
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule();
+  const ok = await t.flushImmediate();
+  assert.equal(ok, false);
+  assert.equal(t.isDirty(), true);
+  assert.deepEqual(statuses, ['unsaved', 'saving', 'error']);
+});
+
+test('NoteAutoSaveTimer: flushImmediate resolves false and stays dirty when flush throws', async () => {
+  const statuses = [];
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => { throw new Error('network down'); },
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule();
+  const ok = await t.flushImmediate();
+  assert.equal(ok, false);
+  assert.equal(t.isDirty(), true);
+  assert.deepEqual(statuses, ['unsaved', 'saving', 'error']);
+});
+
+test('NoteAutoSaveTimer: edit during in-flight flush remains dirty', async () => {
+  const statuses = [];
+  let resolveFlush;
+  const t = new NoteAutoSaveTimer({
+    delayMs: 1000,
+    onFlush: () => new Promise((resolve) => { resolveFlush = resolve; }),
+    onStatusChange: (s) => statuses.push(s),
+  });
+  t.schedule();
+  const firstFlush = t.flushImmediate();
+  t.schedule();
+  resolveFlush(true);
+  const ok = await firstFlush;
+  assert.equal(ok, false);
+  assert.equal(t.isDirty(), true);
+  assert.deepEqual(statuses, ['unsaved', 'saving', 'unsaved', 'unsaved']);
+  t.cancel();
+});
+
 test('NoteAutoSaveTimer: flushImmediate is a no-op when clean', () => {
   let flushed = 0;
   const t = new NoteAutoSaveTimer({ delayMs: 1000, onFlush: () => flushed++ });

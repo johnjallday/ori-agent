@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/vaultref"
@@ -14,6 +15,18 @@ import (
 // ============================================================================
 // Workspace Note Operations
 // ============================================================================
+
+func parseNoteTimes(createdAtRaw, updatedAtRaw interface{}) (time.Time, time.Time, error) {
+	createdAt, err := parseSQLiteTime(createdAtRaw)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("created_at: %w", err)
+	}
+	updatedAt, err := parseSQLiteTime(updatedAtRaw)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("updated_at: %w", err)
+	}
+	return createdAt, updatedAt, nil
+}
 
 // CreateNote creates a new workspace note in the database.
 func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error {
@@ -53,18 +66,24 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, error) {
 	note := &WorkspaceNote{}
 	var vaultReferenceJSON sql.NullString
+	var createdAtRaw interface{}
+	var updatedAtRaw interface{}
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, name, content, COALESCE(vault_reference_json, ''), created_at, updated_at
 		FROM workspace_notes WHERE id = ?
 	`, id).Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Content,
-		&vaultReferenceJSON, &note.CreatedAt, &note.UpdatedAt)
+		&vaultReferenceJSON, &createdAtRaw, &updatedAtRaw)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrNoteNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get note: %w", err)
+	}
+	note.CreatedAt, note.UpdatedAt, err = parseNoteTimes(createdAtRaw, updatedAtRaw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse note timestamps: %w", err)
 	}
 	if note.VaultRef, err = decodeNoteVaultReference(vaultReferenceJSON.String); err != nil {
 		return nil, fmt.Errorf("failed to decode note vault reference: %w", err)
@@ -138,9 +157,15 @@ func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 	for rows.Next() {
 		var note WorkspaceNoteListItem
 		var vaultReferenceRaw string
+		var createdAtRaw interface{}
+		var updatedAtRaw interface{}
 		if err := rows.Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Preview,
-			&vaultReferenceRaw, &note.CreatedAt, &note.UpdatedAt); err != nil {
+			&vaultReferenceRaw, &createdAtRaw, &updatedAtRaw); err != nil {
 			return nil, fmt.Errorf("failed to scan note: %w", err)
+		}
+		note.CreatedAt, note.UpdatedAt, err = parseNoteTimes(createdAtRaw, updatedAtRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse note timestamps: %w", err)
 		}
 		note.VaultRef, err = decodeNoteVaultReference(vaultReferenceRaw)
 		if err != nil {
@@ -506,10 +531,16 @@ func (s *SQLiteStore) SearchNotes(ctx context.Context, query string, limit int) 
 		var result NoteSearchResult
 		var workspaceName sql.NullString
 		var snippet string
+		var createdAtRaw interface{}
+		var updatedAtRaw interface{}
 
 		if err := rows.Scan(&result.ID, &result.WorkspaceID, &result.Name, &result.Preview,
-			&result.CreatedAt, &result.UpdatedAt, &workspaceName, &snippet); err != nil {
+			&createdAtRaw, &updatedAtRaw, &workspaceName, &snippet); err != nil {
 			return nil, fmt.Errorf("failed to scan search result: %w", err)
+		}
+		result.CreatedAt, result.UpdatedAt, err = parseNoteTimes(createdAtRaw, updatedAtRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse search result timestamps: %w", err)
 		}
 
 		result.WorkspaceName = workspaceName.String

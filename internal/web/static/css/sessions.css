@@ -2406,6 +2406,26 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   max-height: 60vh;
 }
 
+.note-modal-editor-grid {
+  grid-template-columns: 1fr;
+}
+
+.note-modal-editor-grid .note-editor-center {
+  grid-column: 1;
+}
+
+.note-toc-rail {
+  grid-column: 1;
+}
+
+.note-editor-center {
+  grid-column: 2;
+}
+
+.note-assist-rail {
+  grid-column: 3;
+}
+
 .note-toc-rail,
 .note-assist-rail {
   display: flex;
@@ -2517,10 +2537,12 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .note-editor-center {
   position: relative;
   min-width: 0; /* allow grid track to shrink below content size */
+  width: 100%;
 }
 
 .note-editor-container {
   position: relative;
+  width: 100%;
   min-height: 400px;
   max-height: 60vh;
 }
@@ -4379,6 +4401,20 @@ body.task-modal-open {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(99, 102, 241, 0.02) 100%);
 }
 
+.note-ai-panel[hidden],
+.note-ai-message[hidden],
+.note-ai-generating[hidden],
+.note-ai-draft[hidden],
+.note-ai-draft-actions[hidden] {
+  display: none !important;
+}
+
+.note-modal-ai-panel {
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary));
+}
+
 .note-ai-panel-header {
   display: flex;
   align-items: center;
@@ -4394,13 +4430,87 @@ body.task-modal-open {
   padding: 10px 12px;
 }
 
+.note-ai-form-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+  gap: 10px;
+}
+
+.note-ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.note-ai-field label,
+.note-ai-field > span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.note-ai-message {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-ai-message-error {
+  color: #ef4444;
+}
+
+.note-ai-generating {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-ai-draft {
+  margin-top: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.note-ai-draft-title {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-ai-draft-content {
+  max-height: 180px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: var(--text-primary);
+  background: transparent;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
 .note-ai-panel-footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
+}
+
+.note-ai-draft-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* When the rail is hosting the Generate-with-AI panel, hide the suggestion
@@ -4414,6 +4524,22 @@ body.task-modal-open {
 .note-toolbar-btn.ai-active {
   background: rgba(99, 102, 241, 0.15);
   color: var(--primary-color);
+}
+
+@media (max-width: 760px) {
+  .note-ai-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .note-ai-panel-footer {
+    justify-content: stretch;
+  }
+
+  .note-ai-panel-footer .modern-btn,
+  .note-ai-draft-actions,
+  .note-ai-draft-actions .modern-btn {
+    width: 100%;
+  }
 }
 
 /* =============================================================================
@@ -5402,6 +5528,12 @@ body.task-modal-open {
 .note-tab-strip-action:hover {
   background: var(--bg-hover, rgba(99, 102, 241, 0.08));
   color: var(--primary-color, #6366f1);
+}
+
+.note-tab-strip-action:disabled,
+.note-tab-strip-action[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.55;
 }
 
 /* Split-pane grid (single pane by default; two columns when split). */

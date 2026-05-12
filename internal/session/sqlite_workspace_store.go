@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 )
@@ -32,6 +33,77 @@ type workspaceJSONFields struct {
 	skillBindings       []byte
 	agentSkillAccess    []byte
 	status              WorkspaceStatus
+}
+
+func parseSQLiteTime(value interface{}) (time.Time, error) {
+	switch v := value.(type) {
+	case time.Time:
+		return v, nil
+	case string:
+		return parseSQLiteTimeString(v)
+	case []byte:
+		return parseSQLiteTimeString(string(v))
+	case nil:
+		return time.Time{}, fmt.Errorf("empty timestamp")
+	default:
+		return time.Time{}, fmt.Errorf("unsupported timestamp type %T", value)
+	}
+}
+
+func parseSQLiteTimeString(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, fmt.Errorf("empty timestamp")
+	}
+	if parsed, err := parseSQLiteTimeStringFormats(trimmed); err == nil {
+		return parsed, nil
+	}
+	// Some legacy rows were persisted from time.Time.String() with a fixed
+	// numeric location, e.g. "2026-04-29 09:10:12.153866 -0400 -0400".
+	// Drop the duplicated final zone token and parse the timestamp normally.
+	fields := strings.Fields(trimmed)
+	if len(fields) >= 4 && fields[len(fields)-1] == fields[len(fields)-2] {
+		if parsed, err := parseSQLiteTimeStringFormats(strings.Join(fields[:len(fields)-1], " ")); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported timestamp format %q", value)
+}
+
+func parseSQLiteTimeStringFormats(value string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999 -0700",
+		"2006-01-02 15:04:05.999999 -0700",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+	}
+	for _, format := range formats {
+		if parsed, err := time.Parse(format, value); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported timestamp format %q", value)
+}
+
+func assignWorkspaceTimes(workspace *Workspace, createdAtRaw, updatedAtRaw interface{}) error {
+	createdAt, err := parseSQLiteTime(createdAtRaw)
+	if err != nil {
+		return fmt.Errorf("created_at: %w", err)
+	}
+	updatedAt, err := parseSQLiteTime(updatedAtRaw)
+	if err != nil {
+		return fmt.Errorf("updated_at: %w", err)
+	}
+	workspace.CreatedAt = createdAt
+	workspace.UpdatedAt = updatedAt
+	return nil
 }
 
 // serializeWorkspaceFields converts workspace fields to JSON for database storage.
@@ -210,6 +282,8 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var agentMCPAccessJSON sql.NullString
 	var skillBindingsJSON sql.NullString
 	var agentSkillAccessJSON sql.NullString
+	var createdAtRaw interface{}
+	var updatedAtRaw interface{}
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
@@ -218,7 +292,7 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, version
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
-		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
+		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
 		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &workspace.Version)
@@ -228,6 +302,9 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	}
+	if err := assignWorkspaceTimes(workspace, createdAtRaw, updatedAtRaw); err != nil {
+		return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
 	}
 
 	workspace.Description = description.String
@@ -418,11 +495,16 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		var workspace Workspace
 		var parentID, color, description, kind sql.NullString
 		var agentsJSON, agentInstancesJSON, status sql.NullString
+		var createdAtRaw interface{}
+		var updatedAtRaw interface{}
 
 		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
-			&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
+			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 			&agentsJSON, &agentInstancesJSON, &status, &workspace.Version); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)
+		}
+		if err := assignWorkspaceTimes(&workspace, createdAtRaw, updatedAtRaw); err != nil {
+			return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
 		}
 
 		workspace.Kind = NormalizeWorkspaceKind(kind.String)

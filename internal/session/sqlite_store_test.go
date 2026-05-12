@@ -392,6 +392,67 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspacesParseStringTimestamps(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 5, 12, 8, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(5 * time.Minute)
+	fixedZoneCreatedAt := time.Date(2026, 4, 29, 9, 10, 12, 153866000, time.FixedZone("-0400", -4*60*60))
+	fixedZoneUpdatedAt := fixedZoneCreatedAt.Add(5 * time.Minute)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, "string-time-workspace", "String Time Workspace", createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339)); err != nil {
+		t.Fatalf("failed to insert raw workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, "fixed-zone-string-workspace", "Fixed Zone String Workspace", fixedZoneCreatedAt.String(), fixedZoneUpdatedAt.String()); err != nil {
+		t.Fatalf("failed to insert fixed-zone string workspace: %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, "string-time-workspace")
+	if err != nil {
+		t.Fatalf("failed to get workspace with string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected created_at %s, got %s", createdAt, got.CreatedAt)
+	}
+	if !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("expected updated_at %s, got %s", updatedAt, got.UpdatedAt)
+	}
+	got, err = store.GetWorkspace(ctx, "fixed-zone-string-workspace")
+	if err != nil {
+		t.Fatalf("failed to get workspace with fixed-zone string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(fixedZoneCreatedAt) {
+		t.Fatalf("expected fixed-zone created_at %s, got %s", fixedZoneCreatedAt, got.CreatedAt)
+	}
+
+	workspaces, err := store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("failed to list workspaces with string timestamps: %v", err)
+	}
+	if len(workspaces) != 2 {
+		t.Fatalf("expected 2 workspaces, got %d", len(workspaces))
+	}
+	createdByID := make(map[string]time.Time, len(workspaces))
+	for _, workspace := range workspaces {
+		createdByID[workspace.ID] = workspace.CreatedAt
+	}
+	if !createdByID["string-time-workspace"].Equal(createdAt) {
+		t.Fatalf("expected listed created_at %s, got %s", createdAt, createdByID["string-time-workspace"])
+	}
+	if !createdByID["fixed-zone-string-workspace"].Equal(fixedZoneCreatedAt) {
+		t.Fatalf("expected listed fixed-zone created_at %s, got %s", fixedZoneCreatedAt, createdByID["fixed-zone-string-workspace"])
+	}
+}
+
 func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -834,6 +895,49 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].VaultRef == nil || listed[0].VaultRef.VaultName != "Private Vault" {
 		t.Fatalf("Expected listed note vault reference, got %#v", listed)
+	}
+}
+
+func TestSQLiteStore_NotesParseStringTimestamps(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	folder := &Workspace{ID: "string-note-folder", Name: "String Note Folder", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateWorkspace(ctx, folder); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	createdAt := time.Date(2026, 4, 29, 9, 10, 12, 153866000, time.FixedZone("-0400", -4*60*60))
+	updatedAt := createdAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_notes (id, workspace_id, name, content, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "string-time-note", folder.ID, "String Time Note", "content", createdAt.String(), updatedAt.String()); err != nil {
+		t.Fatalf("failed to insert raw note: %v", err)
+	}
+
+	got, err := store.GetNote(ctx, "string-time-note")
+	if err != nil {
+		t.Fatalf("failed to get note with string timestamps: %v", err)
+	}
+	if !got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected created_at %s, got %s", createdAt, got.CreatedAt)
+	}
+	if !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("expected updated_at %s, got %s", updatedAt, got.UpdatedAt)
+	}
+
+	listed, err := store.ListNotesByWorkspace(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("failed to list notes with string timestamps: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 note, got %d", len(listed))
+	}
+	if !listed[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("expected listed created_at %s, got %s", createdAt, listed[0].CreatedAt)
 	}
 }
 
