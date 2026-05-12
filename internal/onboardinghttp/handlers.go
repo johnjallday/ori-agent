@@ -381,7 +381,7 @@ func (h *Handler) SetNotesOpenBehavior(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(NotesOpenBehaviorResponse{Behavior: req.Behavior}); encErr != nil {
+	if encErr := json.NewEncoder(w).Encode(NotesOpenBehaviorResponse(req)); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

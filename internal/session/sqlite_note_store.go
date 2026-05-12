@@ -323,7 +323,7 @@ func (s *SQLiteStore) indexNoteLinks(ctx context.Context, noteID, content, works
 	for _, link := range ParseWikilinks(content) {
 		var targetID *string
 		if workspaceID != "" {
-			id, _ := s.resolveWikilinkTargetTx(ctx, tx, link.Target, workspaceID)
+			id := s.resolveWikilinkTargetTx(ctx, tx, link.Target, workspaceID)
 			if id != "" {
 				targetID = &id
 			}
@@ -348,22 +348,22 @@ func (s *SQLiteStore) indexNoteLinks(ctx context.Context, noteID, content, works
 // same transaction (relevant when batches span multiple notes).
 func (s *SQLiteStore) resolveWikilinkTargetTx(ctx context.Context, tx interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}, target, workspaceID string) (string, error) {
+}, target, workspaceID string) string {
 	if target == "" || workspaceID == "" {
-		return "", nil
+		return ""
 	}
 	var id string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT id FROM workspace_notes WHERE workspace_id = ? AND name = ? LIMIT 1`,
 		workspaceID, target).Scan(&id); err == nil {
-		return id, nil
+		return id
 	}
 	if err := tx.QueryRowContext(ctx,
 		`SELECT id FROM workspace_notes WHERE workspace_id = ? AND LOWER(name) = LOWER(?) LIMIT 1`,
 		workspaceID, target).Scan(&id); err == nil {
-		return id, nil
+		return id
 	}
-	return "", nil
+	return ""
 }
 
 // retroResolveBrokenLinks looks for note_links rows in `workspaceID` whose

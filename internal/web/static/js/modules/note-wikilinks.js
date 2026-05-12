@@ -152,7 +152,7 @@ export function applyWikilinksToHtml(html, resolveTarget) {
   // Replace `[[Target|Display]]` and `[[Target]]` outside HTML tags. The
   // regex isn't bulletproof against tag attributes containing `[[`, but in
   // our render pipeline the only place `[[` appears is in text content.
-  return html.replace(/\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]/g, (_, rawTarget, rawDisplay) => {
+  return html.replace(/\[\[([^[\]|]+?)(?:\|([^[\]]+?))?\]\]/g, (_, rawTarget, rawDisplay) => {
     const target = String(rawTarget || '').trim();
     if (!target) return '';
     const display = String(rawDisplay || '').trim();

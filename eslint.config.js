@@ -78,6 +78,7 @@ export default defineConfig([
       }
     },
     rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'no-redeclare': ['error', { builtinGlobals: false }],
       'no-unused-vars': [
         'error',
@@ -95,6 +96,7 @@ export default defineConfig([
       'internal/web/static/js/modules/agent-canvas-animation.js',
       'internal/web/static/js/modules/agent-canvas-api.js',
       'internal/web/static/js/modules/agent-canvas-context-menu.js',
+      'internal/web/static/js/modules/agent-canvas-dialogs.js',
       'internal/web/static/js/modules/agent-canvas-event-handler.js',
       'internal/web/static/js/modules/agent-canvas-events.js',
       'internal/web/static/js/modules/agent-canvas-forms.js',
@@ -118,6 +120,25 @@ export default defineConfig([
       'internal/web/static/js/modules/dashboard-state.js',
       'internal/web/static/js/modules/dashboard-tasks.js',
       'internal/web/static/js/modules/dashboard-ui.js',
+      'internal/web/static/js/modules/note-ai-assist.js',
+      'internal/web/static/js/modules/note-backlinks.js',
+      'internal/web/static/js/modules/note-backlinks.test.js',
+      'internal/web/static/js/modules/note-editor.js',
+      'internal/web/static/js/modules/note-editor.test.js',
+      'internal/web/static/js/modules/note-page.js',
+      'internal/web/static/js/modules/note-page.test.js',
+      'internal/web/static/js/modules/note-presence.js',
+      'internal/web/static/js/modules/note-presence.test.js',
+      'internal/web/static/js/modules/note-rail-notes.js',
+      'internal/web/static/js/modules/note-rail-notes.test.js',
+      'internal/web/static/js/modules/note-staging.js',
+      'internal/web/static/js/modules/note-staging.test.js',
+      'internal/web/static/js/modules/note-tabs.js',
+      'internal/web/static/js/modules/note-tabs.test.js',
+      'internal/web/static/js/modules/note-toc.js',
+      'internal/web/static/js/modules/note-toc.test.js',
+      'internal/web/static/js/modules/note-wikilinks.js',
+      'internal/web/static/js/modules/note-wikilinks.test.js',
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/plugin-init-banner.js',
       'internal/web/static/js/modules/renderer-connections.js',
@@ -125,6 +146,7 @@ export default defineConfig([
       'internal/web/static/js/modules/renderer-panels.js',
       'internal/web/static/js/modules/renderer-primitives.js',
       'internal/web/static/js/modules/renderer-ui.js',
+      'internal/web/static/js/modules/search-palette.js',
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',
@@ -133,8 +155,9 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-file-modal.js',
       'internal/web/static/js/modules/workspace-detail-mcp.js',
       'internal/web/static/js/modules/workspace-detail-skills.js',
+      'internal/web/static/js/modules/workspace-notes-hub.js',
+      'internal/web/static/js/modules/workspace-notes-hub.test.js',
       'internal/web/static/js/modules/workspace-task.js',
-      'internal/web/static/js/modules/agent-canvas-dialogs.js',
       'internal/web/static/js/modules/workspace-task-execution-views.js',
       'internal/web/static/js/modules/workspace-task-skill-draft.js'
     ],
@@ -146,6 +169,14 @@ export default defineConfig([
     files: ['internal/web/static/js/utils/*.js'],
     rules: {
       'no-unused-vars': 'off'
+    }
+  },
+  {
+    files: ['internal/web/static/js/modules/*.test.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
     }
   },
   { files: ['**/*.json'], plugins: { json }, language: 'json/json', extends: ['json/recommended'] },

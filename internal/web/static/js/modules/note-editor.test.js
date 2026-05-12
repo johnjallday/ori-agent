@@ -979,7 +979,7 @@ test('NoteLiveEditor: toggleHeadingFold flips on heading lines, no-op on plain l
 });
 
 test('NoteLiveEditor: toggleTaskLine flips marker and pushes undo', () => {
-  const { host, lines, calls } = mockHost(['- [ ] task', 'plain']);
+  const { host, lines: _lines, calls } = mockHost(['- [ ] task', 'plain']);
   const ed = new NoteLiveEditor(host);
   ed.toggleTaskLine(0, true);
   assert.equal(host.getContentLines()[0], '- [x] task');

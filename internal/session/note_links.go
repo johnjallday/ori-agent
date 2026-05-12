@@ -66,7 +66,7 @@ func scanLineForWikilinks(line string) []rawWikilink {
 
 		// Read target up to '|' or ']]' or another '[' / ']'.
 		targetStart := i
-		var pipeAt int = -1
+		var pipeAt = -1
 		end := -1
 		for j := i; j < len(line)-1; j++ {
 			c := line[j]
@@ -103,26 +103,4 @@ func scanLineForWikilinks(line string) []rawWikilink {
 		i = end + 2
 	}
 	return out
-}
-
-// resolveWikilinkTarget looks up a wikilink target against the workspace's
-// notes table. Returns the matching note ID, or empty string if no match.
-// Matching is exact-case first, then case-insensitive as a fallback.
-func (s *SQLiteStore) resolveWikilinkTarget(target, workspaceID string) (string, error) {
-	if target == "" || workspaceID == "" {
-		return "", nil
-	}
-	var id string
-	err := s.db.QueryRow(`SELECT id FROM workspace_notes WHERE workspace_id = ? AND name = ? LIMIT 1`,
-		workspaceID, target).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	// Fall through to case-insensitive.
-	err = s.db.QueryRow(`SELECT id FROM workspace_notes WHERE workspace_id = ? AND LOWER(name) = LOWER(?) LIMIT 1`,
-		workspaceID, target).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	return "", nil
 }
