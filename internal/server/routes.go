@@ -91,6 +91,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
 	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	agentHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
+	if s.Storage.SessionStore != nil {
+		agentHandler.SetSessionPurger(s.Storage.SessionStore)
+	}
 	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
 	if s.Handlers.Evolution != nil {

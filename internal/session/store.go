@@ -39,6 +39,12 @@ type SessionStore interface {
 	// Returns ErrSessionNotFound if the session doesn't exist.
 	DeleteSession(ctx context.Context, id string) error
 
+	// DeleteSessionsByAgent removes every session whose agent_name matches the
+	// given name, along with their messages and other dependents. Used when an
+	// agent is permanently deleted so the UI cannot resolve stale references.
+	// Returns the number of sessions removed.
+	DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error)
+
 	// ListSessions returns sessions matching the filter with pagination.
 	// Sessions are returned without full message content for efficiency.
 	ListSessions(ctx context.Context, filter *SessionFilter, opts *ListOptions) (*ListResult, error)

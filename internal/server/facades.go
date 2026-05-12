@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
@@ -52,6 +53,7 @@ type StorageSystemFacade struct {
 	AgentStore      store.Store
 	AgentStorePath  string
 	WorkspaceStore  workspace.Store
+	SessionStore    session.HybridStore
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
 }
@@ -136,6 +138,7 @@ func NewStorageSystemFacade(
 	agentStore store.Store,
 	agentStorePath string,
 	workspaceStore workspace.Store,
+	sessionStore session.HybridStore,
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
 ) *StorageSystemFacade {
@@ -143,6 +146,7 @@ func NewStorageSystemFacade(
 		AgentStore:      agentStore,
 		AgentStorePath:  agentStorePath,
 		WorkspaceStore:  workspaceStore,
+		SessionStore:    sessionStore,
 		OnboardingMgr:   onboardingMgr,
 		LocationManager: locationManager,
 	}

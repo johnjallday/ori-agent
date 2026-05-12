@@ -174,6 +174,17 @@ func (h *hybridStore) DeleteSession(ctx context.Context, id string) error {
 	return h.sqlite.DeleteSession(ctx, id)
 }
 
+// DeleteSessionsByAgent removes all sessions owned by the given agent and
+// evicts any cached copies. Returns the number of sessions removed.
+func (h *hybridStore) DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error) {
+	n, err := h.sqlite.DeleteSessionsByAgent(ctx, agentName)
+	if err != nil {
+		return 0, err
+	}
+	h.evictCachedSessionsByAgent(agentName)
+	return n, nil
+}
+
 // ListSessions returns sessions matching the filter.
 func (h *hybridStore) ListSessions(ctx context.Context, filter *SessionFilter, opts *ListOptions) (*ListResult, error) {
 	// Always use SQLite for listing to ensure completeness
@@ -387,6 +398,23 @@ func (h *hybridStore) evictCachedSessionsByWorkspace(workspaceID string) {
 	sessionIDs := make([]string, 0)
 	for _, session := range h.cache.GetAll() {
 		if session == nil || session.FolderID != workspaceID {
+			continue
+		}
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+
+	for _, id := range sessionIDs {
+		h.cache.Remove(id)
+	}
+}
+
+func (h *hybridStore) evictCachedSessionsByAgent(agentName string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	sessionIDs := make([]string, 0)
+	for _, session := range h.cache.GetAll() {
+		if session == nil || session.AgentName != agentName {
 			continue
 		}
 		sessionIDs = append(sessionIDs, session.ID)

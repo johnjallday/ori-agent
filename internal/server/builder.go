@@ -289,6 +289,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.st,
 		b.agentStorePath,
 		b.workspaceStore,
+		b.sessionStore,
 		b.onboardingMgr,
 		b.locationManager,
 	)

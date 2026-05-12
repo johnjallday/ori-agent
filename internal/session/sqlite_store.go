@@ -126,6 +126,22 @@ func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteSessionsByAgent removes every session whose agent_name matches the
+// given name. Dependent rows in messages, tool_calls, session_tags,
+// session_review_status, and review_issues are removed by ON DELETE CASCADE
+// foreign keys. Returns the number of sessions removed.
+func (s *SQLiteStore) DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error) {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE agent_name = ?", agentName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete sessions for agent %q: %w", agentName, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read rows affected: %w", err)
+	}
+	return int(affected), nil
+}
+
 // ListSessions returns sessions matching the filter with pagination.
 func (s *SQLiteStore) ListSessions(ctx context.Context, filter *SessionFilter, opts *ListOptions) (*ListResult, error) {
 	if opts == nil {

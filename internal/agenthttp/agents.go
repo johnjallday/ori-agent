@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -15,6 +16,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// SessionPurger removes sessions tied to a deleted agent so the UI cannot
+// resolve stale references. Implemented by the session HybridStore.
+type SessionPurger interface {
+	DeleteSessionsByAgent(ctx context.Context, agentName string) (int, error)
+}
 
 // validAgentNameRegex defines the allowed characters for agent names
 // Only alphanumeric, underscores, hyphens, and spaces are allowed
@@ -74,6 +81,7 @@ type Handler struct {
 	ActivityLogger   *ActivityLogger
 	cliAgentRegistry *cliagent.CLIAgentRegistry
 	workspaceStore   workspace.Store
+	sessionPurger    SessionPurger
 }
 
 func New(state store.Store) *Handler {
@@ -94,6 +102,13 @@ func (h *Handler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
 // the sidebar use the annotation to hide agents that belong to a workspace.
 func (h *Handler) SetWorkspaceStore(s workspace.Store) {
 	h.workspaceStore = s
+}
+
+// SetSessionPurger wires the session store so that deleting an agent also
+// removes its chat sessions (and dependent rows). Without this the UI can
+// keep referring to a deleted agent through restored session state.
+func (h *Handler) SetSessionPurger(p SessionPurger) {
+	h.sessionPurger = p
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -522,6 +537,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := h.State.DeleteAgent(name); err != nil {
 			orihttp.BadRequest(w, err.Error())
 			return
+		}
+
+		// Remove any sessions still referencing this agent so the UI cannot
+		// restore stale state that resolves to a 404 on /api/agents.
+		if h.sessionPurger != nil {
+			if n, err := h.sessionPurger.DeleteSessionsByAgent(r.Context(), name); err != nil {
+				logger.Error("Failed to purge sessions for deleted agent", logger.Fields{"agent": name, "err": err})
+			} else if n > 0 {
+				logger.Info("Purged sessions for deleted agent", logger.Fields{"agent": name, "count": n})
+			}
 		}
 
 		// Log activity
