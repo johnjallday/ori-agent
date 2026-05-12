@@ -1,10 +1,10 @@
 # <img src="assets/logo-readme.svg" alt="Ori Agent logo" width="36" height="36" style="vertical-align: text-bottom;" /> Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.64-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.65-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
-![Go](https://img.shields.io/badge/Go-1.25.9-00add8)
+![Go](https://img.shields.io/badge/Go-1.25.10-00add8)
 <!-- AUTO:GO_VERSION_END -->
 
 **Ori Agent** is a local-first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents use MCP (Model Context Protocol) servers and Skills for tool capabilities—everything stays on your machine unless you opt into cloud LLMs.
