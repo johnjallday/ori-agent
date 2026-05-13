@@ -4,12 +4,12 @@
 {{template "head.tmpl" .}}
 
 <body class="bg-light">
-  <!-- Toast container -->
+  <a href="#noteMainContent" class="skip-link">Skip to note content</a>
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
   {{template "navbar.tmpl" .}}
 
-  <main class="note-page" role="main" aria-label="Note editor">
+  <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor">
     <!-- Top bar: breadcrumb, editable title, status, "Open in modal" -->
     <header class="note-page-top-bar">
       <nav aria-label="breadcrumb" class="note-page-breadcrumb">
@@ -38,8 +38,8 @@
             <span class="note-status-error text-danger" style="display: none;">⚠ Save failed</span>
           </span>
 
-          <button type="button" id="noteOpenInModal" class="modern-btn modern-btn-secondary btn-sm" title="Open in modal">
-            Open in modal
+          <button type="button" id="noteOpenInModal" class="modern-btn modern-btn-secondary btn-sm" title="Open in Modal">
+            Open in Modal
           </button>
         </div>
       </div>
@@ -91,18 +91,18 @@
             </label>
             <label for="noteAIPromptInput" class="note-ai-field note-ai-field-prompt">
               <span>Prompt</span>
-              <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="Describe the note you want…"></textarea>
+              <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="e.g. Outline a release-prep checklist for v0.0.66…" spellcheck="false"></textarea>
             </label>
           </div>
           <div id="noteAIError" class="note-ai-message note-ai-message-error" role="alert" aria-live="assertive" hidden></div>
           <div id="noteAIStatus" class="note-ai-message" aria-live="polite" aria-atomic="true" hidden></div>
           <div id="noteAIGenerating" class="note-ai-generating" aria-live="polite" hidden>
-            <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
+            <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
             <span>Generating draft…</span>
           </div>
           <div id="noteAIDraftPanel" class="note-ai-draft" hidden>
             <div id="noteAIDraftTitle" class="note-ai-draft-title"></div>
-            <pre id="noteAIDraftContent" class="note-ai-draft-content"></pre>
+            <pre id="noteAIDraftContent" class="note-ai-draft-content" aria-label="Generated note draft" tabindex="0"></pre>
           </div>
         </div>
         <div class="note-ai-panel-footer">
@@ -121,17 +121,17 @@
     <div class="note-editor-grid note-page-editor-grid" id="noteEditorGrid">
       <aside class="note-toc-rail" id="noteTocRail" aria-label="Notes &amp; outline">
         <div class="note-rail-tab-strip" role="tablist" aria-label="Left rail tabs">
-          <button type="button" class="note-rail-tab is-active" data-tab="notes" role="tab" aria-selected="true">Notes</button>
-          <button type="button" class="note-rail-tab" data-tab="outline" role="tab" aria-selected="false">Outline</button>
+          <button type="button" id="noteRailTabNotes" class="note-rail-tab is-active" data-tab="notes" role="tab" aria-selected="true" aria-controls="noteRailPaneNotes">Notes</button>
+          <button type="button" id="noteRailTabOutline" class="note-rail-tab" data-tab="outline" role="tab" aria-selected="false" aria-controls="noteRailPaneOutline">Outline</button>
         </div>
-        <div class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel">
+        <div id="noteRailPaneNotes" class="note-rail-tab-pane note-rail-pane-notes" data-pane="notes" role="tabpanel" aria-labelledby="noteRailTabNotes">
           <div class="note-rail-notes-search">
-            <input type="search" id="noteRailNotesSearch" class="modern-input" placeholder="Filter notes…" aria-label="Filter notes">
+            <input type="search" id="noteRailNotesSearch" class="modern-input" placeholder="Search by title or tag…" aria-label="Filter notes">
           </div>
           <div id="noteRailNotesList" class="note-rail-notes-list" role="list"></div>
-          <button type="button" id="noteRailNewNoteBtn" class="note-rail-new-note">+ New note</button>
+          <button type="button" id="noteRailNewNoteBtn" class="note-rail-new-note">+ New Note</button>
         </div>
-        <div class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel" hidden>
+        <div id="noteRailPaneOutline" class="note-rail-tab-pane note-rail-pane-outline" data-pane="outline" role="tabpanel" aria-labelledby="noteRailTabOutline" hidden>
           <div class="note-rail-empty" data-role="empty">Add a heading to build an outline</div>
           <div class="note-rail-content" data-role="content"></div>
         </div>
@@ -142,8 +142,8 @@
           <div class="note-editor-container note-page-pane note-page-pane-primary" id="notePagePrimaryPane">
             <!-- Source-of-truth textarea, hidden on the page (the preview is the
                  only visible editor; click a rendered line to edit inline). -->
-            <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in Markdown…" style="display: none;"></textarea>
-            <div id="notePreviewContent" class="note-preview-content note-live-editor" role="textbox" aria-label="Markdown live preview editor" tabindex="0">
+            <textarea id="noteContentInput" class="note-content-input" placeholder="e.g. # Project Notes…" style="display: none;" aria-hidden="true" tabindex="-1"></textarea>
+            <div id="notePreviewContent" class="note-preview-content note-live-editor" role="textbox" aria-label="Markdown live preview editor" aria-multiline="true" tabindex="0">
               <div class="note-page-loading">Loading note…</div>
             </div>
           </div>
@@ -160,9 +160,9 @@
             </div>
             <div class="note-page-secondary-body">
               <div id="notePageSecondaryBanner" class="note-page-secondary-banner" hidden>
-                This note is open in the primary pane. Open a different note here, or click Edit this to swap.
+                Already open in the primary pane. Open a different note, or use Edit to swap.
               </div>
-              <textarea id="notePageSecondaryEditor" class="note-page-secondary-editor" placeholder="Markdown source…" spellcheck="true" hidden></textarea>
+              <textarea id="notePageSecondaryEditor" class="note-page-secondary-editor" placeholder="e.g. # Heading…" spellcheck="false" hidden></textarea>
               <div id="notePageSecondaryEmpty" class="note-page-secondary-empty">No note selected.</div>
             </div>
           </aside>
@@ -185,9 +185,7 @@
     <!-- Floating AI selection action bar (positioned via JS) -->
     <div id="noteAIActionBar" class="note-ai-action-bar" role="toolbar" aria-label="AI selection actions"></div>
 
-    <!-- Detach drop zone — appears while dragging a tab when not split.
-         Drop on this zone splits the pane right and places the tab there. -->
-    <div id="notePageDetachZone" class="note-page-detach-zone" hidden aria-hidden="true">
+    <div id="notePageDetachZone" class="note-page-detach-zone" hidden>
       <span>Drop here to split right</span>
     </div>
   </main>

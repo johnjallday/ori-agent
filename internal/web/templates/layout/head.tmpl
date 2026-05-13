@@ -1,8 +1,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
   <title>{{.Title}}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>
@@ -22,6 +25,7 @@
       const isDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
       const root = document.documentElement;
       root.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
+      root.style.colorScheme = isDark ? 'dark' : 'light';
 
       if (savedDensity === 'compact' || savedDensity === 'roomy') {
         root.setAttribute('data-ui-density', savedDensity);

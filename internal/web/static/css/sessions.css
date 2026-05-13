@@ -2385,7 +2385,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   font-size: 12px;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .note-toolbar-btn:hover {
