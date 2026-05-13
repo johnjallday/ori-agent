@@ -147,12 +147,18 @@ function buildActionBar() {
   }
 
   // Inline Ask-AI input that the bar expands into when "Ask AI…" is clicked.
+  // Two rows: a preview of the user's selection (so they still see what
+  // they're asking about after focus moves away from the editor), then the
+  // input + send button.
   const askWrap = document.createElement('div');
   askWrap.className = 'note-ai-ask-wrap';
   askWrap.innerHTML = `
-    <input type="text" class="note-ai-ask-input" data-role="ask-input"
-           placeholder="Ask AI about the selection — Enter to send, Esc to cancel" />
-    <button type="button" class="note-ai-ask-send" data-role="ask-send">Send</button>
+    <div class="note-ai-ask-selection" data-role="ask-selection" title=""></div>
+    <div class="note-ai-ask-row">
+      <input type="text" class="note-ai-ask-input" data-role="ask-input"
+             placeholder="Ask AI about the selection — Enter to send, Esc to cancel" />
+      <button type="button" class="note-ai-ask-send" data-role="ask-send">Send</button>
+    </div>
   `;
   const askInput = askWrap.querySelector('[data-role="ask-input"]');
   const askSend = askWrap.querySelector('[data-role="ask-send"]');
@@ -187,6 +193,17 @@ function notifyAgentMissing() {
 function expandAsk() {
   if (!state.bar) return;
   state.bar.classList.add('is-asking');
+  const sel = state.pendingSelection?.text || '';
+  const selEl = state.bar.querySelector('[data-role="ask-selection"]');
+  if (selEl) {
+    // Preserve newlines so multi-paragraph selections still read as
+    // structured text; only collapse runs of horizontal whitespace and
+    // trim leading/trailing blank space around the whole block.
+    const cleaned = sel.replace(/[ \t]+/g, ' ').replace(/^\s+|\s+$/g, '');
+    const MAX = 280;
+    selEl.textContent = cleaned.length > MAX ? `${cleaned.slice(0, MAX - 1)}…` : cleaned;
+    selEl.title = cleaned;
+  }
   const input = state.bar.querySelector('[data-role="ask-input"]');
   input?.focus();
 }
@@ -196,6 +213,8 @@ function collapseAsk() {
   state.bar.classList.remove('is-asking');
   const input = state.bar.querySelector('[data-role="ask-input"]');
   if (input) input.value = '';
+  const selEl = state.bar.querySelector('[data-role="ask-selection"]');
+  if (selEl) { selEl.textContent = ''; selEl.title = ''; }
 }
 
 function submitAsk(prompt) {

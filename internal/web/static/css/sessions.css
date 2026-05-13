@@ -4779,11 +4779,12 @@ body.task-modal-open {
 
 .note-ai-ask-wrap {
   display: none;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   padding-left: 6px;
   margin-left: 4px;
   border-left: 1px solid var(--border-color);
+  min-width: 280px;
 }
 
 .note-ai-action-bar.is-asking .note-ai-ask-wrap {
@@ -4792,6 +4793,34 @@ body.task-modal-open {
 
 .note-ai-action-bar.is-asking .note-ai-action-btn {
   display: none;
+}
+
+.note-ai-ask-selection {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, var(--text-secondary));
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--primary-color, #6366f1);
+  padding: 3px 6px;
+  border-radius: 0 3px 3px 0;
+  max-width: 320px;
+  max-height: 5.6em; /* ~4 lines */
+  overflow: hidden;
+  white-space: pre-line;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.note-ai-ask-selection:empty {
+  display: none;
+}
+
+.note-ai-ask-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .note-ai-ask-input {
