@@ -272,13 +272,27 @@ function setGenerateBusy(isBusy) {
 async function generatePageNoteWithAI() {
   const promptInput = document.getElementById('noteAIPromptInput');
   const prompt = promptInput?.value?.trim() || '';
-  const agentId = window.NoteEditor?.getSelectedAgentId?.() || '';
-  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
-
   if (!prompt) {
-    setGenerateError('Please enter a prompt describing what you want the note to contain.');
+    setGenerateError('Please enter a prompt.');
     return;
   }
+
+  // If the panel was opened with a selection attached, dispatch as an Ask
+  // suggestion card instead of generating a whole-note draft. Keeps the
+  // selection-scoped flow in the rail with stage/commit semantics.
+  const panelSelection = window.NoteEditor?.getPanelSelection?.();
+  if (panelSelection && panelSelection.text) {
+    const ok = window.NoteAIAssist?.dispatchAsk?.(panelSelection, prompt);
+    if (!ok) {
+      setGenerateError('Could not dispatch — select a workspace agent first.');
+      return;
+    }
+    window.NoteEditor?.closeGeneratePanel?.();
+    return;
+  }
+
+  const agentId = window.NoteEditor?.getSelectedAgentId?.() || '';
+  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
 
   setGenerateError('');
   window.NoteEditor?.setGenerateStatus?.('');

@@ -4455,6 +4455,24 @@ body.task-modal-open {
   padding: 10px 12px;
 }
 
+.note-ai-panel-selection {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted, var(--text-secondary));
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--primary-color, #6366f1);
+  padding: 6px 10px;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 10px;
+  white-space: pre-line;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 6em;
+}
+
 .note-ai-form-grid {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
@@ -4775,71 +4793,6 @@ body.task-modal-open {
 
 .note-ai-action-btn:hover {
   background: var(--bg-hover);
-}
-
-.note-ai-ask-wrap {
-  display: none;
-  flex-direction: column;
-  gap: 4px;
-  padding-left: 6px;
-  margin-left: 4px;
-  border-left: 1px solid var(--border-color);
-  min-width: 280px;
-}
-
-.note-ai-action-bar.is-asking .note-ai-ask-wrap {
-  display: flex;
-}
-
-.note-ai-action-bar.is-asking .note-ai-action-btn {
-  display: none;
-}
-
-.note-ai-ask-selection {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-muted, var(--text-secondary));
-  background: var(--bg-secondary);
-  border-left: 2px solid var(--primary-color, #6366f1);
-  padding: 3px 6px;
-  border-radius: 0 3px 3px 0;
-  max-width: 320px;
-  max-height: 5.6em; /* ~4 lines */
-  overflow: hidden;
-  white-space: pre-line;
-  font-style: italic;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-}
-
-.note-ai-ask-selection:empty {
-  display: none;
-}
-
-.note-ai-ask-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.note-ai-ask-input {
-  width: 240px;
-  padding: 4px 6px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.note-ai-ask-send {
-  background: var(--primary-color, #6366f1);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 10px;
-  cursor: pointer;
 }
 
 /* --- Suggestion cards in the assist rail --- */

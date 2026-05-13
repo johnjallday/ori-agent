@@ -46,9 +46,9 @@
 
       <!-- Toolbar (reused IDs match the modal so NoteEditor wires them automatically) -->
       <div class="note-editor-toolbar">
-        <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Generate with AI" aria-controls="noteAIGeneratePanel" aria-expanded="false">
+        <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Ask AI (⌘J)" aria-controls="noteAIGeneratePanel" aria-expanded="false">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
-          Generate with AI
+          Ask AI
         </button>
         <div class="note-toolbar-spacer"></div>
         <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle sidebar" aria-pressed="false">
@@ -60,12 +60,13 @@
           Assist
         </button>
       </div>
-      <section id="noteAIGeneratePanel" class="note-ai-panel note-page-ai-panel" aria-label="Generate with AI" hidden>
+      <section id="noteAIGeneratePanel" class="note-ai-panel note-page-ai-panel" aria-label="Ask AI" hidden>
         <div class="note-ai-panel-header">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-primary" aria-hidden="true"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
-          <span>Generate with AI</span>
+          <span>Ask AI</span>
         </div>
         <div class="note-ai-panel-body">
+          <div id="noteAIPanelSelection" class="note-ai-panel-selection" data-role="panel-selection" hidden></div>
           <div class="note-ai-form-grid">
             <label for="noteAIAgentSelect" class="note-ai-field">
               <span>Agent</span>
@@ -96,7 +97,7 @@
             <button type="button" id="noteAIAppendBtn" class="modern-btn modern-btn-secondary btn-sm">Append</button>
             <button type="button" id="noteAIReplaceBtn" class="modern-btn modern-btn-primary btn-sm">Replace Note</button>
           </div>
-          <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Generate Draft</button>
+          <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">Ask</button>
         </div>
       </section>
     </header>

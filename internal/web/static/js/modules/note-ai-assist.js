@@ -87,11 +87,6 @@ function onAgentChanged(agentId) {
 // 'textarea' or 'preview', anchorRect is a DOMRect to position against.
 function onSelectionChanged(selection) {
   if (!selection || !selection.text || selection.text.trim() === '') {
-    // While the user is typing into the Ask-AI input, focus moves out of the
-    // preview pane and selectionchange fires with an empty selection. Don't
-    // tear the bar down — keep is-asking mode and the pending selection
-    // intact. The user closes the input via Esc / Send / submitting.
-    if (state.bar?.classList.contains('is-asking')) return;
     hideBar();
     state.pendingSelection = null;
     return;
@@ -103,9 +98,6 @@ function onSelectionChanged(selection) {
 
 function hideBar() {
   if (state.bar) state.bar.style.display = 'none';
-  if (state.bar) state.bar.classList.remove('is-asking');
-  const askInput = state.bar?.querySelector('[data-role="ask-input"]');
-  if (askInput) askInput.value = '';
 }
 
 function showBar() {
@@ -148,28 +140,10 @@ function buildActionBar() {
     bar.appendChild(btn);
   }
 
-  // Inline Ask-AI input that the bar expands into when "Ask AI…" is clicked.
-  // Two rows: a preview of the user's selection (so they still see what
-  // they're asking about after focus moves away from the editor), then the
-  // input + send button.
-  const askWrap = document.createElement('div');
-  askWrap.className = 'note-ai-ask-wrap';
-  askWrap.innerHTML = `
-    <div class="note-ai-ask-selection" data-role="ask-selection" title=""></div>
-    <div class="note-ai-ask-row">
-      <input type="text" class="note-ai-ask-input" data-role="ask-input"
-             placeholder="Ask AI about the selection — Enter to send, Esc to cancel" />
-      <button type="button" class="note-ai-ask-send" data-role="ask-send">Send</button>
-    </div>
-  `;
-  const askInput = askWrap.querySelector('[data-role="ask-input"]');
-  const askSend = askWrap.querySelector('[data-role="ask-send"]');
-  askInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); submitAsk(askInput.value); }
-    else if (e.key === 'Escape') { e.preventDefault(); collapseAsk(); }
-  });
-  askSend.addEventListener('click', () => submitAsk(askInput.value));
-  bar.appendChild(askWrap);
+  // Note: clicking "Ask AI…" no longer expands the bar into an inline input;
+  // it now opens the unified Ask AI panel with the selection attached
+  // (see onActionClick). The inline input has been retired so there is one
+  // canonical prompt surface.
 }
 
 function onActionClick(actionId) {
@@ -178,7 +152,14 @@ function onActionClick(actionId) {
     return;
   }
   if (actionId === 'ask') {
-    expandAsk();
+    // Route Ask AI through the unified panel so the prompt UX has one
+    // canonical surface. The bar dismisses; the panel takes over with
+    // the current selection chip attached.
+    const selection = state.pendingSelection;
+    hideBar();
+    if (typeof window !== 'undefined' && window.NoteEditor?.openGeneratePanel) {
+      window.NoteEditor.openGeneratePanel(selection);
+    }
     return;
   }
   dispatch({ action: actionId });
@@ -192,50 +173,16 @@ function notifyAgentMissing() {
   state.sessionsApi?.showToast?.('Select a workspace agent to use inline AI', 'warning');
 }
 
-function expandAsk() {
-  if (!state.bar) return;
-  state.bar.classList.add('is-asking');
-  const sel = state.pendingSelection?.text || '';
-  const selEl = state.bar.querySelector('[data-role="ask-selection"]');
-  if (selEl) {
-    // Preserve newlines so multi-paragraph selections still read as
-    // structured text; only collapse runs of horizontal whitespace and
-    // trim leading/trailing blank space around the whole block.
-    const cleaned = sel.replace(/[ \t]+/g, ' ').replace(/^\s+|\s+$/g, '');
-    const MAX = 280;
-    selEl.textContent = cleaned.length > MAX ? `${cleaned.slice(0, MAX - 1)}…` : cleaned;
-    selEl.title = cleaned;
-  }
-  const input = state.bar.querySelector('[data-role="ask-input"]');
-  input?.focus();
-}
-
-// openAskForSelection is the public entry point used by keyboard shortcuts.
-// Takes a selection (as returned by readSelection), positions the bar, and
-// expands it directly into Ask mode. Returns true on success.
-function openAskForSelection(selection) {
-  if (!selection || !selection.text || !selection.text.trim()) return false;
+// dispatchAsk creates a suggestion card from an external surface (the
+// unified Ask AI panel). Returns true if dispatch succeeded.
+function dispatchAsk(selection, prompt) {
+  if (!selection || !selection.text) return false;
+  const trimmed = (prompt || '').trim();
+  if (!trimmed) return false;
   if (!isAgentReady()) { notifyAgentMissing(); return false; }
-  onSelectionChanged(selection);
-  expandAsk();
+  state.pendingSelection = selection;
+  dispatch({ action: 'ask', prompt: trimmed });
   return true;
-}
-
-function collapseAsk() {
-  if (!state.bar) return;
-  state.bar.classList.remove('is-asking');
-  const input = state.bar.querySelector('[data-role="ask-input"]');
-  if (input) input.value = '';
-  const selEl = state.bar.querySelector('[data-role="ask-selection"]');
-  if (selEl) { selEl.textContent = ''; selEl.title = ''; }
-}
-
-function submitAsk(prompt) {
-  prompt = (prompt || '').trim();
-  if (!prompt) return;
-  if (!isAgentReady()) { notifyAgentMissing(); return; }
-  dispatch({ action: 'ask', prompt });
-  collapseAsk();
 }
 
 // =============================================================================
@@ -755,7 +702,7 @@ const api = {
   onNoteOpened,
   onAgentChanged,
   onSelectionChanged,
-  openAskForSelection,
+  dispatchAsk,
   hideBar,
   render,
   // Expose for tasks 5.0 / debugging.
@@ -767,4 +714,4 @@ if (typeof window !== 'undefined') {
 }
 
 export default api;
-export { init, onNoteOpened, onAgentChanged, onSelectionChanged, openAskForSelection, hideBar, render };
+export { init, onNoteOpened, onAgentChanged, onSelectionChanged, dispatchAsk, hideBar, render };

@@ -6172,22 +6172,34 @@ const sessionManager = {
     return window.NoteEditor?.loadAgentsIntoDropdown(workspaceId);
   },
 
-  // Generate note content with AI
+  // Submit the unified Ask AI panel. When the panel has a selection attached
+  // (set by openGeneratePanel(selection) — e.g. via the inline Ask AI… button
+  // or Cmd+J), the prompt is dispatched as a suggestion card through
+  // NoteAIAssist. Otherwise it falls back to the cold-start /api/notes/generate
+  // flow that produces a whole-note draft.
   async generateNoteWithAI() {
-    const agentSelect = document.getElementById('noteAIAgentSelect');
     const promptInput = document.getElementById('noteAIPromptInput');
-
-    const agentId = agentSelect?.value || '';
     const prompt = promptInput?.value?.trim() || '';
-    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
-
-    // Validate prompt
     if (!prompt) {
-      window.NoteEditor?.setGenerateError?.('Please enter a prompt describing what you want the note to contain.');
+      window.NoteEditor?.setGenerateError?.('Please enter a prompt.');
       return;
     }
 
-    // Hide error, show loading
+    const panelSelection = window.NoteEditor?.getPanelSelection?.();
+    if (panelSelection && panelSelection.text) {
+      const ok = window.NoteAIAssist?.dispatchAsk?.(panelSelection, prompt);
+      if (!ok) {
+        window.NoteEditor?.setGenerateError?.('Could not dispatch — select a workspace agent first.');
+        return;
+      }
+      window.NoteEditor?.closeGeneratePanel?.();
+      return;
+    }
+
+    const agentSelect = document.getElementById('noteAIAgentSelect');
+    const agentId = agentSelect?.value || '';
+    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
+
     window.NoteEditor?.setGenerateError?.('');
     window.NoteEditor?.setGenerateStatus?.('');
     window.NoteEditor?.clearGenerateDraft?.();

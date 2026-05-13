@@ -1577,10 +1577,39 @@ export function isGeneratePanelOpen() {
   return !panel.hidden && panel.style.display !== 'none';
 }
 
-// openGeneratePanel reveals the Generate-with-AI form and sets the rail to
-// "generating" mode (which hides the suggestion stack so the form is the
-// only visible rail content).
-export function openGeneratePanel() {
+// _panelSelection captures a selection attached to the unified Ask AI panel
+// at open time (via Cmd+J, the inline Ask AI… button, etc.). When non-null,
+// submit handlers route the prompt through the /api/notes/assist suggestion
+// flow instead of /api/notes/generate.
+let _panelSelection = null;
+
+function _renderPanelSelectionChip(selection) {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('noteAIPanelSelection');
+  if (!el) return;
+  if (!selection || !selection.text || !selection.text.trim()) {
+    el.textContent = '';
+    el.title = '';
+    el.hidden = true;
+    return;
+  }
+  // Preserve newlines (multi-paragraph selections still read as structured
+  // text), but collapse runs of horizontal whitespace for readability.
+  const cleaned = selection.text.replace(/[ \t]+/g, ' ').replace(/^\s+|\s+$/g, '');
+  const MAX = 320;
+  el.textContent = cleaned.length > MAX ? `${cleaned.slice(0, MAX - 1)}…` : cleaned;
+  el.title = cleaned;
+  el.hidden = false;
+}
+
+export function getPanelSelection() { return _panelSelection; }
+
+// openGeneratePanel reveals the Ask AI form and sets the rail to "generating"
+// mode (which hides the suggestion stack so the form is the only visible
+// rail content). Pass `selection` (as returned by readSelection) to attach
+// it as a chip; submit will then create a suggestion card via /assist
+// instead of generating a whole-note draft.
+export function openGeneratePanel(selection = null) {
   const panel = _genPanelEl();
   if (!panel) return;
   _setGenerateExpanded(true);
@@ -1590,6 +1619,8 @@ export function openGeneratePanel() {
     const rail = document.getElementById(ASSIST_RAIL_ID);
     if (rail) rail.classList.add('is-generating');
   }
+  _panelSelection = selection || null;
+  _renderPanelSelectionChip(_panelSelection);
   void loadAgentsIntoDropdown();
   const focusPrompt = () => document.getElementById('noteAIPromptInput')?.focus?.();
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusPrompt);
@@ -1611,6 +1642,8 @@ export function closeGeneratePanel() {
   setGenerateError('');
   setGenerateStatus('');
   setGenerateBusy(false);
+  _panelSelection = null;
+  _renderPanelSelectionChip(null);
 
   const rail = document.getElementById(ASSIST_RAIL_ID);
   if (rail) rail.classList.remove('is-generating');
@@ -1972,32 +2005,31 @@ export function initAIAssist(host = {}) {
 let _askShortcutWired = false;
 
 // wireAskAIShortcut installs the global Cmd+J / Ctrl+J shortcut that opens
-// the Ask AI prompt for whatever the user currently has selected in the
-// note editor. Idempotent — installed once when initAIAssist first runs.
+// the unified Ask AI panel. If the user currently has a text selection in
+// a note editor, the selection is attached to the panel as a chip and the
+// prompt will operate on it (suggestion card flow). Otherwise the panel
+// opens in cold-start mode (whole-note draft flow). Idempotent — installed
+// once when initAIAssist first runs.
 function wireAskAIShortcut(host) {
   if (_askShortcutWired || typeof document === 'undefined') return;
   document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
     if (e.key !== 'j' && e.key !== 'J') return;
 
-    // If the user is typing inside a non-note input (search box, generate
-    // prompt, etc.), let the browser handle the keystroke. The note editor
-    // textareas are allowed through so a selection inside them can trigger
-    // Ask AI without leaving the keyboard.
+    // If the user is typing inside a non-note input (search box, the panel's
+    // own prompt textarea, etc.), let the browser handle the keystroke.
+    // Note-editor textareas are allowed through so a selection inside them
+    // can trigger Ask AI without leaving the keyboard.
     const target = e.target;
     const NOTE_INPUT_IDS = new Set(['noteContentInput', 'notePageSecondaryEditor']);
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
       if (!NOTE_INPUT_IDS.has(target.id)) return;
     }
 
-    const sel = host.readSelection?.();
-    if (!sel || !sel.text || !sel.text.trim()) {
-      // Don't preventDefault when nothing happens — leave the keystroke
-      // free for any other surface that might want it.
-      return;
-    }
     e.preventDefault();
-    window.NoteAIAssist?.openAskForSelection?.(sel);
+    const sel = host.readSelection?.();
+    const selection = sel && sel.text && sel.text.trim() ? sel : null;
+    openGeneratePanel(selection);
   });
   _askShortcutWired = true;
 }
@@ -2446,6 +2478,7 @@ const api = {
   toggleGeneratePanel,
   bindGenerateToggleButton,
   openGeneratePanelByDefault,
+  getPanelSelection,
   setGenerateBusy,
   setGenerateError,
   setGenerateStatus,
