@@ -5695,6 +5695,29 @@ body.task-modal-open {
   color: var(--text-secondary, #64748b);
 }
 
+.note-page-secondary-rendered {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  padding: 16px 24px;
+}
+
+.note-page-secondary-rendered[hidden] {
+  display: none !important;
+}
+
+.note-page-secondary-rendered.is-readonly {
+  background: var(--bg-tertiary, #f9fafb);
+  color: var(--text-secondary, #64748b);
+  cursor: default;
+}
+
+.note-page-secondary-rendered.is-readonly .note-live-line-rendered:hover,
+.note-page-secondary-rendered.is-readonly .note-live-line-rendered:focus {
+  background: transparent;
+}
+
 .note-page-secondary-banner {
   padding: 8px 12px;
   background: rgba(99, 102, 241, 0.08);

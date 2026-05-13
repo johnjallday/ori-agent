@@ -53,6 +53,17 @@ test('openTab: existing tab just switches active', () => {
   assert.equal(s.panes[0].activeId, 'a');
 });
 
+test('openTab: cleans repeated copies of an existing tab', () => {
+  const s = {
+    panes: [{ activeId: 'b', tabs: ['a', 'b', 'a'] }],
+    splitMode: 'none',
+    focusedPaneIndex: 0,
+  };
+  const s2 = openTab(s, 'a');
+  assert.deepEqual(s2.panes[0].tabs, ['a', 'b']);
+  assert.equal(s2.panes[0].activeId, 'a');
+});
+
 test('openTab: pure — does not mutate input', () => {
   const s = initialState('a');
   const before = JSON.stringify(s);
@@ -318,6 +329,14 @@ test('hydrate: round-trips a valid two-pane state', () => {
   assert.equal(s.focusedPaneIndex, 1);
   assert.deepEqual(s.panes[0].tabs, ['a', 'b']);
   assert.equal(s.panes[1].activeId, 'c');
+});
+
+test('hydrate: deduplicates repeated tabs in a pane', () => {
+  const s = hydrate({
+    panes: [{ activeId: 'b', tabs: ['a', 'b', 'a', 'b'] }],
+  }, null);
+  assert.deepEqual(s.panes[0].tabs, ['a', 'b']);
+  assert.equal(s.panes[0].activeId, 'b');
 });
 
 test('hydrate: clamps focusedPaneIndex when out of range', () => {

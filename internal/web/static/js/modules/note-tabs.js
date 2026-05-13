@@ -55,11 +55,23 @@ function validPaneIndex(state, idx) {
   return Number.isInteger(idx) && idx >= 0 && idx < state.panes.length;
 }
 
+function uniqueNoteIds(values) {
+  const seen = new Set();
+  const ids = [];
+  for (const value of values || []) {
+    if (typeof value !== 'string' || !value || seen.has(value)) continue;
+    seen.add(value);
+    ids.push(value);
+  }
+  return ids;
+}
+
 export function openTab(state, noteId, paneIndex = state.focusedPaneIndex) {
   if (!noteId) return state;
   const next = cloneState(state);
   if (!validPaneIndex(next, paneIndex)) paneIndex = next.focusedPaneIndex;
   const pane = next.panes[paneIndex];
+  pane.tabs = uniqueNoteIds(pane.tabs);
   if (pane.tabs.includes(noteId)) {
     pane.activeId = noteId;
   } else {
@@ -236,7 +248,7 @@ export function hydrate(saved, fallbackNoteId = null) {
   const sanitizedPanes = [];
   for (const pane of panes) {
     if (!pane || typeof pane !== 'object') return fallback;
-    const tabs = Array.isArray(pane.tabs) ? pane.tabs.filter((t) => typeof t === 'string' && t) : null;
+    const tabs = Array.isArray(pane.tabs) ? uniqueNoteIds(pane.tabs) : null;
     if (!tabs || tabs.length === 0) return fallback;
     let activeId = typeof pane.activeId === 'string' ? pane.activeId : null;
     if (!activeId || !tabs.includes(activeId)) activeId = tabs[0];

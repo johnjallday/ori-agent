@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 const {
   createWorkspaceNote,
+  noteTabsStateKey,
 } = await import('./note-page.js');
 
 test('createWorkspaceNote posts an empty note to the workspace notes endpoint', async () => {
@@ -39,4 +40,9 @@ test('createWorkspaceNote requires a workspace id', async () => {
     () => createWorkspaceNote('', async () => ({ ok: true })),
     /No workspace selected/
   );
+});
+
+test('noteTabsStateKey scopes persisted tab state by workspace', () => {
+  assert.equal(noteTabsStateKey('ws-1'), 'note.tabs.workspace.ws-1');
+  assert.equal(noteTabsStateKey(''), 'note.tabs');
 });

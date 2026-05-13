@@ -1063,6 +1063,21 @@ test('mount: returns the four controller handles', () => {
   assert.equal(typeof bundle.destroy, 'function');
 });
 
+test('mount: can disable the shared TOC for secondary editor surfaces', () => {
+  let content = '# Secondary';
+  const bundle = mount({
+    getContent: () => content,
+    setContent: (v) => { content = v; },
+    getContentLines: () => content.split('\n'),
+    setContentLines: (lines) => { content = lines.join('\n'); },
+    isPreviewMode: () => true,
+    enableToc: false,
+  });
+  assert.equal(bundle.toc, null);
+  assert.ok(bundle.live);
+  bundle.destroy();
+});
+
 test('mount: live.pushUndo records into history; undo/redo round-trip via shortcut', () => {
   let content = 'first';
   const renderCalls = [];

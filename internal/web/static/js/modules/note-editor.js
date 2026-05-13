@@ -523,9 +523,9 @@ export function startOfLine(content, lineIndex) {
 // findRenderedHeadingByPosition locates the rendered live-preview element for
 // the heading at source byte offset `position`. Returns null when the live
 // preview isn't mounted or no rendered line matches.
-export function findRenderedHeadingByPosition(content, position) {
+export function findRenderedHeadingByPosition(content, position, previewPaneId = PREVIEW_PANE_ID) {
   if (typeof document === 'undefined') return null;
-  const previewPane = document.getElementById(PREVIEW_PANE_ID);
+  const previewPane = document.getElementById(previewPaneId || PREVIEW_PANE_ID);
   if (!previewPane) return null;
   const lineIndex = lineIndexAtPosition(content, position);
   return previewPane.querySelector(`.note-live-line-rendered[data-line-index="${lineIndex}"]`);
@@ -534,17 +534,17 @@ export function findRenderedHeadingByPosition(content, position) {
 // scrollToHeadingPosition smooth-scrolls the preview pane so the heading at
 // `position` sits at the top of the visible area. No-op when the preview
 // isn't mounted or the heading isn't rendered.
-export function scrollToHeadingPosition(content, position) {
-  const target = findRenderedHeadingByPosition(content, position);
+export function scrollToHeadingPosition(content, position, previewPaneId = PREVIEW_PANE_ID) {
+  const target = findRenderedHeadingByPosition(content, position, previewPaneId);
   target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // setActiveTocEntry marks the TOC rail entry corresponding to `lineIndex` as
 // the currently-active section (sets `aria-current="location"` and the
 // `.is-active` class). Clears the marker on every other entry first.
-export function setActiveTocEntry(lineIndex, content) {
+export function setActiveTocEntry(lineIndex, content, tocRailId = TOC_RAIL_ID) {
   if (typeof document === 'undefined' || lineIndex == null) return;
-  const rail = document.getElementById(TOC_RAIL_ID);
+  const rail = document.getElementById(tocRailId || TOC_RAIL_ID);
   if (!rail) return;
   const cursor = startOfLine(content, lineIndex);
   const target = rail.querySelector(`[data-position="${cursor}"]`);
@@ -1109,6 +1109,19 @@ export function resizeLiveInput(input) {
   input.style.height = `${Math.max(input.scrollHeight, 24)}px`;
 }
 
+function clearLiveEditorEvents(previewContent) {
+  if (!previewContent) return;
+  previewContent.onmousedown = null;
+  previewContent.onmouseup = null;
+  previewContent.onclick = null;
+  previewContent.onkeydown = null;
+  previewContent.oninput = null;
+  previewContent.onchange = null;
+  previewContent.onpaste = null;
+  previewContent.oncut = null;
+  previewContent.onfocusout = null;
+}
+
 // =============================================================================
 // mount — composite factory that wires the four controllers together
 // =============================================================================
@@ -1129,6 +1142,12 @@ export function resizeLiveInput(input) {
 //                                Defaults to updateSaveStatus(s).
 //   historyLimit?             — number, default 100.
 //   autosaveDelayMs?          — number, default 3000.
+//   previewPaneId?            — DOM id for the live-preview pane.
+//   enableToc?                — bool, default true. Disable for secondary
+//                                editor surfaces that should not update the
+//                                shared Outline rail.
+//   isReadOnly?               — bool callback. Renders Markdown but skips
+//                                live-edit event binding when true.
 //   aiAssist?                 — optional sub-config to wire NoteAIAssist in
 //                                the same call: { readSelection, showToast }.
 //                                Omitting it skips the AI Assist setup; the
@@ -1143,6 +1162,8 @@ export function resizeLiveInput(input) {
 // pushes onto the history instance; its scheduleAutoSave callback fires the
 // timer. The host only supplies content I/O and the render hook.
 export function mount(host = {}) {
+  const previewPaneId = host.previewPaneId || PREVIEW_PANE_ID;
+  const enableToc = host.enableToc !== false;
   const history = new NoteHistory({ limit: host.historyLimit ?? 100 });
 
   // Autosave: host owns onFlush (the actual save API call + state-update
@@ -1176,13 +1197,18 @@ export function mount(host = {}) {
   function render(opts = {}) {
     if (typeof document === 'undefined') return;
     if (!host.isPreviewMode?.()) return;
-    const previewContent = document.getElementById(PREVIEW_PANE_ID);
+    const previewContent = document.getElementById(previewPaneId);
     if (!previewContent || !live) return;
 
     const lines = host.getContentLines?.() || [];
     pruneCollapsedHeadings(lines, live.state.collapsedHeadings);
+    const readOnly = Boolean(host.isReadOnly?.());
+    if (readOnly) {
+      live.state.activeLineIndex = null;
+      live.state.activeRange = null;
+    }
 
-    const activeRange = live.state.activeRange
+    const activeRange = !readOnly && live.state.activeRange
       ? {
           start: Math.max(0, Math.min(live.state.activeRange.start, lines.length - 1)),
           end: Math.max(0, Math.min(live.state.activeRange.end, lines.length - 1)),
@@ -1191,7 +1217,7 @@ export function mount(host = {}) {
     const focusLineIndex = Number.isInteger(opts.focusLineIndex)
       ? opts.focusLineIndex
       : live.state.activeLineIndex;
-    const activeLineIndex = !activeRange && Number.isInteger(focusLineIndex)
+    const activeLineIndex = !readOnly && !activeRange && Number.isInteger(focusLineIndex)
       ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
       : null;
     live.state.activeLineIndex = activeLineIndex;
@@ -1201,7 +1227,13 @@ export function mount(host = {}) {
       activeLineIndex,
       collapsedHeadings: live.state.collapsedHeadings,
     });
-    live.bindEvents(previewContent);
+    previewContent.classList.toggle('is-readonly', readOnly);
+    previewContent.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
+    if (readOnly) {
+      clearLiveEditorEvents(previewContent);
+    } else {
+      live.bindEvents(previewContent);
+    }
 
     const focusInput = activeRange
       ? previewContent.querySelector('.note-live-block-input')
@@ -1260,7 +1292,13 @@ export function mount(host = {}) {
     },
   });
 
-  toc = new NoteTocController(sharedHost);
+  toc = enableToc
+    ? new NoteTocController({
+        ...sharedHost,
+        previewPaneId,
+        tocRailId: host.tocRailId || TOC_RAIL_ID,
+      })
+    : null;
 
   // Optional: wire the inline AI Assist sidebar in the same call. The
   // selection-read callback is host-supplied because surfaces differ on
@@ -1271,7 +1309,7 @@ export function mount(host = {}) {
       setContent: host.setContent,
       isPreviewMode: host.isPreviewMode,
       render,
-      scheduleTocRebuild: () => toc.scheduleRebuild(),
+      scheduleTocRebuild: () => toc?.scheduleRebuild?.(),
       pushUndo: () => history.push(host.getContent?.() || ''),
       scheduleAutoSave: () => autosave.schedule(),
       showToast: host.aiAssist.showToast,
@@ -1287,7 +1325,7 @@ export function mount(host = {}) {
     render,
     destroy() {
       autosave.cancel();
-      toc.destroy();
+      toc?.destroy?.();
     },
   };
 }
@@ -1307,6 +1345,8 @@ export class NoteTocController {
     // host: { getContent(), setContent(value), isPreviewMode(), pushUndo(),
     //         scheduleAutoSave(), render() }
     this.host = host;
+    this.previewPaneId = host.previewPaneId || PREVIEW_PANE_ID;
+    this.tocRailId = host.tocRailId || TOC_RAIL_ID;
     this.observer = null;
     this.rebuildTimer = null;
     this.dragSource = null;
@@ -1327,7 +1367,7 @@ export class NoteTocController {
       // lives in this rail, so hiding it would strand that surface.
       // Just clear the outline pane and detach the active-section observer.
       this.detachObserver();
-      const rail = document.getElementById(TOC_RAIL_ID);
+      const rail = document.getElementById(this.tocRailId);
       const emptyEl = rail?.querySelector('[data-role="empty"]');
       const contentEl = rail?.querySelector('[data-role="content"]');
       if (emptyEl) emptyEl.style.display = '';
@@ -1338,7 +1378,7 @@ export class NoteTocController {
       return;
     }
     if (typeof window === 'undefined' || !window.NoteTOC) return;
-    const rail = document.getElementById(TOC_RAIL_ID);
+    const rail = document.getElementById(this.tocRailId);
     if (!rail) return;
 
     const empty = rail.querySelector('[data-role="empty"]');
@@ -1383,7 +1423,7 @@ export class NoteTocController {
       btn.textContent = h.text;
       btn.title = h.text;
       btn.draggable = true;
-      btn.addEventListener('click', () => scrollToHeadingPosition(this.host.getContent?.() || '', h.position));
+      btn.addEventListener('click', () => scrollToHeadingPosition(this.host.getContent?.() || '', h.position, this.previewPaneId));
       btn.addEventListener('dragstart', (e) => this._onDragStart(e, h.position));
       btn.addEventListener('dragend', () => this._onDragEnd());
       btn.addEventListener('dragover', (e) => this._onDragOver(e, h.position));
@@ -1400,7 +1440,7 @@ export class NoteTocController {
   attachObserver() {
     this.detachObserver();
     if (typeof IntersectionObserver === 'undefined' || typeof document === 'undefined') return;
-    const previewPane = document.getElementById(PREVIEW_PANE_ID);
+    const previewPane = document.getElementById(this.previewPaneId);
     if (!previewPane) return;
     const headingEls = previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]');
     if (!headingEls.length) return;
@@ -1417,7 +1457,7 @@ export class NoteTocController {
         const rect = el.getBoundingClientRect();
         if (rect.top < topY) { topY = rect.top; top = el; }
       }
-      if (top) setActiveTocEntry(top.dataset.lineIndex, this.host.getContent?.() || '');
+      if (top) setActiveTocEntry(top.dataset.lineIndex, this.host.getContent?.() || '', this.tocRailId);
     }, { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] });
 
     headingEls.forEach((el) => observer.observe(el));

@@ -147,9 +147,8 @@
               <div class="note-page-loading">Loading note…</div>
             </div>
           </div>
-          <!-- Secondary pane shown when split mode is active. It hosts a
-               full-textarea editor (Markdown source) with its own autosave —
-               the primary pane keeps the fancier live-preview editor. -->
+          <!-- Secondary pane shown when split mode is active. It hosts its
+               own live-preview editor and autosave lifecycle. -->
           <aside class="note-page-pane note-page-pane-secondary" id="notePageSecondaryPane" hidden aria-label="Secondary pane">
             <div class="note-page-secondary-header">
               <nav class="note-page-secondary-tabs" id="notePageSecondaryTabs" role="tablist" aria-label="Secondary pane tabs"></nav>
@@ -162,7 +161,8 @@
               <div id="notePageSecondaryBanner" class="note-page-secondary-banner" hidden>
                 Already open in the primary pane. Open a different note, or use Edit to swap.
               </div>
-              <textarea id="notePageSecondaryEditor" class="note-page-secondary-editor" placeholder="e.g. # Heading…" spellcheck="false" hidden></textarea>
+              <textarea id="notePageSecondaryEditor" class="note-page-secondary-editor note-page-secondary-source" placeholder="e.g. # Heading…" spellcheck="false" style="display: none;" aria-hidden="true" tabindex="-1" hidden></textarea>
+              <div id="notePageSecondaryPreview" class="note-preview-content note-live-editor note-page-secondary-rendered" role="textbox" aria-label="Secondary Markdown live preview editor" aria-multiline="true" tabindex="0" hidden></div>
               <div id="notePageSecondaryEmpty" class="note-page-secondary-empty">No note selected.</div>
             </div>
           </aside>

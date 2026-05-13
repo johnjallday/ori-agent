@@ -8,7 +8,8 @@
 // changes (no remount, so autosave/history controllers persist across
 // tab switches).
 
-const STATE_KEY = 'note.tabs';
+const LEGACY_STATE_KEY = 'note.tabs';
+const STATE_KEY_PREFIX = 'note.tabs.workspace.';
 
 function readNoteIdFromPath() {
   if (typeof window === 'undefined') return '';
@@ -25,15 +26,25 @@ let state = null;                 // NoteTabs reducer state
 let switching = false;            // re-entrancy guard while swapping content
 let pendingGenerateDraft = null;   // last whole-note AI draft waiting to apply
 let creatingNoteFromTabStrip = false;
+let stateWorkspaceId = null;       // workspace scope for persisted tab state
 
 // =============================================================================
 // State persistence (localStorage)
 // =============================================================================
 
-function loadSavedState(fallbackNoteId) {
+export function noteTabsStateKey(workspaceId) {
+  const id = String(workspaceId || '').trim();
+  return id ? `${STATE_KEY_PREFIX}${id}` : LEGACY_STATE_KEY;
+}
+
+function noteWorkspaceId(note) {
+  return note?.workspace_id || note?.folder_id || '';
+}
+
+function loadSavedState(fallbackNoteId, workspaceId) {
   if (!window.NoteTabs) return null;
   try {
-    const raw = localStorage.getItem(STATE_KEY);
+    const raw = localStorage.getItem(noteTabsStateKey(workspaceId));
     if (!raw) return window.NoteTabs.initialState(fallbackNoteId);
     const parsed = JSON.parse(raw);
     return window.NoteTabs.hydrate(parsed, fallbackNoteId);
@@ -43,7 +54,7 @@ function loadSavedState(fallbackNoteId) {
 }
 
 function persistState() {
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch (_) {}
+  try { localStorage.setItem(noteTabsStateKey(stateWorkspaceId || noteWorkspaceId(currentNote)), JSON.stringify(state)); } catch (_) {}
 }
 
 // =============================================================================
@@ -423,46 +434,89 @@ function renderTabStrip() {
 
 // Secondary pane's local state. Its note is independent of pane 0's currentNote.
 let secondaryNote = null;       // the full note object loaded in pane 1
-let secondaryDirty = false;     // unsaved-changes flag for the secondary editor
-let secondarySaveTimer = null;  // debounce handle for the secondary autosave
+let secondaryBundle = null;     // NoteEditor.mount return value for pane 1
+let secondaryReadOnly = false;  // true when pane 1 mirrors pane 0's note
+let secondaryStatusTimer = null;
 
 function setSecondaryStatus(text) {
   const el = document.getElementById('notePageSecondaryStatus');
   if (el) el.textContent = text || '';
 }
 
-// scheduleSecondarySave debounces secondary-pane PATCHes by 800ms. Calls
-// announceNoteSaved on success so other tabs (and the primary pane, if it
-// somehow has the same note open) can reconcile.
-function scheduleSecondarySave() {
-  secondaryDirty = true;
-  setSecondaryStatus('Unsaved');
-  if (secondarySaveTimer) clearTimeout(secondarySaveTimer);
-  secondarySaveTimer = setTimeout(() => { secondarySaveTimer = null; flushSecondarySave(); }, 800);
+function setSecondaryAutosaveStatus(status) {
+  if (secondaryStatusTimer) {
+    clearTimeout(secondaryStatusTimer);
+    secondaryStatusTimer = null;
+  }
+  if (status === 'unsaved') {
+    setSecondaryStatus('Unsaved');
+  } else if (status === 'saving') {
+    setSecondaryStatus('Saving…');
+  } else if (status === 'error') {
+    setSecondaryStatus('Save failed');
+  } else if (status === 'saved') {
+    setSecondaryStatus('Saved');
+    secondaryStatusTimer = setTimeout(() => {
+      secondaryStatusTimer = null;
+      if (!secondaryBundle?.autosave?.isDirty?.()) setSecondaryStatus('');
+    }, 1200);
+  }
+}
+
+function ensureSecondaryBundle() {
+  if (secondaryBundle || !window.NoteEditor) return secondaryBundle;
+  const source = document.getElementById('notePageSecondaryEditor');
+  const preview = document.getElementById('notePageSecondaryPreview');
+  if (!source || !preview) return null;
+
+  secondaryBundle = window.NoteEditor.mount({
+    previewPaneId: 'notePageSecondaryPreview',
+    enableToc: false,
+    getContent: () => source.value || '',
+    setContent: (value) => { source.value = String(value || ''); },
+    getContentLines: () => {
+      const value = source.value || '';
+      return value.length > 0 ? value.split('\n') : [''];
+    },
+    setContentLines: (lines) => { source.value = (lines || []).join('\n'); },
+    isPreviewMode: () => true,
+    isReadOnly: () => secondaryReadOnly,
+    onAutosaveFlush: flushSecondarySave,
+    onAutosaveStatusChange: setSecondaryAutosaveStatus,
+    autosaveDelayMs: 800,
+  });
+  return secondaryBundle;
+}
+
+function mirrorPrimaryIntoSecondarySource(source) {
+  if (!source || currentNote?.id !== secondaryNote?.id) return;
+  const primaryContent = document.getElementById('noteContentInput')?.value ?? currentNote.content ?? '';
+  source.value = primaryContent;
+  secondaryNote = {
+    ...secondaryNote,
+    name: currentNote.name || secondaryNote.name,
+    content: primaryContent,
+  };
 }
 
 async function flushSecondarySave() {
-  if (!secondaryNote?.id || !secondaryDirty) return;
-  const textarea = document.getElementById('notePageSecondaryEditor');
-  if (!textarea) return;
-  const content = textarea.value;
-  setSecondaryStatus('Saving…');
+  if (!secondaryNote?.id || secondaryReadOnly) return true;
+  const source = document.getElementById('notePageSecondaryEditor');
+  if (!source) return false;
+  const content = source.value;
   try {
     const resp = await fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content }),
     });
-    if (!resp.ok) { setSecondaryStatus('Save failed'); return; }
+    if (!resp.ok) return false;
     const data = await resp.json();
     if (data?.note) {
       secondaryNote = { ...secondaryNote, ...data.note };
       _tabLabelCache.set(secondaryNote.id, secondaryNote.name || 'Untitled');
       refreshSecondaryTabLabels();
     }
-    secondaryDirty = false;
-    setSecondaryStatus('Saved');
-    setTimeout(() => { if (!secondaryDirty) setSecondaryStatus(''); }, 1200);
     window.NoteBacklinks?.announceNoteSaved?.(secondaryNote.id, content.includes('[['));
     // If the primary editor has the SAME note open, refresh its content so
     // the user doesn't lose pane 1's edits the next time pane 0 autosaves.
@@ -476,30 +530,36 @@ async function flushSecondarySave() {
       bundle?.autosave?.markClean?.();
       bundle?.render?.();
     }
+    return true;
   } catch (_) {
-    setSecondaryStatus('Save failed');
+    return false;
   }
 }
 
-// renderSecondaryPane paints the secondary pane's tab strip + Markdown
-// textarea when split mode is on. The secondary is editable — typing in the
-// textarea debounces an autosave PATCH. When pane 1's active note matches
-// pane 0's, the textarea is read-only and a banner explains why.
+// renderSecondaryPane paints the secondary pane's tab strip + rendered
+// Markdown editor when split mode is on. The secondary owns its own
+// NoteEditor bundle so it stays editable without stealing the primary
+// pane's history/autosave/outline state.
 async function renderSecondaryPane() {
   const aside = document.getElementById('notePageSecondaryPane');
   const tabsEl = document.getElementById('notePageSecondaryTabs');
   const grid = document.getElementById('notePagePaneGrid');
-  const textarea = document.getElementById('notePageSecondaryEditor');
+  const source = document.getElementById('notePageSecondaryEditor');
+  const preview = document.getElementById('notePageSecondaryPreview');
   const banner = document.getElementById('notePageSecondaryBanner');
   const emptyEl = document.getElementById('notePageSecondaryEmpty');
-  if (!aside || !tabsEl || !grid || !textarea || !banner || !emptyEl || !state) return;
+  if (!aside || !tabsEl || !grid || !source || !preview || !banner || !emptyEl || !state) return;
+  ensureSecondaryBundle();
 
   if (state.splitMode === 'none' || !state.panes[1]) {
     // Flush any pending save before tearing down.
-    if (secondaryDirty) await flushSecondarySave();
+    await secondaryBundle?.autosave?.flushImmediate?.();
     aside.hidden = true;
     grid.classList.remove('is-split');
     secondaryNote = null;
+    secondaryReadOnly = false;
+    preview.hidden = true;
+    source.value = '';
     return;
   }
 
@@ -520,42 +580,61 @@ async function renderSecondaryPane() {
   }).join('');
 
   if (!pane.activeId) {
-    textarea.hidden = true;
+    preview.hidden = true;
     banner.hidden = true;
     emptyEl.hidden = false;
     secondaryNote = null;
+    secondaryReadOnly = false;
+    source.value = '';
     setSecondaryStatus('');
     return;
   }
 
   // Flush previous secondary save before loading a different note.
-  if (secondaryNote && secondaryNote.id !== pane.activeId && secondaryDirty) {
-    await flushSecondarySave();
+  if (secondaryNote && secondaryNote.id !== pane.activeId) {
+    await secondaryBundle?.autosave?.flushImmediate?.();
+  } else if (secondaryNote?.id === pane.activeId) {
+    const sameAsPrimary = currentNote?.id === secondaryNote.id;
+    secondaryReadOnly = sameAsPrimary;
+    if (sameAsPrimary) {
+      secondaryBundle?.live?.state?.reset?.();
+      mirrorPrimaryIntoSecondarySource(source);
+    }
+    banner.hidden = !sameAsPrimary;
+    emptyEl.hidden = true;
+    preview.hidden = false;
+    secondaryBundle?.render?.();
+    return;
   }
 
   const note = await fetchNote(pane.activeId);
   if (!note) {
-    textarea.hidden = true;
+    preview.hidden = true;
     banner.hidden = true;
     emptyEl.hidden = false;
     emptyEl.textContent = 'Could not load this note.';
     secondaryNote = null;
+    secondaryReadOnly = false;
     return;
   }
   _tabLabelCache.set(note.id, note.name || 'Untitled');
   refreshSecondaryTabLabels();
   secondaryNote = note;
-  secondaryDirty = false;
+  secondaryReadOnly = currentNote?.id === note.id;
   emptyEl.hidden = true;
-  textarea.value = note.content || '';
+  emptyEl.textContent = 'No note selected.';
+  source.value = note.content || '';
+  if (secondaryReadOnly) mirrorPrimaryIntoSecondarySource(source);
+  secondaryBundle?.history?.reset?.();
+  secondaryBundle?.autosave?.reset?.();
+  secondaryBundle?.live?.state?.reset?.();
   setSecondaryStatus('');
 
   // If the same note is in pane 0's editor, lock the secondary to avoid
   // diverging edits. Otherwise it's freely editable.
-  const sameAsPrimary = currentNote?.id === note.id;
-  textarea.readOnly = sameAsPrimary;
-  banner.hidden = !sameAsPrimary;
-  textarea.hidden = false;
+  banner.hidden = !secondaryReadOnly;
+  preview.hidden = false;
+  secondaryBundle?.render?.();
 }
 
 // =============================================================================
@@ -608,6 +687,7 @@ async function loadNoteIntoActivePane(noteId) {
     showLoadError(`Note not found (id: ${noteId}).`);
     return false;
   }
+  stateWorkspaceId = noteWorkspaceId(next) || stateWorkspaceId;
 
   // 3. Swap inputs + caches + history.
   const titleInput = document.getElementById('noteNameInput');
@@ -634,6 +714,9 @@ async function loadNoteIntoActivePane(noteId) {
   window.NoteBacklinks?.loadBacklinksFor(next.id);
   window.NoteRailNotes?.setActiveNoteId(next.id);
   window.NotePresence?.claimOpenNote(next.id, 'page');
+  if (state?.splitMode !== 'none') {
+    await renderSecondaryPane();
+  }
 
   // 7. If the URL carries a heading hash (e.g., palette → tab), scroll to it.
   scrollToHashHeading();
@@ -1021,10 +1104,23 @@ async function bootstrap() {
     return;
   }
 
-  // 1. Initialize tab state. If saved state matches the URL note, restore it;
-  //    otherwise start fresh with the URL note as the single tab.
+  // 1. Load the initial note so tab persistence can be scoped to its
+  //    workspace. The old global key made tabs from unrelated workspaces
+  //    appear together, often with repeated-looking titles.
+  currentNote = await fetchNote(NOTE_ID);
+  if (!currentNote) {
+    showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
+    showToast('Note not found', 'error');
+    return;
+  }
+  stateWorkspaceId = noteWorkspaceId(currentNote);
+  _tabLabelCache.set(currentNote.id, currentNote.name || 'Untitled');
+
+  // 2. Initialize tab state. If saved state for this workspace matches the
+  //    URL note, restore it; otherwise start fresh with the URL note as the
+  //    single tab.
   if (window.NoteTabs) {
-    state = loadSavedState(NOTE_ID);
+    state = loadSavedState(NOTE_ID, stateWorkspaceId);
     // Make sure the URL's note is open + active in the focused pane.
     if (state) {
       const pane = state.panes[state.focusedPaneIndex];
@@ -1040,15 +1136,6 @@ async function bootstrap() {
   } else {
     state = { panes: [{ activeId: NOTE_ID, tabs: [NOTE_ID] }], splitMode: 'none', focusedPaneIndex: 0 };
   }
-
-  // 2. Load the initial note.
-  currentNote = await fetchNote(NOTE_ID);
-  if (!currentNote) {
-    showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
-    showToast('Note not found', 'error');
-    return;
-  }
-  _tabLabelCache.set(currentNote.id, currentNote.name || 'Untitled');
 
   // 3. Populate the editor inputs + document title.
   const titleInput = document.getElementById('noteNameInput');
@@ -1157,22 +1244,18 @@ async function bootstrap() {
   // Detach drop zone — appears during drag when not split.
   installDetachZone();
 
-  // Secondary pane editor input → debounced autosave. Bound once on the
-  // textarea; the textarea persists across re-renders.
-  document.getElementById('notePageSecondaryEditor')?.addEventListener('input', scheduleSecondarySave);
-
   // Flush the secondary pane's pending save before the page unloads.
   window.addEventListener('beforeunload', () => {
-    if (secondaryDirty && secondarySaveTimer) {
-      clearTimeout(secondarySaveTimer);
+    if (secondaryBundle?.autosave?.isDirty?.()) {
+      secondaryBundle.autosave.cancel();
       // beforeunload can't await fetch; fire-and-forget keepalive PATCH.
-      const textarea = document.getElementById('notePageSecondaryEditor');
-      if (secondaryNote?.id && textarea) {
+      const source = document.getElementById('notePageSecondaryEditor');
+      if (secondaryNote?.id && source && !secondaryReadOnly) {
         try {
           fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content: textarea.value }),
+            body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content: source.value }),
             keepalive: true,
           });
         } catch (_) {}
