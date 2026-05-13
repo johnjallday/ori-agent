@@ -28,7 +28,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
 
       - name: Run tests
         run: go test -v -short ./...
@@ -70,7 +70,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
@@ -138,7 +138,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
 
       - name: Build folder picker app
         shell: bash
