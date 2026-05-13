@@ -399,6 +399,13 @@ async function prefetchTabLabels() {
   }
 }
 
+function updatePaneFocusState() {
+  if (typeof document === 'undefined') return;
+  const focusedIndex = state?.focusedPaneIndex ?? 0;
+  document.getElementById('notePagePrimaryPane')?.classList.toggle('is-focused', focusedIndex === 0);
+  document.getElementById('notePageSecondaryPane')?.classList.toggle('is-focused', focusedIndex === 1);
+}
+
 function renderTabStrip() {
   const strip = document.getElementById('notePageTabStrip');
   const list = document.getElementById('notePageTabList');
@@ -410,6 +417,7 @@ function renderTabStrip() {
   // additional notes in tabs, so it needs to be reachable even when the
   // current page has just one open tab.
   strip.hidden = false;
+  updatePaneFocusState();
 
   // Split button visibility — only meaningful when not already split.
   if (splitBtn) splitBtn.hidden = state.splitMode !== 'none' || (state.panes[0]?.tabs?.length ?? 0) === 0;
@@ -560,11 +568,13 @@ async function renderSecondaryPane() {
     secondaryReadOnly = false;
     preview.hidden = true;
     source.value = '';
+    updatePaneFocusState();
     return;
   }
 
   aside.hidden = false;
   grid.classList.add('is-split');
+  updatePaneFocusState();
 
   const pane = state.panes[1];
   tabsEl.innerHTML = pane.tabs.map((id, i) => {
@@ -741,6 +751,18 @@ async function openInTab(noteId) {
   if (currentNote?.id !== noteId) {
     await loadNoteIntoActivePane(noteId);
   }
+}
+
+function setFocusedPane(paneIndex) {
+  if (!window.NoteTabs || !state) return;
+  const next = window.NoteTabs.focusPane(state, paneIndex);
+  if (next === state) {
+    updatePaneFocusState();
+    return;
+  }
+  state = next;
+  persistState();
+  updatePaneFocusState();
 }
 
 async function createNoteFromTabStrip() {
@@ -1240,6 +1262,13 @@ async function bootstrap() {
 
   // Drag-to-reorder for the secondary pane's tabs too.
   installDragReorder(document.getElementById('notePageSecondaryTabs'), 1);
+
+  const primaryPane = document.getElementById('notePagePrimaryPane');
+  const secondaryPane = document.getElementById('notePageSecondaryPane');
+  primaryPane?.addEventListener('pointerdown', () => setFocusedPane(0));
+  primaryPane?.addEventListener('focusin', () => setFocusedPane(0));
+  secondaryPane?.addEventListener('pointerdown', () => setFocusedPane(1));
+  secondaryPane?.addEventListener('focusin', () => setFocusedPane(1));
 
   // Detach drop zone — appears during drag when not split.
   installDetachZone();

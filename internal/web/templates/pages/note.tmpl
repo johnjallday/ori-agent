@@ -44,22 +44,6 @@
         </div>
       </div>
 
-      <!-- Multi-note tab strip (task 4.0) -->
-      <nav class="note-tab-strip" id="notePageTabStrip" aria-label="Open notes" hidden>
-        <ul class="note-tab-list" id="notePageTabList" role="tablist"></ul>
-        <div class="note-tab-strip-actions">
-          <button type="button" id="notePageNewTabBtn" class="note-tab-strip-action" title="Create new note" aria-label="Create new note">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
-          </button>
-          <button type="button" id="notePageSplitRightBtn" class="note-tab-strip-action" title="Split right" aria-label="Split right" hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3,3H21V21H3V3M5,5V19H11V5H5M13,5V19H19V5H13Z"/></svg>
-          </button>
-          <button type="button" id="notePageUnsplitBtn" class="note-tab-strip-action" title="Close split" aria-label="Close split" hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V19H5V5H19Z"/></svg>
-          </button>
-        </div>
-      </nav>
-
       <!-- Toolbar (reused IDs match the modal so NoteEditor wires them automatically) -->
       <div class="note-editor-toolbar">
         <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Generate with AI" aria-controls="noteAIGeneratePanel" aria-expanded="false">
@@ -120,7 +104,7 @@
     <!-- Editor grid (same structure as the modal's body) -->
     <div class="note-editor-grid note-page-editor-grid" id="noteEditorGrid">
       <aside class="note-toc-rail" id="noteTocRail" aria-label="Notes &amp; outline">
-        <div class="note-rail-tab-strip" role="tablist" aria-label="Left rail tabs">
+        <div class="note-rail-tab-strip" role="tablist" aria-label="Rail mode">
           <button type="button" id="noteRailTabNotes" class="note-rail-tab is-active" data-tab="notes" role="tab" aria-selected="true" aria-controls="noteRailPaneNotes">Notes</button>
           <button type="button" id="noteRailTabOutline" class="note-rail-tab" data-tab="outline" role="tab" aria-selected="false" aria-controls="noteRailPaneOutline">Outline</button>
         </div>
@@ -140,6 +124,20 @@
       <div class="note-editor-center">
         <div class="note-page-pane-grid" id="notePagePaneGrid">
           <div class="note-editor-container note-page-pane note-page-pane-primary" id="notePagePrimaryPane">
+            <nav class="note-tab-strip note-pane-tab-strip" id="notePageTabStrip" aria-label="Primary pane open notes" hidden>
+              <ul class="note-tab-list" id="notePageTabList" role="tablist"></ul>
+              <div class="note-tab-strip-actions">
+                <button type="button" id="notePageNewTabBtn" class="note-tab-strip-action" title="Create new note" aria-label="Create new note">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
+                </button>
+                <button type="button" id="notePageSplitRightBtn" class="note-tab-strip-action" title="Split right" aria-label="Split right" hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3,3H21V21H3V3M5,5V19H11V5H5M13,5V19H19V5H13Z"/></svg>
+                </button>
+                <button type="button" id="notePageUnsplitBtn" class="note-tab-strip-action" title="Close split" aria-label="Close split" hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V19H5V5H19Z"/></svg>
+                </button>
+              </div>
+            </nav>
             <!-- Source-of-truth textarea, hidden on the page (the preview is the
                  only visible editor; click a rendered line to edit inline). -->
             <textarea id="noteContentInput" class="note-content-input" placeholder="e.g. # Project Notes…" style="display: none;" aria-hidden="true" tabindex="-1"></textarea>
@@ -150,7 +148,7 @@
           <!-- Secondary pane shown when split mode is active. It hosts its
                own live-preview editor and autosave lifecycle. -->
           <aside class="note-page-pane note-page-pane-secondary" id="notePageSecondaryPane" hidden aria-label="Secondary pane">
-            <div class="note-page-secondary-header">
+            <div class="note-page-secondary-header note-pane-tab-strip">
               <nav class="note-page-secondary-tabs" id="notePageSecondaryTabs" role="tablist" aria-label="Secondary pane tabs"></nav>
               <span id="notePageSecondaryStatus" class="note-page-secondary-status" aria-live="polite"></span>
               <button type="button" id="notePagePromoteBtn" class="note-tab-strip-action" title="Edit this note (swap panes)" aria-label="Edit this note">

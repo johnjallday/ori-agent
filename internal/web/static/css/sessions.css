@@ -5412,16 +5412,31 @@ body.task-modal-open {
 }
 
 /* =============================================================================
-   Page-level multi-note tab strip (above the editor area)
+   Pane-local document tab strips
    ============================================================================= */
+
+.note-pane-tab-strip {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 40px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-tertiary, #f9fafb);
+}
+
+.note-page-pane.is-focused .note-pane-tab-strip::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--primary-color, #6366f1);
+  pointer-events: none;
+}
 
 .note-tab-strip {
   display: flex;
   align-items: stretch;
   gap: 4px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: var(--bg-tertiary, #f9fafb);
   overflow-x: auto;
 }
 
@@ -5606,6 +5621,12 @@ body.task-modal-open {
   flex: 1 1 auto;
 }
 
+.note-page-pane-primary > .note-preview-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
 .note-page-pane-secondary {
   border-left: 1px solid var(--border-color, #e5e7eb);
   background: var(--bg-primary, #ffffff);
@@ -5620,20 +5641,23 @@ body.task-modal-open {
 .note-page-secondary-header {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--border-color, #f3f4f6);
-  background: var(--bg-tertiary, #f9fafb);
 }
 
 .note-page-secondary-tabs {
   display: flex;
   gap: 2px;
-  padding: 6px 8px 0;
+  padding: 0;
   flex: 1 1 auto;
   overflow-x: auto;
 }
 
 .note-page-secondary-tabs .note-tab {
   cursor: pointer;
+}
+
+.note-page-secondary-header > .note-tab-strip-action {
+  align-self: center;
+  margin-right: 8px;
 }
 
 .note-tab-close-secondary {
@@ -5743,35 +5767,42 @@ body.task-modal-open {
 }
 
 /* =============================================================================
-   Left rail tabs (Notes / Outline)
+   Left rail segmented mode switcher (Notes / Outline)
    ============================================================================= */
 
 .note-rail-tab-strip {
   display: flex;
-  gap: 2px;
-  padding: 4px 6px 0;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  gap: 4px;
+  margin: 8px;
+  padding: 3px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 6px;
+  background: var(--bg-secondary, #f3f4f6);
 }
 
 .note-rail-tab {
-  background: none;
+  flex: 1 1 0;
+  min-width: 0;
+  background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  padding: 6px 10px;
+  border-radius: 4px;
+  padding: 5px 8px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary, #64748b);
   cursor: pointer;
-  margin-bottom: -1px;
+  text-align: center;
 }
 
 .note-rail-tab:hover {
   color: var(--text-primary, #111827);
+  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
 }
 
 .note-rail-tab.is-active {
-  color: var(--primary-color, #6366f1);
-  border-bottom-color: var(--primary-color, #6366f1);
+  color: var(--text-primary, #111827);
+  background: var(--bg-primary, #ffffff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .note-rail-tab-pane {
