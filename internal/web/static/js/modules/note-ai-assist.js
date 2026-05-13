@@ -87,6 +87,11 @@ function onAgentChanged(agentId) {
 // 'textarea' or 'preview', anchorRect is a DOMRect to position against.
 function onSelectionChanged(selection) {
   if (!selection || !selection.text || selection.text.trim() === '') {
+    // While the user is typing into the Ask-AI input, focus moves out of the
+    // preview pane and selectionchange fires with an empty selection. Don't
+    // tear the bar down — keep is-asking mode and the pending selection
+    // intact. The user closes the input via Esc / Send / submitting.
+    if (state.bar?.classList.contains('is-asking')) return;
     hideBar();
     state.pendingSelection = null;
     return;
