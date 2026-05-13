@@ -1,6 +1,30 @@
 ---
 name: release-manager
-description: "Use this agent when preparing a release from the dev branch. This includes checking the latest version, running pre-release checks, fixing any issues found, merging to main, verifying CI smoke tests, creating the git tag, and publishing the GitHub release. Trigger this agent when the user mentions 'release', 'prepare release', 'version bump', or 'merge to main for release'.\\n\\nExamples:\\n\\n<example>\\nContext: User wants to prepare a new release from their dev worktree\\nuser: \"I want to prepare a release\"\\nassistant: \"I'll use the release-manager agent to handle the release preparation process.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User mentions they're ready to release\\nuser: \"Let's do a release, the feature work is done\"\\nassistant: \"I'll launch the release-manager agent to check the latest version and run pre-release checks.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User asks about merging dev to main for release\\nuser: \"Can you help me merge dev to main for the next release?\"\\nassistant: \"I'll use the release-manager agent to handle the full release workflow including version checking, pre-release validation, merge to main, tagging, and GitHub release creation.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>"
+description: |
+  Use this agent when preparing a release from the dev branch. This includes checking the latest version, running pre-release checks, fixing any issues found, merging to main, verifying CI smoke tests, creating the git tag, and publishing the GitHub release. Trigger this agent when the user mentions 'release', 'prepare release', 'version bump', or 'merge to main for release'.
+
+  Examples:
+
+  <example>
+  Context: User wants to prepare a new release from their dev worktree
+  user: "I want to prepare a release"
+  assistant: "I'll use the release-manager agent to handle the release preparation process."
+  <Task tool invocation to launch release-manager agent>
+  </example>
+
+  <example>
+  Context: User mentions they're ready to release
+  user: "Let's do a release, the feature work is done"
+  assistant: "I'll launch the release-manager agent to check the latest version and run pre-release checks."
+  <Task tool invocation to launch release-manager agent>
+  </example>
+
+  <example>
+  Context: User asks about merging dev to main for release
+  user: "Can you help me merge dev to main for the next release?"
+  assistant: "I'll use the release-manager agent to handle the full release workflow including version checking, pre-release validation, merge to main, tagging, and GitHub release creation."
+  <Task tool invocation to launch release-manager agent>
+  </example>
 model: sonnet
 color: purple
 ---
@@ -53,9 +77,17 @@ If the pre-release check reports errors, you MUST fix them automatically:
 4. **Maximum 3 iterations** - If still failing after 3 attempts, report to user and ask for guidance
 
 ### Step 4: Push Changes
-1. Once pre-release check passes (the script auto-commits fixes)
-2. Push the dev branch: `git push origin dev`
-3. Confirm the push was successful
+1. Once pre-release check passes (the script auto-commits fixes via `git add -A` + `--no-verify`, which sweeps untracked files and bypasses pre-commit hooks).
+2. **Inspect what's about to be pushed** before pushing:
+   ```bash
+   git log --oneline origin/dev..HEAD
+   git diff --stat origin/dev..HEAD
+   git status --porcelain  # should be empty; flag any leftover untracked files
+   ```
+3. **Show the user the commit list and file diff**, and explicitly call out any files that look suspicious (e.g., `.env*`, credentials, scratch files swept up by `git add -A`).
+4. **Ask the user to confirm before pushing.** If the user declines, abort or revert the auto-commit per their direction.
+5. After confirmation, push the dev branch: `git push origin dev`
+6. Confirm the push was successful
 
 ### Step 5: Code Review (dev → main diff)
 
@@ -75,7 +107,7 @@ Before merging, review the diff to catch issues that pre-release checks (lint/te
    - Security issues (esp. in `internal/*http/` handlers, MCP integration, settings/secrets handling)
    - Breaking changes in public interfaces
    - Dead/unused code introduced by the change
-   - Use the `code-reviewer` agent for complex/large diffs (>20 files or >2000 insertions); review inline for smaller diffs
+   - For large diffs (>20 files or >2000 insertions), spend extra attention on high-risk files (HTTP handlers, auth, settings, MCP integration); review inline either way
 
 3. **Surface findings to the user** in this format:
    ```
@@ -91,7 +123,7 @@ Before merging, review the diff to catch issues that pre-release checks (lint/te
    If no issues: report "No issues found in dev → main diff" and proceed to Step 6.
 
 4. **Wait for explicit user choice** before proceeding. Honor the choice:
-   - **(a) Fix**: Apply the requested fixes, re-run pre-release check (Step 2), then re-run this review. Max 2 iterations — after that, ask the user for guidance.
+   - **(a) Fix**: Apply the requested fixes, re-run pre-release check (Step 2), **push the fix commits to dev with `git push origin dev`** (the review diff and Step 6 merge both reference `origin/dev`, so unpushed fixes are silently dropped), then re-run this review. Max 2 iterations — after that, ask the user for guidance.
    - **(b) Accept**: Proceed to Step 6.
    - **(c) Abort**: Stop the release workflow and exit.
 
@@ -99,12 +131,19 @@ Before merging, review the diff to catch issues that pre-release checks (lint/te
 **IMPORTANT**: Since this project uses git worktrees, you CANNOT use `git switch main` because main is already checked out in another worktree.
 
 Instead, use this worktree-safe approach:
-1. **Derive the main worktree path once and reuse it** for the rest of the workflow. Do NOT hardcode the path:
+1. **Derive the main worktree path** and reuse it for the rest of the workflow. Do NOT hardcode the path:
    ```bash
    MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')
-   echo "$MAIN_WT"  # Verify before proceeding; abort if empty
+   [ -z "$MAIN_WT" ] && { echo "ABORT: no main worktree found"; exit 1; }
+   echo "$MAIN_WT"
    ```
-   Use `$MAIN_WT` in every `git -C` invocation below and in Steps 7–9.
+
+   **IMPORTANT — shell state does not persist between Bash tool calls.** A variable set in one Bash invocation is empty in the next, and `git -C "" <cmd>` silently runs in the current working directory (the dev worktree). Two equivalent ways to handle this:
+
+   - **(preferred) Substitute the literal path** into every later `git -C` command instead of using `$MAIN_WT`. After the derivation above prints the path, use that exact path as a string in every Bash block in Steps 6–9.
+   - **(alternative) Re-derive in every Bash block** that uses `git -C` by re-running the `awk` snippet at the top of that block.
+
+   The `$MAIN_WT` shown in the snippets below is a *placeholder* for the literal path — never rely on the variable carrying across Bash invocations.
 
 2. Run the merge in the main worktree:
    ```bash
@@ -222,13 +261,17 @@ Once smoke tests pass on main, create the tag and GitHub release automatically.
    - This typically takes 10-15 minutes to build cross-platform binaries
    - Poll every 60 seconds until the run is no longer `in_progress` or `queued`
 
-4. **If release workflow PASSES**: Create the GitHub release with release notes:
+4. **If release workflow PASSES**: GoReleaser has already created the GitHub release (`.goreleaser.yaml` has `disable: false` and `mode: replace`; the `release` job creates it, and `build-dmg`/`build-msi` attach assets). `gh release create` would fail with `already_exists`. Verify and amend instead:
    ```bash
-   # Generate release notes from commits since last tag
-   gh release create vX.Y.Z \
-     --title "vX.Y.Z" \
-     --generate-notes \
-     --latest
+   # Confirm the release exists and is marked latest
+   gh release view vX.Y.Z
+
+   # Mark as latest (idempotent; safe even if already latest)
+   gh release edit vX.Y.Z --latest
+   ```
+   If you need to override the auto-generated notes, use:
+   ```bash
+   gh release edit vX.Y.Z --notes-file <path>
    ```
 
 5. **If release workflow FAILS**: Analyze logs and fix (same approach as Step 7), then re-tag:
@@ -238,6 +281,7 @@ Once smoke tests pass on main, create the tag and GitHub release automatically.
    git -C "$MAIN_WT" push origin :refs/tags/vX.Y.Z
    # ... fix, commit, push to main, then re-tag
    ```
+   Track iteration count for this step; stop after 3 attempts and ask the user for guidance. Each iteration retriggers the ~10–15 min release workflow and force-republishes the tag (visible to anyone watching the repo), so do not loop unbounded.
 
 6. **Report completion** with the GitHub release URL, then proceed to Step 9.
 
@@ -245,13 +289,14 @@ Once smoke tests pass on main, create the tag and GitHub release automatically.
 
 Once the new release is published, clean up older GitHub releases and tags so the release page stays focused. This step is **destructive and visible to anyone watching the repo**, so it requires explicit user confirmation.
 
-**Retention policy** (default): keep the **10 most recent published releases**, always delete leftover **drafts** older than the latest published release, and always preserve any release whose tag ends in `.0.0` or matches a `MAJOR.0.0` pattern (reserved for future minor/major bumps).
+**Retention policy** (default): keep the **10 most recent published releases**, always delete leftover **drafts** older than the latest published release, and always preserve any release whose tag matches `vX.Y.0` (minor-zero) or `vX.0.0` (major-zero) — these markers stay regardless of the keep-window.
 
 1. **Enumerate all release artifacts from BOTH sources** — `gh release list` alone is not authoritative. Tag-only artifacts (tags pushed without ever creating a GitHub release) and any releases the listing happens to omit will be invisible. Take the **union** of:
    ```bash
    # Source A: GitHub releases (with draft/prerelease flags)
+   # Include createdAt because drafts have publishedAt = null
    gh release list --limit 1000 \
-     --json tagName,isDraft,isPrerelease,publishedAt
+     --json tagName,isDraft,isPrerelease,publishedAt,createdAt
    ```
    ```bash
    # Source B: All version-shaped tags on the remote
@@ -262,14 +307,15 @@ Once the new release is published, clean up older GitHub releases and tags so th
 
 2. **Sanity-check the enumeration** before building the deletion plan:
    - Print the count from each source and the union count
-   - If `len(union) < len(Source A)`, abort — something is wrong with tag enumeration
+   - If any tag in Source A (GitHub releases) is missing from Source B (remote tags), abort — the remote is missing a tag that backs a release
+   - If `len(Source B) < len(Source A) - <# of tag-less releases>` (which should be 0), abort
    - Confirm the just-published release is in Source A and its tag is in both sources
 
 3. **Build the deletion list** by applying the retention policy:
    - Sort published, non-draft GitHub releases by `publishedAt` descending; mark everything past index 10 for deletion
-   - Mark every draft whose `publishedAt` is older than the latest published release for deletion
-   - Mark every `tag-only` artifact (Source B but not Source A) for deletion unless it falls inside the keep window
-   - **Re-include** anything matching `^v\d+\.\d+\.0$` or `^v\d+\.0\.0$` — never auto-prune those
+   - Mark every draft whose `createdAt` (fall back to `createdAt` because drafts have `publishedAt = null`) is older than the latest published release's `publishedAt` for deletion
+   - Mark every `tag-only` artifact (Source B but not Source A) for deletion. Tag-only artifacts have no `publishedAt`/`createdAt` from GitHub, so they are not in the keep-window — they're always candidates for deletion unless the preservation regex (below) re-includes them.
+   - **Re-include** (always keep) anything matching the regex `^v[0-9]+\.[0-9]+\.0$` (minor-zero) or `^v[0-9]+\.0\.0$` (major-zero) — never auto-prune those
    - **Never** delete the release just published in Step 8
 
 4. **Show the user the deletion list and ask for confirmation**. Distinguish each entry's type so the user can sanity-check:
@@ -317,8 +363,7 @@ Once the new release is published, clean up older GitHub releases and tags so th
 
 ### Worktree Awareness
 - **CRITICAL**: This project uses git worktrees - `git switch main` will FAIL with "already used by worktree" error
-- The dev worktree is at: `/Users/jjdev/Projects/ori/worktrees/ori-agent-dev`
-- The main worktree is at: `/Users/jjdev/Projects/ori/ori-agent`
+- Dev and main typically live in sibling directories (e.g., `<repo>/worktrees/<branch>` and `<repo>`). Always derive the actual paths via the Step 6.1 snippet — never assume a layout or hardcode user-specific paths.
 - Use `git -C <path>` to run git commands in a different worktree without changing directories
 - Always verify which worktree/branch you're operating in before making changes
 - Use `git branch --show-current` to confirm the current branch
