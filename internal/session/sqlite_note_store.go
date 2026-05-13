@@ -16,7 +16,7 @@ import (
 // Workspace Note Operations
 // ============================================================================
 
-func parseNoteTimes(createdAtRaw, updatedAtRaw interface{}) (time.Time, time.Time, error) {
+func parseNoteTimes(createdAtRaw, updatedAtRaw any) (time.Time, time.Time, error) {
 	createdAt, err := parseSQLiteTime(createdAtRaw)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("created_at: %w", err)
@@ -66,8 +66,8 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, error) {
 	note := &WorkspaceNote{}
 	var vaultReferenceJSON sql.NullString
-	var createdAtRaw interface{}
-	var updatedAtRaw interface{}
+	var createdAtRaw any
+	var updatedAtRaw any
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, name, content, COALESCE(vault_reference_json, ''), created_at, updated_at
@@ -157,8 +157,8 @@ func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 	for rows.Next() {
 		var note WorkspaceNoteListItem
 		var vaultReferenceRaw string
-		var createdAtRaw interface{}
-		var updatedAtRaw interface{}
+		var createdAtRaw any
+		var updatedAtRaw any
 		if err := rows.Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Preview,
 			&vaultReferenceRaw, &createdAtRaw, &updatedAtRaw); err != nil {
 			return nil, fmt.Errorf("failed to scan note: %w", err)
@@ -435,14 +435,8 @@ func backlinkContextSnippet(content string, position, width int) string {
 		return ""
 	}
 	half := width / 2
-	start := position - half
-	if start < 0 {
-		start = 0
-	}
-	end := position + half
-	if end > len(content) {
-		end = len(content)
-	}
+	start := max(position-half, 0)
+	end := min(position+half, len(content))
 	// Snap to whitespace boundaries when possible.
 	for start > 0 && content[start] != ' ' && content[start] != '\n' {
 		start--
@@ -531,8 +525,8 @@ func (s *SQLiteStore) SearchNotes(ctx context.Context, query string, limit int) 
 		var result NoteSearchResult
 		var workspaceName sql.NullString
 		var snippet string
-		var createdAtRaw interface{}
-		var updatedAtRaw interface{}
+		var createdAtRaw any
+		var updatedAtRaw any
 
 		if err := rows.Scan(&result.ID, &result.WorkspaceID, &result.Name, &result.Preview,
 			&createdAtRaw, &updatedAtRaw, &workspaceName, &snippet); err != nil {
