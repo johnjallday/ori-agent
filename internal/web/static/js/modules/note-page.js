@@ -1212,6 +1212,14 @@ async function bootstrap() {
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
   bindGenerateWithAIControls();
 
+  // Prime the Generate-with-AI agent dropdown with this note's workspace
+  // so it filters to workspace-bound agents instead of falling back to
+  // every agent in the system. Mirrors the modal flow in sessions.js.
+  const pageWorkspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
+  if (pageWorkspaceId) {
+    window.NoteEditor?.applyAgentDefaultForWorkspace?.(pageWorkspaceId);
+  }
+
   // 7. Render the tab strip + secondary pane (if split state was restored)
   //    + prefetch labels for non-current tabs.
   renderTabStrip();

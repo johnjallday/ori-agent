@@ -6164,9 +6164,12 @@ const sessionManager = {
     window.NoteEditor?.closeGeneratePanel();
   },
 
-  // Load agents for AI generation dropdown
+  // Load agents for AI generation dropdown. Pass the current note's workspace
+  // so the dropdown filters to that workspace's bound agents instead of every
+  // agent in the system.
   async loadNoteAIAgents() {
-    return window.NoteEditor?.loadAgentsIntoDropdown();
+    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
+    return window.NoteEditor?.loadAgentsIntoDropdown(workspaceId);
   },
 
   // Generate note content with AI

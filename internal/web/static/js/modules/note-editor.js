@@ -1706,33 +1706,71 @@ export function setGenerateDraft({ title = '', content = '' } = {}) {
 
 const AGENT_SELECT_ID = 'noteAIAgentSelect';
 
-// loadAgentsIntoDropdown fetches the agent list from /api/agents and rebuilds
-// the editor's agent <select>. Logs but does not throw on network failure so
-// modal-open paths don't have to handle errors. Returns a promise that
-// resolves when the dropdown is ready (or empty).
-export async function loadAgentsIntoDropdown() {
+// _lastAgentDropdownWorkspaceId tracks the last workspace the dropdown was
+// populated for, so subsequent reloads (e.g. openGeneratePanel) keep the
+// workspace filter without needing to pass the id through every caller.
+let _lastAgentDropdownWorkspaceId = '';
+
+function _renderAgentOptions(select, names, previousValue) {
+  select.innerHTML = '<option value="">Use workspace agent</option>';
+  Array.from(names).forEach((name) => {
+    if (!name) return;
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  if (previousValue && Array.from(select.options).some((option) => option.value === previousValue)) {
+    select.value = previousValue;
+  }
+  select.disabled = false;
+}
+
+async function _fetchWorkspaceAgentNames(workspaceId) {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+  if (!response.ok) throw new Error(`Failed to load workspace ${workspaceId}`);
+  const data = await response.json();
+  const names = new Set();
+  (data.agent_instances || []).forEach((inst) => { if (inst?.name) names.add(inst.name); });
+  (data.agents || []).forEach((name) => { if (name) names.add(name); });
+  return names;
+}
+
+// loadAgentsIntoDropdown rebuilds the editor's agent <select>. When a
+// `workspaceId` is supplied (or one was cached from a prior call), the
+// dropdown is filtered to only agents bound to that workspace via the
+// workspace's `agent_instances` (with the legacy `agents` array as a
+// fallback). Without a workspace context, falls back to /api/agents so
+// global-note paths keep working. Logs but does not throw on network
+// failure so modal-open paths don't have to handle errors.
+export async function loadAgentsIntoDropdown(workspaceId = _lastAgentDropdownWorkspaceId) {
   if (typeof document === 'undefined') return;
   const select = document.getElementById(AGENT_SELECT_ID);
   if (!select) return;
   const previousValue = select.value || '';
   select.disabled = true;
   select.innerHTML = '<option value="">Loading agents…</option>';
+
+  if (workspaceId) {
+    _lastAgentDropdownWorkspaceId = workspaceId;
+    try {
+      const names = await _fetchWorkspaceAgentNames(workspaceId);
+      _renderAgentOptions(select, names, previousValue);
+      return;
+    } catch (error) {
+      // Fall through to /api/agents so a transient workspace fetch failure
+      // doesn't leave the user with an empty dropdown.
+      // eslint-disable-next-line no-console
+      console.error('Failed to load workspace agents for note AI:', error);
+    }
+  }
+
   try {
     const response = await fetch('/api/agents');
     if (!response.ok) throw new Error('Failed to load agents');
     const data = await response.json();
-    select.innerHTML = '<option value="">Use workspace agent</option>';
-    const agents = data.agents || [];
-    agents.forEach((agent) => {
-      const option = document.createElement('option');
-      option.value = agent.name;
-      option.textContent = agent.name;
-      select.appendChild(option);
-    });
-    if (previousValue && Array.from(select.options).some((option) => option.value === previousValue)) {
-      select.value = previousValue;
-    }
-    select.disabled = false;
+    const names = (data.agents || []).map((a) => a?.name).filter(Boolean);
+    _renderAgentOptions(select, names, previousValue);
   } catch (error) {
     select.innerHTML = '<option value="">Use workspace agent</option>';
     select.disabled = false;
@@ -1887,7 +1925,7 @@ export function wireAgentChangeHandler() {
 // inline AI surface reflects the choice. Network failures fall back silently
 // to the first-available rule.
 export async function applyAgentDefaultForWorkspace(workspaceId) {
-  await loadAgentsIntoDropdown();
+  await loadAgentsIntoDropdown(workspaceId);
   if (typeof document === 'undefined') return;
   const select = document.getElementById(AGENT_SELECT_ID);
   if (!select) return;
