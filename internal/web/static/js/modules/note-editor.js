@@ -1963,9 +1963,43 @@ export function initAIAssist(host = {}) {
   wireSelectionTracking({
     onChange: () => window.NoteAIAssist?.onSelectionChanged(host.readSelection?.()),
   });
+  wireAskAIShortcut(host);
   wireAgentChangeHandler();
   loadAgentsIntoDropdown();
   _aiAssistInitialized = true;
+}
+
+let _askShortcutWired = false;
+
+// wireAskAIShortcut installs the global Cmd+J / Ctrl+J shortcut that opens
+// the Ask AI prompt for whatever the user currently has selected in the
+// note editor. Idempotent — installed once when initAIAssist first runs.
+function wireAskAIShortcut(host) {
+  if (_askShortcutWired || typeof document === 'undefined') return;
+  document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+    if (e.key !== 'j' && e.key !== 'J') return;
+
+    // If the user is typing inside a non-note input (search box, generate
+    // prompt, etc.), let the browser handle the keystroke. The note editor
+    // textareas are allowed through so a selection inside them can trigger
+    // Ask AI without leaving the keyboard.
+    const target = e.target;
+    const NOTE_INPUT_IDS = new Set(['noteContentInput', 'notePageSecondaryEditor']);
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      if (!NOTE_INPUT_IDS.has(target.id)) return;
+    }
+
+    const sel = host.readSelection?.();
+    if (!sel || !sel.text || !sel.text.trim()) {
+      // Don't preventDefault when nothing happens — leave the keystroke
+      // free for any other surface that might want it.
+      return;
+    }
+    e.preventDefault();
+    window.NoteAIAssist?.openAskForSelection?.(sel);
+  });
+  _askShortcutWired = true;
 }
 
 let _agentChangeWired = false;

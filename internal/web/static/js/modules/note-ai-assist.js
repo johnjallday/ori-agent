@@ -135,12 +135,14 @@ function buildActionBar() {
   const bar = state.bar;
   if (!bar) return;
   bar.innerHTML = '';
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
+  const askShortcut = isMac ? '⌘J' : 'Ctrl+J';
   for (const action of ACTIONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'note-ai-action-btn';
     btn.dataset.action = action.id;
-    btn.title = action.label;
+    btn.title = action.id === 'ask' ? `${action.label} (${askShortcut})` : action.label;
     btn.textContent = action.label;
     btn.addEventListener('click', () => onActionClick(action.id));
     bar.appendChild(btn);
@@ -206,6 +208,17 @@ function expandAsk() {
   }
   const input = state.bar.querySelector('[data-role="ask-input"]');
   input?.focus();
+}
+
+// openAskForSelection is the public entry point used by keyboard shortcuts.
+// Takes a selection (as returned by readSelection), positions the bar, and
+// expands it directly into Ask mode. Returns true on success.
+function openAskForSelection(selection) {
+  if (!selection || !selection.text || !selection.text.trim()) return false;
+  if (!isAgentReady()) { notifyAgentMissing(); return false; }
+  onSelectionChanged(selection);
+  expandAsk();
+  return true;
 }
 
 function collapseAsk() {
@@ -742,6 +755,7 @@ const api = {
   onNoteOpened,
   onAgentChanged,
   onSelectionChanged,
+  openAskForSelection,
   hideBar,
   render,
   // Expose for tasks 5.0 / debugging.
@@ -753,4 +767,4 @@ if (typeof window !== 'undefined') {
 }
 
 export default api;
-export { init, onNoteOpened, onAgentChanged, onSelectionChanged, hideBar, render };
+export { init, onNoteOpened, onAgentChanged, onSelectionChanged, openAskForSelection, hideBar, render };
