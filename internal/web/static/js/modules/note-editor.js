@@ -1314,6 +1314,10 @@ export function mount(host = {}) {
       scheduleAutoSave: () => autosave.schedule(),
       showToast: host.aiAssist.showToast,
       readSelection: host.aiAssist.readSelection,
+      // Split-view hosts can route content I/O to a non-primary pane by
+      // returning a { getContent, setContent, pushUndo, scheduleAutoSave,
+      // render, scheduleTocRebuild } object for the given paneId.
+      getPaneApi: host.aiAssist.getPaneApi,
     });
   }
 
@@ -1804,9 +1808,24 @@ export function getSelectedAgentId() {
 //
 // Returns { text, source, range: { start, end } | null, anchorRect } or null.
 
-export function readSelection({ getContent, isPreviewMode, textareaId = 'noteContentInput', previewPaneId = PREVIEW_PANE_ID } = {}) {
+export function readSelection({ getContent, isPreviewMode, textareaId = 'noteContentInput', previewPaneId = PREVIEW_PANE_ID, panes } = {}) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
 
+  // Multi-pane mode: scan each pane in order, return the first match with
+  // its paneId stamped on so downstream code can route content I/O to the
+  // right pane.
+  if (Array.isArray(panes) && panes.length) {
+    for (const pane of panes) {
+      const sel = _readSinglePaneSelection(pane);
+      if (sel) return { ...sel, paneId: pane.paneId || '' };
+    }
+    return null;
+  }
+
+  return _readSinglePaneSelection({ getContent, isPreviewMode, textareaId, previewPaneId });
+}
+
+function _readSinglePaneSelection({ getContent, isPreviewMode, textareaId, previewPaneId }) {
   if (!isPreviewMode?.()) {
     const ta = document.getElementById(textareaId);
     if (!ta || document.activeElement !== ta) return null;
@@ -1843,25 +1862,45 @@ export function readSelection({ getContent, isPreviewMode, textareaId = 'noteCon
 }
 
 let _selectionTrackingWired = false;
+const _wiredTextareas = new Set();
+let _selectionOnChange = null;
 
 // wireSelectionTracking installs the listeners that drive the AI Assist
 // action bar's visibility. Idempotent — safe to call multiple times.
 // `onChange` is invoked on every selectionchange / keyup / mouseup; the
 // caller typically reads readSelection() inside it and forwards the result
 // to NoteAIAssist.onSelectionChanged.
-export function wireSelectionTracking({ onChange, textareaId = 'noteContentInput' } = {}) {
-  if (_selectionTrackingWired || typeof document === 'undefined') return;
-  const update = () => { try { onChange?.(); } catch (_) { /* ignore */ } };
-  document.addEventListener('selectionchange', update);
-  const ta = document.getElementById(textareaId);
-  ta?.addEventListener('select', update);
-  ta?.addEventListener('keyup', update);
-  ta?.addEventListener('mouseup', update);
-  // Esc dismisses the action bar without changing the selection.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && typeof window !== 'undefined') window.NoteAIAssist?.hideBar();
-  });
-  _selectionTrackingWired = true;
+//
+// Pass `textareaIds` to register additional textareas (e.g. a split-view
+// secondary pane mounted after first call). `textareaId` (singular) is
+// kept for backward compatibility with single-pane callers.
+export function wireSelectionTracking({ onChange, textareaId, textareaIds } = {}) {
+  if (typeof document === 'undefined') return;
+  if (onChange) _selectionOnChange = onChange;
+  const update = () => { try { _selectionOnChange?.(); } catch (_) { /* ignore */ } };
+
+  if (!_selectionTrackingWired) {
+    document.addEventListener('selectionchange', update);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && typeof window !== 'undefined') window.NoteAIAssist?.hideBar();
+    });
+    _selectionTrackingWired = true;
+  }
+
+  const ids = [];
+  if (textareaId) ids.push(textareaId);
+  if (Array.isArray(textareaIds)) ids.push(...textareaIds);
+  if (ids.length === 0 && _wiredTextareas.size === 0) ids.push('noteContentInput');
+
+  for (const id of ids) {
+    if (!id || _wiredTextareas.has(id)) continue;
+    const ta = document.getElementById(id);
+    if (!ta) continue;
+    ta.addEventListener('select', update);
+    ta.addEventListener('keyup', update);
+    ta.addEventListener('mouseup', update);
+    _wiredTextareas.add(id);
+  }
 }
 
 let _aiAssistInitialized = false;
@@ -1877,18 +1916,44 @@ export function initAIAssist(host = {}) {
   const rail = document.getElementById(ASSIST_RAIL_ID);
   if (!bar || !rail) return;
 
+  // host.getPaneApi(paneId) returns pane-scoped helpers
+  // ({ getContent, setContent, pushUndo, scheduleAutoSave }) for split-view
+  // hosts. If the host doesn't implement it (or returns null), each call
+  // falls back to the primary host callbacks. Single-pane callers (the
+  // modal) work without any changes.
+  const resolvePane = (paneId) => host.getPaneApi?.(paneId) || null;
+
   window.NoteAIAssist.init({
     bar,
     rail,
     sessionsApi: {
-      getNoteContent: () => host.getContent?.() || '',
-      setNoteContent: (value) => {
+      getNoteContent: (paneId) => {
+        const pane = resolvePane(paneId);
+        if (pane) return pane.getContent?.() || '';
+        return host.getContent?.() || '';
+      },
+      setNoteContent: (value, paneId) => {
+        const pane = resolvePane(paneId);
+        if (pane) {
+          pane.setContent?.(value);
+          pane.render?.();
+          pane.scheduleTocRebuild?.();
+          return;
+        }
         host.setContent?.(value);
         if (host.isPreviewMode?.()) host.render?.();
         host.scheduleTocRebuild?.();
       },
-      pushUndo: () => host.pushUndo?.(),
-      scheduleAutoSave: () => host.scheduleAutoSave?.(),
+      pushUndo: (paneId) => {
+        const pane = resolvePane(paneId);
+        if (pane) return pane.pushUndo?.();
+        return host.pushUndo?.();
+      },
+      scheduleAutoSave: (paneId) => {
+        const pane = resolvePane(paneId);
+        if (pane) return pane.scheduleAutoSave?.();
+        return host.scheduleAutoSave?.();
+      },
       showToast: (msg, kind) => host.showToast?.(msg, kind),
       showAssistRail: () => showRail('assist'),
       hideAssistRail: () => hideRail('assist'),

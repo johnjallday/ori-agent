@@ -244,6 +244,7 @@ function dispatch({ action, prompt = null, parentId = null }) {
     staged: false,
     status: 'loading',
     parentId,
+    paneId: sel.paneId || '',
     createdAt: Date.now(),
   };
 
@@ -260,7 +261,7 @@ function dispatch({ action, prompt = null, parentId = null }) {
 
 async function callAssistEndpoint(card) {
   try {
-    const noteContent = state.sessionsApi?.getNoteContent?.() || '';
+    const noteContent = state.sessionsApi?.getNoteContent?.(card.paneId) || '';
     const context = noteContent === card.originalText
       ? ''
       : noteContent.replace(card.originalText, '⟦SELECTED⟧');
@@ -520,8 +521,8 @@ function closeReviewPane() {
   render();
 }
 
-function lineNumberFor(position) {
-  const src = state.sessionsApi?.getNoteContent?.() || '';
+function lineNumberFor(position, paneId = '') {
+  const src = state.sessionsApi?.getNoteContent?.(paneId) || '';
   let line = 1;
   for (let i = 0; i < position && i < src.length; i++) {
     if (src.charCodeAt(i) === 10) line++;
@@ -534,7 +535,24 @@ function renderReviewPane() {
   wrap.className = 'note-ai-review-pane';
 
   const staging = getStagingApi();
-  const hunks = staging ? staging.projectHunks(state.cards) : [];
+  // Project per-pane so conflict detection only fires for hunks targeting
+  // the same source. Annotate each hunk with the originating paneId so the
+  // review UI can label and route correctly.
+  const cardsByPane = new Map();
+  for (const c of state.cards) {
+    if (!c.staged || c.status !== 'ready') continue;
+    const key = c.paneId || '';
+    if (!cardsByPane.has(key)) cardsByPane.set(key, []);
+    cardsByPane.get(key).push(c);
+  }
+  let hunks = [];
+  if (staging) {
+    for (const [paneId, cards] of cardsByPane) {
+      const paneHunks = staging.projectHunks(cards);
+      paneHunks.forEach((h) => { h.paneId = paneId; });
+      hunks.push(...paneHunks);
+    }
+  }
   // Render hunks in document order so the diff scans top-to-bottom of the note.
   hunks.sort((a, b) => a.sourceRange.start - b.sourceRange.start);
 
@@ -575,15 +593,16 @@ function renderReviewHunk(hunk, allHunks) {
   if (hunk.conflictsWith.length > 0) el.classList.add('has-conflict');
 
   const label = ACTIONS.find(a => a.id === hunk.action)?.label || hunk.action;
-  const lineNo = lineNumberFor(hunk.sourceRange.start);
+  const lineNo = lineNumberFor(hunk.sourceRange.start, hunk.paneId);
   const modeLabel = hunk.mode === 'insert-before' ? 'before' :
                     hunk.mode === 'insert-after'  ? 'after'  :
                     'replace';
+  const paneLabel = hunk.paneId === 'secondary' ? ' · pane 2' : '';
 
   const head = document.createElement('header');
   head.className = 'note-ai-review-hunk-head';
   head.innerHTML = `
-    <span class="note-ai-review-hunk-label">${escapeHtml(label)} — ${escapeHtml(modeLabel)} (line ${lineNo})</span>
+    <span class="note-ai-review-hunk-label">${escapeHtml(label)} — ${escapeHtml(modeLabel)} (line ${lineNo}${escapeHtml(paneLabel)})</span>
     <button type="button" class="note-ai-review-unstage" data-role="unstage">Unstage</button>
   `;
   head.querySelector('[data-role="unstage"]').addEventListener('click', () => unstageHunk(hunk.id));
@@ -606,7 +625,7 @@ function renderReviewHunk(hunk, allHunks) {
     const otherLabels = hunk.conflictsWith
       .map(id => allHunks.find(h => h.id === id))
       .filter(Boolean)
-      .map(h => `${ACTIONS.find(a => a.id === h.action)?.label || h.action} (line ${lineNumberFor(h.sourceRange.start)})`)
+      .map(h => `${ACTIONS.find(a => a.id === h.action)?.label || h.action} (line ${lineNumberFor(h.sourceRange.start, h.paneId)})`)
       .join(', ');
     warn.textContent = `⚠ Conflicts with ${otherLabels}. Unstage one to commit.`;
     el.appendChild(warn);
@@ -631,22 +650,44 @@ function discardAll() {
 function commit() {
   const staging = getStagingApi();
   if (!staging) return;
-  const hunks = staging.projectHunks(state.cards);
-  if (hunks.length === 0) return;
-  if (hunks.some(h => h.conflictsWith.length > 0)) {
-    state.sessionsApi?.showToast?.('Resolve conflicts before committing.', 'warning');
-    return;
+
+  // Group staged cards by paneId so each pane's source is its own
+  // projection — hunks across panes can never overlap (different sources),
+  // and the apply step writes back to the correct pane.
+  const cardsByPane = new Map();
+  for (const c of state.cards) {
+    if (!c.staged || c.status !== 'ready') continue;
+    const key = c.paneId || '';
+    if (!cardsByPane.has(key)) cardsByPane.set(key, []);
+    cardsByPane.get(key).push(c);
+  }
+  if (cardsByPane.size === 0) return;
+
+  // Project all panes first so we can check for any conflicts before
+  // mutating any source (atomic-ish: refuse the whole commit on conflict).
+  const projections = [];
+  for (const [paneId, cards] of cardsByPane) {
+    const hunks = staging.projectHunks(cards);
+    if (hunks.some(h => h.conflictsWith.length > 0)) {
+      state.sessionsApi?.showToast?.('Resolve conflicts before committing.', 'warning');
+      return;
+    }
+    projections.push({ paneId, hunks });
   }
 
-  const source = state.sessionsApi?.getNoteContent?.() || '';
-  state.sessionsApi?.pushUndo?.();
-  const result = staging.applyHunks(source, hunks);
-  state.sessionsApi?.setNoteContent?.(result.content);
-  state.sessionsApi?.scheduleAutoSave?.();
-  state.sessionsApi?.showToast?.(`Committed ${result.applied.length} change${result.applied.length === 1 ? '' : 's'} — ⌘Z to undo.`, 'success');
+  const allApplied = [];
+  for (const { paneId, hunks } of projections) {
+    const source = state.sessionsApi?.getNoteContent?.(paneId) || '';
+    state.sessionsApi?.pushUndo?.(paneId);
+    const result = staging.applyHunks(source, hunks);
+    state.sessionsApi?.setNoteContent?.(result.content, paneId);
+    state.sessionsApi?.scheduleAutoSave?.(paneId);
+    allApplied.push(...result.applied);
+  }
+  state.sessionsApi?.showToast?.(`Committed ${allApplied.length} change${allApplied.length === 1 ? '' : 's'} — ⌘Z to undo.`, 'success');
 
   // Mark committed cards and remove them from the stack after a short flash.
-  const committedIds = new Set(result.applied);
+  const committedIds = new Set(allApplied);
   for (const c of state.cards) {
     if (committedIds.has(c.id)) {
       c.status = 'committed';

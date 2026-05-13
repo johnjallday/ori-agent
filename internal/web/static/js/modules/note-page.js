@@ -173,10 +173,41 @@ function focusActiveTab(paneIndex) {
 function readPageSelection() {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
   if (!window.NoteEditor) return null;
-  return window.NoteEditor.readSelection({
+  const panes = [{
+    paneId: 'primary',
     getContent: () => document.getElementById('noteContentInput')?.value || '',
     isPreviewMode: () => true,
-  });
+    textareaId: 'noteContentInput',
+    previewPaneId: 'notePreviewContent',
+  }];
+  // Scan the secondary pane too when it's mounted, so selections made there
+  // open the AI Assist bar against the secondary content.
+  if (secondaryBundle && document.getElementById('notePageSecondaryPreview')) {
+    panes.push({
+      paneId: 'secondary',
+      getContent: () => document.getElementById('notePageSecondaryEditor')?.value || '',
+      isPreviewMode: () => true,
+      textareaId: 'notePageSecondaryEditor',
+      previewPaneId: 'notePageSecondaryPreview',
+    });
+  }
+  return window.NoteEditor.readSelection({ panes });
+}
+
+// getPagePaneApi routes AI Assist content I/O to a specific pane. Returning
+// null tells initAIAssist to fall back to the primary host callbacks.
+function getPagePaneApi(paneId) {
+  if (paneId !== 'secondary' || !secondaryBundle || secondaryReadOnly) return null;
+  const source = document.getElementById('notePageSecondaryEditor');
+  if (!source) return null;
+  return {
+    getContent: () => source.value || '',
+    setContent: (value) => { source.value = String(value || ''); },
+    pushUndo: () => secondaryBundle?.history?.push?.(source.value || ''),
+    scheduleAutoSave: () => secondaryBundle?.autosave?.schedule?.(),
+    render: () => secondaryBundle?.render?.(),
+    scheduleTocRebuild: () => {},
+  };
 }
 
 async function savePageNote() {
@@ -493,6 +524,11 @@ function ensureSecondaryBundle() {
     onAutosaveStatusChange: setSecondaryAutosaveStatus,
     autosaveDelayMs: 800,
   });
+  // Register the secondary textarea with the shared selection tracker so
+  // text selections in plain-edit mode there also drive the AI Assist bar.
+  // (Preview-mode selections come through document selectionchange, which
+  // is already wired by the primary mount.)
+  window.NoteEditor.wireSelectionTracking?.({ textareaIds: ['notePageSecondaryEditor'] });
   return secondaryBundle;
 }
 
@@ -1203,6 +1239,7 @@ async function bootstrap() {
     aiAssist: {
       readSelection: readPageSelection,
       showToast,
+      getPaneApi: getPagePaneApi,
     },
   });
   bundle.render();
