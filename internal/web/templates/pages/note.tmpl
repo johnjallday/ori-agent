@@ -46,15 +46,15 @@
 
       <!-- Toolbar (reused IDs match the modal so NoteEditor wires them automatically) -->
       <div class="note-editor-toolbar">
+        <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle Notes &amp; Outline sidebar" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3,5H21V19H3V5M5,7V17H10V7H5M12,7V9H19V7H12M12,11V13H19V11H12M12,15V17H19V15H12Z"/></svg>
+          Sidebar
+        </button>
         <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Ask AI (⌘J)" aria-controls="noteAIGeneratePanel" aria-expanded="false">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/></svg>
           Ask AI
         </button>
         <div class="note-toolbar-spacer"></div>
-        <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle sidebar" aria-pressed="false">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/></svg>
-          Outline
-        </button>
         <button type="button" id="noteAssistToggle" class="note-toolbar-btn" title="Toggle AI assist" aria-pressed="false" hidden>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,3A9,9 0 0,0 3,12H0L4,16L8,12H5A7,7 0 0,1 12,5A7,7 0 0,1 19,12A7,7 0 0,1 12,19C10.5,19 9.09,18.5 7.94,17.7L6.5,19.14C8.04,20.3 9.94,21 12,21A9,9 0 0,0 21,12A9,9 0 0,0 12,3M11,7V13L15.25,15.5L16,14.25L12.5,12.25V7H11Z"/></svg>
           Assist
