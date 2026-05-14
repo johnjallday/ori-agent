@@ -4556,12 +4556,51 @@ body.task-modal-open {
   gap: 6px;
 }
 
-/* When the rail is hosting the Generate-with-AI panel, hide the suggestion
-   stack / empty state / status bar so the form is the focal content. */
-.note-assist-rail.is-generating > [data-role="empty"],
-.note-assist-rail.is-generating > [data-role="content"],
-.note-assist-rail.is-generating > .note-ai-status-bar {
+/* When the rail is hosting the Ask AI panel, only hide the empty-state
+   placeholder — suggestion cards and the status bar stay visible below
+   the panel so the user can see prior work while drafting a new prompt. */
+.note-assist-rail.is-generating > [data-role="empty"] {
   display: none !important;
+}
+
+/* Rail-hosted panel: single-column form, slimmer chrome, separator below. */
+.note-rail-ai-panel {
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  margin: 0;
+}
+
+.note-rail-ai-panel .note-ai-panel-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-rail-ai-panel .note-ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.note-rail-ai-panel .note-ai-field > span {
+  color: var(--text-muted, var(--text-secondary));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.note-rail-ai-panel textarea.modern-input {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.note-rail-ai-panel .note-ai-panel-footer {
+  padding: 6px 10px 10px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .note-toolbar-btn.ai-active {

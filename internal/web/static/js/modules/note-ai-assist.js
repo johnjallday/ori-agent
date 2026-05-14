@@ -278,14 +278,23 @@ function buildHistoryChain(card) {
 function render() {
   if (!state.cardsContainer || !state.emptyEl) return;
 
-  // No cards at all: empty state + hide rail.
+  // The rail hosts both the Ask AI panel and the suggestion cards. Hide it
+  // only when *both* are inactive — otherwise the user loses the panel they
+  // just opened simply because no suggestions have arrived yet.
+  const panelOpen = typeof window !== 'undefined'
+    && window.NoteEditor?.isGeneratePanelOpen?.() === true;
+
   if (state.cards.length === 0) {
     state.view = 'stack';
-    state.emptyEl.style.display = '';
+    state.emptyEl.style.display = panelOpen ? 'none' : '';
     state.cardsContainer.style.display = 'none';
     state.cardsContainer.innerHTML = '';
     removeStatusBar();
-    state.sessionsApi?.hideAssistRail?.();
+    if (panelOpen) {
+      state.sessionsApi?.showAssistRail?.();
+    } else {
+      state.sessionsApi?.hideAssistRail?.();
+    }
     return;
   }
 
