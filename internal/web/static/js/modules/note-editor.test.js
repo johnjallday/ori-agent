@@ -25,12 +25,14 @@ import {
   renderRenderedLine,
   lineIndexAtPosition,
   startOfLine,
+  sourceRangeForLineRange,
   pruneCollapsedHeadings,
   buildLiveEditorHTML,
   NoteLiveEditorState,
   NoteLiveEditor,
   mount,
   bindGenerateToggleButton,
+  readSelection,
 } from './note-editor.js';
 
 // =============================================================================
@@ -760,6 +762,49 @@ test('lineIndexAtPosition + startOfLine round-trip on heading positions', () => 
     const pos = src.indexOf(heading);
     const line = lineIndexAtPosition(src, pos);
     assert.equal(startOfLine(src, line), pos, `round-trip failed for ${heading}`);
+  }
+});
+
+test('sourceRangeForLineRange: maps inclusive line spans to source offsets', () => {
+  const src = 'alpha\nbeta gamma\nomega';
+  assert.deepEqual(sourceRangeForLineRange(src, 1, 1), { start: 6, end: 16 });
+  assert.equal(src.slice(6, 16), 'beta gamma');
+  assert.deepEqual(sourceRangeForLineRange(src, 0, 1), { start: 0, end: 16 });
+});
+
+test('readSelection: maps active live-editor input selection to source offsets', () => {
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  const input = {
+    value: 'beta gamma',
+    selectionStart: 5,
+    selectionEnd: 10,
+    dataset: { lineIndex: '1' },
+    classList: { contains: () => false },
+    closest(selector) { return selector === '.note-live-line-input' ? this : null; },
+    getBoundingClientRect() { return { top: 10, right: 420 }; },
+  };
+  const preview = { contains: (node) => node === input };
+  globalThis.document = {
+    activeElement: input,
+    getElementById(id) {
+      return id === 'preview' ? preview : null;
+    },
+  };
+  globalThis.window = {};
+  try {
+    const sel = readSelection({
+      getContent: () => 'alpha\nbeta gamma\nomega',
+      isPreviewMode: () => true,
+      previewPaneId: 'preview',
+    });
+    assert.equal(sel.text, 'gamma');
+    assert.deepEqual(sel.range, { start: 11, end: 16 });
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
   }
 });
 

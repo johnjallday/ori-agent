@@ -520,6 +520,19 @@ export function startOfLine(content, lineIndex) {
   return cursor;
 }
 
+export function sourceRangeForLineRange(content, startLine, endLine) {
+  const source = String(content ?? '');
+  const lines = source.split('\n');
+  const maxIndex = Math.max(0, lines.length - 1);
+  const rawStart = Number.isFinite(Number(startLine)) ? Number(startLine) : 0;
+  const rawEnd = Number.isFinite(Number(endLine)) ? Number(endLine) : rawStart;
+  const start = Math.max(0, Math.min(rawStart, maxIndex));
+  const end = Math.max(start, Math.min(rawEnd, maxIndex));
+  const offset = startOfLine(source, start);
+  const text = lines.slice(start, end + 1).join('\n');
+  return { start: offset, end: offset + text.length };
+}
+
 // findRenderedHeadingByPosition locates the rendered live-preview element for
 // the heading at source byte offset `position`. Returns null when the live
 // preview isn't mounted or no rendered line matches.
@@ -1797,7 +1810,6 @@ export async function loadAgentsIntoDropdown(workspaceId = _lastAgentDropdownWor
     } catch (error) {
       // Fall through to /api/agents so a transient workspace fetch failure
       // doesn't leave the user with an empty dropdown.
-      // eslint-disable-next-line no-console
       console.error('Failed to load workspace agents for note AI:', error);
     }
   }
@@ -1811,7 +1823,6 @@ export async function loadAgentsIntoDropdown(workspaceId = _lastAgentDropdownWor
   } catch (error) {
     select.innerHTML = '<option value="">Use workspace agent</option>';
     select.disabled = false;
-    // eslint-disable-next-line no-console
     console.error('Failed to load agents for note AI:', error);
   }
 }
@@ -1859,39 +1870,82 @@ export function readSelection({ getContent, isPreviewMode, textareaId = 'noteCon
 }
 
 function _readSinglePaneSelection({ getContent, isPreviewMode, textareaId, previewPaneId }) {
+  const content = getContent?.() || '';
+
   if (!isPreviewMode?.()) {
     const ta = document.getElementById(textareaId);
     if (!ta || document.activeElement !== ta) return null;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    if (start === end) return null;
-    const text = ta.value.slice(start, end);
-    const rect = ta.getBoundingClientRect();
-    return {
-      text,
-      source: 'textarea',
-      range: { start, end },
-      // Caret position inside a textarea isn't trivially available without
-      // canvas measurement, so anchor the bar near the textarea's top-right.
-      anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
-    };
+    return _readTextareaSelection(ta, 0);
+  }
+
+  const previewPane = document.getElementById(previewPaneId);
+  if (!previewPane) return null;
+
+  // Live-preview edits use transient textareas instead of the hidden source
+  // textarea. Convert their local selection offsets back to source offsets so
+  // staged suggestions commit to the correct source range.
+  const active = document.activeElement;
+  const liveInput = active?.closest?.('.note-live-line-input');
+  if (liveInput && previewPane.contains(liveInput)) {
+    return _readLiveInputSelection(liveInput, content);
   }
 
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
-  const previewPane = document.getElementById(previewPaneId);
-  if (!previewPane) return null;
   const range = sel.getRangeAt(0);
   if (!previewPane.contains(range.commonAncestorContainer)) return null;
   const text = sel.toString();
   if (!text || !text.trim()) return null;
   const anchorRect = range.getBoundingClientRect();
 
-  const content = getContent?.() || '';
+  const lineRange = getSelectedLineRange(previewPane);
+  if (lineRange) {
+    const broadRange = sourceRangeForLineRange(content, lineRange.start, lineRange.end);
+    const sourceText = content.slice(broadRange.start, broadRange.end);
+    const localIdx = sourceText.indexOf(text);
+    if (localIdx >= 0) {
+      return {
+        text,
+        source: 'preview',
+        range: { start: broadRange.start + localIdx, end: broadRange.start + localIdx + text.length },
+        anchorRect,
+      };
+    }
+    return { text: sourceText, source: 'preview', range: broadRange, anchorRect };
+  }
+
   const idx = content.indexOf(text);
   const sourceRange = idx >= 0 ? { start: idx, end: idx + text.length } : null;
 
   return { text, source: 'preview', range: sourceRange, anchorRect };
+}
+
+function _readTextareaSelection(textarea, baseOffset = 0) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start === end) return null;
+  const text = String(textarea.value || '').slice(start, end);
+  if (!text || !text.trim()) return null;
+  const rect = textarea.getBoundingClientRect();
+  return {
+    text,
+    source: 'textarea',
+    range: { start: baseOffset + start, end: baseOffset + end },
+    // Caret position inside a textarea isn't trivially available without
+    // canvas measurement, so anchor the bar near the textarea's top-right.
+    anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
+  };
+}
+
+function _readLiveInputSelection(input, content) {
+  if (input.classList?.contains('note-live-block-input')) {
+    const lineStart = Number(input.dataset.lineStart);
+    if (!Number.isInteger(lineStart)) return null;
+    return _readTextareaSelection(input, startOfLine(content, lineStart));
+  }
+  const lineIndex = Number(input.dataset.lineIndex);
+  if (!Number.isInteger(lineIndex)) return null;
+  return _readTextareaSelection(input, startOfLine(content, lineIndex));
 }
 
 let _selectionTrackingWired = false;
@@ -2023,7 +2077,8 @@ function wireAskAIShortcut(host) {
     const target = e.target;
     const NOTE_INPUT_IDS = new Set(['noteContentInput', 'notePageSecondaryEditor']);
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-      if (!NOTE_INPUT_IDS.has(target.id)) return;
+      const isLiveEditorInput = typeof target.closest === 'function' && target.closest('.note-live-line-input');
+      if (!NOTE_INPUT_IDS.has(target.id) && !isLiveEditorInput) return;
     }
 
     e.preventDefault();
@@ -2489,6 +2544,7 @@ const api = {
   setActiveTocEntry,
   lineIndexAtPosition,
   startOfLine,
+  sourceRangeForLineRange,
   NoteTocController,
   NoteLiveEditorState,
   NoteLiveEditor,

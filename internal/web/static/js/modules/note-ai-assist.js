@@ -185,6 +185,13 @@ function dispatchAsk(selection, prompt) {
   return true;
 }
 
+function hasSourceRange(card) {
+  const range = card?.sourceRange;
+  return Number.isInteger(range?.start)
+    && Number.isInteger(range?.end)
+    && range.start <= range.end;
+}
+
 // =============================================================================
 // Dispatch + cards
 // =============================================================================
@@ -361,6 +368,7 @@ function renderCard(card) {
   // Controls — only available once the suggestion is ready
   const controls = el.querySelector('[data-role="controls"]');
   if (card.status === 'ready') {
+    const canCommit = hasSourceRange(card);
     controls.innerHTML = `
       <label class="note-ai-card-mode">
         Mode:
@@ -370,9 +378,9 @@ function renderCard(card) {
           <option value="insert-after">Insert after</option>
         </select>
       </label>
-      <button type="button" class="note-ai-card-stage" data-role="stage">${card.staged ? 'Unstage' : 'Stage'}</button>
+      <button type="button" class="note-ai-card-stage" data-role="stage" ${canCommit ? '' : 'disabled'}>${card.staged ? 'Unstage' : 'Stage'}</button>
       <button type="button" class="note-ai-card-copy" data-role="copy">Copy</button>
-      <button type="button" class="note-ai-card-quick" data-role="quick" title="Stage and commit this single suggestion now">Quick commit</button>
+      <button type="button" class="note-ai-card-quick" data-role="quick" ${canCommit ? '' : 'disabled'} title="${canCommit ? 'Stage and commit this single suggestion now' : 'This selection could not be mapped to note source'}">Quick commit</button>
     `;
     controls.querySelector('[data-role="mode"]').value = card.mode;
     controls.querySelector('[data-role="mode"]').addEventListener('change', (e) => updateCardMode(card.id, e.target.value));
@@ -409,7 +417,7 @@ function renderCard(card) {
 function updateStatusBar() {
   if (!state.rail) return;
   let bar = state.rail.querySelector('.note-ai-status-bar');
-  const stagedCount = state.cards.filter(c => c.staged).length;
+  const stagedCount = state.cards.filter(c => c.staged && hasSourceRange(c)).length;
   if (!bar) {
     bar = document.createElement('div');
     bar.className = 'note-ai-status-bar';
@@ -441,6 +449,10 @@ function updateCardMode(id, mode) {
 function toggleStaged(id) {
   const card = findCard(id);
   if (!card || card.status !== 'ready') return;
+  if (!hasSourceRange(card)) {
+    state.sessionsApi?.showToast?.('Could not map that selection to the note source. Copy the suggestion instead.', 'warning');
+    return;
+  }
   card.staged = !card.staged;
   render();
 }
@@ -479,7 +491,7 @@ function getStagingApi() {
 }
 
 function openReviewPane() {
-  const stagedCount = state.cards.filter(c => c.staged).length;
+  const stagedCount = state.cards.filter(c => c.staged && hasSourceRange(c)).length;
   if (stagedCount === 0) return;
   state.view = 'review';
   render();
@@ -509,7 +521,7 @@ function renderReviewPane() {
   // review UI can label and route correctly.
   const cardsByPane = new Map();
   for (const c of state.cards) {
-    if (!c.staged || c.status !== 'ready') continue;
+    if (!c.staged || c.status !== 'ready' || !hasSourceRange(c)) continue;
     const key = c.paneId || '';
     if (!cardsByPane.has(key)) cardsByPane.set(key, []);
     cardsByPane.get(key).push(c);
@@ -625,7 +637,7 @@ function commit() {
   // and the apply step writes back to the correct pane.
   const cardsByPane = new Map();
   for (const c of state.cards) {
-    if (!c.staged || c.status !== 'ready') continue;
+    if (!c.staged || c.status !== 'ready' || !hasSourceRange(c)) continue;
     const key = c.paneId || '';
     if (!cardsByPane.has(key)) cardsByPane.set(key, []);
     cardsByPane.get(key).push(c);
@@ -674,6 +686,10 @@ function commit() {
 function quickCommit(cardId) {
   const card = findCard(cardId);
   if (!card || card.status !== 'ready') return;
+  if (!hasSourceRange(card)) {
+    state.sessionsApi?.showToast?.('Could not map that selection to the note source. Copy the suggestion instead.', 'warning');
+    return;
+  }
 
   // Stage just this card temporarily, run commit through the same engine,
   // then ensure no other staged state is mutated.
@@ -697,6 +713,7 @@ function addRefinement(parentId, refinementPrompt) {
   state.pendingSelection = {
     text: parent.originalText,
     range: parent.sourceRange,
+    paneId: parent.paneId || '',
   };
   dispatch({ action: 'ask', prompt: refinementPrompt, parentId });
 }

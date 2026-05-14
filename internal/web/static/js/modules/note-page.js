@@ -210,6 +210,23 @@ function getPagePaneApi(paneId) {
   };
 }
 
+function resetPageAIAssistForCurrentNote(agentId = window.NoteEditor?.getSelectedAgentId?.() || null) {
+  const workspaceId = noteWorkspaceId(currentNote);
+  window.NoteAIAssist?.onNoteOpened?.({
+    noteId: currentNote?.id || null,
+    workspaceId: workspaceId || null,
+    agentId,
+  });
+}
+
+async function syncPageAIAssistForCurrentNote() {
+  const workspaceId = noteWorkspaceId(currentNote);
+  if (workspaceId) {
+    await window.NoteEditor?.applyAgentDefaultForWorkspace?.(workspaceId);
+  }
+  resetPageAIAssistForCurrentNote();
+}
+
 async function savePageNote() {
   if (!currentNote?.id) return false;
   // Mid-switch saves would write the new content under the old note's ID.
@@ -347,25 +364,17 @@ function applyPageGenerateDraft(mode = 'replace') {
   const draftTitle = String(draft.title || '').trim();
   let nextContent = draftContent;
 
+  if (mode === 'insert') {
+    setGenerateError('Insert is unavailable in the live preview. Use Append or Replace.');
+    return;
+  }
+
   bundle?.history?.push?.(currentContent);
 
   if (mode === 'append') {
     nextContent = currentContent.trim()
       ? `${currentContent.replace(/\s+$/, '')}\n\n${draftContent}`
       : draftContent;
-  } else if (mode === 'insert') {
-    const start = Number.isInteger(contentInput.selectionStart) ? contentInput.selectionStart : currentContent.length;
-    const end = Number.isInteger(contentInput.selectionEnd) ? contentInput.selectionEnd : start;
-    nextContent = `${currentContent.slice(0, start)}${draftContent}${currentContent.slice(end)}`;
-    const cursor = start + draftContent.length;
-    const restoreCursor = () => {
-      try {
-        contentInput.focus();
-        contentInput.setSelectionRange(cursor, cursor);
-      } catch (_) {}
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreCursor);
-    else restoreCursor();
   } else if (draftTitle && titleInput) {
     titleInput.value = draftTitle;
   }
@@ -399,7 +408,12 @@ function bindGenerateWithAIControls() {
   });
   document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => applyPageGenerateDraft('replace'));
   document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => applyPageGenerateDraft('append'));
-  document.getElementById('noteAIInsertBtn')?.addEventListener('click', () => applyPageGenerateDraft('insert'));
+  const insertBtn = document.getElementById('noteAIInsertBtn');
+  if (insertBtn) {
+    insertBtn.disabled = true;
+    insertBtn.title = 'Insert is unavailable in the live preview. Use Append or Replace.';
+    insertBtn.addEventListener('click', () => applyPageGenerateDraft('insert'));
+  }
 }
 
 // =============================================================================
@@ -758,6 +772,7 @@ async function loadNoteIntoActivePane(noteId) {
   _tabLabelCache.set(next.id, next.name || 'Untitled');
 
   currentNote = next;
+  resetPageAIAssistForCurrentNote(null);
 
   // 4. Reset history so undo doesn't cross note boundaries.
   bundle?.history?.reset?.();
@@ -774,6 +789,7 @@ async function loadNoteIntoActivePane(noteId) {
   window.NoteBacklinks?.loadBacklinksFor(next.id);
   window.NoteRailNotes?.setActiveNoteId(next.id);
   window.NotePresence?.claimOpenNote(next.id, 'page');
+  await syncPageAIAssistForCurrentNote();
   if (state?.splitMode !== 'none') {
     await renderSecondaryPane();
   }
@@ -1263,13 +1279,10 @@ async function bootstrap() {
   titleInput?.addEventListener('input', () => bundle.autosave.schedule());
   bindGenerateWithAIControls();
 
-  // Prime the Generate-with-AI agent dropdown with this note's workspace
-  // so it filters to workspace-bound agents instead of falling back to
-  // every agent in the system. Mirrors the modal flow in sessions.js.
-  const pageWorkspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
-  if (pageWorkspaceId) {
-    window.NoteEditor?.applyAgentDefaultForWorkspace?.(pageWorkspaceId);
-  }
+  // Prime the Ask AI agent dropdown with this note's workspace and reset the
+  // assist-card stack for the loaded note. Mirrors the modal flow in
+  // sessions.js, but the dedicated page has to do it explicitly.
+  await syncPageAIAssistForCurrentNote();
 
   // 7. Render the tab strip + secondary pane (if split state was restored)
   //    + prefetch labels for non-current tabs.

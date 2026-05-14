@@ -31,6 +31,16 @@ test('projectHunks: ignores cards that are not staged or not ready', () => {
   assert.equal(hunks[0].id, '3');
 });
 
+test('projectHunks: ignores staged cards without a source range', () => {
+  const hunks = projectHunks([
+    stagedCard({ id: 'missing', sourceRange: null }),
+    stagedCard({ id: 'invalid', sourceRange: { start: 5, end: 2 } }),
+    stagedCard({ id: 'ok', sourceRange: { start: 1, end: 3 } }),
+  ]);
+  assert.deepEqual(hunks.map(h => h.id), ['ok']);
+  assert.deepEqual(hunks[0].sourceRange, { start: 1, end: 3 });
+});
+
 test('projectHunks: detects conflict on overlapping replace hunks', () => {
   const cards = [
     stagedCard({ id: 'a', sourceRange: { start: 0, end: 10 }, mode: 'replace' }),
