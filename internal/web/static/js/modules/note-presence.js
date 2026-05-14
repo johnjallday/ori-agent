@@ -1,6 +1,6 @@
 // note-presence.js — cross-tab coordination for "which note is open where".
 //
-// The dedicated /notes/<id> page claims presence on load and releases on
+// The workspace notes page claims presence on load and releases on
 // unload. Other surfaces (the modal in sessionManager) can call
 // `isOpenElsewhere(noteId)` to ask whether any other tab in this browser is
 // currently holding the same note. The modal uses this to warn ("already open

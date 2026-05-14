@@ -1,5 +1,5 @@
 // note-tabs.js — pure state reducer for the multi-note tab / split-pane
-// workflow on the dedicated /notes/<id> page. Renderers and DOM wiring live
+// workflow on the workspace notes page. Renderers and DOM wiring live
 // in note-page.js (or a later renderer module); this file only owns state
 // transitions so the logic is exhaustively testable in node --test.
 //

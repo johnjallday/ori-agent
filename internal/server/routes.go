@@ -57,7 +57,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	// Workspaces page routes (primary)
 	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
-	mux.HandleFunc("/notes/", s.handleNotesPageRoute)        // Dedicated note page: /notes/{id}
+	mux.HandleFunc("/notes/", s.handleNotesPageRoute)        // Focused note page: /notes/{id}
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)

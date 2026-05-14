@@ -5724,10 +5724,20 @@ const sessionManager = {
     return this._openNoteEditorWithNote(note);
   },
 
+  _notePageURL(note, hash = '') {
+    const noteId = note?.id || '';
+    if (!noteId) return '';
+    const path = `/notes/${encodeURIComponent(noteId)}`;
+    if (!hash) return path;
+    const value = String(hash);
+    if (!value || value === '#') return path;
+    return value.startsWith('#') ? `${path}${value}` : `${path}#${encodeURIComponent(value)}`;
+  },
+
   // openNote consults the user's `notes_open_behavior` preference and routes
-  // the click to either the modal (default), the dedicated /notes/<id> page,
-  // or a new browser tab. Centralized so every entry point (workspace hub,
-  // ⌘K palette, etc.) routes through the same logic.
+  // the click to either the modal (default), the focused note page, or a new
+  // browser tab. Centralized so every entry point routes through the same
+  // logic.
   //
   // Pass `{ force: 'modal'|'page'|'page-new-tab' }` to override the preference
   // for affordances like "Open in page" / "Open in modal" buttons.
@@ -5735,11 +5745,23 @@ const sessionManager = {
     if (!noteId) return;
     const behavior = options.force || this._readNotesOpenBehavior();
     if (behavior === 'page') {
-      window.location.href = `/notes/${encodeURIComponent(noteId)}`;
+      const note = await this.getNote(noteId);
+      const url = this._notePageURL(note);
+      if (!url) {
+        this.showToast('Could not open this note as a page', 'error');
+        return;
+      }
+      window.location.href = url;
       return;
     }
     if (behavior === 'page-new-tab') {
-      window.open(`/notes/${encodeURIComponent(noteId)}`, '_blank', 'noopener');
+      const note = await this.getNote(noteId);
+      const url = this._notePageURL(note);
+      if (!url) {
+        this.showToast('Could not open this note as a page', 'error');
+        return;
+      }
+      window.open(url, '_blank', 'noopener');
       return;
     }
     return this.openNoteEditor(noteId);
@@ -5897,10 +5919,10 @@ const sessionManager = {
     }
   },
 
-  // Navigate to the dedicated `/notes/<id>` page for the currently-open
-  // note. If the note hasn't been saved yet (no id), flush autosave first
-  // so the URL has something to resolve. Saves the modal's pending edits
-  // before navigating so they aren't lost.
+  // Navigate to the workspace notes page for the currently-open note. If the
+  // note hasn't been saved yet (no id), flush autosave first so the URL has
+  // something to resolve. Saves the modal's pending edits before navigating so
+  // they aren't lost.
   async openCurrentNoteAsPage() {
     // Trigger immediate save so unsaved edits land before navigation.
     const saved = await this.noteAutoSave?.flushImmediate?.();
@@ -5913,7 +5935,12 @@ const sessionManager = {
       this.showToast('Save the note first to get a shareable URL', 'warning');
       return;
     }
-    window.location.href = `/notes/${encodeURIComponent(this.currentNote.id)}`;
+    const url = this._notePageURL(this.currentNote);
+    if (!url) {
+      this.showToast('Could not open this note as a page', 'error');
+      return;
+    }
+    window.location.href = url;
   },
 
   // Save current note
@@ -7943,10 +7970,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sessionManager.init();
   }
 
-  // ?open=<noteId> — opens the note's modal after navigation. Used by the
-  // dedicated /notes/<id> page's "Open in modal" button so the cross-affordance
-  // round-trips without a server change. One-shot: scrubbed from history once
-  // the modal opens.
+  // ?open=<noteId> opens the note's modal after navigation. One-shot:
+  // scrubbed from history once the modal opens.
   try {
     const params = new URLSearchParams(window.location.search);
     const openNoteId = params.get('open');

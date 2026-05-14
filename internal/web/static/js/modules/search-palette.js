@@ -6,9 +6,10 @@
 //   GET /api/notes/search?q=…         — full-text over note bodies
 //   GET /api/notes/search/headings?q=…— FTS over the heading index added in 1.0
 //
-// Selection of a Note result calls window.sessionManager.openNoteEditor(id);
-// selection of a Heading result calls a small wrapper that opens the editor
-// in live-preview mode and scrolls to the heading.
+// Selection of a Note result routes through sessionManager.openNote(id) when
+// available so the user's note-opening preference applies.
+
+import { notePath } from './note-routes.js';
 
 const RECENT_KEY = 'note.search.recent';
 const RECENT_MAX = 5;
@@ -307,12 +308,16 @@ function activateIndex(idx) {
   pushRecent(state.query);
   close();
   if (row.kind === 'note') {
-    // On the note page, open as a new tab. On other pages, route via
-    // sessionManager.openNote so notes_open_behavior applies.
+    // On note pages, use the page API. The workspace app opens a tab; the
+    // focused page navigates. Other pages route via the user preference.
     if (typeof window.NotePage?.openNoteInTab === 'function') {
       window.NotePage.openNoteInTab(row.item.id);
+    } else if (window.sessionManager?.openNote) {
+      window.sessionManager.openNote(row.item.id);
+    } else if (row.item.id) {
+      window.location.href = notePath(row.item.id);
     } else {
-      window.sessionManager?.openNote?.(row.item.id);
+      window.location.href = `/workspaces`;
     }
   } else {
     const noteId = row.item.note_id;
@@ -331,9 +336,9 @@ function activateIndex(idx) {
     if (behavior === 'modal' && window.sessionManager?.openNoteEditorWithHeading) {
       window.sessionManager.openNoteEditorWithHeading(noteId, headingText);
     } else if (behavior === 'page') {
-      window.location.href = `/notes/${encodeURIComponent(noteId)}#${encodeURIComponent(headingText)}`;
+      window.location.href = notePath(noteId, headingText);
     } else if (behavior === 'page-new-tab') {
-      window.open(`/notes/${encodeURIComponent(noteId)}#${encodeURIComponent(headingText)}`, '_blank', 'noopener');
+      window.open(notePath(noteId, headingText), '_blank', 'noopener');
     } else if (window.sessionManager?.openNote) {
       window.sessionManager.openNote(noteId);
     }

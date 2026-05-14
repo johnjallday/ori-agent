@@ -169,10 +169,8 @@
    * @param {string} noteId - Note ID to open
    */
   function openNote(noteId) {
-    // Use the existing openNoteEditor which takes an ID and fetches the note
-    if (window.sessionManager && typeof window.sessionManager.openNoteEditor === 'function') {
-      window.sessionManager.openNoteEditor(noteId);
-    }
+    if (!noteId) return;
+    window.location.href = `/notes/${encodeURIComponent(noteId)}`;
   }
 
   /**

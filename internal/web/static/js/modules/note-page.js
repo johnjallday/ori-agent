@@ -1,6 +1,6 @@
-// note-page.js — bootstrap for the dedicated /notes/<id> page.
+// note-page.js — bootstrap for workspace and focused note pages.
 //
-// Loads the note via the API, populates the textarea + title, and calls
+// Loads the active note via the API, populates the textarea + title, and calls
 // NoteEditor.mount with a host adapter for the page surface. As of task 4.0
 // (slice B), the page also owns multi-tab state via window.NoteTabs — the
 // tab strip above the editor shows all open notes in the active pane. The
@@ -8,25 +8,40 @@
 // changes (no remount, so autosave/history controllers persist across
 // tab switches).
 
+import {
+  notePath,
+  readFocusedNoteRoute,
+  readWorkspaceNotesRoute,
+  workspaceNotePath,
+  workspaceNotesPath,
+} from './note-routes.js';
+
 const LEGACY_STATE_KEY = 'note.tabs';
 const STATE_KEY_PREFIX = 'note.tabs.workspace.';
 
-function readNoteIdFromPath() {
-  if (typeof window === 'undefined') return '';
-  const parts = window.location.pathname.split('/').filter(Boolean);
-  const idx = parts.indexOf('notes');
-  if (idx < 0 || idx + 1 >= parts.length) return '';
-  return decodeURIComponent(parts[idx + 1] || '');
+function readInitialRoute() {
+  if (typeof window === 'undefined') return { mode: 'workspace', workspaceId: '', noteId: '' };
+  const workspaceRoute = readWorkspaceNotesRoute(window.location.pathname);
+  const focusedRoute = readFocusedNoteRoute(window.location.pathname);
+  const page = typeof document !== 'undefined' ? document.getElementById('noteMainContent') : null;
+  const mode = page?.dataset?.pageMode || (focusedRoute.noteId ? 'focused' : 'workspace');
+  const workspaceId = workspaceRoute.workspaceId || page?.dataset?.workspaceId || '';
+  const noteId = workspaceRoute.noteId || focusedRoute.noteId || page?.dataset?.noteId || '';
+  return { mode, workspaceId, noteId };
 }
 
-const NOTE_ID = readNoteIdFromPath();
+const INITIAL_ROUTE = readInitialRoute();
+const NOTE_PAGE_MODE = INITIAL_ROUTE.mode === 'focused' ? 'focused' : 'workspace';
+const FOCUSED_NOTE_PAGE = NOTE_PAGE_MODE === 'focused';
+const WORKSPACE_ID = INITIAL_ROUTE.workspaceId;
+const NOTE_ID = INITIAL_ROUTE.noteId;
 let currentNote = null;          // the note shown in the active pane
 let bundle = null;                // NoteEditor.mount return value (single instance)
 let state = null;                 // NoteTabs reducer state
 let switching = false;            // re-entrancy guard while swapping content
 let pendingGenerateDraft = null;   // last whole-note AI draft waiting to apply
 let creatingNoteFromTabStrip = false;
-let stateWorkspaceId = null;       // workspace scope for persisted tab state
+let stateWorkspaceId = WORKSPACE_ID || null; // workspace scope for persisted tab state
 
 // =============================================================================
 // State persistence (localStorage)
@@ -39,6 +54,10 @@ export function noteTabsStateKey(workspaceId) {
 
 function noteWorkspaceId(note) {
   return note?.workspace_id || note?.folder_id || '';
+}
+
+function currentWorkspaceId() {
+  return stateWorkspaceId || noteWorkspaceId(currentNote) || WORKSPACE_ID || '';
 }
 
 function loadSavedState(fallbackNoteId, workspaceId) {
@@ -54,6 +73,7 @@ function loadSavedState(fallbackNoteId, workspaceId) {
 }
 
 function persistState() {
+  if (FOCUSED_NOTE_PAGE) return;
   try { localStorage.setItem(noteTabsStateKey(stateWorkspaceId || noteWorkspaceId(currentNote)), JSON.stringify(state)); } catch (_) {}
 }
 
@@ -85,6 +105,18 @@ async function fetchWorkspaceName(workspaceId) {
   } catch (_) { return null; }
 }
 
+async function fetchWorkspaceNotes(workspaceId) {
+  if (!workspaceId) return [];
+  try {
+    const resp = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data?.notes) ? data.notes : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 export async function createWorkspaceNote(workspaceId, fetchImpl = fetch) {
   if (!workspaceId) throw new Error('No workspace selected');
   const resp = await fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
@@ -113,12 +145,50 @@ function showLoadError(message) {
   }
 }
 
-function populateBreadcrumb(note, workspaceName) {
+function populateBreadcrumb(note, workspaceName, workspaceId = currentWorkspaceId()) {
   const link = document.getElementById('notePageWorkspaceLink');
-  if (link && note?.workspace_id) {
-    link.href = `/workspaces/${encodeURIComponent(note.workspace_id)}`;
+  const id = workspaceId || noteWorkspaceId(note);
+  if (link && id) {
+    link.href = `/workspaces/${encodeURIComponent(id)}`;
     link.textContent = workspaceName || 'Workspace';
   }
+}
+
+function showWorkspaceEmptyState(message = 'No notes in this workspace yet. Create a note to start writing.') {
+  const titleInput = document.getElementById('noteNameInput');
+  const contentInput = document.getElementById('noteContentInput');
+  if (titleInput) {
+    titleInput.value = '';
+    titleInput.placeholder = 'Create a note to start writing';
+    titleInput.disabled = true;
+  }
+  if (contentInput) contentInput.value = '';
+  const previewContent = document.getElementById('notePreviewContent');
+  if (previewContent) {
+    previewContent.innerHTML = `<div class="note-page-empty">${escapeText(message)}</div>`;
+  }
+}
+
+function applyFocusedNotePageMode() {
+  if (!FOCUSED_NOTE_PAGE || typeof document === 'undefined') return;
+  const main = document.getElementById('noteMainContent');
+  main?.classList.add('note-page-focused');
+
+  const notesTab = document.getElementById('noteRailTabNotes');
+  const outlineTab = document.getElementById('noteRailTabOutline');
+  const notesPane = document.getElementById('noteRailPaneNotes');
+  const outlinePane = document.getElementById('noteRailPaneOutline');
+  if (notesTab) notesTab.hidden = true;
+  if (notesPane) notesPane.hidden = true;
+  if (outlineTab) {
+    outlineTab.classList.add('is-active');
+    outlineTab.setAttribute('aria-selected', 'true');
+  }
+  if (outlinePane) outlinePane.hidden = false;
+
+  document.getElementById('notePageTabStrip')?.setAttribute('hidden', '');
+  document.getElementById('notePageSecondaryPane')?.setAttribute('hidden', '');
+  document.getElementById('notePageDetachZone')?.setAttribute('hidden', '');
 }
 
 function showToast(msg, kind) {
@@ -211,7 +281,7 @@ function getPagePaneApi(paneId) {
 }
 
 function resetPageAIAssistForCurrentNote(agentId = window.NoteEditor?.getSelectedAgentId?.() || null) {
-  const workspaceId = noteWorkspaceId(currentNote);
+  const workspaceId = currentWorkspaceId();
   window.NoteAIAssist?.onNoteOpened?.({
     noteId: currentNote?.id || null,
     workspaceId: workspaceId || null,
@@ -220,7 +290,7 @@ function resetPageAIAssistForCurrentNote(agentId = window.NoteEditor?.getSelecte
 }
 
 async function syncPageAIAssistForCurrentNote() {
-  const workspaceId = noteWorkspaceId(currentNote);
+  const workspaceId = currentWorkspaceId();
   if (workspaceId) {
     await window.NoteEditor?.applyAgentDefaultForWorkspace?.(workspaceId);
   }
@@ -309,7 +379,7 @@ async function generatePageNoteWithAI() {
   }
 
   const agentId = window.NoteEditor?.getSelectedAgentId?.() || '';
-  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
+  const workspaceId = currentWorkspaceId();
 
   setGenerateError('');
   window.NoteEditor?.setGenerateStatus?.('');
@@ -470,6 +540,10 @@ function renderTabStrip() {
   const list = document.getElementById('notePageTabList');
   const splitBtn = document.getElementById('notePageSplitRightBtn');
   const unsplitBtn = document.getElementById('notePageUnsplitBtn');
+  if (FOCUSED_NOTE_PAGE) {
+    if (strip) strip.hidden = true;
+    return;
+  }
   if (!strip || !list || !state) return;
 
   // Always show the strip: the "+" button is the entry point to opening
@@ -620,6 +694,11 @@ async function renderSecondaryPane() {
   const preview = document.getElementById('notePageSecondaryPreview');
   const banner = document.getElementById('notePageSecondaryBanner');
   const emptyEl = document.getElementById('notePageSecondaryEmpty');
+  if (FOCUSED_NOTE_PAGE) {
+    if (aside) aside.hidden = true;
+    if (grid) grid.classList.remove('is-split');
+    return;
+  }
   if (!aside || !tabsEl || !grid || !source || !preview || !banner || !emptyEl || !state) return;
   ensureSecondaryBundle();
 
@@ -761,26 +840,41 @@ async function loadNoteIntoActivePane(noteId) {
     showLoadError(`Note not found (id: ${noteId}).`);
     return false;
   }
-  stateWorkspaceId = noteWorkspaceId(next) || stateWorkspaceId;
+  const nextWorkspaceId = noteWorkspaceId(next);
+  const expectedWorkspaceId = currentWorkspaceId();
+  if (expectedWorkspaceId && nextWorkspaceId && nextWorkspaceId !== expectedWorkspaceId) {
+    switching = false;
+    showLoadError('This note belongs to a different workspace.');
+    showToast('Note belongs to a different workspace', 'error');
+    return false;
+  }
+  stateWorkspaceId = expectedWorkspaceId || nextWorkspaceId || stateWorkspaceId;
 
   // 3. Swap inputs + caches + history.
   const titleInput = document.getElementById('noteNameInput');
   const contentInput = document.getElementById('noteContentInput');
-  if (titleInput) titleInput.value = next.name || '';
+  if (titleInput) {
+    titleInput.disabled = false;
+    titleInput.value = next.name || '';
+  }
   if (contentInput) contentInput.value = next.content || '';
   if (next.name) document.title = `${next.name} - Ori Agent`;
   _tabLabelCache.set(next.id, next.name || 'Untitled');
 
   currentNote = next;
   resetPageAIAssistForCurrentNote(null);
+  fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));
 
   // 4. Reset history so undo doesn't cross note boundaries.
   bundle?.history?.reset?.();
   bundle?.autosave?.markClean?.();
 
   // 5. Update URL so refresh / share / browser back work intuitively.
-  if (window.location.pathname !== `/notes/${encodeURIComponent(next.id)}`) {
-    const url = `/notes/${encodeURIComponent(next.id)}` + window.location.hash;
+  const nextPath = FOCUSED_NOTE_PAGE
+    ? notePath(next.id, window.location.hash)
+    : workspaceNotePath(stateWorkspaceId || nextWorkspaceId, next.id, window.location.hash);
+  if (`${window.location.pathname}${window.location.hash}` !== nextPath) {
+    const url = nextPath;
     window.history.pushState(null, '', url);
   }
 
@@ -806,7 +900,17 @@ async function loadNoteIntoActivePane(noteId) {
 // =============================================================================
 
 async function openInTab(noteId) {
-  if (!noteId || !window.NoteTabs) return;
+  if (!noteId) return;
+  if (FOCUSED_NOTE_PAGE) {
+    const saved = await bundle?.autosave?.flushImmediate?.();
+    if (saved === false) {
+      showToast('Save failed. Retry before opening another note.', 'error');
+      return;
+    }
+    window.location.href = notePath(noteId);
+    return;
+  }
+  if (!window.NoteTabs) return;
   // openTab targets pane 0 (the editor pane) explicitly — splitting routes
   // the editor's main flow through pane 0, with pane 1 being read-only.
   state = window.NoteTabs.openTab(state, noteId, 0);
@@ -832,8 +936,9 @@ function setFocusedPane(paneIndex) {
 }
 
 async function createNoteFromTabStrip() {
+  if (FOCUSED_NOTE_PAGE) return;
   if (creatingNoteFromTabStrip) return;
-  const workspaceId = currentNote?.workspace_id || currentNote?.folder_id || '';
+  const workspaceId = currentWorkspaceId();
   if (!workspaceId) {
     showToast('Cannot create a note without a workspace.', 'error');
     return;
@@ -879,6 +984,7 @@ async function createNoteFromTabStrip() {
 }
 
 async function switchToTab(noteId, paneIndex) {
+  if (FOCUSED_NOTE_PAGE) return;
   if (!window.NoteTabs) return;
   const next = window.NoteTabs.setActiveTab(state, paneIndex, noteId);
   if (next === state) return;
@@ -895,6 +1001,7 @@ async function switchToTab(noteId, paneIndex) {
 }
 
 async function closeTab(noteId, paneIndex) {
+  if (FOCUSED_NOTE_PAGE) return;
   if (!window.NoteTabs) return;
   const before = state;
   state = window.NoteTabs.closeTab(state, noteId, paneIndex);
@@ -906,9 +1013,9 @@ async function closeTab(noteId, paneIndex) {
   // may also have collapsed split mode if pane 1 emptied out.
   const pane0 = state.panes[0];
   if (!pane0?.activeId) {
-    const wsId = currentNote?.workspace_id;
+    const wsId = currentWorkspaceId();
     window.NotePresence?.releaseOpenNote(currentNote?.id);
-    window.location.href = wsId ? `/workspaces/${encodeURIComponent(wsId)}/notes` : '/workspaces';
+    window.location.href = wsId ? workspaceNotesPath(wsId) : '/workspaces';
     return;
   }
   // If the editor pane's active note changed, load it.
@@ -972,6 +1079,7 @@ async function handleTabListKeydown(event, paneIndex) {
 }
 
 async function splitRight() {
+  if (FOCUSED_NOTE_PAGE) return;
   if (!window.NoteTabs || !currentNote?.id) return;
   // Clone the editor pane's active note into a new pane on the right.
   state = window.NoteTabs.splitRight(state);
@@ -984,6 +1092,7 @@ async function splitRight() {
 }
 
 async function unsplit() {
+  if (FOCUSED_NOTE_PAGE) return;
   if (!window.NoteTabs) return;
   state = window.NoteTabs.unsplit(state);
   persistState();
@@ -1152,6 +1261,7 @@ function installDragReorder(container, paneIndex) {
 // becomes the editable one. The editor markup is fixed in pane 0, so
 // "promote" really means "swap panes."
 async function promoteSecondary() {
+  if (FOCUSED_NOTE_PAGE) return;
   if (!window.NoteTabs || state?.splitMode === 'none') return;
   const newPrimaryId = state.panes[1]?.activeId;
   if (!newPrimaryId) return;
@@ -1173,6 +1283,10 @@ function bindPublicAPI() {
   window.NotePage = {
     openNoteInTab: openInTab,
     getActiveNoteId: () => currentNote?.id || null,
+    getWorkspaceId: () => currentWorkspaceId() || null,
+    getPageMode: () => NOTE_PAGE_MODE,
+    notePath,
+    workspaceNotePath,
   };
 }
 
@@ -1181,7 +1295,14 @@ function bindPublicAPI() {
 // =============================================================================
 
 async function bootstrap() {
-  if (!NOTE_ID) {
+  applyFocusedNotePageMode();
+
+  if (!FOCUSED_NOTE_PAGE && !WORKSPACE_ID) {
+    showLoadError('No workspace ID in URL.');
+    showToast('No workspace ID in URL', 'error');
+    return;
+  }
+  if (FOCUSED_NOTE_PAGE && !NOTE_ID) {
     showLoadError('No note ID in URL.');
     showToast('No note ID in URL', 'error');
     return;
@@ -1192,60 +1313,127 @@ async function bootstrap() {
     return;
   }
 
-  // 1. Load the initial note so tab persistence can be scoped to its
-  //    workspace. The old global key made tabs from unrelated workspaces
-  //    appear together, often with repeated-looking titles.
-  currentNote = await fetchNote(NOTE_ID);
-  if (!currentNote) {
-    showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
-    showToast('Note not found', 'error');
-    return;
-  }
-  stateWorkspaceId = noteWorkspaceId(currentNote);
-  _tabLabelCache.set(currentNote.id, currentNote.name || 'Untitled');
+  stateWorkspaceId = WORKSPACE_ID || null;
 
-  // 2. Initialize tab state. If saved state for this workspace matches the
-  //    URL note, restore it; otherwise start fresh with the URL note as the
-  //    single tab.
+  // 1. Resolve the initial note from the route, saved workspace tab state,
+  //    or the workspace's most recently updated note.
+  let initialNoteId = NOTE_ID;
+  if (FOCUSED_NOTE_PAGE) {
+    currentNote = await fetchNote(NOTE_ID);
+    if (!currentNote) {
+      showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
+      showToast('Note not found', 'error');
+      return;
+    }
+    stateWorkspaceId = noteWorkspaceId(currentNote);
+    initialNoteId = currentNote.id;
+  } else {
+    if (window.NoteTabs) {
+      state = loadSavedState(initialNoteId || null, stateWorkspaceId);
+      if (!initialNoteId) {
+        const pane = state.panes[state.focusedPaneIndex];
+        initialNoteId = pane?.activeId || state.panes[0]?.activeId || '';
+      }
+    }
+
+    if (initialNoteId) {
+      currentNote = await fetchNote(initialNoteId);
+      if (!currentNote) {
+        if (NOTE_ID) {
+          showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
+          showToast('Note not found', 'error');
+          return;
+        }
+        initialNoteId = '';
+      } else if (noteWorkspaceId(currentNote) && noteWorkspaceId(currentNote) !== stateWorkspaceId) {
+        showLoadError('This note belongs to a different workspace.');
+        showToast('Note belongs to a different workspace', 'error');
+        return;
+      }
+    }
+
+    if (!currentNote) {
+      const notes = await fetchWorkspaceNotes(stateWorkspaceId);
+      if (notes[0]?.id) {
+        initialNoteId = notes[0].id;
+        currentNote = await fetchNote(initialNoteId);
+        if (currentNote && noteWorkspaceId(currentNote) && noteWorkspaceId(currentNote) !== stateWorkspaceId) {
+          currentNote = null;
+          initialNoteId = '';
+        }
+      }
+    }
+  }
+
+  if (currentNote?.id) {
+    _tabLabelCache.set(currentNote.id, currentNote.name || 'Untitled');
+  }
+
+  // 2. Initialize tab state under the route workspace. Focused note pages keep
+  // a single internal tab only, with no multi-note UI shown or persisted.
   if (window.NoteTabs) {
-    state = loadSavedState(NOTE_ID, stateWorkspaceId);
-    // Make sure the URL's note is open + active in the focused pane.
-    if (state) {
+    if (FOCUSED_NOTE_PAGE) {
+      state = window.NoteTabs.initialState(currentNote.id);
+    } else if (NOTE_ID) {
+      state = loadSavedState(NOTE_ID, stateWorkspaceId);
       const pane = state.panes[state.focusedPaneIndex];
       if (!pane?.tabs?.includes(NOTE_ID)) {
         state = window.NoteTabs.openTab(state, NOTE_ID, state.focusedPaneIndex);
       } else if (pane.activeId !== NOTE_ID) {
         state = window.NoteTabs.setActiveTab(state, state.focusedPaneIndex, NOTE_ID);
       }
+    } else if (currentNote?.id) {
+      state = loadSavedState(currentNote.id, stateWorkspaceId);
+      const pane = state.panes[state.focusedPaneIndex];
+      if (!pane?.tabs?.includes(currentNote.id)) {
+        state = window.NoteTabs.initialState(currentNote.id);
+      } else if (pane.activeId !== currentNote.id) {
+        state = window.NoteTabs.setActiveTab(state, state.focusedPaneIndex, currentNote.id);
+      }
     } else {
-      state = window.NoteTabs.initialState(NOTE_ID);
+      state = window.NoteTabs.initialState(null);
     }
     persistState();
   } else {
-    state = { panes: [{ activeId: NOTE_ID, tabs: [NOTE_ID] }], splitMode: 'none', focusedPaneIndex: 0 };
+    state = {
+      panes: [{ activeId: currentNote?.id || null, tabs: currentNote?.id ? [currentNote.id] : [] }],
+      splitMode: 'none',
+      focusedPaneIndex: 0,
+    };
   }
 
   // 3. Populate the editor inputs + document title.
   const titleInput = document.getElementById('noteNameInput');
   const contentInput = document.getElementById('noteContentInput');
-  if (titleInput) titleInput.value = currentNote.name || '';
-  if (contentInput) contentInput.value = currentNote.content || '';
-  if (currentNote.name) document.title = `${currentNote.name} - Ori Agent`;
+  if (currentNote) {
+    if (titleInput) {
+      titleInput.disabled = false;
+      titleInput.value = currentNote.name || '';
+    }
+    if (contentInput) contentInput.value = currentNote.content || '';
+    if (currentNote.name) document.title = `${currentNote.name} - Ori Agent`;
+  } else {
+    showWorkspaceEmptyState();
+    document.title = 'Workspace Notes - Ori Agent';
+  }
 
   // 4. Breadcrumb workspace name (best effort).
-  fetchWorkspaceName(currentNote.workspace_id).then((name) => populateBreadcrumb(currentNote, name));
+  fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));
 
   // 5. Cross-module hooks (wikilinks, backlinks, rail, presence).
-  window.NoteWikilinks?.setWorkspaceContext(() => currentNote?.workspace_id || null);
-  window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
-  window.NoteRailNotes?.initRail({
-    workspaceIdResolver: () => currentNote?.workspace_id || null,
-    activeNoteId: currentNote.id,
-  });
+  window.NoteWikilinks?.setWorkspaceContext(() => currentWorkspaceId() || null);
+  if (currentNote?.id) window.NoteBacklinks?.loadBacklinksFor(currentNote.id);
+  else window.NoteBacklinks?.clearBacklinks?.();
+  if (!FOCUSED_NOTE_PAGE) {
+    window.NoteRailNotes?.initRail({
+      workspaceIdResolver: () => currentWorkspaceId() || null,
+      activeNoteId: currentNote?.id || null,
+    });
+  }
   // Apply persisted collapse state so the rail doesn't flash expanded on
   // first paint when the user previously collapsed it.
   window.NoteEditor?.applyAllRailState?.();
-  window.NotePresence?.claimOpenNote(currentNote.id, 'page');
+  if (currentNote?.id) window.NotePresence?.claimOpenNote(currentNote.id, 'page');
   window.addEventListener('beforeunload', () => {
     if (currentNote?.id) window.NotePresence?.releaseOpenNote(currentNote.id);
   });
@@ -1273,6 +1461,7 @@ async function bootstrap() {
     },
   });
   bundle.render();
+  if (!currentNote) showWorkspaceEmptyState();
   // Build the Outline immediately on first paint so users see headings
   // without waiting for the scheduleRebuild debounce inside render().
   bundle.toc?.rebuild?.();
@@ -1281,14 +1470,14 @@ async function bootstrap() {
 
   // Prime the Ask AI agent dropdown with this note's workspace and reset the
   // assist-card stack for the loaded note. Mirrors the modal flow in
-  // sessions.js, but the dedicated page has to do it explicitly.
+  // sessions.js, but the page has to do it explicitly.
   await syncPageAIAssistForCurrentNote();
 
-  // 7. Render the tab strip + secondary pane (if split state was restored)
-  //    + prefetch labels for non-current tabs.
+  // 7. Render the tab strip + secondary pane for the workspace app. Focused
+  //    pages keep these hidden.
   renderTabStrip();
   renderSecondaryPane();
-  prefetchTabLabels();
+  if (!FOCUSED_NOTE_PAGE) prefetchTabLabels();
 
   // 8. Delegated handlers for the primary tab strip (pane 0).
   document.getElementById('notePageTabList')?.addEventListener('click', (e) => {
@@ -1372,7 +1561,7 @@ async function bootstrap() {
   document.getElementById('notePageNewTabBtn')?.addEventListener('click', createNoteFromTabStrip);
 
   // Sidebar toggle (Notes/Outline rail). The modal context wires this in
-  // sessions.js, but sessions.js isn't loaded on the dedicated note page.
+  // sessions.js, but sessions.js isn't loaded on note pages.
   document.getElementById('noteTocToggle')?.addEventListener('click', () => {
     window.NoteEditor?.toggleRail?.('toc');
   });

@@ -1159,7 +1159,7 @@ export class WorkspaceDetailPage {
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
 
-    // "View all" → workspace notes hub. The href is set here (not in the
+    // "View all" -> workspace notes app. The href is set here (not in the
     // template) because the workspace ID isn't known at server-render time.
     if (this.elements.viewAllNotesLink && this.workspaceId) {
       this.elements.viewAllNotesLink.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/notes`;
@@ -12842,6 +12842,7 @@ export class WorkspaceDetailPage {
       .map(note => {
         const title = note.name || note.title || 'Untitled Note';
         const preview = note.preview || note.content || '';
+        const noteUrl = `/notes/${encodeURIComponent(note.id)}`;
         const vaultReference = this.normalizeVaultReference(note.vault_reference);
         return `
 	      <div class="workspace-detail-item" data-note-id="${note.id}">
@@ -12861,18 +12862,16 @@ export class WorkspaceDetailPage {
 	            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content"
-             role="button"
-             tabindex="0"
+        <a class="workspace-detail-item-content"
+             href="${this.escapeHtml(noteUrl)}"
              aria-label="Open note ${this.escapeHtml(title)}"
-             onclick="window.workspaceDetail?.editNote('${note.id}')"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.editNote('${note.id}'); }">
+             onclick="event.stopPropagation()">
 	          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
 	          <div class="workspace-detail-item-meta">
 	            ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '…' : '') : 'Empty note'}
 	            ${vaultReference ? this.renderVaultReferenceBadge(vaultReference) : ''}
 	          </div>
-	        </div>
+	        </a>
 	      </div>
     `;
       })

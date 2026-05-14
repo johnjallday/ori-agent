@@ -131,6 +131,7 @@ export default defineConfig([
       'internal/web/static/js/modules/note-presence.test.js',
       'internal/web/static/js/modules/note-rail-notes.js',
       'internal/web/static/js/modules/note-rail-notes.test.js',
+      'internal/web/static/js/modules/note-routes.js',
       'internal/web/static/js/modules/note-staging.js',
       'internal/web/static/js/modules/note-staging.test.js',
       'internal/web/static/js/modules/note-tabs.js',
@@ -155,8 +156,6 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-file-modal.js',
       'internal/web/static/js/modules/workspace-detail-mcp.js',
       'internal/web/static/js/modules/workspace-detail-skills.js',
-      'internal/web/static/js/modules/workspace-notes-hub.js',
-      'internal/web/static/js/modules/workspace-notes-hub.test.js',
       'internal/web/static/js/modules/workspace-task.js',
       'internal/web/static/js/modules/workspace-task-execution-views.js',
       'internal/web/static/js/modules/workspace-task-skill-draft.js'

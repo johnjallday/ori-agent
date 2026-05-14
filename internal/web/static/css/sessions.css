@@ -5200,7 +5200,7 @@ body.task-modal-open {
 }
 
 /* =============================================================================
-   Dedicated note page (/notes/<id>)
+   Workspace notes page
    ============================================================================= */
 
 .note-page {
@@ -5300,6 +5300,7 @@ body.task-modal-open {
 }
 
 .note-page-loading,
+.note-page-empty,
 .note-page-error {
   padding: 24px;
   color: var(--text-tertiary);
@@ -5312,6 +5313,18 @@ body.task-modal-open {
   background: rgba(220, 38, 38, 0.06);
   border-radius: 6px;
   margin: 16px;
+}
+
+.note-page-focused .note-tab-strip,
+.note-page-focused .note-page-pane-secondary,
+.note-page-focused .note-page-detach-zone,
+.note-page-focused #noteRailTabNotes,
+.note-page-focused #noteRailPaneNotes {
+  display: none !important;
+}
+
+.note-page-focused .note-rail-tab-strip {
+  grid-template-columns: 1fr;
 }
 
 /* =============================================================================
@@ -5993,180 +6006,6 @@ body.task-modal-open {
   .note-page-title-actions .modern-btn {
     min-width: 0;
   }
-}
-
-/* =============================================================================
-   Workspace Notes Hub (/workspaces/<id>/notes)
-   ============================================================================= */
-
-.workspace-notes-hub {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px 16px 64px;
-}
-
-.workspace-notes-hub-header {
-  margin-bottom: 16px;
-}
-
-.workspace-notes-hub-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-.workspace-notes-hub-title {
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.workspace-notes-hub-count {
-  color: var(--text-secondary, #64748b);
-  font-size: 13px;
-}
-
-.workspace-notes-hub-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.workspace-notes-hub-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.workspace-notes-hub-search svg {
-  position: absolute;
-  left: 8px;
-  color: var(--text-secondary, #64748b);
-  pointer-events: none;
-}
-.workspace-notes-hub-search input {
-  padding-left: 28px;
-  min-width: 240px;
-}
-
-.workspace-notes-hub-body {
-  background: var(--bg-secondary, #ffffff);
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.workspace-notes-hub-loading,
-.workspace-notes-hub-empty {
-  padding: 32px 24px;
-  text-align: center;
-  color: var(--text-secondary, #64748b);
-  font-size: 13px;
-}
-
-.workspace-notes-hub-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.workspace-notes-hub-table thead {
-  background: var(--bg-tertiary, #f9fafb);
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-}
-
-.workspace-notes-hub-table th {
-  padding: 10px 12px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--text-secondary, #64748b);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.workspace-notes-hub-th-checkbox,
-.workspace-notes-hub-td-checkbox {
-  width: 32px;
-  text-align: center;
-}
-
-.workspace-notes-hub-th-actions,
-.workspace-notes-hub-td-actions {
-  width: 48px;
-  text-align: right;
-}
-
-.hub-sort-btn {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-transform: inherit;
-  letter-spacing: inherit;
-}
-
-.hub-sort-arrow {
-  font-size: 9px;
-  color: var(--primary-color, #6366f1);
-  margin-left: 4px;
-}
-
-.workspace-notes-hub-row {
-  border-top: 1px solid var(--border-color, #f3f4f6);
-}
-
-.workspace-notes-hub-row:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.04));
-}
-
-.workspace-notes-hub-row.is-selected {
-  background: rgba(99, 102, 241, 0.06);
-}
-
-.workspace-notes-hub-table td {
-  padding: 10px 12px;
-  vertical-align: top;
-}
-
-.workspace-notes-hub-title-link {
-  font-weight: 500;
-  color: var(--text-primary, #111827);
-  text-decoration: none;
-}
-.workspace-notes-hub-title-link:hover {
-  color: var(--primary-color, #6366f1);
-  text-decoration: underline;
-}
-
-.workspace-notes-hub-snippet {
-  margin-top: 3px;
-  color: var(--text-secondary, #64748b);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.workspace-notes-hub-td-time {
-  color: var(--text-secondary, #64748b);
-  white-space: nowrap;
-}
-
-.hub-row-action {
-  background: none;
-  border: none;
-  padding: 4px 6px;
-  border-radius: 4px;
-  color: var(--text-secondary, #64748b);
-  cursor: pointer;
-}
-.hub-row-action:hover {
-  background: var(--bg-tertiary, #f3f4f6);
-  color: var(--primary-color, #6366f1);
 }
 
 /* =============================================================================

@@ -6,6 +6,8 @@
 // ESM module loaded via <script type="module">. Exposed as window.NoteWikilinks
 // so the non-module sessions.js can consume it.
 
+import { notePath } from './note-routes.js';
+
 function detectFence(line) {
   let i = 0;
   while (i < 3 && i < line.length && line[i] === ' ') i++;
@@ -172,8 +174,8 @@ export function applyWikilinksToHtml(html, resolveTarget) {
 // resolver via setWorkspaceContext(getWorkspaceId). The delegated click handler
 // reads the clicked link's data-wikilink-target, asks the host for the current
 // workspace, and looks the target up against /api/workspaces/{id}/notes (exact
-// title, then case-insensitive). On match → /notes/<id>. On miss → confirm
-// dialog → POST a new note → /notes/<new-id>.
+// title, then case-insensitive). In page contexts, the host opens the note
+// itself; otherwise we navigate to the focused note URL.
 
 let _getWorkspaceId = () => null;
 
@@ -250,7 +252,7 @@ function installClickHandler() {
       if (typeof window.NotePage?.openNoteInTab === 'function') {
         window.NotePage.openNoteInTab(match.id);
       } else {
-        window.location.href = `/notes/${encodeURIComponent(match.id)}`;
+        window.location.href = notePath(match.id);
       }
       return;
     }
@@ -262,7 +264,7 @@ function installClickHandler() {
       if (typeof window.NotePage?.openNoteInTab === 'function') {
         window.NotePage.openNoteInTab(created.id);
       } else {
-        window.location.href = `/notes/${encodeURIComponent(created.id)}`;
+        window.location.href = notePath(created.id);
       }
     }
   });

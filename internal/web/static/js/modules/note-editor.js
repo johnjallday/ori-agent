@@ -2,7 +2,7 @@
 //
 // Task 1.0 of the v2 plan extracted the ~80 note-related methods on
 // sessionManager into this module so both the modal (today) and the
-// dedicated page (`/notes/<id>`, v2 task 3.0) can mount the same editor
+// workspace notes page can mount the same editor
 // without code duplication.
 //
 // Module surface:

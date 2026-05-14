@@ -326,9 +326,17 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Notes hub: /workspaces/{id}/notes — sortable list of all notes in the workspace.
-	if len(parts) == 2 && parts[1] == "notes" {
-		s.serveWorkspaceNotesHub(w, workspaceID)
+	// Workspace notes app: /workspaces/{id}/notes[/noteId].
+	if len(parts) >= 2 && parts[1] == "notes" {
+		if len(parts) == 2 {
+			s.serveWorkspaceNotesPage(w, workspaceID, "")
+			return
+		}
+		if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
+			s.serveWorkspaceNotesPage(w, workspaceID, parts[2])
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
@@ -342,30 +350,42 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// handleNotesPageRoute serves the dedicated `/notes/<id>` page.
-// API endpoints under /api/notes/* are routed separately in routes.go.
+func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, noteID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace Notes - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = false
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["NoteID"] = noteID
+	data.Extra["NotePageMode"] = "workspace"
+	s.renderAndWritePage(w, "note-page", data)
+}
+
+// handleNotesPageRoute serves the focused `/notes/<id>` page. API endpoints
+// under /api/notes/* are routed separately in routes.go.
 func (s *Server) handleNotesPageRoute(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/notes/")
 	if path == "" || path == r.URL.Path {
 		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
 		return
 	}
-	// Strip any sub-path (no /notes/<id>/<thing> routes today).
 	parts := strings.Split(path, "/")
 	noteID := strings.TrimSpace(parts[0])
 	if noteID == "" {
 		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
 		return
 	}
-	s.serveNotePage(w, noteID)
+	s.serveFocusedNotePage(w, noteID)
 }
 
-func (s *Server) serveNotePage(w http.ResponseWriter, noteID string) {
+func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Note - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = false
+	data.Extra["WorkspaceID"] = ""
 	data.Extra["NoteID"] = noteID
+	data.Extra["NotePageMode"] = "focused"
 	s.renderAndWritePage(w, "note-page", data)
 }
 
@@ -376,15 +396,6 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string)
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
-}
-
-func (s *Server) serveWorkspaceNotesHub(w http.ResponseWriter, workspaceID string) {
-	data := s.prepareBasePageData("workspaces")
-	data.Title = "Workspace Notes - Ori Agent"
-	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
-	data.Extra["WorkspaceID"] = workspaceID
-	s.renderAndWritePage(w, "workspace-notes", data)
 }
 
 func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {

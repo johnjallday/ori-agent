@@ -9,7 +9,7 @@
 
   {{template "navbar.tmpl" .}}
 
-  <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor">
+  <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor" data-workspace-id="{{.Extra.WorkspaceID}}" data-note-id="{{.Extra.NoteID}}" data-page-mode="{{.Extra.NotePageMode}}">
     <!-- Top bar: breadcrumb, editable title, status -->
     <header class="note-page-top-bar">
       <nav aria-label="breadcrumb" class="note-page-breadcrumb">

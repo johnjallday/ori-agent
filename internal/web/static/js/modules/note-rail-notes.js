@@ -1,6 +1,6 @@
 // note-rail-notes.js — "Notes" tab content for the editor's left rail.
 //
-// The left rail in both the modal and the dedicated /notes/<id> page now
+// The left rail in both the modal and the workspace notes page now
 // hosts two tabs: Outline (existing TOC) and Notes (this module). The Notes
 // tab lists every note in the active workspace with a quick-filter input and
 // a "+ New note" button.
@@ -8,6 +8,8 @@
 // Host registers a workspace resolver via setWorkspaceContext(fn) so the
 // list refreshes when pane focus crosses workspaces. The active note ID is
 // highlighted via setActiveNoteId.
+
+import { notePath } from './note-routes.js';
 
 const STORAGE_KEY_TAB = 'note.leftRail.tab';
 
@@ -142,12 +144,12 @@ function setTab(tab) {
 
 function openNoteFromRail(noteId) {
   if (!noteId) return;
-  // Route through sessionManager.openNote when available (modal context),
-  // otherwise navigate to the dedicated page.
-  if (window.sessionManager?.openNote) {
+  if (window.NotePage?.openNoteInTab) {
+    window.NotePage.openNoteInTab(noteId);
+  } else if (window.sessionManager?.openNote) {
     window.sessionManager.openNote(noteId);
   } else {
-    window.location.href = `/notes/${encodeURIComponent(noteId)}`;
+    window.location.href = notePath(noteId);
   }
 }
 

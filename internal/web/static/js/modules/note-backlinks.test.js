@@ -44,6 +44,7 @@ test('renderBacklinkItem: includes note name and snippet', () => {
   const html = renderBacklinkItem({
     source_note_id: 'abc',
     source_note_name: 'Source Note',
+    workspace_id: 'ws-1',
     workspace_name: 'Research',
     target_text: 'Target',
     display_text: '',

@@ -407,7 +407,8 @@ func (m *Manager) SetMenuBarPort(port int) error {
 }
 
 // GetNotesOpenBehavior returns the user's preferred way to open a note:
-// "modal" (default), "page" (navigate to /notes/<id>), or "page-new-tab".
+// "modal" (default), "page" (navigate to the focused note page), or
+// "page-new-tab".
 func (m *Manager) GetNotesOpenBehavior() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

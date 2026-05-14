@@ -5,6 +5,8 @@
 // Hosts (modal sessionManager + page bootstrap) call loadBacklinksFor(noteId)
 // after a note loads; nothing renders when there are no backlinks.
 
+import { notePath } from './note-routes.js';
+
 const SECTION_ID = 'noteBacklinksSection';
 const LIST_ID = 'noteBacklinksList';
 const COUNT_ID = 'noteBacklinksCount';
@@ -32,7 +34,8 @@ export function renderBacklinkItem(b) {
   const name = b.source_note_name || 'Untitled note';
   const ws = b.workspace_name ? ` · ${escapeText(b.workspace_name)}` : '';
   const snippet = highlightSnippet(b.context_snippet || '', b.display_text || b.target_text || '');
-  return `<a href="/notes/${escapeAttr(b.source_note_id)}" class="note-backlink-item" data-note-id="${escapeAttr(b.source_note_id)}">
+  const href = b.source_note_id ? notePath(b.source_note_id) : '#';
+  return `<a href="${escapeAttr(href)}" class="note-backlink-item" data-note-id="${escapeAttr(b.source_note_id)}">
     <div class="note-backlink-name">${escapeText(name)}<span class="note-backlink-ws">${ws}</span></div>
     ${snippet ? `<div class="note-backlink-snippet">${snippet}</div>` : ''}
   </a>`;

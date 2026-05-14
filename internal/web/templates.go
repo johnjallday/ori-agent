@@ -107,7 +107,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/workspaces.tmpl",
 		"templates/pages/personalize.tmpl",
 		"templates/pages/note.tmpl",
-		"templates/pages/workspace-notes.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -148,7 +147,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["workspaces"] = tmpl
 	tr.templates["personalize"] = tmpl
 	tr.templates["note-page"] = tmpl
-	tr.templates["workspace-notes"] = tmpl
 	logger.Info("Successfully loaded templates from embedded filesystem", logger.Fields{})
 
 	return nil
