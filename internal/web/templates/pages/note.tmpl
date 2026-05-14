@@ -10,7 +10,7 @@
   {{template "navbar.tmpl" .}}
 
   <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor">
-    <!-- Top bar: breadcrumb, editable title, status, "Open in modal" -->
+    <!-- Top bar: breadcrumb, editable title, status -->
     <header class="note-page-top-bar">
       <nav aria-label="breadcrumb" class="note-page-breadcrumb">
         <a href="/workspaces" class="breadcrumb-link">Workspaces</a>
@@ -38,9 +38,6 @@
             <span class="note-status-error text-danger" style="display: none;">⚠ Save failed</span>
           </span>
 
-          <button type="button" id="noteOpenInModal" class="modern-btn modern-btn-secondary btn-sm" title="Open in Modal">
-            Open in Modal
-          </button>
         </div>
       </div>
 

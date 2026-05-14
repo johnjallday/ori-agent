@@ -1380,21 +1380,7 @@ async function bootstrap() {
   // 9. Hash-anchor scroll (shared helper — also runs on tab swaps).
   scrollToHashHeading();
 
-  // 10. "Open in modal" button.
-  document.getElementById('noteOpenInModal')?.addEventListener('click', async () => {
-    const saved = await bundle?.autosave?.flushImmediate?.();
-    if (saved === false) {
-      showToast('Save failed. Retry before opening this note in the modal.', 'error');
-      return;
-    }
-    if (currentNote?.workspace_id && currentNote.id) {
-      const wsId = encodeURIComponent(currentNote.workspace_id);
-      const noteId = encodeURIComponent(currentNote.id);
-      location.href = `/workspaces/${wsId}?open=${noteId}`;
-    }
-  });
-
-  // 11. Expose the public API for other modules (wikilinks → open in tab).
+  // 10. Expose the public API for other modules (wikilinks → open in tab).
   bindPublicAPI();
 }
 
