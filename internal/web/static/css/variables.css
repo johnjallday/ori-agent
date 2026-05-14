@@ -10,11 +10,20 @@
   --sidebar-width: 300px;
   --navbar-offset: 76px;
 
-  /* Primary Colors */
-  --primary-color: #1d4ed8;
-  --primary-light: #2563eb;
-  --primary-dark: #1e40af;
-  --secondary-color: #64748b;
+  /* Palette swatches (single source of truth) */
+  --swatch-black: #0A0A0A;
+  --swatch-charred: #0D140D;
+  --swatch-oxidized: #1F2128;
+  --swatch-concrete: #5C5C5E;
+  --swatch-grey: #8A8A8A;
+  --swatch-silver: #C9CCD1;
+  --swatch-emerald: #1F6B4E;
+
+  /* Primary Colors - Emerald accent */
+  --primary-color: #1F6B4E;
+  --primary-light: #2A8762;
+  --primary-dark: #155039;
+  --secondary-color: #5C5C5E;
 
   /* Status Colors */
   --success-color: #10b981;
@@ -22,19 +31,19 @@
   --warning-color: #f59e0b;
   --info-color: #06b6d4;
 
-  /* Backgrounds - Sky blue tint */
-  --bg-primary: #f8fcff;
-  --bg-secondary: #f0f7ff;
-  --bg-tertiary: #e8f4ff;
+  /* Backgrounds - Light variant derived from silver/concrete */
+  --bg-primary: #F5F6F7;
+  --bg-secondary: #E8EAED;
+  --bg-tertiary: #C9CCD1;
 
-  /* Text - Darker for sky blue background */
-  --text-primary: #0f172a;
-  --text-secondary: #1e3a5f;
-  --text-muted: #3b5998;
+  /* Text - Black/oxidized on light */
+  --text-primary: #0A0A0A;
+  --text-secondary: #1F2128;
+  --text-muted: #5C5C5E;
 
-  /* Borders - Blue tint */
-  --border-color: #d4e5f7;
-  --border-light: #e8f4ff;
+  /* Borders */
+  --border-color: #C9CCD1;
+  --border-light: #E8EAED;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
@@ -64,18 +73,18 @@
   --status-warning: var(--warning-color);
 }
 
-/* Dark Mode - Using Bootstrap's data-bs-theme attribute */
+/* Dark Mode - Palette applied directly */
 [data-bs-theme="dark"] {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #0D140D;
+  --bg-tertiary: #1F2128;
 
-  --text-primary: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
+  --text-primary: #C9CCD1;
+  --text-secondary: #8A8A8A;
+  --text-muted: #5C5C5E;
 
-  --border-color: #334155;
-  --border-light: #475569;
+  --border-color: #2A2C33;
+  --border-light: #5C5C5E;
 
   /* Slightly stronger shadows for dark mode */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);

@@ -22,13 +22,13 @@
       --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(250, 245, 238, 0.9));
       --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 239, 229, 0.96));
       --behavior-page-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
-      --behavior-line: color-mix(in srgb, var(--border-color) 72%, #8d5c33 28%);
-      --behavior-line-strong: color-mix(in srgb, var(--border-color) 54%, #8d5c33 46%);
+      --behavior-line: color-mix(in srgb, var(--border-color) 72%, #5C5C5E 28%);
+      --behavior-line-strong: color-mix(in srgb, var(--border-color) 54%, #5C5C5E 46%);
       --behavior-ink: var(--text-primary);
       --behavior-ink-soft: var(--text-secondary);
-      --behavior-title: color-mix(in srgb, var(--text-primary) 90%, #21170f 10%);
-      --behavior-grid: rgba(15, 23, 42, 0.045);
-      --behavior-grid-strong: rgba(15, 23, 42, 0.032);
+      --behavior-title: color-mix(in srgb, var(--text-primary) 90%, #0A0A0A 10%);
+      --behavior-grid: rgba(10, 10, 10, 0.045);
+      --behavior-grid-strong: rgba(10, 10, 10, 0.032);
       --behavior-accent: #0d9488;
       --behavior-accent-strong: #0f766e;
       --behavior-signal: #d97706;
@@ -45,8 +45,8 @@
       --behavior-warning-border: rgba(217, 119, 6, 0.18);
       --behavior-graph-surface: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
       --behavior-empty-surface: color-mix(in srgb, var(--bg-secondary) 82%, #fffaf4 18%);
-      --behavior-json-bg: rgba(15, 23, 42, 0.92);
-      --behavior-shadow: 0 28px 80px rgba(48, 33, 20, 0.14);
+      --behavior-json-bg: rgba(10, 10, 10, 0.92);
+      --behavior-shadow: 0 28px 80px rgba(0, 0, 0, 0.14);
       position: relative;
       min-height: calc(100vh - 64px);
       padding: 32px 28px 40px;
@@ -61,28 +61,28 @@
     }
 
     [data-bs-theme="dark"] #behaviorStudioPage {
-      --behavior-paper: color-mix(in srgb, var(--bg-primary) 82%, #18333a 18%);
-      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 86%, #1b2c3c 14%);
-      --behavior-surface: rgba(15, 23, 35, 0.84);
-      --behavior-surface-strong: rgba(19, 31, 45, 0.94);
-      --behavior-card-surface: rgba(15, 25, 36, 0.82);
-      --behavior-subtle-surface: rgba(19, 31, 45, 0.9);
-      --behavior-input-surface: rgba(10, 18, 28, 0.94);
-      --behavior-input-highlight: rgba(148, 163, 184, 0.08);
-      --behavior-code-surface: rgba(6, 12, 21, 0.96);
-      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(20, 30, 43, 0.08));
-      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(17, 27, 39, 0.12));
-      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(17, 27, 39, 0.14));
-      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(15, 23, 35, 0.14));
-      --behavior-page-wash: linear-gradient(180deg, rgba(15, 23, 42, 0.24), rgba(15, 23, 42, 0.05));
-      --behavior-line: rgba(103, 128, 153, 0.28);
-      --behavior-line-strong: rgba(137, 163, 191, 0.42);
+      --behavior-paper: color-mix(in srgb, var(--bg-primary) 82%, #0D140D 18%);
+      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 86%, #0D140D 14%);
+      --behavior-surface: rgba(13, 20, 13, 0.84);
+      --behavior-surface-strong: rgba(13, 20, 13, 0.94);
+      --behavior-card-surface: rgba(13, 20, 13, 0.82);
+      --behavior-subtle-surface: rgba(13, 20, 13, 0.9);
+      --behavior-input-surface: rgba(10, 10, 10, 0.94);
+      --behavior-input-highlight: rgba(138, 138, 138, 0.08);
+      --behavior-code-surface: rgba(10, 10, 10, 0.96);
+      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(13, 20, 13, 0.08));
+      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(13, 20, 13, 0.12));
+      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(13, 20, 13, 0.14));
+      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(13, 20, 13, 0.14));
+      --behavior-page-wash: linear-gradient(180deg, rgba(10, 10, 10, 0.24), rgba(10, 10, 10, 0.05));
+      --behavior-line: rgba(92, 92, 94, 0.28);
+      --behavior-line-strong: rgba(201, 204, 209, 0.42);
       --behavior-ink: var(--text-primary);
       --behavior-ink-soft: var(--text-secondary);
       --behavior-title: color-mix(in srgb, var(--text-primary) 94%, #fef3c7 6%);
-      --behavior-grid: rgba(203, 213, 225, 0.08);
-      --behavior-grid-strong: rgba(203, 213, 225, 0.06);
-      --behavior-badge-surface: rgba(15, 23, 35, 0.84);
+      --behavior-grid: rgba(201, 204, 209, 0.08);
+      --behavior-grid-strong: rgba(201, 204, 209, 0.06);
+      --behavior-badge-surface: rgba(13, 20, 13, 0.84);
       --behavior-builtin-text: #fdba74;
       --behavior-builtin-bg: rgba(249, 115, 22, 0.16);
       --behavior-builtin-border: rgba(251, 146, 60, 0.24);
@@ -92,10 +92,10 @@
       --behavior-warning-text: #fcd34d;
       --behavior-warning-bg: rgba(245, 158, 11, 0.16);
       --behavior-warning-border: rgba(251, 191, 36, 0.26);
-      --behavior-graph-surface: rgba(8, 15, 25, 0.96);
-      --behavior-empty-surface: rgba(16, 26, 39, 0.84);
-      --behavior-json-bg: rgba(2, 6, 23, 0.96);
-      --behavior-shadow: 0 28px 80px rgba(2, 6, 23, 0.48);
+      --behavior-graph-surface: rgba(10, 10, 10, 0.96);
+      --behavior-empty-surface: rgba(13, 20, 13, 0.84);
+      --behavior-json-bg: rgba(0, 0, 0, 0.96);
+      --behavior-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
     }
 
     [data-bs-theme="dark"] #behaviorStudioPage::before {

@@ -1,32 +1,32 @@
 .vault-page-body {
-  --vault-page-hero-border: rgba(173, 129, 84, 0.24);
-  --vault-page-panel-border: rgba(173, 129, 84, 0.2);
-  --vault-page-soft-border: rgba(173, 129, 84, 0.16);
-  --vault-page-divider-color: rgba(173, 129, 84, 0.2);
-  --vault-page-indicator-border: rgba(169, 124, 81, 0.2);
+  --vault-page-hero-border: rgba(92, 92, 94, 0.24);
+  --vault-page-panel-border: rgba(92, 92, 94, 0.2);
+  --vault-page-soft-border: rgba(92, 92, 94, 0.16);
+  --vault-page-divider-color: rgba(92, 92, 94, 0.2);
+  --vault-page-indicator-border: rgba(92, 92, 94, 0.2);
   --vault-page-hero-bg:
     radial-gradient(circle at top right, rgba(255, 220, 182, 0.18), transparent 30%),
-    linear-gradient(180deg, rgba(255, 251, 244, 0.96), rgba(245, 236, 222, 0.96));
+    linear-gradient(180deg, rgba(245, 246, 247, 0.96), rgba(245, 236, 222, 0.96));
   --vault-page-panel-bg:
-    radial-gradient(circle at top right, rgba(255, 223, 182, 0.1), transparent 34%),
-    linear-gradient(180deg, rgba(255, 250, 242, 0.92), rgba(244, 235, 219, 0.94));
+    radial-gradient(circle at top right, rgba(201, 204, 209, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(245, 246, 247, 0.92), rgba(244, 235, 219, 0.94));
   --vault-page-panel-highlight-bg:
-    radial-gradient(circle at top right, rgba(255, 231, 198, 0.34), transparent 44%),
-    linear-gradient(180deg, rgba(255, 254, 250, 0.94), rgba(247, 236, 219, 0.94));
+    radial-gradient(circle at top right, rgba(201, 204, 209, 0.34), transparent 44%),
+    linear-gradient(180deg, rgba(255, 254, 250, 0.94), rgba(201, 204, 209, 0.94));
   --vault-page-panel-primary-bg:
-    radial-gradient(circle at top right, rgba(255, 227, 190, 0.2), transparent 36%),
-    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(244, 234, 216, 0.94));
+    radial-gradient(circle at top right, rgba(201, 204, 209, 0.2), transparent 36%),
+    linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(201, 204, 209, 0.94));
   --vault-page-chip-bg: rgba(255, 255, 255, 0.58);
-  --vault-page-chip-border: rgba(173, 129, 84, 0.18);
+  --vault-page-chip-border: rgba(92, 92, 94, 0.18);
   --vault-page-indicator-bg: rgba(255, 255, 255, 0.74);
   --vault-page-note-bg: rgba(255, 255, 255, 0.52);
   --vault-page-meta-bg: rgba(255, 255, 255, 0.56);
   --vault-page-record-bg: rgba(255, 255, 255, 0.62);
-  --vault-page-record-selected-bg: linear-gradient(135deg, rgba(255, 241, 220, 0.9), rgba(250, 227, 197, 0.88));
+  --vault-page-record-selected-bg: linear-gradient(135deg, rgba(232, 234, 237, 0.9), rgba(201, 204, 209, 0.88));
   --vault-page-empty-bg: rgba(255, 255, 255, 0.45);
   --vault-page-badge-bg: rgba(54, 43, 31, 0.08);
   --vault-page-shadow: 0 18px 45px rgba(88, 57, 23, 0.08);
-  --vault-page-hover-shadow: 0 12px 28px rgba(156, 105, 63, 0.08);
+  --vault-page-hover-shadow: 0 12px 28px rgba(92, 92, 94, 0.08);
   background:
     radial-gradient(circle at top left, rgba(255, 220, 182, 0.18), transparent 24%),
     linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(246, 239, 226, 0.94));
@@ -34,32 +34,32 @@
 
 [data-bs-theme="dark"] .vault-page-body,
 .dark-mode .vault-page-body {
-  --vault-page-hero-border: rgba(209, 171, 126, 0.18);
-  --vault-page-panel-border: rgba(209, 171, 126, 0.16);
-  --vault-page-soft-border: rgba(209, 171, 126, 0.14);
-  --vault-page-divider-color: rgba(209, 171, 126, 0.16);
-  --vault-page-indicator-border: rgba(209, 171, 126, 0.14);
+  --vault-page-hero-border: rgba(201, 204, 209, 0.18);
+  --vault-page-panel-border: rgba(201, 204, 209, 0.16);
+  --vault-page-soft-border: rgba(201, 204, 209, 0.14);
+  --vault-page-divider-color: rgba(201, 204, 209, 0.16);
+  --vault-page-indicator-border: rgba(201, 204, 209, 0.14);
   --vault-page-hero-bg:
-    radial-gradient(circle at top right, rgba(224, 161, 93, 0.14), transparent 30%),
-    linear-gradient(160deg, rgba(31, 38, 54, 0.96) 0%, rgba(20, 26, 39, 0.96) 100%);
+    radial-gradient(circle at top right, rgba(31, 107, 78, 0.14), transparent 30%),
+    linear-gradient(160deg, rgba(13, 20, 13, 0.96) 0%, rgba(13, 20, 13, 0.96) 100%);
   --vault-page-panel-bg:
-    radial-gradient(circle at top right, rgba(224, 161, 93, 0.1), transparent 36%),
-    linear-gradient(180deg, rgba(30, 37, 53, 0.94), rgba(20, 26, 39, 0.94));
+    radial-gradient(circle at top right, rgba(31, 107, 78, 0.1), transparent 36%),
+    linear-gradient(180deg, rgba(13, 20, 13, 0.94), rgba(13, 20, 13, 0.94));
   --vault-page-panel-highlight-bg:
-    radial-gradient(circle at top right, rgba(224, 161, 93, 0.12), transparent 40%),
-    linear-gradient(160deg, rgba(32, 40, 57, 0.96), rgba(20, 26, 39, 0.96));
+    radial-gradient(circle at top right, rgba(31, 107, 78, 0.12), transparent 40%),
+    linear-gradient(160deg, rgba(13, 20, 13, 0.96), rgba(13, 20, 13, 0.96));
   --vault-page-panel-primary-bg:
-    radial-gradient(circle at top right, rgba(225, 140, 98, 0.12), transparent 38%),
-    linear-gradient(160deg, rgba(30, 37, 53, 0.97), rgba(18, 23, 35, 0.97));
-  --vault-page-chip-bg: rgba(35, 43, 60, 0.72);
-  --vault-page-chip-border: rgba(209, 171, 126, 0.16);
-  --vault-page-indicator-bg: rgba(18, 24, 36, 0.76);
-  --vault-page-note-bg: rgba(35, 43, 60, 0.72);
-  --vault-page-meta-bg: rgba(35, 43, 60, 0.72);
-  --vault-page-record-bg: rgba(35, 43, 60, 0.72);
+    radial-gradient(circle at top right, rgba(92, 92, 94, 0.12), transparent 38%),
+    linear-gradient(160deg, rgba(13, 20, 13, 0.97), rgba(13, 20, 13, 0.97));
+  --vault-page-chip-bg: rgba(31, 33, 40, 0.72);
+  --vault-page-chip-border: rgba(201, 204, 209, 0.16);
+  --vault-page-indicator-bg: rgba(13, 20, 13, 0.76);
+  --vault-page-note-bg: rgba(31, 33, 40, 0.72);
+  --vault-page-meta-bg: rgba(31, 33, 40, 0.72);
+  --vault-page-record-bg: rgba(31, 33, 40, 0.72);
   --vault-page-record-selected-bg: linear-gradient(135deg, rgba(89, 61, 38, 0.58), rgba(54, 39, 24, 0.7));
-  --vault-page-empty-bg: rgba(35, 43, 60, 0.56);
-  --vault-page-badge-bg: rgba(225, 139, 98, 0.14);
+  --vault-page-empty-bg: rgba(31, 33, 40, 0.56);
+  --vault-page-badge-bg: rgba(42, 135, 98, 0.14);
   --vault-page-shadow: 0 24px 58px rgba(0, 0, 0, 0.42);
   --vault-page-hover-shadow: 0 16px 34px rgba(0, 0, 0, 0.36);
 }
@@ -382,8 +382,8 @@
 
 .vault-page-input:focus,
 .vault-page-textarea:focus {
-  border-color: rgba(186, 122, 66, 0.6);
-  box-shadow: 0 0 0 0.2rem rgba(191, 124, 67, 0.12);
+  border-color: rgba(92, 92, 94, 0.6);
+  box-shadow: 0 0 0 0.2rem rgba(31, 107, 78, 0.12);
 }
 
 .vault-page-textarea {
@@ -537,14 +537,14 @@ body.vault-page-dialog-open {
   border: 1px solid var(--vault-page-soft-border);
   background:
     radial-gradient(circle at top right, rgba(255, 218, 171, 0.16), transparent 34%),
-    linear-gradient(180deg, rgba(255, 251, 244, 0.88), rgba(246, 237, 222, 0.8));
+    linear-gradient(180deg, rgba(245, 246, 247, 0.88), rgba(246, 237, 222, 0.8));
 }
 
 [data-bs-theme="dark"] .vault-page-email-connect-panel,
 .dark-mode .vault-page-email-connect-panel {
   background:
     radial-gradient(circle at top right, rgba(240, 161, 93, 0.12), transparent 34%),
-    linear-gradient(180deg, rgba(34, 42, 58, 0.92), rgba(24, 31, 45, 0.88));
+    linear-gradient(180deg, rgba(13, 20, 13, 0.92), rgba(13, 20, 13, 0.88));
 }
 
 .vault-page-email-connect-copy {
@@ -578,8 +578,8 @@ body.vault-page-dialog-open {
 }
 
 .vault-page-email-connect-status[data-state="warning"] {
-  border-color: rgba(191, 124, 67, 0.28);
-  background: rgba(191, 124, 67, 0.1);
+  border-color: rgba(31, 107, 78, 0.28);
+  background: rgba(31, 107, 78, 0.1);
 }
 
 .vault-page-records-list,
@@ -691,8 +691,8 @@ body.vault-page-dialog-open {
 }
 
 .vault-page-email-chip.is-warning {
-  border-color: rgba(191, 124, 67, 0.26);
-  background: rgba(191, 124, 67, 0.12);
+  border-color: rgba(31, 107, 78, 0.26);
+  background: rgba(31, 107, 78, 0.12);
 }
 
 .vault-page-email-secret-state {

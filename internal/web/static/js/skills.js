@@ -160,7 +160,7 @@ function getSourceTheme(source) {
     case '.agents':
       return { bg: 'rgba(16, 185, 129, 0.18)', color: '#34d399' };
     case 'personal':
-      return { bg: 'rgba(249, 115, 22, 0.18)', color: '#fb923c' };
+      return { bg: 'rgba(92, 92, 94, 0.22)', color: '#C9CCD1' };
     default:
       return { bg: 'rgba(148, 163, 184, 0.18)', color: '#94a3b8' };
   }

@@ -1,10 +1,10 @@
 /* Shared theme tokens + legacy aliases. */
 
 :root {
-  --primary-color: #1d4ed8;
-  --primary-light: #2563eb;
-  --primary-dark: #1e40af;
-  --secondary-color: #64748b;
+  --primary-color: #155039;
+  --primary-light: #155039;
+  --primary-dark: #155039;
+  --secondary-color: #5C5C5E;
   --success-color: #34d399;
   --danger-color: #ef4444;
   --warning-color: #f59e0b;
@@ -13,7 +13,7 @@
   --bg-primary: #f8fcff;
   --bg-secondary: #f0f7ff;
   --bg-tertiary: #e8f4ff;
-  --text-primary: #0f172a;
+  --text-primary: #0A0A0A;
   --text-secondary: #1e3a5f;
   --text-muted: #3b5998;
   --border-color: #d4e5f7;
@@ -52,14 +52,14 @@
 /* Support both .dark-mode class and Bootstrap's data-bs-theme attribute */
 .dark-mode,
 [data-bs-theme="dark"] {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --text-primary: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --border-color: #334155;
-  --border-light: #475569;
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #1F2128;
+  --bg-tertiary: #2A2C33;
+  --text-primary: #F5F6F7;
+  --text-secondary: #C9CCD1;
+  --text-muted: #8A8A8A;
+  --border-color: #2A2C33;
+  --border-light: #5C5C5E;
 
   --bg-color: var(--bg-primary);
   --text-color: var(--text-primary);

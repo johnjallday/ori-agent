@@ -842,7 +842,7 @@
         border-radius: 12px;
         background: linear-gradient(120deg,
             color-mix(in srgb, var(--bg-primary) 88%, #facc15 12%),
-            color-mix(in srgb, var(--bg-primary) 92%, #f97316 8%));
+            color-mix(in srgb, var(--bg-primary) 92%, var(--primary-color) 8%));
     }
 
     .ops-search-wrap {
@@ -858,7 +858,7 @@
     .ops-search {
         width: 100%;
         border-radius: 10px;
-        border: 1px solid color-mix(in srgb, var(--border-color) 84%, #f97316 16%);
+        border: 1px solid color-mix(in srgb, var(--border-color) 84%, var(--primary-color) 16%);
         background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
         color: var(--text-primary);
         padding: 10px 14px;
@@ -866,8 +866,8 @@
     }
 
     .ops-search:focus-visible {
-        border-color: #f97316;
-        box-shadow: 0 0 0 3px color-mix(in srgb, #f97316 20%, transparent);
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
     }
 
     .ops-mode {
@@ -890,7 +890,7 @@
     }
 
     .ops-mode-btn.active {
-        background: #f97316;
+        background: var(--primary-color);
         color: #fff;
     }
 
@@ -899,7 +899,7 @@
     .ops-drawer-tab:focus-visible,
     .ops-drawer-close:focus-visible,
     .empty-state-clear-btn:focus-visible {
-        outline: 2px solid #f97316;
+        outline: 2px solid var(--primary-color);
         outline-offset: 2px;
     }
 
@@ -945,9 +945,9 @@
     }
 
     .ops-health-message.warn {
-        border-color: color-mix(in srgb, #f97316 40%, transparent);
-        background: color-mix(in srgb, #f97316 14%, var(--bg-primary));
-        color: color-mix(in srgb, #f97316 76%, var(--text-primary));
+        border-color: color-mix(in srgb, var(--primary-color) 40%, transparent);
+        background: color-mix(in srgb, var(--primary-color) 14%, var(--bg-primary));
+        color: color-mix(in srgb, var(--primary-color) 76%, var(--text-primary));
     }
 
     .ops-board {
@@ -1038,15 +1038,15 @@
     }
 
     .ops-agent-card:hover {
-        border-color: color-mix(in srgb, #f97316 45%, var(--border-color));
+        border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
         transform: translateY(-1px);
-        box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+        box-shadow: 0 18px 38px rgba(10, 10, 10, 0.12);
     }
 
     .ops-agent-card:focus-within {
-        outline: 2px solid #f97316;
+        outline: 2px solid var(--primary-color);
         outline-offset: 2px;
-        border-color: #f97316;
+        border-color: var(--primary-color);
         box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18);
     }
 
@@ -1136,7 +1136,7 @@
 
     [data-bs-theme="dark"] .ops-health-pill.paused {
         color: #cbd5e1;
-        background: rgba(148, 163, 184, 0.25);
+        background: rgba(138, 138, 138, 0.25);
     }
 
     [data-bs-theme="dark"] .ops-health-pill.needs-setup {
@@ -1184,8 +1184,8 @@
     }
 
     .ops-action-btn.primary {
-        background: color-mix(in srgb, #f97316 18%, var(--bg-primary));
-        border-color: color-mix(in srgb, #f97316 35%, var(--border-color));
+        background: color-mix(in srgb, var(--primary-color) 18%, var(--bg-primary));
+        border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
     }
 
     .ops-action-btn.danger {
@@ -1223,7 +1223,7 @@
     .ops-drawer-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(2, 6, 23, 0.48);
+        background: rgba(0, 0, 0, 0.48);
         backdrop-filter: blur(6px);
         z-index: 10040;
     }
@@ -1237,7 +1237,7 @@
         background: var(--bg-primary);
         border: 1px solid var(--border-color);
         border-radius: 20px;
-        box-shadow: 0 30px 80px rgba(2, 6, 23, 0.3);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.3);
         z-index: 10050;
         display: flex;
         flex-direction: column;
@@ -1310,8 +1310,8 @@
     }
 
     .ops-drawer-tab.active {
-        background: #f97316;
-        border-color: #f97316;
+        background: var(--primary-color);
+        border-color: var(--primary-color);
         color: #fff;
     }
 
