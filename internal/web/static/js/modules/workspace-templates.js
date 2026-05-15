@@ -65,6 +65,78 @@
             'then schedule this task to run every weekday morning.'
         }
       ]
+    },
+    {
+      id: 'content-production',
+      label: 'Content Production',
+      icon: '✏',
+      description: 'Brand voice, drafts, scheduled posts.',
+      defaultName: 'Content Production',
+      defaultDescription:
+        'Drafts content (posts, newsletters, copy) in a consistent voice. ' +
+        'Recommended add-ons: a style-guide note, a publishing-tool MCP, and a Brand Voice skill.',
+      starterTasks: [
+        {
+          description: 'Draft a style guide',
+          details:
+            'Replace with your brand voice rules: tone, words to avoid, target audience. ' +
+            'The agent uses this as ground truth for every draft.'
+        },
+        {
+          description: 'Draft this week\'s posts',
+          details:
+            'List the topics, then ask the agent to draft each in the brand voice. ' +
+            'Schedule this task weekly once the style guide is settled.'
+        }
+      ]
+    },
+    {
+      id: 'research-project',
+      label: 'Research Project',
+      icon: '📚',
+      description: 'Synthesis docs, sources, weekly reading.',
+      defaultName: 'Research Project',
+      defaultDescription:
+        'Tracks a research topic over time. Maintains a synthesis doc, a sources index, ' +
+        'and recurring summaries. Recommended add-ons: a web search MCP and a Citations skill.',
+      starterTasks: [
+        {
+          description: 'Build the synthesis doc',
+          details:
+            'Capture the research question, current best understanding, and open gaps. ' +
+            'The agent keeps this up to date as new sources are added.'
+        },
+        {
+          description: 'Compile this week\'s reading list',
+          details:
+            'Ask the agent for new sources on the topic and a 1-paragraph TL;DR of each. ' +
+            'Schedule this task weekly to keep the synthesis fresh.'
+        }
+      ]
+    },
+    {
+      id: 'personal-ops',
+      label: 'Personal Ops',
+      icon: '🗓',
+      description: 'Daily journal, briefings, follow-ups.',
+      defaultName: 'Personal Ops',
+      defaultDescription:
+        'Personal command center — a daily journal, morning briefing, and inbox follow-ups. ' +
+        'Recommended add-ons: a calendar MCP, an email MCP, and a daily-summary skill.',
+      starterTasks: [
+        {
+          description: 'Morning briefing',
+          details:
+            'Customize with the channels you care about (calendar, email, urgent threads). ' +
+            'Schedule this task to run before your workday starts.'
+        },
+        {
+          description: 'End-of-day journal',
+          details:
+            'Write a short reflection on what shipped today and what carries over. ' +
+            'Schedule this task to run at the end of your workday.'
+        }
+      ]
     }
   ];
 

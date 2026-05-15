@@ -208,6 +208,22 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := s.prepareBasePageData("index")
+
+	// Inject home-dashboard context: the workspace count drives the adaptive
+	// layout (first-run wizard vs returning-user dashboard sections). We
+	// compute it server-side so the template can render the correct shell
+	// without a flash of empty-state from a client-side fetch.
+	workspaceCount := 0
+	if s.Storage != nil && s.Storage.WorkspaceStore != nil {
+		if ids, err := s.Storage.WorkspaceStore.List(); err == nil {
+			workspaceCount = len(ids)
+		} else {
+			logger.Warn("serveIndex: failed to list workspaces for first-run check", logger.Fields{"err": err})
+		}
+	}
+	data.Extra["WorkspaceCount"] = workspaceCount
+	data.Extra["IsFirstRun"] = workspaceCount == 0
+
 	s.renderAndWritePage(w, "index", data)
 }
 

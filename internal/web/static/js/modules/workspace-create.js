@@ -790,3 +790,22 @@ window.setAvailableAgents = setAvailableAgents;
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', initializeWorkspaceCreationListeners);
+
+// Auto-open the create-workspace modal when the page is loaded with the
+// `?create=1` query param (used by the home-page first-run CTA). Strips the
+// param from the URL afterward so a refresh doesn't re-trigger the modal.
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('create') !== '1') return;
+    url.searchParams.delete('create');
+    window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
+    // Defer one frame so any other DOMContentLoaded listeners (agent
+    // population, etc.) have a chance to run before the modal renders.
+    requestAnimationFrame(() => {
+      if (typeof window.openCreateWorkspaceModal === 'function') {
+        window.openCreateWorkspaceModal({ entryPoint: 'home_first_run' });
+      }
+    });
+  } catch (_) { /* malformed URL or missing API — silently skip */ }
+});

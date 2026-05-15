@@ -3,6 +3,7 @@ package orchestrationhttp
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,72 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
+}
+
+// UpcomingScheduledTasksHandler returns the next-N enabled scheduled tasks
+// across every workspace, sorted by next-run ascending. Powers the home
+// dashboard's Upcoming section. Only GET is supported.
+func (th *TaskHandler) UpcomingScheduledTasksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	limit := 5
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	ids, err := th.workspaceStore.List()
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		return
+	}
+
+	type upcomingRow struct {
+		TaskID        string    `json:"task_id"`
+		TaskName      string    `json:"task_name"`
+		WorkspaceID   string    `json:"workspace_id"`
+		WorkspaceName string    `json:"workspace_name"`
+		AgentName     string    `json:"agent_name"`
+		NextRun       time.Time `json:"next_run"`
+	}
+
+	rows := make([]upcomingRow, 0)
+	for _, id := range ids {
+		ws, err := th.workspaceStore.Get(id)
+		if err != nil {
+			logger.Warn("upcoming-scheduled-tasks: failed to load workspace", logger.Fields{"workspace_id": id, "err": err})
+			continue
+		}
+		for _, st := range ws.ScheduledTasks {
+			if !st.Enabled || st.NextRun == nil {
+				continue
+			}
+			rows = append(rows, upcomingRow{
+				TaskID:        st.ID,
+				TaskName:      st.Name,
+				WorkspaceID:   ws.ID,
+				WorkspaceName: ws.Name,
+				AgentName:     st.To,
+				NextRun:       *st.NextRun,
+			})
+		}
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].NextRun.Before(rows[j].NextRun)
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"upcoming": rows,
+		"count":    len(rows),
+	})
 }
 
 func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {

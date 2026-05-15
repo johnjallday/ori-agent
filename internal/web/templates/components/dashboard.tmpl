@@ -13,6 +13,60 @@
                style="min-height: 50px;">
         <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
       </form>
+      <!-- Suggested prompt chips: populate the input on click (no auto-submit). -->
+      <div class="home-prompt-chips" role="group" aria-label="Suggested prompts">
+        <button type="button" class="home-prompt-chip" data-prompt="Draft a weekly digest from my notes">Draft a weekly digest from my notes</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Summarize this week's task activity">Summarize this week's task activity</button>
+        <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on today?</button>
+      </div>
+    </div>
+  </div>
+
+  {{if .Extra.IsFirstRun}}
+  <!-- First-run CTA shown when the user has zero workspaces. Button
+       navigates to /workspaces?create=1, where workspace-create.js auto-
+       opens the create-workspace modal with the template gallery focused.
+       The Skip link sets a session flag and reveals the dashboard sections
+       below (which are rendered hidden for this case). -->
+  <section id="homeFirstRunCTA" class="home-section home-first-run-cta" aria-labelledby="homeFirstRunTitle">
+    <h2 id="homeFirstRunTitle" class="home-first-run-title">Get started with your first workspace</h2>
+    <p class="home-first-run-subtitle">Pick a template and Ori will pre-fill a description and starter tasks you can adapt.</p>
+    <div class="home-first-run-actions">
+      <a id="homeFirstRunStart" href="/workspaces?create=1" class="modern-btn modern-btn-primary home-first-run-cta-btn">Create your first workspace</a>
+      <button id="homeFirstRunSkip" type="button" class="home-first-run-skip">Skip — show me the dashboard</button>
+    </div>
+  </section>
+  {{end}}
+  <!-- Dashboard sections (populated by JS). When IsFirstRun=true, the
+       container is hidden by default; home-dashboard.js unhides it if the
+       session-scoped onboarding-dismissed flag is set. -->
+  <div id="homeDashboardSections" class="home-dashboard-sections" data-workspace-count="{{.Extra.WorkspaceCount}}"{{if .Extra.IsFirstRun}} hidden{{end}}>
+    <section id="homeRecentWorkspaces" class="home-section home-section-workspaces" aria-labelledby="homeRecentWorkspacesTitle">
+      <header class="home-section-header">
+        <h2 id="homeRecentWorkspacesTitle" class="home-section-title">Recent workspaces</h2>
+        <a href="/workspaces" class="home-section-link" data-role="view-all" hidden>View all →</a>
+      </header>
+      <div class="home-section-body" data-role="content" aria-live="polite">
+        <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
+      </div>
+    </section>
+    <div class="home-dashboard-row">
+      <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
+        <header class="home-section-header">
+          <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
+        </header>
+        <div class="home-section-body" data-role="content" aria-live="polite">
+          <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
+        </div>
+      </section>
+      <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
+        <header class="home-section-header">
+          <h2 id="homeRecentActivityTitle" class="home-section-title">Recent activity</h2>
+        </header>
+        <div class="home-section-body" data-role="content" aria-live="polite">
+          <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
+        </div>
+      </section>
     </div>
   </div>
 </div>

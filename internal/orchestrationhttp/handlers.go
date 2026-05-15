@@ -389,6 +389,12 @@ func (h *Handler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Request) 
 	h.taskHandlerSub.ScheduledTasksHandler(w, r)
 }
 
+// UpcomingScheduledTasksHandler aggregates the next-N enabled scheduled tasks
+// across every workspace. Powers the home dashboard's Upcoming section.
+func (h *Handler) UpcomingScheduledTasksHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.UpcomingScheduledTasksHandler(w, r)
+}
+
 // ScheduledTaskHandler handles get/update/delete for a specific scheduled task
 // Delegates to TaskHandler for modular organization
 func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {

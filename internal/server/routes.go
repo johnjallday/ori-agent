@@ -404,8 +404,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Event history endpoint
 	mux.HandleFunc("/api/orchestration/events", s.Handlers.Orchestration.EventHistoryHandler)
 
+	// Home dashboard: unified recent-activity feed across all workspaces.
+	mux.HandleFunc("/api/activity/recent", s.Handlers.Orchestration.RecentActivityHandler)
+
 	// Scheduled task endpoints
 	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.Handlers.Orchestration.ScheduledTasksHandler)
+	mux.HandleFunc("/api/orchestration/scheduled-tasks/upcoming", s.Handlers.Orchestration.UpcomingScheduledTasksHandler)
 	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.Handlers.Orchestration.ScheduledTaskHandler)
 
 	// Scheduler node endpoints (canvas-based scheduled tasks)
