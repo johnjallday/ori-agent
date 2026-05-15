@@ -530,7 +530,7 @@ func (se *StepExecutor) executeTaskStep(ctx context.Context, ws *Workspace, step
 	}
 
 	// Execute task via handler
-	result, err := se.taskHandler.ExecuteTask(ctx, step.AssignedTo, task)
+	taskRun, err := ExecuteTaskWithRunMetadata(ctx, se.taskHandler, step.AssignedTo, task)
 	if err != nil {
 		return "", err
 	}
@@ -538,7 +538,7 @@ func (se *StepExecutor) executeTaskStep(ctx context.Context, ws *Workspace, step
 	// Store task ID in step
 	step.TaskID = task.ID
 
-	return result, nil
+	return taskRun.Result, nil
 }
 
 // executeAggregateStep aggregates results from previous steps

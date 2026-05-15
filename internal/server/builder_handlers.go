@@ -43,6 +43,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
 // initializeHandlers creates all HTTP handlers and wires up dependencies.
@@ -250,6 +251,26 @@ func (b *ServerBuilder) initializeHandlers() {
 	logger.Info("CLI agent adapter initialized", logger.Fields{
 		"backends": len(b.cliAgentRegistry.List()),
 	})
+
+	if b.sessionStore != nil {
+		b.workspaceRunStore = workspacerun.NewSQLiteStore(b.sessionStore.DB())
+		runProfiles := workspacerun.NewProfileRegistry()
+		b.workspaceRunExecutors = workspacerun.NewExecutorRegistry()
+		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindNativeCLI, workspacerun.NewNativeCLIExecutor(b.cliAgentRegistry))
+		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor())
+		runEnv := workspacerun.NewLocalEnvironmentManager("")
+		runValidator := workspacerun.NewValidator()
+		resolveRunRoots := func(workspaceID string) []string {
+			root := resolveWorkspaceRoot(b.configManager)
+			if strings.TrimSpace(root) == "" {
+				return nil
+			}
+			return []string{root}
+		}
+		b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
+		b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
+		logger.Info("Workspace Runs initialized", logger.Fields{})
+	}
 
 	// Initialize skills manager and handler (local + external)
 	personalSkillsDir := ""

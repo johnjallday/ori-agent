@@ -176,6 +176,7 @@ type Task struct {
 	ExecutionMode    TaskExecutionMode      `json:"execution_mode,omitempty"`
 	ExecutionSteps   []TaskExecutionStep    `json:"execution_steps,omitempty"`
 	ExecutionTrace   []TaskExecutionTrace   `json:"execution_trace,omitempty"`
+	CurrentRunID     string                 `json:"current_run_id,omitempty"`
 	// OrchestrationMode controls how parent tasks execute their subtasks.
 	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
 	// ResultCombinationMode controls how a parent task combines subtask outputs.
@@ -394,6 +395,7 @@ type ScheduleConfig struct {
 // TaskExecution represents a single recorded run of a task.
 type TaskExecution struct {
 	TaskID     string    `json:"task_id"`            // ID of the executed task
+	RunID      string    `json:"run_id,omitempty"`   // Workspace Run backing this execution, when available
 	ExecutedAt time.Time `json:"executed_at"`        // When the run started
 	Status     string    `json:"status"`             // "success", "failed", or "blocked"
 	Summary    string    `json:"summary,omitempty"`  // Short result or failure summary (truncated, ~360 chars)

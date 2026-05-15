@@ -41,6 +41,7 @@ func RecordTaskExecution(task *Task, status, summary string, executedAt time.Tim
 	trimmedSummary := strings.TrimSpace(summary)
 	record := TaskExecution{
 		TaskID:     task.ID,
+		RunID:      strings.TrimSpace(task.CurrentRunID),
 		ExecutedAt: startedAt,
 		Status:     trimmedStatus,
 		Summary:    summarizeTaskExecutionSummary(trimmedSummary),

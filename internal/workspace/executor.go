@@ -317,7 +317,8 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		}()
 
 		// Execute the task
-		result, err := te.taskHandler.ExecuteTask(ctx, task.To, task)
+		taskRun, err := ExecuteTaskWithRunMetadata(ctx, te.taskHandler, task.To, task)
+		result := taskRun.Result
 
 		// Apply post-execution result/status atomically against the authoritative
 		// workspace state via Store.Update. The closure captures a snapshot for
@@ -331,6 +332,9 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		)
 		if mutErr := te.workspaceStore.Update(workspaceID, func(fresh *Workspace) error {
 			return fresh.MutateTask(task.ID, func(t *Task) error {
+				if taskRun.RunID != "" {
+					t.CurrentRunID = taskRun.RunID
+				}
 				t.CompletedAt = &completedAt
 				startedAt := completedAt
 				if t.StartedAt != nil && !t.StartedAt.IsZero() {

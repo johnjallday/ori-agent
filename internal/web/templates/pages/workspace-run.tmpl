@@ -1,0 +1,533 @@
+{{define "workspace-run"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div
+        id="workspaceRunPageRoot"
+        class="workspace-run-page-shell"
+        data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-run-id="{{.Extra.RunID}}"
+      >
+        <div id="workspace-run-alert" class="workspace-run-alert" hidden></div>
+
+        <section class="workspace-run-hero">
+          <div class="workspace-run-hero-copy">
+            <a href="/workspaces/{{.Extra.WorkspaceID}}" id="workspace-run-backlink" class="workspace-run-backlink">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+              </svg>
+              Back to Workspace
+            </a>
+
+            <div class="workspace-run-breadcrumbs">
+              <a href="/workspaces" class="workspace-run-breadcrumb-link">Workspaces</a>
+              <span>/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}" id="workspace-run-workspace-name" class="workspace-run-breadcrumb-link">Workspace</a>
+              <span>/</span>
+              <span id="workspace-run-breadcrumb-title">Run</span>
+            </div>
+
+            <h1 id="workspace-run-title" class="workspace-run-title">Workspace Run</h1>
+            <p id="workspace-run-subtitle" class="workspace-run-subtitle">Loading run evidence, validation, and trace.</p>
+          </div>
+
+          <div class="workspace-run-hero-meta">
+            <span id="workspace-run-status" class="workspace-run-status" data-state="pending">Pending</span>
+            <button type="button" id="workspace-run-refresh" class="workspace-run-icon-btn" title="Refresh run">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+              </svg>
+            </button>
+            <div id="workspace-run-actions" class="workspace-run-actions"></div>
+          </div>
+        </section>
+
+        <div id="workspace-run-loading" class="workspace-run-loading">Loading run...</div>
+        <div id="workspace-run-empty" class="workspace-run-empty" hidden>Workspace run not found.</div>
+
+        <main id="workspace-run-content" class="workspace-run-content" hidden>
+          <section class="workspace-run-card">
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Overview</div>
+                <h2>Run contract</h2>
+              </div>
+            </div>
+            <div id="workspace-run-overview" class="workspace-run-overview-grid"></div>
+          </section>
+
+          <section id="workspace-run-context-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Context</div>
+                <h2>Prepared inputs</h2>
+              </div>
+            </div>
+            <div id="workspace-run-context" class="workspace-run-context"></div>
+          </section>
+
+          <section id="workspace-run-report-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Report</div>
+                <h2>Final output</h2>
+              </div>
+            </div>
+            <div id="workspace-run-report" class="workspace-run-report"></div>
+          </section>
+
+          <section id="workspace-run-validation-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Validation</div>
+                <h2>Checks</h2>
+              </div>
+            </div>
+            <div id="workspace-run-validation" class="workspace-run-validation-list"></div>
+          </section>
+
+          <section id="workspace-run-artifacts-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Artifacts</div>
+                <h2>Evidence</h2>
+              </div>
+            </div>
+            <div id="workspace-run-artifacts" class="workspace-run-artifact-list"></div>
+          </section>
+
+          <section class="workspace-run-card">
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Trace</div>
+                <h2>Lifecycle events</h2>
+              </div>
+              <div id="workspace-run-trace-count" class="workspace-run-trace-count"></div>
+            </div>
+            <div id="workspace-run-trace" class="workspace-run-trace-list"></div>
+            <button type="button" id="workspace-run-trace-more" class="workspace-run-secondary-btn" hidden>Load more</button>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .workspace-run-page-shell {
+      display: grid;
+      gap: 1rem;
+      padding: 1.5rem;
+    }
+
+    .workspace-run-alert,
+    .workspace-run-loading,
+    .workspace-run-empty {
+      padding: 0.9rem 1rem;
+      border-radius: 16px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      color: var(--text-secondary);
+    }
+
+    .workspace-run-alert {
+      border-color: color-mix(in srgb, #dc2626 32%, var(--border-color));
+      color: #dc2626;
+    }
+
+    .workspace-run-hero {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.2rem 1.25rem;
+      border-radius: 20px;
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+    }
+
+    .workspace-run-hero-copy {
+      display: grid;
+      gap: 0.5rem;
+      min-width: 0;
+    }
+
+    .workspace-run-backlink,
+    .workspace-run-breadcrumb-link {
+      color: var(--text-secondary);
+      text-decoration: none;
+    }
+
+    .workspace-run-backlink {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      width: fit-content;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    .workspace-run-backlink:hover,
+    .workspace-run-breadcrumb-link:hover {
+      color: var(--primary-color);
+    }
+
+    .workspace-run-breadcrumbs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+    }
+
+    .workspace-run-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: clamp(1.4rem, 2vw, 1.8rem);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .workspace-run-subtitle {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.96rem;
+      line-height: 1.55;
+    }
+
+    .workspace-run-hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .workspace-run-status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 5.6rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .workspace-run-status[data-state="succeeded"] {
+      background: color-mix(in srgb, #16a34a 18%, transparent);
+      color: #15803d;
+    }
+
+    .workspace-run-status[data-state="preparing"],
+    .workspace-run-status[data-state="preparing_context"],
+    .workspace-run-status[data-state="executing"],
+    .workspace-run-status[data-state="validating"],
+    .workspace-run-status[data-state="awaiting_approval"] {
+      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-run-status[data-state="failed"],
+    .workspace-run-status[data-state="cancelled"],
+    .workspace-run-status[data-state="rejected"] {
+      background: color-mix(in srgb, #dc2626 16%, transparent);
+      color: #dc2626;
+    }
+
+    .workspace-run-icon-btn,
+    .workspace-run-action-btn,
+    .workspace-run-secondary-btn {
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+
+    .workspace-run-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.2rem;
+      height: 2.2rem;
+      border-radius: 999px;
+    }
+
+    .workspace-run-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .workspace-run-action-btn,
+    .workspace-run-secondary-btn {
+      min-height: 2.2rem;
+      padding: 0.45rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+
+    .workspace-run-action-btn.primary {
+      background: var(--primary-color);
+      border-color: var(--primary-color);
+      color: #fff;
+    }
+
+    .workspace-run-action-btn.danger {
+      color: #dc2626;
+    }
+
+    .workspace-run-content {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .workspace-run-card {
+      display: grid;
+      gap: 0.9rem;
+      padding: 1.1rem;
+      border-radius: 20px;
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+    }
+
+    .workspace-run-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .workspace-run-card-kicker {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .workspace-run-card h2 {
+      margin: 0.2rem 0 0;
+      color: var(--text-primary);
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .workspace-run-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    .workspace-run-overview-item {
+      display: grid;
+      gap: 0.28rem;
+      padding: 0.8rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-run-overview-item.full {
+      grid-column: 1 / -1;
+    }
+
+    .workspace-run-overview-label {
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .workspace-run-overview-value,
+    .workspace-run-report,
+    .workspace-run-artifact-copy,
+    .workspace-run-trace-copy {
+      color: var(--text-primary);
+      font-size: 0.94rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-run-report {
+      display: grid;
+      gap: 0.8rem;
+    }
+
+    .workspace-run-context {
+      display: grid;
+      gap: 0.8rem;
+    }
+
+    .workspace-run-list-block {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .workspace-run-list-title {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .workspace-run-list {
+      display: grid;
+      gap: 0.25rem;
+      margin: 0;
+      padding-left: 1.1rem;
+    }
+
+    .workspace-run-validation-list,
+    .workspace-run-context-list,
+    .workspace-run-artifact-list,
+    .workspace-run-trace-list {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .workspace-run-validation-item,
+    .workspace-run-context-item,
+    .workspace-run-artifact,
+    .workspace-run-trace-item {
+      display: grid;
+      gap: 0.35rem;
+      padding: 0.8rem 0.85rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-run-validation-head,
+    .workspace-run-context-head,
+    .workspace-run-artifact-head,
+    .workspace-run-trace-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .workspace-run-validation-status,
+    .workspace-run-context-access,
+    .workspace-run-artifact-kind,
+    .workspace-run-trace-kind {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.22rem 0.48rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .workspace-run-validation-status[data-state="passed"] {
+      background: color-mix(in srgb, #16a34a 18%, transparent);
+      color: #15803d;
+    }
+
+    .workspace-run-validation-status[data-state="failed"] {
+      background: color-mix(in srgb, #dc2626 16%, transparent);
+      color: #dc2626;
+    }
+
+    .workspace-run-context-access[data-state="injected"] {
+      background: color-mix(in srgb, #16a34a 18%, transparent);
+      color: #15803d;
+    }
+
+    .workspace-run-context-access[data-state="summarized"] {
+      background: color-mix(in srgb, #d97706 18%, transparent);
+      color: #b45309;
+    }
+
+    .workspace-run-context-access[data-state="on_demand"] {
+      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-run-meta,
+    .workspace-run-trace-count {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    .workspace-run-code {
+      color: var(--text-secondary);
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .workspace-run-inline-link {
+      color: var(--primary-color);
+      text-decoration: none;
+    }
+
+    .workspace-run-inline-link:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 860px) {
+      .workspace-run-page-shell {
+        padding: 1rem;
+      }
+
+      .workspace-run-hero {
+        flex-direction: column;
+      }
+
+      .workspace-run-hero-meta {
+        justify-content: flex-start;
+      }
+
+      .workspace-run-overview-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <script type="module">
+    import { WorkspaceRunPage } from '/js/modules/workspace-run.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      const runId = "{{.Extra.RunID}}";
+      if (!workspaceId || !runId) {
+        return;
+      }
+      const page = new WorkspaceRunPage(workspaceId, runId);
+      try {
+        await page.init();
+      } catch (error) {
+        console.error('Failed to initialize workspace run page:', error);
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

@@ -37,6 +37,7 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
 // CoreSystemFacade manages core system dependencies (LLM, client factory, config)
@@ -114,6 +115,7 @@ type HandlerFacade struct {
 	Skills           *skillshttp.Handler
 	CLIAgents        *cliagenthttp.Handler
 	CLIAgentRegistry *cliagent.CLIAgentRegistry
+	WorkspaceRuns    *workspacerun.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

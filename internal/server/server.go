@@ -326,6 +326,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is a workspace run route: /workspaces/{id}/runs/{runId}
+	if len(parts) == 3 && parts[1] == "runs" && strings.TrimSpace(parts[2]) != "" {
+		s.serveWorkspaceRun(w, workspaceID, parts[2])
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -424,6 +430,16 @@ func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, taskID s
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["TaskID"] = taskID
 	s.renderAndWritePage(w, "workspace-task", data)
+}
+
+func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, runID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace Run - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["RunID"] = runID
+	s.renderAndWritePage(w, "workspace-run", data)
 }
 
 func (s *Server) servePersonalize(w http.ResponseWriter, r *http.Request) {

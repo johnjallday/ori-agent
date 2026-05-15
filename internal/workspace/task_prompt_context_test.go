@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 type mockTaskPromptContextStore struct {
@@ -74,6 +77,11 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 	}
 
 	handler := &LLMTaskHandler{
+		agentStore: &resolverAgentStoreStub{
+			agents: map[string]*agent.Agent{
+				"Ori": {},
+			},
+		},
 		workspaceStore: wsStore,
 		contextStore: &mockTaskPromptContextStore{
 			notes: []TaskPromptNoteSummary{
@@ -115,6 +123,73 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 
 	if strings.Contains(prompt, "sensitive body text") {
 		t.Fatalf("expected workspace file body to be excluded from snapshot, got %q", prompt)
+	}
+}
+
+func TestPrepareTaskContext_DescribesInjectedSummarizedAndOnDemandSurfaces(t *testing.T) {
+	wsStore := NewInMemoryStore()
+	ws := NewWorkspace(CreateWorkspaceParams{
+		Name:   "amr",
+		Agents: []string{"Ori"},
+	})
+	ws.ID = "workspace-1"
+	ws.Attachments = []Attachment{
+		{
+			ID:    "att-1",
+			Title: "plan.md",
+			Type:  AttachmentTypeDoc,
+			File: &AttachmentFileMeta{
+				Name: "plan.md",
+				Mime: "text/markdown",
+			},
+		},
+	}
+	ws.DirectoryReferences = []DirectoryReference{{Name: "repo", Path: "/tmp/repo"}}
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	handler := &LLMTaskHandler{
+		agentStore: &resolverAgentStoreStub{
+			agents: map[string]*agent.Agent{
+				"Ori": {},
+			},
+		},
+		workspaceStore: wsStore,
+		contextStore: &mockTaskPromptContextStore{
+			notes: []TaskPromptNoteSummary{{ID: "note-1", Name: "Note", Preview: "Preview"}},
+			sessions: []TaskPromptSessionSummary{
+				{Title: "Sync", AgentName: "Ori", UpdatedAt: time.Now()},
+			},
+			sessionCount: 1,
+		},
+	}
+	handler.workspaceToolsFn = func(string) []toolapi.Tool {
+		return []toolapi.Tool{taskHandlerToolStub{name: "workspace_notes"}}
+	}
+
+	prepared, err := handler.PrepareTaskContext(context.Background(), "Ori", Task{
+		ID:          "task-1",
+		WorkspaceID: ws.ID,
+		Description: "summarize workspace",
+	})
+	if err != nil {
+		t.Fatalf("PrepareTaskContext: %v", err)
+	}
+	if prepared.Strategy != "task_default" {
+		t.Fatalf("Strategy = %q, want task_default", prepared.Strategy)
+	}
+	if !containsPreparedContextItem(prepared.Items, "workspace_snapshot", "injected") {
+		t.Fatalf("Items = %+v, want injected workspace snapshot", prepared.Items)
+	}
+	if !containsPreparedContextItem(prepared.Items, "workspace_notes", "summarized") {
+		t.Fatalf("Items = %+v, want summarized notes", prepared.Items)
+	}
+	if !containsPreparedContextItem(prepared.Items, "workspace_tools", "on_demand") {
+		t.Fatalf("Items = %+v, want on-demand tools", prepared.Items)
+	}
+	if len(prepared.AvailableTools) != 1 || prepared.AvailableTools[0] != "workspace_notes" {
+		t.Fatalf("AvailableTools = %+v, want workspace_notes", prepared.AvailableTools)
 	}
 }
 
@@ -245,4 +320,13 @@ func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T
 			t.Fatalf("expected system prompt to contain %q, got %q", want, prompt)
 		}
 	}
+}
+
+func containsPreparedContextItem(items []TaskPreparedContextItem, kind, access string) bool {
+	for _, item := range items {
+		if item.Kind == kind && item.Access == access {
+			return true
+		}
+	}
+	return false
 }

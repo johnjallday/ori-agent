@@ -579,6 +579,16 @@ func (s *stubWorkspaceTaskExecutor) ExecuteTask(_ context.Context, _ string, _ w
 	return s.result, s.err
 }
 
+type stubRunAwareWorkspaceTaskExecutor struct {
+	stubWorkspaceTaskExecutor
+	runID string
+}
+
+func (s *stubRunAwareWorkspaceTaskExecutor) ExecuteTaskRun(ctx context.Context, agentName string, task workspace.Task) (workspace.TaskRunResult, error) {
+	result, err := s.ExecuteTask(ctx, agentName, task)
+	return workspace.TaskRunResult{Result: result, RunID: s.runID}, err
+}
+
 type stubSequenceTaskExecutor struct {
 	results []string
 	err     error
@@ -1044,8 +1054,9 @@ func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
 
 	handler := &TaskHandler{
 		workspaceStore: store,
-		taskHandler: &stubWorkspaceTaskExecutor{
-			result: "Workspace summary result",
+		taskHandler: &stubRunAwareWorkspaceTaskExecutor{
+			stubWorkspaceTaskExecutor: stubWorkspaceTaskExecutor{result: "Workspace summary result"},
+			runID:                     "run-123",
 		},
 	}
 
@@ -1068,6 +1079,9 @@ func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
 	}
 	if updatedTask.ExecutionHistory[0].Summary == "" {
 		t.Fatalf("expected summary to be recorded")
+	}
+	if updatedTask.CurrentRunID != "run-123" || updatedTask.ExecutionHistory[0].RunID != "run-123" {
+		t.Fatalf("task = %+v, want run id propagated to current run and history", updatedTask)
 	}
 }
 
