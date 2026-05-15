@@ -807,6 +807,8 @@ export class WorkspaceTaskPage {
     this.taskId = taskId;
     this.workspace = null;
     this.task = null;
+    this.currentRun = null;
+    this.workspaceRuns = [];
     this.tasks = [];
     this.taskEvents = [];
     this.availableAgents = [];
@@ -988,6 +990,8 @@ export class WorkspaceTaskPage {
       workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
       workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
       workflowSteps: document.getElementById('workspace-task-workflow-steps'),
+      workspaceRunsCard: document.getElementById('workspace-task-workspace-runs-card'),
+      workspaceRuns: document.getElementById('workspace-task-workspace-runs'),
       runsCard: document.getElementById('workspace-task-runs-card'),
       runsTabs: document.querySelectorAll('#workspace-task-runs-card [data-runs-tab]'),
       runsTabRuns: document.getElementById('workspace-task-runs-tab-runs'),
@@ -1220,6 +1224,8 @@ export class WorkspaceTaskPage {
         this.tasks = this.task ? [this.task] : [];
       }
 
+      this.workspaceRuns = await this.fetchWorkspaceRunsForTask(this.task).catch(() => []);
+      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
       this.seedLiveActivityFromHistory();
       this.render();
       this.setState('content');
@@ -1268,6 +1274,45 @@ export class WorkspaceTaskPage {
 
     const payload = await response.json().catch(() => ({}));
     return Array.isArray(payload?.events) ? payload.events : [];
+  }
+
+  async fetchCurrentRun(runId) {
+    const normalizedRunId = String(runId || '').trim();
+    if (!normalizedRunId) return null;
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error('Failed to load latest workspace run.');
+    }
+    return response.json();
+  }
+
+  async fetchWorkspaceRunsForTask(task = this.task) {
+    const runIds = new Set();
+    const currentRunId = String(task?.current_run_id || '').trim();
+    if (currentRunId) runIds.add(currentRunId);
+
+    (Array.isArray(task?.execution_history) ? task.execution_history : []).forEach((entry) => {
+      const runId = String(entry?.run_id || '').trim();
+      if (runId) runIds.add(runId);
+    });
+
+    if (!runIds.size) return [];
+
+    const runs = await Promise.all(
+      [...runIds].map((runId) => this.fetchCurrentRun(runId).catch(() => null))
+    );
+
+    return runs
+      .filter(Boolean)
+      .sort((left, right) => this.workspaceRunTimestamp(right) - this.workspaceRunTimestamp(left));
+  }
+
+  findWorkspaceRun(runId) {
+    const normalizedRunId = String(runId || '').trim();
+    if (!normalizedRunId) return null;
+    return (Array.isArray(this.workspaceRuns) ? this.workspaceRuns : []).find((run) => run?.id === normalizedRunId) || null;
   }
 
   setupRealtime() {
@@ -1875,6 +1920,10 @@ export class WorkspaceTaskPage {
     return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(taskId)}`;
   }
 
+  getRunHref(runId) {
+    return `/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(runId)}`;
+  }
+
   getTaskHumanLoop(task = this.task) {
     const humanLoop = task?.context?.human_loop;
     return humanLoop && typeof humanLoop === 'object' ? humanLoop : null;
@@ -2155,6 +2204,7 @@ export class WorkspaceTaskPage {
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
     dispatch('output', () => this.renderOutput());
+    dispatch('workspaceRuns', () => this.renderWorkspaceRunsCard());
     dispatch('runs', () => this.renderRunsCard());
     dispatch('schedule', () => this.renderSchedule());
     dispatch('context', () => this.renderContext());
@@ -2222,11 +2272,33 @@ export class WorkspaceTaskPage {
       heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
       overview: JSON.stringify([
         t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
-        t.template_ref, t.timeout, t.progress?.percentage, sigStatusInfo,
+        t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id,
+        this.currentRun?.id, this.currentRun?.status, this.currentRun?.profile_snapshot?.id,
+        this.currentRun?.report?.validation_status, this.currentRun?.started_at,
+        sigStatusInfo,
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
       workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
       output: JSON.stringify([t.id, t.status, t.result, t.result_type, t.structured_result]),
+      workspaceRuns: JSON.stringify([
+        t.id,
+        t.current_run_id,
+        Array.isArray(t.execution_history)
+          ? t.execution_history.map((entry) => entry?.run_id || '').join('|')
+          : '',
+        this.workspaceRuns.map((run) => [
+          run?.id,
+          run?.status,
+          run?.profile_snapshot?.id,
+          run?.executor?.kind,
+          run?.executor?.ref,
+          run?.report?.validation_status,
+          run?.report?.summary,
+          run?.created_at,
+          run?.started_at,
+          run?.finished_at,
+        ]),
+      ]),
       runs: JSON.stringify([
         t.id, t.execution_steps, t.execution_history?.length,
         t.execution_trace, sigWorkflowSubtree,
@@ -2668,6 +2740,31 @@ export class WorkspaceTaskPage {
       });
     }
 
+    const currentRunId = String(this.task?.current_run_id || '').trim();
+    if (currentRunId) {
+      const currentRun = this.currentRun || {};
+      const runBits = [
+        this.formatWorkspaceRunStatus(currentRun.status),
+        String(currentRun?.profile_snapshot?.id || '').trim(),
+        currentRun?.report?.validation_status
+          ? `validation ${String(currentRun.report.validation_status).trim()}`
+          : '',
+        currentRun?.started_at ? `started ${formatDateTime(currentRun.started_at)}` : ''
+      ].filter(Boolean);
+
+      items.push({
+        title: 'Latest Run',
+        value: `${runBits.join(' • ') || 'Recorded'}\n${currentRunId}`,
+        full: true,
+        href: this.getRunHref(currentRunId)
+      });
+    } else {
+      items.push({
+        title: 'Latest Run',
+        value: 'No workspace run recorded yet.'
+      });
+    }
+
     const detailsValue = String(this.task?.details || '').trim();
     const blockedDetailsRedundant = this.isBlockedDetailsRedundant(detailsValue);
 
@@ -2713,7 +2810,11 @@ export class WorkspaceTaskPage {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
             </button>` : ''}
           </div>
-          <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
+          <div class="workspace-task-overview-value">
+            ${item.href
+              ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
+              : this.escapeHtml(item.value)}
+          </div>
         </article>
       `;
     }).join('');
@@ -2725,6 +2826,18 @@ export class WorkspaceTaskPage {
 
   normalizeComparableText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  formatWorkspaceRunStatus(status) {
+    const normalized = String(status || '').trim().replace(/_/g, ' ');
+    if (!normalized) return '';
+    return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  workspaceRunTimestamp(run) {
+    const raw = run?.finished_at || run?.started_at || run?.created_at || '';
+    const parsed = new Date(raw).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   isBlockedDetailsRedundant(detailsValue) {
@@ -3418,6 +3531,8 @@ export class WorkspaceTaskPage {
       if (taskResponse) {
         this.task = taskResponse;
       }
+      this.workspaceRuns = await this.fetchWorkspaceRunsForTask(this.task).catch(() => []);
+      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
       this.render();
     } catch (error) {
       console.error('Failed to refresh task data:', error);
@@ -5305,6 +5420,50 @@ export class WorkspaceTaskPage {
     }
   }
 
+  renderWorkspaceRunsCard() {
+    if (!this.elements.workspaceRunsCard || !this.elements.workspaceRuns) return;
+
+    const runs = Array.isArray(this.workspaceRuns) ? this.workspaceRuns : [];
+    if (!runs.length) {
+      this.elements.workspaceRunsCard.hidden = true;
+      this.elements.workspaceRuns.innerHTML = '';
+      return;
+    }
+
+    this.elements.workspaceRunsCard.hidden = false;
+    this.elements.workspaceRuns.innerHTML = runs.map((run) => {
+      const status = String(run?.status || '').trim();
+      const profile = String(run?.profile_snapshot?.id || '').trim();
+      const executorKind = String(run?.executor?.kind || '').trim();
+      const executorRef = String(run?.executor?.ref || '').trim();
+      const validationStatus = String(run?.report?.validation_status || '').trim();
+      const summary = String(run?.report?.summary || '').trim();
+      const createdAt = run?.created_at ? formatDateTime(run.created_at) : '';
+      const finishedAt = run?.finished_at ? formatDateTime(run.finished_at) : '';
+      const title = [profile || 'general', executorKind || 'executor'].filter(Boolean).join(' / ');
+      const meta = [
+        executorRef ? `worker ${executorRef}` : '',
+        createdAt ? `created ${createdAt}` : '',
+        finishedAt ? `finished ${finishedAt}` : '',
+        validationStatus ? `validation ${validationStatus}` : ''
+      ].filter(Boolean).join(' • ');
+
+      return `
+        <article class="workspace-task-workspace-run">
+          <div class="workspace-task-workspace-run-head">
+            <div class="workspace-task-workspace-run-title">
+              <strong><a href="${this.escapeHtml(this.getRunHref(run?.id || ''))}" class="workspace-task-workspace-run-link">${this.escapeHtml(title)}</a></strong>
+              ${meta ? `<div class="workspace-task-workspace-run-meta">${this.escapeHtml(meta)}</div>` : ''}
+            </div>
+            <span class="workspace-task-workspace-run-status" data-state="${this.escapeHtml(status)}">${this.escapeHtml(this.formatWorkspaceRunStatus(status) || 'Recorded')}</span>
+          </div>
+          ${summary ? `<div class="workspace-task-workspace-run-summary">${this.escapeHtml(summary)}</div>` : ''}
+          <div class="workspace-task-workspace-run-id">${this.escapeHtml(String(run?.id || ''))}</div>
+        </article>
+      `;
+    }).join('');
+  }
+
   setRunsTab(name) {
     const next = name === 'trace' ? 'trace' : 'runs';
     if (next === this._runsTab) return;
@@ -5358,6 +5517,7 @@ export class WorkspaceTaskPage {
 
     if (this.elements.activityEmpty) {
       const anyActivity =
+        visible(document.getElementById('workspace-task-workspace-runs-card')) ||
         visible(document.getElementById('workspace-task-relationships-card')) ||
         visible(document.getElementById('workspace-task-workflow-card')) ||
         visible(document.getElementById('workspace-task-runs-card'));

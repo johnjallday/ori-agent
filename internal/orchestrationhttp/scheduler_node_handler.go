@@ -676,7 +676,8 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		defer cancel()
 		logger.Info("Executing scheduler-triggered task", logger.Fields{"task_id": taskID, "agent": targetTask.To})
 
-		result, execErr := th.taskHandler.ExecuteTask(ctx, targetTask.To, *targetTask)
+		taskRun, execErr := workspace.ExecuteTaskWithRunMetadata(ctx, th.taskHandler, targetTask.To, *targetTask)
+		result := taskRun.Result
 		if execErr != nil {
 			logger.Error("Task execution failed", logger.Fields{"task_id": taskID, "err": execErr})
 
@@ -684,6 +685,9 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
+					if taskRun.RunID != "" {
+						task.CurrentRunID = taskRun.RunID
+					}
 					if err := task.SetStatus(workspace.TaskStatusFailed); err != nil {
 						logger.Error("Scheduler node failure transition rejected", logger.Fields{"task_id": taskID, "error": err})
 					} else {
@@ -702,6 +706,9 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
+					if taskRun.RunID != "" {
+						task.CurrentRunID = taskRun.RunID
+					}
 					if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
 						logger.Error("Scheduler node completion transition rejected", logger.Fields{"task_id": taskID, "error": err})
 					} else {

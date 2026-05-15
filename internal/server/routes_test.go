@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +59,28 @@ func TestLegacyStudiosRoutesRemoved(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRunRoutesRegistered(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-1/runs", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected workspace runs list to return 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"runs"`) {
+		t.Fatalf("expected runs response body, got %s", rec.Body.String())
+	}
+
+	body := bytes.NewReader([]byte(`{"profile_id":"missing","executor":{"kind":"ori_agent","ref":"agent"},"prompt":"do work"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-1/runs", body)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid workspace run create to return 400, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 
@@ -104,6 +127,29 @@ func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkspaceRunPageRouteServesRunDetailPage(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/ws-1/runs/run-1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected /workspaces/{workspaceID}/runs/{runID} page route to return 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="workspaceRunPageRoot"`,
+		`const workspaceId = "ws-1";`,
+		`const runId = "run-1";`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected workspace run page response to contain %q", want)
+		}
 	}
 }
 

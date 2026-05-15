@@ -589,6 +589,20 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Workspace Runs API Endpoints
+	// =============================================================================
+	if s.Handlers.WorkspaceRuns != nil {
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs", s.Handlers.WorkspaceRuns.CreateRun)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs", s.Handlers.WorkspaceRuns.ListRuns)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}", s.Handlers.WorkspaceRuns.GetRun)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs/{runID}/stop", s.Handlers.WorkspaceRuns.StopRun)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs/{runID}/approve", s.Handlers.WorkspaceRuns.ApproveRun)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs/{runID}/reject", s.Handlers.WorkspaceRuns.RejectRun)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/artifacts", s.Handlers.WorkspaceRuns.ListArtifacts)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/trace", s.Handlers.WorkspaceRuns.ListTrace)
+	}
+
+	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
 	if s.Handlers.ExternalAgents != nil {

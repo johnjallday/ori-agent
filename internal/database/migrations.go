@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 17
+const schemaVersion = 19
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -99,6 +99,10 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration016NoteHeadingsIndex(ctx)
 	case 17:
 		return db.migration017NoteLinks(ctx)
+	case 18:
+		return db.migration018WorkspaceRuns(ctx)
+	case 19:
+		return db.migration019WorkspaceRunContext(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -914,6 +918,87 @@ func (db *DB) migration017NoteLinks(ctx context.Context) error {
 	for _, stmt := range indexes {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create note_links index: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration018WorkspaceRuns creates durable storage for workspace-scoped harness runs.
+func (db *DB) migration018WorkspaceRuns(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_runs (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			parent_run_id TEXT,
+			profile_id TEXT NOT NULL,
+			profile_version TEXT NOT NULL,
+			profile_snapshot_json TEXT NOT NULL,
+			executor_json TEXT NOT NULL,
+			scope_json TEXT NOT NULL,
+			policy_json TEXT NOT NULL,
+			environment_json TEXT NOT NULL,
+			prompt TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			started_at DATETIME,
+			finished_at DATETIME,
+			validation_request_json TEXT,
+			validation_result_json TEXT,
+			cost_json TEXT,
+			report_json TEXT,
+			error TEXT,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS workspace_run_trace (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			sequence INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			source TEXT,
+			message TEXT,
+			status TEXT,
+			tool_name TEXT,
+			artifact_id TEXT,
+			data_json TEXT,
+			created_at DATETIME NOT NULL,
+			UNIQUE(run_id, sequence),
+			FOREIGN KEY (run_id) REFERENCES workspace_runs(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS workspace_run_artifacts (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			path TEXT,
+			inline BLOB,
+			metadata_json TEXT,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (run_id) REFERENCES workspace_runs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_runs_workspace_created ON workspace_runs(workspace_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_runs_status ON workspace_runs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_run_trace_run_sequence ON workspace_run_trace(run_id, sequence)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_run_artifacts_run ON workspace_run_artifacts(run_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace run schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration019WorkspaceRunContext adds persisted task context planning and output.
+func (db *DB) migration019WorkspaceRunContext(ctx context.Context) error {
+	statements := []string{
+		`ALTER TABLE workspace_runs ADD COLUMN context_plan_json TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE workspace_runs ADD COLUMN prepared_context_json TEXT`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to extend workspace run context schema: %w", err)
 		}
 	}
 	return nil

@@ -22,6 +22,22 @@ type TaskPromptSessionSummary struct {
 	UpdatedAt time.Time
 }
 
+type TaskPreparedContext struct {
+	Strategy       string
+	Summary        string
+	Items          []TaskPreparedContextItem
+	AvailableTools []string
+	PreparedAt     time.Time
+}
+
+type TaskPreparedContextItem struct {
+	Kind   string
+	Ref    string
+	Name   string
+	Access string
+	Detail string
+}
+
 type taskPromptContextStore interface {
 	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]TaskPromptNoteSummary, error)
 	ListSessionsByWorkspace(ctx context.Context, workspaceID string, limit int) ([]TaskPromptSessionSummary, int, error)
@@ -195,6 +211,149 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 	)
 
 	return strings.Join(lines, "\n")
+}
+
+// PrepareTaskContext records the same high-level context surfaces that task
+// execution already uses so the run harness can expose them before Execute.
+func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName string, task Task) (*TaskPreparedContext, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	prepared := &TaskPreparedContext{
+		Strategy:   "task_default",
+		PreparedAt: time.Now(),
+	}
+
+	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {
+		prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+			Kind:   "workspace_snapshot",
+			Name:   "Workspace snapshot",
+			Access: "injected",
+			Detail: "Workspace metadata plus bounded summaries for tasks, files, directories, notes, and recent sessions are injected into the prompt.",
+		})
+	}
+
+	var ws *Workspace
+	if h.workspaceStore != nil && strings.TrimSpace(task.WorkspaceID) != "" {
+		ws, _ = h.workspaceStore.Get(task.WorkspaceID)
+	}
+	if ws != nil {
+		if fileCount := countTaskPromptFiles(ws.Attachments); fileCount > 0 {
+			prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+				Kind:   "workspace_files",
+				Name:   "Workspace file summaries",
+				Access: "summarized",
+				Detail: fmt.Sprintf("%d workspace file(s) are summarized in the snapshot; full content is not injected unless attached to this task.", fileCount),
+			})
+		}
+		if len(ws.DirectoryReferences) > 0 {
+			prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+				Kind:   "workspace_directories",
+				Name:   "Workspace directory references",
+				Access: "summarized",
+				Detail: fmt.Sprintf("%d directory reference(s) are summarized; contents are available only through tools.", len(ws.DirectoryReferences)),
+			})
+		}
+	}
+
+	if h.contextStore != nil && strings.TrimSpace(task.WorkspaceID) != "" {
+		if notes, err := h.contextStore.ListNotesByWorkspace(ctx, task.WorkspaceID); err == nil && len(notes) > 0 {
+			prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+				Kind:   "workspace_notes",
+				Name:   "Workspace note previews",
+				Access: "summarized",
+				Detail: fmt.Sprintf("%d note(s) have preview text in the snapshot; full bodies are available only through tools.", len(notes)),
+			})
+		}
+		if sessions, count, err := h.contextStore.ListSessionsByWorkspace(ctx, task.WorkspaceID, taskPromptMaxSessions); err == nil && (len(sessions) > 0 || count > 0) {
+			prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+				Kind:   "workspace_sessions",
+				Name:   "Recent workspace sessions",
+				Access: "summarized",
+				Detail: fmt.Sprintf("%d recent session(s) are summarized in the snapshot.", count),
+			})
+		}
+	}
+
+	prepared.Items = append(prepared.Items, buildAttachedTaskPreparedContextItems(ws, task)...)
+
+	ag, err := h.resolveExecutionAgent(agentName, task)
+	if err != nil {
+		return nil, err
+	}
+	tools := h.convertAgentToolsToLLMTools(ag, task)
+	prepared.AvailableTools = make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if name := strings.TrimSpace(tool.Name); name != "" {
+			prepared.AvailableTools = append(prepared.AvailableTools, name)
+		}
+	}
+	sort.Strings(prepared.AvailableTools)
+	if len(prepared.AvailableTools) > 0 {
+		prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+			Kind:   "workspace_tools",
+			Name:   "Workspace and utility tools",
+			Access: "on_demand",
+			Detail: fmt.Sprintf("%d tool(s) are available for retrieving full workspace state or external information during execution.", len(prepared.AvailableTools)),
+		})
+	}
+
+	prepared.Summary = buildTaskPreparedContextSummary(prepared.Items)
+	return prepared, nil
+}
+
+func buildTaskPreparedContextSummary(items []TaskPreparedContextItem) string {
+	var injected, summarized, onDemand int
+	for _, item := range items {
+		switch item.Access {
+		case "injected":
+			injected++
+		case "summarized":
+			summarized++
+		case "on_demand":
+			onDemand++
+		}
+	}
+	return fmt.Sprintf("%d injected, %d summarized, %d on-demand context surface(s)", injected, summarized, onDemand)
+}
+
+func buildAttachedTaskPreparedContextItems(ws *Workspace, task Task) []TaskPreparedContextItem {
+	if ws == nil || ws.Layout == nil {
+		return nil
+	}
+	attachmentsByID := make(map[string]Attachment, len(ws.Attachments))
+	for _, attachment := range ws.Attachments {
+		attachmentsByID[attachment.ID] = attachment
+	}
+
+	var items []TaskPreparedContextItem
+	for _, connection := range ws.Layout.WorkflowConnections {
+		if connection.To != task.ID {
+			continue
+		}
+		attachment, ok := attachmentsByID[connection.From]
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(attachment.Title)
+		if name == "" {
+			name = "Attached file"
+		}
+		ref := ""
+		detail := "Attached content is injected into the prompt during execution."
+		if attachment.File != nil && strings.TrimSpace(attachment.File.URL) != "" {
+			ref = attachment.File.URL
+			detail = fmt.Sprintf("Attached content from %s is injected into the prompt during execution.", attachment.File.URL)
+		}
+		items = append(items, TaskPreparedContextItem{
+			Kind:   "attached_file",
+			Ref:    ref,
+			Name:   name,
+			Access: "injected",
+			Detail: detail,
+		})
+	}
+	return items
 }
 
 type taskPromptAgentSummary struct {

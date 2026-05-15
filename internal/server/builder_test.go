@@ -95,6 +95,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if server.Storage.AgentStore == nil {
 		t.Error("store not initialized")
 	}
+	if server.Handlers.WorkspaceRuns == nil {
+		t.Error("workspace runs handler not initialized")
+	}
+	if builder.runBackedTaskHandler == nil {
+		t.Error("run-backed task handler not initialized")
+	}
 }
 
 // TestNew_UsesBuilder verifies New() delegates to builder

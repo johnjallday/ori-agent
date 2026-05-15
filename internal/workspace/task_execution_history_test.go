@@ -51,3 +51,13 @@ func TestRecordTaskExecution_PreservesFailureDetails(t *testing.T) {
 		t.Fatalf("expected duration 1500ms, got %d", entry.Duration)
 	}
 }
+
+func TestRecordTaskExecution_CapturesCurrentRunID(t *testing.T) {
+	task := &Task{ID: "task-3", CurrentRunID: "run-123"}
+
+	RecordTaskExecution(task, "success", "done", time.Now(), time.Second)
+
+	if len(task.ExecutionHistory) != 1 || task.ExecutionHistory[0].RunID != "run-123" {
+		t.Fatalf("execution history = %+v, want run id", task.ExecutionHistory)
+	}
+}

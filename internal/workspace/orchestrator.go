@@ -382,11 +382,18 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	// LLMTaskHandler — the orchestrator does not duplicate that work.
 	// A missing handler is treated as a task failure (rather than an early
 	// return) so the workspace state and lifecycle events stay consistent.
-	var result string
+	var (
+		result  string
+		taskRun TaskRunResult
+	)
 	if o.taskHandler == nil {
 		err = fmt.Errorf("orchestrator: task handler not configured (call SetTaskHandler before ExecuteTask)")
 	} else {
-		result, err = o.taskHandler.ExecuteTask(ctx, task.To, task)
+		taskRun, err = ExecuteTaskWithRunMetadata(ctx, o.taskHandler, task.To, task)
+		result = taskRun.Result
+		if taskRun.RunID != "" {
+			task.CurrentRunID = taskRun.RunID
+		}
 	}
 
 	completed := time.Now()
@@ -400,6 +407,9 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		task.Error = err.Error()
 
 		if updateErr := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
+			if taskRun.RunID != "" {
+				t.CurrentRunID = taskRun.RunID
+			}
 			if statusErr := t.SetStatus(TaskStatusFailed); statusErr != nil {
 				return statusErr
 			}
@@ -426,6 +436,9 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	task.Result = result
 	ApplyTaskResultMetadata(&task, result)
 	if err := MutateTaskAndSave(o.workspaceStore, workspace, task.ID, func(t *Task) error {
+		if taskRun.RunID != "" {
+			t.CurrentRunID = taskRun.RunID
+		}
 		if statusErr := t.SetStatus(TaskStatusCompleted); statusErr != nil {
 			return statusErr
 		}

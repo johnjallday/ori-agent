@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
 // buildWorkspaceToolFactory returns a factory that exposes workspace-scoped
@@ -181,13 +182,20 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		b.taskHandler.SetWorkspaceToolFactory(fn)
 	}
 
-	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, b.taskHandler, workspace.ExecutorConfig{
+	taskExecutionHandler := workspace.TaskHandler(b.taskHandler)
+	if b.workspaceRunExecutors != nil && b.workspaceRunStore != nil && b.workspaceRunService != nil {
+		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor(b.taskHandler))
+		b.runBackedTaskHandler = workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
+		taskExecutionHandler = b.runBackedTaskHandler
+	}
+
+	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskExecutionHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
 	b.taskExecutor.SetEventBus(b.eventBus)
 
-	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, b.taskHandler, workspace.StepExecutorConfig{
+	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
@@ -215,18 +223,11 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		b.gateway.SetRouter(orch.HandleGatewayMessage)
 	}
 
-	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
-	taskHandler.SetEventBus(b.eventBus)
-	taskHandler.SetMCPRegistry(b.mcpRegistry)
-	taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
-	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
-	if b.sessionStore != nil {
-		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+	b.orchestrationTaskHandler = b.taskHandler
+	taskHandler := workspace.TaskHandler(b.taskHandler)
+	if b.runBackedTaskHandler != nil {
+		taskHandler = b.runBackedTaskHandler
 	}
-	if fn := b.buildWorkspaceToolFactory(); fn != nil {
-		taskHandler.SetWorkspaceToolFactory(fn)
-	}
-	b.orchestrationTaskHandler = taskHandler
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore
@@ -267,7 +268,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
-	if b.taskHandler != nil {
+	if b.runBackedTaskHandler != nil {
+		b.workspaceOrchestrator.SetTaskHandler(b.runBackedTaskHandler)
+	} else if b.taskHandler != nil {
 		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
 	}
 	if verbose {

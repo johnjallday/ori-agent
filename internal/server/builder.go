@@ -49,6 +49,7 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -111,6 +112,7 @@ type ServerBuilder struct {
 	workspaceFileStore       *workspace.FileStore
 	taskHandler              *workspace.LLMTaskHandler
 	orchestrationTaskHandler *workspace.LLMTaskHandler
+	runBackedTaskHandler     workspace.TaskHandler
 	taskExecutor             *workspace.TaskExecutor
 	stepExecutor             *workspace.StepExecutor
 	taskScheduler            *workspace.TaskScheduler
@@ -177,6 +179,12 @@ type ServerBuilder struct {
 	cliAgentExecutor *cliagent.MicroStepExecutor
 	cliAgentLogger   *cliagent.EventLogger
 	cliAgentHandler  *cliagenthttp.Handler
+
+	// Workspace Runs harness
+	workspaceRunStore     workspacerun.Store
+	workspaceRunService   *workspacerun.Service
+	workspaceRunHandler   *workspacerun.Handler
+	workspaceRunExecutors *workspacerun.ExecutorRegistry
 
 	// Skills (local + external)
 	skillsManager *skills.Manager
@@ -351,6 +359,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	)
 	b.server.Handlers.CLIAgents = b.cliAgentHandler
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
+	b.server.Handlers.WorkspaceRuns = b.workspaceRunHandler
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

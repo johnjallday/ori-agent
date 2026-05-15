@@ -1200,7 +1200,12 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		}
 
 		attemptStartedAt := time.Now().UTC()
-		result, execErr := th.taskHandler.ExecuteTask(ctx, currentTask.To, currentTask)
+		taskRun, execErr := workspace.ExecuteTaskWithRunMetadata(ctx, th.taskHandler, currentTask.To, currentTask)
+		result := taskRun.Result
+		if taskRun.RunID != "" {
+			persistedTask.CurrentRunID = taskRun.RunID
+			currentTask.CurrentRunID = taskRun.RunID
+		}
 		attemptCompletedAt := time.Now().UTC()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return "", context.Canceled
