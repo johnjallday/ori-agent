@@ -254,23 +254,28 @@ func (b *ServerBuilder) initializeHandlers() {
 
 	if b.sessionStore != nil {
 		b.workspaceRunStore = workspacerun.NewSQLiteStore(b.sessionStore.DB())
-		runProfiles := workspacerun.NewProfileRegistry()
-		b.workspaceRunExecutors = workspacerun.NewExecutorRegistry()
-		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindNativeCLI, workspacerun.NewNativeCLIExecutor(b.cliAgentRegistry))
-		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor())
-		runEnv := workspacerun.NewLocalEnvironmentManager("")
-		runValidator := workspacerun.NewValidator()
-		resolveRunRoots := func(workspaceID string) []string {
-			root := resolveWorkspaceRoot(b.configManager)
-			if strings.TrimSpace(root) == "" {
-				return nil
-			}
-			return []string{root}
-		}
-		b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
-		b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
-		logger.Info("Workspace Runs initialized", logger.Fields{})
+	} else {
+		b.workspaceRunStore = workspacerun.NewMemoryStore()
 	}
+
+	runProfiles := workspacerun.NewProfileRegistry()
+	b.workspaceRunExecutors = workspacerun.NewExecutorRegistry()
+	b.workspaceRunExecutors.Register(workspacerun.ExecutorKindNativeCLI, workspacerun.NewNativeCLIExecutor(b.cliAgentRegistry))
+	b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor())
+	runEnv := workspacerun.NewLocalEnvironmentManager("")
+	runValidator := workspacerun.NewValidator()
+	resolveRunRoots := func(workspaceID string) []string {
+		root := resolveWorkspaceRoot(b.configManager)
+		if strings.TrimSpace(root) == "" {
+			return nil
+		}
+		return []string{root}
+	}
+	b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
+	b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
+	logger.Info("Workspace Runs initialized", logger.Fields{
+		"durable": b.sessionStore != nil,
+	})
 
 	// Initialize skills manager and handler (local + external)
 	personalSkillsDir := ""
