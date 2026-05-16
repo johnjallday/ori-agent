@@ -154,15 +154,15 @@ function getSourceLabel(source) {
 function getSourceTheme(source) {
   switch (String(source || '').toLowerCase()) {
     case 'agent':
-      return { bg: 'rgba(59, 130, 246, 0.18)', color: '#60a5fa' };
+      return { bg: 'rgba(59, 130, 246, 0.22)', color: 'var(--text-primary)' };
     case 'repo':
-      return { bg: 'rgba(168, 85, 247, 0.18)', color: '#c084fc' };
+      return { bg: 'rgba(168, 85, 247, 0.22)', color: 'var(--text-primary)' };
     case '.agents':
-      return { bg: 'rgba(16, 185, 129, 0.18)', color: '#34d399' };
+      return { bg: 'rgba(16, 185, 129, 0.22)', color: 'var(--text-primary)' };
     case 'personal':
-      return { bg: 'rgba(92, 92, 94, 0.22)', color: '#C9CCD1' };
+      return { bg: 'rgba(92, 92, 94, 0.28)', color: 'var(--text-primary)' };
     default:
-      return { bg: 'rgba(148, 163, 184, 0.18)', color: '#94a3b8' };
+      return { bg: 'rgba(148, 163, 184, 0.22)', color: 'var(--text-primary)' };
   }
 }
 

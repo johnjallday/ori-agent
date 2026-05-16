@@ -7097,6 +7097,8 @@
     import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
 
     document.addEventListener('DOMContentLoaded', () => {
+      themeManager.initialize();
+
       // Extract workspace ID from URL
       const pathParts = window.location.pathname.split('/');
       const workspaceId = pathParts[2]; // /workspaces/{id}
