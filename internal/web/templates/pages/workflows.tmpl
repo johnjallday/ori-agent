@@ -8,19 +8,19 @@
 
   <style>
     #behaviorStudioPage {
-      --behavior-paper: color-mix(in srgb, var(--bg-primary) 76%, #f1e3cf 24%);
-      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 68%, #ead8bf 32%);
-      --behavior-surface: color-mix(in srgb, var(--bg-primary) 84%, #fffaf4 16%);
-      --behavior-surface-strong: color-mix(in srgb, var(--bg-primary) 74%, #fffdf8 26%);
-      --behavior-card-surface: color-mix(in srgb, var(--bg-primary) 80%, #fffaf4 20%);
-      --behavior-subtle-surface: color-mix(in srgb, var(--bg-secondary) 78%, #fffaf4 22%);
+      --behavior-paper: color-mix(in srgb, var(--bg-primary) 76%, #C9CCD1 24%);
+      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 68%, #C9CCD1 32%);
+      --behavior-surface: color-mix(in srgb, var(--bg-primary) 84%, #ffffff 16%);
+      --behavior-surface-strong: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
+      --behavior-card-surface: color-mix(in srgb, var(--bg-primary) 80%, #ffffff 20%);
+      --behavior-subtle-surface: color-mix(in srgb, var(--bg-secondary) 78%, #ffffff 22%);
       --behavior-input-surface: color-mix(in srgb, var(--bg-primary) 88%, white 12%);
       --behavior-input-highlight: rgba(255, 255, 255, 0.82);
       --behavior-code-surface: color-mix(in srgb, var(--bg-secondary) 80%, #ffffff 20%);
-      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(250, 244, 236, 0.86));
-      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(250, 245, 238, 0.88));
-      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(250, 245, 238, 0.9));
-      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 239, 229, 0.96));
+      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(232, 234, 237, 0.86));
+      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(232, 234, 237, 0.88));
+      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(232, 234, 237, 0.9));
+      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(232, 234, 237, 0.96));
       --behavior-page-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
       --behavior-line: color-mix(in srgb, var(--border-color) 72%, #5C5C5E 28%);
       --behavior-line-strong: color-mix(in srgb, var(--border-color) 54%, #5C5C5E 46%);
@@ -44,7 +44,7 @@
       --behavior-warning-bg: rgba(251, 191, 36, 0.14);
       --behavior-warning-border: rgba(217, 119, 6, 0.18);
       --behavior-graph-surface: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
-      --behavior-empty-surface: color-mix(in srgb, var(--bg-secondary) 82%, #fffaf4 18%);
+      --behavior-empty-surface: color-mix(in srgb, var(--bg-secondary) 82%, #ffffff 18%);
       --behavior-json-bg: rgba(10, 10, 10, 0.92);
       --behavior-shadow: 0 28px 80px rgba(0, 0, 0, 0.14);
       position: relative;
@@ -1031,6 +1031,11 @@
   <script src="/js/modules/sidebar.js"></script>
   <script src="/js/app.js"></script>
   <script src="/js/modules/behavior-studio.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
 </body>
 
 </html>
