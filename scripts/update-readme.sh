@@ -47,32 +47,16 @@ fi
 
 # Update version badge if VERSION exists
 if [ -n "$VERSION" ]; then
-    # Use sed to update the version badge between markers
-    sed -i.bak '/<!-- AUTO:VERSION -->/,/<!-- AUTO:VERSION_END -->/{
-        /<!-- AUTO:VERSION -->/!{
-            /<!-- AUTO:VERSION_END -->/!{
-                s|.*|![Version](https://img.shields.io/badge/Version-'"$VERSION"'-blue)|
-            }
-        }
-    }' README.md
+    # Match the Version badge URL anywhere in README; works regardless of line layout
+    perl -i -pe 's|!\[Version\]\(https://img\.shields\.io/badge/Version-[^)]+\)|![Version](https://img.shields.io/badge/Version-'"$VERSION"'-blue)|' README.md
     echo -e "${GREEN}✅${NC} Updated version badge to $VERSION"
 fi
 
 # Update Go version badge if GO_VERSION exists
 if [ -n "$GO_VERSION" ]; then
-    # Use sed to update the Go version badge between markers
-    sed -i.bak '/<!-- AUTO:GO_VERSION -->/,/<!-- AUTO:GO_VERSION_END -->/{
-        /<!-- AUTO:GO_VERSION -->/!{
-            /<!-- AUTO:GO_VERSION_END -->/!{
-                s|.*|![Go](https://img.shields.io/badge/Go-'"$GO_VERSION"'-00add8)|
-            }
-        }
-    }' README.md
+    perl -i -pe 's|!\[Go\]\(https://img\.shields\.io/badge/Go-[^)]+\)|![Go](https://img.shields.io/badge/Go-'"$GO_VERSION"'-00add8)|' README.md
     echo -e "${GREEN}✅${NC} Updated Go version badge to $GO_VERSION"
 fi
-
-# Remove backup file
-rm -f README.md.bak
 
 echo ""
 echo -e "${GREEN}✅ README.md updated successfully!${NC}"
@@ -80,6 +64,6 @@ echo ""
 
 # Show the updated badges
 echo -e "${BLUE}Updated badges:${NC}"
-grep -A 1 "<!-- AUTO:VERSION -->" README.md | grep "Version"
-grep -A 1 "<!-- AUTO:GO_VERSION -->" README.md | grep "Go"
+grep -E "!\[Version\]\(https://img\.shields\.io/badge/Version-" README.md
+grep -E "!\[Go\]\(https://img\.shields\.io/badge/Go-" README.md
 echo ""
