@@ -44,7 +44,7 @@
 }
 
 [data-bs-theme="dark"] .session-sidebar {
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(10, 10, 10, 0.4);
   border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -114,12 +114,12 @@
 }
 
 [data-bs-theme="dark"] .session-search-input {
-  background: rgba(15, 23, 42, 0.3);
+  background: rgba(10, 10, 10, 0.3);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
 [data-bs-theme="dark"] .session-search-input:focus {
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(10, 10, 10, 0.5);
 }
 
 .session-search-clear {
@@ -258,7 +258,7 @@
 }
 
 [data-bs-theme="dark"] .folder-tree-section {
-  background: rgba(15, 23, 42, 0.2);
+  background: rgba(10, 10, 10, 0.2);
 }
 
 .folder-tree-header {
@@ -313,7 +313,7 @@
 }
 
 .folder-tree-section.dragging .folder-tree-header {
-  background: rgba(29, 78, 216, 0.12);
+  background: rgba(21, 80, 57, 0.12);
   border-radius: 6px;
 }
 
@@ -604,13 +604,13 @@
 }
 
 .session-item.active {
-  background: rgba(29, 78, 216, 0.15);
+  background: rgba(21, 80, 57, 0.15);
   border-color: var(--primary-color);
 }
 
 .session-item.selected:not(.active) {
-  background: rgba(29, 78, 216, 0.1);
-  border-color: rgba(29, 78, 216, 0.5);
+  background: rgba(21, 80, 57, 0.1);
+  border-color: rgba(21, 80, 57, 0.5);
 }
 
 .session-item.active::before {
@@ -626,11 +626,11 @@
 }
 
 [data-bs-theme="dark"] .session-item {
-  background: rgba(15, 23, 42, 0.2);
+  background: rgba(10, 10, 10, 0.2);
 }
 
 [data-bs-theme="dark"] .session-item:hover {
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(10, 10, 10, 0.4);
 }
 
 .session-item.dragging {
@@ -706,7 +706,7 @@
 }
 
 [data-bs-theme="dark"] .session-agent-badge {
-  background: rgba(99, 102, 241, 0.25);
+  background: rgba(42, 135, 98, 0.25);
   color: #a5b4fc;
 }
 
@@ -716,8 +716,8 @@
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 8px;
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  background: rgba(31, 107, 78, 0.2);
+  color: #1F6B4E;
   min-width: 16px;
   text-align: center;
   margin-left: 4px;
@@ -729,7 +729,7 @@
 }
 
 [data-bs-theme="dark"] .session-task-count-badge {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(31, 107, 78, 0.3);
   color: #60a5fa;
 }
 
@@ -775,7 +775,7 @@
 .session-tag[data-color="0"] { background: #ef4444; }
 .session-tag[data-color="1"] { background: #f59e0b; }
 .session-tag[data-color="2"] { background: #22c55e; }
-.session-tag[data-color="3"] { background: #3b82f6; }
+.session-tag[data-color="3"] { background: #1F6B4E; }
 .session-tag[data-color="4"] { background: #8b5cf6; }
 .session-tag[data-color="5"] { background: #ec4899; }
 .session-tag[data-color="6"] { background: #06b6d4; }
@@ -893,7 +893,7 @@
 
 .session-sidebar-resize-handle:hover,
 .session-sidebar-resize-handle.resizing {
-  background: rgba(29, 78, 216, 0.3);
+  background: rgba(21, 80, 57, 0.3);
 }
 
 /* Move to Folder Modal */
@@ -1130,8 +1130,8 @@ body.workspace-page .workspace-setup-card {
 }
 
 .workspace-create-modal .workspace-detail-mcp-chip.status {
-  background: rgba(59, 130, 246, 0.12);
-  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(31, 107, 78, 0.12);
+  border-color: rgba(31, 107, 78, 0.2);
   color: #bfdbfe;
 }
 
@@ -1200,13 +1200,13 @@ body.workspace-page .workspace-setup-card {
 
 .workspace-setup-template:hover {
   color: var(--text-primary);
-  border-color: var(--accent-primary, #3b82f6);
+  border-color: var(--accent-primary, #1F6B4E);
 }
 
 .workspace-setup-template.is-active {
   color: #fff;
-  border-color: var(--accent-primary, #3b82f6);
-  background: var(--accent-primary, #3b82f6);
+  border-color: var(--accent-primary, #1F6B4E);
+  background: var(--accent-primary, #1F6B4E);
 }
 
 .workspace-setup-options {
@@ -1375,12 +1375,12 @@ body.workspace-page .workspace-setup-card {
 
 /* Drag and Drop Styles */
 .session-item.drag-over {
-  background: rgba(29, 78, 216, 0.1);
+  background: rgba(21, 80, 57, 0.1);
   border: 1px dashed var(--primary-color);
 }
 
 .folder-item.drag-over {
-  background: rgba(29, 78, 216, 0.2);
+  background: rgba(21, 80, 57, 0.2);
   border: 1px dashed var(--primary-color);
 }
 
@@ -1435,15 +1435,15 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 /* Combined Chat Info Bar (Session + Agent) */
 .chat-info-bar {
   padding: 8px 12px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(42, 135, 98, 0.08);
+  border: 1px solid rgba(42, 135, 98, 0.2);
   border-radius: 8px;
   flex-shrink: 0;
 }
 
 [data-bs-theme="dark"] .chat-info-bar {
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(42, 135, 98, 0.12);
+  border-color: rgba(42, 135, 98, 0.25);
 }
 
 .chat-session-title {
@@ -1507,7 +1507,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .chat-agent-edit-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   border-color: var(--primary-color);
   color: var(--primary-color);
   text-decoration: none;
@@ -1523,7 +1523,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .chat-agent-change-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   border-color: var(--primary-color);
   color: var(--primary-color);
 }
@@ -1661,7 +1661,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .agent-edit-mcp-status.configured {
   color: var(--primary-color);
-  border-color: rgba(99, 102, 241, 0.4);
+  border-color: rgba(42, 135, 98, 0.4);
 }
 
 .agent-edit-mcp-empty,
@@ -1698,7 +1698,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .folder-note-item.active {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   color: var(--primary-color);
 }
 
@@ -2318,14 +2318,14 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .schedule-detail-btn-trigger {
-  background: var(--primary-color, #3b82f6);
-  border: 1px solid var(--primary-color, #3b82f6);
+  background: var(--primary-color, #1F6B4E);
+  border: 1px solid var(--primary-color, #1F6B4E);
   color: white;
 }
 
 .schedule-detail-btn-trigger:hover {
-  background: var(--primary-hover, #2563eb);
-  border-color: var(--primary-hover, #2563eb);
+  background: var(--primary-hover, #155039);
+  border-color: var(--primary-hover, #155039);
 }
 
 .schedule-detail-btn-delete {
@@ -2409,7 +2409,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .note-toolbar-btn.active {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   color: var(--primary-color);
 }
 
@@ -2516,7 +2516,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .note-toc-item.is-active {
   border-left-color: var(--primary-color, #6366f1);
-  background: rgba(99, 102, 241, 0.06);
+  background: rgba(42, 135, 98, 0.06);
 }
 
 .note-toc-item.is-dragging {
@@ -2524,7 +2524,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .note-toc-item.is-drop-target {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(42, 135, 98, 0.12);
 }
 
 .note-toc-entry {
@@ -2642,7 +2642,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .note-live-editor::selection,
 .note-live-editor *::selection {
-  background: rgba(99, 102, 241, 0.45);
+  background: rgba(42, 135, 98, 0.45);
   color: var(--text-primary);
 }
 
@@ -2793,7 +2793,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .note-heading-fold:hover,
 .note-heading-fold:focus {
-  background: rgba(99, 102, 241, 0.14);
+  background: rgba(42, 135, 98, 0.14);
   outline: none;
 }
 
@@ -2858,7 +2858,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   outline: 1px solid transparent;
   overflow: hidden;
   resize: none;
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(42, 135, 98, 0.08);
   color: var(--text-primary);
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
   font-size: inherit;
@@ -2866,7 +2866,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .note-live-line-input:focus {
-  outline-color: rgba(99, 102, 241, 0.28);
+  outline-color: rgba(42, 135, 98, 0.28);
 }
 
 .note-live-line-input.is-heading-1,
@@ -2948,7 +2948,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .search-note-result-snippet mark {
-  background: rgba(99, 102, 241, 0.3);
+  background: rgba(42, 135, 98, 0.3);
   color: var(--text-primary);
   border-radius: 2px;
   padding: 0 2px;
@@ -3224,7 +3224,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 10px;
-  background: #3b82f6;
+  background: #1F6B4E;
   color: white;
   min-width: 18px;
   text-align: center;
@@ -3364,7 +3364,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .main-task-input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 2px rgba(42, 135, 98, 0.2);
 }
 
 .main-task-input::placeholder {
@@ -3473,12 +3473,12 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(139, 92, 246, 0.2);
+  background: rgba(31, 107, 78, 0.2);
   color: #8b5cf6;
 }
 
 [data-bs-theme="dark"] .main-task-workspace-badge {
-  background: rgba(139, 92, 246, 0.25);
+  background: rgba(31, 107, 78, 0.25);
   color: #a78bfa;
 }
 
@@ -3500,8 +3500,8 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .main-task-execute:hover {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
+  background: rgba(31, 107, 78, 0.1);
+  color: #1F6B4E;
 }
 
 .main-task-edit {
@@ -3522,7 +3522,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .main-task-edit:hover {
-  background: rgba(168, 85, 247, 0.1);
+  background: rgba(31, 107, 78, 0.1);
   color: #a855f7;
 }
 
@@ -3724,8 +3724,8 @@ body.task-modal-open {
 }
 
 .task-modal-input:focus {
-  border-color: var(--primary-color, #3b82f6);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--primary-color, #1F6B4E);
+  box-shadow: 0 0 0 3px rgba(31, 107, 78, 0.15);
 }
 
 .task-modal-input-multi {
@@ -3742,7 +3742,7 @@ body.task-modal-open {
   font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.7rem;
   color: var(--text-secondary);
-  background: rgba(148, 163, 184, 0.15);
+  background: rgba(138, 138, 138, 0.15);
   padding: 2px 6px;
   border-radius: 6px;
 }
@@ -3770,8 +3770,8 @@ body.task-modal-open {
 }
 
 .task-modal-textarea:focus {
-  border-color: var(--primary-color, #3b82f6);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--primary-color, #1F6B4E);
+  box-shadow: 0 0 0 3px rgba(31, 107, 78, 0.15);
 }
 
 .task-modal-footer {
@@ -3804,8 +3804,8 @@ body.task-modal-open {
 }
 
 .task-modal-btn-save {
-  background: var(--primary-color, #3b82f6);
-  border: 1px solid var(--primary-color, #3b82f6);
+  background: var(--primary-color, #1F6B4E);
+  border: 1px solid var(--primary-color, #1F6B4E);
   color: white;
   display: inline-flex;
   align-items: center;
@@ -3814,8 +3814,8 @@ body.task-modal-open {
 }
 
 .task-modal-btn-save:hover {
-  background: var(--primary-hover, #2563eb);
-  border-color: var(--primary-hover, #2563eb);
+  background: var(--primary-hover, #155039);
+  border-color: var(--primary-hover, #155039);
 }
 
 .task-modal-btn-save .task-modal-btn-spinner {
@@ -3852,7 +3852,7 @@ body.task-modal-open {
 .task-modal-btn-browse:hover {
   background: var(--bg-tertiary, var(--bg-secondary));
   color: var(--text-primary);
-  border-color: var(--primary-color, #3b82f6);
+  border-color: var(--primary-color, #1F6B4E);
 }
 
 .task-modal-btn-secondary {
@@ -4223,11 +4223,11 @@ body.task-modal-open {
 
 .task-modal-subtask-card.task-modal-subtask-card--has-error {
   border-color: rgba(194, 59, 59, 0.55);
-  background: color-mix(in srgb, #c23b3b 6%, var(--bg-secondary));
+  background: color-mix(in srgb, #9c2a2a 6%, var(--bg-secondary));
 }
 
 .task-modal-subtask-card-error {
-  color: #c23b3b;
+  color: #9c2a2a;
   font-size: 0.78rem;
   font-weight: 600;
   margin-top: 4px;
@@ -4314,7 +4314,7 @@ body.task-modal-open {
 .task-modal-progress {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(10, 10, 10, 0.4);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -4344,7 +4344,7 @@ body.task-modal-open {
   height: 18px;
   border-radius: 50%;
   border: 2px solid var(--border-color);
-  border-top-color: var(--primary-color, #3b82f6);
+  border-top-color: var(--primary-color, #1F6B4E);
   animation: taskModalSpin 0.8s linear infinite;
 }
 
@@ -4379,9 +4379,9 @@ body.task-modal-open {
 }
 
 .task-modal-progress-steps li.is-active {
-  border-color: rgba(59, 130, 246, 0.6);
+  border-color: rgba(31, 107, 78, 0.6);
   color: var(--text-primary);
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(31, 107, 78, 0.12);
 }
 
 .task-modal-progress-steps li.is-complete {
@@ -4418,7 +4418,7 @@ body.task-modal-open {
 /* Note AI Generation Panel */
 .note-ai-panel {
   border-top: 1px solid var(--border-color);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(99, 102, 241, 0.02) 100%);
+  background: linear-gradient(135deg, rgba(42, 135, 98, 0.05) 0%, rgba(42, 135, 98, 0.02) 100%);
 }
 
 .note-ai-panel[hidden],
@@ -4604,7 +4604,7 @@ body.task-modal-open {
 }
 
 .note-toolbar-btn.ai-active {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   color: var(--primary-color);
 }
 
@@ -4629,22 +4629,22 @@ body.task-modal-open {
    ============================================================================= */
 
 .chat-file-drop-zone {
-  border: 2px dashed var(--border-color, #e2e8f0);
+  border: 2px dashed var(--border-color, #E8EAED);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: var(--bg-secondary, #f8fafc);
+  background: var(--bg-secondary, #F5F6F7);
 }
 
 .chat-file-drop-zone:hover {
-  border-color: var(--accent-primary, #3b82f6);
-  background: rgba(59, 130, 246, 0.05);
+  border-color: var(--accent-primary, #1F6B4E);
+  background: rgba(31, 107, 78, 0.05);
 }
 
 .chat-file-drop-zone.drag-active {
-  border-color: var(--accent-primary, #3b82f6);
-  background: rgba(59, 130, 246, 0.1);
+  border-color: var(--accent-primary, #1F6B4E);
+  background: rgba(31, 107, 78, 0.1);
   border-style: solid;
 }
 
@@ -4669,8 +4669,8 @@ body.task-modal-open {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.5rem;
-  background: var(--bg-secondary, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-secondary, #F5F6F7);
+  border: 1px solid var(--border-color, #E8EAED);
   border-radius: 4px;
   font-size: 0.8rem;
 }
@@ -4714,29 +4714,29 @@ body.task-modal-open {
    ============================================================================= */
 
 .task-file-drop-zone {
-  border: 2px dashed var(--border-color, #e2e8f0);
+  border: 2px dashed var(--border-color, #E8EAED);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: var(--bg-secondary, #f8fafc);
+  background: var(--bg-secondary, #F5F6F7);
 }
 
 .task-file-drop-zone:hover {
-  border-color: var(--accent-primary, #3b82f6);
-  background: rgba(59, 130, 246, 0.05);
+  border-color: var(--accent-primary, #1F6B4E);
+  background: rgba(31, 107, 78, 0.05);
 }
 
 .task-file-drop-zone:focus-visible {
-  border-color: var(--accent-primary, #3b82f6);
-  background: rgba(59, 130, 246, 0.08);
-  outline: 3px solid rgba(59, 130, 246, 0.18);
+  border-color: var(--accent-primary, #1F6B4E);
+  background: rgba(31, 107, 78, 0.08);
+  outline: 3px solid rgba(31, 107, 78, 0.18);
   outline-offset: 2px;
 }
 
 .task-file-drop-zone.drag-active {
   border-color: #6366f1;
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(42, 135, 98, 0.1);
   border-style: solid;
 }
 
@@ -4761,8 +4761,8 @@ body.task-modal-open {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.5rem;
-  background: var(--bg-secondary, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-secondary, #F5F6F7);
+  border: 1px solid var(--border-color, #E8EAED);
   border-radius: 4px;
   font-size: 0.8rem;
 }
@@ -5341,7 +5341,7 @@ body.task-modal-open {
 }
 
 .note-wikilink:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(42, 135, 98, 0.08);
   border-bottom-style: solid;
 }
 
@@ -5360,7 +5360,7 @@ body.task-modal-open {
    ============================================================================= */
 
 .note-backlinks-section {
-  border-top: 1px solid var(--border-color, #e5e7eb);
+  border-top: 1px solid var(--border-color, #E8EAED);
   margin-top: 12px;
   padding: 10px 4px 4px;
 }
@@ -5378,13 +5378,13 @@ body.task-modal-open {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
 }
 
 .note-backlinks-count {
   font-size: 10px;
-  color: var(--text-secondary, #64748b);
-  background: var(--bg-tertiary, rgba(99, 102, 241, 0.08));
+  color: var(--text-secondary, #5C5C5E);
+  background: var(--bg-tertiary, rgba(42, 135, 98, 0.08));
   padding: 1px 6px;
   border-radius: 8px;
   min-width: 18px;
@@ -5408,27 +5408,27 @@ body.task-modal-open {
 }
 
 .note-backlink-item:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.06));
-  border-color: var(--border-color, #e5e7eb);
+  background: var(--bg-hover, rgba(42, 135, 98, 0.06));
+  border-color: var(--border-color, #E8EAED);
   text-decoration: none;
 }
 
 .note-backlink-name {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #0A0A0A);
 }
 
 .note-backlink-ws {
   font-weight: 400;
   font-size: 11px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
 }
 
 .note-backlink-snippet {
   font-size: 11px;
   line-height: 1.4;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   margin-top: 2px;
   /* Clamp long snippets to two lines so the rail stays scannable. */
   display: -webkit-box;
@@ -5439,7 +5439,7 @@ body.task-modal-open {
 }
 
 .note-backlink-mark {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(42, 135, 98, 0.15);
   color: var(--primary-color, #6366f1);
   padding: 0 2px;
   border-radius: 2px;
@@ -5453,8 +5453,8 @@ body.task-modal-open {
   position: relative;
   flex: 0 0 auto;
   min-height: 40px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: var(--bg-tertiary, #f9fafb);
+  border-bottom: 1px solid var(--border-color, #E8EAED);
+  background: var(--bg-tertiary, #F5F6F7);
 }
 
 .note-page-pane.is-focused .note-pane-tab-strip::before {
@@ -5507,7 +5507,7 @@ body.task-modal-open {
 
 .note-tab.is-active {
   background: var(--bg-secondary, #ffffff);
-  border-color: var(--border-color, #e5e7eb);
+  border-color: var(--border-color, #E8EAED);
 }
 
 .note-tab.is-dragging {
@@ -5520,7 +5520,7 @@ body.task-modal-open {
 
 .note-tab-list.is-drop-target,
 .note-page-secondary-tabs.is-drop-target {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(42, 135, 98, 0.08);
 }
 
 /* Detach drop zone — overlays the right edge of the editor area during a
@@ -5531,7 +5531,7 @@ body.task-modal-open {
   right: 0;
   width: 220px;
   height: 50%;
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(42, 135, 98, 0.08);
   border: 2px dashed var(--primary-color, #6366f1);
   border-right: none;
   border-top-left-radius: 12px;
@@ -5554,7 +5554,7 @@ body.task-modal-open {
 }
 
 .note-page-detach-zone.is-drop-target {
-  background: rgba(99, 102, 241, 0.18);
+  background: rgba(42, 135, 98, 0.18);
 }
 
 .note-tab-button {
@@ -5562,7 +5562,7 @@ body.task-modal-open {
   border: none;
   padding: 6px 4px 6px 10px;
   font: inherit;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   cursor: pointer;
   max-width: 180px;
   text-align: left;
@@ -5570,7 +5570,7 @@ body.task-modal-open {
 }
 
 .note-tab.is-active .note-tab-button {
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #0A0A0A);
   font-weight: 500;
 }
 
@@ -5587,7 +5587,7 @@ body.task-modal-open {
   background: none;
   border: none;
   padding: 2px 8px 2px 4px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -5598,8 +5598,8 @@ body.task-modal-open {
 }
 
 .note-tab-close:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.1));
-  color: var(--text-primary, #111827);
+  background: var(--bg-hover, rgba(42, 135, 98, 0.1));
+  color: var(--text-primary, #0A0A0A);
 }
 
 .note-tab-strip-actions {
@@ -5613,13 +5613,13 @@ body.task-modal-open {
   background: none;
   border: none;
   padding: 4px 6px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   cursor: pointer;
   border-radius: 4px;
 }
 
 .note-tab-strip-action:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
+  background: var(--bg-hover, rgba(42, 135, 98, 0.08));
   color: var(--primary-color, #6366f1);
 }
 
@@ -5662,7 +5662,7 @@ body.task-modal-open {
 }
 
 .note-page-pane-secondary {
-  border-left: 1px solid var(--border-color, #e5e7eb);
+  border-left: 1px solid var(--border-color, #E8EAED);
   background: var(--bg-primary, #ffffff);
   display: flex;
   flex-direction: column;
@@ -5701,15 +5701,15 @@ body.task-modal-open {
 .note-tab-close-inline {
   margin-left: 6px;
   padding: 0 4px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   font-size: 14px;
   line-height: 1;
   border-radius: 50%;
 }
 
 .note-tab-close-inline:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.1));
-  color: var(--text-primary, #111827);
+  background: var(--bg-hover, rgba(42, 135, 98, 0.1));
+  color: var(--text-primary, #0A0A0A);
 }
 
 .note-page-secondary-content {
@@ -5745,12 +5745,12 @@ body.task-modal-open {
   font-size: 13px;
   line-height: 1.55;
   background: var(--bg-primary, #ffffff);
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #0A0A0A);
 }
 
 .note-page-secondary-editor[readonly] {
-  background: var(--bg-tertiary, #f9fafb);
-  color: var(--text-secondary, #64748b);
+  background: var(--bg-tertiary, #F5F6F7);
+  color: var(--text-secondary, #5C5C5E);
 }
 
 .note-page-secondary-rendered {
@@ -5766,8 +5766,8 @@ body.task-modal-open {
 }
 
 .note-page-secondary-rendered.is-readonly {
-  background: var(--bg-tertiary, #f9fafb);
-  color: var(--text-secondary, #64748b);
+  background: var(--bg-tertiary, #F5F6F7);
+  color: var(--text-secondary, #5C5C5E);
   cursor: default;
 }
 
@@ -5778,15 +5778,15 @@ body.task-modal-open {
 
 .note-page-secondary-banner {
   padding: 8px 12px;
-  background: rgba(99, 102, 241, 0.08);
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  color: var(--text-secondary, #64748b);
+  background: rgba(42, 135, 98, 0.08);
+  border-bottom: 1px solid var(--border-color, #E8EAED);
+  color: var(--text-secondary, #5C5C5E);
   font-size: 12px;
 }
 
 .note-page-secondary-status {
   font-size: 11px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   padding: 0 8px;
   align-self: center;
   min-width: 60px;
@@ -5794,7 +5794,7 @@ body.task-modal-open {
 }
 
 .note-page-secondary-empty {
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   font-size: 13px;
   font-style: italic;
   padding: 16px 24px;
@@ -5809,9 +5809,9 @@ body.task-modal-open {
   gap: 4px;
   margin: 8px;
   padding: 3px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--border-color, #E8EAED);
   border-radius: 6px;
-  background: var(--bg-secondary, #f3f4f6);
+  background: var(--bg-secondary, #F5F6F7);
 }
 
 .note-rail-tab {
@@ -5823,20 +5823,20 @@ body.task-modal-open {
   padding: 5px 8px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   cursor: pointer;
   text-align: center;
 }
 
 .note-rail-tab:hover {
-  color: var(--text-primary, #111827);
-  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
+  color: var(--text-primary, #0A0A0A);
+  background: var(--bg-hover, rgba(42, 135, 98, 0.08));
 }
 
 .note-rail-tab.is-active {
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #0A0A0A);
   background: var(--bg-primary, #ffffff);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(10, 10, 10, 0.08);
 }
 
 .note-rail-tab-pane {
@@ -5852,7 +5852,7 @@ body.task-modal-open {
 
 .note-rail-notes-search {
   padding: 8px;
-  border-bottom: 1px solid var(--border-color, #f3f4f6);
+  border-bottom: 1px solid var(--border-color, #F5F6F7);
 }
 
 .note-rail-notes-search input {
@@ -5878,17 +5878,17 @@ body.task-modal-open {
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 12px;
-  color: var(--text-primary, #111827);
+  color: var(--text-primary, #0A0A0A);
   cursor: pointer;
 }
 
 .note-rail-note-item:hover {
-  background: var(--bg-hover, rgba(99, 102, 241, 0.06));
-  border-color: var(--border-color, #e5e7eb);
+  background: var(--bg-hover, rgba(42, 135, 98, 0.06));
+  border-color: var(--border-color, #E8EAED);
 }
 
 .note-rail-note-item.is-active {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(42, 135, 98, 0.1);
   border-color: var(--primary-color, #6366f1);
   color: var(--primary-color, #6366f1);
   font-weight: 500;
@@ -5904,11 +5904,11 @@ body.task-modal-open {
 .note-rail-new-note {
   margin: 6px 8px 10px;
   padding: 6px 10px;
-  border: 1px dashed var(--border-color, #e5e7eb);
+  border: 1px dashed var(--border-color, #E8EAED);
   background: transparent;
   border-radius: 6px;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, #5C5C5E);
   cursor: pointer;
 }
 
@@ -5975,7 +5975,7 @@ body.task-modal-open {
 
   .note-page-pane-secondary {
     border-left: none;
-    border-top: 1px solid var(--border-color, #e5e7eb);
+    border-top: 1px solid var(--border-color, #E8EAED);
   }
 }
 
@@ -6128,7 +6128,7 @@ body.task-modal-open {
 }
 
 .search-palette-row.is-selected {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(42, 135, 98, 0.12);
 }
 
 .search-palette-row-icon {
@@ -6156,7 +6156,7 @@ body.task-modal-open {
 
 .search-palette-row-title mark,
 .search-palette-row-snippet mark {
-  background: rgba(99, 102, 241, 0.25);
+  background: rgba(42, 135, 98, 0.25);
   color: inherit;
   padding: 0 2px;
   border-radius: 2px;

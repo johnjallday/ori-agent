@@ -4,7 +4,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
-    linear-gradient(180deg, rgba(13, 21, 35, 0.96), rgba(11, 18, 30, 0.92));
+    linear-gradient(180deg, rgba(13, 20, 13, 0.96), rgba(13, 20, 13, 0.92));
 }
 
 .workspace-detail-health-card::before {
@@ -123,7 +123,7 @@
 
 .workspace-detail-health-badge.is-checking {
   border-color: rgba(125, 176, 255, 0.26);
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(31, 107, 78, 0.12);
   color: #b5d4ff;
 }
 
@@ -201,7 +201,7 @@
   padding: 0.95rem 1rem;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 15, 25, 0.66);
+  background: rgba(13, 20, 13, 0.66);
 }
 
 .workspace-detail-health-issue.is-error {
@@ -228,7 +228,7 @@
 
 .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
   background: rgba(239, 68, 68, 0.12);
-  color: #ffb1b1;
+  color: #C9CCD1;
 }
 
 .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
@@ -292,7 +292,7 @@
   margin: 0 1.35rem 1.35rem;
   border-radius: 18px;
   border: 1px solid rgba(125, 176, 255, 0.18);
-  background: rgba(9, 15, 25, 0.58);
+  background: rgba(13, 20, 13, 0.58);
   overflow: hidden;
 }
 
@@ -347,7 +347,7 @@
 
 .workspace-detail-ui-smoke-status.is-failed {
   background: rgba(239, 68, 68, 0.14);
-  color: #ffb1b1;
+  color: #C9CCD1;
 }
 
 .workspace-detail-ui-smoke-checks {
@@ -382,7 +382,7 @@
 
 .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
   background: rgba(239, 68, 68, 0.14);
-  color: #ffb1b1;
+  color: #C9CCD1;
 }
 
 .workspace-detail-ui-smoke-check-name {

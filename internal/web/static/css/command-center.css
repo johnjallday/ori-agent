@@ -253,7 +253,7 @@
 }
 
 .filter-dot.active {
-  background: #3b82f6;
+  background: #1F6B4E;
 }
 
 .filter-dot.completed {
@@ -353,8 +353,8 @@
 }
 
 .task-card-status.in_progress {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  background: rgba(31, 107, 78, 0.15);
+  color: #1F6B4E;
 }
 
 .task-card-status.completed {
@@ -443,12 +443,12 @@
 }
 
 .activity-event-icon.task_started {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  background: rgba(31, 107, 78, 0.15);
+  color: #1F6B4E;
 }
 
 .activity-event-icon.tool_call {
-  background: rgba(168, 85, 247, 0.15);
+  background: rgba(31, 107, 78, 0.15);
   color: #a855f7;
 }
 
