@@ -158,7 +158,10 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-skills.js',
       'internal/web/static/js/modules/workspace-task.js',
       'internal/web/static/js/modules/workspace-task-execution-views.js',
-      'internal/web/static/js/modules/workspace-task-skill-draft.js'
+      'internal/web/static/js/modules/workspace-task-skill-draft.js',
+      'internal/web/static/js/modules/relative-time.js',
+      'internal/web/static/js/modules/relative-time.test.js',
+      'internal/web/static/js/modules/workspace-run.js'
     ],
     languageOptions: {
       sourceType: 'module'

@@ -180,7 +180,7 @@ func (s *SQLiteStore) ListTrace(ctx context.Context, workspaceID, runID string, 
 	if err != nil {
 		return TracePage{}, fmt.Errorf("list workspace run trace: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []TraceEvent
 	for rows.Next() {
@@ -232,7 +232,7 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, workspaceID, runID stri
 	if err != nil {
 		return nil, fmt.Errorf("list workspace run artifacts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var artifacts []Artifact
 	for rows.Next() {
