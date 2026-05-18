@@ -33,7 +33,7 @@ export default defineConfig({
   // Shared settings for all projects
   use: {
     // Base URL for the Ori Agent server
-    baseURL: 'http://localhost:8765',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8765',
 
     // Collect trace on failure for debugging
     trace: 'on-first-retry',

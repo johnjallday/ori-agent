@@ -1,0 +1,33 @@
+[
+  {
+    "name": "direct_time",
+    "prompt": "What time is it in Madrid?",
+    "expected_context_mode": "direct"
+  },
+  {
+    "name": "confident_robotics",
+    "prompt": "Build the robotics dashboard from scratch",
+    "expected_context_mode": "workspace",
+    "expected_workspace_state": "confident",
+    "expected_workspace_id": "ws-robotics"
+  },
+  {
+    "name": "ambiguous_launch",
+    "prompt": "Build the launch dashboard from scratch",
+    "expected_context_mode": "workspace",
+    "expected_workspace_state": "ambiguous"
+  },
+  {
+    "name": "no_fit_finance",
+    "prompt": "Create a payroll service with authentication from scratch",
+    "expected_context_mode": "workspace",
+    "expected_workspace_state": "no_fit"
+  },
+  {
+    "name": "repair_broken_ops",
+    "prompt": "Build the broken ops dashboard from scratch",
+    "expected_context_mode": "workspace",
+    "expected_workspace_state": "needs_repair",
+    "expected_workspace_id": "ws-broken"
+  }
+]
