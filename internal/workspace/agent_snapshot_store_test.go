@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -239,6 +240,148 @@ func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 	}
 	if got, _ := agents.GetAgent("Manager"); got.Settings.Model != "global-model" {
 		t.Fatalf("expected existing global preserved, got %q", got.Settings.Model)
+	}
+}
+
+func TestRestoreAllowlistedWorkspaceAgents_OnlyRestoresAllowlisted(t *testing.T) {
+	primary := NewInMemoryStore()
+
+	allowedAg := &agent.Agent{Type: agent.TypeToolCalling}
+	allowedAg.Settings.Model = "allowed-model"
+	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", allowedAg); err != nil {
+		t.Fatalf("seed allow snapshot: %v", err)
+	}
+	deniedAg := &agent.Agent{Type: agent.TypeToolCalling}
+	deniedAg.Settings.Model = "denied-model"
+	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", deniedAg); err != nil {
+		t.Fatalf("seed deny snapshot: %v", err)
+	}
+	if err := primary.Save(&Workspace{
+		ID:     "ws-allow",
+		Name:   "Allow",
+		Agents: []string{"AllowedManager"},
+	}); err != nil {
+		t.Fatalf("save allow ws: %v", err)
+	}
+	if err := primary.Save(&Workspace{
+		ID:     "ws-deny",
+		Name:   "Deny",
+		Agents: []string{"DeniedManager"},
+	}); err != nil {
+		t.Fatalf("save deny ws: %v", err)
+	}
+
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
+	if err := allowlist.Add("ws-allow"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	RestoreAllowlistedWorkspaceAgents(primary, agents, allowlist)
+
+	if _, ok := agents.GetAgent("AllowedManager"); !ok {
+		t.Fatal("expected AllowedManager restored")
+	}
+	if _, ok := agents.GetAgent("DeniedManager"); ok {
+		t.Fatal("DeniedManager must not be restored (workspace not allowlisted)")
+	}
+}
+
+func TestRestoreAllowlistedWorkspaceAgents_NilAllowlistRestoresNothing(t *testing.T) {
+	primary := NewInMemoryStore()
+	managerAg := &agent.Agent{Type: agent.TypeToolCalling}
+	if err := primary.SaveWorkspaceAgent("ws-x", "Manager", managerAg); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := primary.Save(&Workspace{ID: "ws-x", Agents: []string{"Manager"}}); err != nil {
+		t.Fatalf("save ws: %v", err)
+	}
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+
+	RestoreAllowlistedWorkspaceAgents(primary, agents, nil)
+
+	if _, ok := agents.GetAgent("Manager"); ok {
+		t.Fatal("nil allowlist must restore nothing")
+	}
+}
+
+func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(t *testing.T) {
+	primary := NewInMemoryStore()
+
+	// One allowlisted workspace, one not. Both have workspace-local snapshots.
+	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", &agent.Agent{}); err != nil {
+		t.Fatalf("seed allow snapshot: %v", err)
+	}
+	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", &agent.Agent{}); err != nil {
+		t.Fatalf("seed deny snapshot: %v", err)
+	}
+	if err := primary.Save(&Workspace{ID: "ws-allow", Agents: []string{"AllowedManager"}}); err != nil {
+		t.Fatalf("save allow ws: %v", err)
+	}
+	if err := primary.Save(&Workspace{ID: "ws-deny", Agents: []string{"DeniedManager"}}); err != nil {
+		t.Fatalf("save deny ws: %v", err)
+	}
+
+	// Global agent store has: the system agent (Ori), both workspace-managed
+	// agents, and a user-owned agent that no workspace knows about.
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Ori":             {Type: agent.TypeToolCalling},
+		"AllowedManager":  {Type: agent.TypeGeneral},
+		"DeniedManager":   {Type: agent.TypeGeneral},
+		"UserOwnedHelper": {Type: agent.TypeGeneral},
+	}}
+	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
+	if err := allowlist.Add("ws-allow"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	WipeNonAllowlistedAgentSnapshots(primary, agents, allowlist)
+
+	if _, ok := agents.GetAgent("DeniedManager"); ok {
+		t.Fatal("DeniedManager should be wiped (workspace not in allowlist)")
+	}
+	if _, ok := agents.GetAgent("AllowedManager"); !ok {
+		t.Fatal("AllowedManager should be preserved (workspace allowlisted)")
+	}
+	if _, ok := agents.GetAgent("Ori"); !ok {
+		t.Fatal("system agent Ori must never be wiped")
+	}
+	if _, ok := agents.GetAgent("UserOwnedHelper"); !ok {
+		t.Fatal("agent with no workspace snapshot must not be wiped")
+	}
+}
+
+func TestWipeNonAllowlistedAgentSnapshots_KeepsAgentReferencedByOneAllowlistedWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+
+	// Two workspaces both reference "Manager", but only one is allowlisted.
+	// The agent should still be kept because at least one allowlisted
+	// workspace claims it.
+	if err := primary.SaveWorkspaceAgent("ws-allow", "Manager", &agent.Agent{}); err != nil {
+		t.Fatalf("seed allow: %v", err)
+	}
+	if err := primary.SaveWorkspaceAgent("ws-deny", "Manager", &agent.Agent{}); err != nil {
+		t.Fatalf("seed deny: %v", err)
+	}
+	if err := primary.Save(&Workspace{ID: "ws-allow", Agents: []string{"Manager"}}); err != nil {
+		t.Fatalf("save allow: %v", err)
+	}
+	if err := primary.Save(&Workspace{ID: "ws-deny", Agents: []string{"Manager"}}); err != nil {
+		t.Fatalf("save deny: %v", err)
+	}
+
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Manager": {Type: agent.TypeToolCalling},
+	}}
+	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
+	if err := allowlist.Add("ws-allow"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	WipeNonAllowlistedAgentSnapshots(primary, agents, allowlist)
+
+	if _, ok := agents.GetAgent("Manager"); !ok {
+		t.Fatal("Manager must be preserved because ws-allow references it")
 	}
 }
 

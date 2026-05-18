@@ -110,6 +110,7 @@ type ServerBuilder struct {
 	updateMgr                *updatemanager.Manager
 	workspaceStore           workspace.Store
 	workspaceFileStore       *workspace.FileStore
+	workspaceAllowlist       *workspace.Allowlist
 	taskHandler              *workspace.LLMTaskHandler
 	orchestrationTaskHandler *workspace.LLMTaskHandler
 	runBackedTaskHandler     workspace.TaskHandler

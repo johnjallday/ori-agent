@@ -47,7 +47,12 @@ func (s *resolverAgentStoreStub) CreateAgent(name string, cfg *store.CreateAgent
 	return nil
 }
 
-func (s *resolverAgentStoreStub) DeleteAgent(string) error { return nil }
+func (s *resolverAgentStoreStub) DeleteAgent(name string) error {
+	if s.agents != nil {
+		delete(s.agents, name)
+	}
+	return nil
+}
 
 func (s *resolverAgentStoreStub) GetAgent(name string) (*agent.Agent, bool) {
 	ag, ok := s.agents[name]
