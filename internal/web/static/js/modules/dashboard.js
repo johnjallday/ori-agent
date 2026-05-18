@@ -1349,20 +1349,22 @@
   }
 
   function buildHomeAssistantPlaceholder(routeContext) {
-    if (!routeContext) return 'Ask Ori to do something...';
+    if (!routeContext) {
+      return document.getElementById('homeFirstRunHero') ? 'Plan a product launch…' : 'Ask Ori to do something…';
+    }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
     if (routeContext.surface === 'workspace_canvas') {
-      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace canvas...';
-      if (workspaceMode === 'note') return 'Save a note on this workspace canvas...';
-      return 'Create a task for ' + displayName + ' from this canvas...';
+      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace canvas…';
+      if (workspaceMode === 'note') return 'Save a note on this workspace canvas…';
+      return 'Create a task for ' + displayName + ' from this canvas…';
     }
     if (hasWorkspaceRouteContext(routeContext)) {
-      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace... (/task creates a task)';
-      if (workspaceMode === 'note') return 'Save a workspace note... (/task creates a task, /chat asks)';
-      return 'Create a task for ' + displayName + '... (/chat asks, /note saves a note)';
+      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace… (/task creates a task)';
+      if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /chat asks)';
+      return 'Create a task for ' + displayName + '… (/chat asks, /note saves a note)';
     }
-    return 'Ask Ori to do something...';
+    return document.getElementById('homeFirstRunHero') ? 'Plan a product launch…' : 'Ask Ori to do something…';
   }
 
   function renderHomeAssistantWorkspaceIdentity(routeContext) {

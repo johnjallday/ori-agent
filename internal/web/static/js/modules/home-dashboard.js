@@ -159,6 +159,17 @@
       </a>
     `;
 
+    if (workspaces.length === 0) {
+      return `
+        <div class="home-workspace-empty">
+          <div class="home-workspace-empty-copy">
+            Start with 1 workspace to keep tasks, notes, and files together.
+          </div>
+          ${newTile}
+        </div>
+      `;
+    }
+
     return `<div class="home-workspace-strip">${cards}${newTile}</div>`;
   }
 
@@ -211,7 +222,7 @@
       if (rows.length === 0) {
         body.innerHTML = `
           <div class="home-section-empty">
-            No scheduled tasks. <a href="/workspaces" class="home-section-link">Schedule one →</a>
+            No tasks yet. <a href="/workspaces" class="home-section-link">Create a workspace to add your first task →</a>
           </div>
         `;
         return;
@@ -256,7 +267,11 @@
       const events = Array.isArray(data.events) ? data.events : [];
 
       if (events.length === 0) {
-        body.innerHTML = '<div class="home-section-empty">Nothing to show yet.</div>';
+        body.innerHTML = `
+          <div class="home-section-empty">
+            Recent work will appear here after you create a workspace and ask Ori to help.
+          </div>
+        `;
         return;
       }
       body.innerHTML = `<ul class="home-row-list">${events.map(renderActivityRow).join('')}</ul>`;
@@ -299,56 +314,21 @@
     `;
   }
 
-  // ----- First-run onboarding (CTA + Skip) -----
+  // ----- First-run actions -----
 
-  const ONBOARDING_DISMISSED_KEY = 'home.onboardingDismissed';
-
-  function sessionFlagSet() {
-    try { return sessionStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1'; }
-    catch (_) { return false; }
-  }
-
-  function setSessionFlag() {
-    try { sessionStorage.setItem(ONBOARDING_DISMISSED_KEY, '1'); }
-    catch (_) { /* private mode etc. — skip flag, dashboard still shows */ }
-  }
-
-  function applyFirstRunState() {
-    // Only meaningful when both CTA and a hidden dashboard are present
-    // (first-run server context). For returning users, only the dashboard
-    // is rendered and this function is a no-op.
-    const cta = document.getElementById('homeFirstRunCTA');
-    const sections = document.getElementById('homeDashboardSections');
-    if (!cta || !sections) return false; // not first-run, or markup missing
-
-    if (sessionFlagSet()) {
-      cta.hidden = true;
-      sections.hidden = false;
-      return true; // dashboard is visible; caller should fetch
-    }
-    return false; // CTA still showing; skip fetches
-  }
-
-  function wireFirstRunButtons() {
-    const skipBtn = document.getElementById('homeFirstRunSkip');
-    if (skipBtn) {
-      skipBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        fireTTFA('first-run-skip');
-        setSessionFlag();
-        if (applyFirstRunState()) {
-          wireDashboardActions();
-          loadRecentWorkspaces();
-          loadUpcoming();
-          loadRecentActivity();
-        }
-      });
-    }
+  function wireFirstRunActions() {
     const startBtn = document.getElementById('homeFirstRunStart');
     if (startBtn) {
-      // CTA is a plain anchor — native navigation handles routing. Fire
-      // TTfA here so the metric captures the click before the page unloads.
       startBtn.addEventListener('click', () => fireTTFA('first-run-start'));
+    }
+
+    const askBtn = document.getElementById('homeFirstRunAskBtn');
+    const input = document.getElementById('homeAssistantInput');
+    if (askBtn && input) {
+      askBtn.addEventListener('click', () => {
+        fireTTFA('first-run-ask');
+        input.focus();
+      });
     }
   }
 
@@ -357,15 +337,10 @@
   function init() {
     wireChips();
     wireFocusShortcut();
-    wireFirstRunButtons();
+    wireFirstRunActions();
 
     const sections = document.getElementById('homeDashboardSections');
     if (!sections) return;
-
-    // First-run with no session flag: dashboard stays hidden; skip fetches.
-    if (sections.hasAttribute('hidden') && !applyFirstRunState()) {
-      return;
-    }
 
     wireDashboardActions();
     loadRecentWorkspaces();

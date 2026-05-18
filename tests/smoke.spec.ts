@@ -65,6 +65,126 @@ test.describe('Smoke Tests', () => {
   });
 });
 
+test.describe('Onboarding', () => {
+  async function installBaseOnboardingRoutes(page) {
+    await page.route('**/api/onboarding/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: true,
+          current_step: 0,
+          completed: false,
+          skipped: false,
+          steps_completed: [],
+          user_name: '',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/onboarding/names', async (route) => {
+      const body = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_name: body.user_name || '',
+          assistant_name: body.assistant_name || 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/onboarding/step', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+  }
+
+  test('keeps the first step focused on naming and shows progress', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.goto('/');
+
+    await expect(page.locator('#onboardingModal')).toBeVisible();
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
+    await expect(page.locator('#onboardingWorkspaceRoot')).toHaveCount(0);
+    await expect(page.locator('#onboardingVaultRoot')).toHaveCount(0);
+    await expect(page.getByText('Storage locations can be changed later in Settings when you need them.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
+  });
+
+  test('auto-selects a recommended model before continuing', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.route('**/api/providers', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [
+            { name: 'ollama', display_name: 'Ollama', available: true }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/settings/available-models?provider=ollama', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [
+            { id: 'llama-small', label: 'Llama Small', description: 'Fast', recommended: false },
+            { id: 'llama-balanced', label: 'Llama Balanced', description: 'Recommended', recommended: true }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#onboardingUserName').fill('Jamie');
+    await page.locator('#welcomeNextBtn').click();
+
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 3');
+    await expect(page.locator('#onboardingSystemProvider')).toHaveValue('ollama');
+    await expect(page.locator('#onboardingSystemModel')).toHaveValue('llama-balanced');
+    await expect(page.locator('#modelNextBtn')).toBeEnabled();
+    await expect(page.locator('#modelBackBtn')).toBeVisible();
+  });
+
+  test('blocks progress when no usable provider is available', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.route('**/api/providers', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ providers: [] })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#welcomeNextBtn').click();
+
+    await expect(page.locator('#onboardingApiKeySection')).toBeVisible();
+    await expect(page.locator('#modelNextBtn')).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
+  });
+});
+
+test.describe('Home First Run', () => {
+  test('makes workspace creation the primary next step when no workspaces exist', async ({ page, request }) => {
+    const response = await request.get('/api/workspaces');
+    const data = await response.json();
+    test.skip((data.workspaces || []).length !== 0, 'requires an empty workspace store');
+
+    await page.goto('/');
+    await expect(page.locator('#homeFirstRunHero')).toBeVisible();
+    await expect(page.locator('#homeFirstRunStart')).toHaveText('Create Workspace');
+    await expect(page.locator('#homeAssistantInput')).toHaveAttribute('placeholder', 'Plan a product launch…');
+    await expect(page.getByText('Create a workspace for a software project', { exact: true })).toBeVisible();
+  });
+});
+
 test.describe('Agent Management', () => {
   test('can open create agent modal', async ({ page }) => {
     await page.goto('/');

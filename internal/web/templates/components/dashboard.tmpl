@@ -1,46 +1,51 @@
 <!-- Ori Dashboard - Prompt-first layout -->
 <div class="container-fluid py-5 dashboard-shell dashboard-shell-minimal">
+  {{if .Extra.IsFirstRun}}
+  <section id="homeFirstRunHero" class="modern-card p-4 p-md-5 mb-4 home-first-run-hero" aria-labelledby="homeFirstRunTitle">
+    <div class="home-first-run-hero-copy">
+      <div class="home-assistant-minimal-label">Start Here</div>
+      <h1 id="homeFirstRunTitle" class="home-first-run-title mb-0">Create your first workspace</h1>
+      <p class="home-first-run-subtitle mb-0">A workspace gives Ori the project, files, and tasks it needs to help you well.</p>
+    </div>
+    <div class="home-first-run-actions">
+      <a id="homeFirstRunStart" href="/workspaces?create=1" class="modern-btn modern-btn-primary home-first-run-cta-btn">Create Workspace</a>
+      <button id="homeFirstRunAskBtn" type="button" class="modern-btn modern-btn-secondary">Describe a Project Instead</button>
+    </div>
+  </section>
+  {{end}}
+
   <div id="homeAssistantCard" class="modern-card p-4 p-md-5 mb-4 dashboard-home-card dashboard-home-card-minimal">
     <div class="home-assistant-minimal-wrap">
       <div class="home-assistant-minimal-label">Ask Ori</div>
-      <h1 class="home-assistant-minimal-title mb-0">What should Ori do?</h1>
+      <h1 class="home-assistant-minimal-title mb-0">{{if .Extra.IsFirstRun}}Or describe what you want help with{{else}}What should Ori do?{{end}}</h1>
       <p class="home-assistant-minimal-subtitle mb-0">
-        Enter a task and follow live progress in the thinking modal.
+        {{if .Extra.IsFirstRun}}Ori can turn a rough idea into a workspace-ready plan.{{else}}Enter a task and follow live progress in the thinking modal.{{end}}
       </p>
       <form id="homeAssistantForm" class="home-assistant-form home-assistant-form-minimal">
+        <label for="homeAssistantInput" class="visually-hidden">Ask Ori</label>
         <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-               placeholder="Ask Ori to do something..."
+               name="home_assistant_prompt"
+               autocomplete="off"
+               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Ask Ori to do something…{{end}}"
                style="min-height: 50px;">
         <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
       </form>
       <!-- Suggested prompt chips: populate the input on click (no auto-submit). -->
       <div class="home-prompt-chips" role="group" aria-label="Suggested prompts">
+        {{if .Extra.IsFirstRun}}
+        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a software project">Create a workspace for a software project</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Help me organize a research project">Help me organize a research project</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Plan a product launch">Plan a product launch</button>
+        {{else}}
         <button type="button" class="home-prompt-chip" data-prompt="Draft a weekly digest from my notes">Draft a weekly digest from my notes</button>
         <button type="button" class="home-prompt-chip" data-prompt="Summarize this week's task activity">Summarize this week's task activity</button>
         <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on today?</button>
+        {{end}}
       </div>
     </div>
   </div>
 
-  {{if .Extra.IsFirstRun}}
-  <!-- First-run CTA shown when the user has zero workspaces. Button
-       navigates to /workspaces?create=1, where workspace-create.js auto-
-       opens the create-workspace modal with the template gallery focused.
-       The Skip link sets a session flag and reveals the dashboard sections
-       below (which are rendered hidden for this case). -->
-  <section id="homeFirstRunCTA" class="home-section home-first-run-cta" aria-labelledby="homeFirstRunTitle">
-    <h2 id="homeFirstRunTitle" class="home-first-run-title">Get started with your first workspace</h2>
-    <p class="home-first-run-subtitle">Pick a template and Ori will pre-fill a description and starter tasks you can adapt.</p>
-    <div class="home-first-run-actions">
-      <a id="homeFirstRunStart" href="/workspaces?create=1" class="modern-btn modern-btn-primary home-first-run-cta-btn">Create your first workspace</a>
-      <button id="homeFirstRunSkip" type="button" class="home-first-run-skip">Skip — show me the dashboard</button>
-    </div>
-  </section>
-  {{end}}
-  <!-- Dashboard sections (populated by JS). When IsFirstRun=true, the
-       container is hidden by default; home-dashboard.js unhides it if the
-       session-scoped onboarding-dismissed flag is set. -->
-  <div id="homeDashboardSections" class="home-dashboard-sections" data-workspace-count="{{.Extra.WorkspaceCount}}"{{if .Extra.IsFirstRun}} hidden{{end}}>
+  <div id="homeDashboardSections" class="home-dashboard-sections" data-workspace-count="{{.Extra.WorkspaceCount}}">
     <section id="homeRecentWorkspaces" class="home-section home-section-workspaces" aria-labelledby="homeRecentWorkspacesTitle">
       <header class="home-section-header">
         <h2 id="homeRecentWorkspacesTitle" class="home-section-title">Recent workspaces</h2>
@@ -80,7 +85,7 @@
           <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is thinking</h5>
           <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
             <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-            <span>Analyzing your request...</span>
+            <span>Analyzing your request…</span>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
