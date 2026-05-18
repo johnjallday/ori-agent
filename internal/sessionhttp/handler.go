@@ -22,6 +22,7 @@ type Handler struct {
 	workspaceStore        *workspace.FileStore // optional folder-based workspace store
 	workspaceRootResolver func() string
 	agentStore            store.Store
+	workspaceAllowlist    *workspace.Allowlist
 }
 
 // New creates a new session handler.
@@ -43,6 +44,14 @@ func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
 // SetAgentStore sets the agent store used for workspace entry-agent provisioning.
 func (h *Handler) SetAgentStore(agentStore store.Store) {
 	h.agentStore = agentStore
+}
+
+// SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which
+// workspaces from the shared ~/Ori Workspaces/ tree are allowed to hydrate
+// their agent snapshots into this data directory. When the workspace import
+// endpoint succeeds it appends the imported IDs to this allowlist.
+func (h *Handler) SetWorkspaceAllowlist(a *workspace.Allowlist) {
+	h.workspaceAllowlist = a
 }
 
 // handleSessions routes requests to /api/sessions.

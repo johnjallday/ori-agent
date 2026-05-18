@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 19
+const schemaVersion = 20
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -103,6 +103,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration018WorkspaceRuns(ctx)
 	case 19:
 		return db.migration019WorkspaceRunContext(ctx)
+	case 20:
+		return db.migration020HomeAssistantIntakeTraces(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -999,6 +1001,48 @@ func (db *DB) migration019WorkspaceRunContext(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to extend workspace run context schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration020HomeAssistantIntakeTraces persists home context-routing outcomes
+// so routing quality can be evaluated beyond process logs.
+func (db *DB) migration020HomeAssistantIntakeTraces(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS home_assistant_intake_traces (
+			id TEXT PRIMARY KEY,
+			prompt TEXT NOT NULL,
+			intent TEXT,
+			intent_variant TEXT,
+			routing_policy TEXT,
+			context_mode TEXT,
+			handoff_policy TEXT,
+			route_mode TEXT,
+			target_surface TEXT,
+			matched_agent TEXT,
+			workspace_state TEXT,
+			selected_workspace_id TEXT,
+			selected_workspace_name TEXT,
+			final_workspace_id TEXT,
+			confidence REAL NOT NULL DEFAULT 0,
+			reasons_json TEXT NOT NULL DEFAULT '[]',
+			candidates_json TEXT NOT NULL DEFAULT '[]',
+			user_override INTEGER NOT NULL DEFAULT 0,
+			final_handoff_target TEXT NOT NULL,
+			route_context_json TEXT,
+			created_at DATETIME NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_home_assistant_intake_traces_created_at
+			ON home_assistant_intake_traces(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_home_assistant_intake_traces_workspace_state
+			ON home_assistant_intake_traces(workspace_state)`,
+		`CREATE INDEX IF NOT EXISTS idx_home_assistant_intake_traces_final_workspace
+			ON home_assistant_intake_traces(final_workspace_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create home assistant intake trace schema: %w", err)
 		}
 	}
 	return nil

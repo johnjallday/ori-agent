@@ -65,6 +65,126 @@ test.describe('Smoke Tests', () => {
   });
 });
 
+test.describe('Onboarding', () => {
+  async function installBaseOnboardingRoutes(page) {
+    await page.route('**/api/onboarding/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: true,
+          current_step: 0,
+          completed: false,
+          skipped: false,
+          steps_completed: [],
+          user_name: '',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/onboarding/names', async (route) => {
+      const body = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_name: body.user_name || '',
+          assistant_name: body.assistant_name || 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/onboarding/step', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+  }
+
+  test('keeps the first step focused on naming and shows progress', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.goto('/');
+
+    await expect(page.locator('#onboardingModal')).toBeVisible();
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
+    await expect(page.locator('#onboardingWorkspaceRoot')).toHaveCount(0);
+    await expect(page.locator('#onboardingVaultRoot')).toHaveCount(0);
+    await expect(page.getByText('Storage locations can be changed later in Settings when you need them.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
+  });
+
+  test('auto-selects a recommended model before continuing', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.route('**/api/providers', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [
+            { name: 'ollama', display_name: 'Ollama', available: true }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/settings/available-models?provider=ollama', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [
+            { id: 'llama-small', label: 'Llama Small', description: 'Fast', recommended: false },
+            { id: 'llama-balanced', label: 'Llama Balanced', description: 'Recommended', recommended: true }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#onboardingUserName').fill('Jamie');
+    await page.locator('#welcomeNextBtn').click();
+
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 2 of 3');
+    await expect(page.locator('#onboardingSystemProvider')).toHaveValue('ollama');
+    await expect(page.locator('#onboardingSystemModel')).toHaveValue('llama-balanced');
+    await expect(page.locator('#modelNextBtn')).toBeEnabled();
+    await expect(page.locator('#modelBackBtn')).toBeVisible();
+  });
+
+  test('blocks progress when no usable provider is available', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.route('**/api/providers', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ providers: [] })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#welcomeNextBtn').click();
+
+    await expect(page.locator('#onboardingApiKeySection')).toBeVisible();
+    await expect(page.locator('#modelNextBtn')).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
+  });
+});
+
+test.describe('Home First Run', () => {
+  test('makes workspace creation the primary next step when no workspaces exist', async ({ page, request }) => {
+    const response = await request.get('/api/workspaces');
+    const data = await response.json();
+    test.skip((data.workspaces || []).length !== 0, 'requires an empty workspace store');
+
+    await page.goto('/');
+    await expect(page.locator('#homeFirstRunHero')).toBeVisible();
+    await expect(page.locator('#homeFirstRunStart')).toHaveText('Create Workspace');
+    await expect(page.locator('#homeAssistantInput')).toHaveAttribute('placeholder', 'Plan a product launch…');
+    await expect(page.getByText('Create a workspace for a software project', { exact: true })).toBeVisible();
+  });
+});
+
 test.describe('Agent Management', () => {
   test('can open create agent modal', async ({ page }) => {
     await page.goto('/');
@@ -258,5 +378,419 @@ test.describe('API Health', () => {
   test('plugins API is accessible', async ({ request }) => {
     const response = await request.get('/api/plugins');
     expect(response.ok()).toBeTruthy();
+  });
+});
+
+test.describe('Home Workspace Routing', () => {
+  async function installWorkspaceAssistantMocks(
+    page,
+    options: {
+      workspaceId: string;
+      entryAgentName: string;
+      onChat?: () => void;
+    }
+  ) {
+    await page.route(`**/api/workspaces/${options.workspaceId}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: options.workspaceId,
+          entry_agent_name: options.entryAgentName
+        })
+      });
+    });
+    await page.route('**/api/chat', async (route) => {
+      options.onChat?.();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          response: 'Workspace manager is ready.'
+        })
+      });
+    });
+  }
+
+  test('asks the user to choose when workspace routing is ambiguous', async ({ page }) => {
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          score: 0,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'ambiguous',
+            candidates: [
+              { id: 'ws-alpha', name: 'Launch Alpha', score: 8, reasons: ['matched workspace goal'] },
+              { id: 'ws-beta', name: 'Launch Beta', score: 7, reasons: ['matched workspace goal'] }
+            ]
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#homeAssistantInput').fill('ship the launch plan');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Choose Workspace');
+    await expect(page.getByText('Launch Alpha', { exact: true })).toBeVisible();
+    await expect(page.getByText('Launch Beta', { exact: true })).toBeVisible();
+    await expect(page.getByText('Create New Workspace', { exact: true })).toBeVisible();
+  });
+
+  test('offers workspace creation when no existing workspace fits', async ({ page }) => {
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          matched_agent: 'Ori',
+          score: 4,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'no_fit',
+            candidates: []
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#homeAssistantInput').fill('build a robotics dashboard from scratch');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Workspace Needed');
+    const actions = page.locator('#homeAssistantActions');
+    await expect(actions.getByText('Create Workspace', { exact: true })).toBeVisible();
+    await expect(actions.getByText('Continue in Chat', { exact: true })).toBeVisible();
+  });
+
+  test('hands a confident workspace match to the workspace assistant', async ({ page }) => {
+    let chatCalls = 0;
+    await installWorkspaceAssistantMocks(page, {
+      workspaceId: 'ws-cabinet',
+      entryAgentName: 'Cabinet Manager',
+      onChat: () => { chatCalls += 1; }
+    });
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          matched_agent: 'Cabinet Manager',
+          score: 8,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'confident',
+            selected_workspace_id: 'ws-cabinet',
+            selected_workspace_name: 'Cabinet',
+            confidence: 0.99,
+            reasons: ['matched workspace name'],
+            candidates: [
+              { id: 'ws-cabinet', name: 'Cabinet', score: 12, reasons: ['matched workspace name'] }
+            ]
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.evaluate(() => {
+      (window as any).sessionManager = {
+        sessions: [],
+        async createSessionWithAgentInFolder(agentName: string, folderId: string) {
+          return { id: 'sess-cabinet', agent_name: agentName, folder_id: folderId };
+        }
+      };
+    });
+    await page.locator('#homeAssistantInput').fill('build the cabinet roadmap');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect.poll(() => chatCalls).toBe(1);
+    await expect(page.locator('#homeAssistantConversation')).toContainText('Workspace manager is ready.');
+    await expect(page.locator('#homeAssistantActions')).toContainText('Choose Another Workspace');
+  });
+
+  test('lets the user override a confident workspace match', async ({ page }) => {
+    await page.route('**/api/workspaces/ws-cabinet', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'ws-cabinet',
+          entry_agent_name: 'Cabinet Manager'
+        })
+      });
+    });
+    await page.route('**/api/workspaces/ws-ops', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'ws-ops',
+          entry_agent_name: 'Ops Manager'
+        })
+      });
+    });
+    await page.route('**/api/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          response: 'Workspace manager is ready.'
+        })
+      });
+    });
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          matched_agent: 'Cabinet Manager',
+          score: 8,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'confident',
+            selected_workspace_id: 'ws-cabinet',
+            selected_workspace_name: 'Cabinet',
+            confidence: 0.99,
+            reasons: ['matched workspace name'],
+            candidates: [
+              { id: 'ws-cabinet', name: 'Cabinet', score: 12, reasons: ['matched workspace name'] },
+              { id: 'ws-ops', name: 'Ops Hub', score: 9, reasons: ['matched workspace goal'] }
+            ]
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.evaluate(() => {
+      (window as any).__handoffWorkspaceIds = [];
+      (window as any).sessionManager = {
+        sessions: [],
+        async createSessionWithAgentInFolder(agentName: string, folderId: string) {
+          (window as any).__handoffWorkspaceIds.push(folderId);
+          return { id: `sess-${folderId}`, agent_name: agentName, folder_id: folderId };
+        }
+      };
+    });
+    await page.locator('#homeAssistantInput').fill('build the cabinet roadmap');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect.poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds)).toEqual(['ws-cabinet']);
+    await page.locator('#homeAssistantActions').getByText('Choose Another Workspace', { exact: true }).click();
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Choose Workspace');
+    await page.locator('#homeAssistantActions').getByText('Ops Hub', { exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds)).toEqual(['ws-cabinet', 'ws-ops']);
+  });
+
+  test('shows a repair-required state when the matched workspace has no runnable entry agent', async ({ page }) => {
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          score: 0,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'needs_repair',
+            selected_workspace_id: 'ws-broken',
+            selected_workspace_name: 'Broken Ops',
+            repair_reason: 'workspace has no entry agent',
+            candidates: [
+              { id: 'ws-broken', name: 'Broken Ops', score: 12, reasons: ['matched workspace name'] }
+            ]
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#homeAssistantInput').fill('build the broken ops roadmap');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Entry Agent Required');
+    await expect(page.locator('#homeAssistantActions').getByText('Open Workspace Setup', { exact: true })).toBeVisible();
+  });
+
+  test('resumes a created workspace prompt once the new workspace is ready', async ({ page }) => {
+    let chatCalls = 0;
+    await installWorkspaceAssistantMocks(page, {
+      workspaceId: 'ws-new',
+      entryAgentName: 'New Workspace Manager',
+      onChat: () => { chatCalls += 1; }
+    });
+    await page.route('**/api/home-assistant/route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_only',
+          context_mode: 'workspace',
+          handoff_policy: 'assistant',
+          matched_agent: 'Ori',
+          score: 4,
+          requires_creation: false,
+          workspace_recommended: true,
+          route_mode: 'workspace_task',
+          target_surface: 'workspace',
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general',
+          workspace_resolution: {
+            state: 'no_fit',
+            candidates: []
+          }
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.evaluate(() => {
+      (window as any).sessionManager = {
+        sessions: [],
+        async createSessionWithAgentInFolder(agentName: string, folderId: string) {
+          return { id: 'sess-new', agent_name: agentName, folder_id: folderId };
+        }
+      };
+    });
+    await page.locator('#homeAssistantInput').fill('build a robotics dashboard from scratch');
+    await page.locator('#homeAssistantSendBtn').click();
+    await page.locator('#homeAssistantActions').getByText('Create Workspace', { exact: true }).click();
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('ori:workspace-created', {
+        detail: { workspaceId: 'ws-new', workspaceName: 'New Workspace' }
+      }));
+      return (window as any).OriAskRouting.refreshWorkspaceIdentity({
+        workspace_id: 'ws-new',
+        page_path: '/workspaces/ws-new',
+        surface: 'workspace_detail',
+        origin: 'ask_ori'
+      });
+    });
+
+    await expect.poll(() => chatCalls).toBe(1);
+  });
+
+  test('waits for repair before resuming a preserved workspace prompt', async ({ page }) => {
+    let workspaceReady = false;
+    let chatCalls = 0;
+    await page.route('**/api/workspaces/ws-broken', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(workspaceReady ? {
+          id: 'ws-broken',
+          entry_agent_name: 'Broken Ops Manager'
+        } : {
+          id: 'ws-broken'
+        })
+      });
+    });
+    await page.route('**/api/chat', async (route) => {
+      chatCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ response: 'Workspace repaired and ready.' })
+      });
+    });
+
+    await page.goto('/');
+    await page.evaluate(() => {
+      window.sessionStorage.setItem('ori.homeAssistant.pendingWorkspacePrompt', JSON.stringify({
+        prompt: 'finish the broken ops roadmap',
+        routeContext: {
+          surface: 'dashboard',
+          page_path: '/',
+          workspace_id: '',
+          session_id: '',
+          origin: 'ask_ori'
+        },
+        expectedWorkspaceId: 'ws-broken',
+        intentKey: 'general_task',
+        source: 'repair',
+        createdAt: Date.now()
+      }));
+      (window as any).sessionManager = {
+        sessions: [],
+        async createSessionWithAgentInFolder(agentName: string, folderId: string) {
+          return { id: 'sess-repaired', agent_name: agentName, folder_id: folderId };
+        }
+      };
+    });
+
+    await page.evaluate(() => (window as any).OriAskRouting.refreshWorkspaceIdentity({
+      workspace_id: 'ws-broken',
+      page_path: '/workspaces/ws-broken',
+      surface: 'workspace_detail',
+      origin: 'ask_ori'
+    }));
+    expect(chatCalls).toBe(0);
+
+    workspaceReady = true;
+    await page.evaluate(() => (window as any).OriAskRouting.refreshWorkspaceIdentity({
+      workspace_id: 'ws-broken',
+      page_path: '/workspaces/ws-broken',
+      surface: 'workspace_detail',
+      origin: 'ask_ori'
+    }));
+    await expect.poll(() => chatCalls).toBe(1);
   });
 });

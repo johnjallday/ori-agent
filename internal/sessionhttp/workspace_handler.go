@@ -1340,6 +1340,22 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		}
 	}
 
+	// Record each imported workspace in the per-data-dir allowlist so its agent
+	// snapshots will be re-hydrated on subsequent server starts. Without this,
+	// the workspaces would appear once on import and vanish from /agents after
+	// the next restart.
+	if h.workspaceAllowlist != nil {
+		for _, importItem := range importTree {
+			item := importItem.Workspace
+			if err := h.workspaceAllowlist.Add(item.ID); err != nil {
+				logger.Warn("Failed to add workspace to allowlist", logger.Fields{
+					"workspace_id": item.ID,
+					"error":        err.Error(),
+				})
+			}
+		}
+	}
+
 	adapter := session.NewWorkspaceStoreAdapter(h.store)
 	for _, importItem := range importTree {
 		item := importItem.Workspace

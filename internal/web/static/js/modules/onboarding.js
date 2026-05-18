@@ -7,8 +7,6 @@ export class OnboardingManager {
     this.modal = null;
     this.modalInstance = null;
     this.availableProviders = [];
-    this.workspaceRootState = null;
-    this.vaultRootState = null;
     this.userName = '';
     this.assistantName = 'Ori';
   }
@@ -27,8 +25,6 @@ export class OnboardingManager {
     this.setupEventListeners();
 
     const status = await this.checkOnboardingStatus();
-    await this.loadWorkspaceRoot();
-    await this.loadVaultRoot();
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
     if (status.needs_onboarding) {
@@ -49,10 +45,20 @@ export class OnboardingManager {
       modelNextBtn.addEventListener('click', () => this.advanceFromModel());
     }
 
+    const modelBackBtn = document.getElementById('modelBackBtn');
+    if (modelBackBtn) {
+      modelBackBtn.addEventListener('click', () => this.showPhase(0));
+    }
+
     // Phase 2: Done
     const startBtn = document.getElementById('startBtn');
     if (startBtn) {
       startBtn.addEventListener('click', () => this.completeOnboarding());
+    }
+
+    const doneBackBtn = document.getElementById('doneBackBtn');
+    if (doneBackBtn) {
+      doneBackBtn.addEventListener('click', () => this.showPhase(1));
     }
 
     // Skip link
@@ -79,8 +85,17 @@ export class OnboardingManager {
     const providerSelect = document.getElementById('onboardingSystemProvider');
     if (providerSelect) {
       providerSelect.addEventListener('change', async (e) => {
+        this.clearModelError();
         this.updateReasoningVisibility(e.target.value);
         await this.loadModels(e.target.value);
+      });
+    }
+
+    const modelSelect = document.getElementById('onboardingSystemModel');
+    if (modelSelect) {
+      modelSelect.addEventListener('change', () => {
+        this.clearModelError();
+        this.updateModelStepState();
       });
     }
 
@@ -101,49 +116,9 @@ export class OnboardingManager {
       assistantNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const workspaceRootInput = document.getElementById('onboardingWorkspaceRoot');
-          if (workspaceRootInput) {
-            workspaceRootInput.focus();
-          } else {
-            this.advanceFromWelcome();
-          }
-        }
-      });
-    }
-
-    const workspaceRootInput = document.getElementById('onboardingWorkspaceRoot');
-    if (workspaceRootInput) {
-      workspaceRootInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const vaultRootInput = document.getElementById('onboardingVaultRoot');
-          if (vaultRootInput) {
-            vaultRootInput.focus();
-          } else {
-            this.advanceFromWelcome();
-          }
-        }
-      });
-    }
-
-    const workspaceRootBrowseBtn = document.getElementById('onboardingWorkspaceRootBrowseBtn');
-    if (workspaceRootBrowseBtn) {
-      workspaceRootBrowseBtn.addEventListener('click', () => this.browseWorkspaceRoot());
-    }
-
-    const vaultRootInput = document.getElementById('onboardingVaultRoot');
-    if (vaultRootInput) {
-      vaultRootInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
           this.advanceFromWelcome();
         }
       });
-    }
-
-    const vaultRootBrowseBtn = document.getElementById('onboardingVaultRootBrowseBtn');
-    if (vaultRootBrowseBtn) {
-      vaultRootBrowseBtn.addEventListener('click', () => this.browseVaultRoot());
     }
   }
 
@@ -194,272 +169,6 @@ export class OnboardingManager {
     }
   }
 
-  async loadWorkspaceRoot() {
-    try {
-      const response = await fetch('/api/settings/workspace-root');
-      if (!response.ok) throw new Error('Failed to fetch workspace directory');
-      const data = await response.json();
-      this.applyWorkspaceRootState(data);
-    } catch (error) {
-      console.error('Error loading workspace directory:', error);
-    }
-  }
-
-  async loadVaultRoot() {
-    try {
-      const response = await fetch('/api/settings/vault-root');
-      if (!response.ok) throw new Error('Failed to fetch vault directory');
-      const data = await response.json();
-      this.applyVaultRootState(data);
-    } catch (error) {
-      console.error('Error loading vault directory:', error);
-    }
-  }
-
-  applyWorkspaceRootState(state) {
-    this.workspaceRootState = state || {};
-
-    const input = document.getElementById('onboardingWorkspaceRoot');
-    const help = document.getElementById('onboardingWorkspaceRootHelp');
-    const configuredRoot = String(this.workspaceRootState.workspace_root || '').trim();
-    const effectiveRoot = String(this.workspaceRootState.effective_workspace_root || '').trim();
-    const source = String(this.workspaceRootState.source || 'default');
-
-    if (input) {
-      input.value = configuredRoot || effectiveRoot;
-      input.placeholder = effectiveRoot || 'Choose a workspace directory';
-    }
-
-    if (help) {
-      if (source === 'settings') {
-        help.textContent = effectiveRoot
-          ? `New workspaces will be created in ${effectiveRoot}.`
-          : 'New workspaces will be created inside this folder by default.';
-      } else if (source === 'environment') {
-        help.textContent = effectiveRoot
-          ? `Currently using WORKSPACE_DIR at ${effectiveRoot}. Pick a new folder if you want to override it now.`
-          : 'Currently using WORKSPACE_DIR. Pick a new folder if you want to override it now.';
-      } else {
-        help.textContent = effectiveRoot
-          ? `Currently using the default directory at ${effectiveRoot}. Pick a new folder if you want a custom workspace location.`
-          : 'New workspaces will be created inside this folder by default.';
-      }
-    }
-  }
-
-  applyVaultRootState(state) {
-    this.vaultRootState = state || {};
-
-    const input = document.getElementById('onboardingVaultRoot');
-    const help = document.getElementById('onboardingVaultRootHelp');
-    const configuredRoot = String(this.vaultRootState.vault_root || '').trim();
-    const effectiveRoot = String(this.vaultRootState.effective_vault_root || '').trim();
-    const source = String(this.vaultRootState.source || 'default');
-
-    if (input) {
-      input.value = configuredRoot || effectiveRoot;
-      input.placeholder = effectiveRoot || 'Choose a vault directory';
-    }
-
-    if (help) {
-      if (source === 'settings') {
-        help.textContent = effectiveRoot
-          ? `New managed vault folders will be created in ${effectiveRoot}.`
-          : 'New managed vault folders will be created inside this folder by default.';
-      } else if (source === 'environment') {
-        help.textContent = effectiveRoot
-          ? `Currently using ORI_VAULT_DIR at ${effectiveRoot}. Pick a new folder if you want to override it now.`
-          : 'Currently using ORI_VAULT_DIR. Pick a new folder if you want to override it now.';
-      } else {
-        help.textContent = effectiveRoot
-          ? `Currently using the default vault directory at ${effectiveRoot}. Pick a new folder if you want a custom vault location.`
-          : 'New managed vault folders will be created inside this folder by default.';
-      }
-    }
-  }
-
-  clearWorkspaceRootError() {
-    const errorEl = document.getElementById('onboardingWorkspaceRootError');
-    if (errorEl) {
-      errorEl.textContent = '';
-      errorEl.classList.add('d-none');
-    }
-  }
-
-  showWorkspaceRootError(message) {
-    const errorEl = document.getElementById('onboardingWorkspaceRootError');
-    if (errorEl) {
-      errorEl.textContent = message;
-      errorEl.classList.remove('d-none');
-    }
-  }
-
-  clearVaultRootError() {
-    const errorEl = document.getElementById('onboardingVaultRootError');
-    if (errorEl) {
-      errorEl.textContent = '';
-      errorEl.classList.add('d-none');
-    }
-  }
-
-  showVaultRootError(message) {
-    const errorEl = document.getElementById('onboardingVaultRootError');
-    if (errorEl) {
-      errorEl.textContent = message;
-      errorEl.classList.remove('d-none');
-    }
-  }
-
-  async browseWorkspaceRoot() {
-    const browseBtn = document.getElementById('onboardingWorkspaceRootBrowseBtn');
-    const input = document.getElementById('onboardingWorkspaceRoot');
-    if (!browseBtn || !input) return;
-
-    this.clearWorkspaceRootError();
-    const originalText = browseBtn.textContent || 'Browse';
-    browseBtn.disabled = true;
-    browseBtn.textContent = 'Selecting...';
-
-    try {
-      const response = await fetch('/api/folder-picker/select-path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select Default Workspace Directory'
-        })
-      });
-
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to open folder picker');
-      }
-
-      if (result.selected && result.path) {
-        input.value = result.path;
-        input.focus();
-      }
-    } catch (error) {
-      console.error('Error browsing workspace directory:', error);
-      this.showWorkspaceRootError(error.message || 'Failed to open folder picker.');
-    } finally {
-      browseBtn.disabled = false;
-      browseBtn.textContent = originalText;
-    }
-  }
-
-  async browseVaultRoot() {
-    const browseBtn = document.getElementById('onboardingVaultRootBrowseBtn');
-    const input = document.getElementById('onboardingVaultRoot');
-    if (!browseBtn || !input) return;
-
-    this.clearVaultRootError();
-    const originalText = browseBtn.textContent || 'Browse';
-    browseBtn.disabled = true;
-    browseBtn.textContent = 'Selecting...';
-
-    try {
-      const response = await fetch('/api/folder-picker/select-path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Select Default Vault Directory'
-        })
-      });
-
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to open folder picker');
-      }
-
-      if (result.selected && result.path) {
-        input.value = result.path;
-        input.focus();
-      }
-    } catch (error) {
-      console.error('Error browsing vault directory:', error);
-      this.showVaultRootError(error.message || 'Failed to open folder picker.');
-    } finally {
-      browseBtn.disabled = false;
-      browseBtn.textContent = originalText;
-    }
-  }
-
-  async saveWorkspaceRoot() {
-    const input = document.getElementById('onboardingWorkspaceRoot');
-    if (!input) return true;
-
-    this.clearWorkspaceRootError();
-
-    const desiredRoot = input.value.trim();
-    const configuredRoot = String(this.workspaceRootState?.workspace_root || '').trim();
-    const effectiveRoot = String(this.workspaceRootState?.effective_workspace_root || '').trim();
-
-    if (!configuredRoot && desiredRoot === effectiveRoot) {
-      return true;
-    }
-    if (configuredRoot && desiredRoot === configuredRoot) {
-      return true;
-    }
-
-    try {
-      const response = await fetch('/api/settings/workspace-root', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace_root: desiredRoot })
-      });
-
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        throw new Error((data && data.error) || 'Failed to save workspace directory');
-      }
-
-      this.applyWorkspaceRootState(data);
-      return true;
-    } catch (error) {
-      console.error('Error saving workspace directory:', error);
-      this.showWorkspaceRootError(error.message || 'Failed to save workspace directory.');
-      return false;
-    }
-  }
-
-  async saveVaultRoot() {
-    const input = document.getElementById('onboardingVaultRoot');
-    if (!input) return true;
-
-    this.clearVaultRootError();
-
-    const desiredRoot = input.value.trim();
-    const configuredRoot = String(this.vaultRootState?.vault_root || '').trim();
-    const effectiveRoot = String(this.vaultRootState?.effective_vault_root || '').trim();
-
-    if (!configuredRoot && desiredRoot === effectiveRoot) {
-      return true;
-    }
-    if (configuredRoot && desiredRoot === configuredRoot) {
-      return true;
-    }
-
-    try {
-      const response = await fetch('/api/settings/vault-root', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vault_root: desiredRoot })
-      });
-
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        throw new Error((data && data.error) || 'Failed to save vault directory');
-      }
-
-      this.applyVaultRootState(data);
-      return true;
-    } catch (error) {
-      console.error('Error saving vault directory:', error);
-      this.showVaultRootError(error.message || 'Failed to save vault directory.');
-      return false;
-    }
-  }
-
   async loadProviders() {
     const providerSelect = document.getElementById('onboardingSystemProvider');
     if (!providerSelect) return;
@@ -485,7 +194,7 @@ export class OnboardingManager {
       if (apiKeySection) apiKeySection.classList.add('d-none');
 
       // Populate provider dropdown
-      providerSelect.innerHTML = '<option value="">Select a provider...</option>';
+      providerSelect.innerHTML = '<option value="">Select a provider…</option>';
       const preferredLocalProvider = available.find(p => ['ollama', 'lmstudio', 'mlx_lm'].includes(p.name));
 
       available.forEach(provider => {
@@ -495,12 +204,12 @@ export class OnboardingManager {
         providerSelect.appendChild(option);
       });
 
-      // Auto-select a local provider first when available.
-      if (preferredLocalProvider) {
-        providerSelect.value = preferredLocalProvider.name;
-        this.updateReasoningVisibility(preferredLocalProvider.name);
-        await this.loadModels(preferredLocalProvider.name);
-      }
+      // Prefer a local provider, otherwise choose the first usable provider so
+      // setup starts from a working default instead of an empty decision.
+      const defaultProvider = preferredLocalProvider || available[0];
+      providerSelect.value = defaultProvider.name;
+      this.updateReasoningVisibility(defaultProvider.name);
+      await this.loadModels(defaultProvider.name);
     } catch (error) {
       console.error('Error loading providers:', error);
       this.showApiKeySection();
@@ -517,6 +226,7 @@ export class OnboardingManager {
     if (speechBubble) {
       speechBubble.textContent = "I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.";
     }
+    this.updateModelStepState();
   }
 
   async loadModels(providerName) {
@@ -524,11 +234,12 @@ export class OnboardingManager {
     if (!modelSelect) return;
 
     this.updateReasoningVisibility(providerName);
-    modelSelect.innerHTML = '<option value="">Loading models...</option>';
+    modelSelect.innerHTML = '<option value="">Loading models…</option>';
     modelSelect.disabled = true;
 
     if (!providerName) {
-      modelSelect.innerHTML = '<option value="">Select provider first...</option>';
+      modelSelect.innerHTML = '<option value="">Select provider first…</option>';
+      this.updateModelStepState();
       return;
     }
 
@@ -539,10 +250,11 @@ export class OnboardingManager {
 
       if (!data.available) {
         modelSelect.innerHTML = '<option value="">Provider not available</option>';
+        this.updateModelStepState();
         return;
       }
 
-      modelSelect.innerHTML = '<option value="">Select a model...</option>';
+      modelSelect.innerHTML = '<option value="">Select a model…</option>';
       const modelOptions = this.normalizeModelOptions(data.model_options, data.models);
       modelOptions.forEach(modelOption => {
         const option = document.createElement('option');
@@ -552,9 +264,15 @@ export class OnboardingManager {
       });
 
       modelSelect.disabled = false;
+      const defaultModel = modelOptions.find(option => option.recommended) || modelOptions[0];
+      if (defaultModel) {
+        modelSelect.value = defaultModel.id;
+      }
+      this.updateModelStepState();
     } catch (error) {
       console.error('Error loading models:', error);
       modelSelect.innerHTML = '<option value="">Error loading models</option>';
+      this.updateModelStepState();
     }
   }
 
@@ -604,6 +322,32 @@ export class OnboardingManager {
     }
   }
 
+  clearModelError() {
+    const errorEl = document.getElementById('onboardingModelError');
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.classList.add('d-none');
+  }
+
+  showModelError(message) {
+    const errorEl = document.getElementById('onboardingModelError');
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove('d-none');
+  }
+
+  hasUsableModelSelection() {
+    const provider = document.getElementById('onboardingSystemProvider')?.value || '';
+    const model = document.getElementById('onboardingSystemModel')?.value || '';
+    return Boolean(provider && model);
+  }
+
+  updateModelStepState() {
+    const nextBtn = document.getElementById('modelNextBtn');
+    if (!nextBtn) return;
+    nextBtn.disabled = !this.hasUsableModelSelection();
+  }
+
   async saveSystemModel() {
     const providerSelect = document.getElementById('onboardingSystemProvider');
     const modelSelect = document.getElementById('onboardingSystemModel');
@@ -613,7 +357,10 @@ export class OnboardingManager {
     const model = modelSelect?.value;
     const reasoning_effort = provider === 'codex' ? (reasoningSelect?.value || 'medium') : '';
 
-    if (!provider || !model) return true;
+    if (!provider || !model) {
+      this.showModelError('Choose a provider and model before continuing, or use Set Up Later.');
+      return false;
+    }
 
     try {
       const response = await fetch('/api/settings/system-model', {
@@ -639,7 +386,8 @@ export class OnboardingManager {
       return true;
     } catch (error) {
       console.error('Error saving system model:', error);
-      return true; // Don't block progress
+      this.showModelError('Could not save the model yet. Check the provider, then try again.');
+      return false;
     }
   }
 
@@ -680,7 +428,7 @@ export class OnboardingManager {
 
       // Re-check providers after saving key
       const speechBubble = document.getElementById('modelSpeech');
-      if (speechBubble) speechBubble.textContent = "Got it! Now let's pick a model.";
+      if (speechBubble) speechBubble.textContent = 'Got it! Now let’s pick a model.';
 
       await this.loadProviders();
     } catch (error) {
@@ -733,36 +481,40 @@ export class OnboardingManager {
   async playEggHatchAnimation() {
     const container = document.getElementById('oriEggContainer');
     if (!container) return;
+    const phase0 = document.getElementById('onboarding-phase-0');
+    const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      container.classList.add('egg-hatching');
+      if (phase0) phase0.classList.add('egg-hatched');
+      return;
+    }
 
     const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Step 1: Wobble (600ms)
-    await wait(400); // brief pause after modal appears
+    // Keep the character moment, but get users to the first action quickly.
+    await wait(120);
     container.classList.add('egg-animating');
-    await wait(700);
+    await wait(260);
 
-    // Step 2: Show crack (300ms)
     container.classList.add('egg-cracked');
-    await wait(500);
+    await wait(180);
 
-    // Step 3: Second wobble
     container.classList.remove('egg-animating');
     void container.offsetHeight; // force reflow to re-trigger
     container.classList.add('egg-animating');
-    await wait(600);
+    await wait(220);
 
-    // Step 4: Hatch - shells fly apart, Ori pops up
     container.classList.remove('egg-animating');
     container.classList.remove('egg-cracked');
     container.classList.add('egg-hatching');
-    await wait(600);
+    await wait(260);
 
-    // Step 5: Reveal speech bubble and input
-    const phase0 = document.getElementById('onboarding-phase-0');
     if (phase0) phase0.classList.add('egg-hatched');
   }
 
   showPhase(index) {
+    this.currentPhase = index;
+
     // Hide all phases
     for (let i = 0; i < this.totalPhases; i++) {
       const phase = document.getElementById(`onboarding-phase-${i}`);
@@ -778,18 +530,26 @@ export class OnboardingManager {
       target.offsetHeight; // force reflow
       target.style.animation = '';
     }
+
+    this.updateProgress(index);
+    if (index === 1) {
+      this.updateModelStepState();
+    }
+  }
+
+  updateProgress(index) {
+    const label = document.getElementById('onboardingStepLabel');
+    const progress = document.getElementById('onboardingProgressBar');
+    const track = progress?.parentElement;
+    const current = Math.min(this.totalPhases, Math.max(1, index + 1));
+    const pct = `${(current / this.totalPhases) * 100}%`;
+
+    if (label) label.textContent = `Step ${current} of ${this.totalPhases}`;
+    if (progress) progress.style.width = pct;
+    if (track) track.setAttribute('aria-valuenow', String(current));
   }
 
   async advanceFromWelcome() {
-    const workspaceRootSaved = await this.saveWorkspaceRoot();
-    if (!workspaceRootSaved) {
-      return;
-    }
-    const vaultRootSaved = await this.saveVaultRoot();
-    if (!vaultRootSaved) {
-      return;
-    }
-
     await this.saveNames();
     await this.completeStep('step-welcome');
 
@@ -798,10 +558,9 @@ export class OnboardingManager {
     const aName = this.assistantName || 'Ori';
     const speechBubble = document.getElementById('modelSpeech');
     if (speechBubble) {
-      speechBubble.textContent = `Great to meet you, ${name}! I'm ${aName}. Let's pick the AI model I'll use.`;
+      speechBubble.textContent = `Great to meet you, ${name}! I’m ${aName}. Let’s pick the AI model I’ll use.`;
     }
 
-    this.currentPhase = 1;
     this.showPhase(1);
 
     // Load providers when entering model phase
@@ -809,17 +568,19 @@ export class OnboardingManager {
   }
 
   async advanceFromModel() {
-    await this.saveSystemModel();
+    const modelSaved = await this.saveSystemModel();
+    if (!modelSaved) {
+      return;
+    }
     await this.completeStep('step-model');
 
     // Update done speech with user's name
     const name = this.userName || 'friend';
     const doneSpeech = document.getElementById('doneSpeech');
     if (doneSpeech) {
-      doneSpeech.textContent = `All set, ${name}! I'm ready to help. Let's go!`;
+      doneSpeech.textContent = `All set, ${name}! I’m ready to help. Let’s create your first workspace.`;
     }
 
-    this.currentPhase = 2;
     this.showPhase(2);
   }
 

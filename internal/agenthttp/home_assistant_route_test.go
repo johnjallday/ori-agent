@@ -3,6 +3,7 @@ package agenthttp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,6 +114,21 @@ func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload 
 	return rr
 }
 
+func postTraceRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("failed to marshal request body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/home-assistant/trace", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.TraceHandler(rr, req)
+	return rr
+}
+
 func TestHomeAssistantRouteHandler_MethodNotAllowed(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
@@ -133,6 +149,119 @@ func TestHomeAssistantRouteHandler_EmptyPrompt(t *testing.T) {
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "   "})
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceHandlerRequiresPromptAndTarget(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postTraceRequest(t, handler, HomeAssistantIntakeTrace{
+		Prompt: "ship launch tasks",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d for missing target, got %d", http.StatusBadRequest, rr.Code)
+	}
+
+	rr = postTraceRequest(t, handler, HomeAssistantIntakeTrace{
+		FinalHandoffTarget: "workspace_assistant",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d for missing prompt, got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceHandlerAcceptsValidPayload(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postTraceRequest(t, handler, HomeAssistantIntakeTrace{
+		Prompt:             "ship launch tasks",
+		Intent:             "general_task",
+		ContextMode:        homeAssistantContextWorkspace,
+		FinalHandoffTarget: "workspace_assistant",
+	})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusNoContent, rr.Code, rr.Body.String())
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceHandlerPersistsWhenStoreAvailable(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	traceStore := &homeAssistantIntakeTraceStoreStub{}
+	handler := NewHomeAssistantRouteHandler(st)
+	handler.SetIntakeTraceStore(traceStore)
+
+	rr := postTraceRequest(t, handler, HomeAssistantIntakeTrace{
+		Prompt:             "ship launch tasks",
+		Intent:             "general_task",
+		ContextMode:        homeAssistantContextWorkspace,
+		FinalHandoffTarget: "workspace_assistant",
+	})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusNoContent, rr.Code, rr.Body.String())
+	}
+	if len(traceStore.traces) != 1 {
+		t.Fatalf("expected one stored trace, got %d", len(traceStore.traces))
+	}
+	if traceStore.traces[0].Prompt != "ship launch tasks" {
+		t.Fatalf("expected prompt to persist, got %#v", traceStore.traces[0])
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceHandlerReturnsErrorWhenPersistenceFails(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+	handler.SetIntakeTraceStore(&homeAssistantIntakeTraceStoreStub{err: errors.New("boom")})
+
+	rr := postTraceRequest(t, handler, HomeAssistantIntakeTrace{
+		Prompt:             "ship launch tasks",
+		Intent:             "general_task",
+		ContextMode:        homeAssistantContextWorkspace,
+		FinalHandoffTarget: "workspace_assistant",
+	})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusInternalServerError, rr.Code, rr.Body.String())
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceSummaryHandlerRequiresStore(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/home-assistant/trace/summary", nil)
+	rr := httptest.NewRecorder()
+	handler.TraceSummaryHandler(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, rr.Code)
+	}
+}
+
+func TestHomeAssistantRouteHandler_TraceSummaryHandlerReturnsSummary(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+	handler.SetIntakeTraceStore(&homeAssistantIntakeTraceStoreStub{
+		summary: HomeAssistantIntakeTraceSummary{
+			TotalCount:      3,
+			WorkspaceCount:  2,
+			CorrectionCount: 1,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/home-assistant/trace/summary", nil)
+	rr := httptest.NewRecorder()
+	handler.TraceSummaryHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var got HomeAssistantIntakeTraceSummary
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if got.TotalCount != 3 || got.WorkspaceCount != 2 || got.CorrectionCount != 1 {
+		t.Fatalf("unexpected summary %#v", got)
 	}
 }
 
@@ -683,6 +812,12 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ComplexProjectSetsWorkspaceReco
 	if resp.RouteMode != "workspace_task" {
 		t.Fatalf("expected route_mode workspace_task, got %q", resp.RouteMode)
 	}
+	if resp.ContextMode != homeAssistantContextWorkspace {
+		t.Fatalf("expected context_mode %q, got %q", homeAssistantContextWorkspace, resp.ContextMode)
+	}
+	if resp.HandoffPolicy != homeAssistantHandoffAssistant {
+		t.Fatalf("expected handoff_policy %q, got %q", homeAssistantHandoffAssistant, resp.HandoffPolicy)
+	}
 	if resp.TargetSurface != "workspace" {
 		t.Fatalf("expected target_surface workspace, got %q", resp.TargetSurface)
 	}
@@ -746,6 +881,12 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_WorkspaceContextStaysUtilityDir
 	}
 	if resp.RouteMode != "utility_direct" {
 		t.Fatalf("expected route_mode utility_direct, got %q", resp.RouteMode)
+	}
+	if resp.ContextMode != homeAssistantContextDirect {
+		t.Fatalf("expected context_mode %q, got %q", homeAssistantContextDirect, resp.ContextMode)
+	}
+	if resp.HandoffPolicy != homeAssistantHandoffTool {
+		t.Fatalf("expected handoff_policy %q, got %q", homeAssistantHandoffTool, resp.HandoffPolicy)
 	}
 	if resp.TargetSurface != "current" {
 		t.Fatalf("expected target_surface current, got %q", resp.TargetSurface)

@@ -138,7 +138,27 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 // RestoreAllWorkspaceAgents walks the workspace store once and restores any
 // workspace-local agent snapshots into the global agent registry when the
 // importing/running environment does not already have those agents.
+//
+// Deprecated: prefer RestoreAllowlistedWorkspaceAgents to avoid hydrating
+// workspaces that have not been explicitly imported into this data directory.
+// Retained for callers that genuinely want the un-gated behavior (e.g. tests).
 func RestoreAllWorkspaceAgents(workspaces Store, agents store.Store) {
+	restoreWorkspaceAgentsFiltered(workspaces, agents, nil)
+}
+
+// RestoreAllowlistedWorkspaceAgents restores agent snapshots only for
+// workspaces whose ID is present in the allowlist. A nil allowlist restores
+// nothing (strict mode). Use this at server startup so workspaces that live
+// in the shared ~/Ori Workspaces/ tree do not auto-hydrate into every data
+// directory.
+func RestoreAllowlistedWorkspaceAgents(workspaces Store, agents store.Store, allowlist *Allowlist) {
+	if allowlist == nil {
+		return
+	}
+	restoreWorkspaceAgentsFiltered(workspaces, agents, allowlist)
+}
+
+func restoreWorkspaceAgentsFiltered(workspaces Store, agents store.Store, allowlist *Allowlist) {
 	if workspaces == nil || agents == nil {
 		return
 	}
@@ -151,6 +171,9 @@ func RestoreAllWorkspaceAgents(workspaces Store, agents store.Store) {
 	restoredWorkspaces := 0
 	restoredAgents := 0
 	for _, id := range ids {
+		if allowlist != nil && !allowlist.Contains(id) {
+			continue
+		}
 		ws, err := workspaces.Get(id)
 		if err != nil || ws == nil {
 			continue
@@ -175,6 +198,92 @@ func RestoreAllWorkspaceAgents(workspaces Store, agents store.Store) {
 			"agents":     restoredAgents,
 		})
 	}
+}
+
+// WipeNonAllowlistedAgentSnapshots removes locally-stored agents that exist
+// only because some workspace under workspaces has a snapshot for them and no
+// allowlisted workspace currently references them. Use at server startup to
+// prevent agents from other data directories' workspaces from lingering after
+// the allowlist gate is introduced or tightened.
+//
+// System agents (e.g. "Ori") are never removed. Agents that are not also
+// present as a snapshot in some workspace folder are considered user-owned and
+// are left alone.
+func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allowlist *Allowlist) {
+	if workspaces == nil || agents == nil {
+		return
+	}
+	ids, err := workspaces.List()
+	if err != nil {
+		logger.Warn("wipe non-allowlisted agents: list workspaces failed", logger.Fields{"error": err.Error()})
+		return
+	}
+
+	// Set of agent names protected because at least one allowlisted workspace
+	// references them.
+	allowedReferencedAgents := make(map[string]struct{})
+	// Set of agent names that are workspace-managed (i.e. have a snapshot in
+	// some workspace folder under `workspaces`). These are wipe candidates if
+	// not in allowedReferencedAgents.
+	workspaceManagedAgents := make(map[string]struct{})
+
+	for _, id := range ids {
+		ws, err := workspaces.Get(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		referenced := referencedAgentNames(ws)
+		allowed := allowlist != nil && allowlist.Contains(id)
+		for _, name := range referenced {
+			key := strings.ToLower(name)
+			if _, ok, err := workspaces.GetWorkspaceAgent(ws.ID, name); err == nil && ok {
+				workspaceManagedAgents[key] = struct{}{}
+			}
+			if allowed {
+				allowedReferencedAgents[key] = struct{}{}
+			}
+		}
+	}
+
+	wiped := 0
+	for _, name := range agents.ListAgents() {
+		if isSystemAgentName(name) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(name))
+		if _, managed := workspaceManagedAgents[key]; !managed {
+			continue
+		}
+		if _, allowed := allowedReferencedAgents[key]; allowed {
+			continue
+		}
+		if err := agents.DeleteAgent(name); err != nil {
+			logger.Warn("wipe non-allowlisted agent: delete failed", logger.Fields{
+				"agent": name,
+				"error": err.Error(),
+			})
+			continue
+		}
+		wiped++
+	}
+
+	if wiped > 0 {
+		if err := agents.Save(); err != nil {
+			logger.Warn("wipe non-allowlisted agents: persist agent store failed", logger.Fields{
+				"error": err.Error(),
+			})
+		}
+		logger.Info("Workspace agent snapshots wiped (not in allowlist)", logger.Fields{
+			"agents": wiped,
+		})
+	}
+}
+
+// isSystemAgentName mirrors agenthttp.isSystemAssistantAgent without taking
+// the import dependency. Update both in lockstep if the canonical name
+// changes.
+func isSystemAgentName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "Ori")
 }
 
 func referencedAgentSnapshotCount(s Store, ws *Workspace) int {

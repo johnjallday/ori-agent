@@ -460,6 +460,10 @@
     margin-top: 80px;
   }
 
+  #onboardingModal .modal-content {
+    overscroll-behavior: contain;
+  }
+
   @keyframes modalSlideIn {
     from {
       opacity: 0;
@@ -488,7 +492,7 @@
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: #0EA5E9;
+    background: var(--primary-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -555,12 +559,12 @@
 
   .ori-egg-shell {
     fill: #ffffff;
-    stroke: #0EA5E9;
+    stroke: var(--primary-color);
     stroke-width: 2;
   }
 
   .ori-egg-spot {
-    fill: #0EA5E9;
+    fill: var(--primary-color);
     opacity: 0.5;
   }
 
@@ -585,7 +589,7 @@
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: #0EA5E9;
+    background: var(--primary-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -686,10 +690,18 @@
   }
 
   #onboardingModal .onboarding-next-btn {
-    transition: all 0.2s ease-in-out;
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    color: #fff;
+    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out, color 0.2s ease-in-out, transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
   }
 
-  #onboardingModal .onboarding-next-btn:hover {
+  #onboardingModal .onboarding-next-btn:hover,
+  #onboardingModal .onboarding-next-btn:focus,
+  #onboardingModal .onboarding-next-btn:active {
+    background-color: var(--primary-light);
+    border-color: var(--primary-light);
+    color: #fff;
     transform: translateY(-1px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
   }
@@ -708,12 +720,98 @@
     background: var(--bg-secondary);
     border-color: var(--border-color) var(--border-color) var(--bg-secondary);
   }
+
+  .onboarding-progress-shell {
+    margin-bottom: 1.5rem;
+  }
+
+  .onboarding-step-label {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .onboarding-progress-track {
+    height: 6px;
+    background: color-mix(in srgb, var(--border-color) 72%, transparent);
+  }
+
+  .onboarding-progress-track .progress-bar {
+    background: var(--primary-color);
+    transition: width 0.2s ease-in-out;
+  }
+
+  .onboarding-secondary-action {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    padding: 0.15rem 0.1rem;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--text-secondary) 35%, transparent);
+    text-underline-offset: 3px;
+  }
+
+  .onboarding-secondary-action:hover,
+  .onboarding-secondary-action:focus-visible {
+    color: var(--text-primary);
+    text-decoration-color: currentColor;
+  }
+
+  .onboarding-footnote {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  .onboarding-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .onboarding-actions-end {
+    justify-content: flex-end;
+  }
+
+  .onboarding-model-help {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #onboardingModal .modal-dialog,
+    .onboarding-phase,
+    .egg-animating .ori-egg,
+    .egg-cracked .ori-crack-line,
+    .egg-hatching .ori-shell-left,
+    .egg-hatching .ori-shell-right,
+    .egg-hatching .ori-avatar-hatched,
+    .egg-hatched .ori-hatch-reveal {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
 </style>
 
 <div class="modal fade" id="onboardingModal" tabindex="-1" aria-labelledby="onboardingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" role="dialog" aria-modal="true">
   <div class="modal-dialog" role="document">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 16px; overflow: hidden;">
       <div class="modal-body" style="color: var(--text-primary); padding: 2rem;">
+        <div class="onboarding-progress-shell">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <span id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 3</span>
+            <button type="button" class="onboarding-secondary-action" id="skipOnboardingLink">Set Up Later</button>
+          </div>
+          <div class="progress onboarding-progress-track" role="progressbar" aria-label="Onboarding progress" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1">
+            <div id="onboardingProgressBar" class="progress-bar" style="width: 33.3333%;"></div>
+          </div>
+        </div>
 
         <!-- Phase 0: Welcome (with egg hatch animation) -->
         <div class="onboarding-phase" id="onboarding-phase-0">
@@ -725,8 +823,8 @@
                 <ellipse cx="32" cy="46" rx="28" ry="32" class="ori-egg-shell"/>
                 <ellipse cx="32" cy="22" rx="16" ry="20" class="ori-egg-shell"/>
                 <!-- Smooth connection -->
-                <path d="M4 46 Q4 26 16 14 L16 22 Q8 30 6 46 Z" fill="white" stroke="#0EA5E9" stroke-width="0.5"/>
-                <path d="M60 46 Q60 26 48 14 L48 22 Q56 30 58 46 Z" fill="white" stroke="#0EA5E9" stroke-width="0.5"/>
+                <path d="M4 46 Q4 26 16 14 L16 22 Q8 30 6 46 Z" fill="white" stroke="#1F6B4E" stroke-width="0.5"/>
+                <path d="M60 46 Q60 26 48 14 L48 22 Q56 30 58 46 Z" fill="white" stroke="#1F6B4E" stroke-width="0.5"/>
                 <path d="M4 46 C4 24 16 6 32 2 C48 6 60 24 60 46 C60 62 48 78 32 78 C16 78 4 62 4 46 Z" class="ori-egg-shell" fill="white"/>
                 <!-- Spots -->
                 <circle cx="20" cy="36" r="5" class="ori-egg-spot"/>
@@ -745,8 +843,8 @@
                 <svg viewBox="0 0 32 80" width="32" height="80" xmlns="http://www.w3.org/2000/svg">
                   <clipPath id="leftClip"><rect x="0" y="0" width="32" height="80"/></clipPath>
                   <g clip-path="url(#leftClip)">
-                    <path d="M4 46 C4 24 16 6 32 2 L28 20 L35 28 L26 38 L34 46 L28 55 L32 62 C32 78 16 78 16 78 C4 62 4 46 4 46 Z" fill="white" stroke="#0EA5E9" stroke-width="2"/>
-                    <circle cx="20" cy="36" r="5" fill="#0EA5E9" opacity="0.5"/>
+                    <path d="M4 46 C4 24 16 6 32 2 L28 20 L35 28 L26 38 L34 46 L28 55 L32 62 C32 78 16 78 16 78 C4 62 4 46 4 46 Z" fill="white" stroke="#1F6B4E" stroke-width="2"/>
+                    <circle cx="20" cy="36" r="5" fill="#1F6B4E" opacity="0.5"/>
                   </g>
                 </svg>
               </div>
@@ -756,8 +854,8 @@
                 <svg viewBox="32 0 32 80" width="32" height="80" xmlns="http://www.w3.org/2000/svg">
                   <clipPath id="rightClip"><rect x="32" y="0" width="32" height="80"/></clipPath>
                   <g clip-path="url(#rightClip)">
-                    <path d="M32 2 C48 6 60 24 60 46 C60 62 48 78 32 78 L32 62 L28 55 L34 46 L26 38 L35 28 L28 20 Z" fill="white" stroke="#0EA5E9" stroke-width="2"/>
-                    <circle cx="44" cy="42" r="4" fill="#0EA5E9" opacity="0.5"/>
+                    <path d="M32 2 C48 6 60 24 60 46 C60 62 48 78 32 78 L32 62 L28 55 L34 46 L26 38 L35 28 L28 20 Z" fill="white" stroke="#1F6B4E" stroke-width="2"/>
+                    <circle cx="44" cy="42" r="4" fill="#1F6B4E" opacity="0.5"/>
                   </g>
                 </svg>
               </div>
@@ -772,42 +870,26 @@
 
             <!-- Speech bubble (revealed after hatch) -->
             <div class="ori-speech ori-hatch-reveal" id="welcomeSpeech">
-              Hi there! I'm your new AI assistant. What should we call each other?
+              Hi there! I’m Ori. What should we call each other?
             </div>
           </div>
 
           <div class="mb-3 ori-hatch-reveal" id="welcomeInputReveal">
             <label for="onboardingUserName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Your name</label>
-            <input type="text" class="form-control" id="onboardingUserName" placeholder="Your name" style="font-size: 1rem; padding: 10px 14px;">
+            <input type="text" class="form-control" id="onboardingUserName" name="user_name" autocomplete="name" placeholder="Your name…" style="font-size: 1rem; padding: 10px 14px;">
           </div>
           <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
-            <input type="text" class="form-control" id="onboardingAssistantName" placeholder="Ori" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
+            <input type="text" class="form-control" id="onboardingAssistantName" name="assistant_name" autocomplete="off" spellcheck="false" placeholder="Ori…" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
           </div>
 
-          <div class="mb-4 ori-hatch-reveal" id="welcomeWorkspaceRootReveal">
-            <label for="onboardingWorkspaceRoot" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Workspace directory</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="onboardingWorkspaceRoot" placeholder="Loading workspace directory..." style="font-size: 1rem; padding: 10px 14px;">
-              <button type="button" class="btn btn-outline-secondary" id="onboardingWorkspaceRootBrowseBtn">Browse</button>
-            </div>
-            <small class="text-muted d-block mt-2" id="onboardingWorkspaceRootHelp">New workspaces will be created inside this folder by default.</small>
-            <div class="alert alert-danger d-none mt-2 mb-0 py-2" id="onboardingWorkspaceRootError"></div>
+          <div class="mb-4 onboarding-footnote ori-hatch-reveal" id="welcomeFootnoteReveal">
+            Storage locations can be changed later in Settings when you need them.
           </div>
 
-          <div class="mb-4 ori-hatch-reveal" id="welcomeVaultRootReveal">
-            <label for="onboardingVaultRoot" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Vault directory</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="onboardingVaultRoot" placeholder="Loading vault directory..." style="font-size: 1rem; padding: 10px 14px;">
-              <button type="button" class="btn btn-outline-secondary" id="onboardingVaultRootBrowseBtn">Browse</button>
-            </div>
-            <small class="text-muted d-block mt-2" id="onboardingVaultRootHelp">New managed vault folders will be created inside this folder by default.</small>
-            <div class="alert alert-danger d-none mt-2 mb-0 py-2" id="onboardingVaultRootError"></div>
-          </div>
-
-          <div class="d-flex justify-content-end ori-hatch-reveal" id="welcomeBtnReveal">
+          <div class="onboarding-actions onboarding-actions-end ori-hatch-reveal" id="welcomeBtnReveal">
             <button type="button" class="btn btn-primary onboarding-next-btn" id="welcomeNextBtn" style="padding: 8px 28px;">
-              Next
+              Continue
             </button>
           </div>
         </div>
@@ -821,23 +903,24 @@
               </svg>
             </div>
             <div class="ori-speech" id="modelSpeech">
-              Let's pick the AI model I'll use.
+              Let’s pick the AI model I’ll use.
             </div>
           </div>
 
           <!-- Model selection (shown when providers are available) -->
           <div id="onboardingModelSelection">
+            <p class="onboarding-model-help mb-3">Ori needs a model before it can answer tasks. I’ll choose a recommended default when one is available.</p>
             <div class="mb-3">
               <label for="onboardingSystemProvider" class="form-label" style="font-size: 0.85rem; font-weight: 500;">Provider</label>
               <select class="form-select" id="onboardingSystemProvider" aria-label="Select AI provider">
-                <option value="">Loading providers...</option>
+                <option value="">Loading providers…</option>
               </select>
             </div>
 
             <div class="mb-3">
               <label for="onboardingSystemModel" class="form-label" style="font-size: 0.85rem; font-weight: 500;">Model</label>
               <select class="form-select" id="onboardingSystemModel" disabled aria-label="Select AI model">
-                <option value="">Select provider first...</option>
+                <option value="">Select provider first…</option>
               </select>
             </div>
 
@@ -853,6 +936,7 @@
 
             <div class="alert alert-success d-none mb-3" id="onboardingSystemModelSuccess"></div>
           </div>
+          <div class="alert alert-danger d-none mb-3" id="onboardingModelError" role="alert" aria-live="polite"></div>
 
           <!-- API key section (shown when no providers available) -->
           <div id="onboardingApiKeySection" class="d-none">
@@ -870,7 +954,7 @@
             <div class="tab-content">
               <div class="tab-pane fade show active" id="panel-openai" role="tabpanel">
                 <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="openaiApiKey" placeholder="sk-..." aria-label="OpenAI API Key">
+                  <input type="password" class="form-control" id="openaiApiKey" name="openai_api_key" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-label="OpenAI API Key">
                   <button class="btn btn-outline-secondary" type="button" id="toggleOpenaiKey" aria-label="Toggle visibility">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
                   </button>
@@ -879,7 +963,7 @@
               </div>
               <div class="tab-pane fade" id="panel-anthropic" role="tabpanel">
                 <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="anthropicApiKey" placeholder="sk-ant-..." aria-label="Anthropic API Key">
+                  <input type="password" class="form-control" id="anthropicApiKey" name="anthropic_api_key" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Anthropic API Key">
                   <button class="btn btn-outline-secondary" type="button" id="toggleAnthropicKey" aria-label="Toggle visibility">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
                   </button>
@@ -888,7 +972,7 @@
               </div>
               <div class="tab-pane fade" id="panel-gemini" role="tabpanel">
                 <div class="input-group mb-2">
-                  <input type="password" class="form-control" id="geminiApiKey" placeholder="Google AI Studio API key" aria-label="Gemini API Key">
+                  <input type="password" class="form-control" id="geminiApiKey" name="gemini_api_key" autocomplete="off" spellcheck="false" placeholder="Google AI Studio API key…" aria-label="Gemini API Key">
                   <button class="btn btn-outline-secondary" type="button" id="toggleGeminiKey" aria-label="Toggle visibility">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/></svg>
                   </button>
@@ -903,16 +987,17 @@
             </div>
 
             <div class="alert alert-success d-none mt-3" id="apiKeySaveSuccess">
-              API key saved! Loading providers...
+              API key saved! Loading providers…
             </div>
             <div class="alert alert-danger d-none mt-3" id="apiKeySaveError">
               <span id="apiKeySaveErrorMessage">Failed to save API key.</span>
             </div>
           </div>
 
-          <div class="d-flex justify-content-end mt-3">
-            <button type="button" class="btn btn-primary onboarding-next-btn" id="modelNextBtn" style="padding: 8px 28px;">
-              Next
+          <div class="onboarding-actions mt-3">
+            <button type="button" class="btn btn-outline-secondary" id="modelBackBtn">Back</button>
+            <button type="button" class="btn btn-primary onboarding-next-btn" id="modelNextBtn" style="padding: 8px 28px;" disabled>
+              Continue
             </button>
           </div>
         </div>
@@ -926,20 +1011,16 @@
               </svg>
             </div>
             <div class="ori-speech" id="doneSpeech">
-              All set! I'm ready to help. Let's go!
+              All set! I’m ready to help. Let’s create your first workspace.
             </div>
           </div>
 
-          <div class="d-flex justify-content-end">
+          <div class="onboarding-actions">
+            <button type="button" class="btn btn-outline-secondary" id="doneBackBtn">Back</button>
             <button type="button" class="btn btn-primary onboarding-next-btn" id="startBtn" style="padding: 8px 28px;">
               Get Started
             </button>
           </div>
-        </div>
-
-        <!-- Skip link -->
-        <div class="text-center mt-3">
-          <a href="#" class="text-muted small" id="skipOnboardingLink" style="text-decoration: none;">Skip setup</a>
         </div>
       </div>
     </div>

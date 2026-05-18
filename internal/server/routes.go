@@ -157,6 +157,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Home assistant task routing endpoint
 	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
 	homeAssistantRouteHandler.SetSystemModelReader(s.Core.ConfigManager)
+	homeAssistantWorkspaceResolver := agenthttp.NewHomeAssistantWorkspaceResolver(
+		s.Storage.WorkspaceStore,
+		s.Storage.AgentStore,
+	)
+	if s.Storage.SessionStore != nil {
+		traceStore := agenthttp.NewSQLiteHomeAssistantIntakeTraceStore(s.Storage.SessionStore.DB())
+		homeAssistantRouteHandler.SetIntakeTraceStore(traceStore)
+		homeAssistantWorkspaceResolver.SetFeedbackReader(traceStore)
+	}
+	if s.Storage.SessionStore != nil {
+		homeAssistantWorkspaceResolver.SetNoteReader(s.Storage.SessionStore)
+	}
+	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
 			workspace.NewAgentRuntimeResolver(
@@ -168,6 +181,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		)
 	}
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
+	mux.HandleFunc("/api/home-assistant/trace", homeAssistantRouteHandler.TraceHandler)
+	mux.HandleFunc("/api/home-assistant/trace/summary", homeAssistantRouteHandler.TraceSummaryHandler)
 
 	// =============================================================================
 	// Settings and Configuration Endpoints

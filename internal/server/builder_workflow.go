@@ -114,14 +114,34 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// global agent registry. The snapshots make a workspace folder
 	// self-contained for export/import.
 	if b.st != nil {
+		// Load the per-data-dir allowlist. A missing file yields an empty
+		// allowlist, which means nothing in the shared workspaces tree will
+		// auto-hydrate into this data directory. Workspaces are added to the
+		// allowlist when explicitly imported via the workspace import API.
+		allowlist, err := workspace.LoadAllowlist(workspace.DefaultAllowlistFilename)
+		if err != nil {
+			logger.Warn("Failed to load workspace allowlist", logger.Fields{"error": err.Error()})
+			allowlist = workspace.NewAllowlist(workspace.DefaultAllowlistFilename)
+		}
+		b.workspaceAllowlist = allowlist
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetWorkspaceAllowlist(allowlist)
+		}
+
+		// First wipe agents whose only source is a non-allowlisted workspace
+		// snapshot — keeps cross-worktree contamination from lingering after
+		// the user revokes (or never granted) an import.
 		if fileStore != nil {
-			workspace.RestoreAllWorkspaceAgents(fileStore, b.st)
+			workspace.WipeNonAllowlistedAgentSnapshots(fileStore, b.st, allowlist)
+		}
+		workspace.WipeNonAllowlistedAgentSnapshots(ws, b.st, allowlist)
+
+		// Restore only allowlisted workspaces' agent snapshots.
+		if fileStore != nil {
+			workspace.RestoreAllowlistedWorkspaceAgents(fileStore, b.st, allowlist)
 		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)
-		// One-shot startup repair: restore imported workspace-local agent
-		// snapshots into this environment, then refresh snapshots for globally
-		// available agents referenced by primary or folder-only workspaces.
-		workspace.RestoreAllWorkspaceAgents(ws, b.st)
+		workspace.RestoreAllowlistedWorkspaceAgents(ws, b.st, allowlist)
 		workspace.SnapshotAllWorkspaces(ws, b.st)
 		if fileStore != nil {
 			workspace.SnapshotAllWorkspaces(fileStore, b.st)

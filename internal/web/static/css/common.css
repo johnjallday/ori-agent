@@ -1869,16 +1869,17 @@ h3, .h3 {
     color: var(--primary-color);
     text-transform: uppercase;
     font-size: 0.72rem;
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
     padding: 0.28rem 0.65rem;
     font-weight: 700;
 }
 
 .home-assistant-minimal-title {
     color: var(--text-primary);
-    font-size: clamp(1.5rem, 3vw, 2.2rem);
+    font-size: 2rem;
     line-height: 1.08;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
+    text-wrap: balance;
 }
 
 .home-assistant-minimal-subtitle {
@@ -1922,6 +1923,7 @@ h3, .h3 {
     background: color-mix(in srgb, var(--primary-color) 8%, transparent);
     border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
     color: var(--text-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 18%, transparent);
     outline: none;
 }
 
@@ -1986,6 +1988,22 @@ h3, .h3 {
     padding: 0.5rem 0;
 }
 
+.home-workspace-empty {
+    display: flex;
+    align-items: stretch;
+    gap: 0.75rem;
+}
+
+.home-workspace-empty-copy {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
 /* Recent workspaces — horizontal scrolling strip of cards. */
 .home-workspace-strip {
     display: flex;
@@ -2017,6 +2035,7 @@ h3, .h3 {
     transform: translateY(-1px);
     text-decoration: none;
     color: inherit;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 18%, transparent);
     outline: none;
 }
 
@@ -2098,6 +2117,7 @@ h3, .h3 {
     background: color-mix(in srgb, var(--primary-color) 6%, transparent);
     text-decoration: none;
     color: inherit;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 16%, transparent);
     outline: none;
 }
 
@@ -2150,50 +2170,62 @@ h3, .h3 {
     grid-column: 2 / 3;
 }
 
-/* First-run CTA (shown when the user has zero workspaces). */
-.home-first-run-cta {
-    max-width: 720px;
-    margin: 0 auto;
-    text-align: center;
-    padding: 1.5rem 1.5rem 1.75rem;
+/* First-run hero (shown when the user has zero workspaces). */
+.home-first-run-hero {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.5rem;
 }
 
 .home-first-run-title {
-    margin: 0 0 0.35rem;
-    font-size: 1.2rem;
     color: var(--text-primary);
+    font-size: 2.2rem;
+    line-height: 1.08;
+    letter-spacing: 0;
+    text-wrap: balance;
+}
+
+.home-first-run-hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    max-width: 620px;
 }
 
 .home-first-run-subtitle {
-    margin: 0 0 1rem;
+    max-width: 56ch;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
 }
 
 .home-first-run-actions {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.6rem;
+    flex-shrink: 0;
 }
 
-.home-first-run-skip {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 0.82rem;
-    padding: 0.3rem 0.6rem;
-    cursor: pointer;
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--text-secondary) 35%, transparent);
-    text-underline-offset: 3px;
-}
+@media (max-width: 768px) {
+    .home-first-run-hero {
+        align-items: stretch;
+        flex-direction: column;
+    }
 
-.home-first-run-skip:hover,
-.home-first-run-skip:focus-visible {
-    color: var(--text-primary);
-    text-decoration-color: var(--text-primary);
-    outline: none;
+    .home-first-run-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .home-first-run-title,
+    .home-assistant-minimal-title {
+        font-size: 1.6rem;
+    }
+
+    .home-workspace-empty {
+        flex-direction: column;
+    }
 }
 
 .home-thinking-modal-content {
