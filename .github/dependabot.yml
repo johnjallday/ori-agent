@@ -31,14 +31,7 @@ updates:
     allow:
       - dependency-type: "direct"
       - dependency-type: "indirect"
-    ignore:
-      # invopop/jsonschema v0.14 switched ordered-map to pb33f, while
-      # anthropic-sdk-go (<= v1.43) still uses wk8/go-ordered-map and
-      # fails to build against jsonschema 0.14+. Hold at 0.13.x until
-      # the SDK ships its pb33f fix:
-      #   https://github.com/anthropics/anthropic-sdk-go/issues/325
-      #   https://github.com/anthropics/anthropic-sdk-go/pull/326
-      # Remove this entry once a fixed SDK release is available so the
-      # two can bump together.
-      - dependency-name: "github.com/invopop/jsonschema"
-        versions: [">= 0.14"]
+    # Ignore specific dependencies if needed
+    # ignore:
+    #   - dependency-name: "github.com/example/package"
+    #     versions: ["1.x"]
