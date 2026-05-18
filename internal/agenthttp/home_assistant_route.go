@@ -14,8 +14,10 @@ import (
 )
 
 type HomeAssistantRouteHandler struct {
-	State           store.Store
-	RuntimeResolver interface {
+	State             store.Store
+	WorkspaceResolver *HomeAssistantWorkspaceResolver
+	IntakeTraceStore  HomeAssistantIntakeTraceStore
+	RuntimeResolver   interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
@@ -42,6 +44,20 @@ func (h *HomeAssistantRouteHandler) SetRuntimeResolver(resolver interface {
 	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 }) {
 	h.RuntimeResolver = resolver
+	if h.WorkspaceResolver != nil {
+		h.WorkspaceResolver.SetRuntimeResolver(resolver)
+	}
+}
+
+func (h *HomeAssistantRouteHandler) SetWorkspaceResolver(resolver *HomeAssistantWorkspaceResolver) {
+	h.WorkspaceResolver = resolver
+	if resolver != nil && h.RuntimeResolver != nil {
+		resolver.SetRuntimeResolver(h.RuntimeResolver)
+	}
+}
+
+func (h *HomeAssistantRouteHandler) SetIntakeTraceStore(store HomeAssistantIntakeTraceStore) {
+	h.IntakeTraceStore = store
 }
 
 type HomeAssistantRouteRequest struct {
@@ -58,19 +74,22 @@ type HomeAssistantRouteContext struct {
 }
 
 type HomeAssistantRouteResponse struct {
-	Intent               string   `json:"intent"`
-	IntentVariant        string   `json:"intent_variant,omitempty"`
-	IntentLabel          string   `json:"intent_label"`
-	RoutingPolicy        string   `json:"routing_policy"`
-	MatchedAgent         string   `json:"matched_agent,omitempty"`
-	Score                int      `json:"score"`
-	RequiresCreation     bool     `json:"requires_creation"`
-	WorkspaceRecommended bool     `json:"workspace_recommended"`
-	RouteMode            string   `json:"route_mode"`
-	TargetSurface        string   `json:"target_surface"`
-	Reasons              []string `json:"reasons,omitempty"`
-	SuggestedAgentName   string   `json:"suggested_agent_name"`
-	SuggestedAgentType   string   `json:"suggested_agent_type"`
+	Intent               string                            `json:"intent"`
+	IntentVariant        string                            `json:"intent_variant,omitempty"`
+	IntentLabel          string                            `json:"intent_label"`
+	RoutingPolicy        string                            `json:"routing_policy"`
+	ContextMode          string                            `json:"context_mode"`
+	HandoffPolicy        string                            `json:"handoff_policy"`
+	MatchedAgent         string                            `json:"matched_agent,omitempty"`
+	Score                int                               `json:"score"`
+	RequiresCreation     bool                              `json:"requires_creation"`
+	WorkspaceRecommended bool                              `json:"workspace_recommended"`
+	WorkspaceResolution  *HomeAssistantWorkspaceResolution `json:"workspace_resolution,omitempty"`
+	RouteMode            string                            `json:"route_mode"`
+	TargetSurface        string                            `json:"target_surface"`
+	Reasons              []string                          `json:"reasons,omitempty"`
+	SuggestedAgentName   string                            `json:"suggested_agent_name"`
+	SuggestedAgentType   string                            `json:"suggested_agent_type"`
 }
 
 var errHomeAssistantPromptRequired = errors.New("prompt is required")
@@ -105,6 +124,14 @@ const (
 	homeAssistantPolicyAssistantOnly      = "assistant_only"
 	homeAssistantPolicyAssistantPreferred = "assistant_preferred"
 	homeAssistantPolicySpecialistRequired = "specialist_required"
+
+	homeAssistantContextDirect    = "direct"
+	homeAssistantContextWorkspace = "workspace"
+	homeAssistantContextScratch   = "scratch"
+
+	homeAssistantHandoffAssistant  = "assistant"
+	homeAssistantHandoffSpecialist = "specialist"
+	homeAssistantHandoffTool       = "tool"
 )
 
 var (
@@ -243,21 +270,40 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssi
 	routeContext := normalizeHomeAssistantRouteContext(context)
 	intent := detectHomeAssistantIntent(prompt)
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
-	match := h.findBestMatch(prompt, intent, routeContext)
-	if match == nil {
-		match = h.systemAssistantFallback(intent)
-	}
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
 	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
 	routingPolicy := determineRoutingPolicy(intent, intentVariant, routeMode, targetSurface, routeContext)
+	contextMode := determineHomeAssistantContextMode(routeMode)
+	handoffPolicy := determineHomeAssistantHandoffPolicy(intent, intentVariant)
+
+	var workspaceResolution *HomeAssistantWorkspaceResolution
+	if contextMode == homeAssistantContextWorkspace && h.WorkspaceResolver != nil {
+		workspaceResolution = h.WorkspaceResolver.Resolve(prompt, routeContext)
+	}
+
+	agentRouteContext := routeContext
+	if workspaceResolution != nil &&
+		(workspaceResolution.State == homeAssistantWorkspaceStateConfident ||
+			workspaceResolution.State == homeAssistantWorkspaceStateNeedsRepair) &&
+		strings.TrimSpace(workspaceResolution.SelectedWorkspaceID) != "" {
+		agentRouteContext.WorkspaceID = strings.TrimSpace(workspaceResolution.SelectedWorkspaceID)
+	}
+
+	match := h.findBestMatch(prompt, intent, agentRouteContext)
+	if match == nil {
+		match = h.systemAssistantFallback(intent)
+	}
 
 	resp := &HomeAssistantRouteResponse{
 		Intent:               intent.Key,
 		IntentVariant:        intentVariant,
 		IntentLabel:          intent.Label,
 		RoutingPolicy:        routingPolicy,
+		ContextMode:          contextMode,
+		HandoffPolicy:        handoffPolicy,
 		RequiresCreation:     true,
 		WorkspaceRecommended: workspaceRecommended,
+		WorkspaceResolution:  workspaceResolution,
 		RouteMode:            routeMode,
 		TargetSurface:        targetSurface,
 		SuggestedAgentName:   intent.SuggestedName,
@@ -840,6 +886,29 @@ func determineRoutingPolicy(
 	default:
 		return homeAssistantPolicyAssistantPreferred
 	}
+}
+
+func determineHomeAssistantContextMode(routeMode string) string {
+	switch strings.TrimSpace(routeMode) {
+	case "workspace_task":
+		return homeAssistantContextWorkspace
+	default:
+		return homeAssistantContextDirect
+	}
+}
+
+func determineHomeAssistantHandoffPolicy(intent homeAssistantIntent, intentVariant string) string {
+	switch intent.Key {
+	case homeAssistantUtilityIntent.Key:
+		return homeAssistantHandoffTool
+	case homeAssistantEmailIntent.Key, homeAssistantAppLaunchIntent.Key:
+		return homeAssistantHandoffSpecialist
+	case homeAssistantCalendarIntent.Key:
+		if intentVariant != "workspace_schedule" {
+			return homeAssistantHandoffSpecialist
+		}
+	}
+	return homeAssistantHandoffAssistant
 }
 
 func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {

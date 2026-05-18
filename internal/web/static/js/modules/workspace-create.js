@@ -647,6 +647,13 @@ async function createWorkspace() {
     resetImportState();
 
     if (workspaceId) {
+      window.dispatchEvent(new CustomEvent('ori:workspace-created', {
+        detail: {
+          workspaceId,
+          workspaceName: result.folder?.name || name || extractFolderNameFromPath(importPath) || ''
+        }
+      }));
+
       const successMessageParts = [];
       if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
       if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);

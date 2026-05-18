@@ -101,6 +101,7 @@ func TestMigrations(t *testing.T) {
 		"sessions_fts",
 		"schema_migrations",
 		"vaults",
+		"home_assistant_intake_traces",
 	}
 	for _, table := range tables {
 		var name string
