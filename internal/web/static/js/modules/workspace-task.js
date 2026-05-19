@@ -1811,6 +1811,12 @@ export class WorkspaceTaskPage {
   // Create Skill, Create Workflow Task). The toggle's aria-expanded and
   // the container's data-open state are kept in sync, and the menu's
   // hidden attribute removes its items from the tab order when closed.
+  //
+  // The menu is position: fixed because its parent card sets
+  // overflow: hidden to keep its gradient inside the rounded corners,
+  // which previously clipped the popover. Coordinates are derived from
+  // the toggle's bounding rect on each open; scroll/resize close the
+  // menu so the position can't drift out of sync.
   setOutputOverflowOpen(open) {
     const container = this.elements.outputOverflow;
     const toggle = this.elements.outputOverflowToggle;
@@ -1820,14 +1826,57 @@ export class WorkspaceTaskPage {
     const next = Boolean(open);
     container.dataset.open = next ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-    menu.hidden = !next;
 
     if (next) {
+      menu.hidden = false;
+      this.positionOutputOverflowMenu();
+      this.bindOutputOverflowDismissHandlers();
+
       const firstItem = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
       if (firstItem && typeof firstItem.focus === 'function') {
         window.requestAnimationFrame(() => firstItem.focus());
       }
+    } else {
+      menu.hidden = true;
+      this.unbindOutputOverflowDismissHandlers();
     }
+  }
+
+  positionOutputOverflowMenu() {
+    const toggle = this.elements.outputOverflowToggle;
+    const menu = this.elements.outputOverflowMenu;
+    if (!toggle || !menu) return;
+
+    const toggleRect = toggle.getBoundingClientRect();
+    const gap = 6;
+    // Measure the menu now that it's visible. Clamp to the viewport so the
+    // popover doesn't slip off-screen on narrow widths or near the edge.
+    const menuRect = menu.getBoundingClientRect();
+    const menuWidth = menuRect.width || 224;
+    const viewportPad = 8;
+
+    let left = toggleRect.right - menuWidth;
+    if (left < viewportPad) left = viewportPad;
+    const maxLeft = window.innerWidth - menuWidth - viewportPad;
+    if (left > maxLeft) left = maxLeft;
+
+    menu.style.top = `${Math.round(toggleRect.bottom + gap)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+  }
+
+  bindOutputOverflowDismissHandlers() {
+    if (this._outputOverflowDismissBound) return;
+    this._outputOverflowDismiss = () => this.setOutputOverflowOpen(false);
+    window.addEventListener('scroll', this._outputOverflowDismiss, { passive: true, capture: true });
+    window.addEventListener('resize', this._outputOverflowDismiss);
+    this._outputOverflowDismissBound = true;
+  }
+
+  unbindOutputOverflowDismissHandlers() {
+    if (!this._outputOverflowDismissBound) return;
+    window.removeEventListener('scroll', this._outputOverflowDismiss, { capture: true });
+    window.removeEventListener('resize', this._outputOverflowDismiss);
+    this._outputOverflowDismissBound = false;
   }
 
   // toggleFollowupPanel shows/hides the inline follow-up creation form

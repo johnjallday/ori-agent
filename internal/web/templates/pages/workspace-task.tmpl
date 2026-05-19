@@ -1247,11 +1247,14 @@
       line-height: 1;
     }
 
+    /* position: fixed lifts the popover out of the parent card's
+       overflow: hidden clipping context (the card sets that so its ::before
+       gradient stays within the rounded corners). JS sets top/left from the
+       toggle's bounding rect on open, and closes the menu on scroll/resize
+       so the position can't drift. */
     .workspace-task-output-overflow-menu {
-      position: absolute;
-      top: calc(100% + 0.4rem);
-      right: 0;
-      z-index: 20;
+      position: fixed;
+      z-index: 1050;
       min-width: 14rem;
       display: flex;
       flex-direction: column;
