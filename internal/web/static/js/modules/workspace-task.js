@@ -2425,9 +2425,17 @@ export class WorkspaceTaskPage {
       heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
       overview: JSON.stringify([
         t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
-        t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id,
+        t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id, t.details,
+        t.result_storage,
+        this.getSubtasks().map((step) => [step?.id, step?.subtask_index, step?.result_storage]),
         this.currentRun?.id, this.currentRun?.status, this.currentRun?.profile_snapshot?.id,
         this.currentRun?.report?.validation_status, this.currentRun?.started_at,
+        (this.workspace?.store_nodes || []).map((node) => [
+          node?.id,
+          node?.canvas_node_id,
+          node?.name,
+          node?.base_dir,
+        ]),
         sigStatusInfo,
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
@@ -2946,8 +2954,29 @@ export class WorkspaceTaskPage {
       });
     }
 
+    const resultStorageTask = this.getTaskResultStorageTask();
+    items.push({
+      title: 'Result Storage',
+      value: this.describeTaskResultStorage(resultStorageTask?.result_storage, resultStorageTask),
+      full: true,
+      editable: true,
+      editField: 'result-storage',
+      editLabel: 'Edit result storage',
+      alwaysShowEdit: true
+    });
+
     const detailsValue = String(this.task?.details || '').trim();
     const blockedDetailsRedundant = this.isBlockedDetailsRedundant(detailsValue);
+
+    const renderEditButton = (item) => {
+      if (!item.editable) return '';
+      const editField = item.editField || 'details';
+      const editLabel = item.editLabel || `Edit ${item.title || 'field'}`;
+      const visibilityClass = item.alwaysShowEdit ? ' is-visible' : '';
+      return `<button type="button" class="workspace-task-overview-edit-btn${visibilityClass}" data-edit-field="${this.escapeHtml(editField)}" aria-label="${this.escapeHtml(editLabel)}" title="${this.escapeHtml(editLabel)}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
+      </button>`;
+    };
 
     if (!isBlocked || (detailsValue && !blockedDetailsRedundant)) {
       items.push({
@@ -2972,9 +3001,7 @@ export class WorkspaceTaskPage {
               <div class="workspace-task-overview-disclosure-body">
                 <div class="workspace-task-overview-title">
                   Task Details
-                  ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
-                  </button>` : ''}
+                  ${renderEditButton(item)}
                 </div>
                 <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
               </div>
@@ -2987,9 +3014,7 @@ export class WorkspaceTaskPage {
         <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
           <div class="workspace-task-overview-title">
             ${this.escapeHtml(item.title)}
-            ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
-            </button>` : ''}
+            ${renderEditButton(item)}
           </div>
           <div class="workspace-task-overview-value">
             ${item.href
@@ -3000,9 +3025,94 @@ export class WorkspaceTaskPage {
       `;
     }).join('');
 
-    this.elements.overview.querySelectorAll('[data-edit-field="details"]').forEach((btn) => {
-      btn.addEventListener('click', () => this.startDetailsEdit(btn));
+    this.elements.overview.querySelectorAll('[data-edit-field]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const field = btn.getAttribute('data-edit-field') || '';
+        if (field === 'details') this.startDetailsEdit(btn);
+        if (field === 'result-storage') this.openTaskStorageEditor();
+      });
     });
+  }
+
+  getTaskResultStorageTask() {
+    const subtasks = this.getSubtasks();
+    return subtasks.length > 0 ? subtasks[subtasks.length - 1] : this.task;
+  }
+
+  describeTaskResultStorage(storage, sourceTask = this.task) {
+    if (!storage || storage.enabled !== true) {
+      return 'Not saving automatically.\nEdit this to save each run or append future runs to a CSV file.';
+    }
+
+    const writeMode = String(storage.write_mode || '').trim().toLowerCase();
+    const format = String(storage.format || 'text').trim().toLowerCase() || 'text';
+    const modeLabel = writeMode === 'append'
+      ? 'Append each run to CSV'
+      : `Save each run as a new ${format.toUpperCase()} file`;
+
+    let target = 'Default output folder';
+    const storeNodeId = String(storage.store_node_id || '').trim();
+    const filePath = String(storage.file_path || '').trim();
+    if (storeNodeId) {
+      target = `Store node: ${this.getStoreNodeDisplayLabel(storeNodeId)}`;
+    } else if (filePath) {
+      target = `Path: ${filePath}`;
+    }
+
+    const sourceTaskId = String(sourceTask?.id || '').trim();
+    const currentTaskId = String(this.task?.id || '').trim();
+    const sourceLabel = sourceTaskId && currentTaskId && sourceTaskId !== currentTaskId
+      ? `Final workflow step: ${summarizeText(sourceTask?.description || sourceTaskId, 72)}`
+      : '';
+
+    return [modeLabel, target, sourceLabel].filter(Boolean).join('\n');
+  }
+
+  getStoreNodeDisplayLabel(storeNodeId) {
+    const normalized = String(storeNodeId || '').trim();
+    if (!normalized) return 'Unknown store node';
+    const nodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
+    const node = nodes.find((item) => (
+      String(item?.id || '').trim() === normalized ||
+      String(item?.canvas_node_id || '').trim() === normalized
+    ));
+    if (!node) return normalized;
+
+    const name = String(node.name || '').trim();
+    const baseDir = String(node.base_dir || '').trim();
+    if (name && baseDir) return `${name} (${baseDir})`;
+    return name || baseDir || normalized;
+  }
+
+  async openTaskStorageEditor() {
+    if (!window.taskModalController || typeof window.taskModalController.openForEdit !== 'function') {
+      this.notify('error', 'Task editor is not available on this page.');
+      return;
+    }
+
+    try {
+      await window.taskModalController.openForEdit(this.task, async () => {
+        await this.loadData();
+      });
+      window.requestAnimationFrame(() => this.focusTaskModalAutoSave());
+    } catch (error) {
+      console.error('Failed to open task storage editor:', error);
+      this.notify('error', error?.message || 'Failed to open task editor.');
+    }
+  }
+
+  focusTaskModalAutoSave() {
+    const automationSection = document.querySelector('.task-modal-automation');
+    const autoSaveEnabled = document.getElementById('taskModalAutoSaveEnabled');
+    const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
+    const target = this.getTaskResultStorageTask()?.result_storage?.enabled ? writeModeSelect : autoSaveEnabled;
+
+    automationSection?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    window.setTimeout(() => {
+      if (target && typeof target.focus === 'function') {
+        target.focus({ preventScroll: true });
+      }
+    }, 180);
   }
 
   normalizeComparableText(value) {
