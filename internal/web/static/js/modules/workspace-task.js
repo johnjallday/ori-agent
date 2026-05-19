@@ -2585,9 +2585,15 @@ export class WorkspaceTaskPage {
       </button>`);
     }
 
-    // Mark Complete is for *manual* close-out before a run starts. Hiding
-    // it during in_progress avoids racing the agent's own completion path.
-    if ((status === 'pending' || status === 'assigned') && !statusInfo.isBlocked) {
+    // Mark Complete covers two cases: pre-run close-out (pending/assigned)
+    // and manual close-out of a runaway in_progress task that the user
+    // already finished offline. The completeTask() handler shows a confirm
+    // dialog for in_progress to make the override explicit; pending and
+    // assigned skip the prompt since no execution work is at stake.
+    // Blocked (waiting_for_choice) is excluded because the server's status
+    // transition table doesn't permit a direct jump to completed - the
+    // task has to go through its resolution flow first.
+    if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
       </button>`);
