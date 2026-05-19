@@ -185,27 +185,51 @@
                     <div class="workspace-task-page-card-kicker">Result</div>
                     <h2>Latest output</h2>
                   </div>
+                  <!--
+                    Three competing primaries (Save as Note, Create Skill,
+                    Create Workflow Task) collapsed into one primary
+                    (Save as Note) + one secondary (Follow-up) + an overflow
+                    menu for Copy and the templatize actions. Element IDs
+                    and label <span>s are preserved so updateResultActionButtons
+                    and the click handlers in bindEvents continue to drive
+                    them unchanged.
+                  -->
                   <div class="workspace-task-output-actions" aria-label="Result actions">
-                    <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
-                      <i class="bi bi-copy" aria-hidden="true"></i>
-                      <span>Copy</span>
-                    </button>
                     <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
                       <i class="bi bi-journal-plus" aria-hidden="true"></i>
                       <span>Save as Note</span>
-                    </button>
-                    <button type="button" id="workspace-task-output-create-skill" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                      <i class="bi bi-magic" aria-hidden="true"></i>
-                      <span>Create Skill</span>
                     </button>
                     <button type="button" id="workspace-task-output-followup" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
                       <i class="bi bi-arrow-down-right-circle" aria-hidden="true"></i>
                       <span>Follow-up task</span>
                     </button>
-                    <button type="button" id="workspace-task-output-promote" class="modern-btn modern-btn-primary workspace-task-output-action-btn" hidden>
-                      <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                      <span>Create Workflow Task</span>
-                    </button>
+                    <div class="workspace-task-output-overflow" data-open="false">
+                      <button
+                        type="button"
+                        id="workspace-task-output-overflow-toggle"
+                        class="modern-btn modern-btn-secondary workspace-task-output-action-btn workspace-task-output-overflow-toggle"
+                        aria-haspopup="menu"
+                        aria-expanded="false"
+                        aria-controls="workspace-task-output-overflow-menu"
+                        aria-label="More result actions"
+                        title="More actions">
+                        <i class="bi bi-three-dots" aria-hidden="true"></i>
+                      </button>
+                      <div id="workspace-task-output-overflow-menu" class="workspace-task-output-overflow-menu" role="menu" hidden>
+                        <button type="button" id="workspace-task-output-copy" class="workspace-task-output-overflow-item" role="menuitem">
+                          <i class="bi bi-copy" aria-hidden="true"></i>
+                          <span>Copy</span>
+                        </button>
+                        <button type="button" id="workspace-task-output-create-skill" class="workspace-task-output-overflow-item" role="menuitem" hidden>
+                          <i class="bi bi-magic" aria-hidden="true"></i>
+                          <span>Create Skill</span>
+                        </button>
+                        <button type="button" id="workspace-task-output-promote" class="workspace-task-output-overflow-item" role="menuitem" hidden>
+                          <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                          <span>Create Workflow Task</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
@@ -1202,6 +1226,78 @@
       border-color: color-mix(in srgb, #16a34a 34%, var(--border-color));
       background: color-mix(in srgb, #16a34a 12%, var(--bg-primary));
       color: color-mix(in srgb, #16a34a 82%, var(--text-primary));
+    }
+
+    /* Overflow popover for the demoted Result actions (Copy, Create Skill,
+       Create Workflow Task). Positions relative to the toggle, anchored to
+       the right edge so it doesn't run off-screen on narrow viewports. */
+    .workspace-task-output-overflow {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .workspace-task-output-overflow-toggle {
+      min-width: 2.35rem;
+      padding-inline: 0.7rem;
+      justify-content: center;
+    }
+
+    .workspace-task-output-overflow-toggle i {
+      font-size: 1.05rem;
+      line-height: 1;
+    }
+
+    .workspace-task-output-overflow-menu {
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      right: 0;
+      z-index: 20;
+      min-width: 14rem;
+      display: flex;
+      flex-direction: column;
+      padding: 0.35rem;
+      border-radius: 14px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      box-shadow: 0 18px 38px rgba(10, 10, 10, 0.18);
+    }
+
+    .workspace-task-output-overflow-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.55rem 0.7rem;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.14s ease, color 0.14s ease;
+    }
+
+    .workspace-task-output-overflow-item i {
+      flex: 0 0 1.1rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-output-overflow-item:hover,
+    .workspace-task-output-overflow-item:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+      color: var(--primary-color);
+      outline: none;
+    }
+
+    .workspace-task-output-overflow-item:hover i,
+    .workspace-task-output-overflow-item:focus-visible i {
+      color: var(--primary-color);
+    }
+
+    .workspace-task-output-overflow-item:disabled {
+      opacity: 0.5;
+      pointer-events: none;
     }
 
     .workspace-task-output-note-status {

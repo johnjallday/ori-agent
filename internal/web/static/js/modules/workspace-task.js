@@ -956,6 +956,9 @@ export class WorkspaceTaskPage {
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
       outputCreateSkillBtn: document.getElementById('workspace-task-output-create-skill'),
       outputPromoteBtn: document.getElementById('workspace-task-output-promote'),
+      outputOverflow: document.querySelector('.workspace-task-output-overflow'),
+      outputOverflowToggle: document.getElementById('workspace-task-output-overflow-toggle'),
+      outputOverflowMenu: document.getElementById('workspace-task-output-overflow-menu'),
       outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
       skillModal: document.getElementById('workspace-task-skill-modal'),
@@ -1126,10 +1129,35 @@ export class WorkspaceTaskPage {
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
-    this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
+    this.elements.outputCopyBtn?.addEventListener('click', () => {
+      this.copyCurrentResult();
+      this.setOutputOverflowOpen(false);
+    });
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
-    this.elements.outputCreateSkillBtn?.addEventListener('click', () => this.openSkillDraftModal());
-    this.elements.outputPromoteBtn?.addEventListener('click', () => this.previewResultPromotion());
+    this.elements.outputCreateSkillBtn?.addEventListener('click', () => {
+      this.openSkillDraftModal();
+      this.setOutputOverflowOpen(false);
+    });
+    this.elements.outputPromoteBtn?.addEventListener('click', () => {
+      this.previewResultPromotion();
+      this.setOutputOverflowOpen(false);
+    });
+    this.elements.outputOverflowToggle?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.setOutputOverflowOpen(this.elements.outputOverflow?.dataset.open !== 'true');
+    });
+    document.addEventListener('click', (event) => {
+      if (!this.elements.outputOverflow) return;
+      if (this.elements.outputOverflow.dataset.open !== 'true') return;
+      if (this.elements.outputOverflow.contains(event.target)) return;
+      this.setOutputOverflowOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.elements.outputOverflow?.dataset.open === 'true') {
+        this.setOutputOverflowOpen(false);
+        this.elements.outputOverflowToggle?.focus();
+      }
+    });
     this.elements.skillGenerateBtn?.addEventListener('click', () => this.generateSkillPromptFromTask(true));
     this.elements.skillSubmitBtn?.addEventListener('click', () => this.submitTaskSkillDraft());
     this.elements.skillModal?.addEventListener('hidden.bs.modal', () => {
@@ -1777,6 +1805,29 @@ export class WorkspaceTaskPage {
       this.render();
     }
     return this.task;
+  }
+
+  // setOutputOverflowOpen drives the demoted-actions popover (Copy,
+  // Create Skill, Create Workflow Task). The toggle's aria-expanded and
+  // the container's data-open state are kept in sync, and the menu's
+  // hidden attribute removes its items from the tab order when closed.
+  setOutputOverflowOpen(open) {
+    const container = this.elements.outputOverflow;
+    const toggle = this.elements.outputOverflowToggle;
+    const menu = this.elements.outputOverflowMenu;
+    if (!container || !toggle || !menu) return;
+
+    const next = Boolean(open);
+    container.dataset.open = next ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    menu.hidden = !next;
+
+    if (next) {
+      const firstItem = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
+      if (firstItem && typeof firstItem.focus === 'function') {
+        window.requestAnimationFrame(() => firstItem.focus());
+      }
+    }
   }
 
   // toggleFollowupPanel shows/hides the inline follow-up creation form
