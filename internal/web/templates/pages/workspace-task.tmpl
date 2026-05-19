@@ -338,15 +338,7 @@
           </main>
         </div>
 
-        <!-- Floating respond trigger -->
-        <button type="button" id="workspace-task-respond-trigger" class="workspace-task-respond-trigger" hidden>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H5.17L4,17.17V4H20V16M7,9H9V11H7V9M11,9H13V11H11V9M15,9H17V11H15V9Z"/>
-          </svg>
-          Respond
-        </button>
-
-        <!-- Slide-out assist panel -->
+        <!-- Slide-out assist panel (opened from the Action Required banner CTA) -->
         <div id="workspace-task-assist-panel" class="workspace-task-assist-panel" hidden>
           <div id="workspace-task-assist-backdrop" class="workspace-task-assist-backdrop"></div>
           <div class="workspace-task-assist-panel-content" id="workspace-task-assist-card">
@@ -3249,37 +3241,6 @@
       text-decoration: underline;
     }
 
-    /* Floating respond trigger */
-    .workspace-task-respond-trigger {
-      position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
-      z-index: 1040;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.25rem;
-      border: none;
-      border-radius: 999px;
-      background: var(--primary-color);
-      color: #fff;
-      font-size: 0.92rem;
-      font-weight: 700;
-      cursor: pointer;
-      box-shadow: 0 8px 24px rgba(10, 10, 10, 0.18);
-      transition: transform 0.16s ease, box-shadow 0.16s ease;
-    }
-
-    .workspace-task-respond-trigger:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 32px rgba(10, 10, 10, 0.24);
-    }
-
-    .workspace-task-respond-trigger:focus-visible {
-      outline: 2px solid #fff;
-      outline-offset: 2px;
-    }
-
     /* Slide-out assist panel */
     .workspace-task-assist-panel {
       position: fixed;
@@ -4421,13 +4382,6 @@
 
       .workspace-task-workflow-substeps {
         padding-left: 0.65rem;
-      }
-
-      .workspace-task-respond-trigger {
-        bottom: 1rem;
-        right: 1rem;
-        padding: 0.65rem 1rem;
-        font-size: 0.85rem;
       }
 
       .workspace-task-assist-deck-tab {

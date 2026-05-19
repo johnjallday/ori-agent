@@ -1066,7 +1066,6 @@ export class WorkspaceTaskPage {
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
       assistFailBtn: document.getElementById('workspace-task-assist-fail'),
-      respondTrigger: document.getElementById('workspace-task-respond-trigger'),
       assistPanel: document.getElementById('workspace-task-assist-panel'),
       assistBackdrop: document.getElementById('workspace-task-assist-backdrop'),
       assistCloseBtn: document.getElementById('workspace-task-assist-close')
@@ -1184,7 +1183,6 @@ export class WorkspaceTaskPage {
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.assistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.assistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
-    this.elements.respondTrigger?.addEventListener('click', () => this.toggleAssistPanel(true));
     this.elements.assistCloseBtn?.addEventListener('click', () => this.toggleAssistPanel(false));
     this.elements.assistBackdrop?.addEventListener('click', () => this.toggleAssistPanel(false));
     document.addEventListener('keydown', (e) => {
@@ -2635,7 +2633,17 @@ export class WorkspaceTaskPage {
       button.addEventListener('click', () => {
         const action = String(button.getAttribute('data-hero-priority-action') || '').trim();
         if (action === 'assist') {
-          this.scrollToSection(this.elements.assistCard, { focusTarget: () => this.getAssistFocusTarget() });
+          // The banner is now the sole entry into the assist panel (the
+          // floating Respond button has been retired). Open the panel and
+          // hand focus to its first interactive element after the slide-in
+          // animation has settled.
+          this.toggleAssistPanel(true);
+          window.setTimeout(() => {
+            const target = this.getAssistFocusTarget();
+            if (target && typeof target.focus === 'function') {
+              target.focus({ preventScroll: true });
+            }
+          }, 360);
           return;
         }
         if (action === 'context') {
@@ -5562,13 +5570,11 @@ export class WorkspaceTaskPage {
     const blocked = statusInfo.isBlocked && this.currentBlockedTask;
 
     if (!blocked) {
-      if (this.elements.respondTrigger) this.elements.respondTrigger.hidden = true;
       this.toggleAssistPanel(false);
       if (this.elements.blockedContextCard) this.elements.blockedContextCard.hidden = true;
       return;
     }
 
-    if (this.elements.respondTrigger) this.elements.respondTrigger.hidden = false;
     this.renderBlockedContext();
     this.renderAssistCard();
   }
