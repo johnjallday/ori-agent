@@ -938,7 +938,6 @@ export class WorkspaceTaskPage {
       heroPriorityReason: document.getElementById('workspace-task-hero-priority-reason'),
       heroPriorityReasonText: document.getElementById('workspace-task-hero-priority-reason-text'),
       heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
-      liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
       heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
       heroAgent: document.getElementById('workspace-task-hero-agent'),
@@ -1472,13 +1471,17 @@ export class WorkspaceTaskPage {
   }
 
   renderLiveBadge() {
-    const badge = this.elements.liveBadge;
-    if (!badge) return;
+    // The former separate live badge has been folded into the status pill:
+    // when the task is streaming we set data-live="true" on the pill, swap
+    // its ::before icon for an inline pulsing dot, and replace the "In
+    // Progress" label with the latest activity phase + relative timestamp.
+    const pill = this.elements.status;
+    if (!pill) return;
 
     const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
     const isLive = isRunning && this.workspaceRealtimeUnsubscribe;
-    badge.hidden = !isLive;
     if (!isLive) {
+      pill.removeAttribute('data-live');
       this.stopActivityTick();
       return;
     }
@@ -1489,7 +1492,8 @@ export class WorkspaceTaskPage {
       const ago = this.formatRelativeAgo(activity.at);
       text = ago ? `${activity.label} · ${ago}` : activity.label;
     }
-    badge.innerHTML = `<span class="workspace-task-page-live-dot"></span>${this.escapeHtml(text)}`;
+    pill.setAttribute('data-live', 'true');
+    pill.innerHTML = `<span class="workspace-task-page-live-dot"></span>${this.escapeHtml(text)}`;
 
     this.startActivityTick();
   }

@@ -89,10 +89,7 @@
             </div>
           </div>
           <div class="workspace-task-page-hero-meta">
-            <span id="workspace-task-status" class="workspace-task-page-status" data-state="pending">Pending</span>
-            <span id="workspace-task-live-badge" class="workspace-task-page-live-badge" hidden>
-              <span class="workspace-task-page-live-dot"></span>Live
-            </span>
+            <span id="workspace-task-status" class="workspace-task-page-status" data-state="pending" aria-live="polite">Pending</span>
             <label class="workspace-task-page-agent-picker" id="workspace-task-hero-agent-wrap" hidden>
               <span class="workspace-task-page-agent-picker-label">Agent</span>
               <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign task agent"></select>
@@ -831,18 +828,22 @@
       background: rgba(248, 113, 113, 0.22);
     }
 
-    .workspace-task-page-live-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.35rem 0.7rem;
-      border-radius: 999px;
-      background: rgba(16, 185, 129, 0.12);
-      color: #10b981;
-      font-size: 0.76rem;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
+    /* Live in_progress: replace the static ▶ icon with a pulsing dot child and
+       shift the pill tint from blue to the streaming-green that used to be on
+       the separate live badge. Motion + color together signal "streaming now"
+       inside the one status pill. */
+    .workspace-task-page-status[data-live="true"]::before {
+      content: none;
+    }
+    .workspace-task-page-status[data-state="in_progress"][data-live="true"] {
+      color: #0f7a5a;
+      border-color: rgba(16, 185, 129, 0.32);
+      background: rgba(16, 185, 129, 0.14);
+    }
+    [data-bs-theme="dark"] .workspace-task-page-status[data-state="in_progress"][data-live="true"] {
+      color: #34d399;
+      border-color: rgba(52, 211, 153, 0.5);
+      background: rgba(16, 185, 129, 0.22);
     }
 
     .workspace-task-page-live-dot {
