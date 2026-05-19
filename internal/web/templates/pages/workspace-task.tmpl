@@ -122,15 +122,14 @@
 
         <div id="workspace-task-page-alert" class="workspace-task-page-alert d-none" role="alert"></div>
 
+        <!-- Skeleton mirrors the single-column main layout (no aside). The
+             card heights roughly match the Task Brief and the Result/Schedule
+             stacks that the live page renders. -->
         <div id="workspace-task-page-loading" class="workspace-task-page-loading">
           <div class="workspace-task-page-loading-layout">
-            <div class="workspace-task-page-loading-main">
-              <div class="workspace-task-page-loading-card" style="min-height: 200px;"></div>
-              <div class="workspace-task-page-loading-card" style="min-height: 160px;"></div>
-            </div>
-            <div class="workspace-task-page-loading-aside">
-              <div class="workspace-task-page-loading-card" style="min-height: 240px;"></div>
-            </div>
+            <div class="workspace-task-page-loading-card" style="min-height: 220px;"></div>
+            <div class="workspace-task-page-loading-card" style="min-height: 180px;"></div>
+            <div class="workspace-task-page-loading-card" style="min-height: 140px;"></div>
           </div>
         </div>
 
@@ -3422,14 +3421,6 @@
     }
 
     .workspace-task-page-loading-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
-      gap: 1.25rem;
-      align-items: start;
-    }
-
-    .workspace-task-page-loading-main,
-    .workspace-task-page-loading-aside {
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
@@ -4347,8 +4338,7 @@
 
     @media (max-width: 1100px) {
       .workspace-task-page-hero,
-      .workspace-task-page-layout,
-      .workspace-task-page-loading-layout {
+      .workspace-task-page-layout {
         grid-template-columns: 1fr;
       }
 
