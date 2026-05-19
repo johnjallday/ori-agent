@@ -1238,6 +1238,10 @@
       margin-bottom: 1rem;
     }
 
+    .workspace-task-page-card-header.is-output-menu-open {
+      z-index: 1080;
+    }
+
     .workspace-task-page-card-header h2 {
       margin: 0.28rem 0 0;
       font-family: "Fraunces", serif;
@@ -1291,7 +1295,7 @@
        so the position can't drift. */
     .workspace-task-output-overflow-menu {
       position: fixed;
-      z-index: 1050;
+      z-index: 1080;
       min-width: 14rem;
       display: flex;
       flex-direction: column;

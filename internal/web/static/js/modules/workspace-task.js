@@ -1843,6 +1843,7 @@ export class WorkspaceTaskPage {
     const next = Boolean(open);
     container.dataset.open = next ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    container.closest('.workspace-task-page-card-header')?.classList.toggle('is-output-menu-open', next);
 
     if (next) {
       menu.hidden = false;
@@ -1855,6 +1856,8 @@ export class WorkspaceTaskPage {
       }
     } else {
       menu.hidden = true;
+      menu.style.top = '';
+      menu.style.left = '';
       this.unbindOutputOverflowDismissHandlers();
     }
   }
@@ -1870,6 +1873,7 @@ export class WorkspaceTaskPage {
     // popover doesn't slip off-screen on narrow widths or near the edge.
     const menuRect = menu.getBoundingClientRect();
     const menuWidth = menuRect.width || 224;
+    const menuHeight = menuRect.height || 132;
     const viewportPad = 8;
 
     let left = toggleRect.right - menuWidth;
@@ -1877,7 +1881,13 @@ export class WorkspaceTaskPage {
     const maxLeft = window.innerWidth - menuWidth - viewportPad;
     if (left > maxLeft) left = maxLeft;
 
-    menu.style.top = `${Math.round(toggleRect.bottom + gap)}px`;
+    let top = toggleRect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPad) {
+      top = toggleRect.top - menuHeight - gap;
+    }
+    if (top < viewportPad) top = viewportPad;
+
+    menu.style.top = `${Math.round(top)}px`;
     menu.style.left = `${Math.round(left)}px`;
   }
 
