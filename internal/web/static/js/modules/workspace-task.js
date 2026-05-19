@@ -924,7 +924,6 @@ export class WorkspaceTaskPage {
       content: document.getElementById('workspace-task-page-content'),
       workspaceName: document.getElementById('workspace-task-workspace-name'),
       title: document.getElementById('workspace-task-title'),
-      titleEditBtn: document.getElementById('workspace-task-title-edit'),
       breadcrumbTitle: document.getElementById('workspace-task-breadcrumb-title'),
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
@@ -1076,7 +1075,6 @@ export class WorkspaceTaskPage {
   }
 
   bindEvents() {
-    this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
     this.elements.title?.addEventListener('click', (event) => {
       // Don't hijack the user's text-selection drag — only treat a plain
       // click with no selection as an "open editor" intent.
@@ -1085,6 +1083,15 @@ export class WorkspaceTaskPage {
       this.startTitleEdit();
     });
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
+    // Keyboard parity for the removed pencil button: tabindex=0 + role=button
+    // on the <h1> means keyboard users land here in tab order; Enter or Space
+    // opens the inline editor.
+    this.elements.title?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.startTitleEdit();
+      }
+    });
     this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
     this.elements.subtitle?.addEventListener('click', (event) => {
       if (window.getSelection && String(window.getSelection() || '').length > 0) return;
