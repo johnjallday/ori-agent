@@ -236,13 +236,31 @@
                     <input type="text" id="workspace-task-followup-description" maxlength="500" placeholder="e.g. Draft a calendar reminder from this allergy report" />
                   </label>
                   <label class="workspace-task-followup-field">
-                    <span>Details <em>(optional)</em></span>
-                    <textarea id="workspace-task-followup-details" rows="3" placeholder="Any constraints, format, or extra context the downstream agent should know."></textarea>
-                  </label>
-                  <label class="workspace-task-followup-field">
                     <span>Assign to</span>
                     <select id="workspace-task-followup-agent"></select>
                   </label>
+                  <!-- "Details" was a peer field in the form; most follow-ups
+                       don't need it. Demoted behind a disclosure so the
+                       default form is two fields. Submission logic still
+                       reads .value off the textarea unchanged. -->
+                  <div class="workspace-task-followup-collapsible" data-open="false">
+                    <button
+                      type="button"
+                      id="workspace-task-followup-details-toggle"
+                      class="workspace-task-followup-disclosure"
+                      aria-expanded="false"
+                      aria-controls="workspace-task-followup-details-field">
+                      <span class="workspace-task-followup-disclosure-icon" aria-hidden="true">+</span>
+                      Add constraints
+                    </button>
+                    <label
+                      id="workspace-task-followup-details-field"
+                      class="workspace-task-followup-field workspace-task-followup-field-collapsible"
+                      hidden>
+                      <span>Constraints, format, or extra context</span>
+                      <textarea id="workspace-task-followup-details" rows="3" placeholder="Anything the downstream agent should know."></textarea>
+                    </label>
+                  </div>
                   <div id="workspace-task-followup-error" class="workspace-task-followup-error" hidden></div>
                   <div class="workspace-task-followup-actions">
                     <button type="button" id="workspace-task-followup-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
@@ -1395,6 +1413,58 @@
       outline: 2px solid color-mix(in srgb, var(--primary-color) 50%, transparent);
       outline-offset: 1px;
       border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    }
+
+    .workspace-task-followup-collapsible {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .workspace-task-followup-disclosure {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.55rem;
+      border: 1px dashed color-mix(in srgb, var(--border-color) 92%, transparent);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+    }
+
+    .workspace-task-followup-disclosure:hover {
+      color: var(--primary-color);
+      border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+    }
+
+    .workspace-task-followup-disclosure:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-followup-disclosure-icon {
+      display: inline-flex;
+      width: 1.05rem;
+      height: 1.05rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      font-weight: 800;
+      line-height: 1;
+      transition: transform 0.18s ease;
+    }
+
+    .workspace-task-followup-collapsible[data-open="true"] .workspace-task-followup-disclosure-icon {
+      transform: rotate(45deg);
     }
 
     .workspace-task-followup-error {

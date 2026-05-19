@@ -944,6 +944,9 @@ export class WorkspaceTaskPage {
       followupPanel: document.getElementById('workspace-task-followup-panel'),
       followupDescription: document.getElementById('workspace-task-followup-description'),
       followupDetails: document.getElementById('workspace-task-followup-details'),
+      followupDetailsField: document.getElementById('workspace-task-followup-details-field'),
+      followupDetailsToggle: document.getElementById('workspace-task-followup-details-toggle'),
+      followupDetailsCollapsible: document.querySelector('.workspace-task-followup-collapsible'),
       followupAgent: document.getElementById('workspace-task-followup-agent'),
       followupError: document.getElementById('workspace-task-followup-error'),
       followupSubmit: document.getElementById('workspace-task-followup-submit'),
@@ -1133,6 +1136,7 @@ export class WorkspaceTaskPage {
     this.elements.outputFollowupBtn?.addEventListener('click', () => this.toggleFollowupPanel(true));
     this.elements.followupCancel?.addEventListener('click', () => this.toggleFollowupPanel(false));
     this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
+    this.elements.followupDetailsToggle?.addEventListener('click', () => this.toggleFollowupDetails());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
@@ -1909,6 +1913,30 @@ export class WorkspaceTaskPage {
       window.requestAnimationFrame(() => this.elements.followupDescription?.focus());
     }
     if (this.elements.followupDetails) this.elements.followupDetails.value = '';
+    // Always collapse the "Add constraints" disclosure when the panel
+    // re-opens, so successive follow-ups start with a clean two-field form.
+    this.setFollowupDetailsOpen(false);
+  }
+
+  toggleFollowupDetails() {
+    const container = this.elements.followupDetailsCollapsible;
+    if (!container) return;
+    this.setFollowupDetailsOpen(container.dataset.open !== 'true');
+  }
+
+  setFollowupDetailsOpen(open) {
+    const container = this.elements.followupDetailsCollapsible;
+    const toggle = this.elements.followupDetailsToggle;
+    const field = this.elements.followupDetailsField;
+    if (!container || !toggle || !field) return;
+
+    const next = Boolean(open);
+    container.dataset.open = next ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    field.hidden = !next;
+    if (next) {
+      window.requestAnimationFrame(() => this.elements.followupDetails?.focus());
+    }
   }
 
   populateFollowupAgentOptions() {
