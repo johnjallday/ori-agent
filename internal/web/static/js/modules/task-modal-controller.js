@@ -111,11 +111,15 @@ class TaskModalController {
       if (autoSaveFields) {
         autoSaveFields.style.display = e.target.checked ? 'block' : 'none';
       }
+      this.updateAutoSaveWriteModeFields();
     });
 
     // Auto-save target change handler
     document.getElementById('taskModalAutoSaveTarget')?.addEventListener('change', () => {
       this.updateAutoSaveTargetFields();
+    });
+    document.getElementById('taskModalAutoSaveWriteMode')?.addEventListener('change', () => {
+      this.updateAutoSaveWriteModeFields();
     });
 
     // Escape key handler (document-level for reliable closing)
@@ -250,6 +254,7 @@ class TaskModalController {
       },
       autoSave: {
         enabled: autoSaveEnabled,
+        writeMode: autoSaveEnabled ? readValue('taskModalAutoSaveWriteMode') : '',
         target: autoSaveEnabled ? readValue('taskModalAutoSaveTarget') : '',
         storeNode: autoSaveEnabled ? readValue('taskModalAutoSaveStoreNode') : '',
         path: autoSaveEnabled ? readValue('taskModalAutoSavePath') : '',
@@ -2342,6 +2347,7 @@ class TaskModalController {
           result_storage: {
             enabled: true,
             format: parsed.result_storage.format || 'text',
+            write_mode: parsed.result_storage.write_mode === 'append' ? 'append' : 'new_file',
             store_node_id: parsed.result_storage.store_node_id || undefined,
             file_path: parsed.result_storage.file_path || undefined
           }
@@ -2611,6 +2617,7 @@ class TaskModalController {
           result_storage: {
             enabled: true,
             format: parsed.result_storage.format || 'text',
+            write_mode: parsed.result_storage.write_mode === 'append' ? 'append' : 'new_file',
             store_node_id: parsed.result_storage.store_node_id || undefined,
             file_path: parsed.result_storage.file_path || undefined
           }
@@ -3070,6 +3077,7 @@ class TaskModalController {
     const storeNodeSelect = document.getElementById('taskModalAutoSaveStoreNode');
     const pathInput = document.getElementById('taskModalAutoSavePath');
     const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
     const defaultPathDisplay = document.getElementById('taskModalDefaultOutputPath');
 
     if (enabledCheckbox) enabledCheckbox.checked = false;
@@ -3078,6 +3086,7 @@ class TaskModalController {
     if (storeNodeSelect) storeNodeSelect.innerHTML = '';
     if (pathInput) pathInput.value = '';
     if (formatSelect) formatSelect.value = 'text';
+    if (writeModeSelect) writeModeSelect.value = 'new_file';
 
     // Update default path display
     if (defaultPathDisplay && this.defaultOutputDir) {
@@ -3085,6 +3094,7 @@ class TaskModalController {
     }
 
     this.updateAutoSaveTargetFields();
+    this.updateAutoSaveWriteModeFields();
   }
 
   /**
@@ -3096,6 +3106,7 @@ class TaskModalController {
     const targetSelect = document.getElementById('taskModalAutoSaveTarget');
     const pathInput = document.getElementById('taskModalAutoSavePath');
     const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
 
     if (task.result_storage?.enabled) {
       if (enabledCheckbox) enabledCheckbox.checked = true;
@@ -3115,11 +3126,28 @@ class TaskModalController {
       if (formatSelect && task.result_storage.format) {
         formatSelect.value = task.result_storage.format;
       }
+      if (writeModeSelect) {
+        writeModeSelect.value = task.result_storage.write_mode === 'append' ? 'append' : 'new_file';
+      }
 
       this.updateAutoSaveTargetFields();
+      this.updateAutoSaveWriteModeFields();
     } else {
       this.resetAutoSaveFields();
     }
+  }
+
+  updateAutoSaveWriteModeFields() {
+    const writeMode = document.getElementById('taskModalAutoSaveWriteMode')?.value || 'new_file';
+    const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    if (!formatSelect) return;
+
+    const appendMode = writeMode === 'append';
+    if (appendMode) {
+      formatSelect.value = 'csv';
+    }
+    formatSelect.disabled = appendMode;
+    formatSelect.title = appendMode ? 'Append mode stores each run as a CSV row.' : '';
   }
 
   /**
@@ -3133,10 +3161,12 @@ class TaskModalController {
 
     const target = document.getElementById('taskModalAutoSaveTarget')?.value || 'default';
     const format = document.getElementById('taskModalAutoSaveFormat')?.value || 'text';
+    const writeMode = document.getElementById('taskModalAutoSaveWriteMode')?.value || 'new_file';
 
     const resultStorage = {
       enabled: true,
-      format: format
+      format: writeMode === 'append' ? 'csv' : format,
+      write_mode: writeMode === 'append' ? 'append' : 'new_file'
     };
 
     switch (target) {

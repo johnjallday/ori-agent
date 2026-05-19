@@ -299,6 +299,7 @@
   function summarizeResultStorageForConfirmation(resultStorageData) {
     const storage = resultStorageData?.result_storage;
     if (!storage || storage.enabled !== true) return '';
+    if (storage.write_mode === 'append') return `Append result to ${storage.file_path || 'a CSV file'}`;
     if (storage.file_path) return `Store result at ${storage.file_path}`;
     if (storage.store_node_id) return `Store result in node ${storage.store_node_id}`;
     return `Store result as ${storage.format || 'text'}`;
@@ -413,6 +414,7 @@
         result_storage: {
           enabled: true,
           format: parsed.result_storage.format || 'text',
+          write_mode: parsed.result_storage.write_mode === 'append' ? 'append' : 'new_file',
           store_node_id: parsed.result_storage.store_node_id || undefined,
           file_path: parsed.result_storage.file_path || undefined
         }

@@ -5,6 +5,8 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -175,4 +177,62 @@ func writeCSV(columns []string, rows []map[string]string) string {
 	}
 	writer.Flush()
 	return strings.TrimRight(buffer.String(), "\n")
+}
+
+func csvWithoutHeader(csvData string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
+	lines := strings.Split(normalized, "\n")
+	if len(lines) <= 1 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(lines[1:], "\n"))
+}
+
+// AppendCSVToFile appends CSV rows to filePath, writing the header only once.
+func AppendCSVToFile(filePath, csvData string) error {
+	trimmed := strings.TrimSpace(csvData)
+	if trimmed == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return err
+	}
+
+	writeHeader := true
+	if info, err := os.Stat(filePath); err == nil && info.Size() > 0 {
+		writeHeader = false
+		trimmed = csvWithoutHeader(trimmed)
+	}
+	if strings.TrimSpace(trimmed) == "" {
+		return nil
+	}
+
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	if !writeHeader {
+		if _, err := file.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	_, err = file.WriteString(trimmed)
+	return err
+}
+
+func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string) string {
+	if node == nil {
+		return csvData
+	}
+	finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+	if err != nil {
+		return csvData
+	}
+	if info, err := os.Stat(finalPath); err == nil && info.Size() > 0 {
+		return csvWithoutHeader(csvData)
+	}
+	return csvData
 }

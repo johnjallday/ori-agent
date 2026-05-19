@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -45,5 +47,27 @@ func TestTaskResultToCSV_FallsBackToSingleResultRow(t *testing.T) {
 	}
 	if !strings.Contains(got, "task-1,Check pollen,20260519-120000,agent-1,Pollen is high.") {
 		t.Fatalf("expected fallback row, got %q", got)
+	}
+}
+
+func TestAppendCSVToFile_WritesHeaderOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pollen.csv")
+	first := "date,level\n2026-05-18,Moderate"
+	second := "date,level\n2026-05-19,High"
+
+	if err := AppendCSVToFile(path, first); err != nil {
+		t.Fatalf("append first csv: %v", err)
+	}
+	if err := AppendCSVToFile(path, second); err != nil {
+		t.Fatalf("append second csv: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	want := "date,level\n2026-05-18,Moderate\n2026-05-19,High"
+	if string(data) != want {
+		t.Fatalf("csv data = %q, want %q", string(data), want)
 	}
 }

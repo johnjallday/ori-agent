@@ -109,6 +109,7 @@ type ResultStorageConfig struct {
 	StoreNodeID string `json:"store_node_id" jsonschema_description:"Store node ID to save results to, empty string if not specified"`
 	FilePath    string `json:"file_path" jsonschema_description:"Custom file path to save results, empty string if not specified"`
 	Format      string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown,enum=csv" jsonschema_description:"Output format: text, json, markdown, or csv"`
+	WriteMode   string `json:"write_mode" jsonschema:"enum=new_file,enum=append" jsonschema_description:"Use append only when adding each run to the same CSV dataset"`
 }
 
 // Schema for structured output - generated at init time
@@ -225,7 +226,7 @@ Schedule parsing rules:
 - "every 30 minutes" -> schedule_enabled=true, schedule={"type":"interval","interval_minutes":30}
 - No time mentioned -> schedule_enabled=false, schedule=null
 
-Result storage: set result_storage={"enabled":true,"format":"text|json|markdown|csv"} only if user mentions saving results.
+Result storage: set result_storage={"enabled":true,"format":"text|json|markdown|csv","write_mode":"new_file|append"} only if user mentions saving results. Use write_mode="append" and format="csv" when the user asks to append runs to the same CSV file.
 
 Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
 
@@ -490,6 +491,12 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 		validFormats := map[string]bool{"text": true, "json": true, "markdown": true, "csv": true}
 		if !validFormats[config.ResultStorage.Format] {
 			config.ResultStorage.Format = "text"
+		}
+		if config.ResultStorage.WriteMode != "append" {
+			config.ResultStorage.WriteMode = "new_file"
+		}
+		if config.ResultStorage.WriteMode == "append" {
+			config.ResultStorage.Format = "csv"
 		}
 
 		// If not enabled and no storage details, set to nil

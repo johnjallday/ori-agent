@@ -239,6 +239,7 @@ type ResultStorageConfig struct {
 	StoreNodeID string `json:"store_node_id,omitempty"` // Save to specific store node (if set)
 	FilePath    string `json:"file_path,omitempty"`     // Custom file path (if no store node)
 	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown, csv
+	WriteMode   string `json:"write_mode,omitempty"`    // Output mode: new_file, append
 }
 
 // TaskStatus represents the current state of a task

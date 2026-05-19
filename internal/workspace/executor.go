@@ -602,6 +602,11 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	if format == "" {
 		format = "text"
 	}
+	writeMode := strings.ToLower(strings.TrimSpace(storage.WriteMode))
+	appendCSV := writeMode == "append"
+	if appendCSV {
+		format = "csv"
+	}
 	ext := "txt"
 	switch format {
 	case "json":
@@ -631,10 +636,15 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	}
 
 	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
+	if appendCSV {
+		filename = fmt.Sprintf("%s.%s", sanitized, ext)
+	}
 
 	// Prepare data for storage
 	dataToStore := result
-	if format == "json" {
+	if appendCSV {
+		dataToStore = TaskResultToCSV(task, result, timestamp, "")
+	} else if format == "json" {
 		jsonData := map[string]interface{}{
 			"task_id":     task.ID,
 			"result":      result,
@@ -669,11 +679,33 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			return
 		}
 
-		if err := WriteToStore(storeNode, filename, dataToStore); err != nil {
+		storeFilePath := filename
+		if storage.FilePath != "" {
+			storeFilePath = storage.FilePath
+		}
+		if appendCSV {
+			storeNodeCopy := *storeNode
+			storeNodeCopy.WriteMode = "append"
+			storeNodeCopy.Format = "csv"
+			if err := WriteToStore(&storeNodeCopy, storeFilePath, csvWithoutHeaderForExistingStore(storeNode, storeFilePath, dataToStore)); err != nil {
+				logger.Error("Failed to append task result to store node", logger.Fields{
+					"task_id":       task.ID,
+					"store_node_id": storeNode.ID,
+					"filename":      storeFilePath,
+					"err":           err,
+				})
+				return
+			}
+			storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
+			storeNode.WriteCount = storeNodeCopy.WriteCount
+			storeNode.LastFilePath = storeNodeCopy.LastFilePath
+			storeNode.LastError = storeNodeCopy.LastError
+			storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
+		} else if err := WriteToStore(storeNode, storeFilePath, dataToStore); err != nil {
 			logger.Error("Failed to auto-store task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
-				"filename":      filename,
+				"filename":      storeFilePath,
 				"err":           err,
 			})
 			return
@@ -682,7 +714,7 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		logger.Info("Task result auto-stored to store node", logger.Fields{
 			"task_id":       task.ID,
 			"store_node_id": storeNode.ID,
-			"filename":      filename,
+			"filename":      storeFilePath,
 		})
 
 		if err := workspaceStore.Save(ws); err != nil {
@@ -716,6 +748,22 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			"task_id": task.ID,
 			"dir":     dir,
 			"err":     err,
+		})
+		return
+	}
+
+	if appendCSV {
+		if err := AppendCSVToFile(filePath, dataToStore); err != nil {
+			logger.Error("Failed to append task result to CSV file", logger.Fields{
+				"task_id":   task.ID,
+				"file_path": filePath,
+				"err":       err,
+			})
+			return
+		}
+		logger.Info("Task result appended to CSV file", logger.Fields{
+			"task_id":   task.ID,
+			"file_path": filePath,
 		})
 		return
 	}

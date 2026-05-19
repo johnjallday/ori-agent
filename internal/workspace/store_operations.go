@@ -212,9 +212,11 @@ func WriteToStore(node *StoreNode, filePath, data string) error {
 		}
 		defer func() { _ = f.Close() }()
 
-		// Add newline separator before appending
-		if _, err := f.Write([]byte("\n")); err != nil {
-			return fmt.Errorf("failed to write newline separator: %w", err)
+		if info, err := f.Stat(); err == nil && info.Size() > 0 {
+			// Add newline separator before appending
+			if _, err := f.Write([]byte("\n")); err != nil {
+				return fmt.Errorf("failed to write newline separator: %w", err)
+			}
 		}
 		if _, err := f.Write(formattedData); err != nil {
 			return fmt.Errorf("failed to append data: %w", err)
