@@ -95,17 +95,30 @@
               <select id="workspace-task-hero-agent" class="workspace-task-page-agent-picker-select" aria-label="Reassign task agent"></select>
             </label>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
-            <div id="workspace-task-hero-priority" class="workspace-task-hero-priority" hidden>
-              <div class="workspace-task-hero-priority-kicker">Action Required</div>
-              <div id="workspace-task-hero-priority-copy" class="workspace-task-hero-priority-copy"></div>
-              <div id="workspace-task-hero-priority-reason" class="workspace-task-hero-priority-reason" hidden>
-                <span class="workspace-task-hero-priority-reason-label">Reason</span>
-                <span id="workspace-task-hero-priority-reason-text" class="workspace-task-hero-priority-reason-text"></span>
-              </div>
-              <div id="workspace-task-hero-priority-actions" class="workspace-task-hero-priority-actions"></div>
-            </div>
           </div>
         </section>
+
+        <!-- Full-width Action Required banner. Previously this lived inside
+             the hero's narrow right column where the CTA buttons collided
+             with the status badge and agent picker. Promoted to a sibling
+             of the hero so the "you need to do something" state takes the
+             page's full width and reads as the primary call to action. -->
+        <aside
+          id="workspace-task-hero-priority"
+          class="workspace-task-hero-priority"
+          role="region"
+          aria-label="Action required"
+          hidden>
+          <div class="workspace-task-hero-priority-body">
+            <div class="workspace-task-hero-priority-kicker">Action Required</div>
+            <div id="workspace-task-hero-priority-copy" class="workspace-task-hero-priority-copy"></div>
+            <div id="workspace-task-hero-priority-reason" class="workspace-task-hero-priority-reason" hidden>
+              <span class="workspace-task-hero-priority-reason-label">Reason</span>
+              <span id="workspace-task-hero-priority-reason-text" class="workspace-task-hero-priority-reason-text"></span>
+            </div>
+          </div>
+          <div id="workspace-task-hero-priority-actions" class="workspace-task-hero-priority-actions"></div>
+        </aside>
 
         <div id="workspace-task-page-alert" class="workspace-task-page-alert d-none" role="alert"></div>
 
@@ -877,14 +890,23 @@
     }
 
     .workspace-task-hero-priority {
-      width: min(100%, 24rem);
-      display: grid;
-      gap: 0.7rem;
-      padding: 1rem 1.05rem;
+      width: 100%;
+      display: flex;
+      gap: 1.25rem;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 1rem 1.25rem;
       border-radius: 22px;
-      border: 1px solid rgba(194, 132, 11, 0.26);
-      background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.05));
+      border: 1px solid rgba(194, 132, 11, 0.32);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    .workspace-task-hero-priority-body {
+      display: grid;
+      gap: 0.55rem;
+      flex: 1 1 22rem;
+      min-width: 0;
     }
 
     .workspace-task-hero-priority-kicker {
@@ -944,6 +966,14 @@
       flex-wrap: wrap;
       justify-content: flex-end;
       gap: 0.55rem;
+      flex: 0 1 auto;
+    }
+
+    @media (max-width: 720px) {
+      .workspace-task-hero-priority-actions {
+        justify-content: flex-start;
+        width: 100%;
+      }
     }
 
     .workspace-task-page-hero-btn {
