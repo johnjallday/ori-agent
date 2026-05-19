@@ -139,7 +139,10 @@
           <main class="workspace-task-page-main">
             <div class="workspace-task-page-tabs" role="tablist" aria-label="Task sections">
               <button type="button" class="workspace-task-page-tab is-active" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="workspace-task-tab-overview" id="workspace-task-tab-button-overview">Overview</button>
-              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">Activity</button>
+              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">
+                <span>Activity</span>
+                <span id="workspace-task-tab-activity-count" class="workspace-task-page-tab-count" hidden aria-hidden="true"></span>
+              </button>
               <button type="button" class="workspace-task-page-tab" data-task-tab="developer" role="tab" aria-selected="false" aria-controls="workspace-task-tab-developer" id="workspace-task-tab-button-developer">Developer</button>
             </div>
 
@@ -1133,6 +1136,9 @@
 
     .workspace-task-page-tab {
       appearance: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
       border: 1px solid transparent;
       background: transparent;
       color: var(--text-secondary);
@@ -1153,6 +1159,25 @@
       border-color: var(--border-color);
       color: var(--text-primary);
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    }
+
+    .workspace-task-page-tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.3rem;
+      padding: 0 0.35rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workspace-task-page-tab.is-active .workspace-task-page-tab-count {
+      background: color-mix(in srgb, var(--primary-color) 22%, transparent);
+      color: var(--primary-color);
     }
 
     .workspace-task-tab-pane {

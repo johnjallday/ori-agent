@@ -5668,13 +5668,30 @@ export class WorkspaceTaskPage {
   refreshTaskTabEmptyStates() {
     const visible = (el) => el && !el.hidden;
 
+    const activityCards = [
+      document.getElementById('workspace-task-workspace-runs-card'),
+      document.getElementById('workspace-task-relationships-card'),
+      document.getElementById('workspace-task-workflow-card'),
+      document.getElementById('workspace-task-runs-card')
+    ];
+    const populatedActivityCount = activityCards.filter(visible).length;
+
     if (this.elements.activityEmpty) {
-      const anyActivity =
-        visible(document.getElementById('workspace-task-workspace-runs-card')) ||
-        visible(document.getElementById('workspace-task-relationships-card')) ||
-        visible(document.getElementById('workspace-task-workflow-card')) ||
-        visible(document.getElementById('workspace-task-runs-card'));
-      this.elements.activityEmpty.hidden = anyActivity;
+      this.elements.activityEmpty.hidden = populatedActivityCount > 0;
+    }
+
+    // Mirror the populated-subcard count onto the Activity tab button so
+    // the user can tell from the tab row whether anything's worth opening,
+    // rather than having to click in to find empty placeholders.
+    const activityCount = document.getElementById('workspace-task-tab-activity-count');
+    if (activityCount) {
+      if (populatedActivityCount > 0) {
+        activityCount.hidden = false;
+        activityCount.textContent = String(populatedActivityCount);
+      } else {
+        activityCount.hidden = true;
+        activityCount.textContent = '';
+      }
     }
 
     if (this.elements.developerEmpty) {
