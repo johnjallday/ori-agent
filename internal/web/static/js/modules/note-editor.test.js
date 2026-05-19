@@ -892,6 +892,25 @@ test('buildLiveEditorHTML: activeRange renders one block textarea covering the r
   assert.match(html, /note-live-line-rendered[^"]*"\s+data-line-index="3"/);
 });
 
+test('buildLiveEditorHTML: renders fenced CSV as a table block', () => {
+  const html = buildLiveEditorHTML(['```csv', 'date,level', '2026-05-19,High', '```', 'after']);
+  assert.match(html, /note-csv-table-block/);
+  assert.match(html, /data-line-index="0"/);
+  assert.match(html, /data-line-end="3"/);
+  assert.match(html, /<th scope="col">date<\/th>/);
+  assert.match(html, /<td>High<\/td>/);
+  assert.doesNotMatch(html, /data-line-index="1"/);
+  assert.match(html, /data-line-index="4"/);
+});
+
+test('buildLiveEditorHTML: active line inside fenced CSV keeps raw lines editable', () => {
+  const html = buildLiveEditorHTML(['```csv', 'date,level', '2026-05-19,High', '```'], {
+    activeLineIndex: 1,
+  });
+  assert.doesNotMatch(html, /note-csv-table-block/);
+  assert.match(html, /<textarea[^>]*data-line-index="1"/);
+});
+
 test('buildLiveEditorHTML: collapsed heading at the same level reopens visibility on the next sibling', () => {
   // h1 collapsed → all under it hidden until the next h1.
   const lines = ['# A', 'body A', '## A.1', 'body A1', '# B'];

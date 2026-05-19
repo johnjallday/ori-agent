@@ -4,6 +4,10 @@ import {
   taskExecutionViewsMethods,
   TRACE_PAGE_SIZE,
 } from './workspace-task-execution-views.js';
+import {
+  artifactToCSVFence,
+  buildTaskResultArtifact,
+} from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 
@@ -822,6 +826,8 @@ export class WorkspaceTaskPage {
     this.detailsEditInProgress = false;
     this.workflowDraftPending = false;
     this.resultNoteSaving = false;
+    this.currentResultArtifact = null;
+    this.resultArtifactNoteSaving = false;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
     this.resultPromotionPending = false;
@@ -2416,7 +2422,19 @@ export class WorkspaceTaskPage {
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
       workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
-      output: JSON.stringify([t.id, t.status, t.result, t.result_type, t.structured_result]),
+      output: JSON.stringify([
+        t.id,
+        t.status,
+        t.result,
+        t.result_type,
+        t.structured_result,
+        t.context?.structured_output,
+        Array.isArray(t.execution_history) ? t.execution_history.length : 0,
+        t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
+        t.execution_history?.[t.execution_history.length - 1]?.status || '',
+        t.execution_history?.[t.execution_history.length - 1]?.summary || '',
+        t.execution_history?.[t.execution_history.length - 1]?.result || '',
+      ]),
       workspaceRuns: JSON.stringify([
         t.id,
         t.current_run_id,
@@ -3750,6 +3768,167 @@ export class WorkspaceTaskPage {
     return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
   }
 
+  getArtifactSourceLabel(source) {
+    const normalized = String(source || '').trim().toLowerCase();
+    const labels = {
+      run_history: 'Run history',
+      output_schema: 'Structured output',
+      structured_result: 'Structured result',
+      markdown_table: 'Markdown table',
+      fenced_csv: 'CSV block',
+      csv: 'CSV',
+      tsv: 'TSV',
+      json: 'JSON'
+    };
+    return labels[normalized] || 'Result';
+  }
+
+  renderResultArtifact(artifact) {
+    if (!artifact || !Array.isArray(artifact.columns) || !Array.isArray(artifact.rows)) return '';
+
+    const columns = artifact.columns;
+    const rows = artifact.rows;
+    const previewRows = rows.slice(0, 12);
+    const hiddenRows = Math.max(0, rows.length - previewRows.length);
+    const sourceLabel = this.getArtifactSourceLabel(artifact.source);
+    const rowLabel = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
+    const columnLabel = `${columns.length} column${columns.length === 1 ? '' : 's'}`;
+    const savingLabel = this.resultArtifactNoteSaving ? 'Saving...' : 'Save CSV note';
+
+    const headHtml = columns
+      .map((column) => `<th scope="col">${this.escapeHtml(column)}</th>`)
+      .join('');
+    const rowsHtml = previewRows
+      .map((row) => `
+        <tr>
+          ${columns.map((column) => `<td>${this.escapeHtml(row?.[column] ?? '')}</td>`).join('')}
+        </tr>
+      `)
+      .join('');
+
+    return `
+      <section class="workspace-task-result-artifact" aria-label="CSV-ready task result">
+        <div class="workspace-task-result-artifact-header">
+          <div>
+            <div class="workspace-task-page-mini-label">Artifact</div>
+            <h3>${this.escapeHtml(artifact.title || 'CSV-ready result')}</h3>
+          </div>
+          <div class="workspace-task-result-artifact-actions">
+            <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="copy-result-artifact-csv">
+              <i class="bi bi-clipboard" aria-hidden="true"></i>
+              <span>Copy CSV</span>
+            </button>
+            <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="save-result-artifact-note"${this.resultArtifactNoteSaving ? ' disabled' : ''}>
+              <i class="bi bi-table" aria-hidden="true"></i>
+              <span>${this.escapeHtml(savingLabel)}</span>
+            </button>
+          </div>
+        </div>
+        <div class="workspace-task-result-artifact-meta">
+          <span>${this.escapeHtml(sourceLabel)}</span>
+          <span>${this.escapeHtml(rowLabel)}</span>
+          <span>${this.escapeHtml(columnLabel)}</span>
+        </div>
+        <div class="workspace-task-result-artifact-table-wrap" role="region" aria-label="Artifact table preview" tabindex="0">
+          <table class="workspace-task-result-artifact-table">
+            <thead><tr>${headHtml}</tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        ${hiddenRows > 0 ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'} in CSV`)}</div>` : ''}
+      </section>
+    `;
+  }
+
+  bindResultArtifactActions() {
+    const root = this.elements.output;
+    if (!root) return;
+
+    root
+      .querySelector('[data-action="copy-result-artifact-csv"]')
+      ?.addEventListener('click', () => this.copyCurrentArtifactCSV());
+    root
+      .querySelector('[data-action="save-result-artifact-note"]')
+      ?.addEventListener('click', () => this.saveCurrentArtifactAsNote());
+  }
+
+  async copyCurrentArtifactCSV() {
+    const csv = String(this.currentResultArtifact?.csv || '').trim();
+    if (!csv) {
+      this.notify('warning', 'No CSV artifact is available to copy.');
+      return;
+    }
+    await this.copyToClipboard(csv, 'CSV copied');
+  }
+
+  setResultArtifactNoteSaving(saving) {
+    this.resultArtifactNoteSaving = Boolean(saving);
+    const button = this.elements.output?.querySelector?.('[data-action="save-result-artifact-note"]');
+    if (!button) return;
+    button.disabled = this.resultArtifactNoteSaving;
+    const label = button.querySelector('span');
+    if (label) label.textContent = this.resultArtifactNoteSaving ? 'Saving...' : 'Save CSV note';
+  }
+
+  buildResultArtifactNoteTitle(artifact) {
+    const taskTitle = this.getTaskDisplayLabel();
+    const base = `${artifact?.title || 'CSV'} - ${taskTitle || 'Task Result'}`;
+    const cleaned = base.replace(/\s+/g, ' ').trim();
+    return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
+  }
+
+  buildResultArtifactNoteContent(artifact, title) {
+    const taskTitle = this.getTaskDisplayLabel();
+    const sourceHref = this.getTaskHref(this.taskId);
+    const savedAt = formatDateTime(new Date().toISOString());
+    const sourceLabel = this.getArtifactSourceLabel(artifact?.source);
+    const csvFence = artifactToCSVFence(artifact);
+
+    return [
+      `# ${title}`,
+      '',
+      `Saved from Ori task artifact on ${savedAt}.`,
+      '',
+      `- Source task: [${taskTitle}](${sourceHref})`,
+      `- Artifact source: ${sourceLabel}`,
+      `- Rows: ${artifact?.rows?.length || 0}`,
+      `- Columns: ${artifact?.columns?.length || 0}`,
+      '',
+      '## CSV',
+      '',
+      csvFence,
+    ].join('\n');
+  }
+
+  async saveCurrentArtifactAsNote() {
+    const artifact = this.currentResultArtifact;
+    if (this.resultArtifactNoteSaving || !artifact?.csv) return;
+
+    const title = this.buildResultArtifactNoteTitle(artifact);
+    const content = this.buildResultArtifactNoteContent(artifact, title);
+    this.setResultArtifactNoteSaving(true);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: title, content })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to create CSV note');
+      }
+
+      this.notify('success', 'CSV saved as a note');
+    } catch (error) {
+      console.error('Failed to save CSV artifact as note:', error);
+      this.notify('error', error?.message || 'Failed to save CSV note');
+    } finally {
+      this.setResultArtifactNoteSaving(false);
+    }
+  }
+
   getResultHeadingLevel(node) {
     if (!node || node.nodeType !== Node.ELEMENT_NODE) return 0;
     const match = String(node.tagName || '').match(/^H([1-6])$/i);
@@ -4247,13 +4426,16 @@ export class WorkspaceTaskPage {
 
     const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
+    const artifact = buildTaskResultArtifact(this.task);
+    this.currentResultArtifact = artifact;
     this.closeResultSectionMenu();
 
-    if (!result && !error) {
+    if (!result && !error && !artifact) {
       this.elements.outputCard.hidden = true;
       this.elements.output.innerHTML = '';
       this.savedResultNote = null;
       this.savedResultNoteResult = '';
+      this.currentResultArtifact = null;
       this.updateResultActionButtons('', false);
       this.renderResultNoteStatus();
       return;
@@ -4265,6 +4447,9 @@ export class WorkspaceTaskPage {
     }
 
     const blocks = [];
+    if (artifact) {
+      blocks.push(this.renderResultArtifact(artifact));
+    }
     if (result) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
@@ -4280,6 +4465,7 @@ export class WorkspaceTaskPage {
 
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
+    this.bindResultArtifactActions();
     this.enhanceResultSections();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();

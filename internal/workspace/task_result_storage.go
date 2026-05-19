@@ -1,0 +1,178 @@
+package workspace
+
+import (
+	"bytes"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// TaskResultToCSV converts a task result into importable CSV for result storage.
+func TaskResultToCSV(task *Task, result, timestamp, agent string) string {
+	if looksLikeCSV(result) {
+		return strings.TrimSpace(result)
+	}
+
+	if columns, rows := taskStructuredRowsForCSV(task, result); len(columns) > 0 && len(rows) > 0 {
+		return writeCSV(columns, rows)
+	}
+
+	row := map[string]string{
+		"task_id":     "",
+		"description": "",
+		"timestamp":   timestamp,
+		"agent":       agent,
+		"result":      strings.TrimSpace(result),
+	}
+	if task != nil {
+		row["task_id"] = task.ID
+		row["description"] = task.Description
+	}
+	return writeCSV([]string{"task_id", "description", "timestamp", "agent", "result"}, []map[string]string{row})
+}
+
+func looksLikeCSV(value string) bool {
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n")), "\n")
+	if len(lines) < 2 {
+		return false
+	}
+	return strings.Count(lines[0], ",") > 0 && strings.Count(lines[1], ",") > 0
+}
+
+func taskStructuredRowsForCSV(task *Task, result string) ([]string, []map[string]string) {
+	if task != nil && task.Context != nil {
+		if output, ok := task.Context["structured_output"]; ok {
+			if columns, rows := csvRowsFromValue(output); len(columns) > 0 && len(rows) > 0 {
+				return columns, rows
+			}
+		}
+	}
+
+	var decoded interface{}
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(result)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, nil
+	}
+	return csvRowsFromValue(decoded)
+}
+
+func csvRowsFromValue(value interface{}) ([]string, []map[string]string) {
+	switch typed := value.(type) {
+	case []interface{}:
+		rows := make([]map[string]string, 0, len(typed))
+		for _, item := range typed {
+			object, ok := item.(map[string]interface{})
+			if !ok {
+				return nil, nil
+			}
+			rows = append(rows, csvRowFromMap(object))
+		}
+		return csvColumns(rows, nil), rows
+	case map[string]interface{}:
+		for _, key := range []string{"data", "rows", "items"} {
+			if nested, ok := typed[key]; ok {
+				if columns, rows := csvRowsFromValue(nested); len(columns) > 0 && len(rows) > 0 {
+					return columns, rows
+				}
+			}
+		}
+		return csvColumns(nil, typed), []map[string]string{csvRowFromMap(typed)}
+	default:
+		return nil, nil
+	}
+}
+
+func csvRowFromMap(values map[string]interface{}) map[string]string {
+	row := make(map[string]string, len(values))
+	for key, value := range values {
+		row[strings.TrimSpace(key)] = csvCellValue(value)
+	}
+	return row
+}
+
+func csvCellValue(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case float64, bool:
+		data, err := json.Marshal(typed)
+		if err == nil {
+			return string(data)
+		}
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+	return string(data)
+}
+
+func csvColumns(rows []map[string]string, object map[string]interface{}) []string {
+	seen := make(map[string]struct{})
+	columns := []string{}
+	add := func(column string) {
+		column = strings.TrimSpace(column)
+		if column == "" {
+			return
+		}
+		key := strings.ToLower(column)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		columns = append(columns, column)
+	}
+
+	for _, preferred := range []string{"timestamp", "date", "location", "metric", "value", "unit", "source", "summary"} {
+		if object != nil {
+			if _, ok := object[preferred]; ok {
+				add(preferred)
+			}
+		}
+		for _, row := range rows {
+			if _, ok := row[preferred]; ok {
+				add(preferred)
+			}
+		}
+	}
+
+	remaining := []string{}
+	if object != nil {
+		for key := range object {
+			remaining = append(remaining, key)
+		}
+	}
+	for _, row := range rows {
+		for key := range row {
+			remaining = append(remaining, key)
+		}
+	}
+	sort.Strings(remaining)
+	for _, key := range remaining {
+		add(key)
+	}
+	return columns
+}
+
+func writeCSV(columns []string, rows []map[string]string) string {
+	var buffer bytes.Buffer
+	writer := csv.NewWriter(&buffer)
+	_ = writer.Write(columns)
+	for _, row := range rows {
+		record := make([]string, len(columns))
+		for index, column := range columns {
+			record[index] = row[column]
+		}
+		_ = writer.Write(record)
+	}
+	writer.Flush()
+	return strings.TrimRight(buffer.String(), "\n")
+}

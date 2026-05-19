@@ -1365,7 +1365,7 @@ type SaveTaskResultRequest struct {
 	TaskID      string `json:"task_id"`
 	StoreNodeID string `json:"store_node_id,omitempty"` // Optional: save to specific store node
 	FilePath    string `json:"file_path"`               // Required: relative file path within store or absolute path for direct save
-	Format      string `json:"format,omitempty"`        // Optional: json, text, markdown (default: text)
+	Format      string `json:"format,omitempty"`        // Optional: json, text, markdown, csv (default: text)
 }
 
 // handleSaveTaskResult handles POST /api/orchestration/tasks/{id}/save-result
@@ -1414,9 +1414,9 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate format
-	validFormats := map[string]bool{"json": true, "text": true, "markdown": true}
+	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true}
 	if !validFormats[req.Format] {
-		orihttp.BadRequest(w, "Format must be one of: json, text, markdown")
+		orihttp.BadRequest(w, "Format must be one of: json, text, markdown, csv")
 		return
 	}
 
@@ -1452,8 +1452,13 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		// Override format with store node's format
 		storeNode.Format = req.Format
 
+		dataToStore := task.Result
+		if req.Format == "csv" {
+			dataToStore = workspace.TaskResultToCSV(task, task.Result, time.Now().Format("20060102-150405"), "")
+		}
+
 		// Write to store
-		if err := workspace.WriteToStore(storeNode, req.FilePath, task.Result); err != nil {
+		if err := workspace.WriteToStore(storeNode, req.FilePath, dataToStore); err != nil {
 			orihttp.InternalError(w, fmt.Sprintf("Failed to save result: %v", err))
 			return
 		}
@@ -1478,6 +1483,8 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 			} else {
 				formattedData, _ = json.MarshalIndent(obj, "", "  ")
 			}
+		case "csv":
+			formattedData = []byte(workspace.TaskResultToCSV(task, task.Result, time.Now().Format("20060102-150405"), ""))
 		default:
 			formattedData = []byte(task.Result)
 		}

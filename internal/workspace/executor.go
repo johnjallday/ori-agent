@@ -530,6 +530,8 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		ext = "md"
 	case "text":
 		ext = "txt"
+	case "csv":
+		ext = "csv"
 	case "binary":
 		ext = "bin"
 	}
@@ -556,6 +558,8 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 			return
 		}
 		dataToStore = string(jsonBytes)
+	} else if assignedStore.Format == "csv" {
+		dataToStore = TaskResultToCSV(task, result, timestamp, agentNodeID)
 	}
 
 	// Write result to store
@@ -604,6 +608,8 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		ext = "json"
 	case "markdown":
 		ext = "md"
+	case "csv":
+		ext = "csv"
 	}
 
 	// Generate task name slug for filename
@@ -641,6 +647,8 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			return
 		}
 		dataToStore = string(jsonBytes)
+	} else if format == "csv" {
+		dataToStore = TaskResultToCSV(task, result, timestamp, "")
 	}
 
 	// If store node is specified, use it

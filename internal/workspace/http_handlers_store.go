@@ -60,9 +60,9 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate format
-	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true, "binary": true}
 	if !validFormats[req.Format] {
-		orihttp.BadRequest(w, "Format must be one of: json, text, markdown, binary")
+		orihttp.BadRequest(w, "Format must be one of: json, text, markdown, csv, binary")
 		return
 	}
 
@@ -262,9 +262,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		storeNode.BaseDir = *req.BaseDir
 	}
 	if req.Format != nil {
-		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true, "binary": true}
 		if !validFormats[*req.Format] {
-			orihttp.BadRequest(w, "Format must be one of: json, text, markdown, binary")
+			orihttp.BadRequest(w, "Format must be one of: json, text, markdown, csv, binary")
 			return
 		}
 		storeNode.Format = *req.Format

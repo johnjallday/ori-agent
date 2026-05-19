@@ -108,7 +108,7 @@ type ResultStorageConfig struct {
 	Enabled     bool   `json:"enabled" jsonschema_description:"True if result storage was requested"`
 	StoreNodeID string `json:"store_node_id" jsonschema_description:"Store node ID to save results to, empty string if not specified"`
 	FilePath    string `json:"file_path" jsonschema_description:"Custom file path to save results, empty string if not specified"`
-	Format      string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown" jsonschema_description:"Output format: text, json, or markdown"`
+	Format      string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown,enum=csv" jsonschema_description:"Output format: text, json, markdown, or csv"`
 }
 
 // Schema for structured output - generated at init time
@@ -225,7 +225,7 @@ Schedule parsing rules:
 - "every 30 minutes" -> schedule_enabled=true, schedule={"type":"interval","interval_minutes":30}
 - No time mentioned -> schedule_enabled=false, schedule=null
 
-Result storage: set result_storage={"enabled":true,"format":"text|json|markdown"} only if user mentions saving results.
+Result storage: set result_storage={"enabled":true,"format":"text|json|markdown|csv"} only if user mentions saving results.
 
 Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
 
@@ -487,7 +487,7 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 	// Validate result storage configuration
 	if config.ResultStorage != nil {
 		// Validate format - default to "text" if invalid
-		validFormats := map[string]bool{"text": true, "json": true, "markdown": true}
+		validFormats := map[string]bool{"text": true, "json": true, "markdown": true, "csv": true}
 		if !validFormats[config.ResultStorage.Format] {
 			config.ResultStorage.Format = "text"
 		}

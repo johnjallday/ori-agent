@@ -146,7 +146,7 @@ func formatData(data string, format string) ([]byte, error) {
 		}
 		return formatted, nil
 
-	case "text", "markdown":
+	case "text", "markdown", "csv":
 		// Return as-is, preserve newlines
 		return []byte(data), nil
 

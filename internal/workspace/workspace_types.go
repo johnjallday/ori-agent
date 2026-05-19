@@ -238,7 +238,7 @@ type ResultStorageConfig struct {
 	Enabled     bool   `json:"enabled"`                 // Enable auto-save on completion
 	StoreNodeID string `json:"store_node_id,omitempty"` // Save to specific store node (if set)
 	FilePath    string `json:"file_path,omitempty"`     // Custom file path (if no store node)
-	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown
+	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown, csv
 }
 
 // TaskStatus represents the current state of a task
@@ -446,7 +446,7 @@ type StoreNode struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	Name          string    `json:"name"`
 	BaseDir       string    `json:"base_dir"`   // Base directory (e.g., "reports/")
-	Format        string    `json:"format"`     // "json", "text", "markdown", "binary"
+	Format        string    `json:"format"`     // "json", "text", "markdown", "csv", "binary"
 	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
 	AutoCreateDir bool      `json:"auto_create_dir"`
 	AutoStore     bool      `json:"auto_store"` // Automatically store task results on completion
