@@ -4907,10 +4907,13 @@ export class WorkspaceTaskPage {
 
     if (action === 'rerun') {
       try {
-        const response = await fetch('/api/orchestration/tasks/execute', {
+        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: taskId })
+          body: JSON.stringify({
+            action: 'rerun',
+            history_index: historyIndex
+          })
         });
         if (!response.ok) {
           const text = await response.text();

@@ -843,6 +843,11 @@ func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store
 		return
 	}
 	ApplyTaskValidationResultToLatestExecution(task, validation)
+	workspaceID := ""
+	if ws != nil {
+		workspaceID = ws.ID
+	}
+	mirrorLatestTaskValidationResult(workspaceID, task, validation)
 	if ws != nil {
 		_ = ws.MutateTask(task.ID, func(t *Task) error {
 			ApplyTaskValidationResultToLatestExecution(t, validation)

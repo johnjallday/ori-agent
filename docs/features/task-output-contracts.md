@@ -51,6 +51,8 @@ The task details page summarizes the result storage mode and contract columns. R
 
 When a run is held for review, the task details page shows the latest invalid result with validation errors. Users can copy the raw output, re-run the task, dismiss the review, or edit the row in a table/raw CSV editor and approve the append. Manual approval reuses the same validator before writing to CSV.
 
+If the task was executed through Workspace Runs, Ori mirrors the validation and storage status onto the workspace-run record as `task_output`. This stores contract status, storage status, contract version, and validation errors, but not the raw task output.
+
 ## Existing CSV Files
 
 When an append-to-CSV task points at an existing file and has no contract, Ori can bootstrap a contract from only the first header row. Header-derived columns default to `string`, are marked required, and never rewrite or backfill the CSV file.

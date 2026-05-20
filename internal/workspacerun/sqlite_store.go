@@ -43,13 +43,13 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 			id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
 			prompt, status, created_at, started_at, finished_at,
-			prepared_context_json, validation_request_json, validation_result_json, cost_json, report_json, error, updated_at
+			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error, updated_at
 		)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, run.ID, run.WorkspaceID, run.ParentRunID, run.ProfileID, run.ProfileVersion,
 		mustJSON(run.ProfileSnapshot), mustJSON(run.Executor), mustJSON(run.Scope), mustJSON(run.Policy), mustJSON(run.Environment), mustJSON(run.ContextPlan),
 		run.Prompt, string(run.Status), run.CreatedAt, nullableTime(run.StartedAt), nullableTime(run.FinishedAt),
-		nullableJSON(run.PreparedContext), nullableJSON(run.ValidationRequest), nullableJSON(run.ValidationResult), nullableJSON(run.Cost), nullableJSON(run.Report), nullableString(run.Error), now)
+		nullableJSON(run.PreparedContext), nullableJSON(run.ValidationRequest), nullableJSON(run.ValidationResult), nullableJSON(run.TaskOutput), nullableJSON(run.Cost), nullableJSON(run.Report), nullableString(run.Error), now)
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return ErrRunExists
@@ -257,6 +257,15 @@ func (s *SQLiteStore) SetValidationResult(ctx context.Context, workspaceID, runI
 	return checkRunUpdate(sqlResult, err, "set workspace run validation result")
 }
 
+func (s *SQLiteStore) SetTaskOutput(ctx context.Context, workspaceID, runID string, output TaskOutputSummary) error {
+	sqlResult, err := s.db.ExecContext(ctx, `
+		UPDATE workspace_runs
+		SET task_output_json = ?, updated_at = ?
+		WHERE workspace_id = ? AND id = ?
+	`, mustJSON(output), time.Now(), workspaceID, runID)
+	return checkRunUpdate(sqlResult, err, "set workspace run task output")
+}
+
 func (s *SQLiteStore) SetPreparedContext(ctx context.Context, workspaceID, runID string, prepared PreparedContext) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspace_runs
@@ -299,7 +308,7 @@ func (s *SQLiteStore) getRun(ctx context.Context, workspaceID, runID string) (*R
 		SELECT id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
 			prompt, status, created_at, started_at, finished_at,
-			prepared_context_json, validation_request_json, validation_result_json, cost_json, report_json, error
+			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error
 		FROM workspace_runs
 		WHERE workspace_id = ? AND id = ?
 	`, workspaceID, runID)
@@ -323,12 +332,12 @@ func scanRun(row scanner) (*Run, error) {
 	var profileJSON, executorJSON, scopeJSON, policyJSON, envJSON, contextPlanJSON string
 	var status string
 	var startedAt, finishedAt sql.NullTime
-	var preparedContextJSON, validationReqJSON, validationResultJSON, costJSON, reportJSON, errText sql.NullString
+	var preparedContextJSON, validationReqJSON, validationResultJSON, taskOutputJSON, costJSON, reportJSON, errText sql.NullString
 	if err := row.Scan(
 		&run.ID, &run.WorkspaceID, &parent, &run.ProfileID, &run.ProfileVersion,
 		&profileJSON, &executorJSON, &scopeJSON, &policyJSON, &envJSON, &contextPlanJSON,
 		&run.Prompt, &status, &run.CreatedAt, &startedAt, &finishedAt,
-		&preparedContextJSON, &validationReqJSON, &validationResultJSON, &costJSON, &reportJSON, &errText,
+		&preparedContextJSON, &validationReqJSON, &validationResultJSON, &taskOutputJSON, &costJSON, &reportJSON, &errText,
 	); err != nil {
 		return nil, err
 	}
@@ -375,6 +384,13 @@ func scanRun(row scanner) (*Run, error) {
 			return nil, err
 		}
 		run.ValidationResult = &result
+	}
+	if taskOutputJSON.Valid {
+		var output TaskOutputSummary
+		if err := decodeJSON(taskOutputJSON.String, &output); err != nil {
+			return nil, err
+		}
+		run.TaskOutput = &output
 	}
 	if costJSON.Valid {
 		var cost CostSummary

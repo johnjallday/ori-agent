@@ -30,6 +30,18 @@ function formatKind(value) {
   return formatStatus(value);
 }
 
+function formatTaskOutputStatus(output) {
+  const validation = String(output?.validation_status || '').trim().toLowerCase();
+  const storage = String(output?.storage_status || '').trim().toLowerCase();
+  if (validation === 'dismissed') return 'Dismissed';
+  if (validation === 'manually_approved' || storage === 'manually_appended') return 'Manually Approved';
+  if (validation === 'needs_review' || storage === 'skipped_invalid') return 'Needs Review';
+  if (validation === 'passed' && (storage === 'saved' || storage === 'appended')) return 'Saved';
+  if (validation === 'passed') return 'Validated';
+  if (validation === 'not_applicable') return 'Not Applicable';
+  return formatStatus(validation || storage || '');
+}
+
 function compactText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -463,14 +475,38 @@ export class WorkspaceRunPage {
   renderValidation() {
     if (!this.elements.validationCard || !this.elements.validation) return;
     const checks = Array.isArray(this.run?.validation_result?.checks) ? this.run.validation_result.checks : [];
-    if (!checks.length) {
+    const taskOutput = this.run?.task_output || null;
+    if (!checks.length && !taskOutput) {
       this.elements.validationCard.hidden = true;
       this.elements.validation.innerHTML = '';
       return;
     }
 
+    const taskOutputBlock = taskOutput ? `
+      <article class="workspace-run-validation-item">
+        <div class="workspace-run-validation-head">
+          <strong>Task Output</strong>
+          <span class="workspace-run-validation-status" data-state="${escapeHtml(taskOutput.validation_status || taskOutput.storage_status || '')}">
+            ${escapeHtml(formatTaskOutputStatus(taskOutput))}
+          </span>
+        </div>
+        <div class="workspace-run-meta">
+          ${[
+            taskOutput.contract_version ? `Contract ${taskOutput.contract_version}` : '',
+            taskOutput.storage_status ? `Storage ${formatStatus(taskOutput.storage_status)}` : '',
+            taskOutput.validated_at ? `Validated ${formatDateTime(taskOutput.validated_at)}` : ''
+          ].filter(Boolean).map(escapeHtml).join(' | ')}
+        </div>
+        ${Array.isArray(taskOutput.errors) && taskOutput.errors.length ? `
+          <ul class="workspace-run-list">
+            ${taskOutput.errors.map((error) => `<li>${escapeHtml(error?.message || error?.code || 'Validation failed')}</li>`).join('')}
+          </ul>
+        ` : ''}
+      </article>
+    ` : '';
+
     this.elements.validationCard.hidden = false;
-    this.elements.validation.innerHTML = checks.map((check) => `
+    const checkBlocks = checks.map((check) => `
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
           <strong>${escapeHtml(check?.name || 'Check')}</strong>
@@ -482,6 +518,7 @@ export class WorkspaceRunPage {
         ${check?.evidence ? `<div class="workspace-run-trace-copy">${escapeHtml(check.evidence)}</div>` : ''}
       </article>
     `).join('');
+    this.elements.validation.innerHTML = [taskOutputBlock, checkBlocks].filter(Boolean).join('');
   }
 
   renderArtifacts() {

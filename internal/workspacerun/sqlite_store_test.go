@@ -64,6 +64,18 @@ func TestSQLiteStoreRunArtifactTraceRoundTrip(t *testing.T) {
 	if err := store.SetReport(ctx, "workspace-1", "run-1", Report{Summary: "done", ValidationStatus: ValidationStatusPassed}); err != nil {
 		t.Fatalf("set report: %v", err)
 	}
+	if err := store.SetTaskOutput(ctx, "workspace-1", "run-1", TaskOutputSummary{
+		TaskID:           "task-1",
+		ValidationStatus: "needs_review",
+		StorageStatus:    "skipped_invalid",
+		ContractVersion:  "ocv_test",
+		ErrorCount:       1,
+		Errors: []TaskOutputValidationError{
+			{Code: "missing_required_column", Column: "pollen_count", Message: "Missing required column."},
+		},
+	}); err != nil {
+		t.Fatalf("set task output: %v", err)
+	}
 
 	got, err := store.GetRun(ctx, "workspace-1", "run-1")
 	if err != nil {
@@ -80,6 +92,9 @@ func TestSQLiteStoreRunArtifactTraceRoundTrip(t *testing.T) {
 	}
 	if got.Report == nil || got.Report.Summary != "done" {
 		t.Fatalf("Report = %+v, want summary done", got.Report)
+	}
+	if got.TaskOutput == nil || got.TaskOutput.ValidationStatus != "needs_review" || got.TaskOutput.Errors[0].Column != "pollen_count" {
+		t.Fatalf("TaskOutput = %+v, want persisted output validation", got.TaskOutput)
 	}
 	if len(got.Artifacts) != 1 || string(got.Artifacts[0].Inline) != "log" {
 		t.Fatalf("Artifacts = %+v, want persisted log artifact", got.Artifacts)

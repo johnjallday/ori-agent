@@ -84,6 +84,7 @@ type Run struct {
 	PreparedContext   *PreparedContext   `json:"prepared_context,omitempty"`
 	ValidationRequest *ValidationRequest `json:"validation_request,omitempty"`
 	ValidationResult  *ValidationResult  `json:"validation_result,omitempty"`
+	TaskOutput        *TaskOutputSummary `json:"task_output,omitempty"`
 	Cost              *CostSummary       `json:"cost,omitempty"`
 	Report            *Report            `json:"report,omitempty"`
 
@@ -252,6 +253,23 @@ type ValidationRequest struct {
 type ValidationResult struct {
 	Profile string        `json:"profile,omitempty"`
 	Checks  []CheckResult `json:"checks"`
+}
+
+type TaskOutputSummary struct {
+	TaskID           string                      `json:"task_id,omitempty"`
+	ValidationStatus string                      `json:"validation_status,omitempty"`
+	StorageStatus    string                      `json:"storage_status,omitempty"`
+	ContractVersion  string                      `json:"contract_version,omitempty"`
+	ValidatedAt      *time.Time                  `json:"validated_at,omitempty"`
+	ErrorCount       int                         `json:"error_count,omitempty"`
+	Errors           []TaskOutputValidationError `json:"errors,omitempty"`
+	ManualApproval   bool                        `json:"manual_approval,omitempty"`
+}
+
+type TaskOutputValidationError struct {
+	Code    string `json:"code,omitempty"`
+	Column  string `json:"column,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type CheckResult struct {

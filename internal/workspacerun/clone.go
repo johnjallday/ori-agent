@@ -30,6 +30,15 @@ func CloneRun(run *Run) *Run {
 		result.Checks = append([]CheckResult(nil), run.ValidationResult.Checks...)
 		out.ValidationResult = &result
 	}
+	if run.TaskOutput != nil {
+		output := *run.TaskOutput
+		if run.TaskOutput.ValidatedAt != nil {
+			validatedAt := *run.TaskOutput.ValidatedAt
+			output.ValidatedAt = &validatedAt
+		}
+		output.Errors = append([]TaskOutputValidationError(nil), run.TaskOutput.Errors...)
+		out.TaskOutput = &output
+	}
 	if run.Cost != nil {
 		cost := *run.Cost
 		out.Cost = &cost

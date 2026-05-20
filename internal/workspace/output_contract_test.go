@@ -187,6 +187,7 @@ func TestValidateTaskOutputContractResult_RecurringTaskScenarios(t *testing.T) {
 func TestAutoStoreResult_AppendCSVUsesContractAndRecordsValidation(t *testing.T) {
 	tempDir := t.TempDir()
 	task := contractedPollenTask(tempDir)
+	task.CurrentRunID = "run-1"
 	RecordTaskExecution(task, "success", `{"date":"2026-05-20","location":"NYC","pollen_count":8,"high":true}`, time.Now(), time.Second)
 
 	ws := &Workspace{ID: "ws-1", Name: "Workspace", Status: StatusActive}
@@ -194,6 +195,17 @@ func TestAutoStoreResult_AppendCSVUsesContractAndRecordsValidation(t *testing.T)
 		t.Fatalf("add task: %v", err)
 	}
 	store := newTestWorkspaceStore(t, ws)
+
+	var mirrored TaskValidationResult
+	var mirroredRunID string
+	SetTaskValidationMirror(func(workspaceID, taskID, runID string, validation TaskValidationResult) {
+		if workspaceID != "ws-1" || taskID != task.ID {
+			t.Fatalf("unexpected mirror ids: workspace=%q task=%q", workspaceID, taskID)
+		}
+		mirroredRunID = runID
+		mirrored = validation
+	})
+	t.Cleanup(func() { SetTaskValidationMirror(nil) })
 
 	AutoStoreResult(ws, task, `{"date":"2026-05-20","location":"NYC","pollen_count":8,"high":true}`, store)
 
@@ -220,6 +232,9 @@ func TestAutoStoreResult_AppendCSVUsesContractAndRecordsValidation(t *testing.T)
 	}
 	if validation.ValidationStatus != TaskValidationPassed || validation.StorageStatus != TaskStorageAppended {
 		t.Fatalf("validation = %+v, want passed/appended", validation)
+	}
+	if mirroredRunID != "run-1" || mirrored.ValidationStatus != TaskValidationPassed || mirrored.StorageStatus != TaskStorageAppended {
+		t.Fatalf("mirrored run=%q validation=%+v, want run-1 passed/appended", mirroredRunID, mirrored)
 	}
 }
 

@@ -1158,6 +1158,67 @@ func TestHandleTaskOutputReview_Dismiss(t *testing.T) {
 	}
 }
 
+func TestHandleTaskOutputReview_InspectReturnsRawResult(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
+	ws.ID = "workspace-review-inspect"
+
+	task := workspace.Task{
+		ID:          "task-review-inspect",
+		WorkspaceID: ws.ID,
+		Description: "Track pollen",
+		Status:      workspace.TaskStatusCompleted,
+		ExecutionHistory: []workspace.TaskExecution{
+			{
+				TaskID:     "task-review-inspect",
+				ExecutedAt: time.Now(),
+				Status:     "success",
+				Result:     `{"date":"bad","location":"NYC"}`,
+				Summary:    "bad row",
+				Validation: &workspace.TaskValidationResult{
+					ValidationStatus: workspace.TaskValidationNeedsReview,
+					StorageStatus:    workspace.TaskStorageSkippedInvalid,
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-review-inspect/review", strings.NewReader(`{"action":"inspect","history_index":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Success    bool                            `json:"success"`
+		Result     string                          `json:"result"`
+		Validation *workspace.TaskValidationResult `json:"validation_result"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success || resp.Result != `{"date":"bad","location":"NYC"}` {
+		t.Fatalf("response = %+v, want raw result", resp)
+	}
+	if resp.Validation == nil || resp.Validation.ValidationStatus != workspace.TaskValidationNeedsReview {
+		t.Fatalf("validation = %+v, want needs_review", resp.Validation)
+	}
+}
+
 func TestHandleTaskOutputReview_ApproveAppendValidationFailure(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
