@@ -3956,8 +3956,88 @@ export class WorkspaceTaskPage {
       `)
       .join('');
 
+    const appendCtx = this.getAppendCSVContext();
+    const appendButtonLabel = appendCtx.configured
+      ? `Append to ${appendCtx.label || 'CSV'}`
+      : 'Append to CSV...';
+    const appendButtonTitle = appendCtx.configured
+      ? `Append this run's rows to ${appendCtx.label || 'the configured CSV file'}`
+      : 'Choose a CSV destination to append this run\'s rows';
+    const appendBusy = Boolean(this.resultArtifactAppendBusy);
+    const appendButton = `
+      <button
+        type="button"
+        class="modern-btn modern-btn-primary workspace-task-output-action-btn"
+        data-action="append-result-artifact-csv"
+        title="${this.escapeHtml(appendButtonTitle)}"${appendBusy ? ' disabled' : ''}>
+        <i class="bi bi-file-earmark-spreadsheet" aria-hidden="true"></i>
+        <span data-role="append-label">${this.escapeHtml(appendBusy ? 'Appending...' : appendButtonLabel)}</span>
+      </button>`;
+
+    const chipHtml = appendCtx.configured ? `
+      <div class="workspace-task-result-artifact-chip" data-role="append-chip">
+        <span class="workspace-task-result-artifact-chip-icon" aria-hidden="true">
+          <i class="bi bi-arrow-down-circle"></i>
+        </span>
+        <span class="workspace-task-result-artifact-chip-copy">
+          <span class="workspace-task-result-artifact-chip-label">Auto-appending to</span>
+          <strong>${this.escapeHtml(appendCtx.label || 'CSV file')}</strong>
+          ${appendCtx.locationHint ? `<span class="workspace-task-result-artifact-chip-location">${this.escapeHtml(appendCtx.locationHint)}</span>` : ''}
+        </span>
+        <button type="button" class="workspace-task-result-artifact-chip-edit" data-action="edit-append-storage" aria-label="Edit auto-append destination" title="Edit auto-append destination">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+          </svg>
+        </button>
+      </div>` : '';
+
+    const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
+    const storeNodeOptions = storeNodes
+      .map((node) => {
+        const id = String(node?.id || '').trim();
+        if (!id) return '';
+        const label = this.getStoreNodeDisplayLabel(id);
+        return `<option value="${this.escapeHtml(id)}">${this.escapeHtml(label)}</option>`;
+      })
+      .filter(Boolean)
+      .join('');
+    const chooserHtml = appendCtx.configured ? '' : `
+      <div class="workspace-task-result-artifact-chooser" data-role="append-chooser" hidden>
+        <div class="workspace-task-result-artifact-chooser-header">
+          <div class="workspace-task-page-mini-label">Append destination</div>
+          <button type="button" class="workspace-task-page-text-button" data-action="cancel-append-chooser">Cancel</button>
+        </div>
+        <div class="workspace-task-result-artifact-chooser-options" role="radiogroup" aria-label="Choose append destination">
+          <label class="workspace-task-result-artifact-chooser-option">
+            <input type="radio" name="workspace-task-append-target" value="default" checked />
+            <span>Default output folder</span>
+          </label>
+          <label class="workspace-task-result-artifact-chooser-option${storeNodeOptions ? '' : ' is-disabled'}">
+            <input type="radio" name="workspace-task-append-target" value="store"${storeNodeOptions ? '' : ' disabled'} />
+            <span>Store node</span>
+            <select data-role="append-store-node" class="workspace-task-result-artifact-chooser-select"${storeNodeOptions ? '' : ' disabled'}>
+              ${storeNodeOptions || '<option value="">No store nodes available</option>'}
+            </select>
+          </label>
+          <label class="workspace-task-result-artifact-chooser-option">
+            <input type="radio" name="workspace-task-append-target" value="custom" />
+            <span>Custom path</span>
+            <input type="text" data-role="append-custom-path" placeholder="e.g. /Users/me/Documents/runs.csv" class="workspace-task-result-artifact-chooser-input" />
+          </label>
+        </div>
+        <label class="workspace-task-result-artifact-chooser-auto">
+          <input type="checkbox" data-role="append-automate" />
+          <span>Also auto-append future runs (opens storage editor after)</span>
+        </label>
+        <div class="workspace-task-result-artifact-chooser-error" data-role="append-error" hidden></div>
+        <div class="workspace-task-result-artifact-chooser-actions">
+          <button type="button" class="modern-btn modern-btn-primary" data-action="submit-append-chooser">Append</button>
+        </div>
+      </div>`;
+
     return `
       <section class="workspace-task-result-artifact" aria-label="CSV-ready task result">
+        ${chipHtml}
         <div class="workspace-task-result-artifact-header">
           <div>
             <div class="workspace-task-page-mini-label">Artifact</div>
@@ -3972,8 +4052,10 @@ export class WorkspaceTaskPage {
               <i class="bi bi-table" aria-hidden="true"></i>
               <span>${this.escapeHtml(savingLabel)}</span>
             </button>
+            ${appendButton}
           </div>
         </div>
+        ${chooserHtml}
         <div class="workspace-task-result-artifact-meta">
           <span>${this.escapeHtml(sourceLabel)}</span>
           <span>${this.escapeHtml(rowLabel)}</span>
@@ -3990,6 +4072,42 @@ export class WorkspaceTaskPage {
     `;
   }
 
+  // getAppendCSVContext returns the effective CSV-append storage for the task
+  // owning this result. Used by the result-card chip + Append button to decide
+  // whether the user is one-clicking into an already-configured destination
+  // or needs to pick one ad hoc.
+  getAppendCSVContext() {
+    const owner = this.getTaskResultStorageTask();
+    const storage = owner?.result_storage || null;
+    const configured = Boolean(
+      storage &&
+      storage.enabled === true &&
+      String(storage.write_mode || '').trim().toLowerCase() === 'append'
+    );
+    if (!configured) {
+      return { configured: false, label: '', locationHint: '' };
+    }
+
+    const storeNodeId = String(storage.store_node_id || '').trim();
+    const filePath = String(storage.file_path || '').trim();
+    let label = '';
+    let locationHint = '';
+    if (storeNodeId) {
+      const storeLabel = this.getStoreNodeDisplayLabel(storeNodeId);
+      label = filePath || 'runs.csv';
+      locationHint = `in ${storeLabel}`;
+    } else if (filePath) {
+      const segments = filePath.split('/');
+      label = segments[segments.length - 1] || filePath;
+      if (segments.length > 1) {
+        locationHint = filePath;
+      }
+    } else {
+      label = 'default output folder';
+    }
+    return { configured: true, label, locationHint };
+  }
+
   bindResultArtifactActions() {
     const root = this.elements.output;
     if (!root) return;
@@ -4000,6 +4118,146 @@ export class WorkspaceTaskPage {
     root
       .querySelector('[data-action="save-result-artifact-note"]')
       ?.addEventListener('click', () => this.saveCurrentArtifactAsNote());
+    root
+      .querySelector('[data-action="append-result-artifact-csv"]')
+      ?.addEventListener('click', () => this.handleAppendArtifactClick());
+    root
+      .querySelector('[data-action="cancel-append-chooser"]')
+      ?.addEventListener('click', () => this.toggleAppendChooser(false));
+    root
+      .querySelector('[data-action="submit-append-chooser"]')
+      ?.addEventListener('click', () => this.submitAppendChooser());
+    root
+      .querySelector('[data-action="edit-append-storage"]')
+      ?.addEventListener('click', () => this.openTaskStorageEditor());
+  }
+
+  // handleAppendArtifactClick is the entry point for the Append button.
+  // Configured tasks short-circuit to a single API call; unconfigured tasks
+  // reveal the inline destination chooser instead of opening the full editor.
+  handleAppendArtifactClick() {
+    if (this.resultArtifactAppendBusy) return;
+    const ctx = this.getAppendCSVContext();
+    if (ctx.configured) {
+      void this.appendArtifactToCSV({ useStorage: true });
+      return;
+    }
+    this.toggleAppendChooser(true);
+  }
+
+  toggleAppendChooser(show) {
+    const chooser = this.elements.output?.querySelector?.('[data-role="append-chooser"]');
+    if (!chooser) return;
+    chooser.hidden = !show;
+    if (show) {
+      this.setAppendChooserError('');
+      chooser.querySelector('input[name="workspace-task-append-target"]:checked')
+        ?.focus?.();
+    }
+  }
+
+  setAppendChooserError(message) {
+    const error = this.elements.output?.querySelector?.('[data-role="append-error"]');
+    if (!error) return;
+    if (!message) {
+      error.hidden = true;
+      error.textContent = '';
+      return;
+    }
+    error.hidden = false;
+    error.textContent = message;
+  }
+
+  async submitAppendChooser() {
+    const chooser = this.elements.output?.querySelector?.('[data-role="append-chooser"]');
+    if (!chooser) return;
+    const target = chooser.querySelector('input[name="workspace-task-append-target"]:checked')?.value || 'default';
+    const storeNodeId = chooser.querySelector('[data-role="append-store-node"]')?.value || '';
+    const customPath = chooser.querySelector('[data-role="append-custom-path"]')?.value?.trim() || '';
+    const automate = Boolean(chooser.querySelector('[data-role="append-automate"]')?.checked);
+
+    if (target === 'store' && !storeNodeId) {
+      this.setAppendChooserError('Pick a store node or choose a different destination.');
+      return;
+    }
+    if (target === 'custom' && !customPath) {
+      this.setAppendChooserError('Enter a CSV path (e.g. /Users/me/Documents/runs.csv).');
+      return;
+    }
+    this.setAppendChooserError('');
+
+    const payload = {};
+    if (target === 'store') payload.storeNodeId = storeNodeId;
+    if (target === 'custom') payload.filePath = customPath;
+    const ok = await this.appendArtifactToCSV(payload);
+    if (!ok) return;
+    this.toggleAppendChooser(false);
+    if (automate) {
+      void this.openTaskStorageEditor();
+    }
+  }
+
+  setResultArtifactAppendBusy(busy) {
+    this.resultArtifactAppendBusy = Boolean(busy);
+    const button = this.elements.output?.querySelector?.('[data-action="append-result-artifact-csv"]');
+    if (!button) return;
+    button.disabled = this.resultArtifactAppendBusy;
+    const label = button.querySelector('[data-role="append-label"]');
+    if (!label) return;
+    if (this.resultArtifactAppendBusy) {
+      label.textContent = 'Appending...';
+      return;
+    }
+    const ctx = this.getAppendCSVContext();
+    label.textContent = ctx.configured ? `Append to ${ctx.label || 'CSV'}` : 'Append to CSV...';
+  }
+
+  // appendArtifactToCSV posts the current artifact's CSV to the workspace
+  // task's append-csv endpoint. Returns true on success so callers can chain
+  // follow-up UI (closing the chooser, opening the storage editor, etc.).
+  async appendArtifactToCSV({ useStorage = false, filePath = '', storeNodeId = '' } = {}) {
+    const csv = String(this.currentResultArtifact?.csv || '').trim();
+    if (!csv) {
+      this.notify('warning', 'No CSV artifact is available to append.');
+      return false;
+    }
+    if (this.resultArtifactAppendBusy) return false;
+
+    this.setResultArtifactAppendBusy(true);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(this.taskId)}/results/append-csv`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            csv,
+            use_storage: Boolean(useStorage),
+            file_path: filePath,
+            store_node_id: storeNodeId,
+          }),
+        }
+      );
+
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `Append failed (HTTP ${response.status})`);
+      }
+      let parsed = {};
+      try { parsed = text ? JSON.parse(text) : {}; } catch (_e) { /* ignore */ }
+      const rows = Number(parsed.appended_rows || 0);
+      const label = parsed.label || parsed.file_path || 'CSV';
+      const rowsLabel = rows === 1 ? '1 row' : `${rows} rows`;
+      this.notify('success', `Appended ${rowsLabel} to ${label}`);
+      return true;
+    } catch (error) {
+      console.error('Failed to append artifact CSV:', error);
+      this.setAppendChooserError(error?.message || 'Append failed.');
+      this.notify('error', error?.message || 'Append failed.');
+      return false;
+    } finally {
+      this.setResultArtifactAppendBusy(false);
+    }
   }
 
   async copyCurrentArtifactCSV() {

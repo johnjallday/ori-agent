@@ -733,6 +733,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 	if strings.Contains(path, "/tasks") {
 		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)
+		} else if strings.HasSuffix(path, "/results/append-csv") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.AppendResultToCSV(w, r)
 		} else if r.Method == http.MethodPost {
 			s.Handlers.Workspace.CreateTask(w, r)
 		} else if r.Method == http.MethodPatch {

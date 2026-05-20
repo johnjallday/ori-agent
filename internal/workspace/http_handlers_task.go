@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // CreateTaskRequest represents the request to create a task
@@ -353,4 +355,199 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
+}
+
+// AppendResultToCSVRequest is the body for POST .../results/append-csv.
+type AppendResultToCSVRequest struct {
+	CSV         string `json:"csv"`
+	UseStorage  bool   `json:"use_storage"`
+	FilePath    string `json:"file_path"`
+	StoreNodeID string `json:"store_node_id"`
+}
+
+// AppendResultToCSV handles POST /api/workspaces/:id/tasks/:task_id/results/append-csv.
+// It appends a CSV payload from a task's result artifact either to the task's
+// already-configured result storage destination (use_storage=true) or to a
+// one-shot destination supplied in the request.
+func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}/results/append-csv
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 5 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+	taskID := parts[2]
+
+	var req AppendResultToCSVRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	csvData := strings.TrimSpace(req.CSV)
+	if csvData == "" {
+		orihttp.BadRequest(w, "csv body is required")
+		return
+	}
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	var task *Task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			task = &ws.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		orihttp.NotFound(w, "Task not found")
+		return
+	}
+
+	storeNodeID := strings.TrimSpace(req.StoreNodeID)
+	filePath := strings.TrimSpace(req.FilePath)
+
+	if req.UseStorage {
+		owner := ResolveTaskResultStorageOwner(ws, task)
+		var storage *ResultStorageConfig
+		if owner != nil {
+			storage = owner.ResultStorage
+		}
+		if storage == nil || !storage.Enabled || strings.ToLower(strings.TrimSpace(storage.WriteMode)) != "append" {
+			orihttp.BadRequest(w, "Task is not configured to append results to a CSV file")
+			return
+		}
+		storeNodeID = strings.TrimSpace(storage.StoreNodeID)
+		filePath = strings.TrimSpace(storage.FilePath)
+	}
+
+	appendedRows := csvRowCount(csvData)
+
+	if storeNodeID != "" {
+		var storeNode *StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storeNodeID || ws.StoreNodes[i].CanvasNodeID == storeNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+		if storeNode == nil {
+			orihttp.BadRequest(w, "Store node not found")
+			return
+		}
+		storeFilePath := filePath
+		if storeFilePath == "" {
+			storeFilePath = defaultAppendCSVFilename(task)
+		}
+		nodeCopy := *storeNode
+		nodeCopy.WriteMode = "append"
+		nodeCopy.Format = "csv"
+		payload := csvWithoutHeaderForExistingStore(storeNode, storeFilePath, csvData)
+		if err := WriteToStore(&nodeCopy, storeFilePath, payload); err != nil {
+			logger.Error("Failed to append task result to store node", logger.Fields{
+				"task_id":       task.ID,
+				"store_node_id": storeNode.ID,
+				"err":           err,
+			})
+			orihttp.InternalError(w, fmt.Sprintf("Append to store node failed: %v", err))
+			return
+		}
+		storeNode.LastWriteTime = nodeCopy.LastWriteTime
+		storeNode.WriteCount = nodeCopy.WriteCount
+		storeNode.LastFilePath = nodeCopy.LastFilePath
+		storeNode.LastError = nodeCopy.LastError
+		storeNode.UpdatedAt = nodeCopy.UpdatedAt
+		if err := h.store.Save(ws); err != nil {
+			logger.Error("Failed to persist workspace after manual append", logger.Fields{"workspace_id": ws.ID, "err": err})
+		}
+		resolved, _ := BuildFinalPath(storeNode.BaseDir, storeFilePath)
+		orihttp.WriteJSON(w, map[string]interface{}{
+			"appended_rows": appendedRows,
+			"file_path":     resolved,
+			"label":         filepath.Base(storeFilePath),
+		})
+		return
+	}
+
+	if filePath == "" {
+		baseOutputDir, dirErr := platform.GetDefaultOutputDir()
+		if dirErr != nil {
+			baseOutputDir = "outputs"
+		}
+		filePath = filepath.Join(baseOutputDir, ws.Name, defaultAppendCSVFilename(task))
+	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
+		filePath = filepath.Join(filePath, defaultAppendCSVFilename(task))
+	}
+
+	if err := AppendCSVToFile(filePath, csvData); err != nil {
+		logger.Error("Failed to append task result CSV to file", logger.Fields{
+			"task_id":   task.ID,
+			"file_path": filePath,
+			"err":       err,
+		})
+		orihttp.InternalError(w, fmt.Sprintf("Append failed: %v", err))
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"appended_rows": appendedRows,
+		"file_path":     filePath,
+		"label":         filepath.Base(filePath),
+	})
+}
+
+// csvRowCount counts data rows in a CSV string, excluding the header.
+func csvRowCount(csvData string) int {
+	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
+	if normalized == "" {
+		return 0
+	}
+	lines := strings.Split(normalized, "\n")
+	if len(lines) <= 1 {
+		return 0
+	}
+	count := 0
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// defaultAppendCSVFilename derives the filename used when the caller did not
+// specify a target path. Mirrors the slug rules in autoStoreTaskResult so that
+// a one-shot manual append lands in the same place as the scheduled append.
+func defaultAppendCSVFilename(task *Task) string {
+	name := ""
+	if task != nil {
+		name = task.Description
+	}
+	if len(name) > 30 {
+		name = name[:30]
+	}
+	sanitized := strings.Builder{}
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-':
+			sanitized.WriteRune(r)
+		case r == ' ':
+			sanitized.WriteByte('_')
+		}
+	}
+	slug := sanitized.String()
+	if slug == "" {
+		slug = "task"
+	}
+	return slug + ".csv"
 }
