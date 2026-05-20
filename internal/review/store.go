@@ -88,7 +88,7 @@ func (s *SQLiteStore) GetIssues(ctx context.Context, opts IssueQueryOptions) ([]
 		FROM review_issues
 		WHERE 1=1
 	`
-	args := []interface{}{}
+	args := []any{}
 
 	if opts.AgentName != "" {
 		query += " AND agent_name = ?"
@@ -211,7 +211,7 @@ func (s *SQLiteStore) UpdateReviewRun(ctx context.Context, run *ReviewRun) error
 		WHERE id = ?
 	`
 
-	var completedAt interface{}
+	var completedAt any
 	if !run.CompletedAt.IsZero() {
 		completedAt = run.CompletedAt
 	}

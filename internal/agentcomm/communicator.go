@@ -146,7 +146,7 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, err
 		To:          req.To,
 		Type:        workspace.MessageTaskRequest,
 		Content:     req.Description,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"task_id":  addedTask.ID,
 			"priority": req.Priority,
 			"timeout":  req.Timeout.String(),
@@ -287,7 +287,7 @@ func (c *Communicator) sendTaskResult(task *workspace.Task, result string, error
 		To:          task.From,
 		Type:        workspace.MessageResult,
 		Content:     content,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"task_id":  task.ID,
 			"status":   task.Status,
 			"duration": duration.String(),

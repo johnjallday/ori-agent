@@ -30,11 +30,11 @@ type GlobalConfig struct {
 }
 
 type externalServerConfig struct {
-	Command   string                 `toml:"command"`
-	Args      []string               `toml:"args"`
-	Env       map[string]interface{} `toml:"env"`
-	Transport string                 `toml:"transport"`
-	URL       string                 `toml:"url"`
+	Command   string         `toml:"command"`
+	Args      []string       `toml:"args"`
+	Env       map[string]any `toml:"env"`
+	Transport string         `toml:"transport"`
+	URL       string         `toml:"url"`
 }
 
 type codexConfig struct {
@@ -377,7 +377,7 @@ func loadClaudeDesktopServers() ([]ServerConfig, error) {
 	}
 
 	var raw struct {
-		MCPServers map[string]map[string]interface{} `json:"mcpServers"`
+		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse claude desktop config: %w", err)
@@ -473,7 +473,7 @@ func normalizeTransport(rawTransport, rawURL string) string {
 	return transport
 }
 
-func mapString(data map[string]interface{}, key string) string {
+func mapString(data map[string]any, key string) string {
 	raw, ok := data[key]
 	if !ok || raw == nil {
 		return ""
@@ -492,13 +492,13 @@ func mapString(data map[string]interface{}, key string) string {
 	}
 }
 
-func mapStringSlice(data map[string]interface{}, key string) []string {
+func mapStringSlice(data map[string]any, key string) []string {
 	raw, ok := data[key]
 	if !ok || raw == nil {
 		return nil
 	}
 
-	values, ok := raw.([]interface{})
+	values, ok := raw.([]any)
 	if !ok {
 		return nil
 	}
@@ -514,12 +514,12 @@ func mapStringSlice(data map[string]interface{}, key string) []string {
 	return out
 }
 
-func mapObject(data map[string]interface{}, key string) map[string]interface{} {
+func mapObject(data map[string]any, key string) map[string]any {
 	raw, ok := data[key]
 	if !ok || raw == nil {
 		return nil
 	}
-	value, ok := raw.(map[string]interface{})
+	value, ok := raw.(map[string]any)
 	if !ok {
 		return nil
 	}

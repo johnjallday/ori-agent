@@ -20,9 +20,9 @@ type ExternalAgent struct {
 
 // ClaudeSettings represents the global settings from ~/.claude/settings.json.
 type ClaudeSettings struct {
-	Permissions    ClaudePermissions      `json:"permissions"`
-	EnabledPlugins map[string]bool        `json:"enabledPlugins"`
-	StatusLine     map[string]interface{} `json:"statusLine,omitempty"`
+	Permissions    ClaudePermissions `json:"permissions"`
+	EnabledPlugins map[string]bool   `json:"enabledPlugins"`
+	StatusLine     map[string]any    `json:"statusLine,omitempty"`
 }
 
 // ClaudePermissions represents the permissions configuration in Claude settings.

@@ -33,7 +33,7 @@ type ErrorResponse struct {
 //	if err := http.RespondJSON(w, http.StatusOK, data); err != nil {
 //		logger.Error("Failed to encode response", logger.Fields{"response": err})
 //	}
-func RespondJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
+func RespondJSON(w http.ResponseWriter, statusCode int, data any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
@@ -68,7 +68,7 @@ func RespondError(w http.ResponseWriter, statusCode int, message string) error {
 //	if err := http.RespondSuccess(w, data); err != nil {
 //		logger.Error("Failed to encode success response", logger.Fields{"response": err})
 //	}
-func RespondSuccess(w http.ResponseWriter, data interface{}) error {
+func RespondSuccess(w http.ResponseWriter, data any) error {
 	return RespondJSON(w, http.StatusOK, data)
 }
 
@@ -80,7 +80,7 @@ func RespondSuccess(w http.ResponseWriter, data interface{}) error {
 //	if err := http.RespondCreated(w, newAgent); err != nil {
 //		logger.Error("Failed to encode created response", logger.Fields{"response": err})
 //	}
-func RespondCreated(w http.ResponseWriter, data interface{}) error {
+func RespondCreated(w http.ResponseWriter, data any) error {
 	return RespondJSON(w, http.StatusCreated, data)
 }
 
@@ -104,7 +104,7 @@ func RespondNoContent(w http.ResponseWriter) {
 // Usage:
 //
 //	http.WriteJSON(w, data)
-func WriteJSON(w http.ResponseWriter, data interface{}) {
+func WriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		if IsClientDisconnectError(err) {
@@ -131,14 +131,14 @@ func WriteJSON(w http.ResponseWriter, data interface{}) {
 //	orihttp.Success(w, data)
 
 // Success writes a 200 OK JSON response and logs any errors internally.
-func Success(w http.ResponseWriter, data interface{}) {
+func Success(w http.ResponseWriter, data any) {
 	if err := RespondSuccess(w, data); err != nil {
 		logger.Error("Failed to write success response", logger.Fields{"error": err})
 	}
 }
 
 // Created writes a 201 Created JSON response and logs any errors internally.
-func Created(w http.ResponseWriter, data interface{}) {
+func Created(w http.ResponseWriter, data any) {
 	if err := RespondCreated(w, data); err != nil {
 		logger.Error("Failed to write created response", logger.Fields{"error": err})
 	}

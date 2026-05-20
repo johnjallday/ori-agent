@@ -177,8 +177,8 @@ func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBootstrapDates(t *
 			"workspace-portugal": {
 				ID:   "workspace-portugal",
 				Name: "Portugal",
-				SharedData: map[string]interface{}{
-					"workspace_bootstrap": map[string]interface{}{
+				SharedData: map[string]any{
+					"workspace_bootstrap": map[string]any{
 						"goal":    "Plan 5/11 Lisbon arrival, 5/14 Porto transfer, 5/18 depart Portugal",
 						"context": "May trip with a relaxed pace",
 					},

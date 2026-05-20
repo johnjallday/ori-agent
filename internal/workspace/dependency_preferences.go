@@ -73,7 +73,7 @@ func (w *Workspace) SetDependencyPreference(key string, pref DependencyPreferenc
 	defer w.mu.Unlock()
 
 	if w.SharedData == nil {
-		w.SharedData = make(map[string]interface{})
+		w.SharedData = make(map[string]any)
 	}
 	prefs := decodeDependencyPreferences(w.SharedData[sharedDataDependencyPreferencesKey])
 	pref.UpdatedAt = time.Now()
@@ -82,14 +82,14 @@ func (w *Workspace) SetDependencyPreference(key string, pref DependencyPreferenc
 	w.UpdatedAt = pref.UpdatedAt
 }
 
-func (w *Workspace) sharedDataValue(key string) interface{} {
+func (w *Workspace) sharedDataValue(key string) any {
 	if w.SharedData == nil {
 		return nil
 	}
 	return w.SharedData[key]
 }
 
-func decodeDependencyPreferences(raw interface{}) map[string]DependencyPreference {
+func decodeDependencyPreferences(raw any) map[string]DependencyPreference {
 	if raw == nil {
 		return map[string]DependencyPreference{}
 	}

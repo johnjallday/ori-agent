@@ -61,11 +61,11 @@ func cloneRawMessage(value *RawConfig) *RawConfig {
 	return &out
 }
 
-func cloneMap(values map[string]interface{}) map[string]interface{} {
+func cloneMap(values map[string]any) map[string]any {
 	if values == nil {
 		return nil
 	}
-	out := make(map[string]interface{}, len(values))
+	out := make(map[string]any, len(values))
 	for k, v := range values {
 		out[k] = v
 	}

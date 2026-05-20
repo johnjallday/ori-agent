@@ -86,7 +86,7 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 		templateList = th.templateManager.ListTemplates()
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"templates": templateList,
 		"count":     len(templateList),
 	})
@@ -145,14 +145,14 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	var req struct {
-		TemplateID             string                 `json:"template_id"`
-		Parameters             map[string]interface{} `json:"parameters"`
-		AgentName              string                 `json:"agent_name"`
-		WorkspaceID            string                 `json:"workspace_id"`
-		AgentAssignments       map[string]string      `json:"agent_assignments"`
-		OrchestrationMode      string                 `json:"orchestration_mode"`
-		ResultCombinationMode  string                 `json:"result_combination_mode"`
-		CombinationInstruction string                 `json:"combination_instruction"`
+		TemplateID             string            `json:"template_id"`
+		Parameters             map[string]any    `json:"parameters"`
+		AgentName              string            `json:"agent_name"`
+		WorkspaceID            string            `json:"workspace_id"`
+		AgentAssignments       map[string]string `json:"agent_assignments"`
+		OrchestrationMode      string            `json:"orchestration_mode"`
+		ResultCombinationMode  string            `json:"result_combination_mode"`
+		CombinationInstruction string            `json:"combination_instruction"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -185,7 +185,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 			"parent_task":   parentTask.ID,
 			"subtask_count": len(subtasks),
 		})
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"instance":    instance,
 			"parent_task": parentTask,
 			"subtasks":    subtasks,
@@ -210,7 +210,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	logger.Info("Instantiated and executed workflow from template", logger.Fields{"templateid": req.TemplateID})
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"instance": instance,
 		"result":   result,
 	})
@@ -218,14 +218,14 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 
 func (th *TemplateHandler) instantiateTemplateIntoWorkspace(
 	req struct {
-		TemplateID             string                 `json:"template_id"`
-		Parameters             map[string]interface{} `json:"parameters"`
-		AgentName              string                 `json:"agent_name"`
-		WorkspaceID            string                 `json:"workspace_id"`
-		AgentAssignments       map[string]string      `json:"agent_assignments"`
-		OrchestrationMode      string                 `json:"orchestration_mode"`
-		ResultCombinationMode  string                 `json:"result_combination_mode"`
-		CombinationInstruction string                 `json:"combination_instruction"`
+		TemplateID             string            `json:"template_id"`
+		Parameters             map[string]any    `json:"parameters"`
+		AgentName              string            `json:"agent_name"`
+		WorkspaceID            string            `json:"workspace_id"`
+		AgentAssignments       map[string]string `json:"agent_assignments"`
+		OrchestrationMode      string            `json:"orchestration_mode"`
+		ResultCombinationMode  string            `json:"result_combination_mode"`
+		CombinationInstruction string            `json:"combination_instruction"`
 	},
 	instance *templates.WorkflowInstance,
 ) (*workspace.Task, []workspace.Task, error) {
@@ -277,7 +277,7 @@ func (th *TemplateHandler) instantiateTemplateIntoWorkspace(
 			TemplateID:   instance.TemplateID,
 			TemplateName: instance.TemplateName,
 		},
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"template_parameters": cloneTemplateParameters(instance.Parameters),
 		},
 	}
@@ -373,22 +373,22 @@ func normalizeTemplateStepPriority(priority int) int {
 	return priority
 }
 
-func cloneTemplateContext(src map[string]interface{}) map[string]interface{} {
+func cloneTemplateContext(src map[string]any) map[string]any {
 	if len(src) == 0 {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	out := make(map[string]interface{}, len(src))
+	out := make(map[string]any, len(src))
 	for key, value := range src {
 		out[key] = value
 	}
 	return out
 }
 
-func cloneTemplateParameters(src map[string]interface{}) map[string]interface{} {
+func cloneTemplateParameters(src map[string]any) map[string]any {
 	if len(src) == 0 {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	out := make(map[string]interface{}, len(src))
+	out := make(map[string]any, len(src))
 	for key, value := range src {
 		out[key] = value
 	}

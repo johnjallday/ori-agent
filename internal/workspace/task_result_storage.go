@@ -52,7 +52,7 @@ func taskStructuredRowsForCSV(task *Task, result string) ([]string, []map[string
 		}
 	}
 
-	var decoded interface{}
+	var decoded any
 	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(result)))
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {
@@ -61,19 +61,19 @@ func taskStructuredRowsForCSV(task *Task, result string) ([]string, []map[string
 	return csvRowsFromValue(decoded)
 }
 
-func csvRowsFromValue(value interface{}) ([]string, []map[string]string) {
+func csvRowsFromValue(value any) ([]string, []map[string]string) {
 	switch typed := value.(type) {
-	case []interface{}:
+	case []any:
 		rows := make([]map[string]string, 0, len(typed))
 		for _, item := range typed {
-			object, ok := item.(map[string]interface{})
+			object, ok := item.(map[string]any)
 			if !ok {
 				return nil, nil
 			}
 			rows = append(rows, csvRowFromMap(object))
 		}
 		return csvColumns(rows, nil), rows
-	case map[string]interface{}:
+	case map[string]any:
 		for _, key := range []string{"data", "rows", "items"} {
 			if nested, ok := typed[key]; ok {
 				if columns, rows := csvRowsFromValue(nested); len(columns) > 0 && len(rows) > 0 {
@@ -87,7 +87,7 @@ func csvRowsFromValue(value interface{}) ([]string, []map[string]string) {
 	}
 }
 
-func csvRowFromMap(values map[string]interface{}) map[string]string {
+func csvRowFromMap(values map[string]any) map[string]string {
 	row := make(map[string]string, len(values))
 	for key, value := range values {
 		row[strings.TrimSpace(key)] = csvCellValue(value)
@@ -95,7 +95,7 @@ func csvRowFromMap(values map[string]interface{}) map[string]string {
 	return row
 }
 
-func csvCellValue(value interface{}) string {
+func csvCellValue(value any) string {
 	if value == nil {
 		return ""
 	}
@@ -117,7 +117,7 @@ func csvCellValue(value interface{}) string {
 	return string(data)
 }
 
-func csvColumns(rows []map[string]string, object map[string]interface{}) []string {
+func csvColumns(rows []map[string]string, object map[string]any) []string {
 	seen := make(map[string]struct{})
 	columns := []string{}
 	add := func(column string) {

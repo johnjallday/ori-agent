@@ -84,7 +84,7 @@ func TestRecentActivityHandler_AggregatesSources(t *testing.T) {
 		Type:        workspace.EventScheduledTaskTriggered,
 		WorkspaceID: "ws-1",
 		Timestamp:   now.Add(-1 * time.Hour),
-		Data:        map[string]interface{}{"task_name": "Monday digest"},
+		Data:        map[string]any{"task_name": "Monday digest"},
 	})
 
 	h := &Handler{workspaceStore: store, sessionStore: sessionStore, eventBus: bus}

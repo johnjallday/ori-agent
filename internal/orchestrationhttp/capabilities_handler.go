@@ -51,7 +51,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 	switch r.Method {
 	case http.MethodGet:
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"agent":        agentName,
 			"role":         agent.Role,
 			"capabilities": agent.Capabilities,
@@ -84,7 +84,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 		logger.Info("Updated agent capabilities and role", logger.Fields{"agent": agentName})
 
 		w.WriteHeader(http.StatusOK)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"agent":   agentName,
 		})
@@ -105,13 +105,13 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		WorkspaceID string                 `json:"workspace_id"`
-		From        string                 `json:"from"`
-		To          string                 `json:"to"`
-		Description string                 `json:"description"`
-		Priority    int                    `json:"priority"`
-		Context     map[string]interface{} `json:"context"`
-		Timeout     int                    `json:"timeout"` // timeout in seconds
+		WorkspaceID string         `json:"workspace_id"`
+		From        string         `json:"from"`
+		To          string         `json:"to"`
+		Description string         `json:"description"`
+		Priority    int            `json:"priority"`
+		Context     map[string]any `json:"context"`
+		Timeout     int            `json:"timeout"` // timeout in seconds
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {

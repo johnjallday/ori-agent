@@ -142,7 +142,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 		rows = rows[:limit]
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"events": rows,
 		"count":  len(rows),
 	})

@@ -217,7 +217,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 
 	if th.eventBus != nil {
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, req.WorkspaceID, "workflow.create", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, req.WorkspaceID, "workflow.create", map[string]any{
 			"parent_task_id": parentTaskID,
 			"subtask_count":  len(req.Subtasks),
 			"attached":       attachID != "",
@@ -231,7 +231,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 				Type:        workspace.EventTaskCreated,
 				WorkspaceID: req.WorkspaceID,
 				Source:      "api",
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"task_id":     parentTaskID,
 					"description": req.Parent.Description,
 					"to":          req.Parent.To,
@@ -264,7 +264,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":  true,
 		"parent":   createdParent,
 		"subtasks": createdSubtasks,
@@ -294,7 +294,7 @@ func respondTaskGraphError(w http.ResponseWriter, err error, message string) boo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": false,
 		"error":   message + ": " + graphErr.Error(),
 		"issues":  graphErr.Issues,

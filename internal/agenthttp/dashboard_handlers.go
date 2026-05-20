@@ -460,7 +460,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Log activity
 	if h.ActivityLogger != nil {
-		details := map[string]interface{}{
+		details := map[string]any{
 			"old_status": oldStatus,
 			"new_status": req.Status,
 		}

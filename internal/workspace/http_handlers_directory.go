@@ -87,7 +87,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 			Type:        EventWorkspaceUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"action":    "directory_created",
 				"directory": createdDir,
 			},
@@ -96,7 +96,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Directory reference created successfully",
 		"directory": createdDir,
 		"workspace": workspaceID,
@@ -127,7 +127,7 @@ func (h *HTTPHandler) ListDirectories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"directories": workspace.DirectoryReferences,
 		"count":       len(workspace.DirectoryReferences),
 		"workspace":   workspaceID,
@@ -165,7 +165,7 @@ func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"directory": dir,
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -247,7 +247,7 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 			Type:        EventWorkspaceUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"action":    "directory_updated",
 				"directory": updatedDir,
 			},
@@ -255,7 +255,7 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Directory reference updated successfully",
 		"directory": updatedDir,
 		"workspace": workspaceID,
@@ -301,7 +301,7 @@ func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
 			Type:        EventWorkspaceUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"action":       "directory_deleted",
 				"directory_id": dirID,
 			},
@@ -309,7 +309,7 @@ func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":      "Directory reference deleted successfully",
 		"directory_id": dirID,
 		"workspace":    workspaceID,
@@ -347,7 +347,7 @@ func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"files":        files,
 		"count":        len(files),
 		"directory_id": dirID,

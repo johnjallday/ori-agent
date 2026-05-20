@@ -26,7 +26,7 @@ func TestSyncStore_SaveSyncsToDisk(t *testing.T) {
 		Status:     StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 
 	if err := store.Save(ws); err != nil {
@@ -79,7 +79,7 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 		Status:     StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 		MCPBindings: []WorkspaceMCPBinding{
 			{ID: "mcp-1", ServerName: "test-server", Enabled: true},
 		},
@@ -134,7 +134,7 @@ func TestSyncStore_DeleteRemovesFromBoth(t *testing.T) {
 		Status:     StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 
 	if err := store.Save(ws); err != nil {
@@ -184,7 +184,7 @@ func TestSyncStore_GetDelegatesToPrimary(t *testing.T) {
 		Status:     StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 
 	if err := store.Save(ws); err != nil {
@@ -218,7 +218,7 @@ func TestSyncStore_GetFilesPathUsesFileStore(t *testing.T) {
 		Status:     StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatal(err)

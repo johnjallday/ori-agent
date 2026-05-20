@@ -417,7 +417,7 @@ func (s *fileStore) load() error {
 	}
 
 	// Try to parse the JSON first
-	var rawConfig map[string]interface{}
+	var rawConfig map[string]any
 	if err := json.Unmarshal(b, &rawConfig); err != nil {
 		return err
 	}

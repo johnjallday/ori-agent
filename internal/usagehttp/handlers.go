@@ -80,7 +80,7 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 // GET /api/usage/pricing
 func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 	models := h.costTracker.GetPricingModels()
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"pricing_models": models,
 	})
 }
@@ -99,7 +99,7 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 
 	h.costTracker.UpdatePricingModel(model)
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Pricing model updated successfully",
 	})
@@ -112,20 +112,20 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	monthStats := h.costTracker.GetThisMonthStats()
 	allTimeStats := h.costTracker.GetAllTimeStats()
 
-	summary := map[string]interface{}{
-		"today": map[string]interface{}{
+	summary := map[string]any{
+		"today": map[string]any{
 			"requests": todayStats.TotalRequests,
 			"tokens":   todayStats.TotalTokens,
 			"cost":     todayStats.TotalCost,
 			"currency": todayStats.Currency,
 		},
-		"this_month": map[string]interface{}{
+		"this_month": map[string]any{
 			"requests": monthStats.TotalRequests,
 			"tokens":   monthStats.TotalTokens,
 			"cost":     monthStats.TotalCost,
 			"currency": monthStats.Currency,
 		},
-		"all_time": map[string]interface{}{
+		"all_time": map[string]any{
 			"requests": allTimeStats.TotalRequests,
 			"tokens":   allTimeStats.TotalTokens,
 			"cost":     allTimeStats.TotalCost,
@@ -135,7 +135,7 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	if h.utilityTelemetry != nil {
 		utilitySnapshot := h.utilityTelemetry.Snapshot()
-		summary["utility"] = map[string]interface{}{
+		summary["utility"] = map[string]any{
 			"generated_at": utilitySnapshot.GeneratedAt,
 			"totals":       utilitySnapshot.Totals,
 			"route_counts": utilitySnapshot.RouteCounts,

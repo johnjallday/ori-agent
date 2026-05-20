@@ -122,7 +122,7 @@ func isJWTExpired(token string) bool {
 
 type CodexAuthFile struct {
 	Tokens      CodexTokens `json:"tokens"`
-	LastRefresh interface{} `json:"last_refresh"`
+	LastRefresh any         `json:"last_refresh"`
 }
 
 // DiscoverCodexToken attempts to find an OpenAI API token from Codex CLI.
@@ -201,12 +201,12 @@ func readCodexCredsFromKeychain(codexHome string) (*CodexTokens, error) {
 		return nil, err
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &data); err != nil {
 		return nil, err
 	}
 
-	tokens, ok := data["tokens"].(map[string]interface{})
+	tokens, ok := data["tokens"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("no tokens found in keychain data")
 	}

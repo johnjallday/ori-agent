@@ -45,12 +45,12 @@ func NewToolMessage(toolCallID, content string) Message {
 }
 
 // ParseToolArguments parses the tool arguments JSON into the given struct
-func ParseToolArguments(arguments string, v interface{}) error {
+func ParseToolArguments(arguments string, v any) error {
 	return json.Unmarshal([]byte(arguments), v)
 }
 
 // MarshalToolArguments converts a struct to tool arguments JSON string
-func MarshalToolArguments(v interface{}) (string, error) {
+func MarshalToolArguments(v any) (string, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return "", err

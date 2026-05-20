@@ -86,7 +86,7 @@ func (th *TaskHandler) UpcomingScheduledTasksHandler(w http.ResponseWriter, r *h
 		rows = rows[:limit]
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"upcoming": rows,
 		"count":    len(rows),
 	})
@@ -106,7 +106,7 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"scheduled_tasks": ws.ScheduledTasks,
 		"count":           len(ws.ScheduledTasks),
 	})
@@ -207,7 +207,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	logger.Info("Created scheduled task in workspace", logger.Fields{"workspace_id": createdTask.ID, "workspaceid": req.WorkspaceID, "name": req.Name})
 
 	w.WriteHeader(http.StatusCreated)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":        true,
 		"scheduled_task": createdTask,
 	})
@@ -276,7 +276,7 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, id string) 
 
 		st, err := ws.GetScheduledTask(id)
 		if err == nil {
-			orihttp.WriteJSON(w, map[string]interface{}{
+			orihttp.WriteJSON(w, map[string]any{
 				"scheduled_task": st,
 			})
 			return
@@ -370,7 +370,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 
 		logger.Info("Updated scheduled task", logger.Fields{"task_id": id})
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success":        true,
 			"scheduled_task": st,
 		})
@@ -402,7 +402,7 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, id strin
 
 			logger.Info("Deleted scheduled task", logger.Fields{"task_id": id})
 
-			orihttp.WriteJSON(w, map[string]interface{}{
+			orihttp.WriteJSON(w, map[string]any{
 				"success": true,
 			})
 			return
@@ -470,7 +470,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		}
 		logger.Info("scheduled task", logger.Fields{"task_id": capitalizedAction, "id": id})
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success":        true,
 			"enabled":        enable,
 			"scheduled_task": st,
@@ -535,7 +535,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 
 		logger.Info("Manually triggered scheduled task , created task", logger.Fields{"task_id": id, "taskID": taskID})
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"task_id": taskID,
 		})

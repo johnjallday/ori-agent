@@ -66,7 +66,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	allResults := make(map[string]interface{})
+	allResults := make(map[string]any)
 	for _, wsID := range workspaceIDs {
 		ws, err := th.workspaceStore.Get(wsID)
 		if err != nil {
@@ -79,7 +79,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 			// Get full task info
 			task, err := ws.GetTask(taskID)
 			if err == nil {
-				allResults[taskID] = map[string]interface{}{
+				allResults[taskID] = map[string]any{
 					"task_id":      task.ID,
 					"description":  task.Description,
 					"status":       task.Status,
@@ -89,7 +89,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 					"completed_at": task.CompletedAt,
 				}
 			} else {
-				allResults[taskID] = map[string]interface{}{
+				allResults[taskID] = map[string]any{
 					"task_id": taskID,
 					"result":  result,
 				}
@@ -98,7 +98,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"results": allResults,
 	})
@@ -187,7 +187,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		logger.Info("Started manual execution of task sequence", logger.Fields{"task_id": req.TaskID})
 
 		w.WriteHeader(http.StatusAccepted)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"message": "Task sequence started",
 			"task_id": req.TaskID,
@@ -276,7 +276,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	logger.Info("Started manual execution of task", logger.Fields{"task_id": req.TaskID})
 
 	w.WriteHeader(http.StatusAccepted)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":        true,
 		"message":        "Task execution started",
 		"task_id":        req.TaskID,
@@ -324,10 +324,10 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
-	humanLoop := map[string]interface{}{}
-	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+	humanLoop := map[string]any{}
+	if existing, ok := task.Context["human_loop"].(map[string]any); ok {
 		for key, value := range existing {
 			humanLoop[key] = value
 		}
@@ -345,11 +345,11 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 
 	selectedChoice := normalizeTaskAssistChoice(req.ChoiceID, req.ChoiceLabel, req.ChoiceNumber)
 	fieldValues := normalizeTaskAssistFieldValues(req.FieldValues)
-	history := make([]interface{}, 0, 4)
-	if existingHistory, ok := humanLoop["history"].([]interface{}); ok {
+	history := make([]any, 0, 4)
+	if existingHistory, ok := humanLoop["history"].([]any); ok {
 		history = append(history, existingHistory...)
 	}
-	historyEntry := map[string]interface{}{
+	historyEntry := map[string]any{
 		"at":      time.Now().UTC().Format(time.RFC3339),
 		"action":  action,
 		"agent":   strings.TrimSpace(req.Agent),
@@ -452,13 +452,13 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 
 	if th.eventBus != nil {
 		if action == "mark_failed" {
-			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]any{
 				"description": task.Description,
 				"error":       task.Error,
 				"manual":      true,
 			}))
 		} else {
-			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskResumed, ws.ID, task.ID, task.To, map[string]interface{}{
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskResumed, ws.ID, task.ID, task.To, map[string]any{
 				"description": task.Description,
 				"action":      action,
 				"block_id":    blockID,
@@ -468,7 +468,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 			}))
 		}
 
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "task.assist", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "task.assist", map[string]any{
 			"task_id": task.ID,
 			"status":  task.Status,
 			"action":  action,
@@ -480,7 +480,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task_id": task.ID,
 		"status":  task.Status,
@@ -573,12 +573,12 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	}
 
 	if th.eventBus != nil {
-		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, parentTask.ID, parentTask.To, map[string]any{
 			"description": parentTask.Description,
 			"manual":      true,
 		})
 		th.eventBus.Publish(event)
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-start", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-start", map[string]any{
 			"task_id": parentTask.ID,
 			"status":  parentTask.Status,
 		}))
@@ -640,7 +640,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 
 	if execErr != nil {
 		if blockedErr != nil {
-			extra := map[string]interface{}{}
+			extra := map[string]any{}
 			if blockedSubtaskID != "" {
 				extra["blocked_subtask_id"] = blockedSubtaskID
 			}
@@ -661,7 +661,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			parentTask.Result = ""
 			workspace.ApplyTaskResultMetadata(parentTask, "")
 			if th.eventBus != nil {
-				th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-cancelled", map[string]interface{}{
+				th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-cancelled", map[string]any{
 					"task_id": parentTask.ID,
 					"status":  parentTask.Status,
 				}))
@@ -676,7 +676,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			workspace.ApplyTaskResultMetadata(parentTask, "")
 
 			if th.eventBus != nil {
-				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]any{
 					"description": parentTask.Description,
 					"error":       execErr.Error(),
 					"manual":      true,
@@ -696,7 +696,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		parentTask.Error = ""
 
 		if th.eventBus != nil {
-			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, parentTask.ID, parentTask.To, map[string]any{
 				"description": parentTask.Description,
 				"result":      lastResult,
 				"manual":      true,
@@ -715,7 +715,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	}
 
 	if th.eventBus != nil {
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-complete", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-complete", map[string]any{
 			"task_id": parentTask.ID,
 			"status":  parentTask.Status,
 		}))
@@ -760,7 +760,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	workspace.ApplyTaskResultMetadata(task, "")
 	task.Error = ""
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 	delete(task.Context, "human_loop")
 	delete(task.Context, "structured_output")
@@ -773,7 +773,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 
 	if th.eventBus != nil {
-		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, task.ID, task.To, map[string]interface{}{
+		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, task.ID, task.To, map[string]any{
 			"description": task.Description,
 			"manual":      manual,
 		})
@@ -908,19 +908,19 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 
 	if th.eventBus != nil {
 		if task.Status == workspace.TaskStatusCancelled {
-			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-cancelled", map[string]interface{}{
+			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-cancelled", map[string]any{
 				"task_id": task.ID,
 				"status":  task.Status,
 			}))
 		} else if execErr != nil {
-			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]any{
 				"description": task.Description,
 				"error":       execErr.Error(),
 				"manual":      manual,
 			})
 			th.eventBus.Publish(event)
 		} else {
-			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]any{
 				"description": task.Description,
 				"result":      result,
 				"manual":      manual,
@@ -928,7 +928,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			th.eventBus.Publish(event)
 		}
 
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]any{
 			"task_id": task.ID,
 			"status":  task.Status,
 		}))
@@ -954,7 +954,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	return result, execErr
 }
 
-func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.Task, blockedErr *workspace.TaskBlockedError, manual bool, extra map[string]interface{}) error {
+func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.Task, blockedErr *workspace.TaskBlockedError, manual bool, extra map[string]any) error {
 	if ws == nil || task == nil {
 		return fmt.Errorf("workspace and task are required")
 	}
@@ -982,7 +982,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	if th.eventBus != nil {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"description": task.Description,
 			"manual":      manual,
 			"human_loop":  humanLoop,
@@ -995,7 +995,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 		event := workspace.NewTaskEvent(workspace.EventTaskBlocked, ws.ID, task.ID, task.To, payload)
 		th.eventBus.Publish(event)
 
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-blocked", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-blocked", map[string]any{
 			"task_id": task.ID,
 			"status":  task.Status,
 		}))
@@ -1029,19 +1029,19 @@ func blockedErrReasonCode(blockedErr *workspace.TaskBlockedError) string {
 	return code
 }
 
-func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlockedError, extra map[string]interface{}) map[string]interface{} {
+func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlockedError, extra map[string]any) map[string]any {
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 
 	blockID := fmt.Sprintf("blk_%d", time.Now().UnixNano())
-	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+	if existing, ok := task.Context["human_loop"].(map[string]any); ok {
 		if prior, ok := existing["block_id"].(string); ok && strings.TrimSpace(prior) != "" {
 			blockID = strings.TrimSpace(prior)
 		}
 	}
 
-	humanLoop := map[string]interface{}{
+	humanLoop := map[string]any{
 		"state":       "waiting_for_choice",
 		"block_id":    blockID,
 		"reason_code": blockedErrReasonCode(blockedErr),
@@ -1179,7 +1179,7 @@ func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlocke
 func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
 	maxAttempts := resolveTaskExecutionAttempts(persistedTask)
 	baseContext := cloneTaskContext(taskForExecution.Context)
-	attemptHistory := make([]map[string]interface{}, 0, maxAttempts)
+	attemptHistory := make([]map[string]any, 0, maxAttempts)
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -1191,7 +1191,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		applyIterationContext(&currentTask, attempt, maxAttempts, attemptHistory)
 
 		if attempt > 1 && th.eventBus != nil {
-			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskThinking, ws.ID, persistedTask.ID, persistedTask.To, map[string]interface{}{
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskThinking, ws.ID, persistedTask.ID, persistedTask.To, map[string]any{
 				"message":      fmt.Sprintf("Retrying task autonomously (%d/%d)...", attempt, maxAttempts),
 				"attempt":      attempt,
 				"max_attempts": maxAttempts,
@@ -1213,7 +1213,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		if execErr != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(execErr, &blockedErr) {
-				attemptHistory = append(attemptHistory, map[string]interface{}{
+				attemptHistory = append(attemptHistory, map[string]any{
 					"attempt":    attempt,
 					"outcome":    "blocked",
 					"summary":    summarizeExecutionText(blockedErr.Error()),
@@ -1223,7 +1223,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				return "", blockedErr
 			}
 
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "error",
 				"summary":    summarizeExecutionText(execErr.Error()),
@@ -1249,7 +1249,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		}
 
 		if responseNeedsUserInput(result) {
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "needs_input",
 				"summary":    summarizeExecutionText(result),
@@ -1276,7 +1276,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		}
 
 		if blockedErr := classifyToolAccessBlockedResponse(result); blockedErr != nil {
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "blocked",
 				"summary":    summarizeExecutionText(result),
@@ -1287,7 +1287,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		}
 
 		if blockedErr := classifyInvalidTaskCompletionResponse(currentTask, result); blockedErr != nil {
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "invalid_result",
 				"summary":    summarizeExecutionText(blockedErr.Reason),
@@ -1303,7 +1303,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 
 		evidence := th.collectTaskExecutionEvidence(ws.ID, persistedTask.ID, attemptStartedAt, attemptCompletedAt)
 		if blockedErr := classifyFilesystemListingVerificationFailure(currentTask, result, evidence); blockedErr != nil {
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "unverified",
 				"summary":    summarizeExecutionText(blockedErr.Reason),
@@ -1317,7 +1317,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			return "", blockedErr
 		}
 		if blockedErr := classifyFilesystemListingIncompleteResponse(currentTask, result); blockedErr != nil {
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "incomplete",
 				"summary":    summarizeExecutionText(blockedErr.Reason),
@@ -1336,7 +1336,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			if persistedTask.Context != nil {
 				delete(persistedTask.Context, "structured_output")
 			}
-			attemptHistory = append(attemptHistory, map[string]interface{}{
+			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
 				"outcome":    "invalid_structured_output",
 				"summary":    summarizeExecutionText(validationErr.Error()),
@@ -1361,14 +1361,14 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		}
 		if parsedStructuredOutput != nil {
 			if persistedTask.Context == nil {
-				persistedTask.Context = map[string]interface{}{}
+				persistedTask.Context = map[string]any{}
 			}
 			persistedTask.Context["structured_output"] = parsedStructuredOutput
 		} else if persistedTask.Context != nil {
 			delete(persistedTask.Context, "structured_output")
 		}
 
-		attemptHistory = append(attemptHistory, map[string]interface{}{
+		attemptHistory = append(attemptHistory, map[string]any{
 			"attempt":    attempt,
 			"outcome":    "success",
 			"summary":    summarizeExecutionText(result),
@@ -1392,11 +1392,11 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 	}
 }
 
-func cloneTaskContext(src map[string]interface{}) map[string]interface{} {
+func cloneTaskContext(src map[string]any) map[string]any {
 	if len(src) == 0 {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	cloned := make(map[string]interface{}, len(src))
+	cloned := make(map[string]any, len(src))
 	for key, value := range src {
 		cloned[key] = value
 	}
@@ -1430,7 +1430,7 @@ func resolveTaskExecutionAttempts(task *workspace.Task) int {
 	return attempts
 }
 
-func parsePositiveInt(raw interface{}) (int, bool) {
+func parsePositiveInt(raw any) (int, bool) {
 	switch value := raw.(type) {
 	case int:
 		if value > 0 {
@@ -1492,12 +1492,12 @@ func parsePositiveInt(raw interface{}) (int, bool) {
 	return 0, false
 }
 
-func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, history []map[string]interface{}) {
+func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, history []map[string]any) {
 	if task == nil {
 		return
 	}
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 
 	task.Context["execution_attempt"] = attempt
@@ -1547,15 +1547,15 @@ func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
 	)
 }
 
-func recordIterationHistory(task *workspace.Task, maxAttempts int, history []map[string]interface{}, finalOutcome string) {
+func recordIterationHistory(task *workspace.Task, maxAttempts int, history []map[string]any, finalOutcome string) {
 	if task == nil {
 		return
 	}
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 
-	task.Context["execution_retry"] = map[string]interface{}{
+	task.Context["execution_retry"] = map[string]any{
 		"max_attempts":  maxAttempts,
 		"attempts_used": len(history),
 		"final_outcome": strings.TrimSpace(finalOutcome),
@@ -1628,7 +1628,7 @@ func (th *TaskHandler) collectTaskExecutionEvidence(workspaceID, taskID string, 
 	return evidence
 }
 
-func eventDataString(data map[string]interface{}, key string) string {
+func eventDataString(data map[string]any, key string) string {
 	if len(data) == 0 {
 		return ""
 	}
@@ -1644,7 +1644,7 @@ func eventDataString(data map[string]interface{}, key string) string {
 	}
 }
 
-func eventDataBool(data map[string]interface{}, key string) bool {
+func eventDataBool(data map[string]any, key string) bool {
 	if len(data) == 0 {
 		return false
 	}
@@ -2843,14 +2843,14 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		// Publish events
 		if th.eventBus != nil {
 			if inputTask.Status == workspace.TaskStatusFailed {
-				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, inputTask.ID, inputTask.To, map[string]any{
 					"description": inputTask.Description,
 					"error":       inputTask.Error,
 					"auto":        true,
 				})
 				th.eventBus.Publish(event)
 			} else {
-				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, inputTask.ID, inputTask.To, map[string]any{
 					"description": inputTask.Description,
 					"result":      inputTask.Result,
 					"auto":        true,

@@ -184,7 +184,7 @@ func CountTaskListResultItems(taskList *TaskListResult) int {
 	return count
 }
 
-func taskListResultToMap(taskList *TaskListResult) map[string]interface{} {
+func taskListResultToMap(taskList *TaskListResult) map[string]any {
 	if taskList == nil {
 		return nil
 	}
@@ -192,14 +192,14 @@ func taskListResultToMap(taskList *TaskListResult) map[string]interface{} {
 	if err != nil {
 		return nil
 	}
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil
 	}
 	return out
 }
 
-func taskListResultFromMap(payload map[string]interface{}) (*TaskListResult, error) {
+func taskListResultFromMap(payload map[string]any) (*TaskListResult, error) {
 	if len(payload) == 0 {
 		return nil, fmt.Errorf("structured task list result is empty")
 	}

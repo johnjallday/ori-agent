@@ -43,7 +43,7 @@ type Logger struct {
 }
 
 // Fields represents structured log fields
-type Fields map[string]interface{}
+type Fields map[string]any
 
 var defaultLogger = &Logger{
 	minLevel:   InfoLevel,
@@ -95,7 +95,7 @@ func (l *Logger) log(level Level, message string, fields Fields) {
 
 // logJSON outputs a JSON-formatted log entry
 func (l *Logger) logJSON(level Level, message string, fields Fields) {
-	entry := map[string]interface{}{
+	entry := map[string]any{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"level":     level.String(),
 		"message":   message,
@@ -184,27 +184,27 @@ func (l *Logger) Error(message string, fields ...Fields) {
 }
 
 // Debugf logs a formatted debug message
-func (l *Logger) Debugf(format string, args ...interface{}) {
+func (l *Logger) Debugf(format string, args ...any) {
 	l.log(DebugLevel, fmt.Sprintf(format, args...), nil)
 }
 
 // Infof logs a formatted info message
-func (l *Logger) Infof(format string, args ...interface{}) {
+func (l *Logger) Infof(format string, args ...any) {
 	l.log(InfoLevel, fmt.Sprintf(format, args...), nil)
 }
 
 // Warnf logs a formatted warning message
-func (l *Logger) Warnf(format string, args ...interface{}) {
+func (l *Logger) Warnf(format string, args ...any) {
 	l.log(WarnLevel, fmt.Sprintf(format, args...), nil)
 }
 
 // Errorf logs a formatted error message
-func (l *Logger) Errorf(format string, args ...interface{}) {
+func (l *Logger) Errorf(format string, args ...any) {
 	l.log(ErrorLevel, fmt.Sprintf(format, args...), nil)
 }
 
 // Verbosef logs a formatted verbose/debug message (alias for Debugf)
-func (l *Logger) Verbosef(format string, args ...interface{}) {
+func (l *Logger) Verbosef(format string, args ...any) {
 	l.log(DebugLevel, fmt.Sprintf(format, args...), nil)
 }
 
@@ -231,27 +231,27 @@ func Error(message string, fields ...Fields) {
 }
 
 // Debugf logs a formatted debug message using the default logger
-func Debugf(format string, args ...interface{}) {
+func Debugf(format string, args ...any) {
 	defaultLogger.Debugf(format, args...)
 }
 
 // Infof logs a formatted info message using the default logger
-func Infof(format string, args ...interface{}) {
+func Infof(format string, args ...any) {
 	defaultLogger.Infof(format, args...)
 }
 
 // Warnf logs a formatted warning message using the default logger
-func Warnf(format string, args ...interface{}) {
+func Warnf(format string, args ...any) {
 	defaultLogger.Warnf(format, args...)
 }
 
 // Errorf logs a formatted error message using the default logger
-func Errorf(format string, args ...interface{}) {
+func Errorf(format string, args ...any) {
 	defaultLogger.Errorf(format, args...)
 }
 
 // Verbosef logs a formatted verbose/debug message using the default logger (alias for Debugf)
-func Verbosef(format string, args ...interface{}) {
+func Verbosef(format string, args ...any) {
 	defaultLogger.Verbosef(format, args...)
 }
 

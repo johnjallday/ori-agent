@@ -245,20 +245,20 @@ func cloneAccessEntry(entry WorkspaceAgentMCPAccess) WorkspaceAgentMCPAccess {
 	return copy
 }
 
-func cloneInterfaceMap(src map[string]interface{}) map[string]interface{} {
+func cloneInterfaceMap(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
 	}
 	data, err := json.Marshal(src)
 	if err != nil {
 		// Fallback to shallow copy if marshalling fails
-		out := make(map[string]interface{}, len(src))
+		out := make(map[string]any, len(src))
 		for key, value := range src {
 			out[key] = value
 		}
 		return out
 	}
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil
 	}

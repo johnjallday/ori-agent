@@ -94,7 +94,7 @@ func setWorkspaceEntryAgent(workspace *session.Workspace, agentName string) {
 
 	trimmed := strings.TrimSpace(agentName)
 	if workspace.SharedData == nil {
-		workspace.SharedData = make(map[string]interface{})
+		workspace.SharedData = make(map[string]any)
 	}
 
 	if trimmed == "" {

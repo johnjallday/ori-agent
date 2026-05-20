@@ -185,9 +185,9 @@ type ollamaTool struct {
 
 // ollamaFunctionDef represents a function definition
 type ollamaFunctionDef struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // ollamaRequest represents a request to Ollama

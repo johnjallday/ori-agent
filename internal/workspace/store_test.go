@@ -57,7 +57,7 @@ func newTestWorkspace(id, name string) *Workspace {
 		Status:     StatusActive,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
-		SharedData: map[string]interface{}{},
+		SharedData: map[string]any{},
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -177,12 +178,8 @@ func validateOutputContractResult(contract *TaskOutputContract, task *Task, resu
 }
 
 func appendContractColumn(columns []string, name string) []string {
-	if len(columns) > 0 {
-		for _, existing := range columns {
-			if existing == name {
-				return columns
-			}
-		}
+	if slices.Contains(columns, name) {
+		return columns
 	}
 	return append(columns, name)
 }
@@ -201,11 +198,11 @@ func outputContractRowsFromTaskResult(task *Task, result string) []map[string]st
 		return nil
 	}
 
-	var decoded interface{}
+	var decoded any
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err == nil {
-		var trailing interface{}
+		var trailing any
 		if err := decoder.Decode(&trailing); err == io.EOF {
 			if _, rows := csvRowsFromValue(decoded); len(rows) > 0 {
 				return rows
@@ -304,7 +301,7 @@ func BuildTaskOutputContractPrompt(contract *TaskOutputContract) string {
 		if column.Required {
 			requiredLabel = "required"
 		}
-		prompt.WriteString(fmt.Sprintf("- %s (%s, %s)", column.Name, column.Type, requiredLabel))
+		fmt.Fprintf(&prompt, "- %s (%s, %s)", column.Name, column.Type, requiredLabel)
 		if column.Description != "" {
 			prompt.WriteString(": ")
 			prompt.WriteString(column.Description)

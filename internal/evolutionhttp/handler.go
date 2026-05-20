@@ -113,9 +113,9 @@ func (h *Handler) FeedAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content  string                 `json:"content"`
-		Source   string                 `json:"source,omitempty"`
-		Metadata map[string]interface{} `json:"metadata,omitempty"`
+		Content  string         `json:"content"`
+		Source   string         `json:"source,omitempty"`
+		Metadata map[string]any `json:"metadata,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return

@@ -99,7 +99,7 @@ func setHomeRouteRuntimeMCPServers(handler *HomeAssistantRouteHandler, st store.
 	})
 }
 
-func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload interface{}) *httptest.ResponseRecorder {
+func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload any) *httptest.ResponseRecorder {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -114,7 +114,7 @@ func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload 
 	return rr
 }
 
-func postTraceRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload interface{}) *httptest.ResponseRecorder {
+func postTraceRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload any) *httptest.ResponseRecorder {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -830,9 +830,9 @@ func TestHomeAssistantRouteHandler_WorkspaceContext_ForcesWorkspaceMode(t *testi
 	addHomeRouteTestAgent(t, st, "Task Assistant", &store.CreateAgentConfig{Type: "general"},
 		"General purpose task helper", []string{"tasks"}, []string{})
 
-	rr := postRouteRequest(t, handler, map[string]interface{}{
+	rr := postRouteRequest(t, handler, map[string]any{
 		"prompt": "Draft a migration checklist for our service",
-		"context": map[string]interface{}{
+		"context": map[string]any{
 			"surface":      "workspace_canvas",
 			"page_path":    "/workspaces/ws-abc/canvas",
 			"workspace_id": "ws-abc",
@@ -859,9 +859,9 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_WorkspaceContextStaysUtilityDir
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	rr := postRouteRequest(t, handler, map[string]interface{}{
+	rr := postRouteRequest(t, handler, map[string]any{
 		"prompt": "What time is it in Tokyo?",
-		"context": map[string]interface{}{
+		"context": map[string]any{
 			"surface":      "workspace_detail",
 			"page_path":    "/workspaces/ws-abc",
 			"workspace_id": "ws-abc",
@@ -897,7 +897,7 @@ func TestHomeAssistantRouteHandler_WorkspaceCreatePrompt_UsesWorkspaceIntentAndM
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
-	rr := postRouteRequest(t, handler, map[string]interface{}{
+	rr := postRouteRequest(t, handler, map[string]any{
 		"prompt": "create workspace called test2",
 	})
 	if rr.Code != http.StatusOK {

@@ -21,12 +21,12 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ID         string                 `json:"id,omitempty"`
-		ServerName string                 `json:"server_name"`
-		Alias      string                 `json:"alias,omitempty"`
-		Enabled    *bool                  `json:"enabled,omitempty"`
-		Scope      map[string]interface{} `json:"scope,omitempty"`
-		Config     map[string]interface{} `json:"config,omitempty"`
+		ID         string         `json:"id,omitempty"`
+		ServerName string         `json:"server_name"`
+		Alias      string         `json:"alias,omitempty"`
+		Enabled    *bool          `json:"enabled,omitempty"`
+		Scope      map[string]any `json:"scope,omitempty"`
+		Config     map[string]any `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -85,11 +85,11 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if created == nil {
 		created = &binding
 	}
-	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_created", map[string]interface{}{"binding": created})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_created", map[string]any{"binding": created})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "MCP binding created successfully",
 		"binding":   h.mcpBindingResponse(r.Context(), *created),
 		"workspace": workspaceID,
@@ -114,7 +114,7 @@ func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
 
 	bindings := workspace.GetMCPBindings()
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"bindings":  h.mcpBindingResponses(r.Context(), bindings),
 		"count":     len(bindings),
 		"workspace": workspaceID,
@@ -145,7 +145,7 @@ func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"binding":   h.mcpBindingResponse(r.Context(), *binding),
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -163,11 +163,11 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ServerName *string                `json:"server_name,omitempty"`
-		Alias      *string                `json:"alias,omitempty"`
-		Enabled    *bool                  `json:"enabled,omitempty"`
-		Scope      map[string]interface{} `json:"scope,omitempty"`
-		Config     map[string]interface{} `json:"config,omitempty"`
+		ServerName *string        `json:"server_name,omitempty"`
+		Alias      *string        `json:"alias,omitempty"`
+		Enabled    *bool          `json:"enabled,omitempty"`
+		Scope      map[string]any `json:"scope,omitempty"`
+		Config     map[string]any `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -219,10 +219,10 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if updated == nil {
 		updated = binding
 	}
-	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_updated", map[string]interface{}{"binding": updated})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_updated", map[string]any{"binding": updated})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "MCP binding updated successfully",
 		"binding":   h.mcpBindingResponse(r.Context(), *updated),
 		"workspace": workspaceID,
@@ -255,10 +255,10 @@ func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_deleted", map[string]interface{}{"binding_id": bindingID})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_deleted", map[string]any{"binding_id": bindingID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "MCP binding deleted successfully",
 		"binding_id": bindingID,
 		"workspace":  workspaceID,
@@ -283,7 +283,7 @@ func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request)
 
 	entries := workspace.ListAgentMCPAccess()
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"access":    entries,
 		"count":     len(entries),
 		"workspace": workspaceID,
@@ -314,7 +314,7 @@ func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"access":    entry,
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -381,10 +381,10 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 	if updated == nil {
 		updated = &entry
 	}
-	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_updated", map[string]interface{}{"access": updated})
+	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_updated", map[string]any{"access": updated})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Agent MCP access updated successfully",
 		"access":    updated,
 		"workspace": workspaceID,
@@ -417,10 +417,10 @@ func (h *HTTPHandler) DeleteAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
+	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_deleted", map[string]any{"agent_instance_id": agentInstanceID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":           "Agent MCP access deleted successfully",
 		"agent_instance_id": agentInstanceID,
 		"workspace":         workspaceID,
@@ -429,12 +429,12 @@ func (h *HTTPHandler) DeleteAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (h *HTTPHandler) publishWorkspaceMCPEvent(workspaceID, action string, data map[string]interface{}) {
+func (h *HTTPHandler) publishWorkspaceMCPEvent(workspaceID, action string, data map[string]any) {
 	if h == nil || h.eventBus == nil {
 		return
 	}
 
-	payload := map[string]interface{}{"action": action}
+	payload := map[string]any{"action": action}
 	for key, value := range data {
 		payload[key] = value
 	}

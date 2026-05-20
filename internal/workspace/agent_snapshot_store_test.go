@@ -20,7 +20,7 @@ func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 		ID:     "ws-1",
 		Name:   "Snapshot",
 		Status: StatusActive,
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 		Agents: []string{"Manager"},
@@ -73,7 +73,7 @@ func TestSnapshotAllWorkspaces_HealsExistingWorkspaces(t *testing.T) {
 		ID:     "ws-pre-existing",
 		Name:   "Legacy",
 		Status: StatusActive,
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 		Agents: []string{"Manager"},
@@ -113,7 +113,7 @@ func TestAgentSnapshotStore_SyncStoreWritesSnapshotToDisk(t *testing.T) {
 		Name:   "Disk",
 		Status: StatusActive,
 		Agents: []string{"Manager"},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 	}
@@ -141,7 +141,7 @@ func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 		ID:     "ws-imported",
 		Name:   "Imported",
 		Agents: []string{"Manager"},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 	}
@@ -174,7 +174,7 @@ func TestRestoreAllWorkspaceAgents_RestoresSnapshotsFromLoadedFileStore(t *testi
 		Name:       "Pollen",
 		FolderSlug: "pollen",
 		Agents:     []string{"Pollen Manager"},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Pollen Manager",
 		},
 		AgentInstances: []AgentInstance{
@@ -392,7 +392,7 @@ func TestReferencedAgentNames_Dedupes(t *testing.T) {
 			{Name: "Manager"},
 			{Name: " Other "},
 		},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 	}

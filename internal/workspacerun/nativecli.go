@@ -85,8 +85,8 @@ func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
 	}
 	e.addTraceEvents(run.ID, nativeCLITraceEvents(run.ID, result.Events)...)
 	if result.Output != "" {
-		e.addTraceEvents(run.ID, NewTraceEvent(run.ID, TraceMessage, TraceSource("native_cli"), TraceMessageText(result.Output), TraceData(map[string]interface{}{"backend": backend})))
-		e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactLog, ArtifactInline([]byte(result.Output)), ArtifactMetadata(map[string]interface{}{"backend": backend})))
+		e.addTraceEvents(run.ID, NewTraceEvent(run.ID, TraceMessage, TraceSource("native_cli"), TraceMessageText(result.Output), TraceData(map[string]any{"backend": backend})))
+		e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactLog, ArtifactInline([]byte(result.Output)), ArtifactMetadata(map[string]any{"backend": backend})))
 	}
 	if snapshot != nil {
 		if changes, cmpErr := e.diff.Compare(snapshot, workingDir); cmpErr == nil && len(changes) > 0 {
@@ -94,8 +94,8 @@ func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
 			for _, change := range changes {
 				files = append(files, change.Path)
 			}
-			e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactChangedFiles, ArtifactMetadata(map[string]interface{}{"files": files})))
-			e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactDiff, ArtifactInline(nativeCLIChangeSummary(changes)), ArtifactMetadata(map[string]interface{}{"format": "change_summary"})))
+			e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactChangedFiles, ArtifactMetadata(map[string]any{"files": files})))
+			e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactDiff, ArtifactInline(nativeCLIChangeSummary(changes)), ArtifactMetadata(map[string]any{"format": "change_summary"})))
 		}
 	}
 	if result.Usage.TotalTokens() > 0 || result.Usage.CostUSD > 0 {
@@ -169,7 +169,7 @@ func nativeCLITraceEvents(runID string, events []cliagent.CLIEvent) []TraceEvent
 		case "error":
 			kind = TraceError
 		}
-		data := map[string]interface{}{
+		data := map[string]any{
 			"cli_type":    event.Type,
 			"step_number": event.StepNumber,
 		}

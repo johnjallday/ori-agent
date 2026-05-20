@@ -11,14 +11,14 @@ func newCompletedTaskFixture() *Task {
 	return &Task{
 		ID:               "t1",
 		Status:           TaskStatusCompleted,
-		Description:      "do the thing",                   // authored — must survive reset
-		Details:          "extra notes",                    // authored — must survive reset
-		Result:           "did the thing",                  // runtime — must clear
-		ResultType:       TaskResultTypeMarkdown,           // runtime — must clear
-		StructuredResult: map[string]interface{}{"k": "v"}, // runtime — must clear
-		Error:            "n/a",                            // runtime — must clear
-		StartedAt:        &earlier,                         // runtime — must clear
-		CompletedAt:      &now,                             // runtime — must clear
+		Description:      "do the thing",           // authored — must survive reset
+		Details:          "extra notes",            // authored — must survive reset
+		Result:           "did the thing",          // runtime — must clear
+		ResultType:       TaskResultTypeMarkdown,   // runtime — must clear
+		StructuredResult: map[string]any{"k": "v"}, // runtime — must clear
+		Error:            "n/a",                    // runtime — must clear
+		StartedAt:        &earlier,                 // runtime — must clear
+		CompletedAt:      &now,                     // runtime — must clear
 		Progress: &TaskProgress{
 			Percentage:  50,
 			CurrentStep: "halfway",
@@ -35,9 +35,9 @@ func newCompletedTaskFixture() *Task {
 			{TaskID: "t1", Status: "success", ExecutedAt: earlier},
 		},
 		ExecutionCount: 5,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"user_authored":                "keep me",
-			"human_loop":                   map[string]interface{}{"state": "blocked"},
+			"human_loop":                   map[string]any{"state": "blocked"},
 			"structured_output":            "{}",
 			"execution_blocked_step_index": 1,
 			"execution_blocked_step_title": "halt",

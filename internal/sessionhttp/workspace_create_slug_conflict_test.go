@@ -39,12 +39,12 @@ func TestCreateWorkspaceReturnsSlugConflictWithSuggestion(t *testing.T) {
 		t.Fatalf("expected 409 conflict, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	conflict, ok := resp["conflict"].(map[string]interface{})
+	conflict, ok := resp["conflict"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected conflict payload in response")
 	}
@@ -99,12 +99,12 @@ func TestCreateWorkspaceAcceptsProvidedSuggestedSlug(t *testing.T) {
 		t.Fatalf("expected 201 created, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	folder, ok := resp["folder"].(map[string]interface{})
+	folder, ok := resp["folder"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected folder in response")
 	}

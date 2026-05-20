@@ -198,7 +198,7 @@ func (z *Zone) UnmarshalJSON(data []byte) error {
 	z.DetectionRules = make([]DetectionRule, 0)
 	for _, rawRule := range aux.DetectionRules {
 		// Try to determine rule type by checking for SSID field
-		var temp map[string]interface{}
+		var temp map[string]any
 		if err := json.Unmarshal(rawRule, &temp); err != nil {
 			continue
 		}

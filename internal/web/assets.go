@@ -66,7 +66,7 @@ func (cr *ComponentRenderer) LoadAllComponents() error {
 }
 
 // RenderComponent renders a component with the given data
-func (cr *ComponentRenderer) RenderComponent(name string, data interface{}) (string, error) {
+func (cr *ComponentRenderer) RenderComponent(name string, data any) (string, error) {
 	tmpl, exists := cr.templates[name]
 	if !exists {
 		// Try to load the component if it doesn't exist

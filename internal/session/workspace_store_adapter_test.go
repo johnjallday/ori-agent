@@ -24,11 +24,11 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 				ServerName: "filesystem",
 				Alias:      "repo_fs",
 				Enabled:    true,
-				Scope: map[string]interface{}{
+				Scope: map[string]any{
 					"roots": []string{"/tmp/repo"},
 				},
-				Config: map[string]interface{}{
-					"env": map[string]interface{}{
+				Config: map[string]any{
+					"env": map[string]any{
 						"ORI_SCOPE": "workspace",
 					},
 				},
@@ -53,7 +53,7 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 		t.Fatalf("expected agent MCP access JSON to be serialized")
 	}
 
-	var rawBindings []map[string]interface{}
+	var rawBindings []map[string]any
 	if err := json.Unmarshal(sessionWS.MCPBindingsJSON, &rawBindings); err != nil {
 		t.Fatalf("failed to decode serialized MCP bindings: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
 				SkillName: "workspace-planning",
 				Enabled:   true,
 				Trusted:   true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"profile_type":           "workspace_planning",
 					"default_execution_mode": "step_through",
 				},

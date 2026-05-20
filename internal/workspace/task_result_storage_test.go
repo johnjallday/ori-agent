@@ -12,8 +12,8 @@ func TestTaskResultToCSV_UsesStructuredOutput(t *testing.T) {
 	task := &Task{
 		ID:          "task-1",
 		Description: "Check pollen",
-		Context: map[string]interface{}{
-			"structured_output": map[string]interface{}{
+		Context: map[string]any{
+			"structured_output": map[string]any{
 				"location": "NYC",
 				"value":    8,
 				"unit":     "index",

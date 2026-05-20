@@ -119,7 +119,7 @@ func TestHTTPHandler_AppendResultToCSV_OneShotCustomPath(t *testing.T) {
 		t.Fatalf("save workspace: %v", err)
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"csv":         "name,score\nalpha,9",
 		"use_storage": false,
 		"file_path":   targetPath,

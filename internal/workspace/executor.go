@@ -298,7 +298,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 	// Publish task started event
 	if te.eventBus != nil {
-		event := NewTaskEvent(EventTaskStarted, ws.ID, task.ID, task.To, map[string]interface{}{
+		event := NewTaskEvent(EventTaskStarted, ws.ID, task.ID, task.To, map[string]any{
 			"description": task.Description,
 			"priority":    task.Priority,
 		})
@@ -306,9 +306,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	// Execute asynchronously
-	te.wg.Add(1)
-	go func() {
-		defer te.wg.Done()
+	te.wg.Go(func() {
 		defer cancel()
 		defer func() {
 			te.mu.Lock()
@@ -393,14 +391,14 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		if err != nil {
 			if te.eventBus != nil {
 				if blockedErr != nil {
-					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, workspaceID, task.ID, task.To, map[string]interface{}{
+					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, workspaceID, task.ID, task.To, map[string]any{
 						"description": task.Description,
 						"human_loop":  snapshot.Context["human_loop"],
 						"status":      snapshot.Status,
 						"error":       blockedErr.Error(),
 					}))
 				} else {
-					te.eventBus.Publish(NewTaskEvent(EventTaskFailed, workspaceID, task.ID, task.To, map[string]interface{}{
+					te.eventBus.Publish(NewTaskEvent(EventTaskFailed, workspaceID, task.ID, task.To, map[string]any{
 						"description": task.Description,
 						"error":       err.Error(),
 					}))
@@ -416,7 +414,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			}
 
 			if te.eventBus != nil {
-				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]interface{}{
+				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]any{
 					"description": task.Description,
 					"result":      result,
 				}))
@@ -425,12 +423,12 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		// Publish workspace updated event
 		if te.eventBus != nil {
-			te.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, workspaceID, "task-executor", map[string]interface{}{
+			te.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, workspaceID, "task-executor", map[string]any{
 				"task_id": task.ID,
 				"status":  snapshot.Status,
 			}))
 		}
-	}()
+	})
 }
 
 func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
@@ -438,17 +436,17 @@ func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
 		return
 	}
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 
 	blockID := fmt.Sprintf("blk_%d", time.Now().UnixNano())
-	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+	if existing, ok := task.Context["human_loop"].(map[string]any); ok {
 		if prior, ok := existing["block_id"].(string); ok && strings.TrimSpace(prior) != "" {
 			blockID = strings.TrimSpace(prior)
 		}
 	}
 
-	humanLoop := map[string]interface{}{
+	humanLoop := map[string]any{
 		"state":       "waiting_for_choice",
 		"block_id":    blockID,
 		"reason_code": "blocked",
@@ -555,7 +553,7 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 	switch assignedStore.Format {
 	case "json":
 		// Wrap plain text result in JSON structure
-		jsonData := map[string]interface{}{
+		jsonData := map[string]any{
 			"task_id":     task.ID,
 			"agent":       agentNodeID,
 			"result":      result,
@@ -681,7 +679,7 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			dataToStore = TaskResultToCSV(task, result, timestamp, "")
 		}
 	} else if format == "json" {
-		jsonData := map[string]interface{}{
+		jsonData := map[string]any{
 			"task_id":     task.ID,
 			"result":      result,
 			"timestamp":   timestamp,

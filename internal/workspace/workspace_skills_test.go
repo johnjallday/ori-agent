@@ -214,7 +214,7 @@ func TestSkillBinding_CaseInsensitiveLookup(t *testing.T) {
 
 func TestSkillBinding_ConfigCloned(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
-	cfg := map[string]interface{}{"key": "value"}
+	cfg := map[string]any{"key": "value"}
 	_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{
 		ID:        "sb-1",
 		SkillName: "test",

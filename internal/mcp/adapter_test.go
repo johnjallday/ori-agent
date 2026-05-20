@@ -25,7 +25,7 @@ func TestNormalizeFilesystemArguments_RelativePathUsesAllowedRoot(t *testing.T) 
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp/allowed-root"},
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"path": "Downloads",
 	}
 
@@ -43,7 +43,7 @@ func TestNormalizeFilesystemArguments_AbsolutePathUnchanged(t *testing.T) {
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp/allowed-root"},
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"path": "/Users/tester/Downloads",
 	}
 
@@ -67,7 +67,7 @@ func TestNormalizeFilesystemArguments_RootAliasFallsBackToAllowedRoot(t *testing
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", baseRoot},
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"path": "Documents",
 	}
 
@@ -90,7 +90,7 @@ func TestNormalizeFilesystemArguments_RedundantRootPrefixIsCollapsed(t *testing.
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", baseRoot},
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"path": filepath.Join("Documents", "DNM"),
 	}
 
@@ -108,7 +108,7 @@ func TestNormalizeFilesystemArguments_NonFilesystemToolUnchanged(t *testing.T) {
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp/allowed-root"},
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"path": "Downloads",
 	}
 
@@ -121,7 +121,7 @@ func TestNormalizeFilesystemArguments_NonFilesystemToolUnchanged(t *testing.T) {
 
 func TestAnnotateGetFileInfoResult_AddsPathAndName(t *testing.T) {
 	result := "size: 10\nmodified: today"
-	args := map[string]interface{}{
+	args := map[string]any{
 		"path": "/Users/tester/Downloads/example.txt",
 	}
 
@@ -136,7 +136,7 @@ func TestAnnotateGetFileInfoResult_AddsPathAndName(t *testing.T) {
 
 func TestAnnotateGetFileInfoResult_DoesNotDuplicateExistingNameOrPath(t *testing.T) {
 	result := "path: /Users/tester/Downloads/example.txt\nname: example.txt\nsize: 10"
-	args := map[string]interface{}{
+	args := map[string]any{
 		"path": "/Users/tester/Downloads/example.txt",
 	}
 

@@ -169,7 +169,7 @@ func (m *DirectorySyncManager) handleWatchEvent(evt filewatcher.WatchEvent) {
 		Type:        EventWorkspaceUpdated,
 		WorkspaceID: target.WorkspaceID,
 		Source:      "directory-sync",
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"action":         "directory_synced",
 			"directory_id":   target.DirectoryID,
 			"directory_name": target.Name,

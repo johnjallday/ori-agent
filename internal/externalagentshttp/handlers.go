@@ -35,7 +35,7 @@ func (h *Handler) GetAll(w http.ResponseWriter, r *http.Request) {
 	claudeEnabled := h.configManager.GetExternalAgentsClaudeEnabled()
 	codexEnabled := h.configManager.GetExternalAgentsCodexEnabled()
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"claude_enabled": claudeEnabled,
 		"codex_enabled":  codexEnabled,
 	}
@@ -60,7 +60,7 @@ func (h *Handler) GetClaude(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.configManager.GetExternalAgentsClaudeEnabled() {
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"enabled": false,
 			"message": "Claude Code agents are disabled. Enable in Settings.",
 		})
@@ -80,7 +80,7 @@ func (h *Handler) GetCodex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.configManager.GetExternalAgentsCodexEnabled() {
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"enabled": false,
 			"message": "Codex CLI agents are disabled. Enable in Settings.",
 		})
@@ -103,7 +103,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	codexEnabled := h.configManager.GetExternalAgentsCodexEnabled()
 
 	if !claudeEnabled && !codexEnabled {
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"status":  "skipped",
 			"message": "Both Claude and Codex agents are disabled.",
 		})

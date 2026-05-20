@@ -28,12 +28,12 @@ func shouldUseStructuredExecution(task *workspace.Task, taskForExecution workspa
 	return len(inferred) > 1
 }
 
-func buildStructuredExecutionExtra(task *workspace.Task) map[string]interface{} {
+func buildStructuredExecutionExtra(task *workspace.Task) map[string]any {
 	if task == nil || task.Context == nil {
 		return nil
 	}
 
-	extra := map[string]interface{}{}
+	extra := map[string]any{}
 	if value, ok := task.Context["execution_blocked_step_index"]; ok {
 		extra["blocked_step_index"] = value
 	}
@@ -65,7 +65,7 @@ func (th *TaskHandler) executeTaskWithStructuredSteps(
 	}
 
 	if persistedTask.Context == nil {
-		persistedTask.Context = map[string]interface{}{}
+		persistedTask.Context = map[string]any{}
 	}
 	delete(persistedTask.Context, "execution_blocked_step_index")
 	delete(persistedTask.Context, "execution_blocked_step_title")
@@ -214,7 +214,7 @@ func (th *TaskHandler) publishStructuredTaskProgress(ws *workspace.Workspace, ta
 		return
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"description":           task.Description,
 		"execution_mode":        task.ExecutionMode,
 		"waiting_for_next_step": waiting,
@@ -233,10 +233,10 @@ func buildStructuredExecutionStepTask(baseTask workspace.Task, persistedTask wor
 	stepTask := baseTask
 	stepTask.Context = cloneTaskContext(baseTask.Context)
 	if stepTask.Context == nil {
-		stepTask.Context = map[string]interface{}{}
+		stepTask.Context = map[string]any{}
 	}
 
-	stepTask.Context["execution_step"] = map[string]interface{}{
+	stepTask.Context["execution_step"] = map[string]any{
 		"index":       step.Index,
 		"title":       step.Title,
 		"detail":      step.Detail,

@@ -283,7 +283,7 @@ func (h *AutoTaskHandler) HandleOutputContractTelemetry(w http.ResponseWriter, r
 		return
 	}
 	if h.eventBus != nil {
-		h.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, req.WorkspaceID, "task.output_contract", map[string]interface{}{
+		h.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, req.WorkspaceID, "task.output_contract", map[string]any{
 			"task_id":           req.TaskID,
 			"action":            req.Action,
 			"source":            strings.TrimSpace(req.Source),
@@ -294,7 +294,7 @@ func (h *AutoTaskHandler) HandleOutputContractTelemetry(w http.ResponseWriter, r
 			"error_count":       req.ErrorCount,
 		}))
 	}
-	orihttp.WriteJSON(w, map[string]interface{}{"success": true})
+	orihttp.WriteJSON(w, map[string]any{"success": true})
 }
 
 func normalizeOutputContractTelemetryAction(action string) string {

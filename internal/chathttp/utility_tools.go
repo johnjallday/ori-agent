@@ -292,10 +292,10 @@ func (r *UtilityToolRegistry) registerTimeTool(adapter TimeAdapter) {
 		definition: toolapi.ToolDefinition{
 			Name:        "time",
 			Description: "Get the current real time for a timezone (IANA format, e.g. Asia/Tokyo).",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"timezone": map[string]interface{}{
+				"properties": map[string]any{
+					"timezone": map[string]any{
 						"type":        "string",
 						"description": "IANA timezone name like Asia/Tokyo. Defaults to UTC when omitted.",
 					},
@@ -334,14 +334,14 @@ func (r *UtilityToolRegistry) registerWeatherTool(adapter WeatherAdapter) {
 		definition: toolapi.ToolDefinition{
 			Name:        "weather",
 			Description: "Get current weather for a city or location.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{
+				"properties": map[string]any{
+					"location": map[string]any{
 						"type":        "string",
 						"description": "City or place name (for example: San Francisco, CA).",
 					},
-					"units": map[string]interface{}{
+					"units": map[string]any{
 						"type":        "string",
 						"description": "Temperature unit: celsius or fahrenheit.",
 						"enum":        []string{"celsius", "fahrenheit"},
@@ -383,14 +383,14 @@ func (r *UtilityToolRegistry) registerAirQualityTool(adapter AirQualityAdapter) 
 		definition: toolapi.ToolDefinition{
 			Name:        "air_quality",
 			Description: "Get current air quality (AQI, PM2.5, PM10) for a city or location.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{
+				"properties": map[string]any{
+					"location": map[string]any{
 						"type":        "string",
 						"description": "City or place name (for example: Seoul, KR).",
 					},
-					"standard": map[string]interface{}{
+					"standard": map[string]any{
 						"type":        "string",
 						"description": "AQI standard: us or eu. Defaults to us.",
 						"enum":        []string{"us", "eu"},
@@ -432,14 +432,14 @@ func (r *UtilityToolRegistry) registerWebSearchTool(adapter WebSearchAdapter) {
 		definition: toolapi.ToolDefinition{
 			Name:        "web_search",
 			Description: "Search the web for recent and relevant information.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"query": map[string]interface{}{
+				"properties": map[string]any{
+					"query": map[string]any{
 						"type":        "string",
 						"description": "Search query text.",
 					},
-					"recency": map[string]interface{}{
+					"recency": map[string]any{
 						"type":        "string",
 						"description": "Optional recency hint like day, week, or month.",
 					},
@@ -480,10 +480,10 @@ func (r *UtilityToolRegistry) registerWebFetchTool(adapter WebFetchAdapter) {
 		definition: toolapi.ToolDefinition{
 			Name:        "web_fetch",
 			Description: "Fetch content from a URL and return extracted text.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"url": map[string]interface{}{
+				"properties": map[string]any{
+					"url": map[string]any{
 						"type":        "string",
 						"description": "URL to fetch.",
 					},
@@ -524,23 +524,23 @@ func (r *UtilityToolRegistry) registerBrowserTool(adapter BrowserAdapter) {
 		definition: toolapi.ToolDefinition{
 			Name:        "browser",
 			Description: "Run basic browser automation actions (open, click, type, extract).",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"action": map[string]interface{}{
+				"properties": map[string]any{
+					"action": map[string]any{
 						"type":        "string",
 						"description": "Action name: open_url, click, type, or extract_text.",
 						"enum":        []string{"open_url", "click", "type", "extract_text"},
 					},
-					"url": map[string]interface{}{
+					"url": map[string]any{
 						"type":        "string",
 						"description": "URL for open_url action.",
 					},
-					"selector": map[string]interface{}{
+					"selector": map[string]any{
 						"type":        "string",
 						"description": "CSS selector for click/type/extract_text actions.",
 					},
-					"text": map[string]interface{}{
+					"text": map[string]any{
 						"type":        "string",
 						"description": "Text value for type action.",
 					},

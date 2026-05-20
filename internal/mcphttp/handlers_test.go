@@ -134,7 +134,7 @@ func TestGetServerToolsHandler_AttemptsLazyStartAndReturnsStartError(t *testing.
 		Server     string           `json:"server"`
 		Status     mcp.ServerStatus `json:"status"`
 		StartError string           `json:"start_error"`
-		Tools      []interface{}    `json:"tools"`
+		Tools      []any            `json:"tools"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to parse response: %v body=%s", err, rr.Body.String())

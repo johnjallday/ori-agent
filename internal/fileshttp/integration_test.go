@@ -53,12 +53,12 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	}
 
 	// Step 2: Parse upload response to get file ID
-	var uploadResp map[string]interface{}
+	var uploadResp map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &uploadResp); err != nil {
 		t.Fatalf("failed to parse upload response: %v", err)
 	}
 
-	fileData := uploadResp["file"].(map[string]interface{})
+	fileData := uploadResp["file"].(map[string]any)
 	fileID := fileData["id"].(string)
 
 	// Step 3: List files and verify the file is present
@@ -70,7 +70,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 		t.Fatalf("list failed with status %d", rr.Code)
 	}
 
-	var listResp map[string]interface{}
+	var listResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))
@@ -87,7 +87,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 		t.Fatalf("get file failed with status %d", rr.Code)
 	}
 
-	var fileResp map[string]interface{}
+	var fileResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &fileResp)
 
 	if fileResp["name"] != "document.pdf" {
@@ -253,9 +253,9 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 		t.Fatalf("upload failed with status %d", rr.Code)
 	}
 
-	var uploadResp map[string]interface{}
+	var uploadResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &uploadResp)
-	fileData := uploadResp["file"].(map[string]interface{})
+	fileData := uploadResp["file"].(map[string]any)
 	fileID := fileData["id"].(string)
 
 	// Step 2: Simulate agent reading the file using ReadFile method
@@ -315,7 +315,7 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 		t.Fatalf("list failed with status %d", rr.Code)
 	}
 
-	var listResp map[string]interface{}
+	var listResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))
@@ -446,9 +446,9 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 		t.Fatalf("link failed with status %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var linkResp map[string]interface{}
+	var linkResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &linkResp)
-	fileData := linkResp["file"].(map[string]interface{})
+	fileData := linkResp["file"].(map[string]any)
 	fileID := fileData["id"].(string)
 
 	// Step 3: Verify link is valid
@@ -460,7 +460,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 		t.Fatalf("validate failed with status %d", rr.Code)
 	}
 
-	var validateResp map[string]interface{}
+	var validateResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &validateResp)
 
 	brokenCount := int(validateResp["count"].(float64))
@@ -588,7 +588,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 	}
 
 	// Verify error message (API returns {"code": "...", "message": "..."})
-	var errResp map[string]interface{}
+	var errResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &errResp)
 
 	errorMsg, ok := errResp["message"].(string)
@@ -646,9 +646,9 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 			continue
 		}
 
-		var resp map[string]interface{}
+		var resp map[string]any
 		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-		fileData := resp["file"].(map[string]interface{})
+		fileData := resp["file"].(map[string]any)
 
 		// Verify MIME type detection (relaxed check - just ensure it's set)
 		mimeType := fileData["mime_type"].(string)
@@ -662,7 +662,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ListFiles(rr, req)
 
-	var listResp map[string]interface{}
+	var listResp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))

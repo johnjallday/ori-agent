@@ -16,8 +16,8 @@ func newHomeWorkspaceResolverTestWorkspace(id, name, description string, agents 
 		Description: description,
 		Agents:      agents,
 		Status:      workspace.StatusActive,
-		SharedData: map[string]interface{}{
-			"workspace_bootstrap": map[string]interface{}{
+		SharedData: map[string]any{
+			"workspace_bootstrap": map[string]any{
 				"goal":         description,
 				"systems":      "",
 				"capabilities": "",

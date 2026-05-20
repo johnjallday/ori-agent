@@ -434,7 +434,7 @@ func workspaceSharedString(ws *workspace.Workspace, key string) string {
 	if !ok {
 		return ""
 	}
-	bootstrap, ok := rawBootstrap.(map[string]interface{})
+	bootstrap, ok := rawBootstrap.(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -445,13 +445,13 @@ func workspaceSharedString(ws *workspace.Workspace, key string) string {
 	return strings.TrimSpace(toWorkspaceResolverString(raw))
 }
 
-func toWorkspaceResolverString(value interface{}) string {
+func toWorkspaceResolverString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
 	case []string:
 		return strings.Join(typed, " ")
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(typed))
 		for _, item := range typed {
 			if text := toWorkspaceResolverString(item); strings.TrimSpace(text) != "" {

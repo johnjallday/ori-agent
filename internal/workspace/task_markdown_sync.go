@@ -161,8 +161,8 @@ func ImportTaskMarkdownFromStore(store Store, ws *Workspace) (*TaskMarkdownImpor
 }
 
 // TaskMarkdownStatusForSettings reports filesystem status for a workspace's Markdown task map.
-func TaskMarkdownStatusForSettings(store Store, workspaceID string, settings workspacesettings.TaskMarkdownSettings) map[string]interface{} {
-	status := map[string]interface{}{
+func TaskMarkdownStatusForSettings(store Store, workspaceID string, settings workspacesettings.TaskMarkdownSettings) map[string]any {
+	status := map[string]any{
 		"enabled":       settings.Enabled,
 		"path":          settings.Path,
 		"status":        "disabled",
@@ -467,7 +467,7 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 			Description: item.Description,
 			To:          item.To,
 			Status:      TaskStatusPending,
-			Context:     map[string]interface{}{},
+			Context:     map[string]any{},
 		}
 		if item.Checked {
 			// Markdown-import: a [x] line creates a task that's already Completed.
@@ -510,7 +510,7 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 		// against the live slice element (so concurrent mutations are observed).
 		applyItem := func(t *Task) {
 			if t.Context == nil {
-				t.Context = map[string]interface{}{}
+				t.Context = map[string]any{}
 			}
 			if item.Description != "" && item.Description != t.Description {
 				t.Description = item.Description

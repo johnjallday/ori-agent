@@ -146,7 +146,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentCreated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment": createdAttachment,
 			},
 		})
@@ -154,7 +154,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "Attachment created successfully",
 		"attachment": createdAttachment,
 		"workspace":  workspaceID,
@@ -276,14 +276,14 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment": updatedAttachment,
 			},
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "Attachment updated successfully",
 		"attachment": updatedAttachment,
 		"workspace":  workspaceID,
@@ -375,14 +375,14 @@ func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Reques
 			Type:        EventAttachmentUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment": hydratedAttachment,
 			},
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "Attachment file relinked successfully",
 		"attachment": hydratedAttachment,
 		"workspace":  workspaceID,
@@ -428,14 +428,14 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentDeleted,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment_id": attachmentID,
 			},
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Attachment deleted successfully",
 		"attachment_id": attachmentID,
 		"workspace":     workspaceID,
@@ -493,7 +493,7 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment":    attachment,
 				"action":        "moved_to_trash",
 				"attachment_id": attachmentID,
@@ -504,7 +504,7 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Attachment moved to trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Attachment moved to trash",
 		"attachment_id": attachmentID,
 		"workspace":     workspaceID,
@@ -566,7 +566,7 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment":    attachment,
 				"action":        "restored_from_trash",
 				"attachment_id": attachmentID,
@@ -577,7 +577,7 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Attachment restored from trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Attachment restored from trash",
 		"attachment_id": attachmentID,
 		"attachment":    attachment,
@@ -618,7 +618,7 @@ func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"attachments": trashedAttachments,
 		"count":       len(trashedAttachments),
 		"workspace":   workspaceID,
@@ -678,7 +678,7 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentDeleted,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment_id": attachmentID,
 				"action":        "permanently_deleted",
 			},
@@ -688,7 +688,7 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Attachment permanently deleted from trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Attachment permanently deleted",
 		"attachment_id": attachmentID,
 		"workspace":     workspaceID,
@@ -766,7 +766,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 			Type:        EventWorkspaceUpdated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"action":        "bulk_moved_to_trash",
 				"success_count": successCount,
 				"failed_count":  failedCount,
@@ -781,7 +781,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Bulk move to trash completed",
 		"success_count": successCount,
 		"failed_count":  failedCount,

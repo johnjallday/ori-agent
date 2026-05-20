@@ -54,11 +54,11 @@ type EffectiveBehavior struct {
 }
 
 type ManagedSkill struct {
-	SkillName string                 `json:"skill_name"`
-	Source    string                 `json:"source"`
-	Active    bool                   `json:"active"`
-	Reason    string                 `json:"reason,omitempty"`
-	Config    map[string]interface{} `json:"config,omitempty"`
+	SkillName string         `json:"skill_name"`
+	Source    string         `json:"source"`
+	Active    bool           `json:"active"`
+	Reason    string         `json:"reason,omitempty"`
+	Config    map[string]any `json:"config,omitempty"`
 }
 
 func DefaultSettings() Settings {
@@ -170,7 +170,7 @@ func Normalize(settings Settings) Settings {
 	return decode(toMap(settings))
 }
 
-func Extract(sharedData map[string]interface{}) Settings {
+func Extract(sharedData map[string]any) Settings {
 	if len(sharedData) == 0 {
 		return DefaultSettings()
 	}
@@ -181,7 +181,7 @@ func Extract(sharedData map[string]interface{}) Settings {
 	return decode(raw)
 }
 
-func ExtractRaw(sharedData map[string]interface{}) map[string]interface{} {
+func ExtractRaw(sharedData map[string]any) map[string]any {
 	if len(sharedData) == 0 {
 		return toMap(DefaultSettings())
 	}
@@ -195,10 +195,10 @@ func ExtractRaw(sharedData map[string]interface{}) map[string]interface{} {
 	return toMap(decode(raw))
 }
 
-func Store(sharedData map[string]interface{}, settings Settings) map[string]interface{} {
+func Store(sharedData map[string]any, settings Settings) map[string]any {
 	out := cloneMap(sharedData)
 	if out == nil {
-		out = make(map[string]interface{})
+		out = make(map[string]any)
 	}
 	settings = Normalize(settings)
 	if settings.UpdatedAt.IsZero() {
@@ -208,7 +208,7 @@ func Store(sharedData map[string]interface{}, settings Settings) map[string]inte
 	return out
 }
 
-func ApplyPatch(sharedData map[string]interface{}, patch map[string]interface{}) (map[string]interface{}, Settings) {
+func ApplyPatch(sharedData map[string]any, patch map[string]any) (map[string]any, Settings) {
 	base := ExtractRaw(sharedData)
 	rawProfileValue := strings.TrimSpace(stringValue(patch["profile"]))
 	profileValue := ""
@@ -277,9 +277,9 @@ func boolLabel(value bool) string {
 	return "disabled"
 }
 
-func ToPlanningSkillConfig(settings Settings) map[string]interface{} {
+func ToPlanningSkillConfig(settings Settings) map[string]any {
 	settings = Normalize(settings)
-	return map[string]interface{}{
+	return map[string]any{
 		"profile_type":           "workspace_planning",
 		"mode":                   settings.Planning.Mode,
 		"write_prd":              settings.Planning.WritePRD,
@@ -292,7 +292,7 @@ func ToPlanningSkillConfig(settings Settings) map[string]interface{} {
 	}
 }
 
-func decode(raw interface{}) Settings {
+func decode(raw any) Settings {
 	rawMap := mapValue(raw)
 	profile := inferProfile(rawMap)
 	preset := strings.TrimSpace(stringValue(rawMap["preset"]))
@@ -379,32 +379,32 @@ func decode(raw interface{}) Settings {
 	return decoded
 }
 
-func toMap(value interface{}) map[string]interface{} {
+func toMap(value any) map[string]any {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 	if out == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 	return out
 }
 
-func cloneMap(value map[string]interface{}) map[string]interface{} {
+func cloneMap(value map[string]any) map[string]any {
 	if value == nil {
 		return nil
 	}
 	return toMap(value)
 }
 
-func mergeMaps(base map[string]interface{}, patch map[string]interface{}) map[string]interface{} {
+func mergeMaps(base map[string]any, patch map[string]any) map[string]any {
 	merged := cloneMap(base)
 	if merged == nil {
-		merged = make(map[string]interface{})
+		merged = make(map[string]any)
 	}
 	for key, value := range patch {
 		if value == nil {
@@ -421,12 +421,12 @@ func mergeMaps(base map[string]interface{}, patch map[string]interface{}) map[st
 	return merged
 }
 
-func mapValue(value interface{}) map[string]interface{} {
+func mapValue(value any) map[string]any {
 	if value == nil {
 		return nil
 	}
 	switch typed := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return cloneMap(typed)
 	default:
 		mapped := toMap(typed)
@@ -437,7 +437,7 @@ func mapValue(value interface{}) map[string]interface{} {
 	}
 }
 
-func stringValue(value interface{}) string {
+func stringValue(value any) string {
 	if value == nil {
 		return ""
 	}
@@ -449,7 +449,7 @@ func stringValue(value interface{}) string {
 	}
 }
 
-func intValue(value interface{}) int {
+func intValue(value any) int {
 	switch typed := value.(type) {
 	case int:
 		return typed
@@ -466,7 +466,7 @@ func intValue(value interface{}) int {
 	}
 }
 
-func boolValue(value interface{}) (bool, bool) {
+func boolValue(value any) (bool, bool) {
 	switch typed := value.(type) {
 	case bool:
 		return typed, true
@@ -481,7 +481,7 @@ func boolValue(value interface{}) (bool, bool) {
 	return false, false
 }
 
-func timeValue(value interface{}) time.Time {
+func timeValue(value any) time.Time {
 	switch typed := value.(type) {
 	case time.Time:
 		return typed
@@ -538,7 +538,7 @@ func defaultPresetForProfile(profile string) string {
 	}
 }
 
-func inferProfile(raw map[string]interface{}) string {
+func inferProfile(raw map[string]any) string {
 	if value := strings.TrimSpace(stringValue(raw["profile"])); value != "" {
 		return normalizeProfile(value)
 	}

@@ -90,9 +90,9 @@ func (h *HTTPHandler) resolveEnableWorkspaceMCP(w http.ResponseWriter, workspace
 	}
 
 	if created {
-		h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_created", map[string]interface{}{"binding": binding})
+		h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_created", map[string]any{"binding": binding})
 	} else {
-		h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_updated", map[string]interface{}{"binding": binding})
+		h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_updated", map[string]any{"binding": binding})
 	}
 
 	orihttp.WriteJSON(w, map[string]any{

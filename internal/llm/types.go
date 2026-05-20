@@ -88,7 +88,7 @@ type Tool struct {
 	Description string
 
 	// Parameters is the JSON schema for the tool's parameters
-	Parameters map[string]interface{}
+	Parameters map[string]any
 }
 
 // ToolCall represents a request from the model to call a tool

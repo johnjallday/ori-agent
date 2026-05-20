@@ -135,7 +135,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 
 		case event := <-eventChan:
 			// Send event to client
-			eventData := map[string]interface{}{
+			eventData := map[string]any{
 				"type":         event.Type,
 				"workspace_id": event.WorkspaceID,
 				"timestamp":    event.Timestamp,
@@ -241,7 +241,7 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 		return
 	}
 
-	statusData := map[string]interface{}{
+	statusData := map[string]any{
 		"workspace_id": ws.ID,
 		"status":       ws.Status,
 		"updated_at":   ws.UpdatedAt,
@@ -344,7 +344,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 
 		case event := <-eventChan:
 			// Send event to client
-			eventData := map[string]interface{}{
+			eventData := map[string]any{
 				"type":         event.Type,
 				"workspace_id": event.WorkspaceID,
 				"timestamp":    event.Timestamp,
@@ -401,7 +401,7 @@ func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher h
 	progress := ws.GetWorkspaceProgress()
 	agentStats := ws.GetAgentStats()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"workspace_id":       workspaceID,
 		"workspace_progress": progress,
 		"agent_stats":        agentStats,
@@ -429,7 +429,7 @@ func (sh *StreamingHandler) sendWorkspaceProgressUpdate(w http.ResponseWriter, f
 	progress := ws.GetWorkspaceProgress()
 	agentStats := ws.GetAgentStats()
 
-	eventData := map[string]interface{}{
+	eventData := map[string]any{
 		"type":               "workspace.progress",
 		"workspace_id":       workspaceID,
 		"timestamp":          time.Now(),

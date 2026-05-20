@@ -136,7 +136,7 @@ func formatData(data string, format string) ([]byte, error) {
 			return nil, err
 		}
 		// Pretty-print JSON with 2-space indentation
-		var obj interface{}
+		var obj any
 		if err := json.Unmarshal([]byte(data), &obj); err != nil {
 			return nil, fmt.Errorf("failed to parse JSON: %w", err)
 		}

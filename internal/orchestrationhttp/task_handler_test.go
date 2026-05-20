@@ -829,7 +829,7 @@ func TestHandleCompleteTask_ForceCompletesParentWithIncompleteSubtasks(t *testin
 	if savedParent.Status != workspace.TaskStatusCompleted {
 		t.Fatalf("expected parent to be completed, got %q", savedParent.Status)
 	}
-	record, ok := savedParent.Context["manual_completion"].(map[string]interface{})
+	record, ok := savedParent.Context["manual_completion"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected manual completion record, got %T", savedParent.Context["manual_completion"])
 	}
@@ -1114,22 +1114,22 @@ func TestAppendCSVContractReviewSmoke_CreateInvalidApprove(t *testing.T) {
 		communicator:   agentcomm.NewCommunicator(store),
 	}
 
-	createBody := map[string]interface{}{
+	createBody := map[string]any{
 		"workspace_id": ws.ID,
 		"description":  "Track pollen daily",
 		"to":           "Ori",
-		"result_storage": map[string]interface{}{
+		"result_storage": map[string]any{
 			"enabled":    true,
 			"file_path":  outputPath,
 			"format":     "csv",
 			"write_mode": "append",
 		},
-		"output_contract": map[string]interface{}{
+		"output_contract": map[string]any{
 			"source": "manual",
-			"columns": []interface{}{
-				map[string]interface{}{"name": "date", "type": "date", "required": true},
-				map[string]interface{}{"name": "location", "type": "string", "required": true},
-				map[string]interface{}{"name": "pollen_count", "type": "number", "required": true},
+			"columns": []any{
+				map[string]any{"name": "date", "type": "date", "required": true},
+				map[string]any{"name": "location", "type": "string", "required": true},
+				map[string]any{"name": "pollen_count", "type": "number", "required": true},
 			},
 		},
 	}

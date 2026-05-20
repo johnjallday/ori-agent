@@ -112,10 +112,10 @@ func TestWorkspaceSessionDetailRejectsAmbiguousTitleFallback(t *testing.T) {
 	}
 
 	var payload struct {
-		SessionFound     bool                     `json:"session_found"`
-		RequestedSession string                   `json:"requested_session"`
-		Message          string                   `json:"message"`
-		Available        []map[string]interface{} `json:"available_sessions"`
+		SessionFound     bool             `json:"session_found"`
+		RequestedSession string           `json:"requested_session"`
+		Message          string           `json:"message"`
+		Available        []map[string]any `json:"available_sessions"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("failed to decode result: %v", err)
@@ -161,10 +161,10 @@ func TestWorkspaceSessionDetailReturnsGuidanceForMissingSessionID(t *testing.T) 
 	}
 
 	var payload struct {
-		SessionFound     bool                     `json:"session_found"`
-		RequestedSession string                   `json:"requested_session"`
-		Message          string                   `json:"message"`
-		Available        []map[string]interface{} `json:"available_sessions"`
+		SessionFound     bool             `json:"session_found"`
+		RequestedSession string           `json:"requested_session"`
+		Message          string           `json:"message"`
+		Available        []map[string]any `json:"available_sessions"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("failed to decode result: %v", err)
@@ -265,10 +265,10 @@ func TestWorkspaceNotesRejectsAmbiguousNameFallback(t *testing.T) {
 	}
 
 	var payload struct {
-		NoteFound     bool                     `json:"note_found"`
-		RequestedNote string                   `json:"requested_note"`
-		Message       string                   `json:"message"`
-		Available     []map[string]interface{} `json:"available_notes"`
+		NoteFound     bool             `json:"note_found"`
+		RequestedNote string           `json:"requested_note"`
+		Message       string           `json:"message"`
+		Available     []map[string]any `json:"available_notes"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("failed to decode result: %v", err)
@@ -315,10 +315,10 @@ func TestWorkspaceNotesReturnsGuidanceForMissingNoteID(t *testing.T) {
 	}
 
 	var payload struct {
-		NoteFound     bool                     `json:"note_found"`
-		RequestedNote string                   `json:"requested_note"`
-		Message       string                   `json:"message"`
-		Available     []map[string]interface{} `json:"available_notes"`
+		NoteFound     bool             `json:"note_found"`
+		RequestedNote string           `json:"requested_note"`
+		Message       string           `json:"message"`
+		Available     []map[string]any `json:"available_notes"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("failed to decode result: %v", err)

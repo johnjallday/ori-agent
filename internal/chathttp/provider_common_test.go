@@ -97,7 +97,7 @@ func TestBuildSystemPromptWithResolvedPlanningSkillSettings(t *testing.T) {
 				Name:            "workspace-planning",
 				Prompt:          "Plan work before executing it.",
 				PlanningProfile: true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"profile_type":           "workspace_planning",
 					"mode":                   "feature",
 					"write_prd":              true,

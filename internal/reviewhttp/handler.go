@@ -287,7 +287,7 @@ func (h *Handler) HandleRuns(w http.ResponseWriter, r *http.Request) {
 		runs = []review.ReviewRun{}
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"runs":  runs,
 		"count": len(runs),
 	})

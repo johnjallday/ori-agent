@@ -17,7 +17,7 @@ func (m mockPluginTool) Definition() toolapi.ToolDefinition {
 	return toolapi.ToolDefinition{
 		Name:        m.name,
 		Description: "mock tool",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"type": "object",
 		},
 	}

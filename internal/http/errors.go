@@ -37,10 +37,10 @@ const (
 //	  "request_id": "req_123"
 //	}
 type APIError struct {
-	Code      string      `json:"code"`                 // Machine-readable error code
-	Message   string      `json:"message"`              // Human-readable error message
-	Details   interface{} `json:"details,omitempty"`    // Additional context (optional)
-	RequestID string      `json:"request_id,omitempty"` // Request tracking ID (optional)
+	Code      string `json:"code"`                 // Machine-readable error code
+	Message   string `json:"message"`              // Human-readable error message
+	Details   any    `json:"details,omitempty"`    // Additional context (optional)
+	RequestID string `json:"request_id,omitempty"` // Request tracking ID (optional)
 }
 
 // Error implements the error interface, allowing APIError to be used
@@ -70,7 +70,7 @@ func NewAPIError(code, message string) *APIError {
 //
 //	err := http.NewAPIError(http.ErrCodeNotFound, "Agent not found").
 //	    WithDetails(map[string]string{"agent_name": "assistant"})
-func (e *APIError) WithDetails(details interface{}) *APIError {
+func (e *APIError) WithDetails(details any) *APIError {
 	e.Details = details
 	return e
 }
@@ -141,7 +141,7 @@ func RespondConflict(w http.ResponseWriter, message string) error {
 
 // RespondValidationError writes a 422 Unprocessable Entity error response
 // for validation failures.
-func RespondValidationError(w http.ResponseWriter, message string, details interface{}) error {
+func RespondValidationError(w http.ResponseWriter, message string, details any) error {
 	return RespondAPIError(w, http.StatusUnprocessableEntity,
 		NewAPIError(ErrCodeValidation, message).WithDetails(details))
 }
@@ -231,7 +231,7 @@ func Conflict(w http.ResponseWriter, message string) {
 }
 
 // ValidationError writes a 422 Unprocessable Entity error and logs any write errors internally.
-func ValidationError(w http.ResponseWriter, message string, details interface{}) {
+func ValidationError(w http.ResponseWriter, message string, details any) {
 	if err := RespondValidationError(w, message, details); err != nil {
 		logger.Error("Failed to write response", logger.Fields{"error": err})
 	}

@@ -11,9 +11,9 @@ import (
 
 func TestEventHistoryHandlerFiltersByTaskAndLimit(t *testing.T) {
 	eventBus := workspace.DefaultEventBus()
-	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskStarted, "workspace-1", "task-a", "Agent", map[string]interface{}{"description": "first"}))
-	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskStarted, "workspace-1", "task-b", "Agent", map[string]interface{}{"description": "other"}))
-	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolCall, "workspace-1", "task-a", "Agent", map[string]interface{}{"tool_name": "web_fetch"}))
+	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskStarted, "workspace-1", "task-a", "Agent", map[string]any{"description": "first"}))
+	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskStarted, "workspace-1", "task-b", "Agent", map[string]any{"description": "other"}))
+	eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolCall, "workspace-1", "task-a", "Agent", map[string]any{"tool_name": "web_fetch"}))
 
 	handler := NewNotificationHandler(nil, nil, eventBus)
 	request := httptest.NewRequest(http.MethodGet, "/api/orchestration/events?workspace_id=workspace-1&task_id=task-a&limit=1", nil)

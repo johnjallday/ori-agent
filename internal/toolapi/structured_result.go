@@ -24,7 +24,7 @@ type StructuredResult struct {
 	DisplayType DisplayType    `json:"displayType" yaml:"displayType"`
 	Title       string         `json:"title,omitempty" yaml:"title,omitempty"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
-	Data        interface{}    `json:"data" yaml:"data"`
+	Data        any            `json:"data" yaml:"data"`
 	Metadata    map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 

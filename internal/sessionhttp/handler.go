@@ -160,7 +160,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Session created", logger.Fields{"id": sess.ID, "agent": req.AgentName})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"session": sess,
 	})
@@ -238,7 +238,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 
 	logger.Info("Session updated", logger.Fields{"id": id})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"session": sess,
 	})
@@ -339,7 +339,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"sessions": results,
 			"total":    total,
 			"has_more": opts.Offset+len(results) < total,
@@ -374,7 +374,7 @@ func (h *Handler) getMessages(w http.ResponseWriter, r *http.Request, sessionID 
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"messages": messages,
 		"count":    len(messages),
 	})
@@ -419,7 +419,7 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 		return
 	}
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"message": msg,
 	})
@@ -442,7 +442,7 @@ func (h *Handler) HandleTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"tags": tags,
 	})
 }
@@ -478,7 +478,7 @@ func (h *Handler) HandleSessionTags(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Session tags updated", logger.Fields{"id": sessionID, "tags": req.Tags})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"tags":    req.Tags,
 	})
@@ -535,7 +535,7 @@ func (h *Handler) HandleBulkDeleteSessions(w http.ResponseWriter, r *http.Reques
 		"failed_count":  failedCount,
 	})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":       true,
 		"message":       "Bulk delete completed",
 		"success_count": successCount,

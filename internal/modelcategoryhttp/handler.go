@@ -195,7 +195,7 @@ func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Reques
 
 	// Return updated categories
 	categories := h.store.GetCategories()
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"categories": categories,
 	})
 }
@@ -273,7 +273,7 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 
 	// Return updated assignments
 	assignments := h.store.GetModelAssignments(modelID)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"model_id":     modelID,
 		"category_ids": assignments,
 	})
@@ -305,7 +305,7 @@ func (h *Handler) SetViewPreferenceHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"view_preference": h.store.GetViewPreference(),
 	})
 }

@@ -58,7 +58,7 @@ func (w *Workspace) entryAgentNameLocked() string {
 	return ""
 }
 
-func entryAgentNameFromSharedData(sharedData map[string]interface{}) string {
+func entryAgentNameFromSharedData(sharedData map[string]any) string {
 	if len(sharedData) == 0 {
 		return ""
 	}
@@ -94,7 +94,7 @@ func (w *Workspace) setEntryAgentNameLocked(agentName string) error {
 	}
 
 	if w.SharedData == nil {
-		w.SharedData = make(map[string]interface{})
+		w.SharedData = make(map[string]any)
 	}
 	w.SharedData[sharedDataEntryAgentNameKey] = trimmed
 	for i := range w.AgentInstances {

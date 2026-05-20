@@ -265,7 +265,7 @@ func (ts *TaskScheduler) skipMissedTaskSchedule(ws *Workspace, task *Task, now t
 		return
 	}
 	if ts.eventBus != nil {
-		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler.skip", map[string]interface{}{
+		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler.skip", map[string]any{
 			"task_id":   task.ID,
 			"missed_at": missedAt,
 			"next_run":  nextRun,
@@ -395,7 +395,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 
 	// Publish events
 	if ts.eventBus != nil {
-		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, task.ID, scheduleName, map[string]interface{}{
+		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, task.ID, scheduleName, map[string]any{
 			"task_id":         task.ID,
 			"task_created":    false,
 			"execution_count": executionCount,
@@ -403,7 +403,7 @@ func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time
 			"timestamp":       now,
 		}))
 
-		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+		ts.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]any{
 			"task_id":         task.ID,
 			"execution_count": executionCount,
 			"next_run":        nextRun,
@@ -449,7 +449,7 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 	}
 
 	if ts.eventBus != nil {
-		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, task.ID, scheduleName, map[string]interface{}{
+		ts.eventBus.Publish(NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, task.ID, scheduleName, map[string]any{
 			"error":         err.Error(),
 			"failure_count": failureCount,
 			"timestamp":     time.Now(),
@@ -559,7 +559,7 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 	}
 
 	if ts.eventBus != nil {
-		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, st.ID, st.Name, map[string]interface{}{
+		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, st.ID, st.Name, map[string]any{
 			"task_id":         targetTask.ID,
 			"task_created":    false,
 			"execution_count": st.ExecutionCount,
@@ -570,7 +570,7 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 		})
 		ts.eventBus.Publish(event)
 
-		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]any{
 			"scheduled_task_id": st.ID,
 			"task_created":      false,
 			"execution_count":   st.ExecutionCount,
@@ -612,7 +612,7 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 	}
 
 	if ts.eventBus != nil {
-		event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, st.ID, st.Name, map[string]interface{}{
+		event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, st.ID, st.Name, map[string]any{
 			"error":          st.LastError,
 			"failure_count":  st.FailureCount,
 			"timestamp":      time.Now(),

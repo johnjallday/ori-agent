@@ -213,7 +213,7 @@ func (p *ClaudeProvider) convertTools(tools []Tool) []anthropic.ToolUnionParam {
 			inputSchema.Properties = props
 		}
 		if req, ok := tool.Parameters["required"]; ok {
-			if reqSlice, ok := req.([]interface{}); ok {
+			if reqSlice, ok := req.([]any); ok {
 				inputSchema.Required = make([]string, len(reqSlice))
 				for i, v := range reqSlice {
 					if str, ok := v.(string); ok {

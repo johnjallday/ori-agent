@@ -276,14 +276,14 @@ func buildConcatenatedParentTaskResult(subtasks []workspace.Task) string {
 }
 
 func buildJSONMapParentTaskResult(parentTask *workspace.Task, subtasks []workspace.Task) (string, error) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"parent_task_id": parentTask.ID,
 		"template_ref":   parentTask.TemplateRef,
-		"steps":          make([]map[string]interface{}, 0, len(subtasks)),
+		"steps":          make([]map[string]any, 0, len(subtasks)),
 	}
 
 	for _, subtask := range subtasks {
-		payload["steps"] = append(payload["steps"].([]map[string]interface{}), map[string]interface{}{
+		payload["steps"] = append(payload["steps"].([]map[string]any), map[string]any{
 			"task_id":        subtask.ID,
 			"label":          parentTaskStepLabel(subtask),
 			"status":         subtask.Status,
@@ -305,11 +305,11 @@ func buildJSONMapParentTaskResult(parentTask *workspace.Task, subtasks []workspa
 }
 
 func buildStructuredParentTaskResult(parentTask *workspace.Task, subtasks []workspace.Task) (string, error) {
-	steps := make([]map[string]interface{}, 0, len(subtasks))
-	finalOutputs := make([]map[string]interface{}, 0, len(subtasks))
+	steps := make([]map[string]any, 0, len(subtasks))
+	finalOutputs := make([]map[string]any, 0, len(subtasks))
 
 	for _, subtask := range subtasks {
-		entry := map[string]interface{}{
+		entry := map[string]any{
 			"task_id":      subtask.ID,
 			"step_label":   parentTaskStepLabel(subtask),
 			"status":       subtask.Status,
@@ -318,14 +318,14 @@ func buildStructuredParentTaskResult(parentTask *workspace.Task, subtasks []work
 		}
 		if structured := parseSubtaskStructuredOutput(subtask); structured != nil {
 			entry["output"] = structured
-			finalOutputs = append(finalOutputs, map[string]interface{}{
+			finalOutputs = append(finalOutputs, map[string]any{
 				"task_id":    subtask.ID,
 				"step_label": parentTaskStepLabel(subtask),
 				"output":     structured,
 			})
 		} else if result := strings.TrimSpace(subtask.Result); result != "" {
 			entry["result"] = result
-			finalOutputs = append(finalOutputs, map[string]interface{}{
+			finalOutputs = append(finalOutputs, map[string]any{
 				"task_id":    subtask.ID,
 				"step_label": parentTaskStepLabel(subtask),
 				"result":     result,
@@ -334,7 +334,7 @@ func buildStructuredParentTaskResult(parentTask *workspace.Task, subtasks []work
 		steps = append(steps, entry)
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"parent_task_id":     parentTask.ID,
 		"template_ref":       parentTask.TemplateRef,
 		"combination_mode":   parentTask.ResultCombinationMode,
@@ -360,7 +360,7 @@ func parentTaskStepLabel(task workspace.Task) string {
 	return task.ID
 }
 
-func parseSubtaskStructuredOutput(task workspace.Task) interface{} {
+func parseSubtaskStructuredOutput(task workspace.Task) any {
 	parsed, err := workspace.ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
 	if err != nil || len(parsed) == 0 {
 		return nil

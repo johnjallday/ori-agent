@@ -114,16 +114,16 @@ func TestHTTPHandlerRelinkAttachmentFileCopiesReplacementIntoWorkspace(t *testin
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	attachmentPayload, ok := response["attachment"].(map[string]interface{})
+	attachmentPayload, ok := response["attachment"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected attachment payload, got %#v", response["attachment"])
 	}
-	fileMeta, ok := attachmentPayload["file_meta"].(map[string]interface{})
+	fileMeta, ok := attachmentPayload["file_meta"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected file metadata, got %#v", attachmentPayload["file_meta"])
 	}

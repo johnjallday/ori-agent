@@ -295,7 +295,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Log activity
 		if h.ActivityLogger != nil {
-			details := map[string]interface{}{
+			details := map[string]any{
 				"type":        req.Type,
 				"model":       req.Model,
 				"description": req.Description,
@@ -506,7 +506,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				updatedFields = append(updatedFields, "favorite")
 			}
 
-			details := map[string]interface{}{
+			details := map[string]any{
 				"fields": updatedFields,
 			}
 			if err := h.ActivityLogger.LogActivity(newName, types.ActivityEventUpdated, details, ""); err != nil {
@@ -551,7 +551,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Log activity
 		if h.ActivityLogger != nil {
-			details := map[string]interface{}{}
+			details := map[string]any{}
 			if err := h.ActivityLogger.LogActivity(name, types.ActivityEventDeleted, details, ""); err != nil {
 				logger.Error("Failed to log activity", logger.Fields{"err": err})
 			}

@@ -167,11 +167,11 @@ func TestGeminiProviderBuildRequest(t *testing.T) {
 			{
 				Name:        "calculator",
 				Description: "Do math",
-				Parameters: map[string]interface{}{
+				Parameters: map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"a": map[string]interface{}{"type": "number"},
-						"b": map[string]interface{}{"type": "number"},
+					"properties": map[string]any{
+						"a": map[string]any{"type": "number"},
+						"b": map[string]any{"type": "number"},
 					},
 				},
 			},
@@ -222,20 +222,20 @@ func TestGeminiProviderBuildRequest(t *testing.T) {
 func TestGeminiProviderBuildRequest_SanitizesToolSchemaForGemini(t *testing.T) {
 	provider := NewGeminiProvider(ProviderConfig{APIKey: "test-key"})
 
-	originalParams := map[string]interface{}{
+	originalParams := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema",
 		"type":    "object",
-		"properties": map[string]interface{}{
-			"url": map[string]interface{}{
+		"properties": map[string]any{
+			"url": map[string]any{
 				"type": "string",
 			},
-			"filters": map[string]interface{}{
+			"filters": map[string]any{
 				"type": "array",
-				"items": map[string]interface{}{
+				"items": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
-					"properties": map[string]interface{}{
-						"name": map[string]interface{}{"type": "string"},
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
 					},
 				},
 			},

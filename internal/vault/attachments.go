@@ -39,9 +39,9 @@ type inlineRecordAttachment struct {
 }
 
 type attachmentSQLExecutor interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 func normalizeRecordAttachmentKind(kind string, mimeType string) string {
@@ -178,7 +178,7 @@ func mergeRecordPayloadAttachments(payload json.RawMessage, attachments []Record
 }
 
 func scanRecordAttachmentRow(rows interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (recordAttachmentRow, error) {
 	var row recordAttachmentRow
 	if err := rows.Scan(

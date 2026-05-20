@@ -98,10 +98,10 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_notes",
 			Description: "List and read notes in the current workspace. Use without arguments to list all notes. Provide the exact id field from the list output to read a specific note.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"note_id": map[string]interface{}{
+				"properties": map[string]any{
+					"note_id": map[string]any{
 						"type":        "string",
 						"description": "Optional. The exact note ID from the list output. If a note name is passed, the tool will only accept it when it uniquely matches one note in this workspace.",
 					},
@@ -125,14 +125,14 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 					return "", err
 				}
 				if guidance != nil {
-					return marshalToolResponse(map[string]interface{}{
+					return marshalToolResponse(map[string]any{
 						"note_found":      false,
 						"requested_note":  req.NoteID,
 						"message":         guidance.Message,
 						"available_notes": guidance.Notes,
 					})
 				}
-				result := map[string]interface{}{
+				result := map[string]any{
 					"id":         note.ID,
 					"name":       note.Name,
 					"content":    note.Content,
@@ -151,23 +151,23 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 				return `{"notes":[],"message":"No notes in this workspace."}`, nil
 			}
 
-			items := make([]map[string]interface{}, 0, len(notes))
+			items := make([]map[string]any, 0, len(notes))
 			for _, n := range notes {
-				items = append(items, map[string]interface{}{
+				items = append(items, map[string]any{
 					"id":         n.ID,
 					"name":       n.Name,
 					"preview":    n.Preview,
 					"updated_at": n.UpdatedAt.Format(time.RFC3339),
 				})
 			}
-			return marshalToolResponse(map[string]interface{}{"notes": items})
+			return marshalToolResponse(map[string]any{"notes": items})
 		},
 	}
 }
 
 type workspaceNoteReferenceGuidance struct {
 	Message string
-	Notes   []map[string]interface{}
+	Notes   []map[string]any
 }
 
 func (p *WorkspaceToolProvider) resolveWorkspaceNoteReference(ctx context.Context, noteRef string) (*session.WorkspaceNote, *workspaceNoteReferenceGuidance, error) {
@@ -229,9 +229,9 @@ func (p *WorkspaceToolProvider) buildWorkspaceNoteReferenceGuidance(ctx context.
 		return nil, fmt.Errorf("failed to list notes: %w", err)
 	}
 
-	items := make([]map[string]interface{}, 0, len(notes))
+	items := make([]map[string]any, 0, len(notes))
 	for _, item := range notes {
-		items = append(items, map[string]interface{}{
+		items = append(items, map[string]any{
 			"id":         item.ID,
 			"name":       item.Name,
 			"preview":    item.Preview,
@@ -256,18 +256,18 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_save_note",
 			Description: "Create or update a note in the current workspace. Provide name and content to create a new note, or note_id with content to update an existing one.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"note_id": map[string]interface{}{
+				"properties": map[string]any{
+					"note_id": map[string]any{
 						"type":        "string",
 						"description": "Optional. ID of an existing note to update. Omit to create a new note.",
 					},
-					"name": map[string]interface{}{
+					"name": map[string]any{
 						"type":        "string",
 						"description": "Name/title of the note. Required when creating a new note.",
 					},
-					"content": map[string]interface{}{
+					"content": map[string]any{
 						"type":        "string",
 						"description": "The markdown content of the note.",
 					},
@@ -310,7 +310,7 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 					Name: existing.Name, Content: existing.Content,
 					CreatedAt: existing.CreatedAt, UpdatedAt: existing.UpdatedAt,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"id":      existing.ID,
 					"name":    existing.Name,
 					"action":  "updated",
@@ -344,7 +344,7 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 				"note_id":      note.ID,
 				"name":         note.Name,
 			})
-			return marshalToolResponse(map[string]interface{}{
+			return marshalToolResponse(map[string]any{
 				"id":      note.ID,
 				"name":    note.Name,
 				"action":  "created",
@@ -361,10 +361,10 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_tasks",
 			Description: "List tasks in the current workspace. Returns task descriptions, statuses, assignees, and priorities.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"status": map[string]interface{}{
+				"properties": map[string]any{
+					"status": map[string]any{
 						"type":        "string",
 						"description": "Optional. Filter by status: pending, in_progress, completed, failed, blocked, cancelled.",
 					},
@@ -401,9 +401,9 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 				return `{"tasks":[],"message":"No tasks match the criteria."}`, nil
 			}
 
-			items := make([]map[string]interface{}, 0, len(tasks))
+			items := make([]map[string]any, 0, len(tasks))
 			for _, t := range tasks {
-				item := map[string]interface{}{
+				item := map[string]any{
 					"id":          t.ID,
 					"description": t.Description,
 					"status":      string(t.Status),
@@ -419,7 +419,7 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 				}
 				items = append(items, item)
 			}
-			return marshalToolResponse(map[string]interface{}{"tasks": items, "total": len(items)})
+			return marshalToolResponse(map[string]any{"tasks": items, "total": len(items)})
 		},
 	}
 }
@@ -431,9 +431,9 @@ func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_sessions",
 			Description: "List chat sessions in the current workspace. Returns each session's id, title, agent, and timestamps. Use the id field with workspace_session_detail.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{},
+				"properties": map[string]any{},
 			},
 		},
 		call: func(ctx context.Context, args string) (string, error) {
@@ -450,9 +450,9 @@ func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 				return `{"sessions":[],"message":"No sessions in this workspace."}`, nil
 			}
 
-			items := make([]map[string]interface{}, 0, len(result.Sessions))
+			items := make([]map[string]any, 0, len(result.Sessions))
 			for _, s := range result.Sessions {
-				items = append(items, map[string]interface{}{
+				items = append(items, map[string]any{
 					"id":            s.ID,
 					"title":         s.Title,
 					"agent_name":    s.AgentName,
@@ -460,7 +460,7 @@ func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 					"updated_at":    s.UpdatedAt.Format(time.RFC3339),
 				})
 			}
-			return marshalToolResponse(map[string]interface{}{"sessions": items, "total": result.Total})
+			return marshalToolResponse(map[string]any{"sessions": items, "total": result.Total})
 		},
 	}
 }
@@ -472,10 +472,10 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_session_detail",
 			Description: "Read the messages from a specific session in the workspace. Use workspace_sessions first and pass the exact id field. Do not guess or invent session IDs.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"session_id": map[string]interface{}{
+				"properties": map[string]any{
+					"session_id": map[string]any{
 						"type":        "string",
 						"description": "The exact session ID from workspace_sessions. If a title is passed, the tool will only accept it when it uniquely matches one session in this workspace.",
 					},
@@ -499,7 +499,7 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 				return "", err
 			}
 			if guidance != nil {
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"session_found":      false,
 					"requested_session":  req.SessionID,
 					"message":            guidance.Message,
@@ -512,19 +512,19 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 				return "", fmt.Errorf("failed to load messages: %w", err)
 			}
 
-			msgItems := make([]map[string]interface{}, 0, len(messages))
+			msgItems := make([]map[string]any, 0, len(messages))
 			for _, m := range messages {
 				content := m.Content
 				if len(content) > 2000 {
 					content = content[:2000] + "... (truncated)"
 				}
-				msgItems = append(msgItems, map[string]interface{}{
+				msgItems = append(msgItems, map[string]any{
 					"role":    m.Role,
 					"content": content,
 				})
 			}
 
-			return marshalToolResponse(map[string]interface{}{
+			return marshalToolResponse(map[string]any{
 				"session_id": sess.ID,
 				"title":      sess.Title,
 				"agent_name": sess.AgentName,
@@ -536,7 +536,7 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 
 type workspaceSessionReferenceGuidance struct {
 	Message  string
-	Sessions []map[string]interface{}
+	Sessions []map[string]any
 }
 
 func (p *WorkspaceToolProvider) resolveWorkspaceSessionReference(ctx context.Context, sessionRef string) (*session.Session, *workspaceSessionReferenceGuidance, error) {
@@ -603,9 +603,9 @@ func (p *WorkspaceToolProvider) buildWorkspaceSessionReferenceGuidance(ctx conte
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	items := make([]map[string]interface{}, 0, len(result.Sessions))
+	items := make([]map[string]any, 0, len(result.Sessions))
 	for _, item := range result.Sessions {
-		items = append(items, map[string]interface{}{
+		items = append(items, map[string]any{
 			"id":            item.ID,
 			"title":         item.Title,
 			"agent_name":    item.AgentName,
@@ -631,9 +631,9 @@ func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_files",
 			Description: "List files attached to the current workspace. Returns file names, types, and metadata.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{},
+				"properties": map[string]any{},
 			},
 		},
 		call: func(ctx context.Context, args string) (string, error) {
@@ -642,12 +642,12 @@ func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 				return "", fmt.Errorf("workspace not found: %w", err)
 			}
 
-			files := make([]map[string]interface{}, 0)
+			files := make([]map[string]any, 0)
 			for _, a := range ws.Attachments {
 				if a.DeletedAt != nil {
 					continue
 				}
-				item := map[string]interface{}{
+				item := map[string]any{
 					"id":         a.ID,
 					"title":      a.Title,
 					"type":       string(a.Type),
@@ -665,7 +665,7 @@ func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 				return `{"files":[],"message":"No files attached to this workspace."}`, nil
 			}
 
-			return marshalToolResponse(map[string]interface{}{"files": files, "total": len(files)})
+			return marshalToolResponse(map[string]any{"files": files, "total": len(files)})
 		},
 	}
 }
@@ -677,9 +677,9 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_directories",
 			Description: "List directories referenced by the current workspace. Returns directory names and filesystem paths.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{},
+				"properties": map[string]any{},
 			},
 		},
 		call: func(ctx context.Context, args string) (string, error) {
@@ -692,21 +692,21 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 				return `{"directories":[],"message":"No directories in this workspace."}`, nil
 			}
 
-			items := make([]map[string]interface{}, 0, len(ws.DirectoryReferences))
+			items := make([]map[string]any, 0, len(ws.DirectoryReferences))
 			for _, d := range ws.DirectoryReferences {
-				items = append(items, map[string]interface{}{
+				items = append(items, map[string]any{
 					"id":   d.ID,
 					"name": d.Name,
 					"path": d.Path,
 				})
 			}
-			return marshalToolResponse(map[string]interface{}{"directories": items, "total": len(items)})
+			return marshalToolResponse(map[string]any{"directories": items, "total": len(items)})
 		},
 	}
 }
 
 // marshalToolResponse marshals a tool response to JSON, returning an error if marshaling fails.
-func marshalToolResponse(v interface{}) (string, error) {
+func marshalToolResponse(v any) (string, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal tool response: %w", err)
@@ -734,15 +734,15 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_agents",
 			Description: "Manage agents in the current workspace. Actions: 'list' shows workspace agents, 'available' shows all agents that can be added, 'add' adds an agent, 'remove' removes an agent.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"action": map[string]interface{}{
+				"properties": map[string]any{
+					"action": map[string]any{
 						"type":        "string",
 						"description": "The action to perform.",
 						"enum":        []string{"list", "available", "add", "remove"},
 					},
-					"agent_name": map[string]interface{}{
+					"agent_name": map[string]any{
 						"type":        "string",
 						"description": "Agent name. Required for 'add' and 'remove' actions.",
 					},
@@ -770,14 +770,14 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 				if len(instances) == 0 {
 					return `{"agents":[],"message":"No agents in this workspace."}`, nil
 				}
-				items := make([]map[string]interface{}, 0, len(instances))
+				items := make([]map[string]any, 0, len(instances))
 				for _, inst := range instances {
-					items = append(items, map[string]interface{}{
+					items = append(items, map[string]any{
 						"name":    inst.Name,
 						"node_id": inst.NodeID,
 					})
 				}
-				return marshalToolResponse(map[string]interface{}{"agents": items})
+				return marshalToolResponse(map[string]any{"agents": items})
 
 			case "available":
 				allNames := p.agentStore.ListAgents()
@@ -791,7 +791,7 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 						available = append(available, name)
 					}
 				}
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"available_agents": available,
 					"workspace_agents": len(ws.AgentInstances),
 					"total_agents":     len(allNames),
@@ -811,7 +811,7 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"agent_name":   req.AgentName,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":  "added",
 					"agent":   req.AgentName,
 					"message": fmt.Sprintf("Agent '%s' added to workspace.", req.AgentName),
@@ -831,7 +831,7 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"agent_name":   req.AgentName,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":  "removed",
 					"agent":   req.AgentName,
 					"message": fmt.Sprintf("Agent '%s' removed from workspace.", req.AgentName),
@@ -851,19 +851,19 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_mcp",
 			Description: "Manage MCP server bindings in the current workspace. Actions: 'list' shows workspace MCP bindings, 'available' shows all MCP servers that can be attached, 'attach' adds a binding, 'detach' removes a binding.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"action": map[string]interface{}{
+				"properties": map[string]any{
+					"action": map[string]any{
 						"type":        "string",
 						"description": "The action to perform.",
 						"enum":        []string{"list", "available", "attach", "detach"},
 					},
-					"server_name": map[string]interface{}{
+					"server_name": map[string]any{
 						"type":        "string",
 						"description": "MCP server name. Required for 'attach' and 'detach' actions.",
 					},
-					"binding_id": map[string]interface{}{
+					"binding_id": map[string]any{
 						"type":        "string",
 						"description": "Binding ID. Required for 'detach'. Returned by 'list'.",
 					},
@@ -892,16 +892,16 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 				if len(bindings) == 0 {
 					return `{"mcp_bindings":[],"message":"No MCP servers attached to this workspace."}`, nil
 				}
-				items := make([]map[string]interface{}, 0, len(bindings))
+				items := make([]map[string]any, 0, len(bindings))
 				for _, b := range bindings {
-					items = append(items, map[string]interface{}{
+					items = append(items, map[string]any{
 						"id":          b.ID,
 						"server_name": b.ServerName,
 						"alias":       b.Alias,
 						"enabled":     b.Enabled,
 					})
 				}
-				return marshalToolResponse(map[string]interface{}{"mcp_bindings": items})
+				return marshalToolResponse(map[string]any{"mcp_bindings": items})
 
 			case "available":
 				servers := p.mcpRegistry.ListServers()
@@ -909,15 +909,15 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 				for _, b := range ws.GetMCPBindings() {
 					boundMap[strings.ToLower(b.ServerName)] = true
 				}
-				available := make([]map[string]interface{}, 0)
+				available := make([]map[string]any, 0)
 				for _, s := range servers {
-					available = append(available, map[string]interface{}{
+					available = append(available, map[string]any{
 						"name":             s.Name,
 						"enabled":          s.Enabled,
 						"already_attached": boundMap[strings.ToLower(s.Name)],
 					})
 				}
-				return marshalToolResponse(map[string]interface{}{"available_servers": available})
+				return marshalToolResponse(map[string]any{"available_servers": available})
 
 			case "attach":
 				if strings.TrimSpace(req.ServerName) == "" {
@@ -941,7 +941,7 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 					"server_name":  req.ServerName,
 					"binding_id":   binding.ID,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":     "attached",
 					"binding_id": binding.ID,
 					"server":     req.ServerName,
@@ -975,7 +975,7 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"binding_id":   bindingID,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":  "detached",
 					"message": "MCP server detached from workspace.",
 				})
@@ -994,19 +994,19 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_skills",
 			Description: "Manage skill bindings in the current workspace. Actions: 'list' shows workspace skills, 'available' shows all skills that can be attached, 'attach' adds a skill, 'detach' removes a skill.",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"action": map[string]interface{}{
+				"properties": map[string]any{
+					"action": map[string]any{
 						"type":        "string",
 						"description": "The action to perform.",
 						"enum":        []string{"list", "available", "attach", "detach"},
 					},
-					"skill_name": map[string]interface{}{
+					"skill_name": map[string]any{
 						"type":        "string",
 						"description": "Skill name. Required for 'attach' and 'detach' actions.",
 					},
-					"binding_id": map[string]interface{}{
+					"binding_id": map[string]any{
 						"type":        "string",
 						"description": "Binding ID. Required for 'detach'. Returned by 'list'.",
 					},
@@ -1035,16 +1035,16 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 				if len(bindings) == 0 {
 					return `{"skill_bindings":[],"message":"No skills attached to this workspace."}`, nil
 				}
-				items := make([]map[string]interface{}, 0, len(bindings))
+				items := make([]map[string]any, 0, len(bindings))
 				for _, b := range bindings {
-					items = append(items, map[string]interface{}{
+					items = append(items, map[string]any{
 						"id":         b.ID,
 						"skill_name": b.SkillName,
 						"enabled":    b.Enabled,
 						"trusted":    b.Trusted,
 					})
 				}
-				return marshalToolResponse(map[string]interface{}{"skill_bindings": items})
+				return marshalToolResponse(map[string]any{"skill_bindings": items})
 
 			case "available":
 				// List skills for a generic agent name (empty uses defaults)
@@ -1056,15 +1056,15 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 				for _, b := range ws.GetSkillBindings() {
 					boundMap[strings.ToLower(b.SkillName)] = true
 				}
-				available := make([]map[string]interface{}, 0)
+				available := make([]map[string]any, 0)
 				for _, s := range allSkills {
-					available = append(available, map[string]interface{}{
+					available = append(available, map[string]any{
 						"name":             s.Name,
 						"description":      truncate(s.Description, 200),
 						"already_attached": boundMap[strings.ToLower(s.Name)],
 					})
 				}
-				return marshalToolResponse(map[string]interface{}{"available_skills": available, "total": len(available)})
+				return marshalToolResponse(map[string]any{"available_skills": available, "total": len(available)})
 
 			case "attach":
 				if strings.TrimSpace(req.SkillName) == "" {
@@ -1089,7 +1089,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 					"skill_name":   req.SkillName,
 					"binding_id":   binding.ID,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":     "attached",
 					"binding_id": binding.ID,
 					"skill":      req.SkillName,
@@ -1123,7 +1123,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"binding_id":   bindingID,
 				})
-				return marshalToolResponse(map[string]interface{}{
+				return marshalToolResponse(map[string]any{
 					"action":  "detached",
 					"message": "Skill detached from workspace.",
 				})

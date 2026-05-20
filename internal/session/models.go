@@ -286,7 +286,7 @@ type Workspace struct {
 	AgentInstances []AgentInstance `json:"agent_instances,omitempty"`
 
 	// SharedData is a key-value store for inter-agent data sharing.
-	SharedData map[string]interface{} `json:"shared_data,omitempty"`
+	SharedData map[string]any `json:"shared_data,omitempty"`
 
 	// Status is the current state of the workspace.
 	Status WorkspaceStatus `json:"status,omitempty"`

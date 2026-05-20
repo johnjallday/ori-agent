@@ -62,21 +62,21 @@ func TestHandleWorkspaceMarksMissingAttachmentFiles(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	attachmentList, ok := response["attachments"].([]interface{})
+	attachmentList, ok := response["attachments"].([]any)
 	if !ok || len(attachmentList) != 1 {
 		t.Fatalf("expected one attachment in response, got %#v", response["attachments"])
 	}
 
-	attachmentPayload, ok := attachmentList[0].(map[string]interface{})
+	attachmentPayload, ok := attachmentList[0].(map[string]any)
 	if !ok {
 		t.Fatalf("expected attachment payload map, got %#v", attachmentList[0])
 	}
-	fileMeta, ok := attachmentPayload["file_meta"].(map[string]interface{})
+	fileMeta, ok := attachmentPayload["file_meta"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected file metadata map, got %#v", attachmentPayload["file_meta"])
 	}

@@ -83,7 +83,7 @@ func (a *App) startLocalServer() {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   "method not allowed",
 			})
@@ -107,7 +107,7 @@ func (a *App) startLocalServer() {
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   err.Error(),
 			})
@@ -116,7 +116,7 @@ func (a *App) startLocalServer() {
 
 		a.HideWindow()
 
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"success":  true,
 			"selected": path != "",
 		}
@@ -241,7 +241,7 @@ func (a *App) AddDirectory(workspaceID, name, path string) DirectoryResult {
 	}
 
 	// Send to API
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"name": name,
 		"path": path,
 		"x":    400,

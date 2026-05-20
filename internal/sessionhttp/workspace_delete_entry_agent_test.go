@@ -44,7 +44,7 @@ func TestDeleteWorkspace_DeletesEntryAgent(t *testing.T) {
 		{ID: "inst-1", Name: entryAgentName, EntryPoint: true},
 	}
 	if folderWS.SharedData == nil {
-		folderWS.SharedData = map[string]interface{}{}
+		folderWS.SharedData = map[string]any{}
 	}
 	folderWS.SharedData["entry_agent_name"] = entryAgentName
 	if err := wsStore.Save(folderWS); err != nil {

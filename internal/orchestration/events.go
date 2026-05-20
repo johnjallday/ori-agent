@@ -7,7 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func (o *Orchestrator) publishEvent(eventType workspace.EventType, workspaceID string, data map[string]interface{}) {
+func (o *Orchestrator) publishEvent(eventType workspace.EventType, workspaceID string, data map[string]any) {
 	if o.eventBus == nil {
 		return
 	}

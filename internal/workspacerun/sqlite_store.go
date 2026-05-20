@@ -323,7 +323,7 @@ func (s *SQLiteStore) getRun(ctx context.Context, workspaceID, runID string) (*R
 }
 
 type scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }
 
 func scanRun(row scanner) (*Run, error) {
@@ -443,7 +443,7 @@ func scanArtifact(row scanner) (Artifact, error) {
 	return CloneArtifact(artifact), nil
 }
 
-func mustJSON(value interface{}) string {
+func mustJSON(value any) string {
 	b, err := json.Marshal(value)
 	if err != nil {
 		panic(err)
@@ -451,14 +451,14 @@ func mustJSON(value interface{}) string {
 	return string(b)
 }
 
-func nullableJSON(value interface{}) interface{} {
+func nullableJSON(value any) any {
 	if value == nil {
 		return nil
 	}
 	return mustJSON(value)
 }
 
-func decodeJSON(value string, dest interface{}) error {
+func decodeJSON(value string, dest any) error {
 	if value == "" {
 		return nil
 	}
@@ -468,14 +468,14 @@ func decodeJSON(value string, dest interface{}) error {
 	return nil
 }
 
-func nullableTime(value *time.Time) interface{} {
+func nullableTime(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
 	return *value
 }
 
-func nullableString(value string) interface{} {
+func nullableString(value string) any {
 	if value == "" {
 		return nil
 	}

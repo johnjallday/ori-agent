@@ -374,7 +374,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	}
 
 	if agentWS.SharedData == nil {
-		agentWS.SharedData = make(map[string]interface{})
+		agentWS.SharedData = make(map[string]any)
 	}
 
 	return agentWS
@@ -541,7 +541,7 @@ func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description stri
 		Description: description,
 		Agents:      agents,
 		Status:      workspace.StatusActive,
-		SharedData:  make(map[string]interface{}),
+		SharedData:  make(map[string]any),
 		Messages:    []workspace.AgentMessage{},
 		Tasks:       []workspace.Task{},
 		CreatedAt:   now,

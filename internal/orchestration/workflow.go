@@ -15,7 +15,7 @@ import (
 func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("🔬 Executing full research pipeline", logger.Fields{})
 
-	subResults := make(map[string]interface{})
+	subResults := make(map[string]any)
 	var researcherAgent, analyzerAgent, synthesizerAgent, validatorAgent string
 
 	// Identify agents by role
@@ -74,7 +74,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 		To:          analyzerAgent,
 		Description: fmt.Sprintf("Analyze findings from research on: %s", task.Goal),
 		Priority:    4,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"research_task_id": researchTask.ID,
 			"original_goal":    task.Goal,
 		},
@@ -97,7 +97,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 		To:          synthesizerAgent,
 		Description: fmt.Sprintf("Create comprehensive report combining research and analysis on: %s", task.Goal),
 		Priority:    4,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"research_task_id": researchTask.ID,
 			"analysis_task_id": analysisTask.ID,
 			"original_goal":    task.Goal,
@@ -122,7 +122,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 			To:          validatorAgent,
 			Description: fmt.Sprintf("Validate findings and check for inconsistencies in report on: %s", task.Goal),
 			Priority:    3,
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"synthesis_task_id": synthesisTask.ID,
 				"original_goal":     task.Goal,
 			},

@@ -270,20 +270,20 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	preview := map[string]interface{}{
-		"settings": map[string]interface{}{
+	preview := map[string]any{
+		"settings": map[string]any{
 			"description": "API keys and global configuration",
 			"files":       []string{"settings.json"},
 		},
-		"agents": map[string]interface{}{
+		"agents": map[string]any{
 			"description": "All agents and their configurations",
 			"files":       []string{"agents.json", "agents/"},
 		},
-		"sessions": map[string]interface{}{
+		"sessions": map[string]any{
 			"description": "All chat sessions, message history, workspaces, and uploaded files",
 			"files":       []string{"sessions.db", "session_files/", "workspaces/"},
 		},
-		"onboarding": map[string]interface{}{
+		"onboarding": map[string]any{
 			"description": "Onboarding state and app preferences",
 			"files":       []string{"app_state.json"},
 		},

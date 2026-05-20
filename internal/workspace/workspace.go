@@ -86,19 +86,19 @@ func (w *Workspace) GetMessagesSince(since time.Time) []AgentMessage {
 }
 
 // SetSharedData sets a value in the shared data store
-func (w *Workspace) SetSharedData(key string, value interface{}) {
+func (w *Workspace) SetSharedData(key string, value any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if w.SharedData == nil {
-		w.SharedData = make(map[string]interface{})
+		w.SharedData = make(map[string]any)
 	}
 	w.SharedData[key] = value
 	w.UpdatedAt = time.Now()
 }
 
 // GetSharedData retrieves a value from the shared data store
-func (w *Workspace) GetSharedData(key string) (interface{}, bool) {
+func (w *Workspace) GetSharedData(key string) (any, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 

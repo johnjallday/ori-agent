@@ -51,7 +51,7 @@ type Workspace struct {
 	ParentID             string                      `json:"parent_id,omitempty"`       // ID of parent workspace (empty for root-level)
 	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
 	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
-	SharedData           map[string]interface{}      `json:"shared_data"`
+	SharedData           map[string]any              `json:"shared_data"`
 	Messages             []AgentMessage              `json:"messages"`
 	Tasks                []Task                      `json:"tasks"`
 	PlannerDecision      *types.PlannerDecision      `json:"planner_decision,omitempty"`
@@ -146,37 +146,37 @@ type Attachment struct {
 
 // AgentMessage represents a message passed between agents
 type AgentMessage struct {
-	ID        string                 `json:"id"`
-	From      string                 `json:"from"`
-	To        string                 `json:"to"` // empty = broadcast
-	Type      MessageType            `json:"type"`
-	Content   string                 `json:"content"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
+	ID        string         `json:"id"`
+	From      string         `json:"from"`
+	To        string         `json:"to"` // empty = broadcast
+	Type      MessageType    `json:"type"`
+	Content   string         `json:"content"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
 }
 
 // Task represents a delegated task within a workspace
 type Task struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	From             string                 `json:"from"`
-	To               string                 `json:"to"`
-	AssignedNodeID   string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
-	Description      string                 `json:"description"`
-	Details          string                 `json:"details,omitempty"`
-	Priority         int                    `json:"priority"`
-	Context          map[string]interface{} `json:"context"`
-	Timeout          time.Duration          `json:"timeout"`
-	Status           TaskStatus             `json:"status"`
-	Result           string                 `json:"result,omitempty"`
-	ResultType       TaskResultType         `json:"result_type,omitempty"`
-	StructuredResult map[string]interface{} `json:"structured_result,omitempty"`
-	Error            string                 `json:"error,omitempty"`
-	Progress         *TaskProgress          `json:"progress,omitempty"`
-	ExecutionMode    TaskExecutionMode      `json:"execution_mode,omitempty"`
-	ExecutionSteps   []TaskExecutionStep    `json:"execution_steps,omitempty"`
-	ExecutionTrace   []TaskExecutionTrace   `json:"execution_trace,omitempty"`
-	CurrentRunID     string                 `json:"current_run_id,omitempty"`
+	ID               string               `json:"id"`
+	WorkspaceID      string               `json:"workspace_id"`
+	From             string               `json:"from"`
+	To               string               `json:"to"`
+	AssignedNodeID   string               `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	Description      string               `json:"description"`
+	Details          string               `json:"details,omitempty"`
+	Priority         int                  `json:"priority"`
+	Context          map[string]any       `json:"context"`
+	Timeout          time.Duration        `json:"timeout"`
+	Status           TaskStatus           `json:"status"`
+	Result           string               `json:"result,omitempty"`
+	ResultType       TaskResultType       `json:"result_type,omitempty"`
+	StructuredResult map[string]any       `json:"structured_result,omitempty"`
+	Error            string               `json:"error,omitempty"`
+	Progress         *TaskProgress        `json:"progress,omitempty"`
+	ExecutionMode    TaskExecutionMode    `json:"execution_mode,omitempty"`
+	ExecutionSteps   []TaskExecutionStep  `json:"execution_steps,omitempty"`
+	ExecutionTrace   []TaskExecutionTrace `json:"execution_trace,omitempty"`
+	CurrentRunID     string               `json:"current_run_id,omitempty"`
 	// OrchestrationMode controls how parent tasks execute their subtasks.
 	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
 	// ResultCombinationMode controls how a parent task combines subtask outputs.
@@ -232,7 +232,7 @@ type TaskRuntimeInputs struct {
 	// StructuredOutputs maps each input task ID to its parsed structured
 	// output (when the upstream task declared an OutputSchema and the result
 	// matched).
-	StructuredOutputs map[string]map[string]interface{}
+	StructuredOutputs map[string]map[string]any
 }
 
 // ResultStorageConfig specifies how task results should be automatically stored
@@ -471,17 +471,17 @@ type TaskExecution struct {
 
 // ScheduledTask represents a recurring or one-time scheduled task template
 type ScheduledTask struct {
-	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"workspace_id"`
-	CanvasNodeID string                 `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
-	TargetTaskID string                 `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	From         string                 `json:"from"`   // Sender agent
-	To           string                 `json:"to"`     // Recipient agent
-	Prompt       string                 `json:"prompt"` // Task description/prompt
-	Priority     int                    `json:"priority"`
-	Context      map[string]interface{} `json:"context"`
+	ID           string         `json:"id"`
+	WorkspaceID  string         `json:"workspace_id"`
+	CanvasNodeID string         `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
+	TargetTaskID string         `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	From         string         `json:"from"`   // Sender agent
+	To           string         `json:"to"`     // Recipient agent
+	Prompt       string         `json:"prompt"` // Task description/prompt
+	Priority     int            `json:"priority"`
+	Context      map[string]any `json:"context"`
 
 	// Scheduling configuration
 	Schedule ScheduleConfig `json:"schedule"`
@@ -528,14 +528,14 @@ type StoreNode struct {
 // WorkspaceMCPBinding represents a concrete MCP binding owned by the workspace.
 // ServerName maps to the globally configured MCP server template/definition.
 type WorkspaceMCPBinding struct {
-	ID         string                 `json:"id"`
-	ServerName string                 `json:"server_name"`
-	Alias      string                 `json:"alias,omitempty"`
-	Enabled    bool                   `json:"enabled"`
-	Scope      map[string]interface{} `json:"scope,omitempty"`
-	Config     map[string]interface{} `json:"config,omitempty"`
-	CreatedAt  time.Time              `json:"created_at,omitempty"`
-	UpdatedAt  time.Time              `json:"updated_at,omitempty"`
+	ID         string         `json:"id"`
+	ServerName string         `json:"server_name"`
+	Alias      string         `json:"alias,omitempty"`
+	Enabled    bool           `json:"enabled"`
+	Scope      map[string]any `json:"scope,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
+	CreatedAt  time.Time      `json:"created_at,omitempty"`
+	UpdatedAt  time.Time      `json:"updated_at,omitempty"`
 }
 
 // WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
@@ -549,13 +549,13 @@ type WorkspaceAgentMCPAccess struct {
 // WorkspaceSkillBinding represents a skill binding owned by the workspace.
 // SkillName maps to a skill known to the SkillManager (resolved by name at runtime).
 type WorkspaceSkillBinding struct {
-	ID        string                 `json:"id"`
-	SkillName string                 `json:"skill_name"`
-	Enabled   bool                   `json:"enabled"`
-	Trusted   bool                   `json:"trusted"`
-	Config    map[string]interface{} `json:"config,omitempty"`
-	CreatedAt time.Time              `json:"created_at,omitempty"`
-	UpdatedAt time.Time              `json:"updated_at,omitempty"`
+	ID        string         `json:"id"`
+	SkillName string         `json:"skill_name"`
+	Enabled   bool           `json:"enabled"`
+	Trusted   bool           `json:"trusted"`
+	Config    map[string]any `json:"config,omitempty"`
+	CreatedAt time.Time      `json:"created_at,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at,omitempty"`
 }
 
 // WorkspaceAgentSkillAccess narrows which workspace skill bindings an agent instance
@@ -592,7 +592,7 @@ type CreateWorkspaceParams struct {
 	Name        string
 	Description string
 	Agents      []string
-	InitialData map[string]interface{}
+	InitialData map[string]any
 }
 
 // AgentStats holds statistics for a single agent

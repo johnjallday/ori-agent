@@ -10,14 +10,14 @@ func TestBuildTaskExecutionTrace_NormalizesTaskEventsChronologically(t *testing.
 	earlier := time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC)
 
 	events := []Event{
-		NewTaskEvent(EventTaskToolResult, "workspace-1", "task-1", "Agent", map[string]interface{}{
+		NewTaskEvent(EventTaskToolResult, "workspace-1", "task-1", "Agent", map[string]any{
 			"tool_name":      "web_fetch",
 			"success":        true,
 			"result_preview": "forecast found",
 		}),
-		NewTaskEvent(EventTaskToolCall, "workspace-1", "task-1", "Agent", map[string]interface{}{
+		NewTaskEvent(EventTaskToolCall, "workspace-1", "task-1", "Agent", map[string]any{
 			"tool_name": "web_fetch",
-			"arguments": map[string]interface{}{"url": "https://example.com"},
+			"arguments": map[string]any{"url": "https://example.com"},
 		}),
 	}
 	events[0].Timestamp = later
@@ -41,15 +41,15 @@ func TestRecordTaskExecutionTraceFromEventBusFiltersTaskAndWindow(t *testing.T) 
 	startedAt := time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC)
 	completedAt := time.Date(2026, 5, 5, 10, 2, 0, 0, time.UTC)
 
-	inWindow := NewTaskEvent(EventTaskStarted, "workspace-1", "task-1", "Agent", map[string]interface{}{"description": "run"})
+	inWindow := NewTaskEvent(EventTaskStarted, "workspace-1", "task-1", "Agent", map[string]any{"description": "run"})
 	inWindow.Timestamp = startedAt.Add(time.Minute)
 	eventBus.Publish(inWindow)
 
-	otherTask := NewTaskEvent(EventTaskToolCall, "workspace-1", "task-2", "Agent", map[string]interface{}{"tool_name": "web_fetch"})
+	otherTask := NewTaskEvent(EventTaskToolCall, "workspace-1", "task-2", "Agent", map[string]any{"tool_name": "web_fetch"})
 	otherTask.Timestamp = startedAt.Add(time.Minute)
 	eventBus.Publish(otherTask)
 
-	outsideWindow := NewTaskEvent(EventTaskToolCall, "workspace-1", "task-1", "Agent", map[string]interface{}{"tool_name": "late"})
+	outsideWindow := NewTaskEvent(EventTaskToolCall, "workspace-1", "task-1", "Agent", map[string]any{"tool_name": "late"})
 	outsideWindow.Timestamp = completedAt.Add(10 * time.Second)
 	eventBus.Publish(outsideWindow)
 

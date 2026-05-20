@@ -135,7 +135,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Publish thinking event
 	if h.eventBus != nil {
-		event := NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+		event := NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
 			"phase":   "starting",
 			"message": "Agent is analyzing the task...",
 		})
@@ -234,7 +234,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		// silent in_progress span. provider.Chat() can take tens of seconds,
 		// during which no other event would otherwise fire.
 		if h.eventBus != nil {
-			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
 				"phase":   "awaiting_llm",
 				"round":   round + 1,
 				"model":   modelName,
@@ -257,7 +257,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		}
 
 		if h.eventBus != nil {
-			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+			h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
 				"phase":           "llm_returned",
 				"round":           round + 1,
 				"tool_call_count": len(resp.ToolCalls),
@@ -387,7 +387,7 @@ func taskToolCallSignature(toolCall llm.ToolCall) string {
 }
 
 func normalizeWebSearchToolArguments(arguments string) string {
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(arguments), &parsed); err != nil {
 		return strings.ToLower(strings.Join(strings.Fields(arguments), " "))
 	}
@@ -806,7 +806,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 
 	// Publish tool call event
 	if h.eventBus != nil {
-		event := NewTaskEvent(EventTaskToolCall, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+		event := NewTaskEvent(EventTaskToolCall, task.WorkspaceID, task.ID, agentName, map[string]any{
 			"tool_name": toolCall.Name,
 			"arguments": toolCall.Arguments,
 		})
@@ -823,7 +823,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 
 		// Publish tool result event (error)
 		if h.eventBus != nil {
-			event := NewTaskEvent(EventTaskToolResult, task.WorkspaceID, task.ID, agentName, map[string]interface{}{
+			event := NewTaskEvent(EventTaskToolResult, task.WorkspaceID, task.ID, agentName, map[string]any{
 				"tool_name": toolCall.Name,
 				"success":   false,
 				"error":     result.Error.Error(),
@@ -839,7 +839,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 
 	// Publish tool result event
 	if h.eventBus != nil {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"tool_name": toolCall.Name,
 			"success":   err == nil,
 		}

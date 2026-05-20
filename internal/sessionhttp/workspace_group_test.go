@@ -27,12 +27,12 @@ func createTestGroup(t *testing.T, handler *Handler, name string) string {
 		t.Fatalf("failed to create group: %d - %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode group response: %v", err)
 	}
 
-	folder, ok := resp["folder"].(map[string]interface{})
+	folder, ok := resp["folder"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected folder payload in group response")
 	}
@@ -92,11 +92,11 @@ func TestListWorkspacesFlatExcludesGroups(t *testing.T) {
 		t.Fatalf("expected 200 for flat list, got %d: %s", flatW.Code, flatW.Body.String())
 	}
 
-	var flatResp map[string]interface{}
+	var flatResp map[string]any
 	if err := json.Unmarshal(flatW.Body.Bytes(), &flatResp); err != nil {
 		t.Fatalf("failed to decode flat list response: %v", err)
 	}
-	flatWorkspaces, ok := flatResp["workspaces"].([]interface{})
+	flatWorkspaces, ok := flatResp["workspaces"].([]any)
 	if !ok {
 		t.Fatalf("expected workspaces list in flat response")
 	}
@@ -104,7 +104,7 @@ func TestListWorkspacesFlatExcludesGroups(t *testing.T) {
 		t.Fatalf("expected 1 concrete workspace in flat list, got %d", len(flatWorkspaces))
 	}
 
-	flatWorkspace := flatWorkspaces[0].(map[string]interface{})
+	flatWorkspace := flatWorkspaces[0].(map[string]any)
 	if got := flatWorkspace["id"]; got != childID {
 		t.Fatalf("expected flat list to contain child workspace %q, got %v", childID, got)
 	}
@@ -116,19 +116,19 @@ func TestListWorkspacesFlatExcludesGroups(t *testing.T) {
 		t.Fatalf("expected 200 for tree list, got %d: %s", treeW.Code, treeW.Body.String())
 	}
 
-	var treeResp map[string]interface{}
+	var treeResp map[string]any
 	if err := json.Unmarshal(treeW.Body.Bytes(), &treeResp); err != nil {
 		t.Fatalf("failed to decode tree response: %v", err)
 	}
-	treeWorkspaces, ok := treeResp["workspaces"].([]interface{})
+	treeWorkspaces, ok := treeResp["workspaces"].([]any)
 	if !ok || len(treeWorkspaces) != 1 {
 		t.Fatalf("expected one root group in tree response, got %#v", treeResp["workspaces"])
 	}
-	root := treeWorkspaces[0].(map[string]interface{})
+	root := treeWorkspaces[0].(map[string]any)
 	if got := root["kind"]; got != "group" {
 		t.Fatalf("expected root kind group, got %v", got)
 	}
-	children, ok := root["children"].([]interface{})
+	children, ok := root["children"].([]any)
 	if !ok || len(children) != 1 {
 		t.Fatalf("expected group to contain one child, got %#v", root["children"])
 	}

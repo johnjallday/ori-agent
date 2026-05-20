@@ -162,7 +162,7 @@ func TestWorkspaceEntryAgentNameUsesConfiguredEntryAgent(t *testing.T) {
 			{Name: "Trip Planning Manager", NodeID: "trip-manager-node", EntryPoint: true},
 			{Name: "Trip Planner", NodeID: "trip-planner-node"},
 		},
-		SharedData: map[string]interface{}{},
+		SharedData: map[string]any{},
 	}
 
 	if err := ws.SetEntryAgentName("Trip Planning Manager"); err != nil {

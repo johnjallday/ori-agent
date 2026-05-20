@@ -91,7 +91,7 @@ func (t taskHandlerToolStub) Definition() toolapi.ToolDefinition {
 	return toolapi.ToolDefinition{
 		Name:        t.name,
 		Description: "test tool",
-		Parameters:  map[string]interface{}{"type": "object"},
+		Parameters:  map[string]any{"type": "object"},
 	}
 }
 
@@ -109,7 +109,7 @@ func (t *taskHandlerToolFunc) Definition() toolapi.ToolDefinition {
 	return toolapi.ToolDefinition{
 		Name:        t.name,
 		Description: "test tool",
-		Parameters:  map[string]interface{}{"type": "object"},
+		Parameters:  map[string]any{"type": "object"},
 	}
 }
 

@@ -21,16 +21,16 @@ const (
 
 // Notification represents a user-facing notification
 type Notification struct {
-	ID          string                 `json:"id"`
-	Title       string                 `json:"title"`
-	Message     string                 `json:"message"`
-	Priority    NotificationPriority   `json:"priority"`
-	WorkspaceID string                 `json:"workspace_id,omitempty"`
-	AgentName   string                 `json:"agent_name,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Read        bool                   `json:"read"`
-	ActionURL   string                 `json:"action_url,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty"`
+	ID          string               `json:"id"`
+	Title       string               `json:"title"`
+	Message     string               `json:"message"`
+	Priority    NotificationPriority `json:"priority"`
+	WorkspaceID string               `json:"workspace_id,omitempty"`
+	AgentName   string               `json:"agent_name,omitempty"`
+	Timestamp   time.Time            `json:"timestamp"`
+	Read        bool                 `json:"read"`
+	ActionURL   string               `json:"action_url,omitempty"`
+	Data        map[string]any       `json:"data,omitempty"`
 }
 
 // NotificationChannel is a channel for delivering notifications
@@ -377,7 +377,7 @@ func generateNotificationID() string {
 }
 
 // Stats returns notification service statistics
-func (ns *NotificationService) Stats() map[string]interface{} {
+func (ns *NotificationService) Stats() map[string]any {
 	ns.mu.RLock()
 	defer ns.mu.RUnlock()
 
@@ -393,7 +393,7 @@ func (ns *NotificationService) Stats() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_notifications":  totalNotifications,
 		"unread_notifications": unreadNotifications,
 		"active_channels":      len(ns.channels),

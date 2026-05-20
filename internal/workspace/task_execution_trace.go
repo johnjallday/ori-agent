@@ -108,7 +108,7 @@ func buildTaskExecutionTraceEntry(event Event) (TaskExecutionTrace, bool) {
 	case EventTaskProgress:
 		entry.Status = "progress"
 		entry.Title = "Progress update"
-		if progress, ok := data["progress"].(map[string]interface{}); ok {
+		if progress, ok := data["progress"].(map[string]any); ok {
 			entry.Summary = taskExecutionTraceDataString(progress, "current_step")
 		}
 		if entry.Summary == "" {
@@ -170,7 +170,7 @@ func taskExecutionTraceEventTaskID(event Event) string {
 	return taskExecutionTraceDataString(event.Data, "task_id")
 }
 
-func taskExecutionTraceDataString(data map[string]interface{}, key string) string {
+func taskExecutionTraceDataString(data map[string]any, key string) string {
 	if len(data) == 0 {
 		return ""
 	}
@@ -181,7 +181,7 @@ func taskExecutionTraceDataString(data map[string]interface{}, key string) strin
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func taskExecutionTraceDataBool(data map[string]interface{}, key string) bool {
+func taskExecutionTraceDataBool(data map[string]any, key string) bool {
 	if len(data) == 0 {
 		return false
 	}
@@ -195,7 +195,7 @@ func taskExecutionTraceDataBool(data map[string]interface{}, key string) bool {
 	}
 }
 
-func taskExecutionTraceDataStringified(value interface{}, maxLength int) string {
+func taskExecutionTraceDataStringified(value any, maxLength int) string {
 	if value == nil {
 		return ""
 	}

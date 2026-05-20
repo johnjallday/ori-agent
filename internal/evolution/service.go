@@ -38,7 +38,7 @@ type AssistantProgressStore interface {
 }
 
 type ActivityLogger interface {
-	LogActivity(agentName string, eventType types.ActivityEventType, details map[string]interface{}, user string) error
+	LogActivity(agentName string, eventType types.ActivityEventType, details map[string]any, user string) error
 }
 
 type Config struct {
@@ -203,7 +203,7 @@ func (s *Service) SelectPath(agentName string, requestedPath types.AgentPath) er
 		return err
 	}
 
-	s.logActivity(agentName, types.ActivityEventEvolutionPath, map[string]interface{}{
+	s.logActivity(agentName, types.ActivityEventEvolutionPath, map[string]any{
 		"path":     string(path),
 		"old_path": string(previousPath),
 	})
@@ -360,14 +360,14 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		if source == "" {
 			source = "manual"
 		}
-		s.logActivity(agentName, types.ActivityEventEvolutionFeed, map[string]interface{}{
+		s.logActivity(agentName, types.ActivityEventEvolutionFeed, map[string]any{
 			"source":     source,
 			"awarded_xp": awardXP,
 			"feed_count": feedCount,
 		})
 	}
 	if previousStage != newStage {
-		s.logActivity(agentName, types.ActivityEventEvolutionStage, map[string]interface{}{
+		s.logActivity(agentName, types.ActivityEventEvolutionStage, map[string]any{
 			"old_stage": string(previousStage),
 			"new_stage": string(newStage),
 			"old_level": previousLevel,
@@ -378,7 +378,7 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 	return nil
 }
 
-func (s *Service) logActivity(agentName string, eventType types.ActivityEventType, details map[string]interface{}) {
+func (s *Service) logActivity(agentName string, eventType types.ActivityEventType, details map[string]any) {
 	if s == nil || s.activityLogger == nil {
 		return
 	}

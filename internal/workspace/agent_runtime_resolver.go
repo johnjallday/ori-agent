@@ -35,7 +35,7 @@ type ResolvedSkill struct {
 	DisallowedTools    []string
 	RequiredMCPServers []string
 	PlanningProfile    bool
-	Config             map[string]interface{}
+	Config             map[string]any
 	Model              string
 	Color              string
 	Enabled            bool
@@ -244,7 +244,7 @@ func synthesizeFilesystemBinding(bindings []WorkspaceMCPBinding, ws *Workspace) 
 		ServerName: "filesystem",
 		Alias:      "workspace_filesystem",
 		Enabled:    true,
-		Scope: map[string]interface{}{
+		Scope: map[string]any{
 			"roots": roots,
 		},
 		CreatedAt: now,
@@ -352,7 +352,7 @@ func ParseRuntimeMCPServerName(name string) (workspaceID, serverName, bindingID 
 	return workspaceID, serverName, bindingID, true
 }
 
-func extractFilesystemRoots(scope map[string]interface{}) []string {
+func extractFilesystemRoots(scope map[string]any) []string {
 	if len(scope) == 0 {
 		return nil
 	}
@@ -366,7 +366,7 @@ func extractFilesystemRoots(scope map[string]interface{}) []string {
 	switch typed := raw.(type) {
 	case []string:
 		roots = append(roots, typed...)
-	case []interface{}:
+	case []any:
 		for _, value := range typed {
 			text, ok := value.(string)
 			if ok {
@@ -456,7 +456,7 @@ func cloneServerConfig(src mcp.ServerConfig) mcp.ServerConfig {
 	return cloned
 }
 
-func applyWorkspaceBindingRuntimeConfig(runtimeConfig *mcp.ServerConfig, config map[string]interface{}) {
+func applyWorkspaceBindingRuntimeConfig(runtimeConfig *mcp.ServerConfig, config map[string]any) {
 	if runtimeConfig == nil || len(config) == 0 {
 		return
 	}
@@ -480,7 +480,7 @@ func applyWorkspaceBindingRuntimeConfig(runtimeConfig *mcp.ServerConfig, config 
 	}
 }
 
-func stringFromConfigValue(value interface{}) (string, bool) {
+func stringFromConfigValue(value any) (string, bool) {
 	text, ok := value.(string)
 	if !ok {
 		return "", false
@@ -492,7 +492,7 @@ func stringFromConfigValue(value interface{}) (string, bool) {
 	return text, true
 }
 
-func stringSliceFromConfigValue(value interface{}) ([]string, bool) {
+func stringSliceFromConfigValue(value any) ([]string, bool) {
 	switch typed := value.(type) {
 	case []string:
 		out := make([]string, 0, len(typed))
@@ -503,7 +503,7 @@ func stringSliceFromConfigValue(value interface{}) ([]string, bool) {
 			}
 		}
 		return out, len(out) > 0
-	case []interface{}:
+	case []any:
 		out := make([]string, 0, len(typed))
 		for _, raw := range typed {
 			item, ok := raw.(string)
@@ -521,8 +521,8 @@ func stringSliceFromConfigValue(value interface{}) ([]string, bool) {
 	}
 }
 
-func stringMapFromConfigValue(value interface{}) (map[string]string, bool) {
-	rawMap, ok := value.(map[string]interface{})
+func stringMapFromConfigValue(value any) (map[string]string, bool) {
+	rawMap, ok := value.(map[string]any)
 	if !ok || len(rawMap) == 0 {
 		return nil, false
 	}

@@ -61,7 +61,7 @@ func TestHandler_UploadFile(t *testing.T) {
 		t.Errorf("expected status 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	if resp["message"] != "File uploaded successfully" {
@@ -139,7 +139,7 @@ func TestHandler_ListFiles(t *testing.T) {
 		t.Errorf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))
@@ -161,7 +161,7 @@ func TestHandler_ListFiles_Empty(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rr.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))
@@ -281,7 +281,7 @@ func TestHandler_ValidateLinks(t *testing.T) {
 		t.Errorf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))

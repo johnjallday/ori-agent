@@ -121,7 +121,7 @@ func (h *Handler) handleListWorkflows(w http.ResponseWriter) {
 
 	workflows := h.workflowManager.ListWorkflows()
 
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"workflows": workflows,
 		"count":     len(workflows),
 	}); err != nil {
@@ -175,7 +175,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Created custom workflow", logger.Fields{"id": workflow.ID, "name": workflow.Name, "node_count": len(workflow.Nodes)})
 
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":      workflow.ID,
 		"name":    workflow.Name,
 		"message": "Workflow created successfully",
@@ -345,7 +345,7 @@ func (h *Handler) handleImportWorkflow(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":            importedWorkflow.ID,
 		"name":          importedWorkflow.Name,
 		"original_name": originalName,

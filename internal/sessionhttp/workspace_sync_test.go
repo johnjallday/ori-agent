@@ -68,7 +68,7 @@ func TestHandleWorkspaceSyncStatusAndLocateMissingWorkspaceFolder(t *testing.T) 
 		t.Fatalf("expected last known path %q, got %q", originalPath, status.Orphaned[0].Path)
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]any{
 		"locate": []map[string]string{
 			{
 				"id":   workspaceID,
@@ -88,7 +88,7 @@ func TestHandleWorkspaceSyncStatusAndLocateMissingWorkspaceFolder(t *testing.T) 
 		t.Fatalf("expected 200 for sync apply, got %d: %s", syncW.Code, syncW.Body.String())
 	}
 
-	var syncResp map[string]interface{}
+	var syncResp map[string]any
 	if err := json.Unmarshal(syncW.Body.Bytes(), &syncResp); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestUpdateManagedWorkspaceReferencesCompactsStaleImportedPath(t *testing.T)
 			ServerName: "filesystem",
 			Alias:      "workspace-files",
 			Enabled:    true,
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"roots": []string{stalePath},
 			},
 		},
@@ -245,7 +245,7 @@ func TestHandleWorkspaceSyncStatusSkipsImportedWorkspaceFolders(t *testing.T) {
 		t.Fatalf("create import dir: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]any{
 		"path": importDir,
 	})
 	if err != nil {
@@ -296,7 +296,7 @@ func TestHandleWorkspaceSyncImportPreservesDiskWorkspaceMetadata(t *testing.T) {
 		Kind:        "workspace",
 		Description: "Loaded from workspace.json",
 		FolderSlug:  "disk-workspace",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"source": "disk",
 		},
 		DirectoryReferences: []agentworkspace.DirectoryReference{
@@ -315,7 +315,7 @@ func TestHandleWorkspaceSyncImportPreservesDiskWorkspaceMetadata(t *testing.T) {
 				ServerName: "filesystem",
 				Alias:      "workspace-files",
 				Enabled:    true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"roots": []string{folderPath},
 				},
 				CreatedAt: now,
@@ -330,7 +330,7 @@ func TestHandleWorkspaceSyncImportPreservesDiskWorkspaceMetadata(t *testing.T) {
 		t.Fatalf("Save disk workspace: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]any{
 		"import": []string{"disk-ws-1"},
 	})
 	if err != nil {
@@ -486,7 +486,7 @@ func TestHandleWorkspaceSyncRecreateMissingWorkspaceFolder(t *testing.T) {
 		t.Fatalf("RemoveAll workspace folder: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]any{
 		"recreate": []string{workspaceID},
 	})
 	if err != nil {
@@ -501,7 +501,7 @@ func TestHandleWorkspaceSyncRecreateMissingWorkspaceFolder(t *testing.T) {
 		t.Fatalf("expected 200 for sync recreate, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode recreate response: %v", err)
 	}

@@ -18,7 +18,7 @@ func TestHTTPHandler_ListAgentSnapshots(t *testing.T) {
 		Name:   "Snap",
 		Status: StatusActive,
 		Agents: []string{"Manager", "Helper"},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 	}

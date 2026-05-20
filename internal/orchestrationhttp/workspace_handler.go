@@ -77,7 +77,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 
 		settings := workspacesettings.Extract(ws.SharedData)
 		// Build response with workspace data
-		response := map[string]interface{}{
+		response := map[string]any{
 			"id":                                    ws.ID,
 			"name":                                  ws.Name,
 			"description":                           ws.Description,
@@ -142,7 +142,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"workspaces": workspaces,
 			"count":      len(workspaces),
 		})
@@ -159,7 +159,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 
 	// Load summaries for all workspaces
 	ctx := context.Background()
-	summaries := make([]map[string]interface{}, 0, len(ids))
+	summaries := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		ws, err := wh.workspaceStore.Get(id)
 		if err != nil {
@@ -190,7 +190,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		summaries = append(summaries, summary)
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"workspaces": summaries,
 		"count":      len(summaries),
 	})
@@ -199,10 +199,10 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 // handleCreateWorkspace creates a new workspace
 func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string                 `json:"name"`
-		Description string                 `json:"description"`
-		Agents      []string               `json:"participating_agents"`
-		InitialData map[string]interface{} `json:"initial_context"`
+		Name        string         `json:"name"`
+		Description string         `json:"description"`
+		Agents      []string       `json:"participating_agents"`
+		InitialData map[string]any `json:"initial_context"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -248,7 +248,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 			workspace.EventWorkspaceCreated,
 			ws.ID,
 			"api",
-			map[string]interface{}{
+			map[string]any{
 				"name":        req.Name,
 				"description": req.Description,
 				"agents":      req.Agents,
@@ -258,7 +258,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 	}
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"workspace_id": ws.ID,
 		"status":       ws.Status,
 		"created_at":   ws.CreatedAt,
@@ -316,7 +316,7 @@ func (wh *WorkspaceHandler) handleUpdateWorkspace(w http.ResponseWriter, r *http
 			workspace.EventWorkspaceUpdated,
 			ws.ID,
 			"api",
-			map[string]interface{}{
+			map[string]any{
 				"name":        ws.Name,
 				"description": ws.Description,
 			},
@@ -324,7 +324,7 @@ func (wh *WorkspaceHandler) handleUpdateWorkspace(w http.ResponseWriter, r *http
 		wh.eventBus.Publish(event)
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"id":          ws.ID,
 		"name":        ws.Name,
 		"description": ws.Description,
@@ -348,7 +348,7 @@ func (wh *WorkspaceHandler) handleDeleteWorkspace(w http.ResponseWriter, r *http
 
 	logger.Info("Deleted workspace", logger.Fields{"workspace_id": wsID})
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Workspace deleted successfully",
 	})
@@ -426,7 +426,7 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 			workspace.EventWorkspaceUpdated,
 			req.WorkspaceID,
 			"api",
-			map[string]interface{}{
+			map[string]any{
 				"action": "agent_added",
 				"agent":  req.AgentName,
 			},
@@ -435,7 +435,7 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 	}
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Agent added successfully",
 		"agent":   req.AgentName,
@@ -487,7 +487,7 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 			workspace.EventWorkspaceUpdated,
 			workspaceID,
 			"api",
-			map[string]interface{}{
+			map[string]any{
 				"action": "agent_removed",
 				"agent":  agentName,
 			},
@@ -496,7 +496,7 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 	}
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Agent removed successfully",
 		"agent":   agentName,
@@ -571,7 +571,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Layout saved successfully",
 	}); encErr != nil {
@@ -630,7 +630,7 @@ func (wh *WorkspaceHandler) ActivateHandler(w http.ResponseWriter, r *http.Reque
 		"total_directories":   len(ws.DirectoryReferences),
 	})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":             true,
 		"workspace_id":        wsID,
 		"directories_watched": watched,

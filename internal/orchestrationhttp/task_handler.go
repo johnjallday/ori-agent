@@ -298,7 +298,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		tasks := ws.Tasks
 		stats := ws.GetTaskStats()
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"tasks": tasks,
 			"stats": stats,
 			"count": len(tasks),
@@ -309,7 +309,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	if agentName != "" {
 		// List tasks for agent
 		tasks := th.communicator.ListTasksForAgent(agentName)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"tasks": tasks,
 			"count": len(tasks),
 		})
@@ -467,7 +467,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 			Type:        workspace.EventTaskCreated,
 			WorkspaceID: createdTask.WorkspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"task_id":     createdTask.ID,
 				"description": createdTask.Description,
 				"to":          createdTask.To,
@@ -475,7 +475,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 			},
 			Metadata: map[string]string{},
 		})
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, createdTask.WorkspaceID, "task.create", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, createdTask.WorkspaceID, "task.create", map[string]any{
 			"task_id": createdTask.ID,
 		}))
 	}
@@ -493,7 +493,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task":    createdTask,
 	})
@@ -508,7 +508,7 @@ type taskUpdateRequest struct {
 	Description            *string                        `json:"description"`
 	Details                *string                        `json:"details"`
 	Priority               *int                           `json:"priority"`
-	Context                map[string]interface{}         `json:"context"`
+	Context                map[string]any                 `json:"context"`
 	To                     *string                        `json:"to"`
 	AssignedNodeID         *string                        `json:"assigned_node_id"`
 	InputTaskIDs           []string                       `json:"input_task_ids"`
@@ -564,7 +564,7 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	}
 	if req.Context != nil {
 		if task.Context == nil {
-			task.Context = map[string]interface{}{}
+			task.Context = map[string]any{}
 		}
 		for key, value := range req.Context {
 			if value == nil {
@@ -621,7 +621,7 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.KanbanColumnID != nil {
 		val := strings.TrimSpace(*req.KanbanColumnID)
 		if task.Context == nil {
-			task.Context = map[string]interface{}{}
+			task.Context = map[string]any{}
 		}
 		if val == "" {
 			delete(task.Context, "kanban_column_id")
@@ -632,7 +632,7 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	}
 	if req.KanbanLabels != nil {
 		if task.Context == nil {
-			task.Context = map[string]interface{}{}
+			task.Context = map[string]any{}
 		}
 		if len(req.KanbanLabels) == 0 {
 			delete(task.Context, "kanban_labels")
@@ -644,7 +644,7 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.KanbanDueDate != nil {
 		val := strings.TrimSpace(*req.KanbanDueDate)
 		if task.Context == nil {
-			task.Context = map[string]interface{}{}
+			task.Context = map[string]any{}
 		}
 		if val == "" {
 			delete(task.Context, "kanban_due_date")
@@ -734,8 +734,8 @@ func (th *TaskHandler) calculateNextRun(task *workspace.Task) *time.Time {
 }
 
 // buildTaskUpdateEventData builds the event data for a task update
-func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule *workspace.ScheduleConfig) map[string]interface{} {
-	eventData := map[string]interface{}{
+func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule *workspace.ScheduleConfig) map[string]any {
+	eventData := map[string]any{
 		"task_id":     req.TaskID,
 		"update_type": "task_update",
 	}
@@ -940,7 +940,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			th.eventBus.Publish(workspace.Event{
 				Type:        workspace.EventTaskAssigned,
 				WorkspaceID: task.WorkspaceID,
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"task_id": req.TaskID,
 					"to":      *req.To,
 				},
@@ -1021,19 +1021,19 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 				Type:        workspace.EventTaskDeleted,
 				WorkspaceID: workspaceID,
 				Source:      "api",
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"task_id": taskID,
 				},
 				Metadata: map[string]string{},
 			})
-			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, workspaceID, "task.delete", map[string]interface{}{
+			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, workspaceID, "task.delete", map[string]any{
 				"task_id": taskID,
 			}))
 		}
 
 		logger.Info("Deleted task", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})
 		w.WriteHeader(http.StatusOK)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"message": "Task deleted successfully",
 			"task_id": taskID,
@@ -1050,7 +1050,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 
 	logger.Info("Deleted task", logger.Fields{"task_id": taskID})
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Task deleted successfully",
 		"task_id": taskID,
@@ -1219,7 +1219,7 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 	logger.Info("Cancelled task manually", logger.Fields{"task_id": taskID, "workspace_id": task.WorkspaceID})
 
 	if th.eventBus != nil {
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, task.WorkspaceID, "task.cancel", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, task.WorkspaceID, "task.cancel", map[string]any{
 			"task_id": taskID,
 			"status":  workspace.TaskStatusCancelled,
 		}))
@@ -1227,7 +1227,7 @@ func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) 
 
 	updatedTask, _ := ws.GetTask(taskID)
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task":    updatedTask,
 	})
@@ -1275,9 +1275,9 @@ func incompleteSubtaskLabels(subtasks []workspace.Task) []string {
 
 func recordManualCompletion(task *workspace.Task, req completeTaskRequest, completedAt time.Time) {
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
-	record := map[string]interface{}{
+	record := map[string]any{
 		"force":        req.Force,
 		"completed_at": completedAt.UTC().Format(time.RFC3339),
 	}
@@ -1366,7 +1366,7 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 		th.eventBus.Publish(workspace.Event{
 			Type:        workspace.EventTaskCompleted,
 			WorkspaceID: task.WorkspaceID,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"task_id": taskID,
 				"manual":  true,
 			},
@@ -1376,7 +1376,7 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	// Return updated task
 	updatedTask, _ := ws.GetTask(taskID)
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task":    updatedTask,
 	})
@@ -1498,7 +1498,7 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		switch req.Format {
 		case "json":
 			// Pretty-print JSON
-			var obj interface{}
+			var obj any
 			if err := json.Unmarshal([]byte(task.Result), &obj); err != nil {
 				// If not valid JSON, treat as plain text
 				formattedData = []byte(task.Result)
@@ -1534,7 +1534,7 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 	})
 
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":   true,
 		"message":   "Result saved successfully",
 		"file_path": finalPath,
@@ -1590,7 +1590,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
 		entry := task.ExecutionHistory[historyIndex]
 		w.WriteHeader(http.StatusOK)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success":           true,
 			"task_id":           task.ID,
 			"history_index":     historyIndex,
@@ -1606,7 +1606,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		}
 		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
 		w.WriteHeader(http.StatusAccepted)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"message": "Task re-run started",
 			"task_id": task.ID,
@@ -1650,7 +1650,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		if validation.ValidationStatus != workspace.TaskValidationPassed {
 			th.publishOutputContractReviewEvent(ws.ID, task.ID, action, validation)
 			w.WriteHeader(http.StatusBadRequest)
-			orihttp.WriteJSON(w, map[string]interface{}{
+			orihttp.WriteJSON(w, map[string]any{
 				"success":           false,
 				"validation_result": validation,
 				"message":           "Edited result does not match the output contract.",
@@ -1695,7 +1695,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task":    updatedTask,
 	})
@@ -1705,7 +1705,7 @@ func (th *TaskHandler) publishOutputContractReviewEvent(workspaceID, taskID, act
 	if th.eventBus == nil {
 		return
 	}
-	data := map[string]interface{}{
+	data := map[string]any{
 		"task_id": taskID,
 		"action":  "review_action",
 		"review":  strings.TrimSpace(action),
@@ -1968,7 +1968,7 @@ func (th *TaskHandler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Req
 			th.eventBus.Publish(workspace.Event{
 				Type:        workspace.EventWorkspaceUpdated,
 				WorkspaceID: workspaceID,
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"action":        "bulk_delete_tasks",
 					"deleted_count": len(taskIDs),
 				},
@@ -1981,7 +1981,7 @@ func (th *TaskHandler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Req
 		"failed_count":  failedCount,
 	})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":       true,
 		"message":       "Bulk delete completed",
 		"success_count": successCount,
@@ -2049,12 +2049,12 @@ func (th *TaskHandler) handleFilePaths(w http.ResponseWriter, r *http.Request) {
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			if ws.Tasks[i].Context == nil {
-				ws.Tasks[i].Context = map[string]interface{}{}
+				ws.Tasks[i].Context = map[string]any{}
 			}
 
 			// Get existing file paths and merge with new ones
 			var existingPaths []string
-			if existing, ok := ws.Tasks[i].Context["file_paths"].([]interface{}); ok {
+			if existing, ok := ws.Tasks[i].Context["file_paths"].([]any); ok {
 				for _, ep := range existing {
 					if s, ok := ep.(string); ok {
 						existingPaths = append(existingPaths, s)
@@ -2097,14 +2097,14 @@ func (th *TaskHandler) handleFilePaths(w http.ResponseWriter, r *http.Request) {
 		th.eventBus.Publish(workspace.Event{
 			Type:        workspace.EventWorkspaceUpdated,
 			WorkspaceID: task.WorkspaceID,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"task_id":    taskID,
 				"file_paths": validPaths,
 			},
 		})
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success":     true,
 		"task_id":     taskID,
 		"valid_paths": validPaths,

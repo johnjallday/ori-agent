@@ -220,7 +220,7 @@ func (s *Server) GetTools() []Tool {
 }
 
 // CallTool calls a tool on the MCP server
-func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (*ToolCallResult, error) {
+func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolCallResult, error) {
 	s.mu.RLock()
 	conn := s.conn
 	s.mu.RUnlock()

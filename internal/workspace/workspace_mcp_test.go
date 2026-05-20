@@ -9,11 +9,11 @@ func TestWorkspaceMCPBindingLifecycle(t *testing.T) {
 		ID:         "binding-1",
 		ServerName: "filesystem",
 		Enabled:    true,
-		Scope: map[string]interface{}{
+		Scope: map[string]any{
 			"roots": []string{"/tmp/repo"},
 		},
-		Config: map[string]interface{}{
-			"env": map[string]interface{}{
+		Config: map[string]any{
+			"env": map[string]any{
 				"ORI_SCOPE": "workspace",
 			},
 		},

@@ -62,7 +62,7 @@ func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
 		run.ID,
 		ArtifactFile,
 		ArtifactInline([]byte(result)),
-		ArtifactMetadata(map[string]interface{}{
+		ArtifactMetadata(map[string]any{
 			"role":     oriAgentTaskResultRole,
 			"executor": string(ExecutorKindOriAgent),
 		}),

@@ -188,13 +188,13 @@ func cloneSkillBinding(binding WorkspaceSkillBinding) WorkspaceSkillBinding {
 	if len(binding.Config) > 0 {
 		data, err := json.Marshal(binding.Config)
 		if err != nil {
-			cp.Config = make(map[string]interface{}, len(binding.Config))
+			cp.Config = make(map[string]any, len(binding.Config))
 			for k, v := range binding.Config {
 				cp.Config[k] = v
 			}
 			return cp
 		}
-		var out map[string]interface{}
+		var out map[string]any
 		if err := json.Unmarshal(data, &out); err == nil {
 			cp.Config = out
 		}

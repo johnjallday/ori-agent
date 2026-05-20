@@ -73,7 +73,7 @@ func setupTestServer(t *testing.T) *TestServer {
 }
 
 // Helper: Make HTTP request and return response
-func (ts *TestServer) doRequest(t *testing.T, method, path string, body interface{}) *httptest.ResponseRecorder {
+func (ts *TestServer) doRequest(t *testing.T, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var reqBody []byte
@@ -118,7 +118,7 @@ func (ts *TestServer) doRequest(t *testing.T, method, path string, body interfac
 }
 
 // Helper: Decode JSON response
-func decodeResponse(t *testing.T, rr *httptest.ResponseRecorder, v interface{}) {
+func decodeResponse(t *testing.T, rr *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.NewDecoder(rr.Body).Decode(v); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
@@ -137,7 +137,7 @@ func assertStatus(t *testing.T, rr *httptest.ResponseRecorder, expected int) {
 func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) {
 	t.Helper()
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"name":         name,
 		"type":         agentType,
 		"role":         "general",
@@ -157,7 +157,7 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"name":             "restricted-web-agent",
 		"type":             "tool-calling",
 		"model":            "gpt-4o-mini",
@@ -169,7 +169,7 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 
 	rr = ts.doRequest(t, http.MethodGet, "/api/agents?name=restricted-web-agent", nil)
 	assertStatus(t, rr, http.StatusOK)
-	var detail map[string]interface{}
+	var detail map[string]any
 	decodeResponse(t, rr, &detail)
 	if got, ok := detail["allow_web_search"].(bool); !ok || got {
 		t.Fatalf("expected allow_web_search=false in agent detail response, got %#v", detail["allow_web_search"])
@@ -177,7 +177,7 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 
 	rr = ts.doRequest(t, http.MethodGet, "/api/agents/restricted-web-agent/detail", nil)
 	assertStatus(t, rr, http.StatusOK)
-	var dashboardDetail map[string]interface{}
+	var dashboardDetail map[string]any
 	decodeResponse(t, rr, &dashboardDetail)
 	if got, ok := dashboardDetail["allow_web_search"].(bool); !ok || got {
 		t.Fatalf("expected allow_web_search=false in dashboard detail response, got %#v", dashboardDetail["allow_web_search"])
@@ -188,7 +188,7 @@ func TestCreateAgent_WithCodexReasoningEffort(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"name":             "codex-reasoning-agent",
 		"type":             "research",
 		"llm_provider":     "codex",
@@ -210,7 +210,7 @@ func TestCreateAgent_WithCodexReasoningEffort(t *testing.T) {
 	rr = ts.doRequest(t, http.MethodGet, "/api/agents/codex-reasoning-agent/detail", nil)
 	assertStatus(t, rr, http.StatusOK)
 
-	var detail map[string]interface{}
+	var detail map[string]any
 	decodeResponse(t, rr, &detail)
 	if got := detail["reasoning_effort"]; got != "xhigh" {
 		t.Fatalf("expected reasoning_effort xhigh in detail response, got %#v", got)
@@ -221,7 +221,7 @@ func TestCreateAgent_WithInvalidReasoningEffort(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"name":             "invalid-reasoning-agent",
 		"type":             "research",
 		"llm_provider":     "codex",
@@ -267,7 +267,7 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Agents []map[string]interface{} `json:"agents"`
+			Agents []map[string]any `json:"agents"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -298,7 +298,7 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/lifecycle-agent/detail", nil)
 		assertStatus(t, rr, http.StatusOK)
 
-		var agent map[string]interface{}
+		var agent map[string]any
 		decodeResponse(t, rr, &agent)
 
 		// Verify all expected fields present
@@ -310,7 +310,7 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 			t.Error("Expected statistics in detail response")
 		}
 
-		metadata, ok := agent["metadata"].(map[string]interface{})
+		metadata, ok := agent["metadata"].(map[string]any)
 		if !ok {
 			t.Fatal("Expected metadata in detail response")
 		}
@@ -322,10 +322,10 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 
 	// Step 4: Update agent metadata
 	t.Run("UpdateAgentMetadata", func(t *testing.T) {
-		updateBody := map[string]interface{}{
+		updateBody := map[string]any{
 			"description": "Updated description",
 			"tags":        []string{"test", "updated"},
-			"routing_profile": map[string]interface{}{
+			"routing_profile": map[string]any{
 				"match_phrases":    []string{"open my latest reaper project"},
 				"example_requests": []string{"render stems from yesterday's session"},
 				"domains":          []string{"reaper", "audio"},
@@ -339,14 +339,14 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 
 		// Verify update
 		rr = ts.doRequest(t, http.MethodGet, "/api/agents/lifecycle-agent/detail", nil)
-		var agent map[string]interface{}
+		var agent map[string]any
 		decodeResponse(t, rr, &agent)
 
-		metadata := agent["metadata"].(map[string]interface{})
+		metadata := agent["metadata"].(map[string]any)
 		if metadata["description"] != "Updated description" {
 			t.Errorf("Description not updated, got %v", metadata["description"])
 		}
-		routingProfile, ok := metadata["routing_profile"].(map[string]interface{})
+		routingProfile, ok := metadata["routing_profile"].(map[string]any)
 		if !ok {
 			t.Fatal("Expected routing_profile in metadata response")
 		}
@@ -373,10 +373,10 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 
 		// Verify statistics updated
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/lifecycle-agent/detail", nil)
-		var agent map[string]interface{}
+		var agent map[string]any
 		decodeResponse(t, rr, &agent)
 
-		stats := agent["statistics"].(map[string]interface{})
+		stats := agent["statistics"].(map[string]any)
 		if stats["message_count"].(float64) != 1 {
 			t.Errorf("Expected message_count 1, got %v", stats["message_count"])
 		}
@@ -394,7 +394,7 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		// Verify agent no longer in list
 		rr = ts.doRequest(t, http.MethodGet, "/api/agents/dashboard/list", nil)
 		var response struct {
-			Agents []map[string]interface{} `json:"agents"`
+			Agents []map[string]any `json:"agents"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -421,7 +421,7 @@ func TestDashboardListFiltering(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Agents []map[string]interface{} `json:"agents"`
+			Agents []map[string]any `json:"agents"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -463,7 +463,7 @@ func TestDashboardListFiltering(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Agents []map[string]interface{} `json:"agents"`
+			Agents []map[string]any `json:"agents"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -488,7 +488,7 @@ func TestDashboardListFiltering(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Agents []map[string]interface{} `json:"agents"`
+			Agents []map[string]any `json:"agents"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -509,7 +509,7 @@ func TestErrorHandling(t *testing.T) {
 	defer ts.cleanup()
 
 	t.Run("CreateAgentWithoutName", func(t *testing.T) {
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"type":         "tool-calling",
 			"llm_provider": "openai",
 			"model":        "gpt-4o",
@@ -525,7 +525,7 @@ func TestErrorHandling(t *testing.T) {
 	})
 
 	t.Run("UpdateNonExistentAgent", func(t *testing.T) {
-		updateBody := map[string]interface{}{
+		updateBody := map[string]any{
 			"description": "New description",
 		}
 
@@ -545,7 +545,7 @@ func TestErrorHandling(t *testing.T) {
 	t.Run("InvalidStatusValue", func(t *testing.T) {
 		createTestAgent(t, ts, "status-test", "tool-calling")
 
-		updateBody := map[string]interface{}{
+		updateBody := map[string]any{
 			"status": "invalid-status",
 		}
 
@@ -611,7 +611,7 @@ func TestBackwardCompatibility(t *testing.T) {
 	t.Run("LoadAgentWithoutStatistics", func(t *testing.T) {
 		// Create agent using the API (which will have minimal fields)
 		// This simulates a legacy agent
-		reqBody := map[string]interface{}{
+		reqBody := map[string]any{
 			"name":  "legacy-agent",
 			"type":  "tool-calling",
 			"role":  "general",
@@ -644,7 +644,7 @@ func TestBackwardCompatibility(t *testing.T) {
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/legacy-agent/detail", nil)
 		assertStatus(t, rr, http.StatusOK)
 
-		var agent map[string]interface{}
+		var agent map[string]any
 		decodeResponse(t, rr, &agent)
 
 		// Metadata might be nil or empty object
@@ -718,8 +718,8 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Agent     string                 `json:"agent"`
-			Evolution map[string]interface{} `json:"evolution"`
+			Agent     string         `json:"agent"`
+			Evolution map[string]any `json:"evolution"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -735,15 +735,15 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 	})
 
 	t.Run("FeedSuccess", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]any{
 			"content": "project-specific context",
 			"source":  "manual",
 		})
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Success   bool                   `json:"success"`
-			Evolution map[string]interface{} `json:"evolution"`
+			Success   bool           `json:"success"`
+			Evolution map[string]any `json:"evolution"`
 		}
 		decodeResponse(t, rr, &response)
 
@@ -757,21 +757,21 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 	})
 
 	t.Run("FeedValidationFailure", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]any{
 			"content": "   ",
 		})
 		assertStatus(t, rr, http.StatusBadRequest)
 	})
 
 	t.Run("FeedMissingAgent", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPost, "/api/agents/missing-agent/feed", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/missing-agent/feed", map[string]any{
 			"content": "context",
 		})
 		assertStatus(t, rr, http.StatusNotFound)
 	})
 
 	t.Run("SetPathGatedBeforeLearner", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]any{
 			"path": "coder",
 		})
 		assertStatus(t, rr, http.StatusBadRequest)
@@ -789,13 +789,13 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 			t.Fatalf("failed to persist learner stage for test: %v", err)
 		}
 
-		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]any{
 			"path": "coder",
 		})
 		assertStatus(t, rr, http.StatusOK)
 
 		var response struct {
-			Evolution map[string]interface{} `json:"evolution"`
+			Evolution map[string]any `json:"evolution"`
 		}
 		decodeResponse(t, rr, &response)
 		if response.Evolution["path"] != "coder" {
@@ -822,7 +822,7 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 		assertStatus(t, rr, http.StatusOK)
 
 		var payload struct {
-			Suggestions []map[string]interface{} `json:"suggestions"`
+			Suggestions []map[string]any `json:"suggestions"`
 		}
 		decodeResponse(t, rr, &payload)
 
@@ -857,7 +857,7 @@ func TestReservedSystemAssistantProtection(t *testing.T) {
 	})
 
 	t.Run("RenameReservedAssistantBlocked", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+systemAssistantAgentName, map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+systemAssistantAgentName, map[string]any{
 			"name": "Assistant Renamed",
 		})
 		assertStatus(t, rr, http.StatusBadRequest)
@@ -865,7 +865,7 @@ func TestReservedSystemAssistantProtection(t *testing.T) {
 
 	t.Run("RenameIntoReservedAssistantBlocked", func(t *testing.T) {
 		createTestAgent(t, ts, "rename-source-agent", "general")
-		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]interface{}{
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]any{
 			"name": systemAssistantAgentName,
 		})
 		assertStatus(t, rr, http.StatusBadRequest)
@@ -881,7 +881,7 @@ func TestPutAgentSwitchIsDeprecated(t *testing.T) {
 	rr := ts.doRequest(t, http.MethodPut, "/api/agents?name=reviewer", nil)
 	assertStatus(t, rr, http.StatusOK)
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	decodeResponse(t, rr, &payload)
 	if payload["deprecated"] != true {
 		t.Fatalf("expected deprecated=true, got %#v", payload["deprecated"])

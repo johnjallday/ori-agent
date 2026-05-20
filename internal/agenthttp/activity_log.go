@@ -34,7 +34,7 @@ func NewActivityLogger(logDir string) (*ActivityLogger, error) {
 }
 
 // LogActivity logs an activity event for an agent
-func (al *ActivityLogger) LogActivity(agentName string, eventType types.ActivityEventType, details map[string]interface{}, user string) error {
+func (al *ActivityLogger) LogActivity(agentName string, eventType types.ActivityEventType, details map[string]any, user string) error {
 	al.mu.Lock()
 	defer al.mu.Unlock()
 
@@ -261,7 +261,7 @@ func FormatLogEntry(log types.ActivityLog) types.ActivityLogEntry {
 
 		// Add details about what was updated
 		if log.Details != nil {
-			if fields, ok := log.Details["fields"].([]interface{}); ok && len(fields) > 0 {
+			if fields, ok := log.Details["fields"].([]any); ok && len(fields) > 0 {
 				entry.Description += fmt.Sprintf(" (%v)", fields)
 			}
 		}

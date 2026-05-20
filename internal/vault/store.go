@@ -2163,7 +2163,7 @@ func (s *Store) writeAuditBestEffort(ctx context.Context, event AuditEvent) {
 }
 
 func scanRecordRow(rows interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (recordRow, error) {
 	var row recordRow
 	if err := rows.Scan(

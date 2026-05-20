@@ -55,7 +55,7 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		writeRunError(w, err)
 		return
 	}
-	orihttp.Success(w, map[string]interface{}{"runs": runs})
+	orihttp.Success(w, map[string]any{"runs": runs})
 }
 
 func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (h *Handler) ListArtifacts(w http.ResponseWriter, r *http.Request) {
 		writeRunError(w, err)
 		return
 	}
-	orihttp.Success(w, map[string]interface{}{"artifacts": artifacts})
+	orihttp.Success(w, map[string]any{"artifacts": artifacts})
 }
 
 func (h *Handler) ListTrace(w http.ResponseWriter, r *http.Request) {

@@ -117,19 +117,19 @@ func BuildTaskOutputSchemaPrompt(schema *TaskOutputSchema) string {
 }
 
 // ValidateTaskStructuredOutput validates a JSON result against a task output schema.
-func ValidateTaskStructuredOutput(schema *TaskOutputSchema, result string) (map[string]interface{}, error) {
+func ValidateTaskStructuredOutput(schema *TaskOutputSchema, result string) (map[string]any, error) {
 	normalized := NormalizeTaskOutputSchema(schema)
 	if normalized == nil {
 		return nil, nil
 	}
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(result)))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("result must be valid JSON object: %w", err)
 	}
-	var trailing interface{}
+	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, fmt.Errorf("result must contain only one JSON object")
 	}
@@ -168,7 +168,7 @@ func ValidateTaskStructuredOutput(schema *TaskOutputSchema, result string) (map[
 	return payload, nil
 }
 
-func validateTaskOutputFieldType(field TaskOutputField, value interface{}) error {
+func validateTaskOutputFieldType(field TaskOutputField, value any) error {
 	switch field.Type {
 	case "string":
 		if _, ok := value.(string); !ok {
@@ -191,18 +191,18 @@ func validateTaskOutputFieldType(field TaskOutputField, value interface{}) error
 			return fmt.Errorf("field %q must be a boolean", field.Name)
 		}
 	case "object":
-		if _, ok := value.(map[string]interface{}); !ok {
+		if _, ok := value.(map[string]any); !ok {
 			return fmt.Errorf("field %q must be an object", field.Name)
 		}
 	case "array":
-		if _, ok := value.([]interface{}); !ok {
+		if _, ok := value.([]any); !ok {
 			return fmt.Errorf("field %q must be an array", field.Name)
 		}
 	}
 	return nil
 }
 
-func isJSONNumberLike(value interface{}) bool {
+func isJSONNumberLike(value any) bool {
 	switch value.(type) {
 	case json.Number:
 		return true

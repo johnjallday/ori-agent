@@ -100,7 +100,7 @@ func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalType(t *testing.T
 			"workspace-espana": {
 				ID:         "workspace-espana",
 				Name:       "Espana",
-				SharedData: map[string]interface{}{"entry_agent_name": "Espana Manager"},
+				SharedData: map[string]any{"entry_agent_name": "Espana Manager"},
 				AgentInstances: []workspace.AgentInstance{
 					{ID: "agent-1", Name: "Espana Manager", EntryPoint: true},
 				},
@@ -146,7 +146,7 @@ func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
 			"workspace-spain": {
 				ID:         "workspace-spain",
 				Name:       "Spain",
-				SharedData: map[string]interface{}{"entry_agent_name": "Spain Manager"},
+				SharedData: map[string]any{"entry_agent_name": "Spain Manager"},
 				AgentInstances: []workspace.AgentInstance{
 					{ID: "agent-1", Name: "Spain Manager", EntryPoint: true},
 				},

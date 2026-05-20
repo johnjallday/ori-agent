@@ -194,17 +194,17 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 
 // CollaborativeTask represents a task requiring multiple agents
 type CollaborativeTask struct {
-	Goal          string                 `json:"goal"`
-	RequiredRoles []types.AgentRole      `json:"required_roles"`
-	Context       map[string]interface{} `json:"context"`
-	MaxDuration   time.Duration          `json:"max_duration"`
+	Goal          string            `json:"goal"`
+	RequiredRoles []types.AgentRole `json:"required_roles"`
+	Context       map[string]any    `json:"context"`
+	MaxDuration   time.Duration     `json:"max_duration"`
 }
 
 // CollaborativeResult represents the result of a collaborative task
 type CollaborativeResult struct {
 	WorkspaceID          string                      `json:"workspace_id"`
 	FinalOutput          string                      `json:"final_output"`
-	SubResults           map[string]interface{}      `json:"sub_results"`
+	SubResults           map[string]any              `json:"sub_results"`
 	Duration             time.Duration               `json:"duration"`
 	Status               string                      `json:"status"`
 	Error                string                      `json:"error,omitempty"`
@@ -259,7 +259,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 		return &CollaborativeResult{
 			WorkspaceID: ws.ID,
 			FinalOutput: "",
-			SubResults:  make(map[string]interface{}),
+			SubResults:  make(map[string]any),
 			Duration:    time.Since(startTime),
 			Status:      "failed",
 			Error:       err.Error(),
@@ -362,7 +362,7 @@ func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) 
 func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("📚 Executing research workflow", logger.Fields{})
 
-	subResults := make(map[string]interface{})
+	subResults := make(map[string]any)
 
 	// Find researcher agent
 	var researcherAgent string
@@ -413,7 +413,7 @@ func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task Col
 func (o *Orchestrator) executeParallelWorkflow(ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("⚡ Executing parallel workflow with agents", logger.Fields{"agent": len(agents)})
 
-	subResults := make(map[string]interface{})
+	subResults := make(map[string]any)
 	taskIDs := make([]string, 0)
 
 	// Use first agent as coordinator

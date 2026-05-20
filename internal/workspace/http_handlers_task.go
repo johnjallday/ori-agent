@@ -77,7 +77,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		To:                     req.To,
 		Description:            req.Description,
 		Priority:               req.Priority,
-		Context:                make(map[string]interface{}),
+		Context:                make(map[string]any),
 		ParentTaskID:           req.ParentTaskID,
 		SubtaskIndex:           req.SubtaskIndex,
 		OrchestrationMode:      NormalizeTaskOrchestrationMode(req.OrchestrationMode),
@@ -111,7 +111,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task created successfully",
 		"task_id":   task.ID,
 		"task":      task,
@@ -244,7 +244,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task updated successfully",
 		"task_id":   taskID,
 		"workspace": workspaceID,
@@ -292,7 +292,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task deleted successfully",
 		"task_id":   taskID,
 		"workspace": workspaceID,
@@ -352,7 +352,7 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task execution started",
 		"task_id":   taskID,
 		"workspace": workspaceID,
@@ -475,7 +475,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 			logger.Error("Failed to persist workspace after manual append", logger.Fields{"workspace_id": ws.ID, "err": err})
 		}
 		resolved, _ := BuildFinalPath(storeNode.BaseDir, storeFilePath)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"appended_rows": appendedRows,
 			"file_path":     resolved,
 			"label":         filepath.Base(storeFilePath),
@@ -503,7 +503,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"appended_rows": appendedRows,
 		"file_path":     filePath,
 		"label":         filepath.Base(filePath),
