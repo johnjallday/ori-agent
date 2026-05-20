@@ -848,6 +848,28 @@ func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store
 		workspaceID = ws.ID
 	}
 	mirrorLatestTaskValidationResult(workspaceID, task, validation)
+	logger.Info("Task output contract validation outcome", logger.Fields{
+		"action":            "validation_outcome",
+		"workspace_id":      workspaceID,
+		"task_id":           task.ID,
+		"run_id":            latestTaskExecutionRunID(task),
+		"validation_status": validation.ValidationStatus,
+		"contract_version":  validation.ContractVersion,
+		"validation_errors": len(validation.Errors),
+		"raw_output_stored": false,
+	})
+	logger.Info("Task output contract storage outcome", logger.Fields{
+		"action":            "storage_gating_outcome",
+		"workspace_id":      workspaceID,
+		"task_id":           task.ID,
+		"run_id":            latestTaskExecutionRunID(task),
+		"validation_status": validation.ValidationStatus,
+		"storage_status":    validation.StorageStatus,
+		"contract_version":  validation.ContractVersion,
+		"validation_errors": len(validation.Errors),
+		"raw_output_stored": false,
+		"manual_approval":   validation.ManualApproval != nil,
+	})
 	if ws != nil {
 		_ = ws.MutateTask(task.ID, func(t *Task) error {
 			ApplyTaskValidationResultToLatestExecution(t, validation)
@@ -869,6 +891,13 @@ func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store
 			"error":        err,
 		})
 	}
+}
+
+func latestTaskExecutionRunID(task *Task) string {
+	if task == nil || len(task.ExecutionHistory) == 0 {
+		return ""
+	}
+	return task.ExecutionHistory[len(task.ExecutionHistory)-1].RunID
 }
 
 // autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store

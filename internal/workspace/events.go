@@ -34,6 +34,7 @@ const (
 	EventTaskHeartbeat  EventType = "task.heartbeat"   // Task is still alive (periodic during long phases)
 	EventTaskBlocked    EventType = "task.blocked"     // Task needs user input before it can continue
 	EventTaskResumed    EventType = "task.resumed"     // Task resumed after user input
+	EventTaskOutput     EventType = "task.output"      // Task output contract/storage lifecycle event
 
 	// Scheduled task events
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully

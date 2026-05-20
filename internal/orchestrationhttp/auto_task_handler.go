@@ -47,6 +47,7 @@ type AutoTaskHandler struct {
 	workspaceStore workspace.Store
 	llmFactory     *llm.Factory
 	configManager  *config.Manager
+	eventBus       *workspace.EventBus
 }
 
 // NewAutoTaskHandler creates a new AutoTaskHandler
@@ -55,12 +56,18 @@ func NewAutoTaskHandler(
 	workspaceStore workspace.Store,
 	llmFactory *llm.Factory,
 	configManager *config.Manager,
+	eventBus ...*workspace.EventBus,
 ) *AutoTaskHandler {
+	var bus *workspace.EventBus
+	if len(eventBus) > 0 {
+		bus = eventBus[0]
+	}
 	return &AutoTaskHandler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
 		llmFactory:     llmFactory,
 		configManager:  configManager,
+		eventBus:       bus,
 	}
 }
 
@@ -142,6 +149,18 @@ type OutputContractSuggestionRequest struct {
 type OutputContractSuggestionResponse struct {
 	OutputContract *OutputContractConfig `json:"output_contract" jsonschema_description:"Suggested CSV output contract"`
 	Reasoning      string                `json:"reasoning" jsonschema_description:"Brief explanation of why these columns were selected"`
+}
+
+type OutputContractTelemetryRequest struct {
+	WorkspaceID      string `json:"workspace_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	Action           string `json:"action"`
+	Source           string `json:"source,omitempty"`
+	ColumnCount      int    `json:"column_count,omitempty"`
+	ContractVersion  string `json:"contract_version,omitempty"`
+	ValidationStatus string `json:"validation_status,omitempty"`
+	StorageStatus    string `json:"storage_status,omitempty"`
+	ErrorCount       int    `json:"error_count,omitempty"`
 }
 
 // Schema for structured output - generated at init time
@@ -236,6 +255,52 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 	}
 
 	orihttp.WriteJSON(w, suggestion)
+}
+
+// HandleOutputContractTelemetry handles non-raw output-contract UX telemetry.
+func (h *AutoTaskHandler) HandleOutputContractTelemetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	var req OutputContractTelemetryRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.TaskID = strings.TrimSpace(req.TaskID)
+	req.Action = normalizeOutputContractTelemetryAction(req.Action)
+	if req.WorkspaceID == "" {
+		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
+		return
+	}
+	if req.Action == "" {
+		_ = orihttp.RespondBadRequest(w, "valid action is required")
+		return
+	}
+	if h.eventBus != nil {
+		h.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, req.WorkspaceID, "task.output_contract", map[string]interface{}{
+			"task_id":           req.TaskID,
+			"action":            req.Action,
+			"source":            strings.TrimSpace(req.Source),
+			"column_count":      req.ColumnCount,
+			"contract_version":  strings.TrimSpace(req.ContractVersion),
+			"validation_status": strings.TrimSpace(req.ValidationStatus),
+			"storage_status":    strings.TrimSpace(req.StorageStatus),
+			"error_count":       req.ErrorCount,
+		}))
+	}
+	orihttp.WriteJSON(w, map[string]interface{}{"success": true})
+}
+
+func normalizeOutputContractTelemetryAction(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "suggestion_accepted", "suggestion_edited", "suggestion_regenerated", "suggestion_failed",
+		"validation_outcome", "review_action", "storage_gating_outcome":
+		return strings.ToLower(strings.TrimSpace(action))
+	default:
+		return ""
+	}
 }
 
 func (h *AutoTaskHandler) suggestOutputContract(

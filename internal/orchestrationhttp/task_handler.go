@@ -1587,6 +1587,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 
 	switch action {
 	case "inspect", "copy_raw":
+		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
 		entry := task.ExecutionHistory[historyIndex]
 		w.WriteHeader(http.StatusOK)
 		orihttp.WriteJSON(w, map[string]interface{}{
@@ -1603,6 +1604,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to re-run task", err)
 			return
 		}
+		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
 		w.WriteHeader(http.StatusAccepted)
 		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
@@ -1628,6 +1630,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 				validation.ValidatedAt = &now
 				t.ExecutionHistory[historyIndex].Validation = validation
 				workspace.MirrorTaskValidationResult(fresh.ID, t.ID, t.ExecutionHistory[historyIndex].RunID, validation)
+				th.publishOutputContractReviewEvent(fresh.ID, t.ID, action, validation)
 				return nil
 			})
 		}); err != nil {
@@ -1645,6 +1648,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		}
 		validation, csvData := workspace.ValidateTaskOutputContractResult(task, draft)
 		if validation.ValidationStatus != workspace.TaskValidationPassed {
+			th.publishOutputContractReviewEvent(ws.ID, task.ID, action, validation)
 			w.WriteHeader(http.StatusBadRequest)
 			orihttp.WriteJSON(w, map[string]interface{}{
 				"success":           false,
@@ -1673,6 +1677,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 				}
 				t.ExecutionHistory[historyIndex].Validation = validation
 				workspace.MirrorTaskValidationResult(fresh.ID, t.ID, t.ExecutionHistory[historyIndex].RunID, validation)
+				th.publishOutputContractReviewEvent(fresh.ID, t.ID, action, validation)
 				return nil
 			})
 		}); err != nil {
@@ -1694,6 +1699,24 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		"success": true,
 		"task":    updatedTask,
 	})
+}
+
+func (th *TaskHandler) publishOutputContractReviewEvent(workspaceID, taskID, action string, validation *workspace.TaskValidationResult) {
+	if th.eventBus == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"task_id": taskID,
+		"action":  "review_action",
+		"review":  strings.TrimSpace(action),
+	}
+	if validation != nil {
+		data["validation_status"] = validation.ValidationStatus
+		data["storage_status"] = validation.StorageStatus
+		data["contract_version"] = validation.ContractVersion
+		data["error_count"] = len(validation.Errors)
+	}
+	th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, workspaceID, "task.output_contract", data))
 }
 
 func resolveTaskReviewHistoryIndex(task *workspace.Task, requested *int) int {

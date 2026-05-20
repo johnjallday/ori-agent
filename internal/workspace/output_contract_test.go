@@ -65,6 +65,39 @@ func TestValidateTaskOutputContractResult_CSVPassesCaseInsensitiveColumns(t *tes
 	}
 }
 
+func TestValidateTaskOutputContractResult_UsesRunSnapshotContractVersion(t *testing.T) {
+	authoredTask := contractedPollenTask(t.TempDir())
+	runSnapshot := *authoredTask
+	contractSnapshot := *authoredTask.OutputContract
+	contractSnapshot.Columns = append([]TaskOutputContractColumn(nil), authoredTask.OutputContract.Columns...)
+	runSnapshot.OutputContract = &contractSnapshot
+	pinnedVersion := runSnapshot.OutputContract.Version
+
+	authoredTask.OutputContract = NormalizeTaskOutputContract(&TaskOutputContract{
+		Source: "manual",
+		Columns: []TaskOutputContractColumn{
+			{Name: "date", Type: "date", Required: true},
+			{Name: "location", Type: "string", Required: true},
+			{Name: "pollen_count", Type: "number", Required: true},
+			{Name: "severity", Type: "string"},
+		},
+	})
+
+	validation, csvData := ValidateTaskOutputContractResult(&runSnapshot, `{"date":"2026-05-20","location":"NYC","pollen_count":8,"high":true}`)
+	if validation.ValidationStatus != TaskValidationPassed {
+		t.Fatalf("validation status = %q, want passed: %+v", validation.ValidationStatus, validation.Errors)
+	}
+	if validation.ContractVersion != pinnedVersion {
+		t.Fatalf("validation version = %q, want pinned %q", validation.ContractVersion, pinnedVersion)
+	}
+	if validation.ContractVersion == authoredTask.OutputContract.Version {
+		t.Fatalf("expected edited authored contract to have a different version from pinned run version")
+	}
+	if csvData != "date,location,pollen_count,high\n2026-05-20,NYC,8,true" {
+		t.Fatalf("expected snapshot columns in csv, got %q", csvData)
+	}
+}
+
 func TestValidateTaskOutputContractResult_NeedsReviewForMissingAndTypeErrors(t *testing.T) {
 	task := contractedPollenTask(t.TempDir())
 	validation, csvData := ValidateTaskOutputContractResult(task, `{"date":"not-a-date","location":"NYC","high":"maybe"}`)

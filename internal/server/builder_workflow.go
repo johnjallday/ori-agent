@@ -274,7 +274,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	b.orchestrationHandler = handler
 
 	// Initialize auto-task handler for natural language task creation
-	b.autoTaskHandler = orchestrationhttp.NewAutoTaskHandler(b.st, b.workspaceStore, b.llmFactory, b.configManager)
+	b.autoTaskHandler = orchestrationhttp.NewAutoTaskHandler(b.st, b.workspaceStore, b.llmFactory, b.configManager, b.eventBus)
 
 	// Store orchestrator for chat handler injection
 	b.chatHandler.SetOrchestrator(orch)

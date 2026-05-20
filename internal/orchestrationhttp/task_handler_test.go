@@ -1130,9 +1130,11 @@ func TestHandleTaskOutputReview_Dismiss(t *testing.T) {
 		t.Fatalf("failed to save workspace: %v", err)
 	}
 
+	eventBus := workspace.NewEventBus(10, 10)
 	handler := &TaskHandler{
 		workspaceStore: store,
 		communicator:   agentcomm.NewCommunicator(store),
+		eventBus:       eventBus,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-review-dismiss/review", strings.NewReader(`{"action":"dismiss","history_index":0}`))
@@ -1155,6 +1157,87 @@ func TestHandleTaskOutputReview_Dismiss(t *testing.T) {
 	validation := updatedTask.ExecutionHistory[0].Validation
 	if validation == nil || validation.ValidationStatus != workspace.TaskValidationDismissed {
 		t.Fatalf("validation = %+v, want dismissed", validation)
+	}
+	events := eventBus.GetHistory(func(event workspace.Event) bool {
+		return event.Type == workspace.EventTaskOutput
+	}, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected one review telemetry event, got %d", len(events))
+	}
+	if events[0].Data["action"] != "review_action" || events[0].Data["review"] != "dismiss" {
+		t.Fatalf("unexpected review telemetry: %#v", events[0].Data)
+	}
+}
+
+func TestHandleTaskOutputReview_RerunStartsTaskExecution(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
+	ws.ID = "workspace-review-rerun"
+
+	task := workspace.Task{
+		ID:          "task-review-rerun",
+		WorkspaceID: ws.ID,
+		Description: "Report status",
+		To:          "Ori",
+		Status:      workspace.TaskStatusCompleted,
+		Result:      `{"date":"bad"}`,
+		ExecutionHistory: []workspace.TaskExecution{
+			{
+				TaskID:     "task-review-rerun",
+				ExecutedAt: time.Now(),
+				Status:     "success",
+				Result:     `{"date":"bad"}`,
+				Validation: &workspace.TaskValidationResult{
+					ValidationStatus: workspace.TaskValidationNeedsReview,
+					StorageStatus:    workspace.TaskStorageSkippedInvalid,
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	eventBus := workspace.NewEventBus(10, 20)
+	executor := &stubWorkspaceTaskExecutor{result: "Re-run completed successfully."}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+		taskHandler:    executor,
+		eventBus:       eventBus,
+		runningCancels: make(map[string]context.CancelFunc),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-review-rerun/review", strings.NewReader(`{"action":"rerun","history_index":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if executor.calls.Load() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if executor.calls.Load() == 0 {
+		t.Fatal("expected review re-run to start task execution")
+	}
+	events := eventBus.GetHistory(func(event workspace.Event) bool {
+		return event.Type == workspace.EventTaskOutput
+	}, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected one review telemetry event, got %d", len(events))
+	}
+	if events[0].Data["review"] != "rerun" {
+		t.Fatalf("expected rerun review telemetry, got %#v", events[0].Data)
 	}
 }
 

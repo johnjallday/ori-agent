@@ -43,6 +43,7 @@ class TaskModalController {
     this.outputContractSuggestionRequestKey = '';
     this.outputContractEdited = false;
     this.outputContractSource = 'manual';
+    this.outputContractEditTelemetrySent = false;
   }
 
   /**
@@ -3224,6 +3225,7 @@ class TaskModalController {
     (Array.isArray(columns) ? columns : []).forEach((column) => this.addOutputContractRow(column));
     this.outputContractEdited = false;
     this.outputContractSource = source === 'ai_suggested' || source === 'csv_header' ? source : 'manual';
+    this.outputContractEditTelemetrySent = false;
     this.updateOutputContractEmptyState();
     this.clearOutputContractError();
   }
@@ -3299,6 +3301,13 @@ class TaskModalController {
     this.outputContractEdited = true;
     this.outputContractSource = 'manual';
     this.setOutputContractStatus('');
+    if (!this.outputContractEditTelemetrySent) {
+      this.outputContractEditTelemetrySent = true;
+      this.trackOutputContractTelemetry('suggestion_edited', {
+        source: 'manual',
+        column_count: this.getOutputContractRows().filter((row) => row.name).length
+      });
+    }
   }
 
   setOutputContractStatus(message, tone = '') {
@@ -3359,6 +3368,10 @@ class TaskModalController {
     this.populateOutputContractRows(normalized.columns, normalized.source || 'ai_suggested');
     this.outputContractSuggestionRequestKey = key || '';
     this.setOutputContractStatus(cached ? 'Using the cached AI suggestion for this draft.' : 'AI suggestion applied.');
+    this.trackOutputContractTelemetry('suggestion_accepted', {
+      source: normalized.source || 'ai_suggested',
+      column_count: normalized.columns.length
+    });
     return true;
   }
 
@@ -3407,6 +3420,10 @@ class TaskModalController {
         this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
       }
       this.setOutputContractStatus('AI suggestion unavailable. You can edit these columns manually.', 'error');
+      this.trackOutputContractTelemetry('suggestion_failed', {
+        source: 'manual',
+        column_count: this.getOutputContractRows().filter((row) => row.name).length
+      });
     } finally {
       if (suggestButton) suggestButton.disabled = false;
       if (this.outputContractSuggestionRequestKey === key) {
@@ -3421,7 +3438,29 @@ class TaskModalController {
       return;
     }
     this.outputContractEdited = false;
+    this.trackOutputContractTelemetry('suggestion_regenerated', {
+      source: this.outputContractSource || 'manual',
+      column_count: this.getOutputContractRows().filter((row) => row.name).length
+    });
     await this.ensureOutputContractSuggestion({ force: true });
+  }
+
+  trackOutputContractTelemetry(action, extra = {}) {
+    const workspaceId = this.workspaceId || this.currentTask?.workspace_id || '';
+    if (!workspaceId || typeof fetch !== 'function') return;
+    const payload = {
+      workspace_id: workspaceId,
+      task_id: this.editingTaskId || this.currentTask?.id || '',
+      action,
+      ...extra
+    };
+    fetch('/api/orchestration/tasks/output-contract/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch((error) => {
+      console.debug('Output contract telemetry unavailable:', error);
+    });
   }
 
   suggestOutputContractColumns() {
@@ -4781,6 +4820,7 @@ class TaskModalController {
 }
 
 // Create global instance
+window.TaskModalController = TaskModalController;
 window.taskModalController = new TaskModalController();
 
 // Initialize when DOM is ready
