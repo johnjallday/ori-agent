@@ -134,6 +134,8 @@ app_state.json
 location.json
 mcp_registry.json
 mcp_servers.json
+mcp_search_cache.json
+workspace_allowlist.json
 
 # Agent-specific runtime files
 agents/*/agent_settings.json
