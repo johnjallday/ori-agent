@@ -308,3 +308,44 @@ func BootstrapOutputContractFromCSVHeader(ws *Workspace, task *Task) *TaskOutput
 		Columns: columns,
 	})
 }
+
+// ResolveTaskResultStorageOwner returns the task that owns result storage for
+// a single task or workflow parent. V1 workflow ownership defaults to the final
+// subtask ordered by SubtaskIndex, with CreatedAt/ID as deterministic ties.
+func ResolveTaskResultStorageOwner(ws *Workspace, task *Task) *Task {
+	if task == nil {
+		return nil
+	}
+	if ws == nil || strings.TrimSpace(task.ID) == "" {
+		clone := *task
+		return &clone
+	}
+
+	subtasks := ws.GetSubtasks(task.ID)
+	if len(subtasks) == 0 {
+		clone := *task
+		return &clone
+	}
+	sort.SliceStable(subtasks, func(i, j int) bool {
+		left := subtasks[i]
+		right := subtasks[j]
+		if left.SubtaskIndex != right.SubtaskIndex {
+			return left.SubtaskIndex < right.SubtaskIndex
+		}
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.Before(right.CreatedAt)
+		}
+		return left.ID < right.ID
+	})
+	owner := subtasks[len(subtasks)-1]
+	return &owner
+}
+
+// ResolveTaskResultStorageOwnerID returns the ID of ResolveTaskResultStorageOwner.
+func ResolveTaskResultStorageOwnerID(ws *Workspace, task *Task) string {
+	owner := ResolveTaskResultStorageOwner(ws, task)
+	if owner == nil {
+		return ""
+	}
+	return owner.ID
+}

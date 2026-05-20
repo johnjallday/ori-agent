@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTaskResultToCSV_UsesStructuredOutput(t *testing.T) {
@@ -99,5 +100,36 @@ func TestBootstrapOutputContractFromCSVHeader(t *testing.T) {
 	}
 	if contract.Columns[2].Name != "pollen_count" || contract.Columns[2].Type != "string" {
 		t.Fatalf("unexpected third column: %+v", contract.Columns[2])
+	}
+}
+
+func TestResolveTaskResultStorageOwner_DefaultsWorkflowToFinalStep(t *testing.T) {
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Workflow"})
+	ws.ID = "workspace-1"
+	parent := Task{ID: "parent", WorkspaceID: ws.ID, Description: "Workflow"}
+	first := Task{ID: "step-1", WorkspaceID: ws.ID, ParentTaskID: parent.ID, SubtaskIndex: 1, CreatedAt: time.Now().Add(-time.Minute)}
+	final := Task{ID: "step-2", WorkspaceID: ws.ID, ParentTaskID: parent.ID, SubtaskIndex: 2, CreatedAt: time.Now()}
+
+	if err := ws.AddTask(parent); err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if err := ws.AddTask(final); err != nil {
+		t.Fatalf("add final: %v", err)
+	}
+	if err := ws.AddTask(first); err != nil {
+		t.Fatalf("add first: %v", err)
+	}
+
+	owner := ResolveTaskResultStorageOwner(ws, &parent)
+	if owner == nil || owner.ID != final.ID {
+		t.Fatalf("owner = %+v, want final step", owner)
+	}
+	if got := ResolveTaskResultStorageOwnerID(ws, &parent); got != final.ID {
+		t.Fatalf("owner id = %q, want %q", got, final.ID)
+	}
+
+	single := Task{ID: "single", WorkspaceID: ws.ID}
+	if owner := ResolveTaskResultStorageOwner(ws, &single); owner == nil || owner.ID != single.ID {
+		t.Fatalf("single owner = %+v, want the task itself", owner)
 	}
 }

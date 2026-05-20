@@ -30,7 +30,7 @@ function formatKind(value) {
   return formatStatus(value);
 }
 
-function formatTaskOutputStatus(output) {
+export function formatTaskOutputStatus(output) {
   const validation = String(output?.validation_status || '').trim().toLowerCase();
   const storage = String(output?.storage_status || '').trim().toLowerCase();
   if (validation === 'dismissed') return 'Dismissed';

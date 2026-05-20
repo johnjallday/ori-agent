@@ -4791,6 +4791,11 @@ export class WorkspaceTaskPage {
     const contractColumnNames = contractColumns.map((column) => column.name);
     const tableEditor = this.renderReviewTableEditor(rawOutput, contractColumns);
     const rawHidden = tableEditor ? ' hidden' : '';
+    const currentContractVersion = String(sourceTask?.output_contract?.version || '').trim();
+    const runContractVersion = String(validation?.contract_version || '').trim();
+    const contractMismatchWarning = currentContractVersion && runContractVersion && currentContractVersion !== runContractVersion
+      ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The task now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
+      : '';
 
     return `
       <section class="workspace-task-review-panel" data-review-task-id="${this.escapeHtml(sourceTaskId)}" data-review-history-index="${this.escapeHtml(latest.index)}">
@@ -4800,6 +4805,7 @@ export class WorkspaceTaskPage {
             <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} held from CSV storage.</strong>
             <span>${contractColumnNames.length > 0 ? `Expected columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result must match the output contract before it can be appended.'}</span>
           </div>
+          ${contractMismatchWarning}
           <ul class="workspace-task-review-errors">${errorList}</ul>
           ${tableEditor}
           <label class="workspace-task-review-editor" data-review-raw-pane${rawHidden}>
