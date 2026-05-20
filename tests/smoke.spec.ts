@@ -381,6 +381,62 @@ test.describe('API Health', () => {
   });
 });
 
+test.describe('Task Output Contracts', () => {
+  test('opens append-to-CSV contract editor from task details', async ({ page, request }) => {
+    let workspaceId = '';
+    const workspaceResp = await request.post('/api/orchestration/workspace', {
+      data: {
+        name: `Playwright Output Contract ${Date.now()}`,
+        description: 'Temporary workspace for output contract smoke coverage'
+      }
+    });
+    expect(workspaceResp.ok()).toBeTruthy();
+    const workspaceData = await workspaceResp.json();
+    workspaceId = workspaceData.workspace_id;
+
+    try {
+      const taskResp = await request.post('/api/orchestration/tasks', {
+        data: {
+          workspace_id: workspaceId,
+          description: 'Track NYC pollen daily',
+          to: 'Ori',
+          result_storage: {
+            enabled: true,
+            file_path: `/tmp/ori-output-contract-${workspaceId}.csv`,
+            format: 'csv',
+            write_mode: 'append'
+          },
+          output_contract: {
+            source: 'manual',
+            columns: [
+              { name: 'date', type: 'date', required: true },
+              { name: 'location', type: 'string', required: true },
+              { name: 'pollen_count', type: 'number', required: true }
+            ]
+          }
+        }
+      });
+      expect(taskResp.ok()).toBeTruthy();
+      const taskData = await taskResp.json();
+      const taskId = taskData.task?.id;
+      expect(taskId).toBeTruthy();
+
+      await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
+      await expect(page.getByText('Result Storage', { exact: true })).toBeVisible();
+      await expect(page.getByText('Output contract: date, location, pollen_count')).toBeVisible();
+
+      await page.locator('[data-edit-field="result-storage"]').click();
+      await expect(page.locator('#taskModalOutputContractSection')).toBeVisible();
+      await expect(page.locator('#taskModalAutoSaveWriteMode')).toHaveValue('append');
+      await expect(page.locator('#taskModalOutputContractRows [data-output-contract-name]').first()).toHaveValue('date');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+});
+
 test.describe('Home Workspace Routing', () => {
   async function installWorkspaceAssistantMocks(
     page,
