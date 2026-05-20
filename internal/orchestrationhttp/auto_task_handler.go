@@ -143,6 +143,10 @@ type OutputContractSuggestionRequest struct {
 	ScheduleEnabled bool                 `json:"schedule_enabled"`
 	ScheduleName    string               `json:"schedule_name"`
 	ResultStorage   *ResultStorageConfig `json:"result_storage"`
+	// ResultSample is an optional excerpt of a prior task result. When present
+	// the model can ground its column suggestions in the concrete data the
+	// task actually produces instead of just guessing from title/details.
+	ResultSample string `json:"result_sample"`
 }
 
 // OutputContractSuggestionResponse is the AI-generated CSV output contract suggestion.
@@ -334,12 +338,18 @@ Rules:
 - Mark columns required only when a run should always provide them.
 - Do not include markdown fences or prose outside the JSON object.`
 
+	resultSample := strings.TrimSpace(req.ResultSample)
+	if len(resultSample) > 4000 {
+		resultSample = resultSample[:4000] + "\n...[truncated]"
+	}
 	userMessage := fmt.Sprintf(`Task title: %s
 Task details: %s
 Schedule enabled: %t
 Schedule name: %s
 Schedule JSON: %s
-Result storage JSON: %s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON))
+Result storage JSON: %s
+Sample result from a prior run (use this to derive concrete columns when available):
+%s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON), resultSample)
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

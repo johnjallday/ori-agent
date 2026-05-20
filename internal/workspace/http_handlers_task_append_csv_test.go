@@ -170,6 +170,57 @@ func TestHTTPHandler_AppendResultToCSV_UseStorageNotConfigured(t *testing.T) {
 	}
 }
 
+func TestHTTPHandler_UpdateTask_PersistsResultStorage(t *testing.T) {
+	store := NewInMemoryStore()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := &Workspace{
+		ID:     "ws-storage-patch",
+		Name:   "Demo",
+		Status: StatusActive,
+		Tasks:  []Task{{ID: "task-1", Description: "Allergy"}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	body := `{
+		"output_contract": {"source": "manual", "columns": [{"name": "date", "type": "date", "required": true}]},
+		"result_storage": {"enabled": true, "format": "csv", "write_mode": "append", "file_path": "/tmp/runs.csv"}
+	}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/ws-storage-patch/tasks/task-1",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.UpdateTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := store.Get("ws-storage-patch")
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	if len(updated.Tasks) != 1 {
+		t.Fatalf("task count=%d, want 1", len(updated.Tasks))
+	}
+	storage := updated.Tasks[0].ResultStorage
+	if storage == nil {
+		t.Fatalf("result_storage was not persisted")
+	}
+	if !storage.Enabled || storage.WriteMode != "append" || storage.Format != "csv" {
+		t.Fatalf("unexpected storage config: %+v", storage)
+	}
+	if storage.FilePath != "/tmp/runs.csv" {
+		t.Fatalf("file_path=%q, want /tmp/runs.csv", storage.FilePath)
+	}
+	contract := updated.Tasks[0].OutputContract
+	if contract == nil || len(contract.Columns) != 1 || contract.Columns[0].Name != "date" {
+		t.Fatalf("output_contract not persisted: %+v", contract)
+	}
+}
+
 func TestHTTPHandler_AppendResultToCSV_MissingCSV(t *testing.T) {
 	store := NewInMemoryStore()
 	handler := NewHTTPHandler(store, nil, nil)

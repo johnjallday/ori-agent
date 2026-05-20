@@ -142,20 +142,21 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 
 	var req struct {
-		Description            *string             `json:"description,omitempty"`
-		Details                *string             `json:"details,omitempty"`
-		To                     *string             `json:"to,omitempty"`
-		From                   *string             `json:"from,omitempty"`
-		InputTaskIDs           *[]string           `json:"input_task_ids,omitempty"`
-		AssignedNodeID         *string             `json:"assigned_node_id,omitempty"`
-		ParentTaskID           *string             `json:"parent_task_id,omitempty"`
-		SubtaskIndex           *int                `json:"subtask_index,omitempty"`
-		OrchestrationMode      *string             `json:"orchestration_mode,omitempty"`
-		ResultCombinationMode  *string             `json:"result_combination_mode,omitempty"`
-		CombinationInstruction *string             `json:"combination_instruction,omitempty"`
-		OutputSchema           *TaskOutputSchema   `json:"output_schema,omitempty"`
-		OutputContract         *TaskOutputContract `json:"output_contract,omitempty"`
-		TemplateRef            *TaskTemplateRef    `json:"template_ref,omitempty"`
+		Description            *string              `json:"description,omitempty"`
+		Details                *string              `json:"details,omitempty"`
+		To                     *string              `json:"to,omitempty"`
+		From                   *string              `json:"from,omitempty"`
+		InputTaskIDs           *[]string            `json:"input_task_ids,omitempty"`
+		AssignedNodeID         *string              `json:"assigned_node_id,omitempty"`
+		ParentTaskID           *string              `json:"parent_task_id,omitempty"`
+		SubtaskIndex           *int                 `json:"subtask_index,omitempty"`
+		OrchestrationMode      *string              `json:"orchestration_mode,omitempty"`
+		ResultCombinationMode  *string              `json:"result_combination_mode,omitempty"`
+		CombinationInstruction *string              `json:"combination_instruction,omitempty"`
+		OutputSchema           *TaskOutputSchema    `json:"output_schema,omitempty"`
+		OutputContract         *TaskOutputContract  `json:"output_contract,omitempty"`
+		ResultStorage          *ResultStorageConfig `json:"result_storage,omitempty"`
+		TemplateRef            *TaskTemplateRef     `json:"template_ref,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -216,6 +217,9 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				workspace.Tasks[i].OutputContract = NormalizeTaskOutputContract(req.OutputContract)
 			} else {
 				workspace.Tasks[i].OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &workspace.Tasks[i])
+			}
+			if req.ResultStorage != nil {
+				workspace.Tasks[i].ResultStorage = req.ResultStorage
 			}
 			if req.TemplateRef != nil {
 				workspace.Tasks[i].TemplateRef = req.TemplateRef

@@ -1018,6 +1018,8 @@ export class WorkspaceTaskPage {
       executionTraceCount: document.getElementById('workspace-task-execution-trace-count'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
+      automationColumns: document.getElementById('workspace-task-automation-columns'),
+      automationStorage: document.getElementById('workspace-task-automation-storage'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
       scheduleModal: document.getElementById('workspace-task-schedule-modal'),
       scheduleModalHeading: document.getElementById('workspace-task-schedule-heading'),
@@ -2956,17 +2958,11 @@ export class WorkspaceTaskPage {
       });
     }
 
+    // Result Storage moved into the Automation card; the per-task storage
+    // editor is now reachable from there. Keep the "Needs Review" hint here
+    // because it's a Task Brief signal (validation outcome), not a config
+    // concern that belongs alongside cadence/columns.
     const resultStorageTask = this.getTaskResultStorageTask();
-    items.push({
-      title: 'Result Storage',
-      value: this.describeTaskResultStorage(resultStorageTask?.result_storage, resultStorageTask),
-      full: true,
-      editable: true,
-      editField: 'result-storage',
-      editLabel: 'Edit result storage',
-      alwaysShowEdit: true
-    });
-
     const needsReviewCount = this.countTaskNeedsReviewRuns(resultStorageTask);
     if (needsReviewCount > 0) {
       items.push({
@@ -4035,6 +4031,27 @@ export class WorkspaceTaskPage {
         </div>
       </div>`;
 
+    const contractColumns = this.getResultContractColumns();
+
+    // Bottom CTA on the artifact card is just a small link routing to the
+    // Automation card, which owns the storage on/off toggle and column
+    // designer. The label adapts so the user knows what they'll see when
+    // they get there.
+    let bottomLinkLabel;
+    if (!appendCtx.configured) {
+      bottomLinkLabel = 'Set up CSV storage in Automation →';
+    } else if (contractColumns.length > 0) {
+      bottomLinkLabel = 'Edit output columns in Automation →';
+    } else {
+      bottomLinkLabel = 'Design columns from this result →';
+    }
+    const bottomCtaHtml = `
+      <div class="workspace-task-result-artifact-design-link">
+        <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
+          ${this.escapeHtml(bottomLinkLabel)}
+        </button>
+      </div>`;
+
     return `
       <section class="workspace-task-result-artifact" aria-label="CSV-ready task result">
         ${chipHtml}
@@ -4055,6 +4072,7 @@ export class WorkspaceTaskPage {
             ${appendButton}
           </div>
         </div>
+        ${bottomCtaHtml}
         ${chooserHtml}
         <div class="workspace-task-result-artifact-meta">
           <span>${this.escapeHtml(sourceLabel)}</span>
@@ -4070,6 +4088,102 @@ export class WorkspaceTaskPage {
         ${hiddenRows > 0 ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'} in CSV`)}</div>` : ''}
       </section>
     `;
+  }
+
+  // getResultContractColumns returns the saved output_contract columns for the
+  // task that owns result storage (the workflow's final step, or the task
+  // itself), normalized to a plain array.
+  getResultContractColumns() {
+    const owner = this.getTaskResultStorageTask();
+    const columns = owner?.output_contract?.columns;
+    return Array.isArray(columns) ? columns : [];
+  }
+
+  // renderResultContractBlock renders one of three states on the artifact card:
+  //   1. Saved contract + not editing -> "Columns: ... (Edit)" badge.
+  //   2. No contract + not editing  -> warning prompt with a Design columns CTA.
+  //   3. Editing                    -> inline column designer (name/type/required/desc rows).
+  renderResultContractBlock() {
+    const editing = Array.isArray(this.resultContractDraft);
+    const columns = this.getResultContractColumns();
+    if (!editing && columns.length > 0) {
+      const preview = columns
+        .map((column) => String(column?.name || '').trim())
+        .filter(Boolean)
+        .slice(0, 6)
+        .join(', ');
+      const overflow = columns.length > 6 ? `, +${columns.length - 6} more` : '';
+      return `
+        <div class="workspace-task-result-contract" data-state="view">
+          <div class="workspace-task-result-contract-summary">
+            <span class="workspace-task-page-mini-label">Columns</span>
+            <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
+          </div>
+          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit columns</button>
+        </div>`;
+    }
+    if (!editing) {
+      return `
+        <div class="workspace-task-result-contract" data-state="empty">
+          <div class="workspace-task-result-contract-warning">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <span>No CSV columns defined &mdash; Append will dump the full result into a single cell.</span>
+          </div>
+          <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-result-contract">Design columns</button>
+        </div>`;
+    }
+
+    const rowsHtml = this.resultContractDraft
+      .map((column, index) => this.renderResultContractRow(column, index))
+      .join('');
+    const saving = Boolean(this.resultContractSaving);
+    const suggesting = Boolean(this.resultContractSuggesting);
+
+    return `
+      <div class="workspace-task-result-contract" data-state="edit">
+        <div class="workspace-task-result-contract-header">
+          <div>
+            <div class="workspace-task-page-mini-label">Output contract</div>
+            <p class="workspace-task-result-contract-help">Define the CSV columns the agent should emit. Saving turns on Append mode so future runs are validated against these fields.</p>
+          </div>
+          <div class="workspace-task-result-contract-header-actions">
+            <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
+              <i class="bi bi-magic" aria-hidden="true"></i>
+              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Suggest from this result')}</span>
+            </button>
+          </div>
+        </div>
+        <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
+          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No columns yet. Add one or ask the system model to suggest.</div>'}
+        </div>
+        <div class="workspace-task-result-contract-row-add">
+          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add column</button>
+        </div>
+        <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
+        <div class="workspace-task-result-contract-actions">
+          <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save columns')}</button>
+        </div>
+      </div>`;
+  }
+
+  renderResultContractRow(column, index) {
+    const types = ['string', 'number', 'boolean', 'date'];
+    const optionsHtml = types
+      .map((type) => `<option value="${type}"${column?.type === type ? ' selected' : ''}>${type}</option>`)
+      .join('');
+    const required = column?.required !== false;
+    return `
+      <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
+        <input type="text" data-role="result-contract-name" placeholder="column_name" value="${this.escapeHtml(column?.name || '')}" aria-label="Column name" />
+        <select data-role="result-contract-type" aria-label="Column type">${optionsHtml}</select>
+        <label class="workspace-task-result-contract-required">
+          <input type="checkbox" data-role="result-contract-required"${required ? ' checked' : ''} />
+          <span>Required</span>
+        </label>
+        <input type="text" data-role="result-contract-description" placeholder="description" value="${this.escapeHtml(column?.description || '')}" aria-label="Column description" />
+        <button type="button" class="workspace-task-result-contract-remove" data-action="remove-result-contract-row" data-row-index="${index}" aria-label="Remove column">&times;</button>
+      </div>`;
   }
 
   // getAppendCSVContext returns the effective CSV-append storage for the task
@@ -4130,6 +4244,550 @@ export class WorkspaceTaskPage {
     root
       .querySelector('[data-action="edit-append-storage"]')
       ?.addEventListener('click', () => this.openTaskStorageEditor());
+    root
+      .querySelector('[data-action="design-output-columns-from-result"]')
+      ?.addEventListener('click', () => this.designOutputColumnsFromResult());
+  }
+
+  // bindAutomationColumnsActions wires events on the column-designer DOM
+  // inside the Automation card. Called by renderAutomationColumns whenever
+  // that container re-renders.
+  bindAutomationColumnsActions() {
+    const root = this.elements.automationColumns;
+    if (!root) return;
+    root
+      .querySelector('[data-action="edit-result-contract"]')
+      ?.addEventListener('click', () => this.startResultContractEdit());
+    root
+      .querySelector('[data-action="cancel-result-contract"]')
+      ?.addEventListener('click', () => this.cancelResultContractEdit());
+    root
+      .querySelector('[data-action="add-result-contract-row"]')
+      ?.addEventListener('click', () => this.addResultContractRow());
+    root
+      .querySelector('[data-action="suggest-result-contract"]')
+      ?.addEventListener('click', () => this.suggestResultContractColumns());
+    root
+      .querySelector('[data-action="save-result-contract"]')
+      ?.addEventListener('click', () => this.saveResultContractDraft());
+    root
+      .querySelectorAll('[data-action="remove-result-contract-row"]')
+      .forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-row-index') || '-1');
+          this.removeResultContractRow(idx);
+        });
+      });
+  }
+
+  // Read the live DOM rows back into the draft state so re-renders preserve
+  // user edits. The designer is render-on-state-change rather than render-on-
+  // input to keep focus stable while typing.
+  syncResultContractDraftFromDOM() {
+    if (!Array.isArray(this.resultContractDraft)) return;
+    const rows = this.elements.automationColumns?.querySelectorAll?.('[data-result-contract-row]');
+    if (!rows || rows.length === 0) return;
+    const next = [];
+    rows.forEach((row) => {
+      const name = row.querySelector('[data-role="result-contract-name"]')?.value?.trim() || '';
+      const type = row.querySelector('[data-role="result-contract-type"]')?.value || 'string';
+      const required = Boolean(row.querySelector('[data-role="result-contract-required"]')?.checked);
+      const description = row.querySelector('[data-role="result-contract-description"]')?.value?.trim() || '';
+      next.push({ name, type, required, description });
+    });
+    this.resultContractDraft = next;
+  }
+
+  startResultContractEdit() {
+    const existing = this.getResultContractColumns();
+    this.resultContractDraft = existing.length
+      ? existing.map((column) => ({
+        name: String(column?.name || ''),
+        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        required: column?.required !== false,
+        description: String(column?.description || ''),
+      }))
+      : [{ name: '', type: 'string', required: true, description: '' }];
+    this.resultContractSuggesting = false;
+    this.setResultContractError('');
+    this.refreshResultRender();
+  }
+
+  cancelResultContractEdit() {
+    this.resultContractDraft = null;
+    this.resultContractSuggesting = false;
+    this.resultContractSaving = false;
+    this.setResultContractError('');
+    this.refreshResultRender();
+  }
+
+  addResultContractRow() {
+    this.syncResultContractDraftFromDOM();
+    if (!Array.isArray(this.resultContractDraft)) {
+      this.resultContractDraft = [];
+    }
+    this.resultContractDraft.push({ name: '', type: 'string', required: true, description: '' });
+    this.refreshResultRender();
+  }
+
+  removeResultContractRow(index) {
+    this.syncResultContractDraftFromDOM();
+    if (!Array.isArray(this.resultContractDraft)) return;
+    if (index < 0 || index >= this.resultContractDraft.length) return;
+    this.resultContractDraft.splice(index, 1);
+    this.refreshResultRender();
+  }
+
+  setResultContractError(message) {
+    const error = this.elements.automationColumns?.querySelector?.('[data-role="result-contract-error"]');
+    if (!error) return;
+    if (!message) {
+      error.hidden = true;
+      error.textContent = '';
+      return;
+    }
+    error.hidden = false;
+    error.textContent = message;
+  }
+
+  // refreshResultRender re-runs the result-card render so a state change in
+  // the contract designer (rows added, suggestion applied, save complete)
+  // shows up immediately. Falls back to a full task reload if the card isn't
+  // available, which also re-fetches the latest task state.
+  // refreshResultRender re-renders the Automation columns sub-section after a
+  // designer state change. Falls back to a full data reload when the
+  // container is missing (which also re-fetches the latest task state).
+  refreshResultRender() {
+    if (typeof this.renderAutomationColumns === 'function' && this.elements.automationColumns) {
+      try {
+        this.renderAutomationColumns();
+        return;
+      } catch (error) {
+        console.warn('Failed to re-render Automation columns; falling back to data reload:', error);
+      }
+    }
+    void this.loadData();
+  }
+
+  // Get a trimmed sample of the current task result, used to ground the
+  // model's contract suggestions. The Result card "Design columns" link
+  // captures this before opening the designer so the suggestion request
+  // includes prior-run text instead of relying on title/details alone.
+  captureSuggestionSampleFromCurrentResult() {
+    this.lastSuggestionResultSample = this.getResultSampleForSuggestion();
+  }
+
+  // designOutputColumnsFromResult is the Result-card entrypoint. Always
+  // captures the visible result as the suggestion sample and scrolls the
+  // Automation card into view; only opens the designer when storage is
+  // already configured. When storage is off, the user lands on the
+  // Automation toggle and decides to opt in first — the same one-decision-
+  // at-a-time flow that motivated moving the checkbox here.
+  designOutputColumnsFromResult() {
+    this.captureSuggestionSampleFromCurrentResult();
+    if (this.elements.scheduleCard) {
+      this.elements.scheduleCard.hidden = false;
+      this.elements.scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    if (this.getAppendCSVContext().configured) {
+      this.startResultContractEdit();
+    }
+  }
+
+  // setCsvStorageEnabled drives the Automation card's storage checkbox.
+  // Checking flips append-mode storage on with sensible defaults and opens
+  // the column designer for the natural next step. Unchecking flips storage
+  // off while preserving file_path/store_node_id so re-enabling later
+  // doesn't lose the destination.
+  async setCsvStorageEnabled(checked, checkbox) {
+    if (this.automationStorageToggleBusy) return;
+    this.automationStorageToggleBusy = true;
+    if (checkbox) checkbox.disabled = true;
+
+    const owner = this.getTaskResultStorageTask();
+    const ownerId = owner?.id || this.taskId;
+    const existing = owner?.result_storage || {};
+    const nextStorage = {
+      enabled: Boolean(checked),
+      format: 'csv',
+      write_mode: checked ? 'append' : String(existing.write_mode || 'append'),
+      file_path: String(existing.file_path || ''),
+      store_node_id: String(existing.store_node_id || ''),
+    };
+
+    if (checked) {
+      this.captureSuggestionSampleFromCurrentResult();
+    }
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result_storage: nextStorage }),
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Could not update CSV storage (HTTP ${response.status})`);
+      }
+      this.notify('success', checked ? 'CSV storage enabled.' : 'CSV storage disabled.');
+      await this.loadData();
+      if (checked) {
+        // Auto-start the column designer so the next decision (what columns
+        // to emit) is right there. Suggest button uses the captured sample.
+        this.startResultContractEdit();
+      }
+    } catch (error) {
+      console.error('Failed to update CSV storage:', error);
+      this.notify('error', error?.message || 'Could not update CSV storage.');
+      if (checkbox) {
+        checkbox.checked = !checked;
+      }
+    } finally {
+      this.automationStorageToggleBusy = false;
+      if (checkbox) checkbox.disabled = false;
+    }
+  }
+
+  // renderAutomationColumns renders the columns sub-section into its
+  // dedicated container in the Automation card. Replaces the prior result-
+  // card surface for the same designer.
+  renderAutomationColumns() {
+    const container = this.elements.automationColumns;
+    if (!container) return;
+    if (!this.task) {
+      container.innerHTML = '';
+      return;
+    }
+    const ctx = this.getAppendCSVContext();
+    const busy = Boolean(this.automationStorageToggleBusy);
+    const toggleHtml = `
+      <label class="workspace-task-automation-storage-toggle">
+        <input type="checkbox" data-action="toggle-csv-storage"${ctx.configured ? ' checked' : ''}${busy ? ' disabled' : ''} />
+        <span>
+          <strong>Store each run of this task to CSV</strong>
+          <span class="workspace-task-automation-storage-help">Turns on Append mode so every run becomes a row in a shared CSV file.</span>
+        </span>
+      </label>`;
+    container.innerHTML = toggleHtml + (ctx.configured ? this.renderResultContractBlock() : '');
+    this.bindAutomationColumnsActions();
+    container
+      .querySelector('[data-action="toggle-csv-storage"]')
+      ?.addEventListener('change', (event) => {
+        const target = event?.target;
+        if (!target) return;
+        void this.setCsvStorageEnabled(target.checked, target);
+      });
+  }
+
+  // renderAutomationStorage renders the storage sub-section. When storage
+  // is off, it's just a short placeholder pointing back to the toggle above.
+  // When on, it shows an inline destination editor (radio + path/store-node
+  // inputs + Save) so the user can set where the CSV file lives without
+  // bouncing through the full storage modal.
+  renderAutomationStorage() {
+    const container = this.elements.automationStorage;
+    if (!container) return;
+    if (!this.task) {
+      container.innerHTML = '';
+      return;
+    }
+    const owner = this.getTaskResultStorageTask();
+    const storage = owner?.result_storage || {};
+    const enabled = Boolean(storage.enabled && String(storage.write_mode || '').toLowerCase() === 'append');
+
+    if (!enabled) {
+      container.innerHTML = `
+        <div class="workspace-task-automation-storage-block" data-state="off">
+          <div class="workspace-task-automation-storage-copy">
+            <div class="workspace-task-page-mini-label">Storage</div>
+            <div class="workspace-task-automation-storage-description">Not saving automatically. Turn on the toggle above to choose a destination.</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
+    const storeNodeId = String(storage.store_node_id || '').trim();
+    const filePath = String(storage.file_path || '').trim();
+    let target = 'default';
+    if (storeNodeId) target = 'store';
+    else if (filePath) target = 'custom';
+
+    const storeOptions = storeNodes
+      .map((node) => {
+        const id = String(node?.id || '').trim();
+        if (!id) return '';
+        const label = this.getStoreNodeDisplayLabel(id);
+        const selected = id === storeNodeId ? ' selected' : '';
+        return `<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(label)}</option>`;
+      })
+      .filter(Boolean)
+      .join('');
+    const saving = Boolean(this.automationStorageSaving);
+
+    container.innerHTML = `
+      <div class="workspace-task-automation-storage-block" data-state="on">
+        <div class="workspace-task-page-mini-label">Storage destination</div>
+        <div class="workspace-task-automation-storage-options" role="radiogroup" aria-label="Storage destination">
+          <label class="workspace-task-automation-storage-option">
+            <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
+            <span>Default output folder</span>
+          </label>
+          <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
+            <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
+            <span>Store node</span>
+            <select data-role="automation-storage-store-node" class="workspace-task-automation-storage-select"${storeOptions ? '' : ' disabled'}>
+              ${storeOptions || '<option value="">No store nodes available</option>'}
+            </select>
+          </label>
+          <label class="workspace-task-automation-storage-option">
+            <input type="radio" name="workspace-task-automation-storage-target" value="custom"${target === 'custom' ? ' checked' : ''} />
+            <span>Custom path</span>
+            <input type="text" data-role="automation-storage-path" class="workspace-task-automation-storage-input" placeholder="e.g. /Users/me/Documents/runs.csv" value="${this.escapeHtml(target === 'custom' ? filePath : '')}" />
+          </label>
+        </div>
+        <div class="workspace-task-automation-storage-error" data-role="automation-storage-error" hidden></div>
+        <div class="workspace-task-automation-storage-actions">
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-automation-storage"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save destination')}</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="open-automation-storage-modal">Advanced settings</button>
+        </div>
+      </div>`;
+    container
+      .querySelector('[data-action="save-automation-storage"]')
+      ?.addEventListener('click', () => this.saveAutomationStorageDestination());
+    container
+      .querySelector('[data-action="open-automation-storage-modal"]')
+      ?.addEventListener('click', () => this.openTaskStorageEditor());
+  }
+
+  // saveAutomationStorageDestination reads the inline destination editor and
+  // PATCHes the task's result_storage. Keeps the existing enabled+append
+  // state — this only updates where the file lives, not whether storage is
+  // on.
+  async saveAutomationStorageDestination() {
+    if (this.automationStorageSaving) return;
+    const container = this.elements.automationStorage;
+    if (!container) return;
+    const target = container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')?.value || 'default';
+    const storeNodeId = container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
+    const customPath = container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
+
+    const setError = (message) => {
+      const error = container.querySelector('[data-role="automation-storage-error"]');
+      if (!error) return;
+      if (!message) {
+        error.hidden = true;
+        error.textContent = '';
+        return;
+      }
+      error.hidden = false;
+      error.textContent = message;
+    };
+    setError('');
+
+    if (target === 'store' && !storeNodeId) {
+      setError('Pick a store node or choose a different destination.');
+      return;
+    }
+    if (target === 'custom' && !customPath) {
+      setError('Enter a file path or choose Default output folder.');
+      return;
+    }
+
+    const owner = this.getTaskResultStorageTask();
+    const ownerId = owner?.id || this.taskId;
+    const existing = owner?.result_storage || {};
+    const nextStorage = {
+      enabled: true,
+      format: 'csv',
+      write_mode: 'append',
+      file_path: target === 'custom' ? customPath : '',
+      store_node_id: target === 'store' ? storeNodeId : '',
+    };
+    // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
+    if (
+      String(existing.file_path || '') === nextStorage.file_path &&
+      String(existing.store_node_id || '') === nextStorage.store_node_id
+    ) {
+      this.notify('info', 'Destination is already set.');
+      return;
+    }
+
+    this.automationStorageSaving = true;
+    this.renderAutomationStorage();
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result_storage: nextStorage }),
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Could not save destination (HTTP ${response.status})`);
+      }
+      this.notify('success', 'Storage destination updated.');
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to save storage destination:', error);
+      this.notify('error', error?.message || 'Could not save destination.');
+    } finally {
+      this.automationStorageSaving = false;
+      this.renderAutomationStorage();
+    }
+  }
+
+  renderAutomationSections() {
+    this.renderAutomationColumns();
+    this.renderAutomationStorage();
+  }
+
+  // Get a trimmed sample of the current task result, used to ground the
+  // model's contract suggestions in actual data. Prefers the snapshot
+  // captured by the Result card's "Design columns" link so the sample
+  // matches what the user was looking at, not a stale task field. The
+  // auto-task endpoint truncates server-side too, but trimming here keeps
+  // the request small.
+  getResultSampleForSuggestion() {
+    const captured = String(this.lastSuggestionResultSample || '').trim();
+    if (captured) return captured.slice(0, 4000);
+    const candidate = this.task?.result || this.currentResultArtifact?.csv || '';
+    return String(candidate || '').trim().slice(0, 4000);
+  }
+
+  async suggestResultContractColumns() {
+    if (this.resultContractSuggesting) return;
+    this.syncResultContractDraftFromDOM();
+    this.resultContractSuggesting = true;
+    this.setResultContractError('');
+    this.refreshResultRender();
+
+    try {
+      const owner = this.getTaskResultStorageTask();
+      const response = await fetch('/api/orchestration/tasks/output-contract/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: this.task?.description || owner?.description || '',
+          details: this.task?.details || '',
+          workspace_id: this.workspaceId || '',
+          schedule: null,
+          schedule_enabled: false,
+          schedule_name: '',
+          result_storage: {
+            enabled: true,
+            format: 'csv',
+            write_mode: 'append',
+          },
+          result_sample: this.getResultSampleForSuggestion(),
+        }),
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `Suggestion failed (HTTP ${response.status})`);
+      }
+      const parsed = text ? JSON.parse(text) : {};
+      const columns = Array.isArray(parsed?.output_contract?.columns)
+        ? parsed.output_contract.columns
+        : [];
+      if (columns.length === 0) {
+        throw new Error('No columns suggested.');
+      }
+      this.resultContractDraft = columns.map((column) => ({
+        name: String(column?.name || ''),
+        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        required: column?.required !== false,
+        description: String(column?.description || ''),
+      }));
+      this.notify('success', `Suggested ${columns.length} column${columns.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      console.error('Failed to suggest result contract:', error);
+      this.setResultContractError(error?.message || 'Could not suggest columns.');
+      this.notify('error', error?.message || 'Could not suggest columns.');
+    } finally {
+      this.resultContractSuggesting = false;
+      this.refreshResultRender();
+    }
+  }
+
+  async saveResultContractDraft() {
+    if (this.resultContractSaving) return;
+    this.syncResultContractDraftFromDOM();
+    const draft = Array.isArray(this.resultContractDraft) ? this.resultContractDraft : [];
+    const cleaned = draft
+      .map((column) => ({
+        name: String(column?.name || '').trim(),
+        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        required: Boolean(column?.required),
+        description: String(column?.description || '').trim(),
+      }))
+      .filter((column) => column.name);
+
+    if (cleaned.length === 0) {
+      this.setResultContractError('Add at least one column with a name.');
+      return;
+    }
+    const seen = new Set();
+    for (const column of cleaned) {
+      const key = column.name.toLowerCase();
+      if (seen.has(key)) {
+        this.setResultContractError(`Duplicate column name "${column.name}".`);
+        return;
+      }
+      seen.add(key);
+    }
+    this.setResultContractError('');
+
+    const owner = this.getTaskResultStorageTask();
+    const ownerId = owner?.id || this.taskId;
+    const existingStorage = owner?.result_storage || {};
+    const nextStorage = {
+      enabled: true,
+      format: 'csv',
+      write_mode: 'append',
+      file_path: String(existingStorage.file_path || ''),
+      store_node_id: String(existingStorage.store_node_id || ''),
+    };
+
+    this.resultContractSaving = true;
+    this.refreshResultRender();
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_contract: {
+              source: 'manual',
+              columns: cleaned,
+            },
+            result_storage: nextStorage,
+          }),
+        }
+      );
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `Save failed (HTTP ${response.status})`);
+      }
+      this.notify('success', `Saved ${cleaned.length} column${cleaned.length === 1 ? '' : 's'}. Future runs will validate against this contract.`);
+      this.resultContractDraft = null;
+      this.resultContractSaving = false;
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to save result contract:', error);
+      this.resultContractSaving = false;
+      this.setResultContractError(error?.message || 'Save failed.');
+      this.notify('error', error?.message || 'Save failed.');
+      this.refreshResultRender();
+    }
   }
 
   // handleAppendArtifactClick is the entry point for the Append button.
@@ -6332,10 +6990,18 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
+    // The card is now Automation, not just Schedule, so an output contract
+    // or configured storage destination is enough to surface it even when
+    // the task has never run on a cadence.
+    const storageOwner = this.getTaskResultStorageTask();
+    const hasContract = Array.isArray(storageOwner?.output_contract?.columns) && storageOwner.output_contract.columns.length > 0;
+    const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
+    const editingColumns = Array.isArray(this.resultContractDraft);
 
-    if (!hasSchedule && history.length === 0 && executionCount === 0) {
+    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
+      this.renderAutomationSections();
       return;
     }
 
@@ -6426,6 +7092,7 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.schedule.innerHTML = bannerHtml + statsHtml + historyHtml;
+    this.renderAutomationSections();
 
     // Wire expand/collapse for run rows that captured a full result. The
     // chevron flips and the <pre> below toggles between hidden and visible.
