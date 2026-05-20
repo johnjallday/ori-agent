@@ -2415,6 +2415,23 @@ export class WorkspaceTaskPage {
       : 'null';
     const sigGraphNeighbors = this._taskGraphNeighborsFingerprint();
     const sigWorkflowSubtree = this._taskWorkflowSubtreeFingerprint();
+    const storageOwner = this.getTaskResultStorageTask() || {};
+    const sigAutomation = JSON.stringify([
+      storageOwner?.id || '',
+      storageOwner?.result_storage || null,
+      storageOwner?.output_contract || null,
+      Array.isArray(this.resultContractDraft) ? this.resultContractDraft : null,
+      Boolean(this.resultContractSuggesting),
+      Boolean(this.resultContractSaving),
+      Boolean(this.automationStorageToggleBusy),
+      Boolean(this.automationStorageSaving),
+      (this.workspace?.store_nodes || []).map((node) => [
+        node?.id,
+        node?.canvas_node_id,
+        node?.name,
+        node?.base_dir,
+      ]),
+    ]);
 
     return {
       hero: JSON.stringify([
@@ -2490,6 +2507,7 @@ export class WorkspaceTaskPage {
         // the schedule changed).
         Array.isArray(t.execution_history) ? t.execution_history.length : 0,
         t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
+        sigAutomation,
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
       blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
@@ -4099,10 +4117,10 @@ export class WorkspaceTaskPage {
     return Array.isArray(columns) ? columns : [];
   }
 
-  // renderResultContractBlock renders one of three states on the artifact card:
+  // renderResultContractBlock renders one of three Automation-card states:
   //   1. Saved contract + not editing -> "Columns: ... (Edit)" badge.
-  //   2. No contract + not editing  -> warning prompt with a Design columns CTA.
-  //   3. Editing                    -> inline column designer (name/type/required/desc rows).
+  //   2. No contract + not editing  -> assistant-first column suggestion CTA.
+  //   3. Editing                    -> reviewable draft columns with manual escape hatches.
   renderResultContractBlock() {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
@@ -4126,10 +4144,10 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="empty">
           <div class="workspace-task-result-contract-warning">
-            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-            <span>No CSV columns defined &mdash; Append will dump the full result into a single cell.</span>
+            <i class="bi bi-magic" aria-hidden="true"></i>
+            <span>Let the assistant turn the latest result into durable CSV columns.</span>
           </div>
-          <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-result-contract">Design columns</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest columns</button>
         </div>`;
     }
 
@@ -4144,12 +4162,12 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-contract-header">
           <div>
             <div class="workspace-task-page-mini-label">Output contract</div>
-            <p class="workspace-task-result-contract-help">Define the CSV columns the agent should emit. Saving turns on Append mode so future runs are validated against these fields.</p>
+            <p class="workspace-task-result-contract-help">Review the CSV columns the assistant derived from this task. Future runs validate against these fields before appending.</p>
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
               <i class="bi bi-magic" aria-hidden="true"></i>
-              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Suggest from this result')}</span>
+              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Regenerate from result')}</span>
             </button>
           </div>
         </div>
@@ -4266,7 +4284,13 @@ export class WorkspaceTaskPage {
       ?.addEventListener('click', () => this.addResultContractRow());
     root
       .querySelector('[data-action="suggest-result-contract"]')
-      ?.addEventListener('click', () => this.suggestResultContractColumns());
+      ?.addEventListener('click', () => {
+        if (Array.isArray(this.resultContractDraft)) {
+          this.suggestResultContractColumns();
+          return;
+        }
+        this.startResultContractEdit({ suggest: true });
+      });
     root
       .querySelector('[data-action="save-result-contract"]')
       ?.addEventListener('click', () => this.saveResultContractDraft());
@@ -4298,7 +4322,7 @@ export class WorkspaceTaskPage {
     this.resultContractDraft = next;
   }
 
-  startResultContractEdit() {
+  startResultContractEdit({ suggest = false } = {}) {
     const existing = this.getResultContractColumns();
     this.resultContractDraft = existing.length
       ? existing.map((column) => ({
@@ -4307,10 +4331,13 @@ export class WorkspaceTaskPage {
         required: column?.required !== false,
         description: String(column?.description || ''),
       }))
-      : [{ name: '', type: 'string', required: true, description: '' }];
+      : (suggest ? [] : [{ name: '', type: 'string', required: true, description: '' }]);
     this.resultContractSuggesting = false;
     this.setResultContractError('');
     this.refreshResultRender();
+    if (suggest) {
+      void this.suggestResultContractColumns();
+    }
   }
 
   cancelResultContractEdit() {
@@ -4350,20 +4377,18 @@ export class WorkspaceTaskPage {
     error.textContent = message;
   }
 
-  // refreshResultRender re-runs the result-card render so a state change in
-  // the contract designer (rows added, suggestion applied, save complete)
-  // shows up immediately. Falls back to a full task reload if the card isn't
-  // available, which also re-fetches the latest task state.
-  // refreshResultRender re-renders the Automation columns sub-section after a
-  // designer state change. Falls back to a full data reload when the
-  // container is missing (which also re-fetches the latest task state).
+  // refreshResultRender re-renders the Automation card after a designer state
+  // change. It routes through renderSchedule because that method owns the
+  // card hidden/visible decision as well as the columns and destination blocks.
   refreshResultRender() {
-    if (typeof this.renderAutomationColumns === 'function' && this.elements.automationColumns) {
+    if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
       try {
-        this.renderAutomationColumns();
+        if (this._renderCache) delete this._renderCache.schedule;
+        this.renderSchedule();
+        this.refreshTaskTabEmptyStates();
         return;
       } catch (error) {
-        console.warn('Failed to re-render Automation columns; falling back to data reload:', error);
+        console.warn('Failed to re-render Automation card; falling back to data reload:', error);
       }
     }
     void this.loadData();
@@ -4390,7 +4415,7 @@ export class WorkspaceTaskPage {
       this.elements.scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (this.getAppendCSVContext().configured) {
-      this.startResultContractEdit();
+      this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
     }
   }
 
@@ -4435,9 +4460,7 @@ export class WorkspaceTaskPage {
       this.notify('success', checked ? 'CSV storage enabled.' : 'CSV storage disabled.');
       await this.loadData();
       if (checked) {
-        // Auto-start the column designer so the next decision (what columns
-        // to emit) is right there. Suggest button uses the captured sample.
-        this.startResultContractEdit();
+        this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
       }
     } catch (error) {
       console.error('Failed to update CSV storage:', error);
@@ -4661,6 +4684,42 @@ export class WorkspaceTaskPage {
     return String(candidate || '').trim().slice(0, 4000);
   }
 
+  suggestFallbackResultContractColumns() {
+    const artifact = this.currentResultArtifact || buildTaskResultArtifact(this.task);
+    const artifactColumns = Array.isArray(artifact?.columns) ? artifact.columns : [];
+    if (artifactColumns.length > 0) {
+      const rows = Array.isArray(artifact?.rows) ? artifact.rows.slice(0, 25) : [];
+      return artifactColumns
+        .map((column) => String(column || '').trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((name) => ({
+          name,
+          type: this.inferResultContractColumnType(name, rows),
+          required: rows.length > 0 ? rows.every((row) => String(row?.[name] ?? '').trim() !== '') : true,
+          description: 'Column from the latest task result',
+        }));
+    }
+
+    return [
+      { name: 'date', type: 'date', required: true, description: 'Run date' },
+      { name: 'summary', type: 'string', required: true, description: 'Short result summary' },
+    ];
+  }
+
+  inferResultContractColumnType(columnName, rows = []) {
+    const values = rows
+      .map((row) => String(row?.[columnName] ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (values.length === 0) return 'string';
+    const booleanValues = new Set(['true', 'false', 'yes', 'no']);
+    if (values.every((value) => booleanValues.has(value.toLowerCase()))) return 'boolean';
+    if (values.every((value) => Number.isFinite(Number(value.replace(/,/g, ''))))) return 'number';
+    if (values.every((value) => !Number.isNaN(Date.parse(value)))) return 'date';
+    return 'string';
+  }
+
   async suggestResultContractColumns() {
     if (this.resultContractSuggesting) return;
     this.syncResultContractDraftFromDOM();
@@ -4708,8 +4767,14 @@ export class WorkspaceTaskPage {
       this.notify('success', `Suggested ${columns.length} column${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
-      this.setResultContractError(error?.message || 'Could not suggest columns.');
-      this.notify('error', error?.message || 'Could not suggest columns.');
+      const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
+      if (!hasDraftColumns) {
+        this.resultContractDraft = this.suggestFallbackResultContractColumns();
+        this.notify('warning', 'Assistant suggestion was unavailable, so a local column draft was created from the result.');
+      } else {
+        this.setResultContractError(error?.message || 'Could not suggest columns.');
+        this.notify('error', error?.message || 'Could not suggest columns.');
+      }
     } finally {
       this.resultContractSuggesting = false;
       this.refreshResultRender();

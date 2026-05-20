@@ -422,13 +422,77 @@ test.describe('Task Output Contracts', () => {
       expect(taskId).toBeTruthy();
 
       await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
-      await expect(page.getByText('Result Storage', { exact: true })).toBeVisible();
-      await expect(page.getByText('Output contract: date, location, pollen_count')).toBeVisible();
+      await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('date, location, pollen_count');
 
-      await page.locator('[data-edit-field="result-storage"]').click();
+      await page.getByText('Advanced settings', { exact: true }).click();
       await expect(page.locator('#taskModalOutputContractSection')).toBeVisible();
       await expect(page.locator('#taskModalAutoSaveWriteMode')).toHaveValue('append');
       await expect(page.locator('#taskModalOutputContractRows [data-output-contract-name]').first()).toHaveValue('date');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('shows storage destination immediately after enabling CSV storage', async ({ page, request }) => {
+    let workspaceId = '';
+    const workspaceResp = await request.post('/api/orchestration/workspace', {
+      data: {
+        name: `Playwright CSV Storage ${Date.now()}`,
+        description: 'Temporary workspace for CSV storage smoke coverage'
+      }
+    });
+    expect(workspaceResp.ok()).toBeTruthy();
+    const workspaceData = await workspaceResp.json();
+    workspaceId = workspaceData.workspace_id;
+
+    await page.route('**/api/orchestration/tasks/output-contract/suggest', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          output_contract: {
+            source: 'ai_suggested',
+            columns: [
+              { name: 'date', type: 'date', required: true },
+              { name: 'summary', type: 'string', required: true }
+            ]
+          },
+          reasoning: 'Use one row per scheduled run.'
+        })
+      });
+    });
+
+    try {
+      const taskResp = await request.post('/api/orchestration/tasks', {
+        data: {
+          workspace_id: workspaceId,
+          description: 'Summarize the daily operations report',
+          to: 'Ori',
+          schedule_enabled: true,
+          schedule_name: 'Daily report',
+          schedule: {
+            type: 'daily',
+            time: '09:00'
+          }
+        }
+      });
+      expect(taskResp.ok()).toBeTruthy();
+      const taskData = await taskResp.json();
+      const taskId = taskData.task?.id;
+      expect(taskId).toBeTruthy();
+
+      await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
+      await expect(page.getByText('Store each run of this task to CSV')).toBeVisible();
+
+      await page.locator('[data-action="toggle-csv-storage"]').check();
+
+      await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
+      await expect(page.locator('#workspace-task-automation-storage')).toContainText('Custom path');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Output contract');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('date');
     } finally {
       if (workspaceId) {
         await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);

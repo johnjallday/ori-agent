@@ -3182,9 +3182,9 @@ class TaskModalController {
         writeModeSelect.value = task.result_storage.write_mode === 'append' ? 'append' : 'new_file';
       }
 
+      this.populateOutputContractRows(task.output_contract?.columns || [], task.output_contract?.source || 'manual');
       this.updateAutoSaveTargetFields();
       this.updateAutoSaveWriteModeFields();
-      this.populateOutputContractRows(task.output_contract?.columns || [], task.output_contract?.source || 'manual');
     } else {
       this.resetAutoSaveFields();
     }
