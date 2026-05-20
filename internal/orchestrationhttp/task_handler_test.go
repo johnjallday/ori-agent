@@ -1100,6 +1100,113 @@ func TestHandleTaskOutputReview_ApproveAppend(t *testing.T) {
 	}
 }
 
+func TestAppendCSVContractReviewSmoke_CreateInvalidApprove(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
+	ws.ID = "workspace-review-smoke"
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "pollen.csv")
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	createBody := map[string]interface{}{
+		"workspace_id": ws.ID,
+		"description":  "Track pollen daily",
+		"to":           "Ori",
+		"result_storage": map[string]interface{}{
+			"enabled":    true,
+			"file_path":  outputPath,
+			"format":     "csv",
+			"write_mode": "append",
+		},
+		"output_contract": map[string]interface{}{
+			"source": "manual",
+			"columns": []interface{}{
+				map[string]interface{}{"name": "date", "type": "date", "required": true},
+				map[string]interface{}{"name": "location", "type": "string", "required": true},
+				map[string]interface{}{"name": "pollen_count", "type": "number", "required": true},
+			},
+		},
+	}
+	bodyBytes, err := json.Marshal(createBody)
+	if err != nil {
+		t.Fatalf("marshal create body: %v", err)
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks", strings.NewReader(string(bodyBytes)))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.TasksHandler(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var createResp struct {
+		Task *workspace.Task `json:"task"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResp.Task == nil || createResp.Task.OutputContract == nil {
+		t.Fatalf("expected created append contract task, got %#v", createResp.Task)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	storedTask, err := savedWS.GetTask(createResp.Task.ID)
+	if err != nil {
+		t.Fatalf("load created task: %v", err)
+	}
+	invalidResult := `{"date":"bad","location":"NYC"}`
+	storedTask.Status = workspace.TaskStatusCompleted
+	storedTask.Result = invalidResult
+	storedTask.CurrentRunID = "run-review-smoke"
+	workspace.RecordTaskExecution(storedTask, "success", invalidResult, time.Now(), time.Second)
+	if err := savedWS.UpdateTask(*storedTask); err != nil {
+		t.Fatalf("persist invalid execution: %v", err)
+	}
+
+	workspace.AutoStoreResult(savedWS, storedTask, invalidResult, store)
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("expected invalid output not to create csv, stat err = %v", err)
+	}
+	updatedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	updatedTask, err := updatedWS.GetTask(createResp.Task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	validation := updatedTask.ExecutionHistory[len(updatedTask.ExecutionHistory)-1].Validation
+	if validation == nil || validation.ValidationStatus != workspace.TaskValidationNeedsReview {
+		t.Fatalf("validation = %+v, want needs_review", validation)
+	}
+
+	approveBody := `{"action":"approve_append","result":"{\"date\":\"2026-05-20\",\"location\":\"NYC\",\"pollen_count\":8}","approved_by":"test"}`
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/"+createResp.Task.ID+"/review", strings.NewReader(approveBody))
+	approveReq.Header.Set("Content-Type", "application/json")
+	approveRec := httptest.NewRecorder()
+	handler.TasksPathHandler(approveRec, approveReq)
+
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read approved csv: %v", err)
+	}
+	if string(data) != "date,location,pollen_count\n2026-05-20,NYC,8" {
+		t.Fatalf("unexpected approved csv: %q", string(data))
+	}
+}
+
 func TestHandleTaskOutputReview_Dismiss(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})

@@ -69,6 +69,13 @@
     }).length;
   }
 
+  function renderNeedsReviewBadge(task) {
+    const needsReviewCount = countNeedsReviewRuns(task);
+    return needsReviewCount > 0
+      ? `<span class="hub-task-inputs" title="${needsReviewCount} run${needsReviewCount === 1 ? '' : 's'} need output review">Needs Review: ${needsReviewCount}</span>`
+      : '';
+  }
+
   function applyTaskFilters(tasks) {
     if (!Array.isArray(tasks) || tasks.length === 0) return [];
     const status = taskFilterState.status;
@@ -680,10 +687,7 @@
       const inputBadge = inputCount > 0
         ? `<span class="hub-task-inputs" title="Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}">Inputs: ${inputCount}</span>`
         : '';
-      const needsReviewCount = countNeedsReviewRuns(task);
-      const needsReviewBadge = needsReviewCount > 0
-        ? `<span class="hub-task-inputs" title="${needsReviewCount} run${needsReviewCount === 1 ? '' : 's'} need output review">Needs Review: ${needsReviewCount}</span>`
-        : '';
+      const needsReviewBadge = renderNeedsReviewBadge(task);
       const isSelected = selectedSet.has(task.id);
       const hasUnassignedSubtasks = isParent && subtasks.some((s) => !s.to || s.to === 'unassigned');
       const hasRunningSubtasks = isParent && subtasks.some((s) => s.status === 'in_progress');
@@ -1175,6 +1179,13 @@
     renderSchedules,
     renderTasksList,
     saveTaskAsWorkflow,
-    resetTaskFilters
+    resetTaskFilters,
+    __test: {
+      applyTaskFilters,
+      countNeedsReviewRuns,
+      isNeedsAttentionTask,
+      renderNeedsReviewBadge,
+      taskFilterState
+    }
   };
 })();

@@ -141,3 +141,23 @@ test('output contract regenerate emits telemetry and requests forced suggestion'
   assert.equal(calls[0].body.action, 'suggestion_regenerated');
   assert.equal(calls[0].body.column_count, 1);
 });
+
+test('workflow auto-save payload routes output contract to final step only', () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  const autoSaveData = {
+    result_storage: { enabled: true, format: 'csv', write_mode: 'append' },
+    output_contract: {
+      columns: [
+        { name: 'date', type: 'date', required: true },
+        { name: 'pollen_count', type: 'number', required: true },
+      ],
+    },
+  };
+
+  assert.equal(JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 0, 2, true)), JSON.stringify({
+    result_storage: null,
+    output_contract: { columns: [] },
+  }));
+  assert.equal(JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 1, 2, true)), JSON.stringify(autoSaveData));
+});

@@ -78,6 +78,10 @@ func TestBootstrapOutputContractFromCSVHeader(t *testing.T) {
 	if err := os.WriteFile(path, []byte("date,location,pollen_count\n2026-05-20,NYC,8"), 0644); err != nil {
 		t.Fatalf("write csv: %v", err)
 	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read csv before bootstrap: %v", err)
+	}
 	task := &Task{
 		ID: "task-1",
 		ResultStorage: &ResultStorageConfig{
@@ -100,6 +104,13 @@ func TestBootstrapOutputContractFromCSVHeader(t *testing.T) {
 	}
 	if contract.Columns[2].Name != "pollen_count" || contract.Columns[2].Type != "string" {
 		t.Fatalf("unexpected third column: %+v", contract.Columns[2])
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read csv after bootstrap: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("bootstrap mutated csv: before %q after %q", string(before), string(after))
 	}
 }
 
