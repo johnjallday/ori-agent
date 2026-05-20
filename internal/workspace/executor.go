@@ -514,6 +514,18 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		return
 	}
 
+	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	if validation.ValidationStatus == TaskValidationNeedsReview {
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
+			"task_id":          task.ID,
+			"store_node_id":    assignedStore.ID,
+			"contract_version": validation.ContractVersion,
+			"error_count":      len(validation.Errors),
+		})
+		return
+	}
+
 	// Generate filename: task-{short-id}-{timestamp}.{format}
 	taskIDShort := task.ID
 	if len(taskIDShort) > 8 {
@@ -559,7 +571,11 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		}
 		dataToStore = string(jsonBytes)
 	} else if assignedStore.Format == "csv" {
-		dataToStore = TaskResultToCSV(task, result, timestamp, agentNodeID)
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, agentNodeID)
+		}
 	}
 
 	// Write result to store
@@ -580,6 +596,10 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		"filename":      filename,
 		"write_count":   assignedStore.WriteCount,
 	})
+	if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+		validation.StorageStatus = TaskStorageSaved
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+	}
 
 	// Save workspace to persist store node stats (WriteToStore updated them)
 	if err := workspaceStore.Save(ws); err != nil {
@@ -596,6 +616,17 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 
 	// Generate filename
 	timestamp := time.Now().Format("20060102-150405")
+
+	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	if validation.ValidationStatus == TaskValidationNeedsReview {
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
+			"task_id":          task.ID,
+			"contract_version": validation.ContractVersion,
+			"error_count":      len(validation.Errors),
+		})
+		return
+	}
 
 	// Determine format and extension
 	format := storage.Format
@@ -643,7 +674,11 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	// Prepare data for storage
 	dataToStore := result
 	if appendCSV {
-		dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		}
 	} else if format == "json" {
 		jsonData := map[string]interface{}{
 			"task_id":     task.ID,
@@ -658,7 +693,11 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		}
 		dataToStore = string(jsonBytes)
 	} else if format == "csv" {
-		dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		}
 	}
 
 	// If store node is specified, use it
@@ -701,6 +740,10 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			storeNode.LastFilePath = storeNodeCopy.LastFilePath
 			storeNode.LastError = storeNodeCopy.LastError
 			storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
+			if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+				validation.StorageStatus = TaskStorageAppended
+				recordTaskStorageValidation(ws, task, workspaceStore, validation)
+			}
 		} else if err := WriteToStore(storeNode, storeFilePath, dataToStore); err != nil {
 			logger.Error("Failed to auto-store task result to store node", logger.Fields{
 				"task_id":       task.ID,
@@ -709,6 +752,9 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 				"err":           err,
 			})
 			return
+		} else if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+			validation.StorageStatus = TaskStorageSaved
+			recordTaskStorageValidation(ws, task, workspaceStore, validation)
 		}
 
 		logger.Info("Task result auto-stored to store node", logger.Fields{
@@ -765,6 +811,10 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			"task_id":   task.ID,
 			"file_path": filePath,
 		})
+		if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+			validation.StorageStatus = TaskStorageAppended
+			recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		}
 		return
 	}
 
@@ -782,6 +832,38 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		"task_id":   task.ID,
 		"file_path": filePath,
 	})
+	if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+		validation.StorageStatus = TaskStorageSaved
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+	}
+}
+
+func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult) {
+	if task == nil || validation == nil {
+		return
+	}
+	ApplyTaskValidationResultToLatestExecution(task, validation)
+	if ws != nil {
+		_ = ws.MutateTask(task.ID, func(t *Task) error {
+			ApplyTaskValidationResultToLatestExecution(t, validation)
+			return nil
+		})
+	}
+	if ws == nil || workspaceStore == nil || strings.TrimSpace(ws.ID) == "" {
+		return
+	}
+	if err := workspaceStore.Update(ws.ID, func(fresh *Workspace) error {
+		return fresh.MutateTask(task.ID, func(t *Task) error {
+			ApplyTaskValidationResultToLatestExecution(t, validation)
+			return nil
+		})
+	}); err != nil {
+		logger.Warn("Failed to persist task validation result", logger.Fields{
+			"task_id":      task.ID,
+			"workspace_id": ws.ID,
+			"error":        err,
+		})
+	}
 }
 
 // autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store

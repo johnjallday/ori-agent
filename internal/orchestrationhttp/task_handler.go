@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -333,6 +334,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		ResultCombinationMode  string                         `json:"result_combination_mode"`
 		CombinationInstruction string                         `json:"combination_instruction"`
 		OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
+		OutputContract         *workspace.TaskOutputContract  `json:"output_contract"`
 		TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 		Schedule               json.RawMessage                `json:"schedule"`
 		ScheduleEnabled        bool                           `json:"schedule_enabled"`
@@ -388,6 +390,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		ResultCombinationMode:  workspace.NormalizeTaskResultCombinationMode(req.ResultCombinationMode),
 		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
 		OutputSchema:           workspace.NormalizeTaskOutputSchema(req.OutputSchema),
+		OutputContract:         workspace.NormalizeTaskOutputContract(req.OutputContract),
 		TemplateRef:            req.TemplateRef,
 		Status:                 workspace.TaskStatusPending,
 		Schedule:               schedule,
@@ -398,6 +401,9 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeLeadMinutes:        normalizeWakeLeadMinutes(req.WakeLeadMinutes),
 		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
+	}
+	if task.OutputContract == nil {
+		task.OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &task)
 	}
 
 	// Validate: scheduled tasks must be assigned to an agent
@@ -511,6 +517,7 @@ type taskUpdateRequest struct {
 	ResultCombinationMode  *string                        `json:"result_combination_mode"`
 	CombinationInstruction *string                        `json:"combination_instruction"`
 	OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
+	OutputContract         *workspace.TaskOutputContract  `json:"output_contract"`
 	TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 	Schedule               json.RawMessage                `json:"schedule"`
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
@@ -530,7 +537,7 @@ func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
 		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
-		r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
+		r.OutputContract != nil || r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
 		r.KanbanLabels != nil || r.KanbanDueDate != nil
 }
 
@@ -597,6 +604,10 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.OutputSchema != nil {
 		task.OutputSchema = workspace.NormalizeTaskOutputSchema(req.OutputSchema)
 		logger.Debug("Updated task output schema", logger.Fields{"task_id": req.TaskID, "has_output_schema": task.OutputSchema != nil})
+	}
+	if req.OutputContract != nil {
+		task.OutputContract = workspace.NormalizeTaskOutputContract(req.OutputContract)
+		logger.Debug("Updated task output contract", logger.Fields{"task_id": req.TaskID, "has_output_contract": task.OutputContract != nil})
 	}
 	if req.TemplateRef != nil {
 		task.TemplateRef = req.TemplateRef
@@ -833,6 +844,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 				// Apply basic field updates
 				th.applyBasicFieldUpdates(&ws.Tasks[i], &req)
+				if req.OutputContract == nil {
+					ws.Tasks[i].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &ws.Tasks[i])
+				}
 
 				// Update assignment using helper
 				if req.To != nil {
@@ -1083,6 +1097,7 @@ func extractTaskIDForDelete(r *http.Request) string {
 // - POST /api/orchestration/tasks/{id}/cancel -> CancelTaskHandler
 // - POST /api/orchestration/tasks/{id}/save-result -> SaveTaskResult (via workspace handler)
 // - POST /api/orchestration/tasks/{id}/result/preview -> Preview typed task result
+// - POST /api/orchestration/tasks/{id}/review -> Resolve a Needs Review output contract run
 // - POST /api/orchestration/tasks/{id}/promote-result -> Promote task-list result into subtasks
 func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -1105,6 +1120,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /save-result endpoint
 	if strings.HasSuffix(path, "/save-result") {
 		th.handleSaveTaskResult(w, r)
+		return
+	}
+
+	// Check if this is an output review endpoint
+	if strings.HasSuffix(path, "/review") {
+		th.handleTaskOutputReview(w, r)
 		return
 	}
 
@@ -1518,6 +1539,242 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		"file_path": finalPath,
 		"task_id":   req.TaskID,
 	})
+}
+
+type taskOutputReviewRequest struct {
+	Action       string `json:"action"`
+	HistoryIndex *int   `json:"history_index"`
+	Result       string `json:"result,omitempty"`
+	ApprovedBy   string `json:"approved_by,omitempty"`
+}
+
+func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || pathParts[0] == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := pathParts[0]
+
+	var req taskOutputReviewRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		orihttp.BadRequest(w, "action is required")
+		return
+	}
+
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+	historyIndex := resolveTaskReviewHistoryIndex(task, req.HistoryIndex)
+	if historyIndex < 0 || historyIndex >= len(task.ExecutionHistory) {
+		orihttp.BadRequest(w, "history_index does not identify a reviewable run")
+		return
+	}
+
+	switch action {
+	case "dismiss":
+		now := time.Now().UTC()
+		if err := th.workspaceStore.Update(ws.ID, func(fresh *workspace.Workspace) error {
+			return fresh.MutateTask(taskID, func(t *workspace.Task) error {
+				if historyIndex < 0 || historyIndex >= len(t.ExecutionHistory) {
+					return fmt.Errorf("history entry no longer exists")
+				}
+				validation := t.ExecutionHistory[historyIndex].Validation
+				if validation == nil {
+					validation = &workspace.TaskValidationResult{}
+				}
+				validation.ValidationStatus = workspace.TaskValidationDismissed
+				if validation.StorageStatus == "" {
+					validation.StorageStatus = workspace.TaskStorageSkippedInvalid
+				}
+				validation.ValidatedAt = &now
+				t.ExecutionHistory[historyIndex].Validation = validation
+				return nil
+			})
+		}); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to dismiss review: %v", err))
+			return
+		}
+	case "approve_append":
+		draft := strings.TrimSpace(req.Result)
+		if draft == "" {
+			draft = strings.TrimSpace(task.ExecutionHistory[historyIndex].Result)
+		}
+		if draft == "" {
+			orihttp.BadRequest(w, "result is required for manual approval")
+			return
+		}
+		validation, csvData := workspace.ValidateTaskOutputContractResult(task, draft)
+		if validation.ValidationStatus != workspace.TaskValidationPassed {
+			w.WriteHeader(http.StatusBadRequest)
+			orihttp.WriteJSON(w, map[string]interface{}{
+				"success":           false,
+				"validation_result": validation,
+				"message":           "Edited result does not match the output contract.",
+			})
+			return
+		}
+		if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to append approved result: %v", err))
+			return
+		}
+		now := time.Now().UTC()
+		validation.ValidationStatus = workspace.TaskValidationManuallyApproved
+		validation.StorageStatus = workspace.TaskStorageManuallyAppended
+		validation.Errors = nil
+		validation.ManualApproval = &workspace.TaskManualApproval{
+			ApprovedAt: now,
+			ApprovedBy: strings.TrimSpace(req.ApprovedBy),
+		}
+		validation.ValidatedAt = &now
+		if err := th.workspaceStore.Update(ws.ID, func(fresh *workspace.Workspace) error {
+			return fresh.MutateTask(taskID, func(t *workspace.Task) error {
+				if historyIndex < 0 || historyIndex >= len(t.ExecutionHistory) {
+					return fmt.Errorf("history entry no longer exists")
+				}
+				t.ExecutionHistory[historyIndex].Validation = validation
+				return nil
+			})
+		}); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to record approval: %v", err))
+			return
+		}
+	default:
+		orihttp.BadRequest(w, "action must be dismiss or approve_append")
+		return
+	}
+
+	updatedTask, err := th.communicator.GetTask(taskID)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to load updated task: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+		"task":    updatedTask,
+	})
+}
+
+func resolveTaskReviewHistoryIndex(task *workspace.Task, requested *int) int {
+	if task == nil || len(task.ExecutionHistory) == 0 {
+		return -1
+	}
+	if requested != nil && *requested >= 0 && *requested < len(task.ExecutionHistory) {
+		return *requested
+	}
+	for i := len(task.ExecutionHistory) - 1; i >= 0; i-- {
+		validation := task.ExecutionHistory[i].Validation
+		if validation != nil && validation.ValidationStatus == workspace.TaskValidationNeedsReview {
+			return i
+		}
+	}
+	return -1
+}
+
+func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvData string) error {
+	if ws == nil || task == nil {
+		return fmt.Errorf("workspace and task are required")
+	}
+	storage := task.ResultStorage
+	if storage == nil || !storage.Enabled {
+		return fmt.Errorf("task result storage is not enabled")
+	}
+	if strings.ToLower(strings.TrimSpace(storage.WriteMode)) != "append" {
+		return fmt.Errorf("manual approval append requires append-to-CSV storage")
+	}
+	if strings.TrimSpace(csvData) == "" {
+		return fmt.Errorf("approved CSV is empty")
+	}
+
+	storeFilePath := storage.FilePath
+	if strings.TrimSpace(storeFilePath) == "" {
+		storeFilePath = taskResultAppendCSVFilename(task)
+	}
+
+	if strings.TrimSpace(storage.StoreNodeID) != "" {
+		var storeNode *workspace.StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+		if storeNode == nil {
+			return fmt.Errorf("store node %q not found", storage.StoreNodeID)
+		}
+		storeNodeCopy := *storeNode
+		storeNodeCopy.WriteMode = "append"
+		storeNodeCopy.Format = "csv"
+		dataToStore := csvData
+		if finalPath, err := workspace.BuildFinalPath(storeNode.BaseDir, storeFilePath); err == nil {
+			if info, statErr := os.Stat(finalPath); statErr == nil && info.Size() > 0 {
+				dataToStore = csvWithoutHeaderForReview(csvData)
+			}
+		}
+		if err := workspace.WriteToStore(&storeNodeCopy, storeFilePath, dataToStore); err != nil {
+			return err
+		}
+		storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
+		storeNode.WriteCount = storeNodeCopy.WriteCount
+		storeNode.LastFilePath = storeNodeCopy.LastFilePath
+		storeNode.LastError = storeNodeCopy.LastError
+		storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
+		return nil
+	}
+
+	filePath := storage.FilePath
+	if strings.TrimSpace(filePath) == "" {
+		baseOutputDir, err := platform.GetDefaultOutputDir()
+		if err != nil {
+			baseOutputDir = "outputs"
+		}
+		filePath = filepath.Join(baseOutputDir, ws.Name, storeFilePath)
+	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
+		filePath = filepath.Join(filePath, taskResultAppendCSVFilename(task))
+	}
+	return workspace.AppendCSVToFile(filePath, csvData)
+}
+
+func taskResultAppendCSVFilename(task *workspace.Task) string {
+	name := strings.TrimSpace(task.Description)
+	if len(name) > 30 {
+		name = name[:30]
+	}
+	var sanitized strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			sanitized.WriteRune(r)
+		} else if r == ' ' {
+			sanitized.WriteRune('_')
+		}
+	}
+	if sanitized.Len() == 0 {
+		return "task.csv"
+	}
+	return sanitized.String() + ".csv"
+}
+
+func csvWithoutHeaderForReview(csvData string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
+	lines := strings.Split(normalized, "\n")
+	if len(lines) <= 1 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(lines[1:], "\n"))
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk

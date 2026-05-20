@@ -95,6 +95,63 @@ func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
 	}
 }
 
+func TestWorkflowCreate_PersistsOutputContractOnStorageStep(t *testing.T) {
+	handler, ws := newWorkflowTestHandler(t)
+
+	rec := postJSON(t, handler, map[string]interface{}{
+		"workspace_id": ws.ID,
+		"parent": map[string]interface{}{
+			"id":          "parent-contract",
+			"description": "Daily pollen workflow",
+		},
+		"subtasks": []interface{}{
+			map[string]interface{}{
+				"id":          "collect",
+				"description": "Collect pollen data",
+			},
+			map[string]interface{}{
+				"id":             "append",
+				"description":    "Append pollen row",
+				"input_task_ids": []string{"collect"},
+				"result_storage": map[string]interface{}{
+					"enabled":    true,
+					"format":     "csv",
+					"write_mode": "append",
+				},
+				"output_contract": map[string]interface{}{
+					"source": "manual",
+					"columns": []interface{}{
+						map[string]interface{}{"name": "date", "type": "date", "required": true},
+						map[string]interface{}{"name": "pollen_count", "type": "number", "required": true},
+					},
+				},
+			},
+		},
+	})
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	storageStep, err := ws.GetTask("append")
+	if err != nil {
+		t.Fatalf("get storage step: %v", err)
+	}
+	if storageStep.OutputContract == nil {
+		t.Fatal("expected output contract on storage-owning step")
+	}
+	if storageStep.OutputContract.Version == "" {
+		t.Fatal("expected output contract version")
+	}
+	parent, err := ws.GetTask("parent-contract")
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if parent.OutputContract != nil {
+		t.Fatalf("expected parent to stay contract-free, got %+v", parent.OutputContract)
+	}
+}
+
 func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
 	handler, ws := newWorkflowTestHandler(t)
 

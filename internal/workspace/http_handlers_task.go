@@ -14,17 +14,18 @@ import (
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description            string            `json:"description"`
-	From                   string            `json:"from"`
-	To                     string            `json:"to"`
-	Priority               int               `json:"priority"`
-	ParentTaskID           string            `json:"parent_task_id"`
-	SubtaskIndex           int               `json:"subtask_index"`
-	OrchestrationMode      string            `json:"orchestration_mode"`
-	ResultCombinationMode  string            `json:"result_combination_mode"`
-	CombinationInstruction string            `json:"combination_instruction"`
-	OutputSchema           *TaskOutputSchema `json:"output_schema"`
-	TemplateRef            *TaskTemplateRef  `json:"template_ref"`
+	Description            string              `json:"description"`
+	From                   string              `json:"from"`
+	To                     string              `json:"to"`
+	Priority               int                 `json:"priority"`
+	ParentTaskID           string              `json:"parent_task_id"`
+	SubtaskIndex           int                 `json:"subtask_index"`
+	OrchestrationMode      string              `json:"orchestration_mode"`
+	ResultCombinationMode  string              `json:"result_combination_mode"`
+	CombinationInstruction string              `json:"combination_instruction"`
+	OutputSchema           *TaskOutputSchema   `json:"output_schema"`
+	OutputContract         *TaskOutputContract `json:"output_contract"`
+	TemplateRef            *TaskTemplateRef    `json:"template_ref"`
 }
 
 // CreateTask handles POST /api/workspaces/:id/tasks
@@ -81,9 +82,13 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		ResultCombinationMode:  NormalizeTaskResultCombinationMode(req.ResultCombinationMode),
 		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
 		OutputSchema:           NormalizeTaskOutputSchema(req.OutputSchema),
+		OutputContract:         NormalizeTaskOutputContract(req.OutputContract),
 		TemplateRef:            req.TemplateRef,
 		Status:                 TaskStatusPending,
 		CreatedAt:              time.Now(),
+	}
+	if task.OutputContract == nil {
+		task.OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &task)
 	}
 
 	// Add task to workspace
@@ -135,19 +140,20 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 
 	var req struct {
-		Description            *string           `json:"description,omitempty"`
-		Details                *string           `json:"details,omitempty"`
-		To                     *string           `json:"to,omitempty"`
-		From                   *string           `json:"from,omitempty"`
-		InputTaskIDs           *[]string         `json:"input_task_ids,omitempty"`
-		AssignedNodeID         *string           `json:"assigned_node_id,omitempty"`
-		ParentTaskID           *string           `json:"parent_task_id,omitempty"`
-		SubtaskIndex           *int              `json:"subtask_index,omitempty"`
-		OrchestrationMode      *string           `json:"orchestration_mode,omitempty"`
-		ResultCombinationMode  *string           `json:"result_combination_mode,omitempty"`
-		CombinationInstruction *string           `json:"combination_instruction,omitempty"`
-		OutputSchema           *TaskOutputSchema `json:"output_schema,omitempty"`
-		TemplateRef            *TaskTemplateRef  `json:"template_ref,omitempty"`
+		Description            *string             `json:"description,omitempty"`
+		Details                *string             `json:"details,omitempty"`
+		To                     *string             `json:"to,omitempty"`
+		From                   *string             `json:"from,omitempty"`
+		InputTaskIDs           *[]string           `json:"input_task_ids,omitempty"`
+		AssignedNodeID         *string             `json:"assigned_node_id,omitempty"`
+		ParentTaskID           *string             `json:"parent_task_id,omitempty"`
+		SubtaskIndex           *int                `json:"subtask_index,omitempty"`
+		OrchestrationMode      *string             `json:"orchestration_mode,omitempty"`
+		ResultCombinationMode  *string             `json:"result_combination_mode,omitempty"`
+		CombinationInstruction *string             `json:"combination_instruction,omitempty"`
+		OutputSchema           *TaskOutputSchema   `json:"output_schema,omitempty"`
+		OutputContract         *TaskOutputContract `json:"output_contract,omitempty"`
+		TemplateRef            *TaskTemplateRef    `json:"template_ref,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -203,6 +209,11 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.OutputSchema != nil {
 				workspace.Tasks[i].OutputSchema = NormalizeTaskOutputSchema(req.OutputSchema)
+			}
+			if req.OutputContract != nil {
+				workspace.Tasks[i].OutputContract = NormalizeTaskOutputContract(req.OutputContract)
+			} else {
+				workspace.Tasks[i].OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &workspace.Tasks[i])
 			}
 			if req.TemplateRef != nil {
 				workspace.Tasks[i].TemplateRef = req.TemplateRef

@@ -299,10 +299,39 @@
   function summarizeResultStorageForConfirmation(resultStorageData) {
     const storage = resultStorageData?.result_storage;
     if (!storage || storage.enabled !== true) return '';
-    if (storage.write_mode === 'append') return `Append result to ${storage.file_path || 'a CSV file'}`;
+    const contractColumns = Array.isArray(resultStorageData?.output_contract?.columns)
+      ? resultStorageData.output_contract.columns.map((column) => String(column?.name || '').trim()).filter(Boolean)
+      : [];
+    const contractSummary = contractColumns.length > 0 ? ` Columns: ${contractColumns.join(', ')}` : '';
+    if (storage.write_mode === 'append') return `Append result to ${storage.file_path || 'a CSV file'}.${contractSummary}`;
     if (storage.file_path) return `Store result at ${storage.file_path}`;
     if (storage.store_node_id) return `Store result in node ${storage.store_node_id}`;
     return `Store result as ${storage.format || 'text'}`;
+  }
+
+  function normalizeOutputContractPayload(contract) {
+    const columns = Array.isArray(contract?.columns) ? contract.columns : [];
+    const seen = new Set();
+    const normalized = [];
+    columns.forEach((column) => {
+      const name = String(column?.name || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string';
+      normalized.push({
+        name,
+        type,
+        required: Boolean(column?.required),
+        description: String(column?.description || '').trim() || undefined
+      });
+    });
+    if (normalized.length === 0) return null;
+    return {
+      source: contract?.source || 'ai_suggested',
+      columns: normalized
+    };
   }
 
   async function confirmTaskCreation(options = {}) {
@@ -419,6 +448,12 @@
           file_path: parsed.result_storage.file_path || undefined
         }
       };
+      if (resultStorageData.result_storage.write_mode === 'append') {
+        const outputContract = normalizeOutputContractPayload(parsed.output_contract);
+        if (outputContract) {
+          resultStorageData.output_contract = outputContract;
+        }
+      }
     }
 
     const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];

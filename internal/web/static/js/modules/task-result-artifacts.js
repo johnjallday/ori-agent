@@ -1,4 +1,4 @@
-const DEFAULT_HISTORY_COLUMNS = ['executed_at', 'status', 'run_id', 'duration_ms'];
+const DEFAULT_HISTORY_COLUMNS = ['executed_at', 'status', 'validation_status', 'storage_status', 'run_id', 'duration_ms'];
 
 function cleanColumnName(value, fallback = 'value') {
   const cleaned = String(value ?? '')
@@ -352,6 +352,9 @@ function buildHistoryRow(entry, parsed, parsedRow = null, rowIndex = 0) {
     status: String(entry?.status || ''),
   };
   if (entry?.run_id) row.run_id = String(entry.run_id);
+  const validation = entry?.validation_result || entry?.validation || null;
+  if (validation?.validation_status) row.validation_status = String(validation.validation_status);
+  if (validation?.storage_status) row.storage_status = String(validation.storage_status);
   if (entry?.duration !== undefined && entry?.duration !== null && entry.duration !== '') {
     row.duration_ms = String(entry.duration);
   }

@@ -58,7 +58,15 @@
 
   function isNeedsAttentionTask(task) {
     const bucket = statusBucket(task);
-    return bucket === 'blocked' || bucket === 'failed';
+    return bucket === 'blocked' || bucket === 'failed' || countNeedsReviewRuns(task) > 0;
+  }
+
+  function countNeedsReviewRuns(task) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    return history.filter((entry) => {
+      const validation = entry?.validation_result || entry?.validation || null;
+      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+    }).length;
   }
 
   function applyTaskFilters(tasks) {
@@ -672,6 +680,10 @@
       const inputBadge = inputCount > 0
         ? `<span class="hub-task-inputs" title="Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}">Inputs: ${inputCount}</span>`
         : '';
+      const needsReviewCount = countNeedsReviewRuns(task);
+      const needsReviewBadge = needsReviewCount > 0
+        ? `<span class="hub-task-inputs" title="${needsReviewCount} run${needsReviewCount === 1 ? '' : 's'} need output review">Needs Review: ${needsReviewCount}</span>`
+        : '';
       const isSelected = selectedSet.has(task.id);
       const hasUnassignedSubtasks = isParent && subtasks.some((s) => !s.to || s.to === 'unassigned');
       const hasRunningSubtasks = isParent && subtasks.some((s) => s.status === 'in_progress');
@@ -716,6 +728,7 @@
                 ${stepBadge}
                 <span>${escapeHtml(task.name || task.description || task.id)}</span>
                 ${inputBadge}
+                ${needsReviewBadge}
               </div>
               <div class="hub-task-header-actions">
                 <button class="hub-task-run-btn modern-btn modern-btn-primary modern-btn-icon" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}" aria-label="${escapeHtml(executeAriaLabel)}">

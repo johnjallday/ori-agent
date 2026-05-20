@@ -72,16 +72,17 @@ type AutoTaskRequest struct {
 
 // AutoTaskResponse represents the parsed task configuration with jsonschema tags for structured output
 type AutoTaskResponse struct {
-	Title           string               `json:"title" jsonschema_description:"A concise title for the task"`
-	Details         string               `json:"details" jsonschema_description:"Additional details or context, can be empty"`
-	AgentName       string               `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
-	Priority        int                  `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
-	Tasks           []AutoTaskStep       `json:"tasks" jsonschema_description:"Multi-step workflow tasks. Empty array if the request is a single task. When provided, create tasks in order and honor depends_on relationships."`
-	Schedule        *ScheduleConfig      `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
-	ScheduleEnabled bool                 `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
-	ScheduleName    string               `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
-	ResultStorage   *ResultStorageConfig `json:"result_storage" jsonschema_description:"Result storage configuration, null if no storage requested"`
-	Reasoning       string               `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
+	Title           string                `json:"title" jsonschema_description:"A concise title for the task"`
+	Details         string                `json:"details" jsonschema_description:"Additional details or context, can be empty"`
+	AgentName       string                `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
+	Priority        int                   `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
+	Tasks           []AutoTaskStep        `json:"tasks" jsonschema_description:"Multi-step workflow tasks. Empty array if the request is a single task. When provided, create tasks in order and honor depends_on relationships."`
+	Schedule        *ScheduleConfig       `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
+	ScheduleEnabled bool                  `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
+	ScheduleName    string                `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
+	ResultStorage   *ResultStorageConfig  `json:"result_storage" jsonschema_description:"Result storage configuration, null if no storage requested"`
+	OutputContract  *OutputContractConfig `json:"output_contract" jsonschema_description:"CSV output contract when result_storage.write_mode is append, null otherwise"`
+	Reasoning       string                `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
 }
 
 // AutoTaskStep represents a single step in a multi-task workflow.
@@ -112,8 +113,40 @@ type ResultStorageConfig struct {
 	WriteMode   string `json:"write_mode" jsonschema:"enum=new_file,enum=append" jsonschema_description:"Use append only when adding each run to the same CSV dataset"`
 }
 
+// OutputContractConfig for auto task with jsonschema tags
+type OutputContractConfig struct {
+	Source  string                 `json:"source" jsonschema:"enum=ai_suggested,enum=manual,enum=csv_header" jsonschema_description:"Source of the contract suggestion"`
+	Columns []OutputContractColumn `json:"columns" jsonschema_description:"Ordered CSV columns that each run should produce"`
+}
+
+// OutputContractColumn describes one suggested CSV output column.
+type OutputContractColumn struct {
+	Name        string `json:"name" jsonschema_description:"CSV column name"`
+	Type        string `json:"type" jsonschema:"enum=string,enum=number,enum=boolean,enum=date" jsonschema_description:"Column type"`
+	Required    bool   `json:"required" jsonschema_description:"Whether the column is required for every row"`
+	Description string `json:"description" jsonschema_description:"Brief explanation of the column"`
+}
+
+// OutputContractSuggestionRequest asks the system model to propose an append-to-CSV contract.
+type OutputContractSuggestionRequest struct {
+	Title           string               `json:"title"`
+	Details         string               `json:"details"`
+	WorkspaceID     string               `json:"workspace_id"`
+	Schedule        *ScheduleConfig      `json:"schedule"`
+	ScheduleEnabled bool                 `json:"schedule_enabled"`
+	ScheduleName    string               `json:"schedule_name"`
+	ResultStorage   *ResultStorageConfig `json:"result_storage"`
+}
+
+// OutputContractSuggestionResponse is the AI-generated CSV output contract suggestion.
+type OutputContractSuggestionResponse struct {
+	OutputContract *OutputContractConfig `json:"output_contract" jsonschema_description:"Suggested CSV output contract"`
+	Reasoning      string                `json:"reasoning" jsonschema_description:"Brief explanation of why these columns were selected"`
+}
+
 // Schema for structured output - generated at init time
 var autoTaskResponseSchema = llm.GenerateSchema[AutoTaskResponse]()
+var outputContractSuggestionSchema = llm.GenerateSchema[OutputContractSuggestionResponse]()
 
 // HandleAutoTask handles POST /api/orchestration/tasks/auto-parse
 func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +202,158 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	orihttp.WriteJSON(w, taskConfig)
 }
 
+// HandleOutputContractSuggestion handles POST /api/orchestration/tasks/output-contract/suggest.
+func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req OutputContractSuggestionRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if strings.TrimSpace(req.Title) == "" && strings.TrimSpace(req.Details) == "" {
+		_ = orihttp.RespondBadRequest(w, "title or details is required")
+		return
+	}
+
+	systemProvider, systemModel := h.configManager.GetSystemModel()
+	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		logger.Error("System model not available for output contract suggestion", logger.Fields{"error": err})
+		_ = orihttp.RespondServiceUnavailable(w, "System model not configured")
+		return
+	}
+
+	suggestion, err := h.suggestOutputContract(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req)
+	if err != nil {
+		logger.Error("Output contract suggestion failed", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to suggest output contract: "+err.Error())
+		return
+	}
+
+	orihttp.WriteJSON(w, suggestion)
+}
+
+func (h *AutoTaskHandler) suggestOutputContract(
+	ctx context.Context,
+	provider llm.Provider,
+	providerName string,
+	model string,
+	reasoningEffort string,
+	req OutputContractSuggestionRequest,
+) (*OutputContractSuggestionResponse, error) {
+	scheduleJSON, _ := json.Marshal(req.Schedule)
+	storageJSON, _ := json.Marshal(req.ResultStorage)
+	systemPrompt := `Suggest a compact CSV output contract for a recurring task that appends one row per run.
+
+Return a JSON object with exactly this shape:
+{
+  "output_contract": {
+    "source": "ai_suggested",
+    "columns": [
+      {"name": "date", "type": "date", "required": true, "description": "Observation date"}
+    ]
+  },
+  "reasoning": "brief explanation"
+}
+
+Rules:
+- Use 3-8 practical columns that the task can realistically produce every run.
+- Prefer stable facts over prose blobs.
+- Include a date or timestamp column when the task is scheduled or recurring.
+- Use only these types: string, number, boolean, date.
+- Mark columns required only when a run should always provide them.
+- Do not include markdown fences or prose outside the JSON object.`
+
+	userMessage := fmt.Sprintf(`Task title: %s
+Task details: %s
+Schedule enabled: %t
+Schedule name: %s
+Schedule JSON: %s
+Result storage JSON: %s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON))
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	logger.Info("Output contract suggestion request", logger.Fields{
+		"model":    model,
+		"provider": providerName,
+	})
+
+	if structuredProvider, ok := provider.(llm.StructuredOutputProvider); ok {
+		resp, err := structuredProvider.ChatWithStructuredOutput(ctx, llm.StructuredOutputRequest{
+			Model:           model,
+			ReasoningEffort: reasoningEffort,
+			Messages: []llm.Message{
+				{Role: "user", Content: userMessage},
+			},
+			SystemPrompt: systemPrompt,
+			SchemaName:   "output_contract_suggestion",
+			Schema:       outputContractSuggestionSchema,
+		})
+		if err != nil {
+			if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
+				return nil, fmt.Errorf("%s", friendlyMsg)
+			}
+			return nil, fmt.Errorf("structured output request failed: %w", err)
+		}
+		return parseOutputContractSuggestion(resp.Content)
+	}
+
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+		Messages: []llm.Message{
+			{Role: "user", Content: userMessage},
+		},
+		SystemPrompt: systemPrompt + "\n\nRespond with valid JSON only.",
+		Temperature:  0.2,
+		MaxTokens:    1200,
+	})
+	if err != nil {
+		if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
+			return nil, fmt.Errorf("%s", friendlyMsg)
+		}
+		return nil, fmt.Errorf("LLM request failed: %w", err)
+	}
+	return parseOutputContractSuggestion(resp.Content)
+}
+
+func parseOutputContractSuggestion(content string) (*OutputContractSuggestionResponse, error) {
+	payload := strings.TrimSpace(content)
+	if payload == "" {
+		return nil, fmt.Errorf("LLM returned empty response")
+	}
+	if strings.HasPrefix(payload, "```") {
+		payload = extractJSONFromCodeFence(payload)
+	}
+
+	var suggestion OutputContractSuggestionResponse
+	if err := json.Unmarshal([]byte(payload), &suggestion); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if suggestion.OutputContract == nil {
+		return nil, fmt.Errorf("suggestion did not include an output contract")
+	}
+	normalized := workspace.NormalizeTaskOutputContract(&workspace.TaskOutputContract{
+		Source:  suggestion.OutputContract.Source,
+		Columns: autoTaskOutputContractColumns(suggestion.OutputContract.Columns),
+	})
+	if normalized == nil {
+		return nil, fmt.Errorf("suggestion did not include usable columns")
+	}
+	suggestion.OutputContract = &OutputContractConfig{
+		Source:  normalized.Source,
+		Columns: outputContractColumnsFromWorkspace(normalized.Columns),
+	}
+	suggestion.Reasoning = strings.TrimSpace(suggestion.Reasoning)
+	return &suggestion, nil
+}
+
 // parseTaskDescription uses LLM to parse natural language into task configuration
 func (h *AutoTaskHandler) parseTaskDescription(
 	ctx context.Context,
@@ -213,6 +398,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
   "schedule_name": "",
   "schedule": null,
   "result_storage": null,
+  "output_contract": null,
   "reasoning": "brief explanation"
 }
 
@@ -227,6 +413,8 @@ Schedule parsing rules:
 - No time mentioned -> schedule_enabled=false, schedule=null
 
 Result storage: set result_storage={"enabled":true,"format":"text|json|markdown|csv","write_mode":"new_file|append"} only if user mentions saving results. Use write_mode="append" and format="csv" when the user asks to append runs to the same CSV file.
+
+Output contract: when result_storage.write_mode is "append", also set output_contract with source="ai_suggested" and 3-8 practical CSV columns. Use column types string, number, boolean, or date. Include columns the recurring task can realistically produce every run.
 
 Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
 
@@ -506,6 +694,48 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 			config.ResultStorage = nil
 		}
 	}
+	if config.ResultStorage == nil || config.ResultStorage.WriteMode != "append" {
+		config.OutputContract = nil
+	} else if config.OutputContract != nil {
+		workspaceContract := workspace.NormalizeTaskOutputContract(&workspace.TaskOutputContract{
+			Source:  config.OutputContract.Source,
+			Columns: autoTaskOutputContractColumns(config.OutputContract.Columns),
+		})
+		if workspaceContract == nil {
+			config.OutputContract = nil
+		} else {
+			config.OutputContract = &OutputContractConfig{
+				Source:  workspaceContract.Source,
+				Columns: outputContractColumnsFromWorkspace(workspaceContract.Columns),
+			}
+		}
+	}
 
 	return config
+}
+
+func autoTaskOutputContractColumns(columns []OutputContractColumn) []workspace.TaskOutputContractColumn {
+	converted := make([]workspace.TaskOutputContractColumn, 0, len(columns))
+	for _, column := range columns {
+		converted = append(converted, workspace.TaskOutputContractColumn{
+			Name:        column.Name,
+			Type:        column.Type,
+			Required:    column.Required,
+			Description: column.Description,
+		})
+	}
+	return converted
+}
+
+func outputContractColumnsFromWorkspace(columns []workspace.TaskOutputContractColumn) []OutputContractColumn {
+	converted := make([]OutputContractColumn, 0, len(columns))
+	for _, column := range columns {
+		converted = append(converted, OutputContractColumn{
+			Name:        column.Name,
+			Type:        column.Type,
+			Required:    column.Required,
+			Description: column.Description,
+		})
+	}
+	return converted
 }

@@ -1378,6 +1378,165 @@
       line-height: 1.4;
     }
 
+    .workspace-task-review-card {
+      display: grid;
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      border: 1px solid color-mix(in srgb, #f59e0b 34%, var(--border-color));
+      border-radius: 16px;
+      background: color-mix(in srgb, #f59e0b 9%, var(--bg-primary));
+    }
+
+    .workspace-task-review-copy {
+      display: grid;
+      gap: 0.25rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-review-copy span,
+    .workspace-task-review-errors {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .workspace-task-review-errors {
+      margin: 0;
+      padding-left: 1.1rem;
+    }
+
+    .workspace-task-review-editor {
+      display: grid;
+      gap: 0.35rem;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-review-editor textarea {
+      width: 100%;
+      min-height: 9rem;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      padding: 0.75rem;
+      font: 0.86rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      resize: vertical;
+    }
+
+    .workspace-task-review-mode-tabs {
+      display: inline-flex;
+      width: fit-content;
+      gap: 0.25rem;
+      padding: 0.2rem;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+    }
+
+    .workspace-task-review-mode-tabs button {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 800;
+      padding: 0.35rem 0.6rem;
+    }
+
+    .workspace-task-review-mode-tabs button.is-active {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
+    }
+
+    .workspace-task-review-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+    }
+
+    .workspace-task-review-table-wrap table {
+      width: 100%;
+      min-width: 520px;
+      border-collapse: collapse;
+    }
+
+    .workspace-task-review-table-wrap th,
+    .workspace-task-review-table-wrap td {
+      border-bottom: 1px solid var(--border-color);
+      border-right: 1px solid var(--border-color);
+      padding: 0.55rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .workspace-task-review-table-wrap th:last-child,
+    .workspace-task-review-table-wrap td:last-child {
+      border-right: 0;
+    }
+
+    .workspace-task-review-table-wrap tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .workspace-task-review-table-wrap th {
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .workspace-task-review-table-wrap th small {
+      display: block;
+      margin-top: 0.2rem;
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-review-table-wrap input {
+      width: 100%;
+      min-width: 8rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font: 0.84rem/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 0.45rem 0.5rem;
+    }
+
+    .workspace-task-review-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .workspace-task-storage-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      width: fit-content;
+      margin-bottom: 0.85rem;
+      padding: 0.45rem 0.7rem;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .workspace-task-storage-status small {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
     .workspace-task-result-artifact {
       margin-bottom: 1rem;
       padding: 1rem;

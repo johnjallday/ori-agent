@@ -7,6 +7,8 @@ import {
 import {
   artifactToCSVFence,
   buildTaskResultArtifact,
+  parseDelimitedRecords,
+  rowsToCSV,
 } from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
@@ -2965,6 +2967,14 @@ export class WorkspaceTaskPage {
       alwaysShowEdit: true
     });
 
+    const needsReviewCount = this.countTaskNeedsReviewRuns(resultStorageTask);
+    if (needsReviewCount > 0) {
+      items.push({
+        title: 'Needs Review',
+        value: `${needsReviewCount} run${needsReviewCount === 1 ? '' : 's'} held from storage until reviewed.`
+      });
+    }
+
     const detailsValue = String(this.task?.details || '').trim();
     const blockedDetailsRedundant = this.isBlockedDetailsRedundant(detailsValue);
 
@@ -3039,6 +3049,14 @@ export class WorkspaceTaskPage {
     return subtasks.length > 0 ? subtasks[subtasks.length - 1] : this.task;
   }
 
+  countTaskNeedsReviewRuns(task = this.task) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    return history.filter((entry) => {
+      const validation = entry?.validation_result || entry?.validation || null;
+      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+    }).length;
+  }
+
   describeTaskResultStorage(storage, sourceTask = this.task) {
     if (!storage || storage.enabled !== true) {
       return 'Not saving automatically.\nEdit this to save each run or append future runs to a CSV file.';
@@ -3064,8 +3082,16 @@ export class WorkspaceTaskPage {
     const sourceLabel = sourceTaskId && currentTaskId && sourceTaskId !== currentTaskId
       ? `Final workflow step: ${summarizeText(sourceTask?.description || sourceTaskId, 72)}`
       : '';
+    const contractColumns = Array.isArray(sourceTask?.output_contract?.columns)
+      ? sourceTask.output_contract.columns
+      : [];
+    const contractLabel = writeMode === 'append'
+      ? (contractColumns.length > 0
+        ? `Output contract: ${contractColumns.map((column) => String(column?.name || '').trim()).filter(Boolean).join(', ')}`
+        : 'No output contract defined. Runs will save without validation.')
+      : '';
 
-    return [modeLabel, target, sourceLabel].filter(Boolean).join('\n');
+    return [modeLabel, target, contractLabel, sourceLabel].filter(Boolean).join('\n');
   }
 
   getStoreNodeDisplayLabel(storeNodeId) {
@@ -3105,7 +3131,11 @@ export class WorkspaceTaskPage {
     const automationSection = document.querySelector('.task-modal-automation');
     const autoSaveEnabled = document.getElementById('taskModalAutoSaveEnabled');
     const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
-    const target = this.getTaskResultStorageTask()?.result_storage?.enabled ? writeModeSelect : autoSaveEnabled;
+    const appendContractInput = document.querySelector('#taskModalOutputContractRows [data-output-contract-name]');
+    const resultStorage = this.getTaskResultStorageTask()?.result_storage;
+    const target = resultStorage?.write_mode === 'append' && appendContractInput
+      ? appendContractInput
+      : (resultStorage?.enabled ? writeModeSelect : autoSaveEnabled);
 
     automationSection?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     window.setTimeout(() => {
@@ -4567,6 +4597,14 @@ export class WorkspaceTaskPage {
     }
 
     const blocks = [];
+    const latestStorageStatus = this.renderLatestStorageStatus();
+    if (latestStorageStatus) {
+      blocks.push(latestStorageStatus);
+    }
+    const reviewPanel = this.renderNeedsReviewPanel();
+    if (reviewPanel) {
+      blocks.push(reviewPanel);
+    }
     if (artifact) {
       blocks.push(this.renderResultArtifact(artifact));
     }
@@ -4586,9 +4624,344 @@ export class WorkspaceTaskPage {
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
     this.bindResultArtifactActions();
+    this.bindOutputReviewActions();
     this.enhanceResultSections();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
+  }
+
+  renderLatestStorageStatus() {
+    const sourceTask = this.getTaskResultStorageTask();
+    const history = Array.isArray(sourceTask?.execution_history) ? sourceTask.execution_history : [];
+    const latest = history.length > 0 ? history[history.length - 1] : null;
+    const validation = latest?.validation_result || latest?.validation || null;
+    const label = this.getValidationStatusLabel(validation);
+    if (!label) return '';
+    return `
+      <div class="workspace-task-storage-status">
+        <span>${this.escapeHtml(label)}</span>
+        ${validation?.contract_version ? `<small>Contract ${this.escapeHtml(validation.contract_version)}</small>` : ''}
+      </div>
+    `;
+  }
+
+  getValidationStatusLabel(validation) {
+    const validationStatus = String(validation?.validation_status || '').trim().toLowerCase();
+    const storageStatus = String(validation?.storage_status || '').trim().toLowerCase();
+    if (!validationStatus || validationStatus === 'not_applicable') return '';
+    if (validationStatus === 'dismissed') return 'Dismissed';
+    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended') return 'Manually Approved';
+    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid') return 'Needs Review';
+    if (validationStatus === 'passed' && (storageStatus === 'saved' || storageStatus === 'appended')) return 'Saved';
+    if (validationStatus === 'passed') return 'Validated';
+    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  getNeedsReviewEntries(task = this.getTaskResultStorageTask()) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    return history
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => {
+        const validation = entry?.validation_result || entry?.validation || null;
+        return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+      });
+  }
+
+  getReviewContractColumns(task = this.getTaskResultStorageTask()) {
+    return (Array.isArray(task?.output_contract?.columns) ? task.output_contract.columns : [])
+      .map((column) => ({
+        name: String(column?.name || '').trim(),
+        type: String(column?.type || 'string').trim() || 'string',
+        required: column?.required !== false,
+        description: String(column?.description || '').trim()
+      }))
+      .filter((column) => column.name);
+  }
+
+  getCaseInsensitiveValue(row, columnName) {
+    if (!row || typeof row !== 'object') return '';
+    if (Object.prototype.hasOwnProperty.call(row, columnName)) return row[columnName];
+    const target = String(columnName || '').toLowerCase();
+    const key = Object.keys(row).find((candidate) => String(candidate || '').toLowerCase() === target);
+    return key ? row[key] : '';
+  }
+
+  parseReviewDraftRow(rawOutput, columns = []) {
+    const raw = String(rawOutput || '').trim();
+    const emptyRow = {};
+    columns.forEach((column) => {
+      emptyRow[column.name] = '';
+    });
+    if (!raw || columns.length === 0) {
+      return { row: emptyRow, parsed: false };
+    }
+
+    if (/^[{[]/.test(raw)) {
+      try {
+        const decoded = JSON.parse(raw);
+        let candidate = decoded;
+        if (Array.isArray(candidate)) {
+          candidate = candidate[0] || {};
+        } else if (Array.isArray(candidate?.rows)) {
+          candidate = candidate.rows[0] || {};
+        } else if (Array.isArray(candidate?.data)) {
+          candidate = candidate.data[0] || {};
+        }
+        if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+          const row = {};
+          columns.forEach((column) => {
+            const value = this.getCaseInsensitiveValue(candidate, column.name);
+            row[column.name] = value === undefined || value === null ? '' : String(value);
+          });
+          return { row, parsed: true };
+        }
+      } catch (_error) {
+        // Raw CSV editing remains available below.
+      }
+    }
+
+    const records = parseDelimitedRecords(raw, ',');
+    if (records.length >= 2) {
+      const header = records[0].map((value) => String(value || '').trim());
+      const values = records[1] || [];
+      const rowByHeader = {};
+      header.forEach((name, index) => {
+        if (name) rowByHeader[name] = values[index] ?? '';
+      });
+      const row = {};
+      columns.forEach((column) => {
+        row[column.name] = this.getCaseInsensitiveValue(rowByHeader, column.name);
+      });
+      return { row, parsed: true };
+    }
+
+    return { row: emptyRow, parsed: false };
+  }
+
+  renderReviewTableEditor(rawOutput, columns = []) {
+    if (!columns.length) return '';
+    const { row } = this.parseReviewDraftRow(rawOutput, columns);
+    const headerHtml = columns
+      .map((column) => `<th scope="col">${this.escapeHtml(column.name)}<small>${this.escapeHtml(column.type)}${column.required ? ' required' : ''}</small></th>`)
+      .join('');
+    const rowHtml = columns
+      .map((column) => `
+        <td>
+          <input
+            type="text"
+            value="${this.escapeHtml(row[column.name] || '')}"
+            data-review-table-input
+            data-review-column="${this.escapeHtml(column.name)}"
+            aria-label="${this.escapeHtml(column.name)}"
+          >
+        </td>
+      `)
+      .join('');
+
+    return `
+      <div class="workspace-task-review-mode-tabs" role="tablist" aria-label="Review editor mode">
+        <button type="button" class="is-active" data-review-view-toggle="table">Table</button>
+        <button type="button" data-review-view-toggle="raw">Raw CSV</button>
+      </div>
+      <div class="workspace-task-review-table-pane" data-review-table-pane>
+        <div class="workspace-task-review-table-wrap" role="region" aria-label="Editable CSV row" tabindex="0">
+          <table>
+            <thead><tr>${headerHtml}</tr></thead>
+            <tbody><tr>${rowHtml}</tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  renderNeedsReviewPanel() {
+    const sourceTask = this.getTaskResultStorageTask();
+    const entries = this.getNeedsReviewEntries(sourceTask);
+    if (entries.length === 0) return '';
+
+    const latest = entries[entries.length - 1];
+    const validation = latest.entry?.validation_result || latest.entry?.validation || {};
+    const errors = Array.isArray(validation.errors) ? validation.errors : [];
+    const errorList = errors.length > 0
+      ? errors.map((error) => `<li>${this.escapeHtml(error?.message || error?.code || 'Validation failed')}</li>`).join('')
+      : '<li>Result did not match the output contract.</li>';
+    const rawOutput = String(latest.entry?.result || latest.entry?.summary || this.task?.result || '').trim();
+    const sourceTaskId = String(sourceTask?.id || this.taskId || '').trim();
+    const contractColumns = this.getReviewContractColumns(sourceTask);
+    const contractColumnNames = contractColumns.map((column) => column.name);
+    const tableEditor = this.renderReviewTableEditor(rawOutput, contractColumns);
+    const rawHidden = tableEditor ? ' hidden' : '';
+
+    return `
+      <section class="workspace-task-review-panel" data-review-task-id="${this.escapeHtml(sourceTaskId)}" data-review-history-index="${this.escapeHtml(latest.index)}">
+        <div class="workspace-task-page-mini-label">Needs Review</div>
+        <div class="workspace-task-review-card">
+          <div class="workspace-task-review-copy">
+            <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} held from CSV storage.</strong>
+            <span>${contractColumnNames.length > 0 ? `Expected columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result must match the output contract before it can be appended.'}</span>
+          </div>
+          <ul class="workspace-task-review-errors">${errorList}</ul>
+          ${tableEditor}
+          <label class="workspace-task-review-editor" data-review-raw-pane${rawHidden}>
+            <span>Edit result before approving append</span>
+            <textarea rows="7" data-review-draft>${this.escapeHtml(rawOutput)}</textarea>
+          </label>
+          <div class="workspace-task-review-actions">
+            <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Approve Append</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy Raw</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="rerun">Re-run Task</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="dismiss">Dismiss</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  bindOutputReviewActions() {
+    this.elements.output?.querySelectorAll('[data-review-view-toggle]').forEach((button) => {
+      button.addEventListener('click', () => this.setReviewEditorMode(button));
+    });
+    this.elements.output?.querySelectorAll('[data-review-table-input]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const panel = input.closest('[data-review-task-id]');
+        this.syncReviewRawFromTable(panel);
+      });
+    });
+    this.elements.output?.querySelectorAll('[data-review-action]').forEach((button) => {
+      button.addEventListener('click', () => this.handleOutputReviewAction(button));
+    });
+  }
+
+  setReviewEditorMode(button) {
+    const panel = button?.closest('[data-review-task-id]');
+    if (!panel) return;
+    const mode = button.getAttribute('data-review-view-toggle') || 'table';
+    const tablePane = panel.querySelector('[data-review-table-pane]');
+    const rawPane = panel.querySelector('[data-review-raw-pane]');
+    if (mode === 'table') {
+      this.syncReviewTableFromRaw(panel);
+      if (tablePane) tablePane.hidden = false;
+      if (rawPane) rawPane.hidden = true;
+    } else {
+      this.syncReviewRawFromTable(panel);
+      if (tablePane) tablePane.hidden = true;
+      if (rawPane) rawPane.hidden = false;
+    }
+    panel.querySelectorAll('[data-review-view-toggle]').forEach((tab) => {
+      tab.classList.toggle('is-active', tab === button);
+    });
+  }
+
+  syncReviewRawFromTable(panel) {
+    if (!panel) return '';
+    const inputs = Array.from(panel.querySelectorAll('[data-review-table-input]'));
+    if (inputs.length === 0) return panel.querySelector('[data-review-draft]')?.value || '';
+    const row = {};
+    const columns = [];
+    inputs.forEach((input) => {
+      const column = input.getAttribute('data-review-column') || '';
+      if (!column) return;
+      columns.push(column);
+      row[column] = input.value || '';
+    });
+    const csv = rowsToCSV(columns, [row]);
+    const textarea = panel.querySelector('[data-review-draft]');
+    if (textarea) textarea.value = csv;
+    return csv;
+  }
+
+  syncReviewTableFromRaw(panel) {
+    if (!panel) return false;
+    const inputs = Array.from(panel.querySelectorAll('[data-review-table-input]'));
+    if (inputs.length === 0) return false;
+    const columns = inputs.map((input) => ({
+      name: input.getAttribute('data-review-column') || '',
+      type: 'string',
+      required: false
+    })).filter((column) => column.name);
+    const textarea = panel.querySelector('[data-review-draft]');
+    const { row, parsed } = this.parseReviewDraftRow(textarea?.value || '', columns);
+    if (!parsed) return false;
+    inputs.forEach((input) => {
+      const column = input.getAttribute('data-review-column') || '';
+      input.value = row[column] || '';
+    });
+    return true;
+  }
+
+  async handleOutputReviewAction(button) {
+    const action = button?.getAttribute('data-review-action') || '';
+    const panel = button?.closest('[data-review-task-id]');
+    const taskId = panel?.getAttribute('data-review-task-id') || this.taskId;
+    const historyIndex = Number(panel?.getAttribute('data-review-history-index'));
+    if (!taskId || !Number.isFinite(historyIndex)) return;
+
+    if (action === 'copy') {
+      if (!panel.querySelector('[data-review-table-pane]')?.hidden) {
+        this.syncReviewRawFromTable(panel);
+      }
+      const draft = panel.querySelector('[data-review-draft]')?.value || '';
+      await this.copyToClipboard(draft, 'Raw output copied');
+      return;
+    }
+
+    if (action === 'rerun') {
+      try {
+        const response = await fetch('/api/orchestration/tasks/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_id: taskId })
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Failed to re-run task');
+        }
+        this.notify('success', 'Task re-run started');
+        await this.loadData();
+      } catch (error) {
+        console.error('Failed to re-run task:', error);
+        this.notify('error', error?.message || 'Failed to re-run task');
+      }
+      return;
+    }
+
+    if (!panel.querySelector('[data-review-table-pane]')?.hidden) {
+      this.syncReviewRawFromTable(panel);
+    }
+    const draft = panel.querySelector('[data-review-draft]')?.value || '';
+    const label = action === 'dismiss' ? 'Dismiss' : 'Approve append';
+    if (action === 'dismiss' && !confirm('Dismiss this review without appending it?')) return;
+
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          history_index: historyIndex,
+          result: draft
+        })
+      });
+      const payloadText = await response.text();
+      let payload = null;
+      if (payloadText) {
+        try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+      }
+      if (!response.ok) {
+        const validationErrors = Array.isArray(payload?.validation_result?.errors)
+          ? payload.validation_result.errors.map((error) => error?.message || error?.code).filter(Boolean).join(' ')
+          : '';
+        throw new Error(validationErrors || payload?.message || payloadText || `${label} failed`);
+      }
+      this.notify('success', action === 'dismiss' ? 'Review dismissed' : 'Approved result appended');
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to resolve output review:', error);
+      this.notify('error', error?.message || `${label} failed`);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   updateResultActionButtons(outputText, canSaveNote) {

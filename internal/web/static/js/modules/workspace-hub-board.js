@@ -335,6 +335,10 @@
       ? `<div class="hub-card-labels">${labels.map((label) => `<span class="hub-card-label">${escapeHtml(label)}</span>`).join('')}</div>`
       : '';
     const dueMarkup = dueDate ? `<span class="hub-card-due">Due ${escapeHtml(formatDueDate(dueDate))}</span>` : '';
+    const needsReviewCount = countNeedsReviewRuns(task);
+    const needsReviewMarkup = needsReviewCount > 0
+      ? `<span class="hub-card-due">Needs Review: ${escapeHtml(needsReviewCount)}</span>`
+      : '';
     const assignedMarkup = assignmentLabel && assignmentLabel !== 'Unassigned'
       ? `<span class="hub-card-assignee">${escapeHtml(assignmentLabel)}</span>`
       : '<span class="hub-card-assignee is-muted">Unassigned</span>';
@@ -365,6 +369,7 @@
           <div class="hub-card-meta">
             ${assignedMarkup}
             ${dueMarkup}
+            ${needsReviewMarkup}
           </div>
           <div class="hub-card-meta hub-card-meta-secondary">
             <span>${escapeHtml(status)}</span>
@@ -391,6 +396,14 @@
         </div>
       </div>
     `;
+  }
+
+  function countNeedsReviewRuns(task) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    return history.filter((entry) => {
+      const validation = entry?.validation_result || entry?.validation || null;
+      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+    }).length;
   }
 
   function wireDragAndDrop() {

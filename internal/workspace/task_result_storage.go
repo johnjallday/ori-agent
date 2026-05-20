@@ -236,3 +236,75 @@ func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string)
 	}
 	return csvData
 }
+
+// BootstrapOutputContractFromCSVHeader derives a string-typed output contract from an existing CSV header.
+func BootstrapOutputContractFromCSVHeader(ws *Workspace, task *Task) *TaskOutputContract {
+	if task == nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
+		return NormalizeTaskOutputContract(task.OutputContract)
+	}
+	storage := task.ResultStorage
+	if storage == nil || !storage.Enabled || strings.ToLower(strings.TrimSpace(storage.WriteMode)) != "append" {
+		return nil
+	}
+
+	filePath := strings.TrimSpace(storage.FilePath)
+	if filePath == "" {
+		return nil
+	}
+	if strings.TrimSpace(storage.StoreNodeID) != "" {
+		if ws == nil {
+			return nil
+		}
+		var node *StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
+				node = &ws.StoreNodes[i]
+				break
+			}
+		}
+		if node == nil {
+			return nil
+		}
+		finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+		if err != nil {
+			return nil
+		}
+		filePath = finalPath
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	header, err := reader.Read()
+	if err != nil || len(header) == 0 {
+		return nil
+	}
+
+	columns := make([]TaskOutputContractColumn, 0, len(header))
+	seen := map[string]struct{}{}
+	for _, raw := range header {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		columns = append(columns, TaskOutputContractColumn{
+			Name:     name,
+			Type:     "string",
+			Required: true,
+		})
+	}
+	return NormalizeTaskOutputContract(&TaskOutputContract{
+		Source:  "csv_header",
+		Columns: columns,
+	})
+}

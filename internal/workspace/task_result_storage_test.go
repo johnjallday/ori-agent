@@ -71,3 +71,33 @@ func TestAppendCSVToFile_WritesHeaderOnce(t *testing.T) {
 		t.Fatalf("csv data = %q, want %q", string(data), want)
 	}
 }
+
+func TestBootstrapOutputContractFromCSVHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pollen.csv")
+	if err := os.WriteFile(path, []byte("date,location,pollen_count\n2026-05-20,NYC,8"), 0644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	task := &Task{
+		ID: "task-1",
+		ResultStorage: &ResultStorageConfig{
+			Enabled:   true,
+			FilePath:  path,
+			Format:    "csv",
+			WriteMode: "append",
+		},
+	}
+
+	contract := BootstrapOutputContractFromCSVHeader(nil, task)
+	if contract == nil {
+		t.Fatal("expected header-derived contract")
+	}
+	if contract.Source != "csv_header" {
+		t.Fatalf("source = %q, want csv_header", contract.Source)
+	}
+	if len(contract.Columns) != 3 {
+		t.Fatalf("expected 3 columns, got %d", len(contract.Columns))
+	}
+	if contract.Columns[2].Name != "pollen_count" || contract.Columns[2].Type != "string" {
+		t.Fatalf("unexpected third column: %+v", contract.Columns[2])
+	}
+}

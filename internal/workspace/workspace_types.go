@@ -185,6 +185,8 @@ type Task struct {
 	CombinationInstruction string `json:"combination_instruction,omitempty"`
 	// OutputSchema requires the task result to be returned as structured JSON.
 	OutputSchema *TaskOutputSchema `json:"output_schema,omitempty"`
+	// OutputContract validates task results before automatic storage.
+	OutputContract *TaskOutputContract `json:"output_contract,omitempty"`
 	// TemplateRef tracks which reusable template and step produced this task.
 	TemplateRef *TaskTemplateRef `json:"template_ref,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
@@ -316,6 +318,67 @@ type TaskOutputField struct {
 	Required    bool   `json:"required,omitempty"`
 }
 
+// TaskOutputContract describes the CSV-oriented row shape a task result must satisfy before storage.
+type TaskOutputContract struct {
+	Version string                     `json:"version,omitempty"`
+	Source  string                     `json:"source,omitempty"` // ai_suggested, manual, csv_header
+	Columns []TaskOutputContractColumn `json:"columns,omitempty"`
+}
+
+// TaskOutputContractColumn describes one expected CSV output column.
+type TaskOutputContractColumn struct {
+	Name        string `json:"name"`
+	Type        string `json:"type,omitempty"` // string, number, boolean, date
+	Required    bool   `json:"required,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// TaskValidationStatus records whether a completed run satisfied its output contract.
+type TaskValidationStatus string
+
+const (
+	TaskValidationNotApplicable    TaskValidationStatus = "not_applicable"
+	TaskValidationPassed           TaskValidationStatus = "passed"
+	TaskValidationNeedsReview      TaskValidationStatus = "needs_review"
+	TaskValidationDismissed        TaskValidationStatus = "dismissed"
+	TaskValidationManuallyApproved TaskValidationStatus = "manually_approved"
+)
+
+// TaskStorageStatus records what happened to a run after validation.
+type TaskStorageStatus string
+
+const (
+	TaskStorageNotAttempted     TaskStorageStatus = "not_attempted"
+	TaskStorageSaved            TaskStorageStatus = "saved"
+	TaskStorageAppended         TaskStorageStatus = "appended"
+	TaskStorageSkippedInvalid   TaskStorageStatus = "skipped_invalid"
+	TaskStorageManuallyAppended TaskStorageStatus = "manually_appended"
+)
+
+// TaskValidationResult stores the validation and storage outcome for one run.
+type TaskValidationResult struct {
+	ValidationStatus TaskValidationStatus  `json:"validation_status"`
+	StorageStatus    TaskStorageStatus     `json:"storage_status"`
+	ContractVersion  string                `json:"contract_version,omitempty"`
+	Errors           []TaskValidationError `json:"errors,omitempty"`
+	RawOutputRef     string                `json:"raw_output_ref,omitempty"`
+	ManualApproval   *TaskManualApproval   `json:"manual_approval,omitempty"`
+	ValidatedAt      *time.Time            `json:"validated_at,omitempty"`
+}
+
+// TaskValidationError is a structured, user-facing validation failure.
+type TaskValidationError struct {
+	Code    string `json:"code"`
+	Column  string `json:"column,omitempty"`
+	Message string `json:"message"`
+}
+
+// TaskManualApproval records who manually approved a gated result and when.
+type TaskManualApproval struct {
+	ApprovedAt time.Time `json:"approved_at"`
+	ApprovedBy string    `json:"approved_by,omitempty"`
+}
+
 // TaskExecutionStepStatus tracks a single internal execution step.
 type TaskExecutionStepStatus string
 
@@ -395,14 +458,15 @@ type ScheduleConfig struct {
 
 // TaskExecution represents a single recorded run of a task.
 type TaskExecution struct {
-	TaskID     string    `json:"task_id"`            // ID of the executed task
-	RunID      string    `json:"run_id,omitempty"`   // Workspace Run backing this execution, when available
-	ExecutedAt time.Time `json:"executed_at"`        // When the run started
-	Status     string    `json:"status"`             // "success", "failed", or "blocked"
-	Summary    string    `json:"summary,omitempty"`  // Short result or failure summary (truncated, ~360 chars)
-	Result     string    `json:"result,omitempty"`   // Full result body, capped at maxRecordedTaskExecutionResult bytes
-	Error      string    `json:"error,omitempty"`    // Full error message if failed or blocked
-	Duration   int64     `json:"duration,omitempty"` // Execution duration in milliseconds
+	TaskID     string                `json:"task_id"`            // ID of the executed task
+	RunID      string                `json:"run_id,omitempty"`   // Workspace Run backing this execution, when available
+	ExecutedAt time.Time             `json:"executed_at"`        // When the run started
+	Status     string                `json:"status"`             // "success", "failed", or "blocked"
+	Summary    string                `json:"summary,omitempty"`  // Short result or failure summary (truncated, ~360 chars)
+	Result     string                `json:"result,omitempty"`   // Full result body, capped at maxRecordedTaskExecutionResult bytes
+	Error      string                `json:"error,omitempty"`    // Full error message if failed or blocked
+	Duration   int64                 `json:"duration,omitempty"` // Execution duration in milliseconds
+	Validation *TaskValidationResult `json:"validation_result,omitempty"`
 }
 
 // ScheduledTask represents a recurring or one-time scheduled task template

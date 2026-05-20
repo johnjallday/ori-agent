@@ -346,6 +346,8 @@ export const taskExecutionViewsMethods = {
     return relevantHistory.map((item, index) => {
       const recordedAt = this.normalizeBreakdownField(item?.executed_at);
       const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const validation = item?.validation_result || item?.validation || null;
+      const validationLabel = this.getTaskValidationDisplayLabel(validation);
       const summary = this.normalizeBreakdownField(item?.summary);
       const errorText = this.normalizeBreakdownField(item?.error);
       const durationMs = Number(item?.duration) || 0;
@@ -353,6 +355,10 @@ export const taskExecutionViewsMethods = {
 
       if (recordedAt) detailParts.push(`Recorded at: ${_formatRelativeDate(recordedAt)}`);
       if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
+      if (validationLabel) detailParts.push(`Storage: ${validationLabel}`);
+      if (Array.isArray(validation?.errors) && validation.errors.length > 0) {
+        detailParts.push(`Validation: ${validation.errors.map((error) => error?.message || error?.code).filter(Boolean).join(' ')}`);
+      }
       if (durationMs > 0) detailParts.push(`Duration: ${Math.round(durationMs / 1000)}s`);
       if (summary) {
         detailParts.push(this.truncateBreakdownText(summary, 520));
@@ -361,11 +367,23 @@ export const taskExecutionViewsMethods = {
       }
 
       return {
-        title: `Run ${startIndex + index}`,
-        status: mapRecordedStatus(rawStatus),
+        title: validationLabel ? `Run ${startIndex + index} • ${validationLabel}` : `Run ${startIndex + index}`,
+        status: validation?.validation_status === 'needs_review' ? 'blocked' : mapRecordedStatus(rawStatus),
         detail: detailParts.join('\n')
       };
     });
+  },
+
+  getTaskValidationDisplayLabel(validation) {
+    const validationStatus = String(validation?.validation_status || '').trim().toLowerCase();
+    const storageStatus = String(validation?.storage_status || '').trim().toLowerCase();
+    if (!validationStatus || validationStatus === 'not_applicable') return '';
+    if (validationStatus === 'dismissed') return 'Dismissed';
+    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended') return 'Manually Approved';
+    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid') return 'Needs Review';
+    if (validationStatus === 'passed' && (storageStatus === 'saved' || storageStatus === 'appended')) return 'Saved';
+    if (validationStatus === 'passed') return 'Validated';
+    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
   },
 
   buildExecutionBreakdownDetail(task, fallbackDetail = '') {

@@ -394,6 +394,22 @@
             <option value="csv">CSV</option>
           </select>
         </div>
+        <div id="taskModalOutputContractSection" class="task-modal-field" style="display: none; margin-top: 12px; margin-bottom: 0; border-top: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent); padding-top: 12px;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+            <div>
+              <label class="task-modal-label" style="font-size: 0.8rem; margin-bottom: 2px;">Output Contract</label>
+              <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.35;">Append mode validates each run against these CSV columns before writing.</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-shrink: 0;">
+              <button type="button" id="taskModalOutputContractSuggest" class="task-modal-btn task-modal-btn-secondary" style="padding: 6px 9px; font-size: 0.74rem;">Regenerate</button>
+              <button type="button" id="taskModalOutputContractAddColumn" class="task-modal-btn task-modal-btn-secondary" style="padding: 6px 9px; font-size: 0.74rem;">Add Column</button>
+            </div>
+          </div>
+          <div id="taskModalOutputContractRows" style="display: grid; gap: 8px;"></div>
+          <div id="taskModalOutputContractEmpty" style="display: none; border: 1px dashed var(--border-color); border-radius: 8px; padding: 10px; color: var(--text-secondary); font-size: 0.78rem;">No output contract defined. Runs will save without validation.</div>
+          <div id="taskModalOutputContractStatus" aria-live="polite" style="display: none; margin-top: 8px; color: var(--text-secondary); font-size: 0.76rem;"></div>
+          <div id="taskModalOutputContractError" role="alert" style="display: none; margin-top: 8px; color: #f87171; font-size: 0.76rem;"></div>
+        </div>
       </div>
       </div><!-- End task-modal-automation -->
       </div><!-- End taskManualSection -->
