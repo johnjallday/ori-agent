@@ -147,10 +147,8 @@ func csvColumns(rows []map[string]string, object map[string]interface{}) []strin
 	}
 
 	remaining := []string{}
-	if object != nil {
-		for key := range object {
-			remaining = append(remaining, key)
-		}
+	for key := range object {
+		remaining = append(remaining, key)
 	}
 	for _, row := range rows {
 		for key := range row {

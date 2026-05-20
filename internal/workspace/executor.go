@@ -552,7 +552,8 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 
 	// Prepare data for storage
 	dataToStore := result
-	if assignedStore.Format == "json" {
+	switch assignedStore.Format {
+	case "json":
 		// Wrap plain text result in JSON structure
 		jsonData := map[string]interface{}{
 			"task_id":     task.ID,
@@ -570,7 +571,7 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 			return
 		}
 		dataToStore = string(jsonBytes)
-	} else if assignedStore.Format == "csv" {
+	case "csv":
 		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
 			dataToStore = contractCSV
 		} else {

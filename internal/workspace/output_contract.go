@@ -83,12 +83,7 @@ func outputContractVersion(contract *TaskOutputContract) string {
 		Columns: make([]versionColumn, 0, len(contract.Columns)),
 	}
 	for _, column := range contract.Columns {
-		canonical.Columns = append(canonical.Columns, versionColumn{
-			Name:        column.Name,
-			Type:        column.Type,
-			Required:    column.Required,
-			Description: column.Description,
-		})
+		canonical.Columns = append(canonical.Columns, versionColumn(column))
 	}
 	data, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(data)
@@ -271,15 +266,15 @@ func validateOutputContractValue(column TaskOutputContractColumn, value string) 
 	switch column.Type {
 	case "number":
 		if _, err := strconv.ParseFloat(value, 64); err != nil {
-			return fmt.Errorf("Column `%s` must be a number.", column.Name)
+			return fmt.Errorf("column `%s` must be a number", column.Name)
 		}
 	case "boolean":
 		if _, err := strconv.ParseBool(strings.ToLower(value)); err != nil {
-			return fmt.Errorf("Column `%s` must be true or false.", column.Name)
+			return fmt.Errorf("column `%s` must be true or false", column.Name)
 		}
 	case "date":
 		if !isOutputContractDate(value) {
-			return fmt.Errorf("Column `%s` must be a date.", column.Name)
+			return fmt.Errorf("column `%s` must be a date", column.Name)
 		}
 	}
 	return nil
