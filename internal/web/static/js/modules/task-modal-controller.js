@@ -44,6 +44,7 @@ class TaskModalController {
     this.outputContractEdited = false;
     this.outputContractSource = 'manual';
     this.outputContractEditTelemetrySent = false;
+    this.outputSpecDraft = null;
   }
 
   /**
@@ -3362,9 +3363,12 @@ class TaskModalController {
     });
   }
 
-  applyOutputContractSuggestion(contract, key, cached = false) {
+  applyOutputContractSuggestion(suggestion, key, cached = false) {
+    const outputSpec = suggestion?.output_spec || (suggestion?.contract ? suggestion : null);
+    const contract = outputSpec?.contract || suggestion?.output_contract || suggestion;
     const normalized = this.normalizeOutputContractPayload(contract);
     if (!normalized) return false;
+    this.outputSpecDraft = outputSpec ? this.normalizeOutputSpecPayload(outputSpec) : this.buildOutputSpecFromContract(normalized);
     this.populateOutputContractRows(normalized.columns, normalized.source || 'ai_suggested');
     this.outputContractSuggestionRequestKey = key || '';
     this.setOutputContractStatus(cached ? 'Using the cached AI suggestion for this draft.' : 'AI suggestion applied.');
@@ -3398,19 +3402,23 @@ class TaskModalController {
     const suggestButton = document.getElementById('taskModalOutputContractSuggest');
     if (suggestButton) suggestButton.disabled = true;
     try {
-      const response = await fetch('/api/orchestration/tasks/output-contract/suggest', {
+      const response = await fetch('/api/orchestration/tasks/output-spec/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(draft)
+        body: JSON.stringify({
+          ...draft,
+          task_id: this.editingTaskId || this.currentTask?.id || ''
+        })
       });
       if (!response.ok) {
         throw new Error(await response.text() || 'Unable to suggest output contract');
       }
       const data = await response.json();
-      const contract = data.output_contract;
-      this.outputContractSuggestionCache.set(key, contract);
+      const outputSpec = data.output_spec || null;
+      const contract = outputSpec?.contract || data.output_contract;
+      this.outputContractSuggestionCache.set(key, { output_spec: outputSpec, output_contract: contract });
       if (!this.outputContractEdited || force || this.getOutputContractRows().length === 0) {
-        this.applyOutputContractSuggestion(contract, key, false);
+        this.applyOutputContractSuggestion({ output_spec: outputSpec, output_contract: contract }, key, false);
       } else {
         this.setOutputContractStatus('AI suggestion is ready. Regenerate to replace your manual edits.');
       }
@@ -3418,6 +3426,7 @@ class TaskModalController {
       console.warn('Output contract suggestion failed:', error);
       if (this.getOutputContractRows().length === 0) {
         this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
+        this.outputSpecDraft = null;
       }
       this.setOutputContractStatus('AI suggestion unavailable. You can edit these columns manually.', 'error');
       this.trackOutputContractTelemetry('suggestion_failed', {
@@ -3525,11 +3534,16 @@ class TaskModalController {
     if (columns.length === 0) {
       return { error: 'Append to CSV requires at least one output contract column.' };
     }
+    const outputContract = {
+      source: this.outputContractEdited ? 'manual' : (this.outputContractSource || 'manual'),
+      columns
+    };
+    const outputSpec = !this.outputContractEdited && this.outputSpecDraft && this.outputSpecMatchesContract(this.outputSpecDraft, outputContract)
+      ? this.normalizeOutputSpecPayload({ ...this.outputSpecDraft, contract: outputContract, source: outputContract.source })
+      : this.buildOutputSpecFromContract(outputContract);
     return {
-      output_contract: {
-        source: this.outputContractEdited ? 'manual' : (this.outputContractSource || 'manual'),
-        columns
-      }
+      output_contract: outputContract,
+      output_spec: outputSpec
     };
   }
 
@@ -3556,6 +3570,93 @@ class TaskModalController {
       source: contract?.source || 'ai_suggested',
       columns: normalized
     };
+  }
+
+  normalizeOutputSpecPayload(spec) {
+    if (!spec || typeof spec !== 'object') return null;
+    const contract = this.normalizeOutputContractPayload(spec.contract);
+    if (!contract) return null;
+    const schemaFields = Array.isArray(spec.schema?.fields) ? spec.schema.fields : [];
+    const normalizedFields = [];
+    const seenFields = new Set();
+    schemaFields.forEach((field) => {
+      const name = String(field?.name || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seenFields.has(key)) return;
+      seenFields.add(key);
+      const type = ['string', 'number', 'integer', 'boolean', 'object', 'array'].includes(field?.type) ? field.type : 'string';
+      normalizedFields.push({
+        name,
+        type,
+        required: Boolean(field?.required),
+        description: String(field?.description || '').trim() || undefined
+      });
+    });
+    const schema = {
+      name: String(spec.schema?.name || 'task_result').trim() || 'task_result',
+      description: String(spec.schema?.description || '').trim() || undefined,
+      strict: spec.schema?.strict !== false,
+      fields: normalizedFields.length ? normalizedFields : contract.columns.map((column) => ({
+        name: column.name,
+        type: column.type === 'number' ? 'number' : column.type === 'boolean' ? 'boolean' : 'string',
+        required: Boolean(column.required),
+        description: column.description
+      }))
+    };
+    const mappings = Array.isArray(spec.mappings) && spec.mappings.length
+      ? spec.mappings.map((mapping) => ({
+        schema_field: String(mapping?.schema_field || '').trim(),
+        csv_column: String(mapping?.csv_column || '').trim(),
+        transform: ['identity', 'json_string'].includes(mapping?.transform) ? mapping.transform : 'identity',
+        default_value: String(mapping?.default_value || '').trim() || undefined
+      })).filter((mapping) => mapping.schema_field && mapping.csv_column)
+      : contract.columns.map((column) => ({
+        schema_field: column.name,
+        csv_column: column.name,
+        transform: 'identity'
+      }));
+    return {
+      source: spec.source || contract.source || 'manual',
+      version: spec.version || undefined,
+      schema,
+      contract,
+      mappings,
+      metadata_policy: spec.metadata_policy || {
+        fields: ['run_id', 'executed_at', 'status', 'duration_ms'].map((name) => ({ name, include: true }))
+      }
+    };
+  }
+
+  buildOutputSpecFromContract(contract) {
+    const normalized = this.normalizeOutputContractPayload(contract);
+    if (!normalized) return null;
+    return this.normalizeOutputSpecPayload({
+      source: normalized.source || 'manual',
+      schema: {
+        name: 'task_result',
+        strict: true,
+        fields: normalized.columns.map((column) => ({
+          name: column.name,
+          type: column.type === 'number' ? 'number' : column.type === 'boolean' ? 'boolean' : 'string',
+          required: Boolean(column.required),
+          description: column.description
+        }))
+      },
+      contract: normalized,
+      mappings: normalized.columns.map((column) => ({
+        schema_field: column.name,
+        csv_column: column.name,
+        transform: 'identity'
+      }))
+    });
+  }
+
+  outputSpecMatchesContract(spec, contract) {
+    const specColumns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
+    const columns = Array.isArray(contract?.columns) ? contract.columns : [];
+    if (specColumns.length !== columns.length) return false;
+    return specColumns.every((column, index) => String(column?.name || '').trim().toLowerCase() === String(columns[index]?.name || '').trim().toLowerCase());
   }
 
   /**

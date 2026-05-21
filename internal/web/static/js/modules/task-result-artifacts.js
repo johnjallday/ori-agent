@@ -379,6 +379,14 @@ export function buildRunHistoryArtifact(task) {
   let hasSummary = false;
 
   history.forEach((entry) => {
+    const validation = entry?.validation_result || entry?.validation || null;
+    const normalizedRow = validation?.normalized_row;
+    if (normalizedRow && typeof normalizedRow === 'object' && !Array.isArray(normalizedRow)) {
+      parsedCount += 1;
+      Object.keys(normalizedRow).forEach((column) => parsedColumns.push(column));
+      rows.push(buildHistoryRow(entry, { rows: [normalizedRow] }, normalizedRow, 0));
+      return;
+    }
     const raw = String(entry?.result || entry?.summary || '').trim();
     const parsed = detectTabularResult(raw);
     if (parsed && parsed.rows.length > 0) {

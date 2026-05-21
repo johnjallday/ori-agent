@@ -1418,6 +1418,87 @@
       padding: 0.65rem 0.75rem;
     }
 
+    .workspace-task-review-status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .workspace-task-review-status-row span {
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 800;
+      padding: 0.24rem 0.55rem;
+      text-transform: capitalize;
+    }
+
+    .workspace-task-review-reconcile {
+      display: grid;
+      gap: 0.65rem;
+      border: 1px solid color-mix(in srgb, #dc2626 28%, var(--border-color));
+      border-radius: 10px;
+      background: color-mix(in srgb, #dc2626 7%, var(--bg-primary));
+      padding: 0.75rem;
+    }
+
+    .workspace-task-review-reconcile strong,
+    .workspace-task-review-normalized summary {
+      color: var(--text-primary);
+      font-size: 0.85rem;
+    }
+
+    .workspace-task-review-reconcile span,
+    .workspace-task-review-reconcile dd {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+    }
+
+    .workspace-task-review-reconcile dl {
+      display: grid;
+      gap: 0.45rem;
+      margin: 0;
+    }
+
+    .workspace-task-review-reconcile dl > div {
+      display: grid;
+      grid-template-columns: 5.5rem minmax(0, 1fr);
+      gap: 0.6rem;
+    }
+
+    .workspace-task-review-reconcile dt {
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .workspace-task-review-reconcile dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-task-review-normalized {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      background: var(--bg-primary);
+      padding: 0.65rem 0.75rem;
+    }
+
+    .workspace-task-review-normalized summary {
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .workspace-task-review-normalized pre {
+      margin: 0.55rem 0 0;
+      color: var(--text-primary);
+      font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     .workspace-task-review-editor {
       display: grid;
       gap: 0.35rem;
@@ -1951,8 +2032,9 @@
 
     .workspace-task-result-contract[data-state="view"] {
       flex-direction: row;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
+      flex-wrap: wrap;
       gap: 0.65rem;
     }
 
@@ -1980,6 +2062,40 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       max-width: 38rem;
+    }
+
+    .workspace-task-output-spec-overview {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(8rem, 1fr));
+      gap: 0.45rem;
+      width: 100%;
+      order: 2;
+    }
+
+    .workspace-task-output-spec-stat {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      background: var(--bg-primary);
+      padding: 0.55rem 0.65rem;
+      min-width: 0;
+    }
+
+    .workspace-task-output-spec-stat span {
+      display: block;
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-output-spec-stat strong {
+      display: block;
+      margin-top: 0.15rem;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .workspace-task-result-contract-warning {
@@ -2032,7 +2148,7 @@
 
     .workspace-task-result-contract-row {
       display: grid;
-      grid-template-columns: minmax(8rem, 1fr) 8rem auto minmax(10rem, 2fr) 2rem;
+      grid-template-columns: minmax(8rem, 1fr) 7rem minmax(8rem, 1fr) 8rem auto minmax(10rem, 1.4fr) 2rem;
       gap: 0.5rem;
       align-items: center;
     }
@@ -2076,6 +2192,32 @@
       justify-content: flex-start;
     }
 
+    .workspace-task-output-spec-metadata-editor {
+      display: grid;
+      gap: 0.45rem;
+      border-top: 1px solid var(--border-color);
+      padding-top: 0.65rem;
+    }
+
+    .workspace-task-output-spec-metadata-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .workspace-task-output-spec-metadata-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 0.34rem 0.6rem;
+    }
+
     .workspace-task-result-contract-error {
       color: #c23b3b;
       font-size: 0.82rem;
@@ -2091,6 +2233,9 @@
     @media (max-width: 720px) {
       .workspace-task-result-contract-row {
         grid-template-columns: 1fr 1fr;
+      }
+      .workspace-task-output-spec-overview {
+        grid-template-columns: 1fr;
       }
       .workspace-task-result-contract-row > [data-role="result-contract-description"],
       .workspace-task-result-contract-row > .workspace-task-result-contract-remove {

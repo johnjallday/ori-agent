@@ -66,6 +66,22 @@ test('output contract normalization deduplicates and preserves usable columns', 
   assert.equal(normalized.columns[2].type, 'string');
 });
 
+test('output contract data includes structured output spec payload', () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  controller.getOutputContractRows = () => [
+    { name: 'date', type: 'date', required: true, description: 'Run date' },
+    { name: 'pollen_count', type: 'number', required: true, description: 'Reported pollen level' },
+  ];
+
+  const data = controller.getOutputContractData();
+
+  assert.equal(data.output_contract.columns.length, 2);
+  assert.equal(data.output_spec.schema.fields[0].name, 'date');
+  assert.equal(data.output_spec.contract.columns[1].name, 'pollen_count');
+  assert.equal(data.output_spec.mappings[1].schema_field, 'pollen_count');
+});
+
 test('output contract suggestion cache key is stable for equivalent drafts', () => {
   const { Controller } = loadController();
   const controller = new Controller();

@@ -34,15 +34,20 @@ const (
 type ArtifactKind string
 
 const (
-	ArtifactDiff         ArtifactKind = "diff"
-	ArtifactChangedFiles ArtifactKind = "changed_files"
-	ArtifactTestOutput   ArtifactKind = "test_output"
-	ArtifactLog          ArtifactKind = "log"
-	ArtifactScreenshot   ArtifactKind = "screenshot"
-	ArtifactCitation     ArtifactKind = "citation"
-	ArtifactFile         ArtifactKind = "file"
-	ArtifactTrace        ArtifactKind = "trace"
-	ArtifactMemoryUpdate ArtifactKind = "memory_update"
+	ArtifactDiff                 ArtifactKind = "diff"
+	ArtifactChangedFiles         ArtifactKind = "changed_files"
+	ArtifactTestOutput           ArtifactKind = "test_output"
+	ArtifactLog                  ArtifactKind = "log"
+	ArtifactScreenshot           ArtifactKind = "screenshot"
+	ArtifactCitation             ArtifactKind = "citation"
+	ArtifactFile                 ArtifactKind = "file"
+	ArtifactTrace                ArtifactKind = "trace"
+	ArtifactMemoryUpdate         ArtifactKind = "memory_update"
+	ArtifactTaskRawResult        ArtifactKind = "task_raw_result"
+	ArtifactTaskNormalizedRow    ArtifactKind = "task_normalized_row"
+	ArtifactTaskOutputValidation ArtifactKind = "task_output_validation"
+	ArtifactTaskOutputRepair     ArtifactKind = "task_output_repair"
+	ArtifactTaskStorageReceipt   ArtifactKind = "task_storage_receipt"
 )
 
 type TraceEventKind string
@@ -263,13 +268,18 @@ type TaskOutputSummary struct {
 	ValidatedAt      *time.Time                  `json:"validated_at,omitempty"`
 	ErrorCount       int                         `json:"error_count,omitempty"`
 	Errors           []TaskOutputValidationError `json:"errors,omitempty"`
+	RawOutputRef     string                      `json:"raw_output_ref,omitempty"`
+	NormalizedRowRef string                      `json:"normalized_row_ref,omitempty"`
+	RepairStatus     string                      `json:"repair_status,omitempty"`
 	ManualApproval   bool                        `json:"manual_approval,omitempty"`
 }
 
 type TaskOutputValidationError struct {
-	Code    string `json:"code,omitempty"`
-	Column  string `json:"column,omitempty"`
-	Message string `json:"message,omitempty"`
+	Code     string   `json:"code,omitempty"`
+	Column   string   `json:"column,omitempty"`
+	Message  string   `json:"message,omitempty"`
+	Expected []string `json:"expected,omitempty"`
+	Actual   []string `json:"actual,omitempty"`
 }
 
 type CheckResult struct {

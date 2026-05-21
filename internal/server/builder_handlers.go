@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -310,16 +311,81 @@ func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {
 				"error":        err,
 			})
 		}
+		mirrorTaskOutputArtifacts(context.Background(), store, workspaceID, runID, taskID, validation)
 	})
+}
+
+func mirrorTaskOutputArtifacts(ctx context.Context, store workspacerun.Store, workspaceID, runID, taskID string, validation workspace.TaskValidationResult) {
+	if store == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+		return
+	}
+	baseMetadata := map[string]any{
+		"task_id":           taskID,
+		"contract_version":  validation.ContractVersion,
+		"validation_status": string(validation.ValidationStatus),
+		"storage_status":    string(validation.StorageStatus),
+	}
+	if validation.NormalizedRow != nil {
+		if data, err := json.Marshal(validation.NormalizedRow); err == nil {
+			_, _ = store.AddArtifact(ctx, workspaceID, runID, workspacerun.NewArtifact(
+				runID,
+				workspacerun.ArtifactTaskNormalizedRow,
+				workspacerun.ArtifactInline(data),
+				workspacerun.ArtifactMetadata(baseMetadata),
+			))
+		}
+	}
+	if data, err := json.Marshal(validation); err == nil {
+		_, _ = store.AddArtifact(ctx, workspaceID, runID, workspacerun.NewArtifact(
+			runID,
+			workspacerun.ArtifactTaskOutputValidation,
+			workspacerun.ArtifactInline(data),
+			workspacerun.ArtifactMetadata(baseMetadata),
+		))
+	}
+	if strings.TrimSpace(validation.RepairStatus) != "" {
+		repair := map[string]any{
+			"task_id":           taskID,
+			"contract_version":  validation.ContractVersion,
+			"repair_status":     validation.RepairStatus,
+			"validation_status": validation.ValidationStatus,
+			"error_count":       len(validation.Errors),
+		}
+		if data, err := json.Marshal(repair); err == nil {
+			_, _ = store.AddArtifact(ctx, workspaceID, runID, workspacerun.NewArtifact(
+				runID,
+				workspacerun.ArtifactTaskOutputRepair,
+				workspacerun.ArtifactInline(data),
+				workspacerun.ArtifactMetadata(baseMetadata),
+			))
+		}
+	}
+	receipt := map[string]any{
+		"task_id":           taskID,
+		"contract_version":  validation.ContractVersion,
+		"storage_status":    validation.StorageStatus,
+		"validation_status": validation.ValidationStatus,
+		"error_count":       len(validation.Errors),
+	}
+	if data, err := json.Marshal(receipt); err == nil {
+		_, _ = store.AddArtifact(ctx, workspaceID, runID, workspacerun.NewArtifact(
+			runID,
+			workspacerun.ArtifactTaskStorageReceipt,
+			workspacerun.ArtifactInline(data),
+			workspacerun.ArtifactMetadata(baseMetadata),
+		))
+	}
 }
 
 func taskValidationToWorkspaceRunOutput(taskID string, validation workspace.TaskValidationResult) workspacerun.TaskOutputSummary {
 	errors := make([]workspacerun.TaskOutputValidationError, 0, len(validation.Errors))
 	for _, item := range validation.Errors {
 		errors = append(errors, workspacerun.TaskOutputValidationError{
-			Code:    item.Code,
-			Column:  item.Column,
-			Message: item.Message,
+			Code:     item.Code,
+			Column:   item.Column,
+			Message:  item.Message,
+			Expected: append([]string(nil), item.Expected...),
+			Actual:   append([]string(nil), item.Actual...),
 		})
 	}
 	return workspacerun.TaskOutputSummary{
@@ -330,6 +396,9 @@ func taskValidationToWorkspaceRunOutput(taskID string, validation workspace.Task
 		ValidatedAt:      validation.ValidatedAt,
 		ErrorCount:       len(validation.Errors),
 		Errors:           errors,
+		RawOutputRef:     validation.RawOutputRef,
+		NormalizedRowRef: validation.NormalizedRowRef,
+		RepairStatus:     validation.RepairStatus,
 		ManualApproval:   validation.ManualApproval != nil || validation.ValidationStatus == workspace.TaskValidationManuallyApproved,
 	}
 }

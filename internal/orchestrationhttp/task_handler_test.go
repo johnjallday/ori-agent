@@ -1100,6 +1100,275 @@ func TestHandleTaskOutputReview_ApproveAppend(t *testing.T) {
 	}
 }
 
+func TestHandleTaskOutputReview_ApproveAppendBlocksCSVHeaderMismatch(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
+	ws.ID = "workspace-review-approve-header-mismatch"
+
+	outputPath := filepath.Join(t.TempDir(), "pollen.csv")
+	if err := os.WriteFile(outputPath, []byte("wrong,header\n1,2"), 0644); err != nil {
+		t.Fatalf("write existing csv: %v", err)
+	}
+	task := workspace.Task{
+		ID:          "task-review-approve-header-mismatch",
+		WorkspaceID: ws.ID,
+		Description: "Track pollen",
+		Status:      workspace.TaskStatusCompleted,
+		ResultStorage: &workspace.ResultStorageConfig{
+			Enabled:   true,
+			FilePath:  outputPath,
+			Format:    "csv",
+			WriteMode: "append",
+		},
+		OutputContract: workspace.NormalizeTaskOutputContract(&workspace.TaskOutputContract{
+			Source: "manual",
+			Columns: []workspace.TaskOutputContractColumn{
+				{Name: "date", Type: "date", Required: true},
+				{Name: "location", Type: "string", Required: true},
+			},
+		}),
+		ExecutionHistory: []workspace.TaskExecution{
+			{
+				TaskID:     "task-review-approve-header-mismatch",
+				RunID:      "run-header-mismatch",
+				ExecutedAt: time.Now(),
+				Status:     "success",
+				Result:     `{"date":"bad","location":"NYC"}`,
+				Validation: &workspace.TaskValidationResult{
+					ValidationStatus: workspace.TaskValidationNeedsReview,
+					StorageStatus:    workspace.TaskStorageSkippedInvalid,
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	body := `{"action":"approve_append","history_index":0,"result":"{\"date\":\"2026-05-20\",\"location\":\"NYC\"}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-review-approve-header-mismatch/review", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if string(data) != "wrong,header\n1,2" {
+		t.Fatalf("csv should not append on header mismatch, got %q", string(data))
+	}
+	updatedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	updatedTask, err := updatedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	validation := updatedTask.ExecutionHistory[0].Validation
+	if validation == nil || validation.ValidationStatus != workspace.TaskValidationNeedsReview || validation.StorageStatus != workspace.TaskStorageSkippedInvalid {
+		t.Fatalf("validation = %+v, want needs_review/skipped_invalid", validation)
+	}
+	if len(validation.Errors) == 0 || validation.Errors[0].Code != "csv_header_mismatch" {
+		t.Fatalf("expected csv_header_mismatch, got %+v", validation.Errors)
+	}
+	if strings.Join(validation.Errors[0].Expected, ",") != "date,location" || strings.Join(validation.Errors[0].Actual, ",") != "wrong,header" {
+		t.Fatalf("unexpected headers: %+v", validation.Errors[0])
+	}
+}
+
+func TestTaskOutputReviewApproval_UsesValidationSpecSnapshot(t *testing.T) {
+	runSpec, errs := workspace.NormalizeTaskOutputSpec(&workspace.TaskOutputSpec{
+		Source: "manual",
+		Schema: &workspace.TaskOutputSchema{
+			Name:   "pollen_v1",
+			Strict: true,
+			Fields: []workspace.TaskOutputField{
+				{Name: "date", Type: "string", Required: true},
+				{Name: "pollen_count", Type: "number", Required: true},
+			},
+		},
+		Contract: &workspace.TaskOutputContract{
+			Source: "manual",
+			Columns: []workspace.TaskOutputContractColumn{
+				{Name: "date", Type: "date", Required: true},
+				{Name: "pollen_count", Type: "number", Required: true},
+			},
+		},
+		Mappings: []workspace.TaskOutputMapping{
+			{SchemaField: "date", CSVColumn: "date", Transform: workspace.TaskOutputMappingTransformIdentity},
+			{SchemaField: "pollen_count", CSVColumn: "pollen_count", Transform: workspace.TaskOutputMappingTransformIdentity},
+		},
+	})
+	if len(errs) > 0 {
+		t.Fatalf("normalize run spec: %v", errs)
+	}
+	runSpec = workspace.AssignTaskOutputSpecVersion(runSpec)
+	activeSpec := workspace.SnapshotTaskOutputSpec(runSpec)
+	activeSpec.Schema.Fields = append(activeSpec.Schema.Fields, workspace.TaskOutputField{Name: "location", Type: "string", Required: true})
+	activeSpec.Contract.Columns = append(activeSpec.Contract.Columns, workspace.TaskOutputContractColumn{Name: "location", Type: "string", Required: true})
+	activeSpec.Mappings = append(activeSpec.Mappings, workspace.TaskOutputMapping{SchemaField: "location", CSVColumn: "location", Transform: workspace.TaskOutputMappingTransformIdentity})
+
+	task := &workspace.Task{ID: "task-review-snapshot", OutputSpec: activeSpec}
+	reviewTask := taskOutputReviewValidationTask(task, &workspace.TaskValidationResult{OutputSpec: runSpec})
+	validation, _ := validateTaskOutputReviewApproval(reviewTask, `{"date":"2026-05-20","pollen_count":8}`)
+
+	if validation.ValidationStatus != workspace.TaskValidationPassed {
+		t.Fatalf("validation = %+v, want passed under run spec snapshot", validation)
+	}
+	if validation.ContractVersion != runSpec.Version {
+		t.Fatalf("contract_version = %q, want %q", validation.ContractVersion, runSpec.Version)
+	}
+}
+
+func TestHandleTaskOutputReview_RetryNormalizationUsesRunSpecSnapshot(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
+	ws.ID = "workspace-review-retry-normalization"
+
+	runSpec, errs := workspace.NormalizeTaskOutputSpec(&workspace.TaskOutputSpec{
+		Source: "manual",
+		Schema: &workspace.TaskOutputSchema{
+			Name:   "pollen_v1",
+			Strict: true,
+			Fields: []workspace.TaskOutputField{
+				{Name: "forecast_date", Type: "string", Required: true},
+				{Name: "pollen_count", Type: "number", Required: true},
+			},
+		},
+		Contract: &workspace.TaskOutputContract{
+			Source: "manual",
+			Columns: []workspace.TaskOutputContractColumn{
+				{Name: "forecast_date", Type: "date", Required: true},
+				{Name: "pollen_count", Type: "number", Required: true},
+			},
+		},
+		Mappings: []workspace.TaskOutputMapping{
+			{SchemaField: "forecast_date", CSVColumn: "forecast_date", Transform: workspace.TaskOutputMappingTransformIdentity},
+			{SchemaField: "pollen_count", CSVColumn: "pollen_count", Transform: workspace.TaskOutputMappingTransformIdentity},
+		},
+	})
+	if len(errs) > 0 {
+		t.Fatalf("normalize run spec: %v", errs)
+	}
+	runSpec = workspace.AssignTaskOutputSpecVersion(runSpec)
+	activeSpec := workspace.SnapshotTaskOutputSpec(runSpec)
+	activeSpec.Schema.Fields = append(activeSpec.Schema.Fields, workspace.TaskOutputField{Name: "location", Type: "string", Required: true})
+	activeSpec.Contract.Columns = append(activeSpec.Contract.Columns, workspace.TaskOutputContractColumn{Name: "location", Type: "string", Required: true})
+	activeSpec.Mappings = append(activeSpec.Mappings, workspace.TaskOutputMapping{SchemaField: "location", CSVColumn: "location", Transform: workspace.TaskOutputMappingTransformIdentity})
+
+	outputPath := filepath.Join(t.TempDir(), "pollen.csv")
+	executedAt := time.Date(2026, 5, 21, 9, 30, 0, 0, time.UTC)
+	task := workspace.Task{
+		ID:          "task-review-retry-normalization",
+		WorkspaceID: ws.ID,
+		Description: "Track pollen",
+		To:          "Ori",
+		Status:      workspace.TaskStatusCompleted,
+		OutputSpec:  activeSpec,
+		ResultStorage: &workspace.ResultStorageConfig{
+			Enabled:   true,
+			FilePath:  outputPath,
+			Format:    "csv",
+			WriteMode: "append",
+		},
+		ExecutionHistory: []workspace.TaskExecution{
+			{
+				TaskID:     "task-review-retry-normalization",
+				RunID:      "run-review-normalize",
+				ExecutedAt: executedAt,
+				Status:     "success",
+				Result:     "Pollen count was 9.7 on May 21.",
+				Duration:   2500,
+				Validation: &workspace.TaskValidationResult{
+					ValidationStatus: workspace.TaskValidationNeedsReview,
+					StorageStatus:    workspace.TaskStorageSkippedInvalid,
+					ContractVersion:  runSpec.Version,
+					OutputSpec:       workspace.SnapshotTaskOutputSpec(runSpec),
+					Errors: []workspace.TaskValidationError{{
+						Code:    "normalization_provider_error",
+						Message: "provider unavailable",
+					}},
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	eventBus := workspace.NewEventBus(10, 20)
+	executor := &reviewNormalizationExecutor{
+		normalizeResult: `{"forecast_date":"2026-05-21","pollen_count":9.7}`,
+	}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+		taskHandler:    executor,
+		eventBus:       eventBus,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-review-retry-normalization/review", strings.NewReader(`{"action":"retry_normalization","history_index":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.TasksPathHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if executor.normalizeCalls != 1 {
+		t.Fatalf("normalizeCalls=%d, want 1", executor.normalizeCalls)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read normalized csv: %v", err)
+	}
+	wantCSV := "run_id,executed_at,status,duration_ms,forecast_date,pollen_count\nrun-review-normalize,2026-05-21T09:30:00Z,success,2500,2026-05-21,9.7"
+	if string(data) != wantCSV {
+		t.Fatalf("csv data = %q, want %q", string(data), wantCSV)
+	}
+	updatedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	updatedTask, err := updatedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	validation := updatedTask.ExecutionHistory[0].Validation
+	if validation == nil || validation.ValidationStatus != workspace.TaskValidationPassed || validation.StorageStatus != workspace.TaskStorageAppended {
+		t.Fatalf("validation = %+v, want passed/appended", validation)
+	}
+	if validation.ContractVersion != runSpec.Version {
+		t.Fatalf("contract_version=%q, want run snapshot %q", validation.ContractVersion, runSpec.Version)
+	}
+	if validation.NormalizedRow == nil || validation.NormalizedRow["forecast_date"] != "2026-05-21" {
+		t.Fatalf("normalized row not recorded: %+v", validation.NormalizedRow)
+	}
+	events := eventBus.GetHistory(func(event workspace.Event) bool {
+		return event.Type == workspace.EventTaskOutput
+	}, 1)
+	if len(events) != 1 || events[0].Data["review"] != "retry_normalization" {
+		t.Fatalf("expected retry_normalization telemetry, got %#v", events)
+	}
+}
+
 func TestAppendCSVContractReviewSmoke_CreateInvalidApprove(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
@@ -1346,6 +1615,26 @@ func TestHandleTaskOutputReview_RerunStartsTaskExecution(t *testing.T) {
 	if events[0].Data["review"] != "rerun" {
 		t.Fatalf("expected rerun review telemetry, got %#v", events[0].Data)
 	}
+}
+
+type reviewNormalizationExecutor struct {
+	stubWorkspaceTaskExecutor
+	normalizeResult string
+	normalizeErr    error
+	repairResult    string
+	repairErr       error
+	normalizeCalls  int
+	repairCalls     int
+}
+
+func (e *reviewNormalizationExecutor) NormalizeTaskOutputSpec(_ context.Context, _ workspace.Task, _ string) (string, error) {
+	e.normalizeCalls++
+	return e.normalizeResult, e.normalizeErr
+}
+
+func (e *reviewNormalizationExecutor) RepairTaskOutputSpec(_ context.Context, _ workspace.Task, _ string, _ map[string]any, _ []workspace.TaskValidationError) (string, error) {
+	e.repairCalls++
+	return e.repairResult, e.repairErr
 }
 
 func TestHandleTaskOutputReview_InspectReturnsRawResult(t *testing.T) {

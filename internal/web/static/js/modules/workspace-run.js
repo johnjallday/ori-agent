@@ -27,6 +27,15 @@ function formatStatus(value) {
 }
 
 function formatKind(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const labels = {
+    task_raw_result: 'Task Raw Result',
+    task_normalized_row: 'Task Normalized Row',
+    task_output_validation: 'Task Output Validation',
+    task_output_repair: 'Task Output Repair',
+    task_storage_receipt: 'Task Storage Receipt',
+  };
+  if (labels[normalized]) return labels[normalized];
   return formatStatus(value);
 }
 

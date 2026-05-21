@@ -895,7 +895,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			}
 			workspace.RecordTaskExecution(task, "success", result, startedAt, completedAt.Sub(startedAt))
 
-			workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
+			var assistant workspace.TaskOutputSpecAssistant
+			if candidate, ok := th.taskHandler.(workspace.TaskOutputSpecAssistant); ok {
+				assistant = candidate
+			}
+			workspace.AutoStoreResultWithAssistant(ctx, ws, task, result, th.workspaceStore, assistant)
 		}
 	}
 
@@ -1188,6 +1192,11 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 
 		currentTask := taskForExecution
 		currentTask.Context = cloneTaskContext(baseContext)
+		currentTask.OutputSpec = workspace.SnapshotTaskOutputSpec(currentTask.OutputSpec)
+		if currentTask.OutputSpec != nil {
+			currentTask.OutputSchema = currentTask.OutputSpec.Schema
+			currentTask.OutputContract = currentTask.OutputSpec.Contract
+		}
 		applyIterationContext(&currentTask, attempt, maxAttempts, attemptHistory)
 
 		if attempt > 1 && th.eventBus != nil {
@@ -1331,41 +1340,43 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			return "", blockedErr
 		}
 
-		parsedStructuredOutput, validationErr := workspace.ValidateTaskStructuredOutput(persistedTask.OutputSchema, result)
-		if validationErr != nil {
-			if persistedTask.Context != nil {
+		if currentTask.OutputSpec == nil {
+			parsedStructuredOutput, validationErr := workspace.ValidateTaskStructuredOutput(currentTask.OutputSchema, result)
+			if validationErr != nil {
+				if persistedTask.Context != nil {
+					delete(persistedTask.Context, "structured_output")
+				}
+				attemptHistory = append(attemptHistory, map[string]any{
+					"attempt":    attempt,
+					"outcome":    "invalid_structured_output",
+					"summary":    summarizeExecutionText(validationErr.Error()),
+					"created_at": time.Now().UTC().Format(time.RFC3339),
+				})
+				if attempt < maxAttempts {
+					continue
+				}
+
+				recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "structured_output_invalid")
+				return "", &workspace.TaskBlockedError{
+					ReasonCode: "structured_output_invalid",
+					Reason:     fmt.Sprintf("Task did not return valid structured output after %d attempts", maxAttempts),
+					Question:   "The task result did not match the required JSON schema. Should I retry, revise the schema, or continue with your guidance?",
+					SuggestedActions: []string{
+						"continue_with_instruction",
+						"retry",
+						"mark_failed",
+					},
+					RawResponse: result,
+				}
+			}
+			if parsedStructuredOutput != nil {
+				if persistedTask.Context == nil {
+					persistedTask.Context = map[string]any{}
+				}
+				persistedTask.Context["structured_output"] = parsedStructuredOutput
+			} else if persistedTask.Context != nil {
 				delete(persistedTask.Context, "structured_output")
 			}
-			attemptHistory = append(attemptHistory, map[string]any{
-				"attempt":    attempt,
-				"outcome":    "invalid_structured_output",
-				"summary":    summarizeExecutionText(validationErr.Error()),
-				"created_at": time.Now().UTC().Format(time.RFC3339),
-			})
-			if attempt < maxAttempts {
-				continue
-			}
-
-			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "structured_output_invalid")
-			return "", &workspace.TaskBlockedError{
-				ReasonCode: "structured_output_invalid",
-				Reason:     fmt.Sprintf("Task did not return valid structured output after %d attempts", maxAttempts),
-				Question:   "The task result did not match the required JSON schema. Should I retry, revise the schema, or continue with your guidance?",
-				SuggestedActions: []string{
-					"continue_with_instruction",
-					"retry",
-					"mark_failed",
-				},
-				RawResponse: result,
-			}
-		}
-		if parsedStructuredOutput != nil {
-			if persistedTask.Context == nil {
-				persistedTask.Context = map[string]any{}
-			}
-			persistedTask.Context["structured_output"] = parsedStructuredOutput
-		} else if persistedTask.Context != nil {
-			delete(persistedTask.Context, "structured_output")
 		}
 
 		attemptHistory = append(attemptHistory, map[string]any{

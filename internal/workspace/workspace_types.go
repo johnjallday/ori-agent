@@ -184,9 +184,15 @@ type Task struct {
 	// CombinationInstruction adds optional guidance for result aggregation.
 	CombinationInstruction string `json:"combination_instruction,omitempty"`
 	// OutputSchema requires the task result to be returned as structured JSON.
+	// Retained for backward compatibility; new code reads via OutputSpec.
 	OutputSchema *TaskOutputSchema `json:"output_schema,omitempty"`
 	// OutputContract validates task results before automatic storage.
+	// Retained for backward compatibility; new code reads via OutputSpec.
 	OutputContract *TaskOutputContract `json:"output_contract,omitempty"`
+	// OutputSpec is the active approved structured output spec used at execution time.
+	OutputSpec *TaskOutputSpec `json:"output_spec,omitempty"`
+	// DraftOutputSpec is the single pending draft awaiting user approval.
+	DraftOutputSpec *TaskOutputSpec `json:"draft_output_spec,omitempty"`
 	// TemplateRef tracks which reusable template and step produced this task.
 	TemplateRef *TaskTemplateRef `json:"template_ref,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
@@ -333,6 +339,54 @@ type TaskOutputContractColumn struct {
 	Description string `json:"description,omitempty"`
 }
 
+// TaskOutputSpec groups schema, contract, mapping rules, metadata policy, version,
+// source, and approval metadata into a single structured output spec. A spec with
+// Approval == nil is a draft; with Approval != nil is the active approved spec.
+type TaskOutputSpec struct {
+	Version        string                    `json:"version,omitempty"` // ocv_... contract version, assigned on approval
+	Source         string                    `json:"source,omitempty"`  // ai_suggested, manual, csv_header
+	Schema         *TaskOutputSchema         `json:"schema,omitempty"`
+	Contract       *TaskOutputContract       `json:"contract,omitempty"`
+	Mappings       []TaskOutputMapping       `json:"mappings,omitempty"`
+	MetadataPolicy *TaskOutputMetadataPolicy `json:"metadata_policy,omitempty"`
+	Approval       *TaskOutputApproval       `json:"approval,omitempty"`
+}
+
+// TaskOutputMapping connects a schema field to a CSV contract column.
+type TaskOutputMapping struct {
+	SchemaField  string `json:"schema_field"`
+	CSVColumn    string `json:"csv_column"`
+	Transform    string `json:"transform,omitempty"` // identity, json_string
+	DefaultValue string `json:"default_value,omitempty"`
+}
+
+// TaskOutputMetadataPolicy declares which system metadata fields are appended to CSV
+// rows. Fields kept on run artifacts but hidden from CSV have Include=false.
+type TaskOutputMetadataPolicy struct {
+	Fields []TaskOutputMetadataField `json:"fields,omitempty"`
+}
+
+// TaskOutputMetadataField represents one system metadata field's CSV visibility.
+type TaskOutputMetadataField struct {
+	Name    string `json:"name"`              // run_id, executed_at, status, duration_ms
+	Include bool   `json:"include,omitempty"` // true = include in CSV; false = run artifact only
+}
+
+// TaskOutputApproval records who approved a spec and when. Presence promotes a spec from draft to active.
+type TaskOutputApproval struct {
+	ApprovedAt time.Time `json:"approved_at"`
+	ApprovedBy string    `json:"approved_by,omitempty"`
+}
+
+// Supported mapping transforms (PRD Tech Consideration 1.3).
+const (
+	TaskOutputMappingTransformIdentity   = "identity"
+	TaskOutputMappingTransformJSONString = "json_string"
+)
+
+// Default system metadata field names attached to runs.
+var DefaultTaskOutputMetadataFieldNames = []string{"run_id", "executed_at", "status", "duration_ms"}
+
 // TaskValidationStatus records whether a completed run satisfied its output contract.
 type TaskValidationStatus string
 
@@ -362,15 +416,21 @@ type TaskValidationResult struct {
 	ContractVersion  string                `json:"contract_version,omitempty"`
 	Errors           []TaskValidationError `json:"errors,omitempty"`
 	RawOutputRef     string                `json:"raw_output_ref,omitempty"`
+	NormalizedRowRef string                `json:"normalized_row_ref,omitempty"`
+	NormalizedRow    map[string]any        `json:"normalized_row,omitempty"`
+	OutputSpec       *TaskOutputSpec       `json:"output_spec_snapshot,omitempty"`
+	RepairStatus     string                `json:"repair_status,omitempty"`
 	ManualApproval   *TaskManualApproval   `json:"manual_approval,omitempty"`
 	ValidatedAt      *time.Time            `json:"validated_at,omitempty"`
 }
 
 // TaskValidationError is a structured, user-facing validation failure.
 type TaskValidationError struct {
-	Code    string `json:"code"`
-	Column  string `json:"column,omitempty"`
-	Message string `json:"message"`
+	Code     string   `json:"code"`
+	Column   string   `json:"column,omitempty"`
+	Message  string   `json:"message"`
+	Expected []string `json:"expected,omitempty"`
+	Actual   []string `json:"actual,omitempty"`
 }
 
 // TaskManualApproval records who manually approved a gated result and when.

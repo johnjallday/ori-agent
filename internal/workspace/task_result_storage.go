@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -186,6 +187,69 @@ func csvWithoutHeader(csvData string) string {
 	return strings.TrimSpace(strings.Join(lines[1:], "\n"))
 }
 
+type CSVHeaderMismatchError struct {
+	Expected []string
+	Actual   []string
+}
+
+func (e *CSVHeaderMismatchError) Error() string {
+	return fmt.Sprintf("CSV header mismatch: expected %s, found %s", strings.Join(e.Expected, ","), strings.Join(e.Actual, ","))
+}
+
+func csvHeaderFromString(csvData string) ([]string, error) {
+	reader := csv.NewReader(strings.NewReader(strings.TrimSpace(csvData)))
+	header, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+	for i := range header {
+		header[i] = strings.TrimSpace(header[i])
+	}
+	return header, nil
+}
+
+func csvHeaderFromFile(filePath string) ([]string, bool, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if info.Size() == 0 {
+		return nil, false, nil
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = file.Close() }()
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	for i := range header {
+		header[i] = strings.TrimSpace(header[i])
+	}
+	return header, true, nil
+}
+
+func csvHeadersEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if strings.TrimSpace(a[i]) != strings.TrimSpace(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // AppendCSVToFile appends CSV rows to filePath, writing the header only once.
 func AppendCSVToFile(filePath, csvData string) error {
 	trimmed := strings.TrimSpace(csvData)
@@ -221,6 +285,27 @@ func AppendCSVToFile(filePath, csvData string) error {
 	return err
 }
 
+// AppendCSVToFileStrict appends CSV rows to filePath only when an existing
+// header matches the incoming CSV header exactly.
+func AppendCSVToFileStrict(filePath, csvData string) error {
+	trimmed := strings.TrimSpace(csvData)
+	if trimmed == "" {
+		return nil
+	}
+	incomingHeader, err := csvHeaderFromString(trimmed)
+	if err != nil {
+		return err
+	}
+	existingHeader, exists, err := csvHeaderFromFile(filePath)
+	if err != nil {
+		return err
+	}
+	if exists && !csvHeadersEqual(existingHeader, incomingHeader) {
+		return &CSVHeaderMismatchError{Expected: incomingHeader, Actual: existingHeader}
+	}
+	return AppendCSVToFile(filePath, trimmed)
+}
+
 func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string) string {
 	if node == nil {
 		return csvData
@@ -233,6 +318,38 @@ func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string)
 		return csvWithoutHeader(csvData)
 	}
 	return csvData
+}
+
+func csvWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
+	if node == nil {
+		return csvData, nil
+	}
+	finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+	if err != nil {
+		return csvData, err
+	}
+	incomingHeader, err := csvHeaderFromString(csvData)
+	if err != nil {
+		return csvData, err
+	}
+	existingHeader, exists, err := csvHeaderFromFile(finalPath)
+	if err != nil {
+		return csvData, err
+	}
+	if exists {
+		if !csvHeadersEqual(existingHeader, incomingHeader) {
+			return "", &CSVHeaderMismatchError{Expected: incomingHeader, Actual: existingHeader}
+		}
+		return csvWithoutHeader(csvData), nil
+	}
+	return csvData, nil
+}
+
+// CSVWithoutHeaderForExistingStoreStrict prepares a CSV append payload for a
+// store node while preserving the same strict header check used by task result
+// auto-storage.
+func CSVWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
+	return csvWithoutHeaderForExistingStoreStrict(node, filePath, csvData)
 }
 
 // BootstrapOutputContractFromCSVHeader derives a string-typed output contract from an existing CSV header.

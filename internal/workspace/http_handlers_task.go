@@ -16,18 +16,21 @@ import (
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description            string              `json:"description"`
-	From                   string              `json:"from"`
-	To                     string              `json:"to"`
-	Priority               int                 `json:"priority"`
-	ParentTaskID           string              `json:"parent_task_id"`
-	SubtaskIndex           int                 `json:"subtask_index"`
-	OrchestrationMode      string              `json:"orchestration_mode"`
-	ResultCombinationMode  string              `json:"result_combination_mode"`
-	CombinationInstruction string              `json:"combination_instruction"`
-	OutputSchema           *TaskOutputSchema   `json:"output_schema"`
-	OutputContract         *TaskOutputContract `json:"output_contract"`
-	TemplateRef            *TaskTemplateRef    `json:"template_ref"`
+	Description            string               `json:"description"`
+	From                   string               `json:"from"`
+	To                     string               `json:"to"`
+	Priority               int                  `json:"priority"`
+	ParentTaskID           string               `json:"parent_task_id"`
+	SubtaskIndex           int                  `json:"subtask_index"`
+	OrchestrationMode      string               `json:"orchestration_mode"`
+	ResultCombinationMode  string               `json:"result_combination_mode"`
+	CombinationInstruction string               `json:"combination_instruction"`
+	OutputSchema           *TaskOutputSchema    `json:"output_schema"`
+	OutputContract         *TaskOutputContract  `json:"output_contract"`
+	OutputSpec             *TaskOutputSpec      `json:"output_spec"`
+	DraftOutputSpec        *TaskOutputSpec      `json:"draft_output_spec"`
+	ResultStorage          *ResultStorageConfig `json:"result_storage"`
+	TemplateRef            *TaskTemplateRef     `json:"template_ref"`
 }
 
 // CreateTask handles POST /api/workspaces/:id/tasks
@@ -69,6 +72,17 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("CreateTask - Workspace and agents", logger.Fields{"workspace_id": workspaceID, "agents": workspace.Agents})
 	logger.Debug("CreateTask - Request routing", logger.Fields{"from": req.From, "to": req.To})
 
+	outputSpec, outputSpecErrors := NormalizeTaskOutputSpec(req.OutputSpec)
+	if len(outputSpecErrors) > 0 {
+		orihttp.BadRequest(w, "Invalid output_spec: "+strings.Join(outputSpecErrors, "; "))
+		return
+	}
+	draftOutputSpec, draftSpecErrors := NormalizeTaskOutputSpec(req.DraftOutputSpec)
+	if len(draftSpecErrors) > 0 {
+		orihttp.BadRequest(w, "Invalid draft_output_spec: "+strings.Join(draftSpecErrors, "; "))
+		return
+	}
+
 	// Create task
 	task := Task{
 		ID:                     uuid.New().String(),
@@ -85,12 +99,16 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
 		OutputSchema:           NormalizeTaskOutputSchema(req.OutputSchema),
 		OutputContract:         NormalizeTaskOutputContract(req.OutputContract),
+		OutputSpec:             outputSpec,
+		DraftOutputSpec:        draftOutputSpec,
+		ResultStorage:          req.ResultStorage,
 		TemplateRef:            req.TemplateRef,
 		Status:                 TaskStatusPending,
 		CreatedAt:              time.Now(),
 	}
-	if task.OutputContract == nil {
-		task.OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &task)
+	if task.OutputSpec != nil {
+		task.OutputSchema = task.OutputSpec.Schema
+		task.OutputContract = task.OutputSpec.Contract
 	}
 
 	// Add task to workspace
@@ -155,6 +173,8 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		CombinationInstruction *string              `json:"combination_instruction,omitempty"`
 		OutputSchema           *TaskOutputSchema    `json:"output_schema,omitempty"`
 		OutputContract         *TaskOutputContract  `json:"output_contract,omitempty"`
+		OutputSpec             *TaskOutputSpec      `json:"output_spec,omitempty"`
+		DraftOutputSpec        *TaskOutputSpec      `json:"draft_output_spec,omitempty"`
 		ResultStorage          *ResultStorageConfig `json:"result_storage,omitempty"`
 		TemplateRef            *TaskTemplateRef     `json:"template_ref,omitempty"`
 	}
@@ -215,8 +235,26 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.OutputContract != nil {
 				workspace.Tasks[i].OutputContract = NormalizeTaskOutputContract(req.OutputContract)
-			} else {
-				workspace.Tasks[i].OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &workspace.Tasks[i])
+			}
+			if req.OutputSpec != nil {
+				outputSpec, outputSpecErrors := NormalizeTaskOutputSpec(req.OutputSpec)
+				if len(outputSpecErrors) > 0 {
+					orihttp.BadRequest(w, "Invalid output_spec: "+strings.Join(outputSpecErrors, "; "))
+					return
+				}
+				workspace.Tasks[i].OutputSpec = outputSpec
+				if outputSpec != nil {
+					workspace.Tasks[i].OutputSchema = outputSpec.Schema
+					workspace.Tasks[i].OutputContract = outputSpec.Contract
+				}
+			}
+			if req.DraftOutputSpec != nil {
+				draftOutputSpec, draftSpecErrors := NormalizeTaskOutputSpec(req.DraftOutputSpec)
+				if len(draftSpecErrors) > 0 {
+					orihttp.BadRequest(w, "Invalid draft_output_spec: "+strings.Join(draftSpecErrors, "; "))
+					return
+				}
+				workspace.Tasks[i].DraftOutputSpec = draftOutputSpec
 			}
 			if req.ResultStorage != nil {
 				workspace.Tasks[i].ResultStorage = req.ResultStorage

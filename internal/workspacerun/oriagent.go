@@ -67,6 +67,16 @@ func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
 			"executor": string(ExecutorKindOriAgent),
 		}),
 	))
+	e.addArtifact(run.ID, NewArtifact(
+		run.ID,
+		ArtifactTaskRawResult,
+		ArtifactInline([]byte(result)),
+		ArtifactMetadata(map[string]any{
+			"role":     oriAgentTaskResultRole,
+			"executor": string(ExecutorKindOriAgent),
+			"task_id":  task.ID,
+		}),
+	))
 	return nil
 }
 
