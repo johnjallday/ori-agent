@@ -34,7 +34,7 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 
 	// Parse response
-	var result map[string]interface{}
+	var result map[string]any
 	testutil.ReadJSONResponse(t, resp, &result)
 
 	// Check response structure
@@ -63,7 +63,7 @@ func TestListAgentsEndpoint(t *testing.T) {
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
 
 	// Parse response
-	var agents []map[string]interface{}
+	var agents []map[string]any
 	testutil.ReadJSONResponse(t, resp, &agents)
 
 	// Should return an array (may be empty)
@@ -83,7 +83,7 @@ func TestCreateAgentEndpoint(t *testing.T) {
 
 	// Create agent request
 	model := helpers.GetTestModel()
-	agentData := map[string]interface{}{
+	agentData := map[string]any{
 		"name":        "test-agent",
 		"description": "Test agent for integration testing",
 		"model":       model,
@@ -109,7 +109,7 @@ func TestCreateAgentEndpoint(t *testing.T) {
 	}
 
 	// Parse response
-	var result map[string]interface{}
+	var result map[string]any
 	testutil.ReadJSONResponse(t, resp, &result)
 
 	// Verify agent was created
@@ -138,7 +138,7 @@ func TestListPluginsEndpoint(t *testing.T) {
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
 
 	// Parse response
-	var result map[string]interface{}
+	var result map[string]any
 	testutil.ReadJSONResponse(t, resp, &result)
 
 	// Should have a plugins field
@@ -167,7 +167,7 @@ func TestSettingsEndpoint(t *testing.T) {
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
 
 	// Parse response
-	var settings map[string]interface{}
+	var settings map[string]any
 	testutil.ReadJSONResponse(t, resp, &settings)
 
 	// Should have some settings fields
@@ -200,7 +200,7 @@ func TestChatEndpointWithoutAPIKey(t *testing.T) {
 	defer server.Cleanup()
 
 	// Attempt to send a chat message
-	chatData := map[string]interface{}{
+	chatData := map[string]any{
 		"message":    "Hello",
 		"agent_name": "test-agent",
 	}
@@ -280,28 +280,28 @@ func startTestServer(t *testing.T) *testutil.TestServer {
 			switch r.Method {
 			case "GET":
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
 			case "POST":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
-				var agent map[string]interface{}
+				var agent map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&agent)
 				_ = json.NewEncoder(w).Encode(agent)
 			}
 		case "/api/plugins":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"plugins": []interface{}{},
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"plugins": []any{},
 			})
 		case "/api/settings":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"theme": "light",
 			})
 		case "/api/home-assistant/route":
 			if r.Method == "POST" {
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"intent":               "utility_direct",
 					"intent_label":         "daily utility",
 					"matched_agent":        "Ori",

@@ -66,7 +66,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"releases": releases,
 		"count":    len(releases),
 	}
@@ -106,7 +106,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 		message = "Update downloaded successfully. Restarting application..."
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success":     true,
 		"version":     request.Version,
 		"filePath":    filePath,

@@ -30,7 +30,7 @@ func TestNativeCLIExecutorSuccessCapturesArtifactsTraceAndCost(t *testing.T) {
 		result: &cliagent.StepResult{
 			Output: "done",
 			Events: []cliagent.CLIEvent{
-				{Type: "tool_call", StepNumber: 1, Content: "write file", Payload: map[string]interface{}{"tool": "write"}},
+				{Type: "tool_call", StepNumber: 1, Content: "write file", Payload: map[string]any{"tool": "write"}},
 			},
 			Usage:  cliagent.StepUsage{InputTokens: 10, OutputTokens: 5, CostUSD: 0.01},
 			Status: cliagent.StepCompleted,
@@ -180,7 +180,7 @@ func (a *stubCLIAgentAdapter) Backend() string {
 	return a.backend
 }
 
-func testRawConfig(t *testing.T, value interface{}) *RawConfig {
+func testRawConfig(t *testing.T, value any) *RawConfig {
 	t.Helper()
 	data, err := json.Marshal(value)
 	if err != nil {

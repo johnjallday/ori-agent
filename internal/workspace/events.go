@@ -34,6 +34,7 @@ const (
 	EventTaskHeartbeat  EventType = "task.heartbeat"   // Task is still alive (periodic during long phases)
 	EventTaskBlocked    EventType = "task.blocked"     // Task needs user input before it can continue
 	EventTaskResumed    EventType = "task.resumed"     // Task resumed after user input
+	EventTaskOutput     EventType = "task.output"      // Task output contract/storage lifecycle event
 
 	// Scheduled task events
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully
@@ -83,13 +84,13 @@ const (
 
 // Event represents a workspace event
 type Event struct {
-	ID          string                 `json:"id"`
-	Type        EventType              `json:"type"`
-	WorkspaceID string                 `json:"workspace_id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Source      string                 `json:"source"`   // Agent or system component that generated event
-	Data        map[string]interface{} `json:"data"`     // Event-specific payload
-	Metadata    map[string]string      `json:"metadata"` // Additional context
+	ID          string            `json:"id"`
+	Type        EventType         `json:"type"`
+	WorkspaceID string            `json:"workspace_id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Source      string            `json:"source"`   // Agent or system component that generated event
+	Data        map[string]any    `json:"data"`     // Event-specific payload
+	Metadata    map[string]string `json:"metadata"` // Additional context
 }
 
 // EventSubscriber is a function that receives events
@@ -327,7 +328,7 @@ func generateSubscriptionID() string {
 // Helper methods to create events
 
 // NewWorkspaceEvent creates a workspace-related event
-func NewWorkspaceEvent(eventType EventType, workspaceID, source string, data map[string]interface{}) Event {
+func NewWorkspaceEvent(eventType EventType, workspaceID, source string, data map[string]any) Event {
 	return Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
@@ -338,9 +339,9 @@ func NewWorkspaceEvent(eventType EventType, workspaceID, source string, data map
 }
 
 // NewTaskEvent creates a task-related event
-func NewTaskEvent(eventType EventType, workspaceID, taskID, agentName string, data map[string]interface{}) Event {
+func NewTaskEvent(eventType EventType, workspaceID, taskID, agentName string, data map[string]any) Event {
 	if data == nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 	data["task_id"] = taskID
 	data["agent"] = agentName
@@ -355,9 +356,9 @@ func NewTaskEvent(eventType EventType, workspaceID, taskID, agentName string, da
 }
 
 // NewWorkflowEvent creates a workflow-related event
-func NewWorkflowEvent(eventType EventType, workspaceID, workflowID string, data map[string]interface{}) Event {
+func NewWorkflowEvent(eventType EventType, workspaceID, workflowID string, data map[string]any) Event {
 	if data == nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 	data["workflow_id"] = workflowID
 
@@ -371,9 +372,9 @@ func NewWorkflowEvent(eventType EventType, workspaceID, workflowID string, data 
 }
 
 // NewScheduledTaskEvent creates a scheduled task-related event
-func NewScheduledTaskEvent(eventType EventType, workspaceID, scheduledTaskID, scheduledTaskName string, data map[string]interface{}) Event {
+func NewScheduledTaskEvent(eventType EventType, workspaceID, scheduledTaskID, scheduledTaskName string, data map[string]any) Event {
 	if data == nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 	data["scheduled_task_id"] = scheduledTaskID
 	data["scheduled_task_name"] = scheduledTaskName
@@ -388,9 +389,9 @@ func NewScheduledTaskEvent(eventType EventType, workspaceID, scheduledTaskID, sc
 }
 
 // NewStoreNodeEvent creates a store node-related event
-func NewStoreNodeEvent(eventType EventType, workspaceID, storeNodeID string, data map[string]interface{}) Event {
+func NewStoreNodeEvent(eventType EventType, workspaceID, storeNodeID string, data map[string]any) Event {
 	if data == nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 	data["store_node_id"] = storeNodeID
 

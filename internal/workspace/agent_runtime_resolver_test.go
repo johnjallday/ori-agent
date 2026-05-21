@@ -260,7 +260,7 @@ func TestAgentRuntimeResolver_RespectsAgentInstanceBindingAccess(t *testing.T) {
 				ID:         "binding-1",
 				ServerName: "filesystem",
 				Enabled:    true,
-				Scope: map[string]interface{}{
+				Scope: map[string]any{
 					"roots": []string{root},
 				},
 			},
@@ -315,11 +315,11 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 				ID:         "binding-1",
 				ServerName: "browser",
 				Enabled:    true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"command":   "uvx",
-					"args":      []interface{}{"playwright-mcp", "--headless"},
+					"args":      []any{"playwright-mcp", "--headless"},
 					"transport": "stdio",
-					"env": map[string]interface{}{
+					"env": map[string]any{
 						"BROWSER_CONTEXT": "workspace",
 					},
 				},
@@ -387,8 +387,8 @@ func TestAgentRuntimeResolver_UsesFilesystemRootsFromBindingConfig(t *testing.T)
 				ID:         "binding-config-roots",
 				ServerName: "filesystem",
 				Enabled:    true,
-				Config: map[string]interface{}{
-					"roots": []interface{}{root},
+				Config: map[string]any{
+					"roots": []any{root},
 				},
 			},
 		},
@@ -495,7 +495,7 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 				ID:        "sb-planning",
 				SkillName: "workspace-planning",
 				Enabled:   true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"profile_type":           "workspace_planning",
 					"mode":                   "feature",
 					"tasks_dir":              "tasks",
@@ -544,11 +544,11 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-managed-planning",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
-			"workspace_settings": map[string]interface{}{
+			"workspace_settings": map[string]any{
 				"preset": "planner",
-				"planning": map[string]interface{}{
+				"planning": map[string]any{
 					"tasks_dir": "plans",
 				},
 			},
@@ -596,11 +596,11 @@ func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *tes
 func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSkill(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-managed-planning-override",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
-			"workspace_settings": map[string]interface{}{
+			"workspace_settings": map[string]any{
 				"preset": "planner",
-				"planning": map[string]interface{}{
+				"planning": map[string]any{
 					"tasks_dir": "managed-plans",
 				},
 			},
@@ -613,7 +613,7 @@ func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSk
 				ID:        "sb-planning",
 				SkillName: "workspace-planning",
 				Enabled:   true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"profile_type": "workspace_planning",
 					"tasks_dir":    "manual-plans",
 				},
@@ -657,7 +657,7 @@ func TestResolveAgentForWorkspace_MissingEntryAgentReturnsError(t *testing.T) {
 	ws := &Workspace{
 		ID:   "ws-entry-missing",
 		Name: "Spain",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
 		},
 		Agents: []string{"Workspace Manager"},
@@ -688,7 +688,7 @@ func TestResolveAgentForWorkspace_UsesWorkspaceLocalSnapshotWhenGlobalMissing(t 
 	ws := &Workspace{
 		ID:   "ws-local-agent",
 		Name: "Imported",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Woodworking Manager",
 		},
 		Agents: []string{"Woodworking Manager"},
@@ -727,7 +727,7 @@ func TestResolveAgentForWorkspace_LocalSnapshotPreferredOverGlobal(t *testing.T)
 		ID:     "ws-precedence",
 		Name:   "Precedence",
 		Agents: []string{"Manager"},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
 		AgentInstances: []AgentInstance{

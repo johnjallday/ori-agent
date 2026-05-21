@@ -83,7 +83,7 @@ func parseDirectToolCommand(message string) (*DirectToolCommand, error) {
 	args := strings.TrimSpace(message[jsonStart:])
 
 	// Validate that args is valid JSON
-	var testJSON map[string]interface{}
+	var testJSON map[string]any
 	if err := json.Unmarshal([]byte(args), &testJSON); err != nil {
 		return nil, fmt.Errorf("invalid JSON arguments: %v. Format: /tool <tool_name> {\"key\": \"value\"}", err)
 	}

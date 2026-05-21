@@ -50,11 +50,11 @@ const (
 
 // WorkflowNode represents a single node in a custom workflow
 type WorkflowNode struct {
-	ID        string                 `json:"id"`
-	Type      WorkflowNodeType       `json:"type"`
-	Config    map[string]interface{} `json:"config"`
-	RelativeX float64                `json:"relative_x"`
-	RelativeY float64                `json:"relative_y"`
+	ID        string           `json:"id"`
+	Type      WorkflowNodeType `json:"type"`
+	Config    map[string]any   `json:"config"`
+	RelativeX float64          `json:"relative_x"`
+	RelativeY float64          `json:"relative_y"`
 }
 
 // WorkflowConnection represents a connection between two nodes within a workflow

@@ -19,8 +19,8 @@ func TestFormatInputResults_EmitsRawAndStructuredSections(t *testing.T) {
 		TaskResults: map[string]string{
 			"task-a": "all done",
 		},
-		StructuredOutputs: map[string]map[string]interface{}{
-			"task-a": {"items": []interface{}{"x", "y"}, "count": 2.0},
+		StructuredOutputs: map[string]map[string]any{
+			"task-a": {"items": []any{"x", "y"}, "count": 2.0},
 		},
 	}
 
@@ -54,7 +54,7 @@ func TestFormatInputResults_StructuredOnlyTaskStillEmits(t *testing.T) {
 	h := newPromptHandlerForTest()
 	var sb strings.Builder
 	inputs := &TaskRuntimeInputs{
-		StructuredOutputs: map[string]map[string]interface{}{
+		StructuredOutputs: map[string]map[string]any{
 			"only-structured": {"ok": true},
 		},
 	}

@@ -28,6 +28,7 @@ type Store interface {
 	ListArtifacts(ctx context.Context, workspaceID, runID string) ([]Artifact, error)
 	SetPreparedContext(ctx context.Context, workspaceID, runID string, prepared PreparedContext) error
 	SetValidationResult(ctx context.Context, workspaceID, runID string, result ValidationResult) error
+	SetTaskOutput(ctx context.Context, workspaceID, runID string, output TaskOutputSummary) error
 	SetReport(ctx context.Context, workspaceID, runID string, report Report) error
 	SetCost(ctx context.Context, workspaceID, runID string, cost CostSummary) error
 	SetError(ctx context.Context, workspaceID, runID, errMessage string) error
@@ -207,6 +208,23 @@ func (s *MemoryStore) SetValidationResult(_ context.Context, workspaceID, runID 
 	}
 	result.Checks = append([]CheckResult(nil), result.Checks...)
 	run.ValidationResult = &result
+	return nil
+}
+
+func (s *MemoryStore) SetTaskOutput(_ context.Context, workspaceID, runID string, output TaskOutputSummary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, err := s.getLocked(workspaceID, runID)
+	if err != nil {
+		return err
+	}
+	output.Errors = append([]TaskOutputValidationError(nil), output.Errors...)
+	if output.ValidatedAt != nil {
+		validatedAt := *output.ValidatedAt
+		output.ValidatedAt = &validatedAt
+	}
+	run.TaskOutput = &output
 	return nil
 }
 

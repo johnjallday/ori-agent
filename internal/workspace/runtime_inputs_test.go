@@ -37,14 +37,14 @@ func TestBuildRuntimeInputs_DoesNotMutateContext(t *testing.T) {
 		Status:       TaskStatusPending,
 		To:           "alice",
 		InputTaskIDs: []string{"upstream"},
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"author_note": "this is authored, not runtime",
 		},
 	}
 	ws.Tasks = []Task{upstream, downstream}
 	ws.taskIndex = map[string]int{"upstream": 0, "downstream": 1}
 
-	authored := map[string]interface{}{
+	authored := map[string]any{
 		"author_note": "this is authored, not runtime",
 	}
 

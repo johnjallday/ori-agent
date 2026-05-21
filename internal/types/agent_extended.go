@@ -244,12 +244,12 @@ const (
 
 // ActivityLog represents a single activity log entry for an agent
 type ActivityLog struct {
-	ID        string                 `json:"id"`                // Unique identifier for the log entry
-	AgentName string                 `json:"agent_name"`        // Name of the agent this activity relates to
-	EventType ActivityEventType      `json:"event_type"`        // Type of activity event
-	Timestamp time.Time              `json:"timestamp"`         // When the activity occurred
-	Details   map[string]interface{} `json:"details,omitempty"` // Additional event-specific details (JSON)
-	User      string                 `json:"user,omitempty"`    // User who triggered the activity (if applicable)
+	ID        string            `json:"id"`                // Unique identifier for the log entry
+	AgentName string            `json:"agent_name"`        // Name of the agent this activity relates to
+	EventType ActivityEventType `json:"event_type"`        // Type of activity event
+	Timestamp time.Time         `json:"timestamp"`         // When the activity occurred
+	Details   map[string]any    `json:"details,omitempty"` // Additional event-specific details (JSON)
+	User      string            `json:"user,omitempty"`    // User who triggered the activity (if applicable)
 }
 
 // ActivityLogEntry is a formatted activity log entry for UI rendering

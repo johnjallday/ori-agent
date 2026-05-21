@@ -39,6 +39,11 @@ class TaskModalController {
     this.currentResultFollowUpPending = false;
     this.currentMissingMCPRequirement = null;
     this.mcpRequirementPending = false;
+    this.outputContractSuggestionCache = new Map();
+    this.outputContractSuggestionRequestKey = '';
+    this.outputContractEdited = false;
+    this.outputContractSource = 'manual';
+    this.outputContractEditTelemetrySent = false;
   }
 
   /**
@@ -111,11 +116,38 @@ class TaskModalController {
       if (autoSaveFields) {
         autoSaveFields.style.display = e.target.checked ? 'block' : 'none';
       }
+      this.updateAutoSaveWriteModeFields();
     });
 
     // Auto-save target change handler
     document.getElementById('taskModalAutoSaveTarget')?.addEventListener('change', () => {
       this.updateAutoSaveTargetFields();
+    });
+    document.getElementById('taskModalAutoSaveWriteMode')?.addEventListener('change', () => {
+      this.updateAutoSaveWriteModeFields();
+    });
+    document.getElementById('taskModalOutputContractAddColumn')?.addEventListener('click', () => {
+      this.markOutputContractEdited();
+      this.addOutputContractRow();
+      this.updateOutputContractEmptyState();
+    });
+    document.getElementById('taskModalOutputContractSuggest')?.addEventListener('click', () => {
+      void this.regenerateOutputContractSuggestion();
+    });
+    document.getElementById('taskModalOutputContractRows')?.addEventListener('click', (event) => {
+      const removeButton = event.target?.closest?.('[data-output-contract-remove]');
+      if (!removeButton) return;
+      this.markOutputContractEdited();
+      removeButton.closest('.task-modal-output-contract-row')?.remove();
+      this.updateOutputContractEmptyState();
+    });
+    document.getElementById('taskModalOutputContractRows')?.addEventListener('input', () => {
+      this.markOutputContractEdited();
+      this.clearOutputContractError();
+    });
+    document.getElementById('taskModalOutputContractRows')?.addEventListener('change', () => {
+      this.markOutputContractEdited();
+      this.clearOutputContractError();
     });
 
     // Escape key handler (document-level for reliable closing)
@@ -250,10 +282,12 @@ class TaskModalController {
       },
       autoSave: {
         enabled: autoSaveEnabled,
+        writeMode: autoSaveEnabled ? readValue('taskModalAutoSaveWriteMode') : '',
         target: autoSaveEnabled ? readValue('taskModalAutoSaveTarget') : '',
         storeNode: autoSaveEnabled ? readValue('taskModalAutoSaveStoreNode') : '',
         path: autoSaveEnabled ? readValue('taskModalAutoSavePath') : '',
-        format: autoSaveEnabled ? readValue('taskModalAutoSaveFormat') : ''
+        format: autoSaveEnabled ? readValue('taskModalAutoSaveFormat') : '',
+        outputContract: autoSaveEnabled ? this.getOutputContractRows() : []
       },
       files: this.pendingFiles.map((file) => ({
         name: file.name,
@@ -1834,6 +1868,12 @@ class TaskModalController {
 
       // Get auto-save data
       const autoSaveData = this.getAutoSaveData();
+      if (autoSaveData.output_contract_error) {
+        this.showToast(autoSaveData.output_contract_error, 'error');
+        const firstNameInput = document.querySelector('#taskModalOutputContractRows [data-output-contract-name]');
+        firstNameInput?.focus();
+        return;
+      }
 
       const createTask = async (payload) => {
         const response = await fetch('/api/orchestration/tasks', {
@@ -1936,7 +1976,8 @@ class TaskModalController {
             schedule: null,
             schedule_enabled: false,
             schedule_name: '',
-            result_storage: null
+            result_storage: null,
+            output_contract: { columns: [] }
           });
 
           const totalSubtasks = subtasks.length;
@@ -2029,7 +2070,7 @@ class TaskModalController {
           assigned_node_id: subtask.assigned_node_id || '',
           input_task_ids: this.resolveInputRefs(subtask.input_task_ids, subtaskIds),
           subtask_index: i + 1,
-          result_storage: this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)?.result_storage || null
+          ...this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)
         }));
 
         await createWorkflow(
@@ -2342,10 +2383,17 @@ class TaskModalController {
           result_storage: {
             enabled: true,
             format: parsed.result_storage.format || 'text',
+            write_mode: parsed.result_storage.write_mode === 'append' ? 'append' : 'new_file',
             store_node_id: parsed.result_storage.store_node_id || undefined,
             file_path: parsed.result_storage.file_path || undefined
           }
         };
+        if (resultStorageData.result_storage.write_mode === 'append') {
+          const outputContract = this.normalizeOutputContractPayload(parsed.output_contract);
+          if (outputContract) {
+            resultStorageData.output_contract = outputContract;
+          }
+        }
       }
 
       const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
@@ -2562,7 +2610,8 @@ class TaskModalController {
             schedule_enabled: this.currentTask.schedule_enabled || false,
             schedule: this.currentTask.schedule || null,
             schedule_name: this.currentTask.schedule_name || '',
-            result_storage: this.currentTask.result_storage || null
+            result_storage: this.currentTask.result_storage || null,
+            output_contract: this.currentTask.output_contract || null
           },
           modification: modificationDescription,
           workspace_id: this.workspaceId
@@ -2611,10 +2660,17 @@ class TaskModalController {
           result_storage: {
             enabled: true,
             format: parsed.result_storage.format || 'text',
+            write_mode: parsed.result_storage.write_mode === 'append' ? 'append' : 'new_file',
             store_node_id: parsed.result_storage.store_node_id || undefined,
             file_path: parsed.result_storage.file_path || undefined
           }
         };
+        if (resultStorageData.result_storage.write_mode === 'append') {
+          const outputContract = this.normalizeOutputContractPayload(parsed.output_contract);
+          if (outputContract) {
+            resultStorageData.output_contract = outputContract;
+          }
+        }
       }
 
       this.updateProgress('apply', {
@@ -3070,6 +3126,7 @@ class TaskModalController {
     const storeNodeSelect = document.getElementById('taskModalAutoSaveStoreNode');
     const pathInput = document.getElementById('taskModalAutoSavePath');
     const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
     const defaultPathDisplay = document.getElementById('taskModalDefaultOutputPath');
 
     if (enabledCheckbox) enabledCheckbox.checked = false;
@@ -3078,6 +3135,10 @@ class TaskModalController {
     if (storeNodeSelect) storeNodeSelect.innerHTML = '';
     if (pathInput) pathInput.value = '';
     if (formatSelect) formatSelect.value = 'text';
+    if (writeModeSelect) writeModeSelect.value = 'new_file';
+    this.populateOutputContractRows([]);
+    this.outputContractSuggestionCache.clear();
+    this.outputContractSuggestionRequestKey = '';
 
     // Update default path display
     if (defaultPathDisplay && this.defaultOutputDir) {
@@ -3085,6 +3146,7 @@ class TaskModalController {
     }
 
     this.updateAutoSaveTargetFields();
+    this.updateAutoSaveWriteModeFields();
   }
 
   /**
@@ -3096,6 +3158,7 @@ class TaskModalController {
     const targetSelect = document.getElementById('taskModalAutoSaveTarget');
     const pathInput = document.getElementById('taskModalAutoSavePath');
     const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
 
     if (task.result_storage?.enabled) {
       if (enabledCheckbox) enabledCheckbox.checked = true;
@@ -3115,11 +3178,384 @@ class TaskModalController {
       if (formatSelect && task.result_storage.format) {
         formatSelect.value = task.result_storage.format;
       }
+      if (writeModeSelect) {
+        writeModeSelect.value = task.result_storage.write_mode === 'append' ? 'append' : 'new_file';
+      }
 
       this.updateAutoSaveTargetFields();
+      this.updateAutoSaveWriteModeFields();
+      this.populateOutputContractRows(task.output_contract?.columns || [], task.output_contract?.source || 'manual');
     } else {
       this.resetAutoSaveFields();
     }
+  }
+
+  updateAutoSaveWriteModeFields() {
+    const writeMode = document.getElementById('taskModalAutoSaveWriteMode')?.value || 'new_file';
+    const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    if (!formatSelect) return;
+
+    const appendMode = writeMode === 'append';
+    if (appendMode) {
+      formatSelect.value = 'csv';
+      if (this.getOutputContractRows().length === 0) {
+        void this.ensureOutputContractSuggestion();
+      }
+    }
+    formatSelect.disabled = appendMode;
+    formatSelect.title = appendMode ? 'Append mode stores each run as a CSV row.' : '';
+    const contractSection = document.getElementById('taskModalOutputContractSection');
+    if (contractSection) contractSection.style.display = appendMode ? 'block' : 'none';
+    this.updateOutputContractEmptyState();
+  }
+
+  getOutputContractRows() {
+    return Array.from(document.querySelectorAll('#taskModalOutputContractRows .task-modal-output-contract-row')).map((row) => ({
+      name: row.querySelector('[data-output-contract-name]')?.value?.trim() || '',
+      type: row.querySelector('[data-output-contract-type]')?.value || 'string',
+      required: Boolean(row.querySelector('[data-output-contract-required]')?.checked),
+      description: row.querySelector('[data-output-contract-description]')?.value?.trim() || ''
+    }));
+  }
+
+  populateOutputContractRows(columns = [], source = 'manual') {
+    const rows = document.getElementById('taskModalOutputContractRows');
+    if (!rows) return;
+    rows.innerHTML = '';
+    (Array.isArray(columns) ? columns : []).forEach((column) => this.addOutputContractRow(column));
+    this.outputContractEdited = false;
+    this.outputContractSource = source === 'ai_suggested' || source === 'csv_header' ? source : 'manual';
+    this.outputContractEditTelemetrySent = false;
+    this.updateOutputContractEmptyState();
+    this.clearOutputContractError();
+  }
+
+  addOutputContractRow(column = {}) {
+    const rows = document.getElementById('taskModalOutputContractRows');
+    if (!rows) return;
+
+    const row = document.createElement('div');
+    row.className = 'task-modal-output-contract-row';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'task-modal-input';
+    nameInput.placeholder = 'column_name';
+    nameInput.value = column.name || '';
+    nameInput.dataset.outputContractName = 'true';
+    nameInput.style.fontSize = '0.78rem';
+
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'task-modal-input';
+    typeSelect.dataset.outputContractType = 'true';
+    typeSelect.style.fontSize = '0.78rem';
+    ['string', 'number', 'boolean', 'date'].forEach((type) => {
+      const option = document.createElement('option');
+      option.value = type;
+      option.textContent = type;
+      typeSelect.appendChild(option);
+    });
+    typeSelect.value = ['string', 'number', 'boolean', 'date'].includes(column.type) ? column.type : 'string';
+
+    const requiredLabel = document.createElement('label');
+    requiredLabel.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 0.76rem;';
+    const requiredInput = document.createElement('input');
+    requiredInput.type = 'checkbox';
+    requiredInput.checked = column.required !== false;
+    requiredInput.dataset.outputContractRequired = 'true';
+    requiredLabel.appendChild(requiredInput);
+    requiredLabel.appendChild(document.createTextNode('Required'));
+
+    const descriptionInput = document.createElement('input');
+    descriptionInput.type = 'text';
+    descriptionInput.className = 'task-modal-input';
+    descriptionInput.placeholder = 'description';
+    descriptionInput.value = column.description || '';
+    descriptionInput.dataset.outputContractDescription = 'true';
+    descriptionInput.style.fontSize = '0.78rem';
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'task-modal-btn task-modal-btn-secondary';
+    removeButton.dataset.outputContractRemove = 'true';
+    removeButton.title = 'Remove column';
+    removeButton.setAttribute('aria-label', 'Remove output contract column');
+    removeButton.style.cssText = 'width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;';
+    removeButton.textContent = '×';
+
+    row.appendChild(nameInput);
+    row.appendChild(typeSelect);
+    row.appendChild(requiredLabel);
+    row.appendChild(descriptionInput);
+    row.appendChild(removeButton);
+    rows.appendChild(row);
+  }
+
+  updateOutputContractEmptyState() {
+    const rows = this.getOutputContractRows();
+    const empty = document.getElementById('taskModalOutputContractEmpty');
+    if (empty) empty.style.display = rows.length === 0 ? 'block' : 'none';
+  }
+
+  markOutputContractEdited() {
+    this.outputContractEdited = true;
+    this.outputContractSource = 'manual';
+    this.setOutputContractStatus('');
+    if (!this.outputContractEditTelemetrySent) {
+      this.outputContractEditTelemetrySent = true;
+      this.trackOutputContractTelemetry('suggestion_edited', {
+        source: 'manual',
+        column_count: this.getOutputContractRows().filter((row) => row.name).length
+      });
+    }
+  }
+
+  setOutputContractStatus(message, tone = '') {
+    const status = document.getElementById('taskModalOutputContractStatus');
+    if (!status) return;
+    status.textContent = message || '';
+    status.style.display = message ? 'block' : 'none';
+    status.style.color = tone === 'error' ? '#f87171' : 'var(--text-secondary)';
+  }
+
+  showOutputContractError(message) {
+    const error = document.getElementById('taskModalOutputContractError');
+    if (!error) return;
+    error.textContent = message || '';
+    error.style.display = message ? 'block' : 'none';
+  }
+
+  clearOutputContractError() {
+    this.showOutputContractError('');
+  }
+
+  getOutputContractSuggestionDraft() {
+    const scheduleData = this.getScheduleData();
+    const storageTarget = document.getElementById('taskModalAutoSaveTarget')?.value || 'default';
+    const storagePath = document.getElementById('taskModalAutoSavePath')?.value?.trim() || '';
+    const storeNodeId = document.getElementById('taskModalAutoSaveStoreNode')?.value || '';
+    return {
+      title: document.getElementById('taskModalDescription')?.value?.trim() || this.currentTask?.description || '',
+      details: document.getElementById('taskModalDetails')?.value?.trim() || this.currentTask?.details || '',
+      workspace_id: this.workspaceId || '',
+      schedule: scheduleData.schedule || null,
+      schedule_enabled: Boolean(scheduleData.schedule_enabled),
+      schedule_name: scheduleData.schedule_name || '',
+      result_storage: {
+        enabled: true,
+        format: 'csv',
+        write_mode: 'append',
+        store_node_id: storageTarget === 'store' ? storeNodeId : '',
+        file_path: storageTarget === 'custom' ? storagePath : ''
+      }
+    };
+  }
+
+  getOutputContractSuggestionCacheKey(draft = this.getOutputContractSuggestionDraft()) {
+    return JSON.stringify({
+      title: draft.title || '',
+      details: draft.details || '',
+      schedule: draft.schedule || null,
+      schedule_enabled: Boolean(draft.schedule_enabled),
+      schedule_name: draft.schedule_name || '',
+      result_storage: draft.result_storage || null
+    });
+  }
+
+  applyOutputContractSuggestion(contract, key, cached = false) {
+    const normalized = this.normalizeOutputContractPayload(contract);
+    if (!normalized) return false;
+    this.populateOutputContractRows(normalized.columns, normalized.source || 'ai_suggested');
+    this.outputContractSuggestionRequestKey = key || '';
+    this.setOutputContractStatus(cached ? 'Using the cached AI suggestion for this draft.' : 'AI suggestion applied.');
+    this.trackOutputContractTelemetry('suggestion_accepted', {
+      source: normalized.source || 'ai_suggested',
+      column_count: normalized.columns.length
+    });
+    return true;
+  }
+
+  async ensureOutputContractSuggestion({ force = false } = {}) {
+    const writeMode = document.getElementById('taskModalAutoSaveWriteMode')?.value || 'new_file';
+    if (writeMode !== 'append') return;
+    if (!force && this.getOutputContractRows().length > 0) return;
+
+    const draft = this.getOutputContractSuggestionDraft();
+    const key = this.getOutputContractSuggestionCacheKey(draft);
+    if (!force && this.outputContractSuggestionCache.has(key)) {
+      this.applyOutputContractSuggestion(this.outputContractSuggestionCache.get(key), key, true);
+      return;
+    }
+    if (!draft.title && !draft.details) {
+      this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
+      this.setOutputContractStatus('Add a task title or details to improve the contract suggestion.');
+      return;
+    }
+    if (this.outputContractSuggestionRequestKey === key) return;
+
+    this.outputContractSuggestionRequestKey = key;
+    this.setOutputContractStatus('Suggesting columns...');
+    const suggestButton = document.getElementById('taskModalOutputContractSuggest');
+    if (suggestButton) suggestButton.disabled = true;
+    try {
+      const response = await fetch('/api/orchestration/tasks/output-contract/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft)
+      });
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Unable to suggest output contract');
+      }
+      const data = await response.json();
+      const contract = data.output_contract;
+      this.outputContractSuggestionCache.set(key, contract);
+      if (!this.outputContractEdited || force || this.getOutputContractRows().length === 0) {
+        this.applyOutputContractSuggestion(contract, key, false);
+      } else {
+        this.setOutputContractStatus('AI suggestion is ready. Regenerate to replace your manual edits.');
+      }
+    } catch (error) {
+      console.warn('Output contract suggestion failed:', error);
+      if (this.getOutputContractRows().length === 0) {
+        this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
+      }
+      this.setOutputContractStatus('AI suggestion unavailable. You can edit these columns manually.', 'error');
+      this.trackOutputContractTelemetry('suggestion_failed', {
+        source: 'manual',
+        column_count: this.getOutputContractRows().filter((row) => row.name).length
+      });
+    } finally {
+      if (suggestButton) suggestButton.disabled = false;
+      if (this.outputContractSuggestionRequestKey === key) {
+        this.outputContractSuggestionRequestKey = '';
+      }
+    }
+  }
+
+  async regenerateOutputContractSuggestion() {
+    const hasManualRows = this.getOutputContractRows().some((row) => row.name || row.description);
+    if (this.outputContractEdited && hasManualRows && !confirm('Replace your unsaved output contract edits with a new suggestion?')) {
+      return;
+    }
+    this.outputContractEdited = false;
+    this.trackOutputContractTelemetry('suggestion_regenerated', {
+      source: this.outputContractSource || 'manual',
+      column_count: this.getOutputContractRows().filter((row) => row.name).length
+    });
+    await this.ensureOutputContractSuggestion({ force: true });
+  }
+
+  trackOutputContractTelemetry(action, extra = {}) {
+    const workspaceId = this.workspaceId || this.currentTask?.workspace_id || '';
+    if (!workspaceId || typeof fetch !== 'function') return;
+    const payload = {
+      workspace_id: workspaceId,
+      task_id: this.editingTaskId || this.currentTask?.id || '',
+      action,
+      ...extra
+    };
+    fetch('/api/orchestration/tasks/output-contract/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch((error) => {
+      console.debug('Output contract telemetry unavailable:', error);
+    });
+  }
+
+  suggestOutputContractColumns() {
+    const title = document.getElementById('taskModalDescription')?.value || this.currentTask?.description || '';
+    const details = document.getElementById('taskModalDetails')?.value || this.currentTask?.details || '';
+    const text = `${title} ${details}`.toLowerCase();
+    const base = [
+      { name: 'date', type: 'date', required: true, description: 'Run date' },
+      { name: 'summary', type: 'string', required: true, description: 'Short result summary' }
+    ];
+    if (text.includes('pollen')) {
+      return [
+        { name: 'date', type: 'date', required: true, description: 'Forecast date' },
+        { name: 'location', type: 'string', required: true, description: 'City or area' },
+        { name: 'pollen_count', type: 'number', required: true, description: 'Reported pollen level' },
+        { name: 'category', type: 'string', required: false, description: 'Low, moderate, high, or similar label' },
+        { name: 'source', type: 'string', required: false, description: 'Data source' }
+      ];
+    }
+    if (text.includes('weather') || text.includes('temperature')) {
+      return [
+        { name: 'date', type: 'date', required: true, description: 'Forecast date' },
+        { name: 'location', type: 'string', required: true, description: 'City or area' },
+        { name: 'temperature', type: 'number', required: false, description: 'Temperature value' },
+        { name: 'condition', type: 'string', required: false, description: 'Weather condition' },
+        { name: 'source', type: 'string', required: false, description: 'Data source' }
+      ];
+    }
+    if (text.includes('price') || text.includes('stock') || text.includes('crypto')) {
+      return [
+        { name: 'date', type: 'date', required: true, description: 'Observation date' },
+        { name: 'symbol', type: 'string', required: true, description: 'Ticker or asset symbol' },
+        { name: 'price', type: 'number', required: true, description: 'Observed price' },
+        { name: 'currency', type: 'string', required: false, description: 'Quote currency' },
+        { name: 'source', type: 'string', required: false, description: 'Data source' }
+      ];
+    }
+    return base;
+  }
+
+  getOutputContractData() {
+    const rows = this.getOutputContractRows();
+    const seen = new Set();
+    const columns = [];
+    for (const row of rows) {
+      const name = row.name.trim();
+      if (!name) {
+        return { error: 'Each output contract column needs a name.' };
+      }
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        return { error: `Duplicate output contract column: ${name}` };
+      }
+      seen.add(key);
+      columns.push({
+        name,
+        type: ['string', 'number', 'boolean', 'date'].includes(row.type) ? row.type : 'string',
+        required: Boolean(row.required),
+        description: row.description || undefined
+      });
+    }
+    if (columns.length === 0) {
+      return { error: 'Append to CSV requires at least one output contract column.' };
+    }
+    return {
+      output_contract: {
+        source: this.outputContractEdited ? 'manual' : (this.outputContractSource || 'manual'),
+        columns
+      }
+    };
+  }
+
+  normalizeOutputContractPayload(contract) {
+    const columns = Array.isArray(contract?.columns) ? contract.columns : [];
+    const seen = new Set();
+    const normalized = [];
+    columns.forEach((column) => {
+      const name = String(column?.name || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string';
+      normalized.push({
+        name,
+        type,
+        required: Boolean(column?.required),
+        description: String(column?.description || '').trim() || undefined
+      });
+    });
+    if (normalized.length === 0) return null;
+    return {
+      source: contract?.source || 'ai_suggested',
+      columns: normalized
+    };
   }
 
   /**
@@ -3128,15 +3564,18 @@ class TaskModalController {
   getAutoSaveData() {
     const enabledCheckbox = document.getElementById('taskModalAutoSaveEnabled');
     if (!enabledCheckbox?.checked) {
-      return { result_storage: null };
+      return { result_storage: null, output_contract: { columns: [] } };
     }
 
     const target = document.getElementById('taskModalAutoSaveTarget')?.value || 'default';
     const format = document.getElementById('taskModalAutoSaveFormat')?.value || 'text';
+    const writeMode = document.getElementById('taskModalAutoSaveWriteMode')?.value || 'new_file';
+    const appendMode = writeMode === 'append';
 
     const resultStorage = {
       enabled: true,
-      format: format
+      format: appendMode ? 'csv' : format,
+      write_mode: appendMode ? 'append' : 'new_file'
     };
 
     switch (target) {
@@ -3157,7 +3596,20 @@ class TaskModalController {
       // 'default' uses workspace output folder (no additional config needed)
     }
 
-    return { result_storage: resultStorage };
+    const payload = { result_storage: resultStorage };
+    if (appendMode) {
+      const contractData = this.getOutputContractData();
+      if (contractData.error) {
+        payload.output_contract_error = contractData.error;
+        this.showOutputContractError(contractData.error);
+      } else {
+        payload.output_contract = contractData.output_contract;
+      }
+    } else {
+      payload.output_contract = { columns: [] };
+    }
+
+    return payload;
   }
 
   /**
@@ -3922,9 +4374,9 @@ class TaskModalController {
       if (enabled) {
         return autoSaveData;
       }
-      return forUpdate ? { result_storage: null } : {};
+      return forUpdate ? { result_storage: null, output_contract: { columns: [] } } : {};
     }
-    return forUpdate ? { result_storage: null } : {};
+    return forUpdate ? { result_storage: null, output_contract: { columns: [] } } : {};
   }
 
   /**
@@ -4368,6 +4820,7 @@ class TaskModalController {
 }
 
 // Create global instance
+window.TaskModalController = TaskModalController;
 window.taskModalController = new TaskModalController();
 
 // Initialize when DOM is ready

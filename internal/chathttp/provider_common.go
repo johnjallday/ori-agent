@@ -236,7 +236,7 @@ func canonicalizeToolArguments(arguments string) string {
 		return ""
 	}
 
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
 		return trimmed
 	}
@@ -377,7 +377,7 @@ func processToolResultsCommon(results []ToolCallResult) (combinedResult string, 
 
 		// Legacy: Check if result is valid JSON array
 		if !hasStructured && strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
-			var testJSON []interface{}
+			var testJSON []any
 			if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
 				hasStructured = true
 			}
@@ -614,7 +614,7 @@ func formatResolvedSkillRuntimeSettings(skill workspace.ResolvedSkill) string {
 	return strings.Join(lines, "\n")
 }
 
-func stringConfigValue(config map[string]interface{}, key string) string {
+func stringConfigValue(config map[string]any, key string) string {
 	if len(config) == 0 {
 		return ""
 	}
@@ -630,7 +630,7 @@ func stringConfigValue(config map[string]interface{}, key string) string {
 	}
 }
 
-func boolConfigValue(config map[string]interface{}, key string, fallback bool) bool {
+func boolConfigValue(config map[string]any, key string, fallback bool) bool {
 	if len(config) == 0 {
 		return fallback
 	}

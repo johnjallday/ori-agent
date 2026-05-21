@@ -60,9 +60,9 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate format
-	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true, "binary": true}
 	if !validFormats[req.Format] {
-		orihttp.BadRequest(w, "Format must be one of: json, text, markdown, binary")
+		orihttp.BadRequest(w, "Format must be one of: json, text, markdown, csv, binary")
 		return
 	}
 
@@ -143,7 +143,7 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 			Type:        "store_node.created",
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"store_node_id": storeNode.ID,
 				"name":          storeNode.Name,
 			},
@@ -262,9 +262,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		storeNode.BaseDir = *req.BaseDir
 	}
 	if req.Format != nil {
-		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true, "binary": true}
 		if !validFormats[*req.Format] {
-			orihttp.BadRequest(w, "Format must be one of: json, text, markdown, binary")
+			orihttp.BadRequest(w, "Format must be one of: json, text, markdown, csv, binary")
 			return
 		}
 		storeNode.Format = *req.Format
@@ -324,7 +324,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 			Type:        "store_node.updated",
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"store_node_id": nodeID,
 			},
 		})
@@ -394,14 +394,14 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 			Type:        "store_node.deleted",
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"store_node_id": nodeID,
 			},
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":       "Store node deleted successfully",
 		"store_node_id": nodeID,
 		"workspace":     workspaceID,
@@ -447,7 +447,7 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"last_write_time": storeNode.LastWriteTime,
 		"write_count":     storeNode.WriteCount,
 		"last_error":      storeNode.LastError,
@@ -489,7 +489,7 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 	outputDir := filepath.Join(baseOutputDir, workspace.Name)
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"output_dir":   outputDir,
 		"workspace_id": workspaceID,
 	}); encErr != nil {

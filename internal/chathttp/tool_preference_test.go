@@ -20,7 +20,7 @@ func (m mockNamedTool) Definition() toolapi.ToolDefinition {
 	return toolapi.ToolDefinition{
 		Name:        m.name,
 		Description: "mock named tool",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"type": "object",
 		},
 	}

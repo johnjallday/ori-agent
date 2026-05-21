@@ -632,7 +632,7 @@ func adaptBrowserToolArgsForDefinition(definitionName, rawArgs string) (string, 
 
 	req := BrowserRequest{}
 	if err := json.Unmarshal([]byte(rawArgs), &req); err != nil {
-		var direct map[string]interface{}
+		var direct map[string]any
 		if err2 := json.Unmarshal([]byte(rawArgs), &direct); err2 == nil {
 			if url, ok := direct["url"].(string); ok && strings.TrimSpace(url) != "" {
 				payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(url)})

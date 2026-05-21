@@ -72,7 +72,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Agent added successfully",
 		"agent":     req.AgentName,
 		"workspace": workspaceID,
@@ -183,7 +183,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Agent removed successfully",
 		"agent":     agentName,
 		"workspace": workspaceID,
@@ -224,7 +224,7 @@ func (h *HTTPHandler) ListAgentSnapshots(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"workspace_id": workspaceID,
 		"agents":       available,
 	}); encErr != nil {

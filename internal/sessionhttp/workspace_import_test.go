@@ -24,10 +24,10 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 		t.Fatalf("failed to create temp import directory: %v", err)
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"path":        importDir,
 		"entry_point": "create_modal",
-		"workspace_bootstrap": map[string]interface{}{
+		"workspace_bootstrap": map[string]any{
 			"goal":         "Build the Q2 presentation",
 			"systems":      "Keynote, Finder",
 			"capabilities": "Create slides and organize imported assets",
@@ -45,12 +45,12 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 		t.Fatalf("expected 201 for import, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	folder, ok := resp["folder"].(map[string]interface{})
+	folder, ok := resp["folder"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected folder object in response")
 	}
@@ -90,7 +90,7 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap metadata in shared_data")
 	}
-	bootstrapMap, ok := bootstrapRaw.(map[string]interface{})
+	bootstrapMap, ok := bootstrapRaw.(map[string]any)
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap to be an object, got %T", bootstrapRaw)
 	}
@@ -128,7 +128,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 		Name:       "Spain",
 		FolderSlug: "spain-export",
 		Agents:     []string{"Trip Manager"},
-		SharedData: map[string]interface{}{"entry_agent_name": "Trip Manager"},
+		SharedData: map[string]any{"entry_agent_name": "Trip Manager"},
 		Status:     agentworkspace.StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -158,7 +158,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				ServerName: "filesystem",
 				Alias:      "workspace-files",
 				Enabled:    true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"roots": []string{staleRootPath},
 				},
 				CreatedAt: now,
@@ -184,7 +184,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 		Name:       "Madrid",
 		FolderSlug: "madrid",
 		Agents:     []string{"Madrid Planner"},
-		SharedData: map[string]interface{}{"entry_agent_name": "Madrid Planner"},
+		SharedData: map[string]any{"entry_agent_name": "Madrid Planner"},
 		Status:     agentworkspace.StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -214,7 +214,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				ServerName: "filesystem",
 				Alias:      "workspace-files",
 				Enabled:    true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"roots": []string{staleChildPath},
 				},
 				CreatedAt: now,
@@ -235,7 +235,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 		t.Fatalf("failed to write child workspace agent snapshot: %v", err)
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"path": exportRoot,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
@@ -247,11 +247,11 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 		t.Fatalf("expected 201 for exported workspace restore, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	folder, ok := resp["folder"].(map[string]interface{})
+	folder, ok := resp["folder"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected folder object in response")
 	}
@@ -398,7 +398,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceNotes(t *testing.T) {
 		t.Fatalf("failed to write exported note: %v", err)
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"path": exportRoot,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
@@ -519,7 +519,7 @@ func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 		t.Fatalf("failed to create temp import directory: %v", err)
 	}
 
-	createPayload, _ := json.Marshal(map[string]interface{}{
+	createPayload, _ := json.Marshal(map[string]any{
 		"name": "First Import",
 		"path": importDir,
 	})
@@ -538,11 +538,11 @@ func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 		t.Fatalf("expected duplicate check 200, got %d: %s", checkW.Code, checkW.Body.String())
 	}
 
-	var checkResp map[string]interface{}
+	var checkResp map[string]any
 	if err := json.Unmarshal(checkW.Body.Bytes(), &checkResp); err != nil {
 		t.Fatalf("failed to decode duplicate check response: %v", err)
 	}
-	dupMap, ok := checkResp["duplicate"].(map[string]interface{})
+	dupMap, ok := checkResp["duplicate"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected duplicate payload")
 	}
@@ -558,7 +558,7 @@ func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 		t.Fatalf("expected duplicate import conflict 409, got %d: %s", secondW.Code, secondW.Body.String())
 	}
 
-	overridePayload, _ := json.Marshal(map[string]interface{}{
+	overridePayload, _ := json.Marshal(map[string]any{
 		"name":            "Duplicate Override",
 		"path":            importDir,
 		"allow_duplicate": true,
@@ -581,7 +581,7 @@ func TestHandleWorkspaceImportDuplicateActionTelemetry(t *testing.T) {
 		t.Fatalf("failed to create temp import directory: %v", err)
 	}
 
-	validPayload, _ := json.Marshal(map[string]interface{}{
+	validPayload, _ := json.Marshal(map[string]any{
 		"action":       "suggestion_accepted",
 		"workspace_id": "workspace-123",
 		"entry_point":  "dashboard_button",
@@ -595,7 +595,7 @@ func TestHandleWorkspaceImportDuplicateActionTelemetry(t *testing.T) {
 		t.Fatalf("expected duplicate action request to succeed, got %d: %s", validW.Code, validW.Body.String())
 	}
 
-	invalidPayload, _ := json.Marshal(map[string]interface{}{
+	invalidPayload, _ := json.Marshal(map[string]any{
 		"action": "not_allowed",
 	})
 	invalidReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/import/duplicate-action", bytes.NewBuffer(invalidPayload))

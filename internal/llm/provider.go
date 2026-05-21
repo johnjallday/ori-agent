@@ -105,5 +105,5 @@ type ProviderConfig struct {
 	MaxTokens   int
 
 	// Provider-specific options (stored as map for flexibility)
-	Options map[string]interface{}
+	Options map[string]any
 }

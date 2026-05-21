@@ -53,7 +53,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 	if showExistingFolderPicker(reqBody.WorkspaceID) {
 		logger.Info("Showed existing folder picker window", logger.Fields{"workspace_id": reqBody.WorkspaceID})
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Folder picker shown",
 		})
@@ -66,7 +66,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Content-Type", "application/json")
 		status, errMsg := folderPickerLaunchErrorResponse(err)
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"error":   errMsg,
 		})
@@ -74,7 +74,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Folder picker launched",
 	})

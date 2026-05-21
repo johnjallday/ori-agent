@@ -115,17 +115,17 @@ func TestProviderIntegration(t *testing.T) {
 		calculatorTool := Tool{
 			Name:        "calculator",
 			Description: "Perform arithmetic operations",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"operation": map[string]interface{}{
+				"properties": map[string]any{
+					"operation": map[string]any{
 						"type": "string",
 						"enum": []string{"add", "subtract", "multiply", "divide"},
 					},
-					"a": map[string]interface{}{
+					"a": map[string]any{
 						"type": "number",
 					},
-					"b": map[string]interface{}{
+					"b": map[string]any{
 						"type": "number",
 					},
 				},

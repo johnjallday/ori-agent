@@ -42,7 +42,7 @@ func (v *Validator) Validate(ctx context.Context, run *Run, artifacts []Artifact
 	case ValidationProfileUnit:
 		output, status := v.runAllowedCommand(ctx, run, "go test ./...")
 		result.Checks = append(result.Checks, CheckResult{Name: "unit_validation", Status: status, Evidence: output})
-		produced = append(produced, NewArtifact(run.ID, ArtifactTestOutput, ArtifactInline([]byte(output)), ArtifactMetadata(map[string]interface{}{"profile": profile})))
+		produced = append(produced, NewArtifact(run.ID, ArtifactTestOutput, ArtifactInline([]byte(output)), ArtifactMetadata(map[string]any{"profile": profile})))
 	default:
 		result.Checks = append(result.Checks, CheckResult{Name: "validation_profile_supported", Status: CheckStatusFailed, Evidence: fmt.Sprintf("unknown validation profile %q", profile)})
 	}
@@ -55,7 +55,7 @@ func (v *Validator) Validate(ctx context.Context, run *Run, artifacts []Artifact
 			}
 			output, status := v.runAllowedCommand(ctx, run, command)
 			result.Checks = append(result.Checks, CheckResult{Name: "command:" + command, Status: status, Evidence: output})
-			produced = append(produced, NewArtifact(run.ID, ArtifactTestOutput, ArtifactInline([]byte(output)), ArtifactMetadata(map[string]interface{}{"command": command})))
+			produced = append(produced, NewArtifact(run.ID, ArtifactTestOutput, ArtifactInline([]byte(output)), ArtifactMetadata(map[string]any{"command": command})))
 		}
 	}
 

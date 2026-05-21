@@ -21,11 +21,11 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		ID        string                 `json:"id,omitempty"`
-		SkillName string                 `json:"skill_name"`
-		Enabled   *bool                  `json:"enabled,omitempty"`
-		Trusted   *bool                  `json:"trusted,omitempty"`
-		Config    map[string]interface{} `json:"config,omitempty"`
+		ID        string         `json:"id,omitempty"`
+		SkillName string         `json:"skill_name"`
+		Enabled   *bool          `json:"enabled,omitempty"`
+		Trusted   *bool          `json:"trusted,omitempty"`
+		Config    map[string]any `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -82,11 +82,11 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	if created == nil {
 		created = &binding
 	}
-	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_created", map[string]interface{}{"binding": created})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_created", map[string]any{"binding": created})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Skill binding created successfully",
 		"binding":   created,
 		"workspace": workspaceID,
@@ -111,7 +111,7 @@ func (h *HTTPHandler) ListSkillBindings(w http.ResponseWriter, r *http.Request) 
 
 	bindings := workspace.GetSkillBindings()
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"bindings":  bindings,
 		"count":     len(bindings),
 		"workspace": workspaceID,
@@ -142,7 +142,7 @@ func (h *HTTPHandler) GetSkillBindingByID(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"binding":   binding,
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -160,10 +160,10 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		SkillName *string                `json:"skill_name,omitempty"`
-		Enabled   *bool                  `json:"enabled,omitempty"`
-		Trusted   *bool                  `json:"trusted,omitempty"`
-		Config    map[string]interface{} `json:"config,omitempty"`
+		SkillName *string        `json:"skill_name,omitempty"`
+		Enabled   *bool          `json:"enabled,omitempty"`
+		Trusted   *bool          `json:"trusted,omitempty"`
+		Config    map[string]any `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -207,10 +207,10 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 	if updated == nil {
 		updated = binding
 	}
-	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_updated", map[string]interface{}{"binding": updated})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_updated", map[string]any{"binding": updated})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Skill binding updated successfully",
 		"binding":   updated,
 		"workspace": workspaceID,
@@ -243,10 +243,10 @@ func (h *HTTPHandler) DeleteSkillBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_deleted", map[string]interface{}{"binding_id": bindingID})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_deleted", map[string]any{"binding_id": bindingID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "Skill binding deleted successfully",
 		"binding_id": bindingID,
 		"workspace":  workspaceID,
@@ -271,7 +271,7 @@ func (h *HTTPHandler) ListAgentSkillAccess(w http.ResponseWriter, r *http.Reques
 
 	entries := workspace.ListAgentSkillAccess()
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"access":    entries,
 		"count":     len(entries),
 		"workspace": workspaceID,
@@ -302,7 +302,7 @@ func (h *HTTPHandler) GetAgentSkillAccessEntry(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"access":    entry,
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -369,10 +369,10 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 	if updated == nil {
 		updated = &entry
 	}
-	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_updated", map[string]interface{}{"access": updated})
+	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_updated", map[string]any{"access": updated})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Agent skill access updated successfully",
 		"access":    updated,
 		"workspace": workspaceID,
@@ -405,10 +405,10 @@ func (h *HTTPHandler) DeleteAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
+	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_deleted", map[string]any{"agent_instance_id": agentInstanceID})
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":           "Agent skill access deleted successfully",
 		"agent_instance_id": agentInstanceID,
 		"workspace":         workspaceID,
@@ -417,12 +417,12 @@ func (h *HTTPHandler) DeleteAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (h *HTTPHandler) publishWorkspaceSkillEvent(workspaceID, action string, data map[string]interface{}) {
+func (h *HTTPHandler) publishWorkspaceSkillEvent(workspaceID, action string, data map[string]any) {
 	if h == nil || h.eventBus == nil {
 		return
 	}
 
-	payload := map[string]interface{}{"action": action}
+	payload := map[string]any{"action": action}
 	for key, value := range data {
 		payload[key] = value
 	}

@@ -397,9 +397,9 @@ func (w *Workspace) BuildRuntimeInputs(task *Task) *TaskRuntimeInputs {
 		out.TaskResults = results
 	}
 	if len(structured) > 0 {
-		out.StructuredOutputs = make(map[string]map[string]interface{}, len(structured))
+		out.StructuredOutputs = make(map[string]map[string]any, len(structured))
 		for id, val := range structured {
-			if m, ok := val.(map[string]interface{}); ok {
+			if m, ok := val.(map[string]any); ok {
 				out.StructuredOutputs[id] = m
 			}
 		}
@@ -409,11 +409,11 @@ func (w *Workspace) BuildRuntimeInputs(task *Task) *TaskRuntimeInputs {
 
 // GetTaskStructuredOutputs returns parsed structured outputs for tasks whose
 // result matches a schema. Uses the task index for O(M) lookup.
-func (w *Workspace) GetTaskStructuredOutputs(taskIDs []string) map[string]interface{} {
+func (w *Workspace) GetTaskStructuredOutputs(taskIDs []string) map[string]any {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	outputs := make(map[string]interface{}, len(taskIDs))
+	outputs := make(map[string]any, len(taskIDs))
 	for _, taskID := range taskIDs {
 		idx := w.findTaskIdxLocked(taskID)
 		if idx == -1 {

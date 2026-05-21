@@ -19,6 +19,8 @@
 // ESM module loaded via <script type="module"> from base.tmpl. Exposed as
 // `window.NoteEditor` for the non-module sessions.js to consume.
 
+import { parseDelimitedRecords } from './task-result-artifacts.js';
+
 // =============================================================================
 // HTML escape — pure string version (replaces sessionManager's DOM-based one)
 // =============================================================================
@@ -228,6 +230,64 @@ export function pruneCollapsedHeadings(lines, collapsedHeadings) {
   }
 }
 
+function csvFenceLanguage(line) {
+  const match = String(line || '').trim().match(/^```(csv|tsv)\s*$/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function findFenceEnd(lines, startIndex) {
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    if (String(lines[index] || '').trim() === '```') return index;
+  }
+  return -1;
+}
+
+function rangeContainsIndex(start, end, index) {
+  return Number.isInteger(index) && index >= start && index <= end;
+}
+
+function rangeOverlaps(start, end, range) {
+  if (!range) return false;
+  return range.start <= end && range.end >= start;
+}
+
+export function renderCSVFenceBlock(lines, startIndex, endIndex, language) {
+  const delimiter = language === 'tsv' ? '\t' : ',';
+  const records = parseDelimitedRecords(lines.slice(startIndex + 1, endIndex).join('\n'), delimiter);
+  if (records.length < 2 || records[0].length < 1) {
+    return '';
+  }
+
+  const header = records[0];
+  const body = records.slice(1).filter((row) => row.some((cell) => String(cell || '').trim()));
+  if (body.length === 0) return '';
+
+  const headHtml = header
+    .map((column) => `<th scope="col">${escapeHtml(column || 'column')}</th>`)
+    .join('');
+  const bodyHtml = body
+    .map((row) => `
+      <tr>
+        ${header.map((_, columnIndex) => `<td>${escapeHtml(row[columnIndex] ?? '')}</td>`).join('')}
+      </tr>
+    `)
+    .join('');
+
+  return `
+    <div class="note-live-line note-live-line-rendered note-csv-table-block" data-line-index="${startIndex}" data-line-end="${endIndex}" tabindex="0">
+      <div class="note-csv-table-shell">
+        <div class="note-csv-table-meta">${escapeHtml(language.toUpperCase())}</div>
+        <div class="note-csv-table-scroll" role="region" aria-label="${escapeHtml(language.toUpperCase())} table preview" tabindex="0">
+          <table class="note-csv-table">
+            <thead><tr>${headHtml}</tr></thead>
+            <tbody>${bodyHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // buildLiveEditorHTML assembles the full HTML string for the live-preview pane.
 // Each source line becomes one wrapper element; lines under a folded heading
 // are skipped. The single line being edited (activeLineIndex) renders as a
@@ -265,6 +325,21 @@ export function buildLiveEditorHTML(lines, { activeRange = null, activeLineIndex
     if (index === activeLineIndex) {
       html.push(renderEditingLine(lines[index], index));
       continue;
+    }
+    const fenceLanguage = csvFenceLanguage(lines[index]);
+    if (fenceLanguage) {
+      const fenceEnd = findFenceEnd(lines, index);
+      const shouldRenderFence = fenceEnd > index
+        && !rangeContainsIndex(index, fenceEnd, activeLineIndex)
+        && !rangeOverlaps(index, fenceEnd, activeRange);
+      if (shouldRenderFence) {
+        const renderedFence = renderCSVFenceBlock(lines, index, fenceEnd, fenceLanguage);
+        if (renderedFence) {
+          html.push(renderedFence);
+          index = fenceEnd;
+          continue;
+        }
+      }
     }
     html.push(renderRenderedLine(lines[index], index, collapsedHeadings.has(index)));
 
@@ -2511,6 +2586,7 @@ const api = {
   renderHeadingLine,
   renderTaskLine,
   renderRenderedLine,
+  renderCSVFenceBlock,
   pruneCollapsedHeadings,
   buildLiveEditorHTML,
   getRailCollapsed,

@@ -62,8 +62,8 @@ func TestManager_AssistantProgress_PersistenceRoundTrip(t *testing.T) {
 func TestManager_AssistantProgress_BackwardCompatibleLoad(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "app_state.json")
 
-	legacyState := map[string]interface{}{
-		"onboarding": map[string]interface{}{
+	legacyState := map[string]any{
+		"onboarding": map[string]any{
 			"completed":       false,
 			"current_step":    0,
 			"steps_completed": []string{},

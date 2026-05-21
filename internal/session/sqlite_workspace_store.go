@@ -35,7 +35,7 @@ type workspaceJSONFields struct {
 	status              WorkspaceStatus
 }
 
-func parseSQLiteTime(value interface{}) (time.Time, error) {
+func parseSQLiteTime(value any) (time.Time, error) {
 	switch v := value.(type) {
 	case time.Time:
 		return v, nil
@@ -92,7 +92,7 @@ func parseSQLiteTimeStringFormats(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unsupported timestamp format %q", value)
 }
 
-func assignWorkspaceTimes(workspace *Workspace, createdAtRaw, updatedAtRaw interface{}) error {
+func assignWorkspaceTimes(workspace *Workspace, createdAtRaw, updatedAtRaw any) error {
 	createdAt, err := parseSQLiteTime(createdAtRaw)
 	if err != nil {
 		return fmt.Errorf("created_at: %w", err)
@@ -282,8 +282,8 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var agentMCPAccessJSON sql.NullString
 	var skillBindingsJSON sql.NullString
 	var agentSkillAccessJSON sql.NullString
-	var createdAtRaw interface{}
-	var updatedAtRaw interface{}
+	var createdAtRaw any
+	var updatedAtRaw any
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
@@ -495,8 +495,8 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		var workspace Workspace
 		var parentID, color, description, kind sql.NullString
 		var agentsJSON, agentInstancesJSON, status sql.NullString
-		var createdAtRaw interface{}
-		var updatedAtRaw interface{}
+		var createdAtRaw any
+		var updatedAtRaw any
 
 		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,

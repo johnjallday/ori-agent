@@ -9,20 +9,20 @@ import (
 
 // Task represents a delegated task from one agent to another
 type Task struct {
-	ID          string                 `json:"id"`
-	WorkspaceID string                 `json:"workspace_id"`
-	From        string                 `json:"from"`        // Agent delegating the task
-	To          string                 `json:"to"`          // Agent receiving the task
-	Description string                 `json:"description"` // What needs to be done
-	Priority    int                    `json:"priority"`    // 1 (low) to 5 (high)
-	Context     map[string]interface{} `json:"context"`     // Additional context
-	Timeout     time.Duration          `json:"timeout"`     // Max time to complete
-	Status      TaskStatus             `json:"status"`      // Current status
-	Result      string                 `json:"result"`      // Result when completed
-	Error       string                 `json:"error"`       // Error message if failed
-	CreatedAt   time.Time              `json:"created_at"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspace_id"`
+	From        string         `json:"from"`        // Agent delegating the task
+	To          string         `json:"to"`          // Agent receiving the task
+	Description string         `json:"description"` // What needs to be done
+	Priority    int            `json:"priority"`    // 1 (low) to 5 (high)
+	Context     map[string]any `json:"context"`     // Additional context
+	Timeout     time.Duration  `json:"timeout"`     // Max time to complete
+	Status      TaskStatus     `json:"status"`      // Current status
+	Result      string         `json:"result"`      // Result when completed
+	Error       string         `json:"error"`       // Error message if failed
+	CreatedAt   time.Time      `json:"created_at"`
+	StartedAt   *time.Time     `json:"started_at,omitempty"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -40,13 +40,13 @@ const (
 
 // DelegationRequest represents a request to delegate a task
 type DelegationRequest struct {
-	WorkspaceID string                 `json:"workspace_id"`
-	From        string                 `json:"from"`
-	To          string                 `json:"to"`
-	Description string                 `json:"description"`
-	Priority    int                    `json:"priority"`
-	Context     map[string]interface{} `json:"context"`
-	Timeout     time.Duration          `json:"timeout"`
+	WorkspaceID string         `json:"workspace_id"`
+	From        string         `json:"from"`
+	To          string         `json:"to"`
+	Description string         `json:"description"`
+	Priority    int            `json:"priority"`
+	Context     map[string]any `json:"context"`
+	Timeout     time.Duration  `json:"timeout"`
 
 	// CLI agent adapter fields (used when delegating to external CLI agents)
 	WorkingDir    string  `json:"working_dir,omitempty"`     // Scoped working directory for CLI agent
@@ -65,12 +65,12 @@ type DelegationResponse struct {
 
 // MessageRequest is a convenient wrapper for sending messages
 type MessageRequest struct {
-	WorkspaceID string                 `json:"workspace_id"`
-	From        string                 `json:"from"`
-	To          string                 `json:"to"` // Empty for broadcast
-	Type        workspace.MessageType  `json:"type"`
-	Content     string                 `json:"content"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID string                `json:"workspace_id"`
+	From        string                `json:"from"`
+	To          string                `json:"to"` // Empty for broadcast
+	Type        workspace.MessageType `json:"type"`
+	Content     string                `json:"content"`
+	Metadata    map[string]any        `json:"metadata,omitempty"`
 }
 
 // NewTask creates a new task with generated ID and timestamps

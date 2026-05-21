@@ -532,7 +532,7 @@ func parseSkillFrontmatter(frontmatter string) (skillFrontmatter, error) {
 		return skillFrontmatter{}, nil
 	}
 
-	raw := make(map[string]interface{})
+	raw := make(map[string]any)
 	if err := yaml.Unmarshal([]byte(frontmatter), &raw); err != nil {
 		return skillFrontmatter{}, err
 	}
@@ -567,7 +567,7 @@ func parseFrontmatter(content string) (frontmatter, body string) {
 	return frontmatter, body
 }
 
-func getStringField(raw map[string]interface{}, key string) string {
+func getStringField(raw map[string]any, key string) string {
 	if val, ok := raw[key]; ok {
 		if str, ok := val.(string); ok {
 			return str
@@ -576,7 +576,7 @@ func getStringField(raw map[string]interface{}, key string) string {
 	return ""
 }
 
-func getStringSliceField(raw map[string]interface{}, keys ...string) []string {
+func getStringSliceField(raw map[string]any, keys ...string) []string {
 	for _, key := range keys {
 		if val, ok := raw[key]; ok {
 			return interfaceSliceToStrings(val)
@@ -585,11 +585,11 @@ func getStringSliceField(raw map[string]interface{}, keys ...string) []string {
 	return nil
 }
 
-func interfaceSliceToStrings(value interface{}) []string {
+func interfaceSliceToStrings(value any) []string {
 	switch v := value.(type) {
 	case []string:
 		return v
-	case []interface{}:
+	case []any:
 		result := make([]string, 0, len(v))
 		for _, item := range v {
 			if str, ok := item.(string); ok {

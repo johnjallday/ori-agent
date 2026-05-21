@@ -35,7 +35,7 @@ func (h *Handler) getWorkspaceSettings(w http.ResponseWriter, r *http.Request, i
 
 	settings := workspacesettings.Extract(workspace.SharedData)
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"workspace_id":         workspace.ID,
 		"settings":             settings,
 		"effective_behavior":   effective,
@@ -55,7 +55,7 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var patch map[string]interface{}
+	var patch map[string]any
 	if !orihttp.ParseJSONBody(w, r, &patch) {
 		return
 	}
@@ -85,7 +85,7 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success":              true,
 		"workspace_id":         workspace.ID,
 		"settings":             settings,
@@ -96,6 +96,6 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (h *Handler) taskMarkdownSyncStatus(workspaceID string, settings workspacesettings.Settings) map[string]interface{} {
+func (h *Handler) taskMarkdownSyncStatus(workspaceID string, settings workspacesettings.Settings) map[string]any {
 	return agentworkspace.TaskMarkdownStatusForSettings(h.workspaceStore, workspaceID, settings.TaskMarkdown)
 }

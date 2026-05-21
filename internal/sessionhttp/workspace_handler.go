@@ -120,7 +120,7 @@ type workspaceBootstrapRequest struct {
 	Context      string `json:"context,omitempty"`
 }
 
-func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]interface{} {
+func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]any {
 	if input == nil {
 		return nil
 	}
@@ -138,7 +138,7 @@ func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]in
 		systemsList = []string{}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"version":      1,
 		"goal":         goal,
 		"systems":      systems,
@@ -247,7 +247,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		if ws.SharedData == nil {
-			ws.SharedData = make(map[string]interface{})
+			ws.SharedData = make(map[string]any)
 		}
 		ws.SharedData["workspace_bootstrap"] = bootstrapData
 	}
@@ -344,7 +344,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				ServerName: "filesystem",
 				Alias:      "workspace-files",
 				Enabled:    true,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"roots": []string{folderPath},
 				},
 				CreatedAt: now,
@@ -387,7 +387,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"folder":  ws,
 	})
@@ -551,7 +551,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		)
 		if bootstrapData != nil {
 			if workspace.SharedData == nil {
-				workspace.SharedData = make(map[string]interface{})
+				workspace.SharedData = make(map[string]any)
 			}
 			workspace.SharedData["workspace_bootstrap"] = bootstrapData
 		} else if workspace.SharedData != nil {
@@ -619,7 +619,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	logger.Info("Workspace updated", logger.Fields{"id": id})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"folder":  workspace,
 	})
@@ -648,7 +648,7 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	// If confirm is not set, return session count for UI confirmation prompt
 	if r.URL.Query().Get("confirm") != "true" {
 		sessionCount := ws.SessionCount
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"workspace_id":     id,
 			"name":             ws.Name,
 			"session_count":    sessionCount,
@@ -739,7 +739,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"folders":    workspaces,
 			"workspaces": workspaces,
 		})
@@ -760,7 +760,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	workspaces = filterConcreteWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"folders":    workspaces,
 		"workspaces": workspaces,
 	})
@@ -847,7 +847,7 @@ func setWorkspacePrimaryDirectoryID(workspace *session.Workspace, directoryID st
 
 	trimmed := strings.TrimSpace(directoryID)
 	if workspace.SharedData == nil {
-		workspace.SharedData = make(map[string]interface{})
+		workspace.SharedData = make(map[string]any)
 	}
 
 	if trimmed == "" {
@@ -936,7 +936,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 	logger.Info("Workspace renamed", logger.Fields{"id": id, "new_name": req.Name})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"folder":  ws,
 	})
@@ -1026,7 +1026,7 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":         true,
 		"normalized_path": normalizedPath,
 		"duplicate":       duplicate,
@@ -1125,7 +1125,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"mode":         "workspace_restore",
 		})
 
-		response := map[string]interface{}{
+		response := map[string]any{
 			"success":              true,
 			"folder":               workspace,
 			"duplicate":            workspaceImportDuplicate{Found: false},
@@ -1149,8 +1149,8 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	if req.OrderIndex != nil {
 		workspace.OrderIndex = *req.OrderIndex
 	}
-	workspace.SharedData = map[string]interface{}{
-		"folder_import": map[string]interface{}{
+	workspace.SharedData = map[string]any{
+		"folder_import": map[string]any{
 			"enabled":         true,
 			"path":            normalizedPath,
 			"path_hash":       hashPathForTelemetry(normalizedPath),
@@ -1257,10 +1257,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		"entry_point":  req.EntryPoint,
 	})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"folder":  workspace,
-		"directory": map[string]interface{}{
+		"directory": map[string]any{
 			"id":           dirRef.ID,
 			"workspace_id": dirRef.WorkspaceID,
 			"name":         dirRef.Name,
@@ -1296,7 +1296,7 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		if rootWorkspace.SharedData == nil {
-			rootWorkspace.SharedData = make(map[string]interface{})
+			rootWorkspace.SharedData = make(map[string]any)
 		}
 		rootWorkspace.SharedData["workspace_bootstrap"] = bootstrapData
 	}
@@ -1531,7 +1531,7 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), "workspace-files") ||
 			workspaceBindingHasRoot(ws.MCPBindings[i].Config, normalizedOld) {
 			if ws.MCPBindings[i].Config == nil {
-				ws.MCPBindings[i].Config = make(map[string]interface{})
+				ws.MCPBindings[i].Config = make(map[string]any)
 			}
 			ws.MCPBindings[i].Config["roots"] = []string{normalizedNew}
 			ws.MCPBindings[i].UpdatedAt = now
@@ -1546,7 +1546,7 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 			ServerName: "filesystem",
 			Alias:      "workspace-files",
 			Enabled:    true,
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"roots": []string{normalizedNew},
 			},
 			CreatedAt: now,
@@ -1649,7 +1649,7 @@ func (h *Handler) handleWorkspaceImportDuplicateAction(w http.ResponseWriter, r 
 
 	recordWorkspaceImportTelemetry(action, fields)
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 	})
 }
@@ -1733,7 +1733,7 @@ func normalizeImportPath(input string) (string, error) {
 func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplicate workspaceImportDuplicate) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusConflict)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"success":   false,
 		"error":     message,
 		"duplicate": duplicate,
@@ -1754,7 +1754,7 @@ func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName strin
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusConflict)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"success": false,
 		"error":   message,
 		"conflict": workspaceCreateConflict{
@@ -1899,7 +1899,7 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		"instance_number": instanceNumber,
 	})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success":        true,
 		"agent_instance": newInstance,
 		"workspace":      workspace,
@@ -2029,18 +2029,18 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		"agent":        agentIdentifier,
 	})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":   true,
 		"workspace": workspace,
 	})
 }
 
-func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map[string]interface{} {
+func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map[string]any {
 	if workspace == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 
-	payload := make(map[string]interface{})
+	payload := make(map[string]any)
 	if data, err := json.Marshal(workspace); err == nil {
 		if err := json.Unmarshal(data, &payload); err != nil {
 			logger.Warn("Failed to decode workspace payload for response", logger.Fields{"workspace_id": workspace.ID, "error": err})
@@ -2340,7 +2340,7 @@ func (h *Handler) getWorkspaceLayout(w http.ResponseWriter, r *http.Request, wor
 		layout = &session.CanvasLayout{}
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"layout": layout,
 	})
 }
@@ -2375,7 +2375,7 @@ func (h *Handler) saveWorkspaceLayout(w http.ResponseWriter, r *http.Request, wo
 
 	logger.Info("Workspace layout saved", logger.Fields{"workspace_id": workspaceID})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"layout":  layout,
 	})
@@ -2711,7 +2711,7 @@ func isFolderImportedWorkspace(ws session.Workspace) bool {
 		return false
 	}
 
-	meta, ok := raw.(map[string]interface{})
+	meta, ok := raw.(map[string]any)
 	if !ok {
 		return false
 	}
@@ -2838,7 +2838,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 	for i := range bindings {
 		if strings.EqualFold(strings.TrimSpace(bindings[i].Alias), "workspace-files") || workspaceBindingHasRoot(bindings[i].Config, normalizedOld) {
 			if bindings[i].Config == nil {
-				bindings[i].Config = make(map[string]interface{})
+				bindings[i].Config = make(map[string]any)
 			}
 			bindings[i].Config["roots"] = []string{normalizedNew}
 			bindings[i].UpdatedAt = now
@@ -2852,7 +2852,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 			ServerName: "filesystem",
 			Alias:      "workspace-files",
 			Enabled:    true,
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"roots": []string{normalizedNew},
 			},
 			CreatedAt: now,
@@ -2927,7 +2927,7 @@ func (h *Handler) restoreWorkspaceNoteFiles(ctx context.Context, workspaceID str
 	return nil
 }
 
-func workspaceBindingHasRoot(config map[string]interface{}, path string) bool {
+func workspaceBindingHasRoot(config map[string]any, path string) bool {
 	if len(config) == 0 || strings.TrimSpace(path) == "" {
 		return false
 	}
@@ -2944,7 +2944,7 @@ func workspaceBindingHasRoot(config map[string]interface{}, path string) bool {
 				return true
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, root := range roots {
 			if cleanWorkspaceSyncPath(fmt.Sprint(root)) == path {
 				return true

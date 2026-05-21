@@ -159,11 +159,11 @@ type StructuredOutputRequest struct {
 	SystemPrompt    string
 	ReasoningEffort string
 	SchemaName      string
-	Schema          interface{}
+	Schema          any
 }
 
 // GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs
-func GenerateSchema[T any]() interface{} {
+func GenerateSchema[T any]() any {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,

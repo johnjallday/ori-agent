@@ -89,6 +89,10 @@
 
     (tasks || []).forEach((task) => {
       const status = String(task.status || 'pending').trim().toLowerCase();
+      const hasNeedsReview = (Array.isArray(task.execution_history) ? task.execution_history : []).some((entry) => {
+        const validation = entry?.validation_result || entry?.validation || null;
+        return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+      });
       if (status === 'completed') stats.completed += 1;
       if (status === 'in_progress') stats.in_progress += 1;
       if (status === 'pending' || status === 'assigned') stats.pending += 1;
@@ -97,7 +101,7 @@
       if (task.schedule_enabled) stats.scheduled += 1;
       // Needs attention combines blocked-ish + failed so users have one
       // pill to scan when they open the hub looking for "what needs me".
-      if (status === 'blocked' || status === 'waiting_for_choice' || status === 'failed') {
+      if (status === 'blocked' || status === 'waiting_for_choice' || status === 'failed' || hasNeedsReview) {
         stats.needs_attention += 1;
       }
     });

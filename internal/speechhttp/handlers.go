@@ -136,7 +136,7 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = header
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"text":     text,
 		"provider": provider,
 		"model":    modelUsed,

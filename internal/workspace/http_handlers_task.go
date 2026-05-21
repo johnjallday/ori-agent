@@ -4,27 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description            string            `json:"description"`
-	From                   string            `json:"from"`
-	To                     string            `json:"to"`
-	Priority               int               `json:"priority"`
-	ParentTaskID           string            `json:"parent_task_id"`
-	SubtaskIndex           int               `json:"subtask_index"`
-	OrchestrationMode      string            `json:"orchestration_mode"`
-	ResultCombinationMode  string            `json:"result_combination_mode"`
-	CombinationInstruction string            `json:"combination_instruction"`
-	OutputSchema           *TaskOutputSchema `json:"output_schema"`
-	TemplateRef            *TaskTemplateRef  `json:"template_ref"`
+	Description            string              `json:"description"`
+	From                   string              `json:"from"`
+	To                     string              `json:"to"`
+	Priority               int                 `json:"priority"`
+	ParentTaskID           string              `json:"parent_task_id"`
+	SubtaskIndex           int                 `json:"subtask_index"`
+	OrchestrationMode      string              `json:"orchestration_mode"`
+	ResultCombinationMode  string              `json:"result_combination_mode"`
+	CombinationInstruction string              `json:"combination_instruction"`
+	OutputSchema           *TaskOutputSchema   `json:"output_schema"`
+	OutputContract         *TaskOutputContract `json:"output_contract"`
+	TemplateRef            *TaskTemplateRef    `json:"template_ref"`
 }
 
 // CreateTask handles POST /api/workspaces/:id/tasks
@@ -74,16 +77,20 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		To:                     req.To,
 		Description:            req.Description,
 		Priority:               req.Priority,
-		Context:                make(map[string]interface{}),
+		Context:                make(map[string]any),
 		ParentTaskID:           req.ParentTaskID,
 		SubtaskIndex:           req.SubtaskIndex,
 		OrchestrationMode:      NormalizeTaskOrchestrationMode(req.OrchestrationMode),
 		ResultCombinationMode:  NormalizeTaskResultCombinationMode(req.ResultCombinationMode),
 		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
 		OutputSchema:           NormalizeTaskOutputSchema(req.OutputSchema),
+		OutputContract:         NormalizeTaskOutputContract(req.OutputContract),
 		TemplateRef:            req.TemplateRef,
 		Status:                 TaskStatusPending,
 		CreatedAt:              time.Now(),
+	}
+	if task.OutputContract == nil {
+		task.OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &task)
 	}
 
 	// Add task to workspace
@@ -104,7 +111,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task created successfully",
 		"task_id":   task.ID,
 		"task":      task,
@@ -135,19 +142,21 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 
 	var req struct {
-		Description            *string           `json:"description,omitempty"`
-		Details                *string           `json:"details,omitempty"`
-		To                     *string           `json:"to,omitempty"`
-		From                   *string           `json:"from,omitempty"`
-		InputTaskIDs           *[]string         `json:"input_task_ids,omitempty"`
-		AssignedNodeID         *string           `json:"assigned_node_id,omitempty"`
-		ParentTaskID           *string           `json:"parent_task_id,omitempty"`
-		SubtaskIndex           *int              `json:"subtask_index,omitempty"`
-		OrchestrationMode      *string           `json:"orchestration_mode,omitempty"`
-		ResultCombinationMode  *string           `json:"result_combination_mode,omitempty"`
-		CombinationInstruction *string           `json:"combination_instruction,omitempty"`
-		OutputSchema           *TaskOutputSchema `json:"output_schema,omitempty"`
-		TemplateRef            *TaskTemplateRef  `json:"template_ref,omitempty"`
+		Description            *string              `json:"description,omitempty"`
+		Details                *string              `json:"details,omitempty"`
+		To                     *string              `json:"to,omitempty"`
+		From                   *string              `json:"from,omitempty"`
+		InputTaskIDs           *[]string            `json:"input_task_ids,omitempty"`
+		AssignedNodeID         *string              `json:"assigned_node_id,omitempty"`
+		ParentTaskID           *string              `json:"parent_task_id,omitempty"`
+		SubtaskIndex           *int                 `json:"subtask_index,omitempty"`
+		OrchestrationMode      *string              `json:"orchestration_mode,omitempty"`
+		ResultCombinationMode  *string              `json:"result_combination_mode,omitempty"`
+		CombinationInstruction *string              `json:"combination_instruction,omitempty"`
+		OutputSchema           *TaskOutputSchema    `json:"output_schema,omitempty"`
+		OutputContract         *TaskOutputContract  `json:"output_contract,omitempty"`
+		ResultStorage          *ResultStorageConfig `json:"result_storage,omitempty"`
+		TemplateRef            *TaskTemplateRef     `json:"template_ref,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -204,6 +213,14 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			if req.OutputSchema != nil {
 				workspace.Tasks[i].OutputSchema = NormalizeTaskOutputSchema(req.OutputSchema)
 			}
+			if req.OutputContract != nil {
+				workspace.Tasks[i].OutputContract = NormalizeTaskOutputContract(req.OutputContract)
+			} else {
+				workspace.Tasks[i].OutputContract = BootstrapOutputContractFromCSVHeader(workspace, &workspace.Tasks[i])
+			}
+			if req.ResultStorage != nil {
+				workspace.Tasks[i].ResultStorage = req.ResultStorage
+			}
 			if req.TemplateRef != nil {
 				workspace.Tasks[i].TemplateRef = req.TemplateRef
 			}
@@ -227,7 +244,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task updated successfully",
 		"task_id":   taskID,
 		"workspace": workspaceID,
@@ -275,7 +292,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task deleted successfully",
 		"task_id":   taskID,
 		"workspace": workspaceID,
@@ -335,11 +352,206 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task execution started",
 		"task_id":   taskID,
 		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
+}
+
+// AppendResultToCSVRequest is the body for POST .../results/append-csv.
+type AppendResultToCSVRequest struct {
+	CSV         string `json:"csv"`
+	UseStorage  bool   `json:"use_storage"`
+	FilePath    string `json:"file_path"`
+	StoreNodeID string `json:"store_node_id"`
+}
+
+// AppendResultToCSV handles POST /api/workspaces/:id/tasks/:task_id/results/append-csv.
+// It appends a CSV payload from a task's result artifact either to the task's
+// already-configured result storage destination (use_storage=true) or to a
+// one-shot destination supplied in the request.
+func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}/results/append-csv
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 5 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+	taskID := parts[2]
+
+	var req AppendResultToCSVRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	csvData := strings.TrimSpace(req.CSV)
+	if csvData == "" {
+		orihttp.BadRequest(w, "csv body is required")
+		return
+	}
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	var task *Task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			task = &ws.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		orihttp.NotFound(w, "Task not found")
+		return
+	}
+
+	storeNodeID := strings.TrimSpace(req.StoreNodeID)
+	filePath := strings.TrimSpace(req.FilePath)
+
+	if req.UseStorage {
+		owner := ResolveTaskResultStorageOwner(ws, task)
+		var storage *ResultStorageConfig
+		if owner != nil {
+			storage = owner.ResultStorage
+		}
+		if storage == nil || !storage.Enabled || strings.ToLower(strings.TrimSpace(storage.WriteMode)) != "append" {
+			orihttp.BadRequest(w, "Task is not configured to append results to a CSV file")
+			return
+		}
+		storeNodeID = strings.TrimSpace(storage.StoreNodeID)
+		filePath = strings.TrimSpace(storage.FilePath)
+	}
+
+	appendedRows := csvRowCount(csvData)
+
+	if storeNodeID != "" {
+		var storeNode *StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storeNodeID || ws.StoreNodes[i].CanvasNodeID == storeNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+		if storeNode == nil {
+			orihttp.BadRequest(w, "Store node not found")
+			return
+		}
+		storeFilePath := filePath
+		if storeFilePath == "" {
+			storeFilePath = defaultAppendCSVFilename(task)
+		}
+		nodeCopy := *storeNode
+		nodeCopy.WriteMode = "append"
+		nodeCopy.Format = "csv"
+		payload := csvWithoutHeaderForExistingStore(storeNode, storeFilePath, csvData)
+		if err := WriteToStore(&nodeCopy, storeFilePath, payload); err != nil {
+			logger.Error("Failed to append task result to store node", logger.Fields{
+				"task_id":       task.ID,
+				"store_node_id": storeNode.ID,
+				"err":           err,
+			})
+			orihttp.InternalError(w, fmt.Sprintf("Append to store node failed: %v", err))
+			return
+		}
+		storeNode.LastWriteTime = nodeCopy.LastWriteTime
+		storeNode.WriteCount = nodeCopy.WriteCount
+		storeNode.LastFilePath = nodeCopy.LastFilePath
+		storeNode.LastError = nodeCopy.LastError
+		storeNode.UpdatedAt = nodeCopy.UpdatedAt
+		if err := h.store.Save(ws); err != nil {
+			logger.Error("Failed to persist workspace after manual append", logger.Fields{"workspace_id": ws.ID, "err": err})
+		}
+		resolved, _ := BuildFinalPath(storeNode.BaseDir, storeFilePath)
+		orihttp.WriteJSON(w, map[string]any{
+			"appended_rows": appendedRows,
+			"file_path":     resolved,
+			"label":         filepath.Base(storeFilePath),
+		})
+		return
+	}
+
+	if filePath == "" {
+		baseOutputDir, dirErr := platform.GetDefaultOutputDir()
+		if dirErr != nil {
+			baseOutputDir = "outputs"
+		}
+		filePath = filepath.Join(baseOutputDir, ws.Name, defaultAppendCSVFilename(task))
+	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
+		filePath = filepath.Join(filePath, defaultAppendCSVFilename(task))
+	}
+
+	if err := AppendCSVToFile(filePath, csvData); err != nil {
+		logger.Error("Failed to append task result CSV to file", logger.Fields{
+			"task_id":   task.ID,
+			"file_path": filePath,
+			"err":       err,
+		})
+		orihttp.InternalError(w, fmt.Sprintf("Append failed: %v", err))
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]any{
+		"appended_rows": appendedRows,
+		"file_path":     filePath,
+		"label":         filepath.Base(filePath),
+	})
+}
+
+// csvRowCount counts data rows in a CSV string, excluding the header.
+func csvRowCount(csvData string) int {
+	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
+	if normalized == "" {
+		return 0
+	}
+	lines := strings.Split(normalized, "\n")
+	if len(lines) <= 1 {
+		return 0
+	}
+	count := 0
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// defaultAppendCSVFilename derives the filename used when the caller did not
+// specify a target path. Mirrors the slug rules in autoStoreTaskResult so that
+// a one-shot manual append lands in the same place as the scheduled append.
+func defaultAppendCSVFilename(task *Task) string {
+	name := ""
+	if task != nil {
+		name = task.Description
+	}
+	if len(name) > 30 {
+		name = name[:30]
+	}
+	sanitized := strings.Builder{}
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-':
+			sanitized.WriteRune(r)
+		case r == ' ':
+			sanitized.WriteByte('_')
+		}
+	}
+	slug := sanitized.String()
+	if slug == "" {
+		slug = "task"
+	}
+	return slug + ".csv"
 }

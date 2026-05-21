@@ -7,7 +7,7 @@ import "context"
 type ToolDefinition struct {
 	Name        string
 	Description string
-	Parameters  map[string]interface{}
+	Parameters  map[string]any
 }
 
 // Tool is the interface that executable tools must implement.

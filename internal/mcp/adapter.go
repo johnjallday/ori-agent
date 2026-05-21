@@ -34,9 +34,9 @@ func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
 // This is the bridge that makes MCP tools compatible with any LLM provider
 func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
 	// Convert MCP inputSchema to generic parameters format
-	parameters := map[string]interface{}(nil)
+	parameters := map[string]any(nil)
 	switch schema := a.tool.InputSchema.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		parameters = schema
 	case json.RawMessage:
 		_ = json.Unmarshal(schema, &parameters)
@@ -49,9 +49,9 @@ func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
 		}
 	}
 	if parameters == nil {
-		parameters = map[string]interface{}{
+		parameters = map[string]any{
 			"type":       "object",
-			"properties": map[string]interface{}{},
+			"properties": map[string]any{},
 		}
 	}
 
@@ -65,7 +65,7 @@ func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
 // Call executes the MCP tool and returns the result
 func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
 	// Parse arguments
-	var arguments map[string]interface{}
+	var arguments map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal([]byte(args), &arguments); err != nil {
 			return "", fmt.Errorf("failed to parse arguments: %w", err)
@@ -112,9 +112,9 @@ func (a *MCPAdapter) formatResult(result *ToolCallResult) (string, error) {
 	}
 
 	// Multiple items or complex content - return as JSON
-	formatted := make([]map[string]interface{}, 0, len(result.Content))
+	formatted := make([]map[string]any, 0, len(result.Content))
 	for _, item := range result.Content {
-		formattedItem := map[string]interface{}{}
+		formattedItem := map[string]any{}
 		switch c := item.(type) {
 		case *sdkmcp.TextContent:
 			formattedItem["type"] = "text"
@@ -185,7 +185,7 @@ var _ toolapi.Tool = (*MCPAdapter)(nil)
 var _ toolapi.AgentAwareTool = (*MCPAdapter)(nil)
 var _ toolapi.VersionedTool = (*MCPAdapter)(nil)
 
-func normalizeFilesystemArguments(toolName string, arguments map[string]interface{}, serverConfig ServerConfig) map[string]interface{} {
+func normalizeFilesystemArguments(toolName string, arguments map[string]any, serverConfig ServerConfig) map[string]any {
 	if len(arguments) == 0 || !isFilesystemTool(toolName) {
 		return arguments
 	}
@@ -200,7 +200,7 @@ func normalizeFilesystemArguments(toolName string, arguments map[string]interfac
 		return arguments
 	}
 
-	normalized := make(map[string]interface{}, len(arguments))
+	normalized := make(map[string]any, len(arguments))
 	for key, value := range arguments {
 		textValue, ok := value.(string)
 		if !ok || !isFilesystemPathArgumentKey(key) {
@@ -330,7 +330,7 @@ func splitFilesystemPathSegments(pathValue string) []string {
 	return segments
 }
 
-func annotateGetFileInfoResult(toolName, result string, arguments map[string]interface{}) string {
+func annotateGetFileInfoResult(toolName, result string, arguments map[string]any) string {
 	if !strings.EqualFold(strings.TrimSpace(toolName), "get_file_info") {
 		return result
 	}

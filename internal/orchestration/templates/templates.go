@@ -24,7 +24,7 @@ type WorkflowTemplate struct {
 	RequiredRoles          []types.AgentRole                   `json:"required_roles"`
 	Parameters             []TemplateParameter                 `json:"parameters"`
 	Steps                  []WorkflowStep                      `json:"steps"`
-	DefaultConfig          map[string]interface{}              `json:"default_config,omitempty"`
+	DefaultConfig          map[string]any                      `json:"default_config,omitempty"`
 	OrchestrationMode      workspace.TaskOrchestrationMode     `json:"orchestration_mode,omitempty"`
 	ResultCombinationMode  workspace.TaskResultCombinationMode `json:"result_combination_mode,omitempty"`
 	CombinationInstruction string                              `json:"combination_instruction,omitempty"`
@@ -35,11 +35,11 @@ type WorkflowTemplate struct {
 
 // TemplateParameter defines a parameter that can be set when instantiating a template
 type TemplateParameter struct {
-	Name         string      `json:"name"`
-	Type         string      `json:"type"` // string, number, boolean, array, object
-	Description  string      `json:"description"`
-	Required     bool        `json:"required"`
-	DefaultValue interface{} `json:"default_value,omitempty"`
+	Name         string `json:"name"`
+	Type         string `json:"type"` // string, number, boolean, array, object
+	Description  string `json:"description"`
+	Required     bool   `json:"required"`
+	DefaultValue any    `json:"default_value,omitempty"`
 }
 
 // WorkflowStep defines a single step in a workflow
@@ -53,7 +53,7 @@ type WorkflowStep struct {
 	DependsOn    []string                    `json:"depends_on,omitempty"`
 	Priority     int                         `json:"priority"`
 	Timeout      time.Duration               `json:"timeout"`
-	Context      map[string]interface{}      `json:"context,omitempty"`
+	Context      map[string]any              `json:"context,omitempty"`
 	OutputSchema *workspace.TaskOutputSchema `json:"output_schema,omitempty"`
 }
 
@@ -383,7 +383,7 @@ func (tm *TemplateManager) DeleteTemplate(id string) error {
 }
 
 // ValidateParameters validates parameters against template definition
-func (tm *TemplateManager) ValidateParameters(template *WorkflowTemplate, params map[string]interface{}) error {
+func (tm *TemplateManager) ValidateParameters(template *WorkflowTemplate, params map[string]any) error {
 	for _, param := range template.Parameters {
 		if param.Required {
 			if _, exists := params[param.Name]; !exists {
@@ -395,7 +395,7 @@ func (tm *TemplateManager) ValidateParameters(template *WorkflowTemplate, params
 }
 
 // InstantiateTemplate creates a workflow instance from a template with parameters
-func (tm *TemplateManager) InstantiateTemplate(templateID string, params map[string]interface{}) (*WorkflowInstance, error) {
+func (tm *TemplateManager) InstantiateTemplate(templateID string, params map[string]any) (*WorkflowInstance, error) {
 	template, err := tm.GetTemplate(templateID)
 	if err != nil {
 		return nil, err
@@ -407,7 +407,7 @@ func (tm *TemplateManager) InstantiateTemplate(templateID string, params map[str
 	}
 
 	// Merge with defaults
-	finalParams := make(map[string]interface{})
+	finalParams := make(map[string]any)
 	for _, param := range template.Parameters {
 		if val, exists := params[param.Name]; exists {
 			finalParams[param.Name] = val
@@ -451,7 +451,7 @@ type WorkflowInstance struct {
 	TemplateID             string                              `json:"template_id"`
 	TemplateName           string                              `json:"template_name"`
 	TemplateDescription    string                              `json:"template_description,omitempty"`
-	Parameters             map[string]interface{}              `json:"parameters"`
+	Parameters             map[string]any                      `json:"parameters"`
 	RequiredRoles          []types.AgentRole                   `json:"required_roles"`
 	Steps                  []WorkflowStep                      `json:"steps"`
 	OrchestrationMode      workspace.TaskOrchestrationMode     `json:"orchestration_mode,omitempty"`
@@ -461,7 +461,7 @@ type WorkflowInstance struct {
 	CreatedAt              time.Time                           `json:"created_at"`
 }
 
-func renderWorkflowSteps(steps []WorkflowStep, params map[string]interface{}) ([]WorkflowStep, error) {
+func renderWorkflowSteps(steps []WorkflowStep, params map[string]any) ([]WorkflowStep, error) {
 	rendered := make([]WorkflowStep, 0, len(steps))
 	for _, step := range steps {
 		renderedName, err := renderTemplateText(step.Name, params)
@@ -496,12 +496,12 @@ func renderWorkflowSteps(steps []WorkflowStep, params map[string]interface{}) ([
 	return rendered, nil
 }
 
-func renderTemplateContext(src map[string]interface{}, params map[string]interface{}) (map[string]interface{}, error) {
+func renderTemplateContext(src map[string]any, params map[string]any) (map[string]any, error) {
 	if len(src) == 0 {
 		return nil, nil
 	}
 
-	rendered := make(map[string]interface{}, len(src))
+	rendered := make(map[string]any, len(src))
 	for key, raw := range src {
 		switch value := raw.(type) {
 		case string:
@@ -510,14 +510,14 @@ func renderTemplateContext(src map[string]interface{}, params map[string]interfa
 				return nil, fmt.Errorf("render %q: %w", key, err)
 			}
 			rendered[key] = text
-		case map[string]interface{}:
+		case map[string]any:
 			nested, err := renderTemplateContext(value, params)
 			if err != nil {
 				return nil, err
 			}
 			rendered[key] = nested
-		case []interface{}:
-			items := make([]interface{}, 0, len(value))
+		case []any:
+			items := make([]any, 0, len(value))
 			for _, item := range value {
 				text, ok := item.(string)
 				if !ok {
@@ -538,7 +538,7 @@ func renderTemplateContext(src map[string]interface{}, params map[string]interfa
 	return rendered, nil
 }
 
-func renderTemplateText(input string, params map[string]interface{}) (string, error) {
+func renderTemplateText(input string, params map[string]any) (string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" || !strings.Contains(input, "{{") {
 		return input, nil

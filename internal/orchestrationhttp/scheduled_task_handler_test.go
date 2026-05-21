@@ -22,8 +22,8 @@ func TestUpcomingScheduledTasksHandler_Empty(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var resp struct {
-		Upcoming []map[string]interface{} `json:"upcoming"`
-		Count    int                      `json:"count"`
+		Upcoming []map[string]any `json:"upcoming"`
+		Count    int              `json:"count"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)

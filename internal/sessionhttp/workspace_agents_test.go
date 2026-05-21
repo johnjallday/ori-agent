@@ -87,7 +87,7 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 		Name:           "Agent Cleanup",
 		Agents:         []string{"Writer", "Reviewer"},
 		AgentInstances: []session.AgentInstance{writerOne, writerTwo, reviewer},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Writer",
 		},
 		Layout: &session.CanvasLayout{
@@ -301,7 +301,7 @@ func TestHandleWorkspaceAgents_DeleteRejectsRemovingLastEntryAgent(t *testing.T)
 		Name:           "Trip Planning",
 		Agents:         []string{"Trip Planning Manager"},
 		AgentInstances: []session.AgentInstance{manager},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Trip Planning Manager",
 		},
 		CreatedAt: now,
@@ -362,7 +362,7 @@ func TestHandleWorkspaceAgents_DeleteSupportsNameInstanceIdentifier(t *testing.T
 		Name:           "Instance Delete",
 		Agents:         []string{"Writer", "Reviewer"},
 		AgentInstances: []session.AgentInstance{writerOne, writerTwo, reviewer},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Writer",
 		},
 		CreatedAt: now,
@@ -438,7 +438,7 @@ func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 				CreatedAt:      now,
 			},
 		},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Writer",
 		},
 		CreatedAt: now,
@@ -457,7 +457,7 @@ func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 		t.Fatalf("expected entry_agent_name Writer, got %#v", got)
 	}
 
-	agentStats, ok := response["agent_stats"].(map[string]interface{})
+	agentStats, ok := response["agent_stats"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected agent_stats object, got %#v", response["agent_stats"])
 	}
@@ -474,7 +474,7 @@ func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 		t.Fatalf("expected Writer stats, got %#v", agentStats)
 	}
 
-	workspaceProgress, ok := response["workspace_progress"].(map[string]interface{})
+	workspaceProgress, ok := response["workspace_progress"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected workspace_progress object, got %#v", response["workspace_progress"])
 	}

@@ -88,7 +88,7 @@ func decryptString(key []byte, nonceB64 string, ciphertextB64 string) (string, e
 	return string(plaintext), nil
 }
 
-func encryptJSON(key []byte, value interface{}) (nonceB64 string, ciphertextB64 string, err error) {
+func encryptJSON(key []byte, value any) (nonceB64 string, ciphertextB64 string, err error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "", "", fmt.Errorf("marshal json: %w", err)
@@ -96,7 +96,7 @@ func encryptJSON(key []byte, value interface{}) (nonceB64 string, ciphertextB64 
 	return encryptBytes(key, data)
 }
 
-func decryptJSON(key []byte, nonceB64 string, ciphertextB64 string, value interface{}) error {
+func decryptJSON(key []byte, nonceB64 string, ciphertextB64 string, value any) error {
 	data, err := decryptBytes(key, nonceB64, ciphertextB64)
 	if err != nil {
 		return err

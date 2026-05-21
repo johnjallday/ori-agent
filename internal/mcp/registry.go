@@ -184,7 +184,7 @@ func (r *Registry) GetToolsForServer(serverName string) ([]toolapi.Tool, error) 
 }
 
 // CallTool calls a tool on a specific server
-func (r *Registry) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]interface{}) (*ToolCallResult, error) {
+func (r *Registry) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (*ToolCallResult, error) {
 	server, err := r.GetServer(serverName)
 	if err != nil {
 		return nil, err

@@ -19,7 +19,7 @@ func TestCostAggregationNormalizesTotals(t *testing.T) {
 }
 
 func TestNewReportSummarizesValidation(t *testing.T) {
-	artifact := NewArtifact("run-1", ArtifactChangedFiles, ArtifactMetadata(map[string]interface{}{
+	artifact := NewArtifact("run-1", ArtifactChangedFiles, ArtifactMetadata(map[string]any{
 		"files": []string{"a.go", "b.go"},
 	}))
 	validation := &ValidationResult{

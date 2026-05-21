@@ -75,7 +75,7 @@ func TestUpdateWorkspaceSyncsCanonicalDescriptionNote(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap in shared_data")
 	}
-	bootstrapMap, ok := bootstrapRaw.(map[string]interface{})
+	bootstrapMap, ok := bootstrapRaw.(map[string]any)
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap map, got %T", bootstrapRaw)
 	}
@@ -144,11 +144,11 @@ func TestHandleWorkspaceRenameReturnsSlugConflictAndRollsBackDB(t *testing.T) {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	conflict, ok := resp["conflict"].(map[string]interface{})
+	conflict, ok := resp["conflict"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected conflict payload")
 	}
@@ -176,7 +176,7 @@ func TestHandleWorkspaceRenameReturnsSlugConflictAndRollsBackDB(t *testing.T) {
 	if getW.Code != http.StatusOK {
 		t.Fatalf("expected hydrated workspace detail 200, got %d: %s", getW.Code, getW.Body.String())
 	}
-	var getResp map[string]interface{}
+	var getResp map[string]any
 	if err := json.Unmarshal(getW.Body.Bytes(), &getResp); err != nil {
 		t.Fatalf("failed to decode workspace detail response: %v", err)
 	}

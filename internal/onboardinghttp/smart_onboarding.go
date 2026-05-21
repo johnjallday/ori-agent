@@ -351,7 +351,7 @@ func (h *SmartOnboardingHandler) UpdateProfile(w http.ResponseWriter, r *http.Re
 	// Filter to only new agents (not already existing)
 	newAgents := configuratorInstance.GetCreatedAgentNames(config)
 
-	h.sendJSON(w, map[string]interface{}{
+	h.sendJSON(w, map[string]any{
 		"success":          true,
 		"profile":          profile,
 		"config":           config,
@@ -563,13 +563,13 @@ func (h *SmartOnboardingHandler) GetStoredProfile(w http.ResponseWriter, r *http
 
 	profile := h.onboardingMgr.GetUserProfile()
 
-	h.sendJSON(w, map[string]interface{}{
+	h.sendJSON(w, map[string]any{
 		"success": true,
 		"profile": profile,
 	})
 }
 
 // sendJSON sends a JSON response.
-func (h *SmartOnboardingHandler) sendJSON(w http.ResponseWriter, data interface{}) {
+func (h *SmartOnboardingHandler) sendJSON(w http.ResponseWriter, data any) {
 	orihttp.WriteJSON(w, data)
 }

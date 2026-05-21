@@ -41,6 +41,44 @@ func TestMemoryStoreCreateGetDefensiveCopiesAndParentRun(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreSetTaskOutputDefensiveCopy(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	if err := store.CreateRun(ctx, &Run{ID: "run-1", WorkspaceID: "workspace-1"}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	output := TaskOutputSummary{
+		TaskID:           "task-1",
+		ValidationStatus: "passed",
+		StorageStatus:    "appended",
+		Errors: []TaskOutputValidationError{
+			{Code: "old"},
+		},
+	}
+	if err := store.SetTaskOutput(ctx, "workspace-1", "run-1", output); err != nil {
+		t.Fatalf("set task output: %v", err)
+	}
+	output.Errors[0].Code = "mutated"
+
+	got, err := store.GetRun(ctx, "workspace-1", "run-1")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.TaskOutput == nil || got.TaskOutput.Errors[0].Code != "old" {
+		t.Fatalf("TaskOutput = %+v, want defensive copy", got.TaskOutput)
+	}
+	got.TaskOutput.Errors[0].Code = "changed"
+
+	again, err := store.GetRun(ctx, "workspace-1", "run-1")
+	if err != nil {
+		t.Fatalf("get run again: %v", err)
+	}
+	if again.TaskOutput == nil || again.TaskOutput.Errors[0].Code != "old" {
+		t.Fatalf("TaskOutput = %+v, want stored copy unchanged", again.TaskOutput)
+	}
+}
+
 func TestMemoryStoreConcurrentTraceAppendSequences(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

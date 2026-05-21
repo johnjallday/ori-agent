@@ -31,9 +31,9 @@ func TestTracePageAfterCapsAndReportsMore(t *testing.T) {
 
 func TestTraceTailReturnsRecentCopy(t *testing.T) {
 	events := []TraceEvent{
-		{Sequence: 1, Data: map[string]interface{}{"k": "v1"}},
-		{Sequence: 2, Data: map[string]interface{}{"k": "v2"}},
-		{Sequence: 3, Data: map[string]interface{}{"k": "v3"}},
+		{Sequence: 1, Data: map[string]any{"k": "v1"}},
+		{Sequence: 2, Data: map[string]any{"k": "v2"}},
+		{Sequence: 3, Data: map[string]any{"k": "v3"}},
 	}
 
 	tail := TraceTail(events, 2)

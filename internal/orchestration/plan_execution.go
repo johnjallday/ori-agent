@@ -31,14 +31,14 @@ func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, reques
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        workspaceName,
 		Agents:      []string{mainAgent},
-		InitialData: map[string]interface{}{"request": request},
+		InitialData: map[string]any{"request": request},
 	})
 
 	ws.SetPlannerDecision(&decision)
 	if err := o.workspaceStore.Save(ws); err != nil {
 		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
-	o.publishEvent(workspace.EventPlannerDecision, ws.ID, map[string]interface{}{
+	o.publishEvent(workspace.EventPlannerDecision, ws.ID, map[string]any{
 		"complexity_score": decision.ComplexityScore,
 		"threshold":        decision.Threshold,
 		"mode":             decision.Mode,
@@ -74,7 +74,7 @@ func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, reques
 		if err := o.workspaceStore.Save(ws); err != nil {
 			return nil, fmt.Errorf("failed to save pending plan: %w", err)
 		}
-		o.publishEvent(workspace.EventDynamicAgentRequested, ws.ID, map[string]interface{}{
+		o.publishEvent(workspace.EventDynamicAgentRequested, ws.ID, map[string]any{
 			"requests": requests,
 			"plan_id":  pending.ID,
 		})
@@ -82,7 +82,7 @@ func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, reques
 		return &CollaborativeResult{
 			WorkspaceID:          ws.ID,
 			FinalOutput:          "",
-			SubResults:           make(map[string]interface{}),
+			SubResults:           make(map[string]any),
 			Duration:             time.Since(startTime),
 			Status:               "pending_approval",
 			PendingPlanID:        pending.ID,
@@ -201,7 +201,7 @@ func (o *Orchestrator) ensureWorkspaceAgents(ws *workspace.Workspace, mainAgent 
 }
 
 func (o *Orchestrator) executePlanSequentially(ctx context.Context, ws *workspace.Workspace, mainAgent, request string, plan *types.PlannerOutput, assignments map[string]string, timeout time.Duration) (*CollaborativeResult, error) {
-	subResults := make(map[string]interface{})
+	subResults := make(map[string]any)
 	taskResults := make(map[string]string)
 
 	for _, step := range plan.Tasks {
@@ -210,7 +210,7 @@ func (o *Orchestrator) executePlanSequentially(ctx context.Context, ws *workspac
 			agentName = mainAgent
 		}
 
-		context := map[string]interface{}{
+		context := map[string]any{
 			"request":          request,
 			"plan_task_id":     step.ID,
 			"plan_task_role":   step.RequiredRole,

@@ -137,7 +137,7 @@ func getFreePort(t *testing.T) string {
 func (tc *TestContext) CreateAgent(name, model string) *Agent {
 	tc.T.Helper()
 
-	agentData := map[string]interface{}{
+	agentData := map[string]any{
 		"name":         name,
 		"description":  fmt.Sprintf("Test agent created at %s", time.Now().Format(time.RFC3339)),
 		"model":        model,
@@ -161,7 +161,7 @@ func (tc *TestContext) CreateAgent(name, model string) *Agent {
 		tc.T.Fatalf("Failed to create agent (status %d): %s", resp.StatusCode, body)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		tc.T.Fatalf("Failed to decode agent response: %v", err)
 	}
@@ -190,12 +190,12 @@ func (tc *TestContext) LoadPlugin(pluginName string) *Plugin {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		tc.T.Fatalf("Failed to decode plugins: %v", err)
 	}
 
-	plugins, ok := result["plugins"].([]interface{})
+	plugins, ok := result["plugins"].([]any)
 	if !ok {
 		tc.T.Fatalf("Invalid plugins response")
 	}
@@ -204,14 +204,14 @@ func (tc *TestContext) LoadPlugin(pluginName string) *Plugin {
 	if tc.Verbose {
 		tc.T.Logf("Available plugins from API: %d plugins", len(plugins))
 		for _, p := range plugins {
-			plugin := p.(map[string]interface{})
+			plugin := p.(map[string]any)
 			tc.T.Logf("  - %s", plugin["name"])
 		}
 	}
 
 	// Find plugin
 	for _, p := range plugins {
-		plugin := p.(map[string]interface{})
+		plugin := p.(map[string]any)
 		if plugin["name"] == pluginName {
 			if tc.Verbose {
 				tc.T.Logf("✓ Loaded plugin: %s", pluginName)
@@ -297,7 +297,7 @@ func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 	tc.T.Helper()
 
 	sessionID := tc.ensureSession(agent)
-	chatData := map[string]interface{}{
+	chatData := map[string]any{
 		"question":   message, // API expects "question" not "message"
 		"agent_name": agent.Name,
 	}
@@ -323,7 +323,7 @@ func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 		tc.T.Fatalf("Chat request failed (status %d): %s", resp.StatusCode, body)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		tc.T.Fatalf("Failed to decode chat response: %v", err)
 	}
@@ -345,9 +345,9 @@ func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 	tc.T.Helper()
 
 	// Try both "toolCalls" (new format) and "tool_calls" (legacy format)
-	toolCalls, ok := resp.Response["toolCalls"].([]interface{})
+	toolCalls, ok := resp.Response["toolCalls"].([]any)
 	if !ok {
-		toolCalls, ok = resp.Response["tool_calls"].([]interface{})
+		toolCalls, ok = resp.Response["tool_calls"].([]any)
 	}
 
 	if !ok || len(toolCalls) == 0 {
@@ -356,7 +356,7 @@ func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 	}
 
 	for _, call := range toolCalls {
-		callMap := call.(map[string]interface{})
+		callMap := call.(map[string]any)
 		// Check both "name" (OpenAI format) and "function" (Ollama format)
 		name := callMap["name"]
 		if name == nil {
@@ -377,9 +377,9 @@ func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 func (tc *TestContext) AssertToolCalledT(t *testing.T, resp *ChatResponse, toolName string) {
 	t.Helper()
 
-	toolCalls, ok := resp.Response["toolCalls"].([]interface{})
+	toolCalls, ok := resp.Response["toolCalls"].([]any)
 	if !ok {
-		toolCalls, ok = resp.Response["tool_calls"].([]interface{})
+		toolCalls, ok = resp.Response["tool_calls"].([]any)
 	}
 
 	if !ok || len(toolCalls) == 0 {
@@ -388,7 +388,7 @@ func (tc *TestContext) AssertToolCalledT(t *testing.T, resp *ChatResponse, toolN
 	}
 
 	for _, call := range toolCalls {
-		callMap := call.(map[string]interface{})
+		callMap := call.(map[string]any)
 		name := callMap["name"]
 		if name == nil {
 			name = callMap["function"]
@@ -469,20 +469,20 @@ type Agent struct {
 	Model     string
 	SessionID string
 	ctx       *TestContext
-	config    map[string]interface{}
+	config    map[string]any
 }
 
 // Plugin represents a test plugin
 type Plugin struct {
 	Name   string
 	ctx    *TestContext
-	config map[string]interface{}
+	config map[string]any
 }
 
 // ChatResponse represents a chat response
 type ChatResponse struct {
 	Message  string
-	Response map[string]interface{}
+	Response map[string]any
 	ctx      *TestContext
 }
 
@@ -518,7 +518,7 @@ func (tc *TestContext) ensureSession(agent *Agent) string {
 		return agent.SessionID
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"title":      "Test Session",
 		"agent_name": agent.Name,
 	}
@@ -539,12 +539,12 @@ func (tc *TestContext) ensureSession(agent *Agent) string {
 		tc.T.Fatalf("Failed to create session (status %d): %s", resp.StatusCode, body)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		tc.T.Fatalf("Failed to decode session response: %v", err)
 	}
 
-	sessionData, _ := result["session"].(map[string]interface{})
+	sessionData, _ := result["session"].(map[string]any)
 	if sessionData == nil {
 		sessionData = result
 	}

@@ -25,9 +25,9 @@ type folderRow struct {
 }
 
 type folderSQLExecutor interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 func normalizeFolderPath(path string) (string, error) {
@@ -96,7 +96,7 @@ func encryptFolderPath(dek []byte, path string) (string, string, error) {
 }
 
 func scanFolderRow(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (folderRow, error) {
 	var row folderRow
 	if err := scanner.Scan(

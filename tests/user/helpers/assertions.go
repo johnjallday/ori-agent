@@ -8,7 +8,7 @@ import (
 // Assertion helpers for user tests
 
 // AssertEqual checks if two values are equal
-func AssertEqual(t *testing.T, expected, actual interface{}, message string) {
+func AssertEqual(t *testing.T, expected, actual any, message string) {
 	t.Helper()
 	if expected != actual {
 		t.Errorf("%s: expected %v, got %v", message, expected, actual)
@@ -16,7 +16,7 @@ func AssertEqual(t *testing.T, expected, actual interface{}, message string) {
 }
 
 // AssertNotEqual checks if two values are not equal
-func AssertNotEqual(t *testing.T, expected, actual interface{}, message string) {
+func AssertNotEqual(t *testing.T, expected, actual any, message string) {
 	t.Helper()
 	if expected == actual {
 		t.Errorf("%s: expected values to be different, both are %v", message, expected)
@@ -56,7 +56,7 @@ func AssertNotContains(t *testing.T, haystack, needle, message string) {
 }
 
 // AssertNil checks if a value is nil
-func AssertNil(t *testing.T, value interface{}, message string) {
+func AssertNil(t *testing.T, value any, message string) {
 	t.Helper()
 	if value != nil {
 		t.Errorf("%s: expected nil, got %v", message, value)
@@ -64,7 +64,7 @@ func AssertNil(t *testing.T, value interface{}, message string) {
 }
 
 // AssertNotNil checks if a value is not nil
-func AssertNotNil(t *testing.T, value interface{}, message string) {
+func AssertNotNil(t *testing.T, value any, message string) {
 	t.Helper()
 	if value == nil {
 		t.Errorf("%s: expected non-nil value", message)
@@ -88,16 +88,16 @@ func AssertNoError(t *testing.T, err error, message string) {
 }
 
 // AssertLen checks if a slice/array/map has expected length
-func AssertLen(t *testing.T, collection interface{}, expectedLen int, message string) {
+func AssertLen(t *testing.T, collection any, expectedLen int, message string) {
 	t.Helper()
 
 	var actualLen int
 	switch v := collection.(type) {
-	case []interface{}:
+	case []any:
 		actualLen = len(v)
 	case []string:
 		actualLen = len(v)
-	case map[string]interface{}:
+	case map[string]any:
 		actualLen = len(v)
 	default:
 		t.Errorf("%s: unsupported collection type: %T", message, collection)
@@ -134,19 +134,19 @@ func AssertInRange(t *testing.T, value, min, max int, message string) {
 }
 
 // Logf logs a formatted message (helper for verbose output)
-func Logf(t *testing.T, format string, args ...interface{}) {
+func Logf(t *testing.T, format string, args ...any) {
 	t.Helper()
 	t.Logf(format, args...)
 }
 
 // Errorf logs a formatted error
-func Errorf(t *testing.T, format string, args ...interface{}) {
+func Errorf(t *testing.T, format string, args ...any) {
 	t.Helper()
 	t.Errorf(format, args...)
 }
 
 // Fatalf logs a formatted fatal error
-func Fatalf(t *testing.T, format string, args ...interface{}) {
+func Fatalf(t *testing.T, format string, args ...any) {
 	t.Helper()
 	t.Fatalf(format, args...)
 }

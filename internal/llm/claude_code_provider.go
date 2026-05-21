@@ -136,7 +136,7 @@ type claudeCLIResponse struct {
 	Errors           []string        `json:"errors"`
 }
 
-func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt string, schema interface{}) (string, error) {
+func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt string, schema any) (string, error) {
 	args := []string{
 		"--print",
 		"--output-format",

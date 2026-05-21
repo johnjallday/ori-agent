@@ -18,7 +18,7 @@ type TemplateData struct {
 	Model        string
 	Version      string
 	CurrentPage  string
-	Extra        map[string]interface{} // Additional custom data
+	Extra        map[string]any // Additional custom data
 
 	// Navbar configuration fields
 	NavbarClass            string
@@ -195,7 +195,7 @@ func GetDefaultData() TemplateData {
 		CurrentAgent: "Assistant",
 		Model:        "gpt-5-nano",
 		Version:      version.GetVersion(),
-		Extra:        make(map[string]interface{}), // Initialize Extra map
+		Extra:        make(map[string]any),
 
 		// Navbar defaults - enable common features
 		ShowSidebarToggle:      true,

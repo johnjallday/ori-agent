@@ -172,10 +172,10 @@ func TestClaudeProviderConvertTools(t *testing.T) {
 		{
 			Name:        "calculator",
 			Description: "Perform calculations",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"operation": map[string]interface{}{
+				"properties": map[string]any{
+					"operation": map[string]any{
 						"type": "string",
 					},
 				},
@@ -185,10 +185,10 @@ func TestClaudeProviderConvertTools(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search the web",
-			Parameters: map[string]interface{}{
+			Parameters: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"query": map[string]interface{}{
+				"properties": map[string]any{
+					"query": map[string]any{
 						"type": "string",
 					},
 				},

@@ -53,7 +53,7 @@ func (ts *TestServer) Get(path string) *httptest.ResponseRecorder {
 }
 
 // Post performs a POST request to the test server
-func (ts *TestServer) Post(path string, body interface{}) *httptest.ResponseRecorder {
+func (ts *TestServer) Post(path string, body any) *httptest.ResponseRecorder {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		ts.t.Fatalf("Failed to marshal body: %v", err)
@@ -67,7 +67,7 @@ func (ts *TestServer) Post(path string, body interface{}) *httptest.ResponseReco
 }
 
 // Put performs a PUT request to the test server
-func (ts *TestServer) Put(path string, body interface{}) *httptest.ResponseRecorder {
+func (ts *TestServer) Put(path string, body any) *httptest.ResponseRecorder {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		ts.t.Fatalf("Failed to marshal body: %v", err)
@@ -122,7 +122,7 @@ func AssertStatusCode(t *testing.T, expected, actual int) {
 }
 
 // AssertJSONResponse asserts the response is valid JSON and unmarshals it
-func AssertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, v interface{}) {
+func AssertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
 
 	if rec.Header().Get("Content-Type") != "application/json" {
@@ -189,7 +189,7 @@ func SkipIfNoAPIKey(t *testing.T) {
 }
 
 // LoadTestData loads test data from a JSON file
-func LoadTestData(t *testing.T, filename string, v interface{}) {
+func LoadTestData(t *testing.T, filename string, v any) {
 	t.Helper()
 
 	data, err := os.ReadFile(filename)
@@ -203,7 +203,7 @@ func LoadTestData(t *testing.T, filename string, v interface{}) {
 }
 
 // SaveTestData saves test data to a JSON file
-func SaveTestData(t *testing.T, filename string, v interface{}) {
+func SaveTestData(t *testing.T, filename string, v any) {
 	t.Helper()
 
 	data, err := json.MarshalIndent(v, "", "  ")
@@ -246,7 +246,7 @@ func MakeRequest(t *testing.T, client *http.Client, baseURL string, req HTTPRequ
 }
 
 // ReadJSONResponse reads and unmarshals a JSON response
-func ReadJSONResponse(t *testing.T, resp *http.Response, v interface{}) {
+func ReadJSONResponse(t *testing.T, resp *http.Response, v any) {
 	t.Helper()
 	defer func() { _ = resp.Body.Close() }()
 

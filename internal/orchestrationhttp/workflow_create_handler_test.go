@@ -26,7 +26,7 @@ func newWorkflowTestHandler(t *testing.T) (*TaskHandler, *workspace.Workspace) {
 	return handler, ws
 }
 
-func postJSON(t *testing.T, handler *TaskHandler, body interface{}) *httptest.ResponseRecorder {
+func postJSON(t *testing.T, handler *TaskHandler, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -42,22 +42,22 @@ func postJSON(t *testing.T, handler *TaskHandler, body interface{}) *httptest.Re
 func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
 	handler, ws := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id": ws.ID,
-		"parent": map[string]interface{}{
+		"parent": map[string]any{
 			"id":          "parent-1",
 			"description": "Onboarding workflow",
 			"to":          "ori",
 		},
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":             "step-1",
 				"description":    "Collect requirements",
 				"to":             "researcher",
 				"subtask_index":  1,
 				"input_task_ids": []string{},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":             "step-2",
 				"description":    "Draft plan",
 				"to":             "writer",
@@ -95,22 +95,79 @@ func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
 	}
 }
 
+func TestWorkflowCreate_PersistsOutputContractOnStorageStep(t *testing.T) {
+	handler, ws := newWorkflowTestHandler(t)
+
+	rec := postJSON(t, handler, map[string]any{
+		"workspace_id": ws.ID,
+		"parent": map[string]any{
+			"id":          "parent-contract",
+			"description": "Daily pollen workflow",
+		},
+		"subtasks": []any{
+			map[string]any{
+				"id":          "collect",
+				"description": "Collect pollen data",
+			},
+			map[string]any{
+				"id":             "append",
+				"description":    "Append pollen row",
+				"input_task_ids": []string{"collect"},
+				"result_storage": map[string]any{
+					"enabled":    true,
+					"format":     "csv",
+					"write_mode": "append",
+				},
+				"output_contract": map[string]any{
+					"source": "manual",
+					"columns": []any{
+						map[string]any{"name": "date", "type": "date", "required": true},
+						map[string]any{"name": "pollen_count", "type": "number", "required": true},
+					},
+				},
+			},
+		},
+	})
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	storageStep, err := ws.GetTask("append")
+	if err != nil {
+		t.Fatalf("get storage step: %v", err)
+	}
+	if storageStep.OutputContract == nil {
+		t.Fatal("expected output contract on storage-owning step")
+	}
+	if storageStep.OutputContract.Version == "" {
+		t.Fatal("expected output contract version")
+	}
+	parent, err := ws.GetTask("parent-contract")
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if parent.OutputContract != nil {
+		t.Fatalf("expected parent to stay contract-free, got %+v", parent.OutputContract)
+	}
+}
+
 func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
 	handler, ws := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id": ws.ID,
-		"parent": map[string]interface{}{
+		"parent": map[string]any{
 			"id":          "parent-cycle",
 			"description": "Bad workflow",
 		},
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":             "a",
 				"description":    "A",
 				"input_task_ids": []string{"b"},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":             "b",
 				"description":    "B",
 				"input_task_ids": []string{"a"},
@@ -153,14 +210,14 @@ func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
 func TestWorkflowCreate_RejectsUnknownInputWithStructuredIssue(t *testing.T) {
 	handler, _ := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id": "ws-workflows",
-		"parent": map[string]interface{}{
+		"parent": map[string]any{
 			"id":          "parent-unknown",
 			"description": "Workflow",
 		},
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":             "real",
 				"description":    "Real step",
 				"input_task_ids": []string{"never-existed"},
@@ -191,13 +248,13 @@ func TestWorkflowCreate_RejectsUnknownInputWithStructuredIssue(t *testing.T) {
 func TestWorkflowCreate_RejectsMissingParentID(t *testing.T) {
 	handler, _ := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id": "ws-workflows",
-		"parent": map[string]interface{}{
+		"parent": map[string]any{
 			"description": "Has no client-supplied id",
 		},
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":          "x",
 				"description": "X",
 			},
@@ -215,16 +272,16 @@ func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id":        ws.ID,
 		"attach_to_parent_id": "existing-parent",
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":            "attached-1",
 				"description":   "Step 1",
 				"subtask_index": 1,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"id":             "attached-2",
 				"description":    "Step 2",
 				"subtask_index":  2,
@@ -254,11 +311,11 @@ func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
 func TestWorkflowCreate_AttachRejectsMissingParent(t *testing.T) {
 	handler, _ := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id":        "ws-workflows",
 		"attach_to_parent_id": "ghost-parent",
-		"subtasks": []interface{}{
-			map[string]interface{}{
+		"subtasks": []any{
+			map[string]any{
 				"id":          "x",
 				"description": "X",
 			},
@@ -273,15 +330,15 @@ func TestWorkflowCreate_AttachRejectsMissingParent(t *testing.T) {
 func TestWorkflowCreate_RejectsBothParentAndAttach(t *testing.T) {
 	handler, _ := newWorkflowTestHandler(t)
 
-	rec := postJSON(t, handler, map[string]interface{}{
+	rec := postJSON(t, handler, map[string]any{
 		"workspace_id":        "ws-workflows",
 		"attach_to_parent_id": "anything",
-		"parent": map[string]interface{}{
+		"parent": map[string]any{
 			"id":          "p",
 			"description": "P",
 		},
-		"subtasks": []interface{}{
-			map[string]interface{}{"id": "x", "description": "X"},
+		"subtasks": []any{
+			map[string]any{"id": "x", "description": "X"},
 		},
 	})
 
@@ -299,7 +356,7 @@ func TestWorkflowCreate_StructuredIssueOnSingleTaskEndpoint(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"workspace_id":   ws.ID,
 		"description":    "child",
 		"parent_task_id": "ghost",

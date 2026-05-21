@@ -5,11 +5,11 @@ import (
 )
 
 // GetSummary returns a summary of the workspace
-func (w *Workspace) GetSummary() map[string]interface{} {
+func (w *Workspace) GetSummary() map[string]any {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"id":            w.ID,
 		"name":          w.Name,
 		"description":   w.Description,

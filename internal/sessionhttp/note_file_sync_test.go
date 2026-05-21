@@ -47,7 +47,7 @@ func TestSyncNoteToFile(t *testing.T) {
 		Status:     workspace.StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestSyncNoteToFileAfterRename(t *testing.T) {
 		Status:     workspace.StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestDeleteNoteFile(t *testing.T) {
 		Status:     workspace.StatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		SharedData: make(map[string]interface{}),
+		SharedData: make(map[string]any),
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatal(err)

@@ -138,7 +138,7 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema interface{}) (string, error) {
+func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema any) (string, error) {
 	var schemaPath string
 	if schema != nil {
 		tmpSchema, err := os.CreateTemp("", "codex-schema-*.json")

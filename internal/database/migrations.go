@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 20
+const schemaVersion = 21
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -105,6 +105,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration019WorkspaceRunContext(ctx)
 	case 20:
 		return db.migration020HomeAssistantIntakeTraces(ctx)
+	case 21:
+		return db.migration021WorkspaceRunTaskOutput(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1044,6 +1046,15 @@ func (db *DB) migration020HomeAssistantIntakeTraces(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create home assistant intake trace schema: %w", err)
 		}
+	}
+	return nil
+}
+
+// migration021WorkspaceRunTaskOutput stores task-level output validation
+// summaries on durable workspace runs without storing raw task output.
+func (db *DB) migration021WorkspaceRunTaskOutput(ctx context.Context) error {
+	if _, err := db.ExecContext(ctx, `ALTER TABLE workspace_runs ADD COLUMN task_output_json TEXT`); err != nil {
+		return fmt.Errorf("failed to extend workspace run task output schema: %w", err)
 	}
 	return nil
 }

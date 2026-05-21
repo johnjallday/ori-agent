@@ -291,7 +291,7 @@ func parseProfileResponse(response string) (*UserProfile, error) {
 			profile.SuggestedPlugins = pluginStrings
 		} else {
 			// Try parsing as []object with "type" or "name" field
-			var pluginObjects []map[string]interface{}
+			var pluginObjects []map[string]any
 			if err := json.Unmarshal(raw.SuggestedPlugins, &pluginObjects); err == nil {
 				for _, obj := range pluginObjects {
 					// Try "type" first, then "name"

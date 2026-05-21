@@ -101,7 +101,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		"size":       entry.Size,
 	})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"message": "File uploaded successfully",
 		"file":    entry,
 	})
@@ -179,7 +179,7 @@ func (h *Handler) LinkFile(w http.ResponseWriter, r *http.Request) {
 		"original_path": req.Path,
 	})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"message": "File linked successfully",
 		"file":    entry,
 	})
@@ -203,7 +203,7 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"files": files,
 		"count": len(files),
 	})
@@ -298,7 +298,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		"file_id":    fileID,
 	})
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "File deleted successfully",
 	})
 }
@@ -363,7 +363,7 @@ func (h *Handler) RelinkFile(w http.ResponseWriter, r *http.Request) {
 		"new_path":   req.NewPath,
 	})
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "File relinked successfully",
 		"file":    entry,
 	})
@@ -408,7 +408,7 @@ func (h *Handler) OpenFolder(w http.ResponseWriter, r *http.Request) {
 		"path":       folderPath,
 	})
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "Folder opened",
 		"path":    folderPath,
 	})
@@ -432,7 +432,7 @@ func (h *Handler) ValidateLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"broken_links": brokenLinks,
 		"count":        len(brokenLinks),
 	})
@@ -519,7 +519,7 @@ func (h *Handler) StartWatching(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "Started watching session folder",
 		"path":    filesPath,
 	})
@@ -547,7 +547,7 @@ func (h *Handler) StopWatching(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "Stopped watching session folder",
 	})
 }

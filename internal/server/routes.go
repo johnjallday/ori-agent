@@ -393,6 +393,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/workflows", s.Handlers.Orchestration.WorkflowCreateHandler)
 	if s.Handlers.AutoTask != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
+		mux.HandleFunc("/api/orchestration/tasks/output-contract/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
+		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}
 	mux.HandleFunc("/api/orchestration/tasks/", s.Handlers.Orchestration.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
 	mux.HandleFunc("/api/orchestration/task-results", s.Handlers.Orchestration.TaskResultsHandler)
@@ -731,6 +733,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 	if strings.Contains(path, "/tasks") {
 		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)
+		} else if strings.HasSuffix(path, "/results/append-csv") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.AppendResultToCSV(w, r)
 		} else if r.Method == http.MethodPost {
 			s.Handlers.Workspace.CreateTask(w, r)
 		} else if r.Method == http.MethodPatch {

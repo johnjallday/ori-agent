@@ -212,7 +212,7 @@ func boolToSQLiteInt(value bool) int {
 	return 0
 }
 
-func nullableTraceJSON(raw []byte, present bool) interface{} {
+func nullableTraceJSON(raw []byte, present bool) any {
 	if !present {
 		return nil
 	}

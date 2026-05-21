@@ -231,7 +231,7 @@ func ResetTaskExecutionSteps(task *Task) {
 
 	task.Progress = nil
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	} else {
 		delete(task.Context, "execution_step_waiting")
 		delete(task.Context, "execution_step_waiting_index")

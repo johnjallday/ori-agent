@@ -883,7 +883,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"providers": providers,
 	})
 }
@@ -1240,7 +1240,7 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 	provider, err := h.llmFactory.GetProvider(providerName)
 	if err != nil {
 		// Provider not available - return empty models list with available=false
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"provider":      providerName,
 			"available":     false,
 			"models":        []string{},
@@ -1251,7 +1251,7 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	models := provider.DefaultModels()
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"provider":      providerName,
 		"available":     true,
 		"models":        models,
@@ -1381,7 +1381,7 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"claude_enabled":        h.configManager.GetExternalAgentsClaudeEnabled(),
 			"codex_enabled":         h.configManager.GetExternalAgentsCodexEnabled(),
 			"codex_exchange_status": codexExchangeStatus,

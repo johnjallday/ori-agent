@@ -35,10 +35,10 @@ func (h *HTTPHandler) normalizeBindingForPersistence(ctx context.Context, worksp
 	return binding, nil
 }
 
-func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspaceID string, config map[string]interface{}) (map[string]interface{}, *vault.EmailAccount, error) {
+func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspaceID string, config map[string]any) (map[string]any, *vault.EmailAccount, error) {
 	normalized := cloneInterfaceMap(config)
 	if normalized == nil {
-		normalized = make(map[string]interface{})
+		normalized = make(map[string]any)
 	}
 
 	accountID, ok := stringFromConfigValue(normalized["account_id"])
@@ -92,8 +92,8 @@ func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspace
 	return normalized, account, nil
 }
 
-func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding WorkspaceMCPBinding) map[string]interface{} {
-	resp := map[string]interface{}{
+func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding WorkspaceMCPBinding) map[string]any {
+	resp := map[string]any{
 		"id":          binding.ID,
 		"server_name": binding.ServerName,
 		"alias":       binding.Alias,
@@ -114,8 +114,8 @@ func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding WorkspaceM
 	return resp
 }
 
-func (h *HTTPHandler) mcpBindingResponses(ctx context.Context, bindings []WorkspaceMCPBinding) []map[string]interface{} {
-	items := make([]map[string]interface{}, 0, len(bindings))
+func (h *HTTPHandler) mcpBindingResponses(ctx context.Context, bindings []WorkspaceMCPBinding) []map[string]any {
+	items := make([]map[string]any, 0, len(bindings))
 	for _, binding := range bindings {
 		items = append(items, h.mcpBindingResponse(ctx, binding))
 	}
@@ -138,11 +138,11 @@ func (h *HTTPHandler) lookupEmailAccountForBinding(ctx context.Context, binding 
 	return h.emailAccounts.GetEmailAccount(ctx, accountID)
 }
 
-func emailAccountSummary(account *vault.EmailAccount) map[string]interface{} {
+func emailAccountSummary(account *vault.EmailAccount) map[string]any {
 	if account == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"id":            account.ID,
 		"vault_id":      account.VaultID,
 		"workspace_id":  account.WorkspaceID,
@@ -200,7 +200,7 @@ func hasString(values []string, target string) bool {
 	return false
 }
 
-func boolFromConfigValue(value interface{}) (bool, bool) {
+func boolFromConfigValue(value any) (bool, bool) {
 	typed, ok := value.(bool)
 	return typed, ok
 }

@@ -685,7 +685,7 @@ func (h *hybridStore) enforceMaxSessions(ctx context.Context) error {
 		placeholders := strings.Repeat("?,", len(idsToDelete))
 		placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
 
-		args := make([]interface{}, len(idsToDelete))
+		args := make([]any, len(idsToDelete))
 		for i, id := range idsToDelete {
 			args[i] = id
 		}

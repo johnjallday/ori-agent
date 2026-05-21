@@ -2740,6 +2740,56 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   font-weight: 600;
 }
 
+.note-csv-table-block {
+  padding: 4px;
+}
+
+.note-csv-table-shell {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.note-csv-table-meta {
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.note-csv-table-scroll {
+  overflow: auto;
+}
+
+.note-csv-table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.note-csv-table th,
+.note-csv-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-csv-table th {
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.note-csv-table tr:last-child td {
+  border-bottom: 0;
+}
+
 .note-live-line {
   min-height: 1.6em;
   padding: 1px 4px;
@@ -4092,6 +4142,23 @@ body.task-modal-open {
   font-size: 0.78rem;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+.task-modal-output-contract-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(96px, 0.7fr) minmax(84px, auto) minmax(140px, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .task-modal-output-contract-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .task-modal-output-contract-row [data-output-contract-description] {
+    grid-column: 1 / -1;
+  }
 }
 
 .task-modal-day-row {

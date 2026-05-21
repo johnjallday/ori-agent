@@ -71,7 +71,7 @@ func SetWorkspaceKanbanBoardConfig(ws *Workspace, cfg KanbanBoardConfig) error {
 	}
 
 	if ws.SharedData == nil {
-		ws.SharedData = map[string]interface{}{}
+		ws.SharedData = map[string]any{}
 	}
 
 	ws.SharedData[workspaceSharedDataKanbanBoardKey] = normalized

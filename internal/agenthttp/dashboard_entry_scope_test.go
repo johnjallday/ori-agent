@@ -51,7 +51,7 @@ func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 		AgentInstances: []workspace.AgentInstance{
 			{ID: "inst-1", Name: "Workspace Manager", EntryPoint: true},
 		},
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
 		},
 	}

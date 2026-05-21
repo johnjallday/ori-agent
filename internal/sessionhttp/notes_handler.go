@@ -157,7 +157,7 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": req.WorkspaceID, "name": req.Name})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"note":    note,
 	})
@@ -216,7 +216,7 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": workspaceID, "name": req.Name})
 
-	_ = orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"note":    note,
 	})
@@ -293,7 +293,7 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 
 	logger.Info("Note updated", logger.Fields{"id": id})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"note":    note,
 	})
@@ -350,7 +350,7 @@ func (h *Handler) listNotesByWorkspace(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"notes": notes,
 	})
 }
@@ -359,7 +359,7 @@ func (h *Handler) listNotesByWorkspace(w http.ResponseWriter, r *http.Request, w
 func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"notes": []session.NoteSearchResult{},
 		})
 		return
@@ -372,7 +372,7 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"notes": notes,
 	})
 }
@@ -397,7 +397,7 @@ func (h *Handler) getBacklinks(w http.ResponseWriter, r *http.Request, noteID st
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"backlinks": results,
 	})
 }
@@ -418,7 +418,7 @@ func (h *Handler) searchHeadings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"headings": headings,
 	})
 }
@@ -471,7 +471,7 @@ func (h *Handler) HandleBulkDeleteNotes(w http.ResponseWriter, r *http.Request) 
 		"failed_count":  failedCount,
 	})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":       true,
 		"message":       "Bulk delete completed",
 		"success_count": successCount,

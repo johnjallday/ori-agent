@@ -45,7 +45,7 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "Valid Workflow",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 				},
 			},
 			expectError: false,
@@ -55,7 +55,7 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 				},
 			},
 			expectError: true,
@@ -78,7 +78,7 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 					nodes[i] = WorkflowNode{
 						ID:     fmt.Sprintf("node-%d", i),
 						Type:   NodeTypeTask,
-						Config: map[string]interface{}{},
+						Config: map[string]any{},
 					}
 				}
 				return &CustomWorkflow{
@@ -94,8 +94,8 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "Duplicate IDs",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
-					{ID: "node-1", Type: NodeTypeAgent, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
+					{ID: "node-1", Type: NodeTypeAgent, Config: map[string]any{}},
 				},
 			},
 			expectError: true,
@@ -106,7 +106,7 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "Bad Connection",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 				},
 				InternalConnections: []WorkflowConnection{
 					{ID: "conn-1", FromNode: "nonexistent", ToNode: "node-1"},
@@ -120,7 +120,7 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "Bad Connection",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 				},
 				InternalConnections: []WorkflowConnection{
 					{ID: "conn-1", FromNode: "node-1", ToNode: "nonexistent"},
@@ -134,8 +134,8 @@ func TestCustomWorkflow_Validate(t *testing.T) {
 			workflow: &CustomWorkflow{
 				Name: "Connected Workflow",
 				Nodes: []WorkflowNode{
-					{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
-					{ID: "node-2", Type: NodeTypeTask, Config: map[string]interface{}{}},
+					{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
+					{ID: "node-2", Type: NodeTypeTask, Config: map[string]any{}},
 				},
 				InternalConnections: []WorkflowConnection{
 					{ID: "conn-1", FromNode: "node-1", FromPort: "out", ToNode: "node-2", ToPort: "in"},
@@ -170,14 +170,14 @@ func TestCustomWorkflow_GetAgentNames(t *testing.T) {
 			{
 				ID:   "agent-1",
 				Type: NodeTypeAgent,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"name": "researcher",
 				},
 			},
 			{
 				ID:   "task-1",
 				Type: NodeTypeTask,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"to":          "analyzer",
 					"description": "Analyze data",
 				},
@@ -185,7 +185,7 @@ func TestCustomWorkflow_GetAgentNames(t *testing.T) {
 			{
 				ID:   "task-2",
 				Type: NodeTypeTask,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"to":          "unassigned",
 					"description": "Pending task",
 				},
@@ -193,7 +193,7 @@ func TestCustomWorkflow_GetAgentNames(t *testing.T) {
 			{
 				ID:   "task-3",
 				Type: NodeTypeTask,
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"to":          "researcher", // Duplicate, should not appear twice
 					"description": "Research task",
 				},
@@ -237,8 +237,8 @@ func TestCustomWorkflowManager_SaveAndLoad(t *testing.T) {
 	// Create and save a workflow
 	workflow := NewCustomWorkflow("Test Workflow", "Description", "test")
 	workflow.Nodes = []WorkflowNode{
-		{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{"description": "Task 1"}},
-		{ID: "node-2", Type: NodeTypeAgent, Config: map[string]interface{}{"name": "agent1"}},
+		{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{"description": "Task 1"}},
+		{ID: "node-2", Type: NodeTypeAgent, Config: map[string]any{"name": "agent1"}},
 	}
 	workflow.InternalConnections = []WorkflowConnection{
 		{ID: "conn-1", FromNode: "node-1", FromPort: "out", ToNode: "node-2", ToPort: "in"},
@@ -292,7 +292,7 @@ func TestCustomWorkflowManager_Delete(t *testing.T) {
 	// Create and save a workflow
 	workflow := NewCustomWorkflow("Test Workflow", "Description", "test")
 	workflow.Nodes = []WorkflowNode{
-		{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+		{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 	}
 
 	err = manager.SaveWorkflow(workflow)
@@ -325,9 +325,9 @@ func TestCustomWorkflowManager_CheckAgentAvailability(t *testing.T) {
 	workflow := &CustomWorkflow{
 		Name: "Test Workflow",
 		Nodes: []WorkflowNode{
-			{ID: "agent-1", Type: NodeTypeAgent, Config: map[string]interface{}{"name": "researcher"}},
-			{ID: "task-1", Type: NodeTypeTask, Config: map[string]interface{}{"to": "analyzer"}},
-			{ID: "task-2", Type: NodeTypeTask, Config: map[string]interface{}{"to": "synthesizer"}},
+			{ID: "agent-1", Type: NodeTypeAgent, Config: map[string]any{"name": "researcher"}},
+			{ID: "task-1", Type: NodeTypeTask, Config: map[string]any{"to": "analyzer"}},
+			{ID: "task-2", Type: NodeTypeTask, Config: map[string]any{"to": "synthesizer"}},
 		},
 	}
 
@@ -377,7 +377,7 @@ func TestCustomWorkflowManager_ListWorkflows(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		workflow := NewCustomWorkflow(fmt.Sprintf("Workflow %d", i), "", "test")
 		workflow.Nodes = []WorkflowNode{
-			{ID: "node-1", Type: NodeTypeTask, Config: map[string]interface{}{}},
+			{ID: "node-1", Type: NodeTypeTask, Config: map[string]any{}},
 		}
 		if err := manager.SaveWorkflow(workflow); err != nil {
 			t.Fatalf("failed to save workflow: %v", err)

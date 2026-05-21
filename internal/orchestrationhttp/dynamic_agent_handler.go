@@ -100,13 +100,13 @@ func (h *DynamicAgentHandler) DynamicAgentApprovalHandler(w http.ResponseWriter,
 			Type:        eventType,
 			WorkspaceID: ws.ID,
 			Source:      "orchestrationhttp",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"request": updatedReq,
 			},
 		})
 	}
 
-	resumeResult := interface{}(nil)
+	resumeResult := any(nil)
 	if req.Approve && ws.PendingPlan != nil && h.orchestrator != nil {
 		if allApproved(ws, ws.PendingPlan.ID) {
 			result, err := h.orchestrator.ResumePendingPlan(r.Context(), ws.ID)

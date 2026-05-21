@@ -65,7 +65,7 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
-		SharedData:  make(map[string]interface{}),
+		SharedData:  make(map[string]any),
 		Messages:    make([]AgentMessage, 0),
 		Tasks:       make([]Task, 0),
 		Attachments: make([]Attachment, 0),
@@ -106,7 +106,7 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Return created workspace
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"id":               workspace.ID,
 		"name":             workspace.Name,
 		"agents":           workspace.Agents,
@@ -152,7 +152,7 @@ func (h *HTTPHandler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Return workspace details
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"id":                   workspace.ID,
 		"name":                 workspace.Name,
 		"description":          workspace.Description,
@@ -194,7 +194,7 @@ func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaces := make([]map[string]interface{}, 0, len(ids))
+	workspaces := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		workspace, err := h.store.Get(id)
 		if err != nil {
@@ -202,7 +202,7 @@ func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		workspaces = append(workspaces, map[string]interface{}{
+		workspaces = append(workspaces, map[string]any{
 			"id":               workspace.ID,
 			"name":             workspace.Name,
 			"description":      workspace.Description,
@@ -216,7 +216,7 @@ func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	// Return workspaces
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"workspaces": workspaces,
 		"count":      len(workspaces),
 	}); encErr != nil {
@@ -262,7 +262,7 @@ func (h *HTTPHandler) GetWorkspaceEvents(w http.ResponseWriter, r *http.Request)
 			WorkspaceID: workspaceID,
 			Timestamp:   time.Now(),
 			Source:      "system",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"message": "Connected to event stream",
 			},
 			Metadata: make(map[string]string),

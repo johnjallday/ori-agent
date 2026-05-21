@@ -35,7 +35,7 @@ func (h *Handler) getWorkspaceBoard(w http.ResponseWriter, r *http.Request, work
 
 	board, _ := session.GetWorkspaceKanbanBoardConfig(ws)
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"workspace_id": workspaceID,
 		"board":        board,
 	})
@@ -75,7 +75,7 @@ func (h *Handler) updateWorkspaceBoard(w http.ResponseWriter, r *http.Request, w
 	}
 
 	updated, _ := session.GetWorkspaceKanbanBoardConfig(ws)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"board":   updated,
 	})

@@ -27,6 +27,7 @@ type workflowSubtaskInput struct {
 	InputTaskIDs   []string                       `json:"input_task_ids"`
 	SubtaskIndex   int                            `json:"subtask_index"`
 	ResultStorage  *workspace.ResultStorageConfig `json:"result_storage"`
+	OutputContract *workspace.TaskOutputContract  `json:"output_contract"`
 }
 
 type workflowParentInput struct {
@@ -39,6 +40,7 @@ type workflowParentInput struct {
 	Priority       int                            `json:"priority"`
 	InputTaskIDs   []string                       `json:"input_task_ids"`
 	ResultStorage  *workspace.ResultStorageConfig `json:"result_storage"`
+	OutputContract *workspace.TaskOutputContract  `json:"output_contract"`
 	ParentTaskID   string                         `json:"parent_task_id"`
 }
 
@@ -161,8 +163,12 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			ParentTaskID:   strings.TrimSpace(req.Parent.ParentTaskID),
 			Status:         workspace.TaskStatusPending,
 			ResultStorage:  req.Parent.ResultStorage,
+			OutputContract: workspace.NormalizeTaskOutputContract(req.Parent.OutputContract),
 			CreatedAt:      now,
 		})
+		if tasks[len(tasks)-1].OutputContract == nil {
+			tasks[len(tasks)-1].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &tasks[len(tasks)-1])
+		}
 	}
 
 	for i, sub := range req.Subtasks {
@@ -187,8 +193,12 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			SubtaskIndex:   subtaskIndex,
 			Status:         workspace.TaskStatusPending,
 			ResultStorage:  sub.ResultStorage,
+			OutputContract: workspace.NormalizeTaskOutputContract(sub.OutputContract),
 			CreatedAt:      now,
 		})
+		if tasks[len(tasks)-1].OutputContract == nil {
+			tasks[len(tasks)-1].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &tasks[len(tasks)-1])
+		}
 	}
 
 	if err := ws.AddTasks(tasks); err != nil {
@@ -207,7 +217,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 
 	if th.eventBus != nil {
-		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, req.WorkspaceID, "workflow.create", map[string]interface{}{
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, req.WorkspaceID, "workflow.create", map[string]any{
 			"parent_task_id": parentTaskID,
 			"subtask_count":  len(req.Subtasks),
 			"attached":       attachID != "",
@@ -221,7 +231,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 				Type:        workspace.EventTaskCreated,
 				WorkspaceID: req.WorkspaceID,
 				Source:      "api",
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"task_id":     parentTaskID,
 					"description": req.Parent.Description,
 					"to":          req.Parent.To,
@@ -254,7 +264,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":  true,
 		"parent":   createdParent,
 		"subtasks": createdSubtasks,
@@ -284,7 +294,7 @@ func respondTaskGraphError(w http.ResponseWriter, err error, message string) boo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": false,
 		"error":   message + ": " + graphErr.Error(),
 		"issues":  graphErr.Issues,

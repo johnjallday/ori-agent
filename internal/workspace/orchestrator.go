@@ -95,7 +95,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 		}
 
 		// Publish task creation event
-		o.publishEvent("task_created", workspaceID, map[string]interface{}{
+		o.publishEvent("task_created", workspaceID, map[string]any{
 			"task_id":     task.ID,
 			"description": task.Description,
 			"assigned_to": task.To,
@@ -184,7 +184,7 @@ Return your response as a JSON array of tasks in this format:
 				To:          availableAgents[0], // Assign to first agent
 				Description: mission,
 				Priority:    5,
-				Context:     map[string]interface{}{"original_mission": mission},
+				Context:     map[string]any{"original_mission": mission},
 				Status:      TaskStatusPending,
 				CreatedAt:   time.Now(),
 			},
@@ -200,7 +200,7 @@ Return your response as a JSON array of tasks in this format:
 			To:          spec.AssignedTo,
 			Description: spec.Description,
 			Priority:    spec.Priority,
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"original_mission": mission,
 				"task_index":       i,
 			},
@@ -284,7 +284,7 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID
 			// Execute the task
 			if err := o.ExecuteTask(ctx, workspaceID, task); err != nil {
 				logger.Error("[Orchestrator] Task failed", logger.Fields{"task_id": task.ID, "err": err})
-				o.publishEvent("task_failed", workspaceID, map[string]interface{}{
+				o.publishEvent("task_failed", workspaceID, map[string]any{
 					"task_id": task.ID,
 					"error":   err.Error(),
 				})
@@ -293,7 +293,7 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID
 	}
 
 	logger.Info("[Orchestrator] All tasks completed for workspace", logger.Fields{"task_id": workspaceID})
-	o.publishEvent("mission_completed", workspaceID, map[string]interface{}{
+	o.publishEvent("mission_completed", workspaceID, map[string]any{
 		"total_tasks": len(tasks),
 	})
 }
@@ -366,12 +366,12 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		logger.Error("[Orchestrator] Warning: failed to start task", logger.Fields{"task_id": task.ID, "error": updateErr})
 	}
 
-	o.publishEvent("task_started", workspaceID, map[string]interface{}{
+	o.publishEvent("task_started", workspaceID, map[string]any{
 		"task_id":     task.ID,
 		"assigned_to": task.To,
 	})
 
-	o.publishEvent("message_sent", workspaceID, map[string]interface{}{
+	o.publishEvent("message_sent", workspaceID, map[string]any{
 		"from":    message.From,
 		"to":      message.To,
 		"content": message.Content,
@@ -420,7 +420,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 			logger.Error("[Orchestrator] Warning: failed to record task failure", logger.Fields{"task_id": task.ID, "error": updateErr})
 		}
 
-		o.publishEvent("task_failed", workspaceID, map[string]interface{}{
+		o.publishEvent("task_failed", workspaceID, map[string]any{
 			"task_id": task.ID,
 			"error":   err.Error(),
 		})
@@ -450,7 +450,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		logger.Error("[Orchestrator] Warning: failed to record task completion", logger.Fields{"task_id": task.ID, "error": err})
 	}
 
-	o.publishEvent("task_completed", workspaceID, map[string]interface{}{
+	o.publishEvent("task_completed", workspaceID, map[string]any{
 		"task_id": task.ID,
 		"result":  task.Result,
 	})
@@ -481,7 +481,7 @@ func (o *Orchestrator) formatAgentCapabilities(agents []string) string {
 }
 
 // publishEvent publishes an event to the event bus
-func (o *Orchestrator) publishEvent(eventType string, workspaceID string, data map[string]interface{}) {
+func (o *Orchestrator) publishEvent(eventType string, workspaceID string, data map[string]any) {
 	if o.eventBus == nil {
 		return
 	}

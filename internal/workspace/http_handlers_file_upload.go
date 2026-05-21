@@ -129,7 +129,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Type:        EventAttachmentCreated,
 			WorkspaceID: workspaceID,
 			Source:      "api",
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"attachment": hydratedAttachment,
 			},
 		})
@@ -144,7 +144,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":    "File uploaded successfully",
 		"attachment": hydratedAttachment,
 		"workspace":  workspaceID,

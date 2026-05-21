@@ -49,10 +49,10 @@ func (f *fakeAssistantProgressStore) SetAssistantProgress(progress *types.Assist
 
 type fakeActivityLogger struct {
 	events []types.ActivityEventType
-	detail []map[string]interface{}
+	detail []map[string]any
 }
 
-func (f *fakeActivityLogger) LogActivity(_ string, eventType types.ActivityEventType, details map[string]interface{}, _ string) error {
+func (f *fakeActivityLogger) LogActivity(_ string, eventType types.ActivityEventType, details map[string]any, _ string) error {
 	f.events = append(f.events, eventType)
 	f.detail = append(f.detail, details)
 	return nil

@@ -46,7 +46,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 
 	// Return ALL scheduled tasks as scheduler nodes (both canvas and dashboard-created)
 	// Auto-assign canvas_node_id to dashboard-created schedulers for display
-	schedulerNodes := make([]map[string]interface{}, 0)
+	schedulerNodes := make([]map[string]any, 0)
 	needsSave := false
 
 	for i := range ws.ScheduledTasks {
@@ -90,7 +90,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 			needsSave = true
 		}
 
-		node := map[string]interface{}{
+		node := map[string]any{
 			"node_id":           st.CanvasNodeID,
 			"scheduled_task":    st,
 			"scheduled_task_id": st.ID,
@@ -109,7 +109,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"scheduler_nodes": schedulerNodes,
 		"count":           len(schedulerNodes),
 	})
@@ -265,7 +265,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	})
 
 	w.WriteHeader(http.StatusCreated)
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":           true,
 		"node_id":           nodeID,
 		"scheduled_task_id": createdTask.ID,
@@ -337,7 +337,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"node_id":        nodeID,
 		"scheduled_task": foundTask,
 		"position":       position,
@@ -481,7 +481,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 
 	logger.Info("Updated scheduler node", logger.Fields{"node_id": nodeID})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success":        true,
 		"node_id":        nodeID,
 		"scheduled_task": st,
@@ -537,7 +537,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 
 	logger.Info("Deleted scheduler node", logger.Fields{"node_id": nodeID})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Scheduler node deleted successfully",
 		"node_id": nodeID,
@@ -725,7 +725,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}()
 
 	if th.eventBus != nil {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"task_id":         taskID,
 			"task_created":    foundTask.TargetTaskID == "",
 			"execution_count": foundTask.ExecutionCount,
@@ -739,7 +739,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	logger.Info("Manually triggered scheduler node", logger.Fields{"node_id": nodeID, "task_id": taskID, "target_task_id": foundTask.TargetTaskID})
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"task_id": taskID,
 		"message": "Scheduler node triggered successfully - task execution started",

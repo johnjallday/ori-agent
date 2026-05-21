@@ -62,7 +62,7 @@ func TraceArtifactID(id string) TraceOption {
 	}
 }
 
-func TraceData(data map[string]interface{}) TraceOption {
+func TraceData(data map[string]any) TraceOption {
 	return func(e *TraceEvent) {
 		e.Data = cloneMap(data)
 	}
@@ -77,11 +77,11 @@ func ErrorTrace(runID, source, message string) TraceEvent {
 }
 
 func ArtifactCapturedTrace(runID, artifactID string, kind ArtifactKind) TraceEvent {
-	return NewTraceEvent(runID, TraceArtifactCaptured, TraceSource("artifact"), TraceArtifactID(artifactID), TraceData(map[string]interface{}{"kind": string(kind)}))
+	return NewTraceEvent(runID, TraceArtifactCaptured, TraceSource("artifact"), TraceArtifactID(artifactID), TraceData(map[string]any{"kind": string(kind)}))
 }
 
 func ValidationTrace(runID, checkName, status string) TraceEvent {
-	return NewTraceEvent(runID, TraceValidationCheck, TraceSource("validator"), TraceMessageText(checkName), TraceData(map[string]interface{}{"status": status}))
+	return NewTraceEvent(runID, TraceValidationCheck, TraceSource("validator"), TraceMessageText(checkName), TraceData(map[string]any{"status": status}))
 }
 
 func CloneTraceEvent(event TraceEvent) TraceEvent {

@@ -35,7 +35,7 @@ func TestIsLikelyBrowserAutomationIntent_MatchesBrowserTask(t *testing.T) {
 func TestTaskBrowserIntentDescription_UsesOverallTaskDescriptionForStructuredStep(t *testing.T) {
 	task := Task{
 		Description: "Complete internal execution step 2 of 7 for this task.\nCurrent step: Inspect candidate directories\nStep type: Discovery",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"execution_overall_task_description": "Gather DNM related files into DNM folder",
 		},
 	}
@@ -52,7 +52,7 @@ func TestTaskBrowserIntentDescription_UsesOverallTaskDescriptionForStructuredSte
 func TestTaskRequiresBrowserAutomation_UsesOverallDescriptionForStructuredBrowserTask(t *testing.T) {
 	task := Task{
 		Description: "Complete internal execution step 2 of 6 for this task.\nCurrent step: Open the target page\nStep type: Action",
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"execution_overall_task_description": "Open instagram.com and extract the follower count.",
 		},
 	}

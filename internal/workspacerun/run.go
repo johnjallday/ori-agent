@@ -84,6 +84,7 @@ type Run struct {
 	PreparedContext   *PreparedContext   `json:"prepared_context,omitempty"`
 	ValidationRequest *ValidationRequest `json:"validation_request,omitempty"`
 	ValidationResult  *ValidationResult  `json:"validation_result,omitempty"`
+	TaskOutput        *TaskOutputSummary `json:"task_output,omitempty"`
 	Cost              *CostSummary       `json:"cost,omitempty"`
 	Report            *Report            `json:"report,omitempty"`
 
@@ -141,13 +142,13 @@ type NativeCLIExecutorConfig struct {
 }
 
 type WorkflowExecutorConfig struct {
-	Inputs       map[string]interface{} `json:"inputs,omitempty"`
-	ResumePolicy string                 `json:"resume_policy,omitempty"`
+	Inputs       map[string]any `json:"inputs,omitempty"`
+	ResumePolicy string         `json:"resume_policy,omitempty"`
 }
 
 type SystemToolExecutorConfig struct {
-	Inputs map[string]interface{} `json:"inputs,omitempty"`
-	DryRun bool                   `json:"dry_run,omitempty"`
+	Inputs map[string]any `json:"inputs,omitempty"`
+	DryRun bool           `json:"dry_run,omitempty"`
 }
 
 type Scope struct {
@@ -221,27 +222,27 @@ const (
 )
 
 type Artifact struct {
-	ID        string                 `json:"id"`
-	RunID     string                 `json:"run_id"`
-	Kind      ArtifactKind           `json:"kind"`
-	Path      string                 `json:"path,omitempty"`
-	Inline    []byte                 `json:"inline,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	ID        string         `json:"id"`
+	RunID     string         `json:"run_id"`
+	Kind      ArtifactKind   `json:"kind"`
+	Path      string         `json:"path,omitempty"`
+	Inline    []byte         `json:"inline,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 type TraceEvent struct {
-	ID         string                 `json:"id"`
-	RunID      string                 `json:"run_id"`
-	Sequence   int64                  `json:"sequence"`
-	Kind       TraceEventKind         `json:"kind"`
-	Source     string                 `json:"source,omitempty"`
-	Message    string                 `json:"message,omitempty"`
-	Status     string                 `json:"status,omitempty"`
-	ToolName   string                 `json:"tool_name,omitempty"`
-	ArtifactID string                 `json:"artifact_id,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
+	ID         string         `json:"id"`
+	RunID      string         `json:"run_id"`
+	Sequence   int64          `json:"sequence"`
+	Kind       TraceEventKind `json:"kind"`
+	Source     string         `json:"source,omitempty"`
+	Message    string         `json:"message,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	ToolName   string         `json:"tool_name,omitempty"`
+	ArtifactID string         `json:"artifact_id,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 type ValidationRequest struct {
@@ -252,6 +253,23 @@ type ValidationRequest struct {
 type ValidationResult struct {
 	Profile string        `json:"profile,omitempty"`
 	Checks  []CheckResult `json:"checks"`
+}
+
+type TaskOutputSummary struct {
+	TaskID           string                      `json:"task_id,omitempty"`
+	ValidationStatus string                      `json:"validation_status,omitempty"`
+	StorageStatus    string                      `json:"storage_status,omitempty"`
+	ContractVersion  string                      `json:"contract_version,omitempty"`
+	ValidatedAt      *time.Time                  `json:"validated_at,omitempty"`
+	ErrorCount       int                         `json:"error_count,omitempty"`
+	Errors           []TaskOutputValidationError `json:"errors,omitempty"`
+	ManualApproval   bool                        `json:"manual_approval,omitempty"`
+}
+
+type TaskOutputValidationError struct {
+	Code    string `json:"code,omitempty"`
+	Column  string `json:"column,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type CheckResult struct {

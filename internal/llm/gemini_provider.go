@@ -382,23 +382,23 @@ var geminiUnsupportedSchemaKeys = map[string]struct{}{
 	"additionalProperties": {},
 }
 
-func sanitizeGeminiToolParameters(parameters map[string]interface{}) map[string]interface{} {
+func sanitizeGeminiToolParameters(parameters map[string]any) map[string]any {
 	if len(parameters) == 0 {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 
 	sanitized := sanitizeGeminiSchemaValue(parameters)
-	if schema, ok := sanitized.(map[string]interface{}); ok && schema != nil {
+	if schema, ok := sanitized.(map[string]any); ok && schema != nil {
 		return schema
 	}
 
-	return map[string]interface{}{}
+	return map[string]any{}
 }
 
-func sanitizeGeminiSchemaValue(value interface{}) interface{} {
+func sanitizeGeminiSchemaValue(value any) any {
 	switch typed := value.(type) {
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(typed))
+	case map[string]any:
+		out := make(map[string]any, len(typed))
 		for key, fieldValue := range typed {
 			if _, blocked := geminiUnsupportedSchemaKeys[key]; blocked {
 				continue
@@ -406,8 +406,8 @@ func sanitizeGeminiSchemaValue(value interface{}) interface{} {
 			out[key] = sanitizeGeminiSchemaValue(fieldValue)
 		}
 		return out
-	case []interface{}:
-		out := make([]interface{}, len(typed))
+	case []any:
+		out := make([]any, len(typed))
 		for i, item := range typed {
 			out[i] = sanitizeGeminiSchemaValue(item)
 		}
@@ -430,34 +430,34 @@ func toolCallNameFromMessage(msg Message) string {
 	return msg.ToolCallID
 }
 
-func parseGeminiToolArguments(raw string) map[string]interface{} {
+func parseGeminiToolArguments(raw string) map[string]any {
 	if strings.TrimSpace(raw) == "" {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"raw": raw,
 		}
 	}
 	return parsed
 }
 
-func buildGeminiFunctionResponse(content string) interface{} {
+func buildGeminiFunctionResponse(content string) any {
 	if strings.TrimSpace(content) == "" {
-		return map[string]interface{}{
+		return map[string]any{
 			"output": "",
 		}
 	}
 
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"output": content,
 		}
 	}
 
-	if parsedMap, ok := parsed.(map[string]interface{}); ok {
+	if parsedMap, ok := parsed.(map[string]any); ok {
 		if _, hasOutput := parsedMap["output"]; hasOutput {
 			return parsedMap
 		}
@@ -466,7 +466,7 @@ func buildGeminiFunctionResponse(content string) interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"output": parsed,
 	}
 }
@@ -716,19 +716,19 @@ type geminiTool struct {
 }
 
 type geminiFunctionDeclaration struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
 type geminiFunctionCall struct {
-	Name string                 `json:"name,omitempty"`
-	Args map[string]interface{} `json:"args,omitempty"`
+	Name string         `json:"name,omitempty"`
+	Args map[string]any `json:"args,omitempty"`
 }
 
 type geminiFunctionResponse struct {
-	Name     string      `json:"name,omitempty"`
-	Response interface{} `json:"response,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Response any    `json:"response,omitempty"`
 }
 
 type geminiGenerationConfig struct {

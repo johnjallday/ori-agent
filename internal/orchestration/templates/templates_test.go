@@ -32,7 +32,7 @@ func TestInstantiateTemplate_RendersFieldsAndPreservesOrchestrationConfig(t *tes
 				Name:        "Research {{.topic}}",
 				Description: "Investigate {{.topic}}",
 				Details:     "Start with {{.source}}",
-				Context: map[string]interface{}{
+				Context: map[string]any{
 					"brief": "Use {{.source}} for {{.topic}}",
 				},
 				OutputSchema: &workspace.TaskOutputSchema{
@@ -44,7 +44,7 @@ func TestInstantiateTemplate_RendersFieldsAndPreservesOrchestrationConfig(t *tes
 		},
 	}
 
-	instance, err := manager.InstantiateTemplate("release-review", map[string]interface{}{
+	instance, err := manager.InstantiateTemplate("release-review", map[string]any{
 		"topic":  "workspace orchestration",
 		"source": "internal docs",
 	})

@@ -467,13 +467,13 @@ func (s *SQLiteStore) updateTagsInternal(ctx context.Context, sessionID string, 
 	})
 }
 
-func (s *SQLiteStore) buildWhereClause(filter *SessionFilter) (string, []interface{}) {
+func (s *SQLiteStore) buildWhereClause(filter *SessionFilter) (string, []any) {
 	if filter == nil {
 		return "", nil
 	}
 
 	conditions := []string{}
-	args := []interface{}{}
+	args := []any{}
 
 	if filter.AgentName != "" {
 		conditions = append(conditions, "s.agent_name = ?")

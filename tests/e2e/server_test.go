@@ -81,7 +81,7 @@ func TestHealthCheck(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	t.Logf("Health check response body: %s", string(body))
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestAgentLifecycle(t *testing.T) {
 	// 1. Create agent
 	t.Log("Creating agent...")
 	model := helpers.GetTestModel()
-	agentData := map[string]interface{}{
+	agentData := map[string]any{
 		"name":        "e2e-test-agent",
 		"description": "Agent for E2E testing",
 		"model":       model,
@@ -135,7 +135,7 @@ func TestAgentLifecycle(t *testing.T) {
 		t.Fatalf("Failed to create agent (status %d): %s", resp.StatusCode, body)
 	}
 
-	var createdAgent map[string]interface{}
+	var createdAgent map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&createdAgent); err != nil {
 		t.Fatalf("Failed to decode created agent: %v", err)
 	}
@@ -150,19 +150,19 @@ func TestAgentLifecycle(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode agents: %v", err)
 	}
 
-	agentsList, ok := response["agents"].([]interface{})
+	agentsList, ok := response["agents"].([]any)
 	if !ok {
 		t.Fatalf("Expected 'agents' array in response, got: %v", response)
 	}
 
 	found := false
 	for _, a := range agentsList {
-		agent := a.(map[string]interface{})
+		agent := a.(map[string]any)
 		if agent["name"] == "e2e-test-agent" {
 			found = true
 			break
@@ -224,7 +224,7 @@ func TestSettingsEndpoint(t *testing.T) {
 		t.Fatalf("Failed to get settings (status %d): %s", resp.StatusCode, body)
 	}
 
-	var settings map[string]interface{}
+	var settings map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&settings); err != nil {
 		t.Fatalf("Failed to decode settings: %v", err)
 	}

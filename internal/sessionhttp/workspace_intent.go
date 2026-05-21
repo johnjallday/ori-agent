@@ -12,7 +12,7 @@ import (
 
 const workspaceDescriptionNoteName = "Workspace Description"
 
-func workspaceBootstrapMap(sharedData map[string]interface{}) map[string]interface{} {
+func workspaceBootstrapMap(sharedData map[string]any) map[string]any {
 	if sharedData == nil {
 		return nil
 	}
@@ -22,11 +22,11 @@ func workspaceBootstrapMap(sharedData map[string]interface{}) map[string]interfa
 		return nil
 	}
 
-	bootstrap, _ := raw.(map[string]interface{})
+	bootstrap, _ := raw.(map[string]any)
 	return bootstrap
 }
 
-func workspaceBootstrapStringValue(sharedData map[string]interface{}, key string) string {
+func workspaceBootstrapStringValue(sharedData map[string]any, key string) string {
 	bootstrap := workspaceBootstrapMap(sharedData)
 	if bootstrap == nil {
 		return ""
@@ -40,7 +40,7 @@ func workspaceBootstrapStringValue(sharedData map[string]interface{}, key string
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func mergeWorkspaceBootstrapForUpdate(sharedData map[string]interface{}, description string, descriptionTouched bool, input *workspaceBootstrapRequest) map[string]interface{} {
+func mergeWorkspaceBootstrapForUpdate(sharedData map[string]any, description string, descriptionTouched bool, input *workspaceBootstrapRequest) map[string]any {
 	if input != nil {
 		goal := strings.TrimSpace(input.Goal)
 		if descriptionTouched {

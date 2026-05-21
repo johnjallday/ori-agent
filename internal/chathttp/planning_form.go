@@ -410,7 +410,7 @@ func workspaceBootstrapPlanningText(ws *workspace.Workspace) string {
 		return ""
 	}
 
-	bootstrap, ok := raw.(map[string]interface{})
+	bootstrap, ok := raw.(map[string]any)
 	if !ok {
 		return strings.TrimSpace(fmt.Sprint(raw))
 	}
@@ -423,7 +423,7 @@ func workspaceBootstrapPlanningText(ws *workspace.Workspace) string {
 	return strings.TrimSpace(strings.Join(uniquePlanningContextParts(parts), "\n"))
 }
 
-func workspaceBootstrapFieldText(bootstrap map[string]interface{}, key string) string {
+func workspaceBootstrapFieldText(bootstrap map[string]any, key string) string {
 	if len(bootstrap) == 0 {
 		return ""
 	}

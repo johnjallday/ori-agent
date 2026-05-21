@@ -352,7 +352,7 @@ func (se *StepExecutor) evaluateCondition(workflow *Workflow, step *WorkflowStep
 }
 
 // evaluateOperator evaluates a condition operator
-func (se *StepExecutor) evaluateOperator(actual interface{}, operator string, expected interface{}) bool {
+func (se *StepExecutor) evaluateOperator(actual any, operator string, expected any) bool {
 	switch operator {
 	case "eq":
 		return fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", expected)

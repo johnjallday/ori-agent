@@ -116,7 +116,7 @@ func getMap(raw map[string]any, keys ...string) map[string]any {
 			if m, ok := val.(map[string]any); ok {
 				return m
 			}
-			if m, ok := val.(map[interface{}]interface{}); ok {
+			if m, ok := val.(map[any]any); ok {
 				converted := make(map[string]any, len(m))
 				for k, v := range m {
 					if ks, ok := k.(string); ok {

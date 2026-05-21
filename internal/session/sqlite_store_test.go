@@ -311,7 +311,7 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 		ID:    "root-workspace",
 		Name:  "Root",
 		Color: "#ff0000",
-		SharedData: map[string]interface{}{
+		SharedData: map[string]any{
 			"kanban_board": KanbanBoardConfig{
 				Version: 1,
 				Columns: []KanbanBoardColumn{
@@ -461,7 +461,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Round(time.Second)
 
-	initialRefsJSON, err := json.Marshal([]map[string]interface{}{
+	initialRefsJSON, err := json.Marshal([]map[string]any{
 		{
 			"id":           "dir-ref-1",
 			"workspace_id": "import-workspace",
@@ -480,8 +480,8 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	workspace := &Workspace{
 		ID:   "import-workspace",
 		Name: "Imported Workspace",
-		SharedData: map[string]interface{}{
-			"folder_import": map[string]interface{}{
+		SharedData: map[string]any{
+			"folder_import": map[string]any{
 				"enabled":     true,
 				"path":        "/tmp/repo",
 				"path_hash":   "abc123:repo",
@@ -508,7 +508,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 		t.Fatalf("expected folder_import metadata in shared_data")
 	}
 
-	importMeta, ok := importMetaRaw.(map[string]interface{})
+	importMeta, ok := importMetaRaw.(map[string]any)
 	if !ok {
 		t.Fatalf("expected folder_import metadata to be a map, got %T", importMetaRaw)
 	}
@@ -519,7 +519,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 		t.Fatalf("expected folder_import.entry_point to persist, got %#v", importMeta["entry_point"])
 	}
 
-	var refs []map[string]interface{}
+	var refs []map[string]any
 	if err := json.Unmarshal(got.DirectoryReferencesJSON, &refs); err != nil {
 		t.Fatalf("failed to decode persisted directory references: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 		t.Fatalf("expected persisted directory reference path '/tmp/repo', got %#v", refs[0]["path"])
 	}
 
-	updatedRefsJSON, err := json.Marshal([]map[string]interface{}{
+	updatedRefsJSON, err := json.Marshal([]map[string]any{
 		{
 			"id":           "dir-ref-1",
 			"workspace_id": "import-workspace",
@@ -548,7 +548,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 		t.Fatalf("failed to marshal updated directory references: %v", err)
 	}
 
-	got.SharedData["folder_import"] = map[string]interface{}{
+	got.SharedData["folder_import"] = map[string]any{
 		"enabled":         true,
 		"path":            "/tmp/repo",
 		"path_hash":       "abc123:repo",
@@ -572,7 +572,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected folder_import metadata after update")
 	}
-	updatedMeta, ok := updatedMetaRaw.(map[string]interface{})
+	updatedMeta, ok := updatedMetaRaw.(map[string]any)
 	if !ok {
 		t.Fatalf("expected updated folder_import metadata to be a map, got %T", updatedMetaRaw)
 	}
@@ -584,7 +584,7 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 		t.Fatalf("expected allow_duplicate=true, got %#v", updatedMeta["allow_duplicate"])
 	}
 
-	var updatedRefs []map[string]interface{}
+	var updatedRefs []map[string]any
 	if err := json.Unmarshal(updated.DirectoryReferencesJSON, &updatedRefs); err != nil {
 		t.Fatalf("failed to decode updated directory references: %v", err)
 	}
@@ -601,17 +601,17 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Round(time.Second)
 
-	initialBindingsJSON, err := json.Marshal([]map[string]interface{}{
+	initialBindingsJSON, err := json.Marshal([]map[string]any{
 		{
 			"id":          "binding-1",
 			"server_name": "filesystem",
 			"alias":       "repo_fs",
 			"enabled":     true,
-			"scope": map[string]interface{}{
+			"scope": map[string]any{
 				"roots": []string{"/tmp/repo"},
 			},
-			"config": map[string]interface{}{
-				"env": map[string]interface{}{
+			"config": map[string]any{
+				"env": map[string]any{
 					"ORI_SCOPE": "workspace",
 				},
 			},
@@ -623,7 +623,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("failed to marshal initial MCP bindings: %v", err)
 	}
 
-	initialAccessJSON, err := json.Marshal([]map[string]interface{}{
+	initialAccessJSON, err := json.Marshal([]map[string]any{
 		{
 			"agent_instance_id":   "agent-1",
 			"enabled_binding_ids": []string{"binding-1"},
@@ -652,7 +652,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("failed to fetch workspace: %v", err)
 	}
 
-	var bindings []map[string]interface{}
+	var bindings []map[string]any
 	if err := json.Unmarshal(got.MCPBindingsJSON, &bindings); err != nil {
 		t.Fatalf("failed to decode MCP bindings: %v", err)
 	}
@@ -663,7 +663,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("expected MCP server_name filesystem, got %#v", bindings[0]["server_name"])
 	}
 
-	var access []map[string]interface{}
+	var access []map[string]any
 	if err := json.Unmarshal(got.AgentMCPAccessJSON, &access); err != nil {
 		t.Fatalf("failed to decode MCP access: %v", err)
 	}
@@ -674,7 +674,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("expected agent_instance_id agent-1, got %#v", access[0]["agent_instance_id"])
 	}
 
-	updatedBindingsJSON, err := json.Marshal([]map[string]interface{}{
+	updatedBindingsJSON, err := json.Marshal([]map[string]any{
 		{
 			"id":          "binding-1",
 			"server_name": "filesystem",
@@ -692,7 +692,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("failed to marshal updated MCP bindings: %v", err)
 	}
 
-	updatedAccessJSON, err := json.Marshal([]map[string]interface{}{
+	updatedAccessJSON, err := json.Marshal([]map[string]any{
 		{
 			"agent_instance_id":   "agent-1",
 			"enabled_binding_ids": []string{"binding-1", "binding-2"},
@@ -719,7 +719,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("failed to fetch updated workspace: %v", err)
 	}
 
-	var updatedBindings []map[string]interface{}
+	var updatedBindings []map[string]any
 	if err := json.Unmarshal(updated.MCPBindingsJSON, &updatedBindings); err != nil {
 		t.Fatalf("failed to decode updated MCP bindings: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 		t.Fatalf("expected 2 updated MCP bindings, got %d", len(updatedBindings))
 	}
 
-	var updatedAccess []map[string]interface{}
+	var updatedAccess []map[string]any
 	if err := json.Unmarshal(updated.AgentMCPAccessJSON, &updatedAccess); err != nil {
 		t.Fatalf("failed to decode updated MCP access: %v", err)
 	}

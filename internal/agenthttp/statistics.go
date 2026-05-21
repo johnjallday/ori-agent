@@ -90,16 +90,16 @@ func ComputeOverallStatistics(agents map[string]*agent.Agent) *types.DashboardSt
 
 // ComputeAgentStatistics calculates derived statistics for a single agent
 // This can be used to enrich agent data with computed fields
-func ComputeAgentStatistics(ag *agent.Agent) map[string]interface{} {
+func ComputeAgentStatistics(ag *agent.Agent) map[string]any {
 	if ag == nil || ag.Statistics == nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"average_tokens_per_message": 0.0,
 			"cost_per_message":           0.0,
 			"cost_per_thousand_tokens":   0.0,
 		}
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 
 	// Average tokens per message
 	if ag.Statistics.MessageCount > 0 {

@@ -13,7 +13,7 @@ func TestFormatLogEntry_EvolutionFeed(t *testing.T) {
 		AgentName: "alpha",
 		EventType: types.ActivityEventEvolutionFeed,
 		Timestamp: time.Now(),
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"source": "manual",
 		},
 	})
@@ -32,7 +32,7 @@ func TestFormatLogEntry_EvolutionStage(t *testing.T) {
 		AgentName: "alpha",
 		EventType: types.ActivityEventEvolutionStage,
 		Timestamp: time.Now(),
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"old_stage": "spark",
 			"new_stage": "infant",
 		},
@@ -52,7 +52,7 @@ func TestFormatLogEntry_EvolutionPath(t *testing.T) {
 		AgentName: "alpha",
 		EventType: types.ActivityEventEvolutionPath,
 		Timestamp: time.Now(),
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"path": "coder",
 		},
 	})

@@ -41,19 +41,19 @@ func TestProfileDefaultsForSoftwareProjectUsePlannerPreset(t *testing.T) {
 }
 
 func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
-	sharedData := map[string]interface{}{
-		SharedDataKey: map[string]interface{}{
+	sharedData := map[string]any{
+		SharedDataKey: map[string]any{
 			"profile": "software_project",
 			"preset":  "guided",
-			"workflow": map[string]interface{}{
+			"workflow": map[string]any{
 				"require_repo_scan": false,
 			},
 		},
 	}
 
-	updatedSharedData, settings := ApplyPatch(sharedData, map[string]interface{}{
+	updatedSharedData, settings := ApplyPatch(sharedData, map[string]any{
 		"preset": "planner",
-		"workflow": map[string]interface{}{
+		"workflow": map[string]any{
 			"save_outputs_as_notes": false,
 		},
 	})
@@ -78,8 +78,8 @@ func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
 }
 
 func TestApplyPatchPersistsTaskMarkdownSettings(t *testing.T) {
-	_, settings := ApplyPatch(nil, map[string]interface{}{
-		"task_markdown": map[string]interface{}{
+	_, settings := ApplyPatch(nil, map[string]any{
+		"task_markdown": map[string]any{
 			"enabled":              true,
 			"path":                 "workspace/tasks.md",
 			"generate_agent_views": false,

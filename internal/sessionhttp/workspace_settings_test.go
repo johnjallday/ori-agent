@@ -25,12 +25,12 @@ func TestHandleWorkspaceSettings_GetReturnsNormalizedDefaults(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	settings, ok := response["settings"].(map[string]interface{})
+	settings, ok := response["settings"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected settings object, got %#v", response["settings"])
 	}
@@ -41,11 +41,11 @@ func TestHandleWorkspaceSettings_GetReturnsNormalizedDefaults(t *testing.T) {
 		t.Fatalf("expected guided preset, got %#v", got)
 	}
 
-	effective, ok := response["effective_behavior"].(map[string]interface{})
+	effective, ok := response["effective_behavior"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected effective_behavior object, got %#v", response["effective_behavior"])
 	}
-	if _, ok := effective["summary"].([]interface{}); !ok {
+	if _, ok := effective["summary"].([]any); !ok {
 		t.Fatalf("expected summary array, got %#v", effective["summary"])
 	}
 }

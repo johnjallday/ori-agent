@@ -37,7 +37,7 @@ func ArtifactInline(data []byte) ArtifactOption {
 	}
 }
 
-func ArtifactMetadata(metadata map[string]interface{}) ArtifactOption {
+func ArtifactMetadata(metadata map[string]any) ArtifactOption {
 	return func(a *Artifact) {
 		a.Metadata = cloneMap(metadata)
 	}

@@ -126,7 +126,7 @@ const MaxJSONBodySize = 1 << 20 // 1 MB
 //		return // Error response already sent
 //	}
 //	// Use req...
-func ParseJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+func ParseJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if r.Body == nil {
 		BadRequest(w, "Request body is required")
 		return false

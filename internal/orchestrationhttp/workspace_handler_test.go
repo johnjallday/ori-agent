@@ -51,22 +51,22 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	skillBindings, ok := response["skill_bindings"].([]interface{})
+	skillBindings, ok := response["skill_bindings"].([]any)
 	if !ok || len(skillBindings) != 1 {
 		t.Fatalf("expected one skill binding in response, got %#v", response["skill_bindings"])
 	}
 
-	agentSkillAccess, ok := response["agent_skill_access"].([]interface{})
+	agentSkillAccess, ok := response["agent_skill_access"].([]any)
 	if !ok || len(agentSkillAccess) != 1 {
 		t.Fatalf("expected one agent skill access rule in response, got %#v", response["agent_skill_access"])
 	}
 
-	settings, ok := response["workspace_settings"].(map[string]interface{})
+	settings, ok := response["workspace_settings"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected workspace_settings object in response, got %#v", response["workspace_settings"])
 	}
@@ -74,11 +74,11 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 		t.Fatalf("expected default guided settings preset, got %#v", got)
 	}
 
-	effective, ok := response["workspace_settings_effective_behavior"].(map[string]interface{})
+	effective, ok := response["workspace_settings_effective_behavior"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected workspace_settings_effective_behavior object, got %#v", response["workspace_settings_effective_behavior"])
 	}
-	if _, ok := effective["summary"].([]interface{}); !ok {
+	if _, ok := effective["summary"].([]any); !ok {
 		t.Fatalf("expected summary array in effective behavior, got %#v", effective["summary"])
 	}
 }

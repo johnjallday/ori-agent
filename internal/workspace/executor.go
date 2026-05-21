@@ -298,7 +298,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 	// Publish task started event
 	if te.eventBus != nil {
-		event := NewTaskEvent(EventTaskStarted, ws.ID, task.ID, task.To, map[string]interface{}{
+		event := NewTaskEvent(EventTaskStarted, ws.ID, task.ID, task.To, map[string]any{
 			"description": task.Description,
 			"priority":    task.Priority,
 		})
@@ -306,9 +306,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	// Execute asynchronously
-	te.wg.Add(1)
-	go func() {
-		defer te.wg.Done()
+	te.wg.Go(func() {
 		defer cancel()
 		defer func() {
 			te.mu.Lock()
@@ -393,14 +391,14 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		if err != nil {
 			if te.eventBus != nil {
 				if blockedErr != nil {
-					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, workspaceID, task.ID, task.To, map[string]interface{}{
+					te.eventBus.Publish(NewTaskEvent(EventTaskBlocked, workspaceID, task.ID, task.To, map[string]any{
 						"description": task.Description,
 						"human_loop":  snapshot.Context["human_loop"],
 						"status":      snapshot.Status,
 						"error":       blockedErr.Error(),
 					}))
 				} else {
-					te.eventBus.Publish(NewTaskEvent(EventTaskFailed, workspaceID, task.ID, task.To, map[string]interface{}{
+					te.eventBus.Publish(NewTaskEvent(EventTaskFailed, workspaceID, task.ID, task.To, map[string]any{
 						"description": task.Description,
 						"error":       err.Error(),
 					}))
@@ -416,7 +414,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			}
 
 			if te.eventBus != nil {
-				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]interface{}{
+				te.eventBus.Publish(NewTaskEvent(EventTaskCompleted, workspaceID, task.ID, task.To, map[string]any{
 					"description": task.Description,
 					"result":      result,
 				}))
@@ -425,12 +423,12 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		// Publish workspace updated event
 		if te.eventBus != nil {
-			te.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, workspaceID, "task-executor", map[string]interface{}{
+			te.eventBus.Publish(NewWorkspaceEvent(EventWorkspaceUpdated, workspaceID, "task-executor", map[string]any{
 				"task_id": task.ID,
 				"status":  snapshot.Status,
 			}))
 		}
-	}()
+	})
 }
 
 func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
@@ -438,17 +436,17 @@ func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
 		return
 	}
 	if task.Context == nil {
-		task.Context = map[string]interface{}{}
+		task.Context = map[string]any{}
 	}
 
 	blockID := fmt.Sprintf("blk_%d", time.Now().UnixNano())
-	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+	if existing, ok := task.Context["human_loop"].(map[string]any); ok {
 		if prior, ok := existing["block_id"].(string); ok && strings.TrimSpace(prior) != "" {
 			blockID = strings.TrimSpace(prior)
 		}
 	}
 
-	humanLoop := map[string]interface{}{
+	humanLoop := map[string]any{
 		"state":       "waiting_for_choice",
 		"block_id":    blockID,
 		"reason_code": "blocked",
@@ -514,6 +512,18 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		return
 	}
 
+	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	if validation.ValidationStatus == TaskValidationNeedsReview {
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
+			"task_id":          task.ID,
+			"store_node_id":    assignedStore.ID,
+			"contract_version": validation.ContractVersion,
+			"error_count":      len(validation.Errors),
+		})
+		return
+	}
+
 	// Generate filename: task-{short-id}-{timestamp}.{format}
 	taskIDShort := task.ID
 	if len(taskIDShort) > 8 {
@@ -530,6 +540,8 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		ext = "md"
 	case "text":
 		ext = "txt"
+	case "csv":
+		ext = "csv"
 	case "binary":
 		ext = "bin"
 	}
@@ -538,9 +550,10 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 
 	// Prepare data for storage
 	dataToStore := result
-	if assignedStore.Format == "json" {
+	switch assignedStore.Format {
+	case "json":
 		// Wrap plain text result in JSON structure
-		jsonData := map[string]interface{}{
+		jsonData := map[string]any{
 			"task_id":     task.ID,
 			"agent":       agentNodeID,
 			"result":      result,
@@ -556,6 +569,12 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 			return
 		}
 		dataToStore = string(jsonBytes)
+	case "csv":
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, agentNodeID)
+		}
 	}
 
 	// Write result to store
@@ -576,6 +595,10 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		"filename":      filename,
 		"write_count":   assignedStore.WriteCount,
 	})
+	if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+		validation.StorageStatus = TaskStorageSaved
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+	}
 
 	// Save workspace to persist store node stats (WriteToStore updated them)
 	if err := workspaceStore.Save(ws); err != nil {
@@ -593,10 +616,26 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	// Generate filename
 	timestamp := time.Now().Format("20060102-150405")
 
+	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	if validation.ValidationStatus == TaskValidationNeedsReview {
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
+			"task_id":          task.ID,
+			"contract_version": validation.ContractVersion,
+			"error_count":      len(validation.Errors),
+		})
+		return
+	}
+
 	// Determine format and extension
 	format := storage.Format
 	if format == "" {
 		format = "text"
+	}
+	writeMode := strings.ToLower(strings.TrimSpace(storage.WriteMode))
+	appendCSV := writeMode == "append"
+	if appendCSV {
+		format = "csv"
 	}
 	ext := "txt"
 	switch format {
@@ -604,6 +643,8 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		ext = "json"
 	case "markdown":
 		ext = "md"
+	case "csv":
+		ext = "csv"
 	}
 
 	// Generate task name slug for filename
@@ -625,11 +666,20 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	}
 
 	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
+	if appendCSV {
+		filename = fmt.Sprintf("%s.%s", sanitized, ext)
+	}
 
 	// Prepare data for storage
 	dataToStore := result
-	if format == "json" {
-		jsonData := map[string]interface{}{
+	if appendCSV {
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		}
+	} else if format == "json" {
+		jsonData := map[string]any{
 			"task_id":     task.ID,
 			"result":      result,
 			"timestamp":   timestamp,
@@ -641,6 +691,12 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			return
 		}
 		dataToStore = string(jsonBytes)
+	} else if format == "csv" {
+		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
+			dataToStore = contractCSV
+		} else {
+			dataToStore = TaskResultToCSV(task, result, timestamp, "")
+		}
 	}
 
 	// If store node is specified, use it
@@ -661,20 +717,49 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			return
 		}
 
-		if err := WriteToStore(storeNode, filename, dataToStore); err != nil {
+		storeFilePath := filename
+		if storage.FilePath != "" {
+			storeFilePath = storage.FilePath
+		}
+		if appendCSV {
+			storeNodeCopy := *storeNode
+			storeNodeCopy.WriteMode = "append"
+			storeNodeCopy.Format = "csv"
+			if err := WriteToStore(&storeNodeCopy, storeFilePath, csvWithoutHeaderForExistingStore(storeNode, storeFilePath, dataToStore)); err != nil {
+				logger.Error("Failed to append task result to store node", logger.Fields{
+					"task_id":       task.ID,
+					"store_node_id": storeNode.ID,
+					"filename":      storeFilePath,
+					"err":           err,
+				})
+				return
+			}
+			storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
+			storeNode.WriteCount = storeNodeCopy.WriteCount
+			storeNode.LastFilePath = storeNodeCopy.LastFilePath
+			storeNode.LastError = storeNodeCopy.LastError
+			storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
+			if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+				validation.StorageStatus = TaskStorageAppended
+				recordTaskStorageValidation(ws, task, workspaceStore, validation)
+			}
+		} else if err := WriteToStore(storeNode, storeFilePath, dataToStore); err != nil {
 			logger.Error("Failed to auto-store task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
-				"filename":      filename,
+				"filename":      storeFilePath,
 				"err":           err,
 			})
 			return
+		} else if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+			validation.StorageStatus = TaskStorageSaved
+			recordTaskStorageValidation(ws, task, workspaceStore, validation)
 		}
 
 		logger.Info("Task result auto-stored to store node", logger.Fields{
 			"task_id":       task.ID,
 			"store_node_id": storeNode.ID,
-			"filename":      filename,
+			"filename":      storeFilePath,
 		})
 
 		if err := workspaceStore.Save(ws); err != nil {
@@ -712,6 +797,26 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		return
 	}
 
+	if appendCSV {
+		if err := AppendCSVToFile(filePath, dataToStore); err != nil {
+			logger.Error("Failed to append task result to CSV file", logger.Fields{
+				"task_id":   task.ID,
+				"file_path": filePath,
+				"err":       err,
+			})
+			return
+		}
+		logger.Info("Task result appended to CSV file", logger.Fields{
+			"task_id":   task.ID,
+			"file_path": filePath,
+		})
+		if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+			validation.StorageStatus = TaskStorageAppended
+			recordTaskStorageValidation(ws, task, workspaceStore, validation)
+		}
+		return
+	}
+
 	// Write file
 	if err := os.WriteFile(filePath, []byte(dataToStore), 0644); err != nil {
 		logger.Error("Failed to auto-store task result to file", logger.Fields{
@@ -726,6 +831,72 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		"task_id":   task.ID,
 		"file_path": filePath,
 	})
+	if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
+		validation.StorageStatus = TaskStorageSaved
+		recordTaskStorageValidation(ws, task, workspaceStore, validation)
+	}
+}
+
+func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult) {
+	if task == nil || validation == nil {
+		return
+	}
+	ApplyTaskValidationResultToLatestExecution(task, validation)
+	workspaceID := ""
+	if ws != nil {
+		workspaceID = ws.ID
+	}
+	mirrorLatestTaskValidationResult(workspaceID, task, validation)
+	logger.Info("Task output contract validation outcome", logger.Fields{
+		"action":            "validation_outcome",
+		"workspace_id":      workspaceID,
+		"task_id":           task.ID,
+		"run_id":            latestTaskExecutionRunID(task),
+		"validation_status": validation.ValidationStatus,
+		"contract_version":  validation.ContractVersion,
+		"validation_errors": len(validation.Errors),
+		"raw_output_stored": false,
+	})
+	logger.Info("Task output contract storage outcome", logger.Fields{
+		"action":            "storage_gating_outcome",
+		"workspace_id":      workspaceID,
+		"task_id":           task.ID,
+		"run_id":            latestTaskExecutionRunID(task),
+		"validation_status": validation.ValidationStatus,
+		"storage_status":    validation.StorageStatus,
+		"contract_version":  validation.ContractVersion,
+		"validation_errors": len(validation.Errors),
+		"raw_output_stored": false,
+		"manual_approval":   validation.ManualApproval != nil,
+	})
+	if ws != nil {
+		_ = ws.MutateTask(task.ID, func(t *Task) error {
+			ApplyTaskValidationResultToLatestExecution(t, validation)
+			return nil
+		})
+	}
+	if ws == nil || workspaceStore == nil || strings.TrimSpace(ws.ID) == "" {
+		return
+	}
+	if err := workspaceStore.Update(ws.ID, func(fresh *Workspace) error {
+		return fresh.MutateTask(task.ID, func(t *Task) error {
+			ApplyTaskValidationResultToLatestExecution(t, validation)
+			return nil
+		})
+	}); err != nil {
+		logger.Warn("Failed to persist task validation result", logger.Fields{
+			"task_id":      task.ID,
+			"workspace_id": ws.ID,
+			"error":        err,
+		})
+	}
+}
+
+func latestTaskExecutionRunID(task *Task) string {
+	if task == nil || len(task.ExecutionHistory) == 0 {
+		return ""
+	}
+	return task.ExecutionHistory[len(task.ExecutionHistory)-1].RunID
 }
 
 // autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store

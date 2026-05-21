@@ -60,7 +60,7 @@ func (nh *NotificationHandler) handleGetNotifications(w http.ResponseWriter, r *
 	if agentName != "" && unreadOnly {
 		// Get unread notifications for agent
 		notifications := nh.notificationService.GetUnreadForAgent(agentName)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"notifications": notifications,
 			"count":         len(notifications),
 		})
@@ -71,7 +71,7 @@ func (nh *NotificationHandler) handleGetNotifications(w http.ResponseWriter, r *
 	limit := 50
 	notifications := nh.notificationService.GetHistory(limit)
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"notifications": notifications,
 		"count":         len(notifications),
 	})
@@ -93,7 +93,7 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	if req.MarkAll && req.AgentName != "" {
 
 		nh.notificationService.MarkAllAsRead(req.AgentName)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"message": "All notifications marked as read",
 		})
@@ -103,7 +103,7 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	if req.NotificationID != "" {
 		// Mark specific notification as read
 		nh.notificationService.MarkAsRead(req.NotificationID)
-		orihttp.WriteJSON(w, map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]any{
 			"success": true,
 			"message": "Notification marked as read",
 		})
@@ -156,7 +156,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 	// Send initial unread notifications
 	unread := nh.notificationService.GetUnreadForAgent(agentName)
 	if len(unread) > 0 {
-		data, _ := json.Marshal(map[string]interface{}{
+		data, _ := json.Marshal(map[string]any{
 			"notifications": unread,
 			"count":         len(unread),
 		})
@@ -260,7 +260,7 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		events = nh.eventBus.GetHistory(nil, limit)
 	}
 
-	orihttp.WriteJSON(w, map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]any{
 		"events": events,
 		"count":  len(events),
 	})

@@ -43,6 +43,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -273,6 +274,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 	b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
 	b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
+	b.registerWorkspaceRunTaskValidationMirror()
 	logger.Info("Workspace Runs initialized", logger.Fields{
 		"durable": b.sessionStore != nil,
 	})
@@ -290,6 +292,46 @@ func (b *ServerBuilder) initializeHandlers() {
 	})
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
+}
+
+func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {
+	store := b.workspaceRunStore
+	if store == nil {
+		workspace.SetTaskValidationMirror(nil)
+		return
+	}
+	workspace.SetTaskValidationMirror(func(workspaceID, taskID, runID string, validation workspace.TaskValidationResult) {
+		output := taskValidationToWorkspaceRunOutput(taskID, validation)
+		if err := store.SetTaskOutput(context.Background(), workspaceID, runID, output); err != nil {
+			logger.Warn("Failed to mirror task output validation to workspace run", logger.Fields{
+				"workspace_id": workspaceID,
+				"task_id":      taskID,
+				"run_id":       runID,
+				"error":        err,
+			})
+		}
+	})
+}
+
+func taskValidationToWorkspaceRunOutput(taskID string, validation workspace.TaskValidationResult) workspacerun.TaskOutputSummary {
+	errors := make([]workspacerun.TaskOutputValidationError, 0, len(validation.Errors))
+	for _, item := range validation.Errors {
+		errors = append(errors, workspacerun.TaskOutputValidationError{
+			Code:    item.Code,
+			Column:  item.Column,
+			Message: item.Message,
+		})
+	}
+	return workspacerun.TaskOutputSummary{
+		TaskID:           taskID,
+		ValidationStatus: string(validation.ValidationStatus),
+		StorageStatus:    string(validation.StorageStatus),
+		ContractVersion:  validation.ContractVersion,
+		ValidatedAt:      validation.ValidatedAt,
+		ErrorCount:       len(validation.Errors),
+		Errors:           errors,
+		ManualApproval:   validation.ManualApproval != nil || validation.ValidationStatus == workspace.TaskValidationManuallyApproved,
+	}
 }
 
 func (b *ServerBuilder) syncPlaywrightBrowserSettings(utility config.UtilitySettings) {

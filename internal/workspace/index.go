@@ -242,7 +242,7 @@ func (idx *Index) Close() error {
 }
 
 // nullString converts an empty string to sql NULL.
-func nullString(s string) interface{} {
+func nullString(s string) any {
 	if s == "" {
 		return nil
 	}

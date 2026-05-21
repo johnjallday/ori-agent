@@ -179,7 +179,7 @@ func (th *TaskHandler) createTasksFromTaskListResult(ws *workspace.Workspace, so
 		Status:                workspace.TaskStatusPending,
 		OrchestrationMode:     workspace.TaskOrchestrationModeSequential,
 		ResultCombinationMode: workspace.TaskResultCombinationLastResult,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"promoted_from_task_id":     sourceTask.ID,
 			"promoted_from_result_type": string(workspace.TaskResultTypeTaskList),
 		},
@@ -212,7 +212,7 @@ func (th *TaskHandler) createTasksFromTaskListResult(ws *workspace.Workspace, so
 				SubtaskIndex:          groupIndex,
 				OrchestrationMode:     workspace.TaskOrchestrationModeSequential,
 				ResultCombinationMode: workspace.TaskResultCombinationLastResult,
-				Context: map[string]interface{}{
+				Context: map[string]any{
 					"promoted_from_task_id":     sourceTask.ID,
 					"promoted_from_result_type": string(workspace.TaskResultTypeTaskList),
 					"promoted_group_title":      strings.TrimSpace(group.Title),
@@ -318,7 +318,7 @@ func addPromotedLeafSubtask(ws *workspace.Workspace, sourceTask *workspace.Task,
 		Status:         workspace.TaskStatusPending,
 		ParentTaskID:   parentTaskID,
 		SubtaskIndex:   subtaskIndex,
-		Context: map[string]interface{}{
+		Context: map[string]any{
 			"promoted_from_task_id":     sourceTask.ID,
 			"promoted_from_result_type": string(workspace.TaskResultTypeTaskList),
 			"promoted_group_title":      strings.TrimSpace(groupTitle),
@@ -386,7 +386,7 @@ func (th *TaskHandler) publishTaskResultPromotionEvents(workspaceID, sourceTaskI
 	if th == nil || th.eventBus == nil || parentTask == nil {
 		return
 	}
-	th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, workspaceID, "task.result.promote", map[string]interface{}{
+	th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, workspaceID, "task.result.promote", map[string]any{
 		"source_task_id": sourceTaskID,
 		"parent_task_id": parentTask.ID,
 		"subtask_count":  len(subtasks),
@@ -395,7 +395,7 @@ func (th *TaskHandler) publishTaskResultPromotionEvents(workspaceID, sourceTaskI
 		Type:        workspace.EventTaskCreated,
 		WorkspaceID: workspaceID,
 		Source:      "task.result.promote",
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"task_id":        parentTask.ID,
 			"source_task_id": sourceTaskID,
 			"subtask_count":  len(subtasks),

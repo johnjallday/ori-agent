@@ -23,12 +23,12 @@ const (
 
 // Notification represents a notification event
 type Notification struct {
-	Type      NotificationType       `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
-	Title     string                 `json:"title"`
-	Message   string                 `json:"message"`
-	Severity  string                 `json:"severity"` // "info", "warning", "error"
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Type      NotificationType `json:"type"`
+	Timestamp time.Time        `json:"timestamp"`
+	Title     string           `json:"title"`
+	Message   string           `json:"message"`
+	Severity  string           `json:"severity"` // "info", "warning", "error"
+	Data      map[string]any   `json:"data,omitempty"`
 }
 
 // Channel represents a notification delivery channel
@@ -91,7 +91,7 @@ func (n *Notifier) RemoveChannel(name string) {
 }
 
 // Notify sends a notification to all channels
-func (n *Notifier) Notify(notifType NotificationType, title, message, severity string, data map[string]interface{}) {
+func (n *Notifier) Notify(notifType NotificationType, title, message, severity string, data map[string]any) {
 	if !n.enabled {
 		return
 	}
