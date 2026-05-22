@@ -448,7 +448,7 @@ test.describe('Task Output Contracts', () => {
     const workspaceData = await workspaceResp.json();
     workspaceId = workspaceData.workspace_id;
 
-    await page.route('**/api/orchestration/tasks/output-contract/suggest', async (route) => {
+    await page.route('**/api/orchestration/tasks/output-spec/suggest', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -491,7 +491,7 @@ test.describe('Task Output Contracts', () => {
 
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Custom path');
-      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Output contract');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Result format');
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('date');
     } finally {
       if (workspaceId) {

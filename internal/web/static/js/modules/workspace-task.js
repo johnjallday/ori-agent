@@ -4171,21 +4171,21 @@ export class WorkspaceTaskPage {
   renderOutputSpecOverview(spec) {
     if (!spec) return '';
     const fields = this.getOutputSpecSchemaFields(spec);
-    const mappings = Array.isArray(spec?.mappings) ? spec.mappings : [];
+    const columns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
     const metadataFields = this.getOutputSpecMetadataFields(spec);
     const metadataIncluded = metadataFields.filter((field) => field.include).map((field) => field.name);
     return `
       <div class="workspace-task-output-spec-overview">
         <div class="workspace-task-output-spec-stat">
-          <span>Schema</span>
+          <span>Assistant fields</span>
           <strong>${this.escapeHtml(`${fields.length} field${fields.length === 1 ? '' : 's'}`)}</strong>
         </div>
         <div class="workspace-task-output-spec-stat">
-          <span>Mappings</span>
-          <strong>${this.escapeHtml(`${mappings.length} mapped`)}</strong>
+          <span>CSV columns</span>
+          <strong>${this.escapeHtml(`${columns.length} column${columns.length === 1 ? '' : 's'}`)}</strong>
         </div>
         <div class="workspace-task-output-spec-stat">
-          <span>Run metadata</span>
+          <span>Run info</span>
           <strong>${this.escapeHtml(metadataIncluded.length ? metadataIncluded.join(', ') : 'hidden')}</strong>
         </div>
       </div>`;
@@ -4195,7 +4195,7 @@ export class WorkspaceTaskPage {
     const fields = this.getOutputSpecMetadataFields(this.resultOutputSpecDraft || this.getActiveOutputSpec());
     return `
       <div class="workspace-task-output-spec-metadata-editor">
-        <div class="workspace-task-page-mini-label">Run metadata columns</div>
+        <div class="workspace-task-page-mini-label">Run info saved with each row</div>
         <div class="workspace-task-output-spec-metadata-list">
           ${fields.map((field) => `
             <label class="workspace-task-output-spec-metadata-item">
@@ -4226,11 +4226,11 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Structured output${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
+            <span class="workspace-task-page-mini-label">Result format${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
           </div>
           ${this.renderOutputSpecOverview(activeSpec)}
-          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit spec</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit format</button>
         </div>`;
     }
     if (!editing) {
@@ -4238,9 +4238,9 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-contract" data-state="empty">
           <div class="workspace-task-result-contract-warning">
             <i class="bi bi-magic" aria-hidden="true"></i>
-            <span>Let the assistant turn the latest result into a structured output spec.</span>
+            <span>Let the assistant choose the CSV columns from the latest result.</span>
           </div>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest structured output</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest result format</button>
         </div>`;
     }
 
@@ -4254,27 +4254,33 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-contract" data-state="edit">
         <div class="workspace-task-result-contract-header">
           <div>
-            <div class="workspace-task-page-mini-label">Output contract</div>
-            <p class="workspace-task-result-contract-help">Review the CSV projection for the structured output spec. Future runs normalize, validate, and append only when this shape passes.</p>
+            <div class="workspace-task-page-mini-label">Result format</div>
+            <p class="workspace-task-result-contract-help">Review what each future run will save to CSV. The assistant extracts one row, checks it, then appends it only when the row matches this format.</p>
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
               <i class="bi bi-magic" aria-hidden="true"></i>
-              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Regenerate spec')}</span>
+              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Ask assistant')}</span>
             </button>
           </div>
         </div>
-        <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
-          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No output shape yet. Add a column or ask the system model to suggest one.</div>'}
+        <div class="workspace-task-result-format-steps" aria-label="Result storage setup steps">
+          <span class="is-complete">Storage on</span>
+          <span class="is-active">Review columns</span>
+          <span>Save format</span>
         </div>
+        <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
+          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No result format yet. Add a CSV column or ask the assistant to suggest one from the latest result.</div>'}
+        </div>
+        ${this.renderResultFormatPreview(this.resultContractDraft)}
         ${this.renderOutputSpecMetadataEditor()}
         <div class="workspace-task-result-contract-row-add">
-          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add column</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add CSV column</button>
         </div>
         <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
         <div class="workspace-task-result-contract-actions">
           <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Approve spec')}</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save format')}</button>
         </div>
       </div>`;
   }
@@ -4293,17 +4299,126 @@ export class WorkspaceTaskPage {
       .join('');
     return `
       <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
-        <input type="text" data-role="result-contract-name" placeholder="csv_column" value="${this.escapeHtml(column?.name || '')}" aria-label="CSV column name" />
-        <select data-role="result-contract-type" aria-label="Column type">${optionsHtml}</select>
-        <input type="text" data-role="result-contract-schema-field" placeholder="schema_field" value="${this.escapeHtml(schemaField)}" aria-label="Schema field" />
-        <select data-role="result-contract-transform" aria-label="Mapping transform">${transformOptions}</select>
+        <label class="workspace-task-result-contract-field workspace-task-result-contract-field-name">
+          <span>CSV column</span>
+          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="CSV column name" />
+        </label>
+        <label class="workspace-task-result-contract-field">
+          <span>Type</span>
+          <select data-role="result-contract-type" aria-label="Column type">${optionsHtml}</select>
+        </label>
         <label class="workspace-task-result-contract-required">
           <input type="checkbox" data-role="result-contract-required"${required ? ' checked' : ''} />
-          <span>Required</span>
+          <span>Require value</span>
         </label>
-        <input type="text" data-role="result-contract-description" placeholder="description" value="${this.escapeHtml(column?.description || '')}" aria-label="Column description" />
         <button type="button" class="workspace-task-result-contract-remove" data-action="remove-result-contract-row" data-row-index="${index}" aria-label="Remove column">&times;</button>
+        <details class="workspace-task-result-contract-advanced">
+          <summary>Advanced mapping</summary>
+          <div class="workspace-task-result-contract-advanced-grid">
+            <label class="workspace-task-result-contract-field">
+              <span>Assistant field</span>
+              <input type="text" data-role="result-contract-schema-field" placeholder="pollen_count" value="${this.escapeHtml(schemaField)}" aria-label="Assistant field" />
+            </label>
+            <label class="workspace-task-result-contract-field">
+              <span>Transform</span>
+              <select data-role="result-contract-transform" aria-label="Mapping transform">${transformOptions}</select>
+            </label>
+            <label class="workspace-task-result-contract-field workspace-task-result-contract-field-description">
+              <span>Notes</span>
+              <input type="text" data-role="result-contract-description" placeholder="Optional note for this column" value="${this.escapeHtml(column?.description || '')}" aria-label="Column notes" />
+            </label>
+          </div>
+        </details>
       </div>`;
+  }
+
+  renderResultFormatPreview(columns = []) {
+    const usableColumns = Array.isArray(columns)
+      ? columns
+        .map((column) => ({
+          name: String(column?.name || '').trim(),
+          type: String(column?.type || 'string').trim() || 'string',
+        }))
+        .filter((column) => column.name)
+      : [];
+    if (usableColumns.length === 0) return '';
+    const metadataFields = this.getResultMetadataPolicyDraft(this.resultOutputSpecDraft || this.getActiveOutputSpec()).fields
+      .filter((field) => field.include !== false)
+      .map((field) => ({ name: field.name, type: 'run_info', metadata: true }));
+    const previewColumns = [...metadataFields, ...usableColumns].slice(0, 10);
+    const hiddenCount = Math.max(0, metadataFields.length + usableColumns.length - previewColumns.length);
+    const sampleRow = this.getResultFormatPreviewRow(usableColumns);
+    const headerHtml = previewColumns
+      .map((column) => `<th scope="col"${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(column.name)}</th>`)
+      .join('');
+    const rowHtml = previewColumns
+      .map((column) => {
+        const value = column.metadata
+          ? this.previewMetadataValue(column.name)
+          : sampleRow[column.name] || this.previewValueForType(column.type);
+        return `<td${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(value)}</td>`;
+      })
+      .join('');
+    return `
+      <div class="workspace-task-result-format-preview">
+        <div class="workspace-task-result-format-preview-header">
+          <div>
+            <div class="workspace-task-page-mini-label">CSV preview</div>
+            <span>First row shape after the assistant parses a run result.</span>
+          </div>
+          ${hiddenCount ? `<small>+${this.escapeHtml(hiddenCount)} more column${hiddenCount === 1 ? '' : 's'}</small>` : ''}
+        </div>
+        <div class="workspace-task-result-format-preview-table" role="region" aria-label="CSV preview" tabindex="0">
+          <table>
+            <thead><tr>${headerHtml}</tr></thead>
+            <tbody><tr>${rowHtml}</tr></tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  getResultFormatPreviewRow(columns = []) {
+    const artifact = this.currentResultArtifact || buildTaskResultArtifact(this.task);
+    const rows = Array.isArray(artifact?.rows) ? artifact.rows : [];
+    const candidate = rows.find((row) => row && typeof row === 'object') || {};
+    const row = {};
+    columns.forEach((column) => {
+      const value = this.getCaseInsensitiveValue(candidate, column.name);
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        row[column.name] = String(value);
+      }
+    });
+    return row;
+  }
+
+  previewMetadataValue(name) {
+    const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
+    const latest = history.length ? history[history.length - 1] : null;
+    switch (String(name || '').trim()) {
+    case 'run_id':
+      return latest?.run_id ? String(latest.run_id).slice(0, 8) : 'run_1234';
+    case 'executed_at':
+      return latest?.executed_at ? String(latest.executed_at).slice(0, 10) : '2026-05-22';
+    case 'status':
+      return latest?.status ? String(latest.status) : 'success';
+    case 'duration_ms':
+      return latest?.duration !== undefined && latest?.duration !== null ? String(latest.duration) : '1200';
+    default:
+      return '';
+    }
+  }
+
+  previewValueForType(type) {
+    switch (String(type || '').trim().toLowerCase()) {
+    case 'number':
+      return '9.7';
+    case 'boolean':
+      return 'true';
+    case 'date':
+      return '2026-05-22';
+    default:
+      return 'parsed from result';
+    }
   }
 
   // getAppendCSVContext returns the effective CSV-append storage for the task
@@ -4891,14 +5006,14 @@ export class WorkspaceTaskPage {
         required: column?.required !== false,
         description: String(column?.description || ''),
       }));
-      this.notify('success', `Suggested structured output with ${columns.length} column${columns.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Suggested a result format with ${columns.length} CSV column${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
       const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
       if (!hasDraftColumns) {
         this.resultContractDraft = this.suggestFallbackResultContractColumns();
         this.resultOutputSpecDraft = null;
-        this.notify('warning', 'Assistant suggestion was unavailable, so a local structured output draft was created from the result.');
+        this.notify('warning', 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
       } else {
         this.setResultContractError(error?.message || 'Could not suggest columns.');
         this.notify('error', error?.message || 'Could not suggest columns.');
@@ -4992,7 +5107,7 @@ export class WorkspaceTaskPage {
       if (!storageResponse.ok) {
         throw new Error(storageText || `Storage save failed (HTTP ${storageResponse.status})`);
       }
-      this.notify('success', `Approved structured output with ${cleaned.length} column${cleaned.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Saved result format with ${cleaned.length} CSV column${cleaned.length === 1 ? '' : 's'}.`);
       this.resultContractDraft = null;
       this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
@@ -5972,6 +6087,7 @@ export class WorkspaceTaskPage {
   renderReviewTableEditor(rawOutput, columns = [], outputFormat = 'csv') {
     if (!columns.length) return '';
     const { row } = this.parseReviewDraftRow(rawOutput, columns);
+    const rawLabel = outputFormat === 'json' ? 'Raw JSON' : 'Raw CSV';
     const headerHtml = columns
       .map((column) => `<th scope="col">${this.escapeHtml(column.name)}<small>${this.escapeHtml(column.type)}${column.required ? ' required' : ''}</small></th>`)
       .join('');
@@ -5991,8 +6107,8 @@ export class WorkspaceTaskPage {
 
     return `
       <div class="workspace-task-review-mode-tabs" role="tablist" aria-label="Review editor mode">
-        <button type="button" class="is-active" data-review-view-toggle="table">Table</button>
-        <button type="button" data-review-view-toggle="raw">Raw CSV</button>
+        <button type="button" class="is-active" data-review-view-toggle="table">Edit row</button>
+        <button type="button" data-review-view-toggle="raw">${this.escapeHtml(rawLabel)}</button>
       </div>
       <div class="workspace-task-review-table-pane" data-review-table-pane data-review-output-format="${this.escapeHtml(outputFormat)}">
         <div class="workspace-task-review-table-wrap" role="region" aria-label="Editable CSV row" tabindex="0">
@@ -6039,13 +6155,17 @@ export class WorkspaceTaskPage {
     const headerMismatchHtml = headerMismatch ? `
       <div class="workspace-task-review-reconcile">
         <div>
-          <strong>CSV header mismatch</strong>
-          <span>Reconcile the destination file before appending this row.</span>
+          <strong>Destination CSV uses different columns</strong>
+          <span>The row is ready, but the existing file header does not match this result format.</span>
         </div>
         <dl>
           <div><dt>Expected</dt><dd>${this.escapeHtml((headerMismatch.expected || []).join(', ') || 'No expected header')}</dd></div>
           <div><dt>Actual</dt><dd>${this.escapeHtml((headerMismatch.actual || []).join(', ') || 'No existing header')}</dd></div>
         </dl>
+        <div class="workspace-task-review-reconcile-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-append-storage">Change destination</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-action="design-output-columns-from-result">Edit format</button>
+        </div>
       </div>` : '';
     const normalizedPreviewHtml = normalizedRow ? `
       <details class="workspace-task-review-normalized" open>
@@ -6060,8 +6180,8 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-page-mini-label">Needs Review</div>
         <div class="workspace-task-review-card">
           <div class="workspace-task-review-copy">
-            <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} held from CSV storage.</strong>
-            <span>${contractColumnNames.length > 0 ? `Expected columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result must match the output contract before it can be appended.'}</span>
+            <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} waiting before CSV save.</strong>
+            <span>${contractColumnNames.length > 0 ? `Expected CSV columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result needs to match the saved format before it can be written.'}</span>
           </div>
           <div class="workspace-task-review-status-row">
             ${runContractVersion ? `<span>Contract ${this.escapeHtml(runContractVersion)}</span>` : ''}
@@ -6074,13 +6194,13 @@ export class WorkspaceTaskPage {
           ${normalizedPreviewHtml}
           ${tableEditor}
           <label class="workspace-task-review-editor" data-review-raw-pane${rawHidden}>
-            <span>Edit result before approving append</span>
+            <span>Edit the row before saving</span>
             <textarea rows="7" data-review-draft>${this.escapeHtml(reviewDraft)}</textarea>
           </label>
           <div class="workspace-task-review-actions">
-            <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Approve Append</button>
-            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy Raw</button>
-            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="retry_normalization">Retry Normalization</button>
+            <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Save row</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy row</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="retry_normalization">Retry parsing</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="rerun">Re-run Task</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="dismiss">Dismiss</button>
           </div>
