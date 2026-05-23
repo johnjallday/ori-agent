@@ -379,7 +379,7 @@
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     gap: 2rem;
     border: 1px solid rgba(138, 138, 138, 0.25);
-    background: linear-gradient(135deg, rgba(31, 107, 78, 0.14) 0%, rgba(13, 20, 13, 0.18) 45%, rgba(42, 135, 98, 0.12) 100%);
+    background: linear-gradient(135deg, rgba(31, 107, 78, 0.14) 0%, rgba(31, 33, 40, 0.18) 45%, rgba(42, 135, 98, 0.12) 100%);
 }
 
 .workspace-empty-card::before,

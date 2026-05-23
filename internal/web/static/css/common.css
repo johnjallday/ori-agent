@@ -138,13 +138,13 @@ a:focus-visible {
 
 .nav-link-item:hover {
     background: var(--bg-secondary) !important;
-    color: var(--primary-color) !important;
+    color: var(--text-primary) !important;
 }
 
 .nav-link-item:active,
 .nav-link-item.active {
     background: var(--bg-tertiary) !important;
-    color: var(--primary-color) !important;
+    color: var(--text-primary) !important;
 }
 
 /* Plugin Pages Dropdown Styles */
@@ -161,12 +161,12 @@ a:focus-visible {
 
 #pluginPagesMenu .dropdown-item:hover {
     background: var(--bg-secondary) !important;
-    color: var(--primary-color) !important;
+    color: var(--text-primary) !important;
 }
 
 #pluginPagesMenu .dropdown-item:active {
     background: var(--bg-tertiary) !important;
-    color: var(--primary-color) !important;
+    color: var(--text-primary) !important;
 }
 
 .nav-badge {
@@ -473,13 +473,13 @@ a:focus-visible {
 /* Dark mode input adjustments */
 [data-bs-theme="dark"] .form-input,
 [data-bs-theme="dark"] .modern-input {
-    background: rgba(13, 20, 13, 0.88);
+    background: rgba(31, 33, 40, 0.88);
     border-color: rgba(92, 92, 94, 0.32);
 }
 
 [data-bs-theme="dark"] .form-input:hover,
 [data-bs-theme="dark"] .modern-input:hover {
-    background: rgba(13, 20, 13, 0.94);
+    background: rgba(31, 33, 40, 0.94);
     border-color: rgba(31, 107, 78, 0.42);
 }
 
@@ -1180,7 +1180,7 @@ h3, .h3 {
 .nav-link.active {
     position: relative;
     background: var(--bg-tertiary) !important;
-    color: var(--primary-color) !important;
+    color: var(--text-primary) !important;
 }
 
 .nav-link-item.active::after,

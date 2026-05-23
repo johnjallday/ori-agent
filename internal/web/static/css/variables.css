@@ -75,15 +75,16 @@
 
 /* Dark Mode - Palette applied directly */
 [data-bs-theme="dark"] {
-  --bg-primary: #0A0A0A;
-  --bg-secondary: #0D140D;
-  --bg-tertiary: #1F2128;
+  --bg-primary: #0A0A0A;        /* black */
+  --bg-secondary: #1F2128;      /* oxidized — cool neutral, was charred (green) */
+  --bg-tertiary: #2A2C33;       /* elevated oxidized step */
+  --bg-organic: #0D140D;        /* charred — reserve for ~5–10% "organic-cool" surfaces */
 
   --text-primary: #C9CCD1;
   --text-secondary: #8A8A8A;
   --text-muted: #5C5C5E;
 
-  --border-color: #2A2C33;
+  --border-color: #383B43;      /* slightly lighter so it reads against bg-tertiary */
   --border-light: #5C5C5E;
 
   /* Slightly stronger shadows for dark mode */
