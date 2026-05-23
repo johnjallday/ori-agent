@@ -21,12 +21,14 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ID         string         `json:"id,omitempty"`
-		ServerName string         `json:"server_name"`
-		Alias      string         `json:"alias,omitempty"`
-		Enabled    *bool          `json:"enabled,omitempty"`
-		Scope      map[string]any `json:"scope,omitempty"`
-		Config     map[string]any `json:"config,omitempty"`
+		ID                string                `json:"id,omitempty"`
+		ServerName        string                `json:"server_name"`
+		Alias             string                `json:"alias,omitempty"`
+		Enabled           *bool                 `json:"enabled,omitempty"`
+		Scope             map[string]any        `json:"scope,omitempty"`
+		Config            map[string]any        `json:"config,omitempty"`
+		DefaultSideEffect SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides     map[string]SideEffect `json:"tool_overrides,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -34,6 +36,16 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.ServerName) == "" {
 		orihttp.BadRequest(w, "server_name is required")
 		return
+	}
+	if req.DefaultSideEffect != "" && !isValidSideEffect(req.DefaultSideEffect) {
+		orihttp.BadRequest(w, fmt.Sprintf("invalid default_side_effect: %q", req.DefaultSideEffect))
+		return
+	}
+	for tool, se := range req.ToolOverrides {
+		if se != "" && !isValidSideEffect(se) {
+			orihttp.BadRequest(w, fmt.Sprintf("invalid tool_overrides[%q]: %q", tool, se))
+			return
+		}
 	}
 
 	workspace, err := h.store.Get(workspaceID)
@@ -57,14 +69,16 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	binding := WorkspaceMCPBinding{
-		ID:         bindingID,
-		ServerName: req.ServerName,
-		Alias:      req.Alias,
-		Enabled:    enabled,
-		Scope:      req.Scope,
-		Config:     req.Config,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:                bindingID,
+		ServerName:        req.ServerName,
+		Alias:             req.Alias,
+		Enabled:           enabled,
+		Scope:             req.Scope,
+		Config:            req.Config,
+		DefaultSideEffect: req.DefaultSideEffect,
+		ToolOverrides:     req.ToolOverrides,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 	binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, binding)
 	if err != nil {
@@ -163,14 +177,28 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ServerName *string        `json:"server_name,omitempty"`
-		Alias      *string        `json:"alias,omitempty"`
-		Enabled    *bool          `json:"enabled,omitempty"`
-		Scope      map[string]any `json:"scope,omitempty"`
-		Config     map[string]any `json:"config,omitempty"`
+		ServerName        *string                `json:"server_name,omitempty"`
+		Alias             *string                `json:"alias,omitempty"`
+		Enabled           *bool                  `json:"enabled,omitempty"`
+		Scope             map[string]any         `json:"scope,omitempty"`
+		Config            map[string]any         `json:"config,omitempty"`
+		DefaultSideEffect *SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides     *map[string]SideEffect `json:"tool_overrides,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+	if req.DefaultSideEffect != nil && *req.DefaultSideEffect != "" && !isValidSideEffect(*req.DefaultSideEffect) {
+		orihttp.BadRequest(w, fmt.Sprintf("invalid default_side_effect: %q", *req.DefaultSideEffect))
+		return
+	}
+	if req.ToolOverrides != nil {
+		for tool, se := range *req.ToolOverrides {
+			if se != "" && !isValidSideEffect(se) {
+				orihttp.BadRequest(w, fmt.Sprintf("invalid tool_overrides[%q]: %q", tool, se))
+				return
+			}
+		}
 	}
 
 	workspace, err := h.store.Get(workspaceID)
@@ -199,6 +227,12 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Config != nil {
 		binding.Config = req.Config
+	}
+	if req.DefaultSideEffect != nil {
+		binding.DefaultSideEffect = *req.DefaultSideEffect
+	}
+	if req.ToolOverrides != nil {
+		binding.ToolOverrides = *req.ToolOverrides
 	}
 	*binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, *binding)
 	if err != nil {

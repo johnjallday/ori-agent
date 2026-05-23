@@ -7,6 +7,17 @@ import (
 
 type RawConfig = json.RawMessage
 
+// OriginType identifies what initiated a run. Used by mission-aware code
+// paths (prompt augmentation, autonomy gate, opportunity parsing) so that
+// general WorkspaceRun behavior stays unchanged for legacy run sources.
+type OriginType string
+
+const (
+	// OriginMission marks runs created by workspace mission cadence triggers,
+	// "Run baseline now", or the manual mission-trigger endpoint.
+	OriginMission OriginType = "mission"
+)
+
 type RunStatus string
 
 const (
@@ -66,6 +77,15 @@ type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	ParentRunID string `json:"parent_run_id,omitempty"`
+
+	// OriginType identifies what triggered this run. Empty for legacy runs
+	// triggered through the normal CreateRun path; OriginMission for runs
+	// fired by the workspace mission cadence (or manual mission trigger).
+	OriginType OriginType `json:"origin_type,omitempty"`
+	// CycleOrdinal is 1 for the first mission run on a workspace, 2 for the
+	// second, etc. Used to drive "Baseline" badging and prompt composition
+	// (first run is the baseline assessment). Zero for non-mission runs.
+	CycleOrdinal int `json:"cycle_ordinal,omitempty"`
 
 	ProfileID       string  `json:"profile_id"`
 	ProfileVersion  string  `json:"profile_version"`

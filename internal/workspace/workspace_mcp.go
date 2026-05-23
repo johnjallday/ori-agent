@@ -234,7 +234,21 @@ func cloneBinding(binding WorkspaceMCPBinding) WorkspaceMCPBinding {
 	if len(binding.Config) > 0 {
 		copy.Config = cloneInterfaceMap(binding.Config)
 	}
+	if len(binding.ToolOverrides) > 0 {
+		copy.ToolOverrides = cloneSideEffectMap(binding.ToolOverrides)
+	}
 	return copy
+}
+
+func cloneSideEffectMap(src map[string]SideEffect) map[string]SideEffect {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]SideEffect, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
 }
 
 func cloneAccessEntry(entry WorkspaceAgentMCPAccess) WorkspaceAgentMCPAccess {

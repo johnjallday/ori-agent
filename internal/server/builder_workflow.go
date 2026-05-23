@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
@@ -300,6 +301,58 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
 	if verbose {
 		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
+	}
+}
+
+// initializeMissionBridge wires the workspace mission cadence into the run
+// lifecycle. By the time this phase runs, the workspace store, workspace run
+// service+store, agent store, and task scheduler all exist, so we can
+// construct the MissionBridge and hand it to the scheduler + HTTP handler.
+//
+// Best-effort: if any prerequisite is missing (e.g. a test path that skipped
+// the run service) the function logs and returns without panicking. Mission
+// HTTP endpoints will return 503 in that mode, which is the intended UX.
+func (b *ServerBuilder) initializeMissionBridge() {
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
+	if b.taskScheduler == nil {
+		if verbose {
+			logger.Info("Mission bridge skipped: task scheduler not initialized", logger.Fields{})
+		}
+		return
+	}
+	if b.workspaceRunService == nil || b.workspaceRunStore == nil {
+		if verbose {
+			logger.Info("Mission bridge skipped: workspace run service not initialized", logger.Fields{})
+		}
+		return
+	}
+	if b.workspaceStore == nil {
+		return
+	}
+	opportunityStore := workspace.NewOpportunityStore(b.workspaceStore)
+	bridge := workspacerun.NewMissionBridge(workspacerun.MissionBridgeConfig{
+		RunStore:         b.workspaceRunStore,
+		Service:          b.workspaceRunService,
+		WorkspaceStore:   b.workspaceStore,
+		Agents:           b.st,
+		OpportunityStore: opportunityStore,
+	})
+	if bridge == nil {
+		logger.Warn("Mission bridge construction returned nil; mission triggers will not fire", logger.Fields{})
+		return
+	}
+	b.taskScheduler.SetMissionTrigger(bridge)
+	if b.workspaceHandler != nil {
+		b.workspaceHandler.SetScheduler(b.taskScheduler)
+	}
+
+	// Wire the Action Center handler with the same OpportunityStore so list,
+	// dismiss, snooze, and resolve operations stay in lockstep with mission
+	// runs that produce findings.
+	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore)
+
+	if verbose {
+		logger.Info("Mission bridge initialized", logger.Fields{})
 	}
 }
 

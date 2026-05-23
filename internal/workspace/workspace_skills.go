@@ -199,6 +199,9 @@ func cloneSkillBinding(binding WorkspaceSkillBinding) WorkspaceSkillBinding {
 			cp.Config = out
 		}
 	}
+	if len(binding.ToolOverrides) > 0 {
+		cp.ToolOverrides = cloneSideEffectMap(binding.ToolOverrides)
+	}
 	return cp
 }
 

@@ -28,6 +28,38 @@ const (
 	MessageStatus      MessageType = "status"
 )
 
+// AutonomyPolicy controls how much agent-initiated action a mission run is allowed.
+// Higher levels (Act-with-approval, Autopilot) are deferred to v1.5+.
+type AutonomyPolicy string
+
+const (
+	// AutonomyWatch limits the run to read-classified tools only. No writes anywhere.
+	AutonomyWatch AutonomyPolicy = "watch"
+	// AutonomyPropose allows read + workspace-internal writes (draft artifacts, notes,
+	// recommended-task drafts). External-effect tools remain denied.
+	AutonomyPropose AutonomyPolicy = "propose"
+)
+
+// NotificationPolicy describes when a mission run's findings should reach the user
+// (today via the Action Center; future channels are out of scope for v1).
+type NotificationPolicy struct {
+	// MinPriority filters which findings enter the Action Center. Below this, the
+	// finding is still recorded against the run but suppressed from the global inbox.
+	MinPriority string `json:"min_priority,omitempty"` // low | medium | high | critical
+	// OnFindings controls whether the run notifies at all on a given cycle.
+	OnFindings string `json:"on_findings,omitempty"` // always | if_any | never
+}
+
+// SideEffect classifies what a tool call does so the autonomy gate can allow or
+// deny it. Bindings carry a DefaultSideEffect plus optional per-tool overrides.
+type SideEffect string
+
+const (
+	SideEffectRead     SideEffect = "read"     // observation only; safe under all policies
+	SideEffectWrite    SideEffect = "write"    // mutates workspace-internal state
+	SideEffectExternal SideEffect = "external" // affects systems outside the workspace
+)
+
 // AgentInstance represents a specific instance of an agent with a stable identifier
 type AgentInstance struct {
 	ID             string    `json:"id"`              // Stable UUID for this agent instance
@@ -69,10 +101,25 @@ type Workspace struct {
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
 	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
-	CreatedAt            time.Time                   `json:"created_at"`
-	UpdatedAt            time.Time                   `json:"updated_at"`
-	mu                   sync.RWMutex                `json:"-"`
-	taskIndex            map[string]int              `json:"-"` // Index for O(1) task lookups by ID
+
+	// Mission fields — workspace-level proactive goal carried out by the entry
+	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
+	// with MissionEnabled = false (the zero value) behaves exactly as before.
+	Mission               string              `json:"mission,omitempty"`
+	Cadence               *ScheduleConfig     `json:"cadence,omitempty"`
+	AutonomyPolicy        AutonomyPolicy      `json:"autonomy_policy,omitempty"` // defaults to AutonomyPropose when MissionEnabled is true
+	NotificationPolicy    *NotificationPolicy `json:"notification_policy,omitempty"`
+	MissionEnabled        bool                `json:"mission_enabled,omitempty"`
+	LastMissionRunAt      *time.Time          `json:"last_mission_run_at,omitempty"`
+	NextMissionRunAt      *time.Time          `json:"next_mission_run_at,omitempty"`
+	MissionExecutionCount int                 `json:"mission_execution_count,omitempty"`
+	MissionFailureCount   int                 `json:"mission_failure_count,omitempty"`
+	Opportunities         []Opportunity       `json:"opportunities,omitempty"`
+
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	mu        sync.RWMutex   `json:"-"`
+	taskIndex map[string]int `json:"-"` // Index for O(1) task lookups by ID
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas
@@ -484,6 +531,7 @@ const (
 	ScheduleInterval      ScheduleType = "interval"       // Every X duration
 	ScheduleDaily         ScheduleType = "daily"          // Every day at specific time
 	ScheduleWeekly        ScheduleType = "weekly"         // Every week on specific day/time
+	ScheduleMonthly       ScheduleType = "monthly"        // Every month on a specific day/time
 	ScheduleCron          ScheduleType = "cron"           // Cron expression (advanced)
 	ScheduleRelativeDelay ScheduleType = "relative_delay" // Delay from trigger/enable time
 )
@@ -506,6 +554,11 @@ type ScheduleConfig struct {
 
 	// For "weekly" type
 	DayOfWeek int `json:"day_of_week,omitempty"` // 0=Sunday, 1=Monday, ..., 6=Saturday
+
+	// For "monthly" type. DayOfMonth is 1-31; if the current month has fewer
+	// days than DayOfMonth the next-run calculation clamps to the last day of
+	// that month (e.g., DayOfMonth=31 in February fires on Feb 28/29).
+	DayOfMonth int `json:"day_of_month,omitempty"`
 
 	// For "relative_delay" type
 	DelayDuration time.Duration `json:"delay_duration,omitempty"` // e.g., 30s, 5m, 1h
@@ -594,8 +647,16 @@ type WorkspaceMCPBinding struct {
 	Enabled    bool           `json:"enabled"`
 	Scope      map[string]any `json:"scope,omitempty"`
 	Config     map[string]any `json:"config,omitempty"`
-	CreatedAt  time.Time      `json:"created_at,omitempty"`
-	UpdatedAt  time.Time      `json:"updated_at,omitempty"`
+	// DefaultSideEffect classifies the binding's tools when no per-tool override
+	// applies. Empty means unclassified; mission runs must not invoke this
+	// binding until the user classifies it (one-time prompt on mission enable).
+	DefaultSideEffect SideEffect `json:"default_side_effect,omitempty"`
+	// ToolOverrides maps individual tool names to a SideEffect classification,
+	// overriding DefaultSideEffect for that tool. Used for mixed-capability
+	// servers (e.g. filesystem servers with both read_file and write_file).
+	ToolOverrides map[string]SideEffect `json:"tool_overrides,omitempty"`
+	CreatedAt     time.Time             `json:"created_at,omitempty"`
+	UpdatedAt     time.Time             `json:"updated_at,omitempty"`
 }
 
 // WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
@@ -614,8 +675,15 @@ type WorkspaceSkillBinding struct {
 	Enabled   bool           `json:"enabled"`
 	Trusted   bool           `json:"trusted"`
 	Config    map[string]any `json:"config,omitempty"`
-	CreatedAt time.Time      `json:"created_at,omitempty"`
-	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+	// DefaultSideEffect classifies the skill when no per-tool override applies.
+	// Empty means unclassified; mission runs must not invoke this skill until
+	// the user classifies it. Prompt-only skills typically default to read.
+	DefaultSideEffect SideEffect `json:"default_side_effect,omitempty"`
+	// ToolOverrides maps tool names exposed by the skill to a SideEffect
+	// classification, overriding DefaultSideEffect for that tool.
+	ToolOverrides map[string]SideEffect `json:"tool_overrides,omitempty"`
+	CreatedAt     time.Time             `json:"created_at,omitempty"`
+	UpdatedAt     time.Time             `json:"updated_at,omitempty"`
 }
 
 // WorkspaceAgentSkillAccess narrows which workspace skill bindings an agent instance

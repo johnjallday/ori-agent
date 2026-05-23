@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -9,12 +10,26 @@ import (
 	"time"
 )
 
+// MissionTrigger is the bridge into the run-execution layer for mission runs.
+// The scheduler calls it when a workspace's mission cadence fires; the
+// concrete implementation (lives outside this package to avoid an import
+// cycle with workspacerun) is responsible for creating the actual
+// WorkspaceRun, augmenting the system prompt, applying the autonomy gate,
+// parsing findings into opportunities, and updating mission tracking fields.
+//
+// Returning the run ID lets the scheduler write it back onto trace/audit
+// fields if needed; returning an error increments the failure count.
+type MissionTrigger interface {
+	TriggerMissionRun(ctx context.Context, workspaceID string, cycleOrdinal int) (runID string, err error)
+}
+
 // TaskScheduler handles automatic execution of scheduled tasks
 type TaskScheduler struct {
 	workspaceStore Store
 	eventBus       *EventBus
 	pollInterval   time.Duration
 	wakeScheduler  WakeScheduler
+	missionTrigger MissionTrigger
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -57,6 +72,13 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 // SetEventBus sets the event bus for publishing events
 func (ts *TaskScheduler) SetEventBus(eventBus *EventBus) {
 	ts.eventBus = eventBus
+}
+
+// SetMissionTrigger attaches the mission-run bridge. Without one the scheduler
+// silently skips mission cadence checks (matching how it behaves before a
+// MissionTrigger is wired in at server startup).
+func (ts *TaskScheduler) SetMissionTrigger(trigger MissionTrigger) {
+	ts.missionTrigger = trigger
 }
 
 // Start begins the scheduler polling loop
@@ -183,6 +205,9 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 		// Also check legacy ScheduledTasks for backward compatibility during migration
 		ts.checkLegacyScheduledTasks(ws, now)
+		// Check workspace mission cadence — fires a mission run via the
+		// configured MissionTrigger when NextMissionRunAt has arrived.
+		ts.checkMissionCadence(ws, now)
 		wakeCandidates = append(wakeCandidates, collectWakeCandidates(ws, now)...)
 	}
 
@@ -765,6 +790,50 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 
 		return &next
 
+	case ScheduleMonthly:
+		if config.TimeOfDay == "" {
+			logger.Warn("Invalid monthly schedule: time_of_day is empty", logger.Fields{})
+			return nil
+		}
+		if config.DayOfMonth < 1 || config.DayOfMonth > 31 {
+			logger.Warn("Invalid monthly schedule: day_of_month out of range", logger.Fields{"day_of_month": config.DayOfMonth})
+			return nil
+		}
+		var hour, minute int
+		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
+			logger.Warn("Invalid time_of_day format", logger.Fields{"time_of_day": config.TimeOfDay, "error": err})
+			return nil
+		}
+
+		// Start from the month containing lastRun (or now, if lastRun is zero)
+		// and advance one month at a time until the resulting tick is strictly
+		// after now. DayOfMonth is clamped to the last valid day of each month
+		// so DayOfMonth=31 fires on Feb 28/29 etc.
+		base := lastRun
+		if base.IsZero() {
+			base = now
+		}
+		year, month := base.Year(), base.Month()
+		const maxSkips = 1200 // ~100 years of months
+		var next time.Time
+		for i := 0; i < maxSkips; i++ {
+			day := clampDayOfMonth(year, month, config.DayOfMonth)
+			next = time.Date(year, month, day, hour, minute, 0, 0, base.Location())
+			if next.After(now) {
+				break
+			}
+			month++
+			if month > time.December {
+				month = time.January
+				year++
+			}
+		}
+
+		if config.EndDate != nil && next.After(*config.EndDate) {
+			return nil
+		}
+		return &next
+
 	case ScheduleCron:
 		// Validate cron expression is provided
 		if config.CronExpr == "" {
@@ -847,4 +916,17 @@ func ValidateCronExpression(expr string) error {
 	}
 
 	return nil
+}
+
+// clampDayOfMonth returns the smaller of requestedDay and the number of days
+// in the given month. Used by ScheduleMonthly so DayOfMonth=31 fires on the
+// last day of short months instead of rolling into the next month.
+func clampDayOfMonth(year int, month time.Month, requestedDay int) int {
+	// time.Date with day=0 returns the last day of the previous month, so
+	// adding 1 to month and asking for day 0 gives us the days in `month`.
+	last := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if requestedDay > last {
+		return last
+	}
+	return requestedDay
 }

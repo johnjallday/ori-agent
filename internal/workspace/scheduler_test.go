@@ -474,3 +474,112 @@ func TestCollectWakeCandidates(t *testing.T) {
 		t.Fatalf("unexpected candidate: %#v", candidates[0])
 	}
 }
+
+// TestCalculateNextRun_Monthly verifies monthly cadence including the
+// short-month clamp (DayOfMonth=31 in February fires on Feb 28/29).
+func TestCalculateNextRun_Monthly(t *testing.T) {
+	// Mid-January reference time so "next" is straightforward.
+	refTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	prevNow := nowFunc
+	nowFunc = func() time.Time { return refTime }
+	t.Cleanup(func() { nowFunc = prevNow })
+
+	tests := []struct {
+		name        string
+		dayOfMonth  int
+		timeOfDay   string
+		lastRun     time.Time
+		wantYear    int
+		wantMonth   time.Month
+		wantDay     int
+		wantNilNext bool
+	}{
+		{
+			name:       "later this month",
+			dayOfMonth: 28,
+			timeOfDay:  "09:00",
+			lastRun:    refTime,
+			wantYear:   2026, wantMonth: time.January, wantDay: 28,
+		},
+		{
+			name:       "day already passed this month rolls to next",
+			dayOfMonth: 5,
+			timeOfDay:  "09:00",
+			lastRun:    refTime,
+			wantYear:   2026, wantMonth: time.February, wantDay: 5,
+		},
+		{
+			name:       "day 31 clamps to Feb 28 in a non-leap year",
+			dayOfMonth: 31,
+			timeOfDay:  "09:00",
+			// Pin lastRun + now to late January 2026 so the next monthly tick lands in Feb 2026.
+			lastRun:  time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC),
+			wantYear: 2026, wantMonth: time.February, wantDay: 28,
+		},
+		{
+			name:        "empty time_of_day returns nil",
+			dayOfMonth:  15,
+			timeOfDay:   "",
+			lastRun:     refTime,
+			wantNilNext: true,
+		},
+		{
+			name:        "out-of-range day returns nil",
+			dayOfMonth:  0,
+			timeOfDay:   "09:00",
+			lastRun:     refTime,
+			wantNilNext: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// For tests that change "now" (e.g. clamp test), repin nowFunc.
+			localNow := tc.lastRun
+			if localNow.IsZero() {
+				localNow = refTime
+			}
+			nowFunc = func() time.Time { return localNow }
+			defer func() { nowFunc = func() time.Time { return refTime } }()
+
+			next := CalculateNextRun(ScheduleConfig{
+				Type:       ScheduleMonthly,
+				TimeOfDay:  tc.timeOfDay,
+				DayOfMonth: tc.dayOfMonth,
+			}, tc.lastRun)
+
+			if tc.wantNilNext {
+				if next != nil {
+					t.Fatalf("expected nil next; got %v", *next)
+				}
+				return
+			}
+			if next == nil {
+				t.Fatalf("expected non-nil next")
+			}
+			if next.Year() != tc.wantYear || next.Month() != tc.wantMonth || next.Day() != tc.wantDay {
+				t.Errorf("next = %v; want %d-%s-%02d", *next, tc.wantYear, tc.wantMonth, tc.wantDay)
+			}
+		})
+	}
+}
+
+func TestClampDayOfMonth(t *testing.T) {
+	cases := []struct {
+		year, day int
+		month     time.Month
+		want      int
+	}{
+		{2026, 31, time.February, 28}, // non-leap February
+		{2024, 31, time.February, 29}, // leap February
+		{2026, 31, time.April, 30},    // 30-day month
+		{2026, 15, time.July, 15},     // within range
+		{2026, 31, time.January, 31},  // 31-day month
+	}
+	for _, c := range cases {
+		got := clampDayOfMonth(c.year, c.month, c.day)
+		if got != c.want {
+			t.Errorf("clampDayOfMonth(%d, %s, %d) = %d; want %d", c.year, c.month, c.day, got, c.want)
+		}
+	}
+}

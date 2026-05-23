@@ -21,11 +21,13 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		ID        string         `json:"id,omitempty"`
-		SkillName string         `json:"skill_name"`
-		Enabled   *bool          `json:"enabled,omitempty"`
-		Trusted   *bool          `json:"trusted,omitempty"`
-		Config    map[string]any `json:"config,omitempty"`
+		ID                string                `json:"id,omitempty"`
+		SkillName         string                `json:"skill_name"`
+		Enabled           *bool                 `json:"enabled,omitempty"`
+		Trusted           *bool                 `json:"trusted,omitempty"`
+		Config            map[string]any        `json:"config,omitempty"`
+		DefaultSideEffect SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides     map[string]SideEffect `json:"tool_overrides,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -33,6 +35,16 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(req.SkillName) == "" {
 		orihttp.BadRequest(w, "skill_name is required")
 		return
+	}
+	if req.DefaultSideEffect != "" && !isValidSideEffect(req.DefaultSideEffect) {
+		orihttp.BadRequest(w, fmt.Sprintf("invalid default_side_effect: %q", req.DefaultSideEffect))
+		return
+	}
+	for tool, se := range req.ToolOverrides {
+		if se != "" && !isValidSideEffect(se) {
+			orihttp.BadRequest(w, fmt.Sprintf("invalid tool_overrides[%q]: %q", tool, se))
+			return
+		}
 	}
 
 	workspace, err := h.store.Get(workspaceID)
@@ -60,13 +72,15 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	binding := WorkspaceSkillBinding{
-		ID:        bindingID,
-		SkillName: req.SkillName,
-		Enabled:   enabled,
-		Trusted:   trusted,
-		Config:    req.Config,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:                bindingID,
+		SkillName:         req.SkillName,
+		Enabled:           enabled,
+		Trusted:           trusted,
+		Config:            req.Config,
+		DefaultSideEffect: req.DefaultSideEffect,
+		ToolOverrides:     req.ToolOverrides,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 
 	if err := workspace.UpsertSkillBinding(binding); err != nil {
@@ -160,13 +174,27 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		SkillName *string        `json:"skill_name,omitempty"`
-		Enabled   *bool          `json:"enabled,omitempty"`
-		Trusted   *bool          `json:"trusted,omitempty"`
-		Config    map[string]any `json:"config,omitempty"`
+		SkillName         *string                `json:"skill_name,omitempty"`
+		Enabled           *bool                  `json:"enabled,omitempty"`
+		Trusted           *bool                  `json:"trusted,omitempty"`
+		Config            map[string]any         `json:"config,omitempty"`
+		DefaultSideEffect *SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides     *map[string]SideEffect `json:"tool_overrides,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+	if req.DefaultSideEffect != nil && *req.DefaultSideEffect != "" && !isValidSideEffect(*req.DefaultSideEffect) {
+		orihttp.BadRequest(w, fmt.Sprintf("invalid default_side_effect: %q", *req.DefaultSideEffect))
+		return
+	}
+	if req.ToolOverrides != nil {
+		for tool, se := range *req.ToolOverrides {
+			if se != "" && !isValidSideEffect(se) {
+				orihttp.BadRequest(w, fmt.Sprintf("invalid tool_overrides[%q]: %q", tool, se))
+				return
+			}
+		}
 	}
 
 	workspace, err := h.store.Get(workspaceID)
@@ -192,6 +220,12 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Config != nil {
 		binding.Config = req.Config
+	}
+	if req.DefaultSideEffect != nil {
+		binding.DefaultSideEffect = *req.DefaultSideEffect
+	}
+	if req.ToolOverrides != nil {
+		binding.ToolOverrides = *req.ToolOverrides
 	}
 
 	if err := workspace.UpsertSkillBinding(*binding); err != nil {

@@ -804,6 +804,27 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *resolvedTaskA
 func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
 	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
 
+	// Mission autonomy gate. Runs only when this is a mission task (set by
+	// MissionBridge) — interactive chat with the same agent is unaffected.
+	// v1 uses a heuristic classifier (SuggestSideEffect) when no per-binding
+	// classification can be resolved; tools whose names don't match a
+	// read-prefix are conservatively treated as write/external and denied
+	// under Watch. Per-tool binding-driven classification is a follow-up.
+	if IsMissionTask(task.Context) {
+		if denial := h.evaluateMissionGate(task, toolCall.Name); denial != nil {
+			if h.eventBus != nil {
+				event := NewTaskEvent(EventTaskToolResult, task.WorkspaceID, task.ID, agentName, map[string]any{
+					"tool_name": toolCall.Name,
+					"success":   false,
+					"error":     denial.Error(),
+					"blocked":   true,
+				})
+				h.eventBus.Publish(event)
+			}
+			return toolCallResult{Name: toolCall.Name, Error: denial}
+		}
+	}
+
 	// Publish tool call event
 	if h.eventBus != nil {
 		event := NewTaskEvent(EventTaskToolCall, task.WorkspaceID, task.ID, agentName, map[string]any{

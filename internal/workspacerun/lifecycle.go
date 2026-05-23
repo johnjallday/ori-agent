@@ -30,6 +30,12 @@ type CreateRunRequest struct {
 	Environment       Environment        `json:"environment"`
 	ContextPlan       ContextPlan        `json:"context_plan,omitempty"`
 	ValidationRequest *ValidationRequest `json:"validation_request,omitempty"`
+	// OriginType marks why the run was created (e.g. OriginMission for
+	// workspace mission triggers). Empty for normal runs.
+	OriginType OriginType `json:"origin_type,omitempty"`
+	// CycleOrdinal is meaningful only when OriginType == OriginMission; it
+	// records which mission cycle this run is (1 = baseline).
+	CycleOrdinal int `json:"cycle_ordinal,omitempty"`
 }
 
 func NewService(store Store, profiles *ProfileRegistry, executors *ExecutorRegistry, environments EnvironmentManager, validator *Validator, resolveRoots WorkspaceRootResolver) *Service {
@@ -79,6 +85,8 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 	run := &Run{
 		WorkspaceID:       workspaceID,
 		ParentRunID:       req.ParentRunID,
+		OriginType:        req.OriginType,
+		CycleOrdinal:      req.CycleOrdinal,
 		ProfileID:         profile.ID,
 		ProfileVersion:    profile.Version,
 		ProfileSnapshot:   profile,

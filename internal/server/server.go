@@ -233,6 +233,16 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "agents", data)
 }
 
+// serveActionCenter renders the cross-workspace Action Center page. The page
+// only depends on the action-center JS module; all data comes from the
+// /api/action-center/opportunities endpoints.
+func (s *Server) serveActionCenter(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("action-center")
+	data.Title = "Action Center - Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "action-center", data)
+}
+
 func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Agent Details - Ori Agent"

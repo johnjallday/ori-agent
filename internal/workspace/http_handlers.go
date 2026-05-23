@@ -19,6 +19,11 @@ type HTTPHandler struct {
 	orchestrator  *Orchestrator
 	eventBus      *EventBus
 	emailAccounts emailAccountStore
+	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
+	// Mission-related HTTP endpoints route through it so they share the same
+	// trigger configuration as cadence-driven runs. Optional — handlers
+	// that depend on it should fall back to a 503 when nil.
+	scheduler *TaskScheduler
 }
 
 // NewHTTPHandler creates a new HTTP handler
@@ -28,6 +33,12 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 		orchestrator: orchestrator,
 		eventBus:     eventBus,
 	}
+}
+
+// SetScheduler wires the task scheduler so mission HTTP endpoints can fire
+// mission runs through the same MissionTrigger configured for cadence runs.
+func (h *HTTPHandler) SetScheduler(scheduler *TaskScheduler) {
+	h.scheduler = scheduler
 }
 
 // CreateWorkspaceRequest represents the request to create a new workspace

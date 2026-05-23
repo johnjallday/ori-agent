@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -116,6 +117,7 @@ type HandlerFacade struct {
 	CLIAgents        *cliagenthttp.Handler
 	CLIAgentRegistry *cliagent.CLIAgentRegistry
 	WorkspaceRuns    *workspacerun.Handler
+	ActionCenter     *actioncenterhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
