@@ -270,6 +270,7 @@
                     </label>
                   </div>
                   <div class="workspace-detail-goal-modal-enabled-hint" id="workspace-detail-goal-modal-enabled-hint" style="display: none;">Pick a cadence above to enable automatic runs.</div>
+                  <div class="workspace-detail-goal-modal-autonomy" id="workspace-detail-goal-modal-autonomy"></div>
                   <div class="workspace-detail-goal-modal-status" id="workspace-detail-goal-modal-status" aria-live="polite"></div>
                 </div>
                 <div class="modal-footer workspace-detail-goal-modal-footer">
@@ -2805,6 +2806,15 @@
       margin-top: 0.1rem;
       color: var(--warning-color, #f5a623);
       font-size: 0.76rem;
+    }
+
+    .workspace-detail-goal-modal-autonomy {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+    }
+
+    .workspace-detail-goal-modal-autonomy strong {
+      color: var(--text-primary);
     }
 
     .workspace-detail-goal-modal-status {

@@ -73,11 +73,54 @@
     goalModalCadenceDomWrap: '#workspace-detail-goal-modal-cadence-dom-wrap',
     goalModalCadenceIntervalWrap: '#workspace-detail-goal-modal-cadence-interval-wrap',
     goalModalEnabledHint: '#workspace-detail-goal-modal-enabled-hint',
+    goalModalAutonomy: '#workspace-detail-goal-modal-autonomy',
     goalModalBindingsWarning: '#workspace-detail-goal-modal-bindings-warning',
     goalModalUnclassifiedList: '#workspace-detail-goal-modal-unclassified-list',
   };
 
+  // Plain-language summary of each autonomy policy. The quick-edit modal only
+  // displays the current value (read-only) — it's changed in Advanced settings.
+  const AUTONOMY_LABELS = {
+    watch: { label: 'Watch', desc: 'reports findings only, makes no changes' },
+    propose: { label: 'Propose', desc: 'may draft inside the workspace, no external changes' },
+  };
+
   let latestState = null;
+
+  // Cadence intervals come back from the API as Go durations in nanoseconds.
+  const NS_PER_HOUR = 3.6e12;
+
+  // The goal cadence editor exists twice — in the quick-edit modal and the
+  // advanced form. Both share identical logic over different element ids, so
+  // describe each surface once and drive the shared helpers below from it.
+  const CADENCE_SURFACES = {
+    form: {
+      type: SELECTORS.cadenceType,
+      time: SELECTORS.cadenceTime,
+      dow: SELECTORS.cadenceDow,
+      dom: SELECTORS.cadenceDom,
+      interval: SELECTORS.cadenceInterval,
+      timeWrap: SELECTORS.cadenceTimeWrap,
+      dowWrap: SELECTORS.cadenceDowWrap,
+      domWrap: SELECTORS.cadenceDomWrap,
+      intervalWrap: SELECTORS.cadenceIntervalWrap,
+      enabled: SELECTORS.enabled,
+      enabledHint: SELECTORS.enabledHint,
+    },
+    modal: {
+      type: SELECTORS.goalModalCadenceType,
+      time: SELECTORS.goalModalCadenceTime,
+      dow: SELECTORS.goalModalCadenceDow,
+      dom: SELECTORS.goalModalCadenceDom,
+      interval: SELECTORS.goalModalCadenceInterval,
+      timeWrap: SELECTORS.goalModalCadenceTimeWrap,
+      dowWrap: SELECTORS.goalModalCadenceDowWrap,
+      domWrap: SELECTORS.goalModalCadenceDomWrap,
+      intervalWrap: SELECTORS.goalModalCadenceIntervalWrap,
+      enabled: SELECTORS.goalModalEnabled,
+      enabledHint: SELECTORS.goalModalEnabledHint,
+    },
+  };
 
   function $(sel) {
     return document.querySelector(sel);
@@ -138,101 +181,112 @@
       return `Monthly day ${day} at ${config.time_of_day || '09:00'}`;
     }
     if (type === 'interval') {
-      const hours = config.interval ? Math.max(1, Math.round(config.interval / 3.6e12)) : 24;
+      const hours = config.interval ? Math.max(1, Math.round(config.interval / NS_PER_HOUR)) : 24;
       return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
     }
     return type;
   }
 
-  function applyGoalModalCadenceVisibility(type) {
+  // Show only the cadence sub-fields relevant to the selected type, and keep
+  // the "enable automation" toggle honest: a goal with no cadence can't run on
+  // its own, so force the toggle off + disabled and reveal the hint. Shared by
+  // both the modal and the advanced form via their CADENCE_SURFACES entry.
+  function applyCadenceVisibility(fields, type) {
     const wraps = {
-      daily: ['goalModalCadenceTimeWrap'],
-      weekly: ['goalModalCadenceTimeWrap', 'goalModalCadenceDowWrap'],
-      monthly: ['goalModalCadenceTimeWrap', 'goalModalCadenceDomWrap'],
-      interval: ['goalModalCadenceIntervalWrap'],
+      daily: ['timeWrap'],
+      weekly: ['timeWrap', 'dowWrap'],
+      monthly: ['timeWrap', 'domWrap'],
+      interval: ['intervalWrap'],
     };
     const visible = new Set(wraps[type] || []);
-    for (const key of [
-      'goalModalCadenceTimeWrap',
-      'goalModalCadenceDowWrap',
-      'goalModalCadenceDomWrap',
-      'goalModalCadenceIntervalWrap',
-    ]) {
-      const el = $(SELECTORS[key]);
+    for (const key of ['timeWrap', 'dowWrap', 'domWrap', 'intervalWrap']) {
+      const el = $(fields[key]);
       if (el) el.style.display = visible.has(key) ? '' : 'none';
     }
-    syncGoalModalEnableState(type);
-  }
-
-  // Automation can only run on a cadence. With "Manual only" selected there is
-  // nothing to enable, so force the toggle off and disabled to avoid a green
-  // "Enabled" goal that never actually runs.
-  function syncGoalModalEnableState(type) {
-    const enabled = $(SELECTORS.goalModalEnabled);
-    const hint = $(SELECTORS.goalModalEnabledHint);
     const manualOnly = !type;
+    const enabled = $(fields.enabled);
     if (enabled) {
       if (manualOnly) enabled.checked = false;
       enabled.disabled = manualOnly;
     }
+    const hint = $(fields.enabledHint);
     if (hint) hint.style.display = manualOnly ? '' : 'none';
+  }
+
+  // Fill a cadence editor's inputs from a cadence object and sync visibility.
+  function populateCadenceFields(fields, cadence) {
+    const config = cadence || {};
+    const setVal = (sel, val) => {
+      const el = $(sel);
+      if (el) el.value = val;
+    };
+    setVal(fields.type, config.type || '');
+    if (config.time_of_day) setVal(fields.time, config.time_of_day);
+    if (typeof config.day_of_week === 'number') setVal(fields.dow, String(config.day_of_week));
+    if (typeof config.day_of_month === 'number') setVal(fields.dom, String(config.day_of_month));
+    if (config.interval) {
+      setVal(fields.interval, String(Math.max(1, Math.round(config.interval / NS_PER_HOUR))));
+    }
+    applyCadenceVisibility(fields, config.type || '');
+  }
+
+  // Build a cadence object from a cadence editor's inputs (null = manual only).
+  function readCadenceFields(fields) {
+    const type = $(fields.type).value;
+    if (type === 'daily') {
+      return { type: 'daily', time_of_day: $(fields.time).value || '09:00' };
+    }
+    if (type === 'weekly') {
+      return {
+        type: 'weekly',
+        time_of_day: $(fields.time).value || '09:00',
+        day_of_week: parseInt($(fields.dow).value, 10),
+      };
+    }
+    if (type === 'monthly') {
+      return {
+        type: 'monthly',
+        time_of_day: $(fields.time).value || '09:00',
+        day_of_month: parseInt($(fields.dom).value, 10) || 1,
+      };
+    }
+    if (type === 'interval') {
+      const hours = parseInt($(fields.interval).value, 10) || 24;
+      return { type: 'interval', interval: hours * NS_PER_HOUR };
+    }
+    return null;
   }
 
   function populateGoalModalFromState(state) {
     const current = state || latestState || {};
     const mission = String(current.mission || '');
-    const cadence = current.cadence || {};
-    const type = cadence.type || '';
     const title = $(SELECTORS.goalModalTitle);
     const text = $(SELECTORS.goalModalText);
     const enabled = $(SELECTORS.goalModalEnabled);
-    const cadenceType = $(SELECTORS.goalModalCadenceType);
 
     if (title) title.textContent = mission.trim() ? 'Edit goal' : 'Set goal';
     if (text) text.value = mission;
     if (enabled) enabled.checked = !!current.mission_enabled;
-    if (cadenceType) cadenceType.value = type;
-    if (cadence.time_of_day) $(SELECTORS.goalModalCadenceTime).value = cadence.time_of_day;
-    if (typeof cadence.day_of_week === 'number') {
-      $(SELECTORS.goalModalCadenceDow).value = String(cadence.day_of_week);
-    }
-    if (typeof cadence.day_of_month === 'number') {
-      $(SELECTORS.goalModalCadenceDom).value = String(cadence.day_of_month);
-    }
-    if (cadence.interval) {
-      const hours = Math.max(1, Math.round(cadence.interval / 3.6e12));
-      $(SELECTORS.goalModalCadenceInterval).value = String(hours);
-    }
-    applyGoalModalCadenceVisibility(type);
+    populateCadenceFields(CADENCE_SURFACES.modal, current.cadence);
+    renderGoalModalAutonomy(current);
     renderGoalModalBindingsWarning(current);
     setGoalModalStatus('');
   }
 
-  function readGoalModalState() {
-    const cadenceType = $(SELECTORS.goalModalCadenceType).value;
-    let cadence = null;
-    if (cadenceType === 'daily') {
-      cadence = { type: 'daily', time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00' };
-    } else if (cadenceType === 'weekly') {
-      cadence = {
-        type: 'weekly',
-        time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00',
-        day_of_week: parseInt($(SELECTORS.goalModalCadenceDow).value, 10),
-      };
-    } else if (cadenceType === 'monthly') {
-      cadence = {
-        type: 'monthly',
-        time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00',
-        day_of_month: parseInt($(SELECTORS.goalModalCadenceDom).value, 10) || 1,
-      };
-    } else if (cadenceType === 'interval') {
-      const hours = parseInt($(SELECTORS.goalModalCadenceInterval).value, 10) || 24;
-      cadence = { type: 'interval', interval: hours * 3.6e12 };
-    }
+  // Show the active autonomy policy in the modal so first-time users (who may
+  // never open Advanced settings) can see how the manager will act.
+  function renderGoalModalAutonomy(state) {
+    const el = $(SELECTORS.goalModalAutonomy);
+    if (!el) return;
+    const policy = (state && state.autonomy_policy) || 'propose';
+    const info = AUTONOMY_LABELS[policy] || AUTONOMY_LABELS.propose;
+    el.innerHTML = `Autonomy: <strong>${info.label}</strong> — ${info.desc}. Adjust in Advanced settings.`;
+  }
 
+  function readGoalModalState() {
     return {
       mission: $(SELECTORS.goalModalText).value,
-      cadence,
+      cadence: readCadenceFields(CADENCE_SURFACES.modal),
       mission_enabled: $(SELECTORS.goalModalEnabled).checked,
     };
   }
@@ -403,34 +457,6 @@
     if (list) list.innerHTML = unclassifiedSummaryHTML(state);
   }
 
-  function applyCadenceVisibility(type) {
-    const wraps = {
-      daily: ['cadenceTimeWrap'],
-      weekly: ['cadenceTimeWrap', 'cadenceDowWrap'],
-      monthly: ['cadenceTimeWrap', 'cadenceDomWrap'],
-      interval: ['cadenceIntervalWrap'],
-    };
-    const visible = new Set(wraps[type] || []);
-    for (const key of ['cadenceTimeWrap', 'cadenceDowWrap', 'cadenceDomWrap', 'cadenceIntervalWrap']) {
-      const el = $(SELECTORS[key]);
-      if (el) el.style.display = visible.has(key) ? '' : 'none';
-    }
-    syncFormEnableState(type);
-  }
-
-  // Mirror of syncGoalModalEnableState for the advanced form: a goal with no
-  // cadence cannot be "enabled" in any meaningful way, so keep the toggle off.
-  function syncFormEnableState(type) {
-    const enabled = $(SELECTORS.enabled);
-    const hint = $(SELECTORS.enabledHint);
-    const manualOnly = !type;
-    if (enabled) {
-      if (manualOnly) enabled.checked = false;
-      enabled.disabled = manualOnly;
-    }
-    if (hint) hint.style.display = manualOnly ? '' : 'none';
-  }
-
   function populateFormFromState(state) {
     $(SELECTORS.text).value = state.mission || '';
     $(SELECTORS.enabled).checked = !!state.mission_enabled;
@@ -442,19 +468,7 @@
       r.checked = r.value === policy;
     });
 
-    // Cadence
-    const cadence = state.cadence || {};
-    const type = cadence.type || '';
-    $(SELECTORS.cadenceType).value = type;
-    if (cadence.time_of_day) $(SELECTORS.cadenceTime).value = cadence.time_of_day;
-    if (typeof cadence.day_of_week === 'number') $(SELECTORS.cadenceDow).value = String(cadence.day_of_week);
-    if (typeof cadence.day_of_month === 'number') $(SELECTORS.cadenceDom).value = String(cadence.day_of_month);
-    if (cadence.interval) {
-      // Interval comes back as a Go duration in nanoseconds (number).
-      const hours = Math.max(1, Math.round(cadence.interval / 3.6e12));
-      $(SELECTORS.cadenceInterval).value = String(hours);
-    }
-    applyCadenceVisibility(type);
+    populateCadenceFields(CADENCE_SURFACES.form, state.cadence);
 
     // Notification policy
     const notif = state.notification_policy || {};
@@ -488,26 +502,7 @@
 
   function readFormState() {
     const policy = Array.from(document.querySelectorAll(SELECTORS.autonomyRadios)).find((r) => r.checked);
-    const cadenceType = $(SELECTORS.cadenceType).value;
-    let cadence = null;
-    if (cadenceType === 'daily') {
-      cadence = { type: 'daily', time_of_day: $(SELECTORS.cadenceTime).value || '09:00' };
-    } else if (cadenceType === 'weekly') {
-      cadence = {
-        type: 'weekly',
-        time_of_day: $(SELECTORS.cadenceTime).value || '09:00',
-        day_of_week: parseInt($(SELECTORS.cadenceDow).value, 10),
-      };
-    } else if (cadenceType === 'monthly') {
-      cadence = {
-        type: 'monthly',
-        time_of_day: $(SELECTORS.cadenceTime).value || '09:00',
-        day_of_month: parseInt($(SELECTORS.cadenceDom).value, 10) || 1,
-      };
-    } else if (cadenceType === 'interval') {
-      const hours = parseInt($(SELECTORS.cadenceInterval).value, 10) || 24;
-      cadence = { type: 'interval', interval: hours * 3.6e12 }; // hours → nanoseconds
-    }
+    const cadence = readCadenceFields(CADENCE_SURFACES.form);
 
     const minPriority = $(SELECTORS.notifPriority).value;
     const onFindings = $(SELECTORS.notifOnFindings).value;
@@ -616,13 +611,15 @@
   function wireForm() {
     const cadenceType = $(SELECTORS.cadenceType);
     if (cadenceType) {
-      cadenceType.addEventListener('change', () => applyCadenceVisibility(cadenceType.value));
+      cadenceType.addEventListener('change', () =>
+        applyCadenceVisibility(CADENCE_SURFACES.form, cadenceType.value)
+      );
     }
 
     const goalModalCadenceType = $(SELECTORS.goalModalCadenceType);
     if (goalModalCadenceType) {
       goalModalCadenceType.addEventListener('change', () =>
-        applyGoalModalCadenceVisibility(goalModalCadenceType.value)
+        applyCadenceVisibility(CADENCE_SURFACES.modal, goalModalCadenceType.value)
       );
     }
 
