@@ -2286,7 +2286,7 @@ button.hub-stat[hidden] {
   border: 1px solid rgba(138, 138, 138, 0.18);
   background:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.14), transparent 42%),
-    linear-gradient(135deg, rgba(13, 20, 13, 0.96), rgba(13, 20, 13, 0.9));
+    linear-gradient(135deg, rgba(31, 33, 40, 0.96), rgba(31, 33, 40, 0.9));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -3226,7 +3226,7 @@ button.hub-stat[hidden] {
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.18), transparent 34%),
     radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.12), transparent 40%),
     linear-gradient(160deg, color-mix(in srgb, var(--bg-primary) 92%, #06111c 8%), color-mix(in srgb, var(--bg-secondary) 90%, #030712 10%));
-  box-shadow: 0 34px 84px rgba(13, 20, 13, 0.5);
+  box-shadow: 0 34px 84px rgba(31, 33, 40, 0.5);
   overflow: hidden;
 }
 

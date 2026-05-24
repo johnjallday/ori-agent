@@ -7,6 +7,17 @@ import (
 
 type RawConfig = json.RawMessage
 
+// OriginType identifies what initiated a run. Used by mission-aware code
+// paths (prompt augmentation, autonomy gate, opportunity parsing) so that
+// general WorkspaceRun behavior stays unchanged for legacy run sources.
+type OriginType string
+
+const (
+	// OriginMission marks runs created by workspace mission cadence triggers,
+	// "Run baseline now", or the manual mission-trigger endpoint.
+	OriginMission OriginType = "mission"
+)
+
 type RunStatus string
 
 const (
@@ -34,15 +45,20 @@ const (
 type ArtifactKind string
 
 const (
-	ArtifactDiff         ArtifactKind = "diff"
-	ArtifactChangedFiles ArtifactKind = "changed_files"
-	ArtifactTestOutput   ArtifactKind = "test_output"
-	ArtifactLog          ArtifactKind = "log"
-	ArtifactScreenshot   ArtifactKind = "screenshot"
-	ArtifactCitation     ArtifactKind = "citation"
-	ArtifactFile         ArtifactKind = "file"
-	ArtifactTrace        ArtifactKind = "trace"
-	ArtifactMemoryUpdate ArtifactKind = "memory_update"
+	ArtifactDiff                 ArtifactKind = "diff"
+	ArtifactChangedFiles         ArtifactKind = "changed_files"
+	ArtifactTestOutput           ArtifactKind = "test_output"
+	ArtifactLog                  ArtifactKind = "log"
+	ArtifactScreenshot           ArtifactKind = "screenshot"
+	ArtifactCitation             ArtifactKind = "citation"
+	ArtifactFile                 ArtifactKind = "file"
+	ArtifactTrace                ArtifactKind = "trace"
+	ArtifactMemoryUpdate         ArtifactKind = "memory_update"
+	ArtifactTaskRawResult        ArtifactKind = "task_raw_result"
+	ArtifactTaskNormalizedRow    ArtifactKind = "task_normalized_row"
+	ArtifactTaskOutputValidation ArtifactKind = "task_output_validation"
+	ArtifactTaskOutputRepair     ArtifactKind = "task_output_repair"
+	ArtifactTaskStorageReceipt   ArtifactKind = "task_storage_receipt"
 )
 
 type TraceEventKind string
@@ -61,6 +77,15 @@ type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	ParentRunID string `json:"parent_run_id,omitempty"`
+
+	// OriginType identifies what triggered this run. Empty for legacy runs
+	// triggered through the normal CreateRun path; OriginMission for runs
+	// fired by the workspace mission cadence (or manual mission trigger).
+	OriginType OriginType `json:"origin_type,omitempty"`
+	// CycleOrdinal is 1 for the first mission run on a workspace, 2 for the
+	// second, etc. Used to drive "Baseline" badging and prompt composition
+	// (first run is the baseline assessment). Zero for non-mission runs.
+	CycleOrdinal int `json:"cycle_ordinal,omitempty"`
 
 	ProfileID       string  `json:"profile_id"`
 	ProfileVersion  string  `json:"profile_version"`
@@ -263,13 +288,18 @@ type TaskOutputSummary struct {
 	ValidatedAt      *time.Time                  `json:"validated_at,omitempty"`
 	ErrorCount       int                         `json:"error_count,omitempty"`
 	Errors           []TaskOutputValidationError `json:"errors,omitempty"`
+	RawOutputRef     string                      `json:"raw_output_ref,omitempty"`
+	NormalizedRowRef string                      `json:"normalized_row_ref,omitempty"`
+	RepairStatus     string                      `json:"repair_status,omitempty"`
 	ManualApproval   bool                        `json:"manual_approval,omitempty"`
 }
 
 type TaskOutputValidationError struct {
-	Code    string `json:"code,omitempty"`
-	Column  string `json:"column,omitempty"`
-	Message string `json:"message,omitempty"`
+	Code     string   `json:"code,omitempty"`
+	Column   string   `json:"column,omitempty"`
+	Message  string   `json:"message,omitempty"`
+	Expected []string `json:"expected,omitempty"`
+	Actual   []string `json:"actual,omitempty"`
 }
 
 type CheckResult struct {

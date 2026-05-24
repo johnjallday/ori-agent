@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
@@ -190,6 +191,9 @@ type ServerBuilder struct {
 	// Skills (local + external)
 	skillsManager *skills.Manager
 	skillsHandler *skillshttp.Handler
+
+	// Action Center — cross-workspace mission opportunity triage.
+	actionCenterHandler *actioncenterhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -266,6 +270,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
 	}
 	b.initializeWorkspaceOrchestrator() // Phase 22
+	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeTemplateManager()       // Phase 23
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -361,6 +366,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Handlers.CLIAgents = b.cliAgentHandler
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
 	b.server.Handlers.WorkspaceRuns = b.workspaceRunHandler
+	b.server.Handlers.ActionCenter = b.actionCenterHandler
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

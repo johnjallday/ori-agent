@@ -1,0 +1,140 @@
+{{define "action-center"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/>
+                </svg>
+                Action Center
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">
+                Findings your workspace managers have surfaced. Triage in one place — open, snooze, resolve, or dismiss.
+              </p>
+            </div>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+              <select id="action-center-status-filter" class="form-select form-select-sm" style="width: auto;">
+                <option value="">Active (new + snoozed)</option>
+                <option value="new">New only</option>
+                <option value="snoozed">Snoozed only</option>
+                <option value="resolved">Resolved</option>
+                <option value="dismissed">Dismissed</option>
+                <option value="all">All</option>
+              </select>
+              <select id="action-center-sort" class="form-select form-select-sm" style="width: auto;">
+                <option value="priority">Sort: priority</option>
+                <option value="recency">Sort: recency</option>
+              </select>
+              <button id="action-center-refresh" class="modern-btn modern-btn-secondary" type="button" title="Refresh">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="action-center-status" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;" aria-live="polite"></div>
+
+        <div id="action-center-list" class="modern-card p-2">
+          <div id="action-center-empty" class="text-center p-5" style="color: var(--text-secondary);">
+            <div style="font-size: 1.05rem; margin-bottom: 0.5rem;">Nothing yet.</div>
+            <div style="font-size: 0.9rem;">When a workspace mission produces findings they'll surface here.</div>
+            <div style="margin-top: 1rem;">
+              <a href="/workspaces" class="modern-btn modern-btn-primary">Go to workspaces</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dismiss reason modal -->
+  <div class="modal fade" id="action-center-dismiss-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Dismiss finding</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Tell us why so we can improve the dedup heuristic.</p>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="action-center-dismiss-reason" id="dismiss-not-useful" value="not_useful" checked>
+            <label class="form-check-label" for="dismiss-not-useful">Not useful</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="action-center-dismiss-reason" id="dismiss-duplicate" value="duplicate">
+            <label class="form-check-label" for="dismiss-duplicate">Duplicate of something I've seen</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="action-center-dismiss-reason" id="dismiss-out-of-scope" value="out_of_scope">
+            <label class="form-check-label" for="dismiss-out-of-scope">Out of scope</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="action-center-dismiss-reason" id="dismiss-other" value="other">
+            <label class="form-check-label" for="dismiss-other">Other</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="action-center-dismiss-confirm">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snooze modal -->
+  <div class="modal fade" id="action-center-snooze-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Snooze finding</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>When should this come back?</p>
+          <div class="d-grid gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-snooze-preset="tomorrow">Tomorrow at 9am</button>
+            <button type="button" class="btn btn-outline-secondary" data-snooze-preset="next_week">Next week</button>
+            <button type="button" class="btn btn-outline-secondary" data-snooze-preset="next_month">Next month</button>
+          </div>
+          <hr>
+          <label for="action-center-snooze-custom" class="form-label">Custom date</label>
+          <input type="datetime-local" class="form-control" id="action-center-snooze-custom">
+          <div class="mt-2 text-end">
+            <button type="button" class="btn btn-primary" id="action-center-snooze-custom-go">Snooze until selected time</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/utils/logger.js"></script>
+  <script src="/js/utils/event-bus.js"></script>
+  <script src="/js/utils/api-client.js"></script>
+  <script src="/js/utils/dom-utils.js"></script>
+  <script src="/js/app.js?v=1694538177"></script>
+  <script src="/js/modules/agents.js"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/themeManager.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
+  <script src="/js/modules/action-center.js"></script>
+</body>
+</html>
+{{end}}

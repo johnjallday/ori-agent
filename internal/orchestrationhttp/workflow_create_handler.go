@@ -166,9 +166,6 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			OutputContract: workspace.NormalizeTaskOutputContract(req.Parent.OutputContract),
 			CreatedAt:      now,
 		})
-		if tasks[len(tasks)-1].OutputContract == nil {
-			tasks[len(tasks)-1].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &tasks[len(tasks)-1])
-		}
 	}
 
 	for i, sub := range req.Subtasks {
@@ -196,9 +193,6 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			OutputContract: workspace.NormalizeTaskOutputContract(sub.OutputContract),
 			CreatedAt:      now,
 		})
-		if tasks[len(tasks)-1].OutputContract == nil {
-			tasks[len(tasks)-1].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &tasks[len(tasks)-1])
-		}
 	}
 
 	if err := ws.AddTasks(tasks); err != nil {

@@ -59,6 +59,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
 	mux.HandleFunc("/notes/", s.handleNotesPageRoute)        // Focused note page: /notes/{id}
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
+	mux.HandleFunc("/action-center", s.serveActionCenter)
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
 	mux.HandleFunc("/personalize", s.servePersonalize)
@@ -394,6 +395,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.AutoTask != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
+		mux.HandleFunc("/api/orchestration/tasks/output-spec/suggest", s.Handlers.AutoTask.HandleOutputContractSuggestion)
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}
 	mux.HandleFunc("/api/orchestration/tasks/", s.Handlers.Orchestration.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
@@ -676,6 +678,23 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentSkillAccess)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentSkillAccess)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.DeleteAgentSkillAccess)
+
+	// Mission routes — workspace-level persistent goal carried out by the
+	// Workspace Manager on cadence. See internal/workspace/http_handlers_mission.go.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.GetMission)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
+
+	// Action Center — cross-workspace triage of mission opportunities.
+	if s.Handlers.ActionCenter != nil {
+		mux.HandleFunc("GET /api/action-center/opportunities", s.Handlers.ActionCenter.List)
+		mux.HandleFunc("GET /api/action-center/opportunities/{workspaceID}/{opportunityID}", s.Handlers.ActionCenter.Get)
+		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/dismiss", s.Handlers.ActionCenter.Dismiss)
+		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/snooze", s.Handlers.ActionCenter.Snooze)
+		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/resolve", s.Handlers.ActionCenter.Resolve)
+	}
 }
 
 func (s *Server) handleWorkspaceCollectionAPI(w http.ResponseWriter, r *http.Request) {
@@ -735,6 +754,12 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)
 		} else if strings.HasSuffix(path, "/results/append-csv") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.AppendResultToCSV(w, r)
+		} else if strings.HasSuffix(path, "/output-spec/draft") && (r.Method == http.MethodPost || r.Method == http.MethodPatch) {
+			s.Handlers.Workspace.SaveTaskOutputSpecDraft(w, r)
+		} else if strings.HasSuffix(path, "/output-spec/approve") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.ApproveTaskOutputSpecDraft(w, r)
+		} else if strings.HasSuffix(path, "/output-spec/discard") && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
+			s.Handlers.Workspace.DiscardTaskOutputSpecDraft(w, r)
 		} else if r.Method == http.MethodPost {
 			s.Handlers.Workspace.CreateTask(w, r)
 		} else if r.Method == http.MethodPatch {

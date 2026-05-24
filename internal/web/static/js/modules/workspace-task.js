@@ -838,6 +838,7 @@ export class WorkspaceTaskPage {
     this.resultResearchPendingSectionId = '';
     this.resultResearchDraft = null;
     this.resultResearchSubmitting = false;
+    this.resultOutputSpecDraft = null;
     this.skillDraftGenerating = false;
     this.skillDraftSubmitting = false;
     this.skillDraftAbortController = null;
@@ -2415,6 +2416,26 @@ export class WorkspaceTaskPage {
       : 'null';
     const sigGraphNeighbors = this._taskGraphNeighborsFingerprint();
     const sigWorkflowSubtree = this._taskWorkflowSubtreeFingerprint();
+    const storageOwner = this.getTaskResultStorageTask() || {};
+    const sigAutomation = JSON.stringify([
+      storageOwner?.id || '',
+      storageOwner?.result_storage || null,
+      storageOwner?.output_spec || null,
+      storageOwner?.draft_output_spec || null,
+      storageOwner?.output_contract || null,
+      this.resultOutputSpecDraft || null,
+      Array.isArray(this.resultContractDraft) ? this.resultContractDraft : null,
+      Boolean(this.resultContractSuggesting),
+      Boolean(this.resultContractSaving),
+      Boolean(this.automationStorageToggleBusy),
+      Boolean(this.automationStorageSaving),
+      (this.workspace?.store_nodes || []).map((node) => [
+        node?.id,
+        node?.canvas_node_id,
+        node?.name,
+        node?.base_dir,
+      ]),
+    ]);
 
     return {
       hero: JSON.stringify([
@@ -2490,6 +2511,7 @@ export class WorkspaceTaskPage {
         // the schedule changed).
         Array.isArray(t.execution_history) ? t.execution_history.length : 0,
         t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
+        sigAutomation,
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
       blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
@@ -4095,18 +4117,106 @@ export class WorkspaceTaskPage {
   // itself), normalized to a plain array.
   getResultContractColumns() {
     const owner = this.getTaskResultStorageTask();
-    const columns = owner?.output_contract?.columns;
+    const columns = owner?.output_spec?.contract?.columns || owner?.output_contract?.columns;
     return Array.isArray(columns) ? columns : [];
   }
 
-  // renderResultContractBlock renders one of three states on the artifact card:
+  getActiveOutputSpec() {
+    const owner = this.getTaskResultStorageTask();
+    return owner?.output_spec || null;
+  }
+
+  getOutputSpecSchemaFields(spec = this.getActiveOutputSpec()) {
+    const fields = Array.isArray(spec?.schema?.fields) ? spec.schema.fields : [];
+    return fields
+      .map((field) => ({
+        name: String(field?.name || '').trim(),
+        type: String(field?.type || 'string').trim() || 'string',
+        required: field?.required === true,
+        description: String(field?.description || '').trim(),
+      }))
+      .filter((field) => field.name);
+  }
+
+  getOutputSpecMappingsByColumn(spec = this.getActiveOutputSpec()) {
+    const mappings = Array.isArray(spec?.mappings) ? spec.mappings : [];
+    const byColumn = new Map();
+    mappings.forEach((mapping) => {
+      const csvColumn = String(mapping?.csv_column || '').trim();
+      if (!csvColumn) return;
+      byColumn.set(csvColumn.toLowerCase(), {
+        schemaField: String(mapping?.schema_field || '').trim(),
+        transform: ['identity', 'json_string'].includes(mapping?.transform) ? mapping.transform : 'identity',
+        defaultValue: String(mapping?.default_value || '').trim(),
+      });
+    });
+    return byColumn;
+  }
+
+  getOutputSpecMetadataFields(spec = this.getActiveOutputSpec()) {
+    const defaults = ['run_id', 'executed_at', 'status', 'duration_ms'];
+    const fields = Array.isArray(spec?.metadata_policy?.fields) ? spec.metadata_policy.fields : [];
+    const byName = new Map();
+    fields.forEach((field) => {
+      const name = String(field?.name || '').trim();
+      if (!name) return;
+      byName.set(name, { name, include: field?.include !== false });
+    });
+    defaults.forEach((name) => {
+      if (!byName.has(name)) byName.set(name, { name, include: true });
+    });
+    return Array.from(byName.values());
+  }
+
+  renderOutputSpecOverview(spec) {
+    if (!spec) return '';
+    const fields = this.getOutputSpecSchemaFields(spec);
+    const columns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
+    const metadataFields = this.getOutputSpecMetadataFields(spec);
+    const metadataIncluded = metadataFields.filter((field) => field.include).map((field) => field.name);
+    return `
+      <div class="workspace-task-output-spec-overview">
+        <div class="workspace-task-output-spec-stat">
+          <span>Assistant fields</span>
+          <strong>${this.escapeHtml(`${fields.length} field${fields.length === 1 ? '' : 's'}`)}</strong>
+        </div>
+        <div class="workspace-task-output-spec-stat">
+          <span>CSV columns</span>
+          <strong>${this.escapeHtml(`${columns.length} column${columns.length === 1 ? '' : 's'}`)}</strong>
+        </div>
+        <div class="workspace-task-output-spec-stat">
+          <span>Run info</span>
+          <strong>${this.escapeHtml(metadataIncluded.length ? metadataIncluded.join(', ') : 'hidden')}</strong>
+        </div>
+      </div>`;
+  }
+
+  renderOutputSpecMetadataEditor() {
+    const fields = this.getOutputSpecMetadataFields(this.resultOutputSpecDraft || this.getActiveOutputSpec());
+    return `
+      <div class="workspace-task-output-spec-metadata-editor">
+        <div class="workspace-task-page-mini-label">Run info saved with each row</div>
+        <div class="workspace-task-output-spec-metadata-list">
+          ${fields.map((field) => `
+            <label class="workspace-task-output-spec-metadata-item">
+              <input type="checkbox" data-role="result-metadata-field" data-field-name="${this.escapeHtml(field.name)}"${field.include ? ' checked' : ''} />
+              <span>${this.escapeHtml(field.name)}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  // renderResultContractBlock renders one of three Automation-card states:
   //   1. Saved contract + not editing -> "Columns: ... (Edit)" badge.
-  //   2. No contract + not editing  -> warning prompt with a Design columns CTA.
-  //   3. Editing                    -> inline column designer (name/type/required/desc rows).
+  //   2. No contract + not editing  -> assistant-first column suggestion CTA.
+  //   3. Editing                    -> reviewable draft columns with manual escape hatches.
   renderResultContractBlock() {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
     if (!editing && columns.length > 0) {
+      const activeSpec = this.getActiveOutputSpec();
+      const version = String(activeSpec?.version || this.getTaskResultStorageTask()?.output_contract?.version || '').trim();
       const preview = columns
         .map((column) => String(column?.name || '').trim())
         .filter(Boolean)
@@ -4116,20 +4226,21 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Columns</span>
+            <span class="workspace-task-page-mini-label">Result format${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
           </div>
-          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit columns</button>
+          ${this.renderOutputSpecOverview(activeSpec)}
+          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit format</button>
         </div>`;
     }
     if (!editing) {
       return `
         <div class="workspace-task-result-contract" data-state="empty">
           <div class="workspace-task-result-contract-warning">
-            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-            <span>No CSV columns defined &mdash; Append will dump the full result into a single cell.</span>
+            <i class="bi bi-magic" aria-hidden="true"></i>
+            <span>Let the assistant choose the CSV columns from the latest result.</span>
           </div>
-          <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-result-contract">Design columns</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest result format</button>
         </div>`;
     }
 
@@ -4143,26 +4254,33 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-contract" data-state="edit">
         <div class="workspace-task-result-contract-header">
           <div>
-            <div class="workspace-task-page-mini-label">Output contract</div>
-            <p class="workspace-task-result-contract-help">Define the CSV columns the agent should emit. Saving turns on Append mode so future runs are validated against these fields.</p>
+            <div class="workspace-task-page-mini-label">Result format</div>
+            <p class="workspace-task-result-contract-help">Review what each future run will save to CSV. The assistant extracts one row, checks it, then appends it only when the row matches this format.</p>
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
               <i class="bi bi-magic" aria-hidden="true"></i>
-              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Suggest from this result')}</span>
+              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Ask assistant')}</span>
             </button>
           </div>
         </div>
-        <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
-          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No columns yet. Add one or ask the system model to suggest.</div>'}
+        <div class="workspace-task-result-format-steps" aria-label="Result storage setup steps">
+          <span class="is-complete">Storage on</span>
+          <span class="is-active">Review columns</span>
+          <span>Save format</span>
         </div>
+        <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
+          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No result format yet. Add a CSV column or ask the assistant to suggest one from the latest result.</div>'}
+        </div>
+        ${this.renderResultFormatPreview(this.resultContractDraft)}
+        ${this.renderOutputSpecMetadataEditor()}
         <div class="workspace-task-result-contract-row-add">
-          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add column</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add CSV column</button>
         </div>
         <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
         <div class="workspace-task-result-contract-actions">
           <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save columns')}</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save format')}</button>
         </div>
       </div>`;
   }
@@ -4173,17 +4291,134 @@ export class WorkspaceTaskPage {
       .map((type) => `<option value="${type}"${column?.type === type ? ' selected' : ''}>${type}</option>`)
       .join('');
     const required = column?.required !== false;
+    const schemaField = String(column?.schema_field || column?.schemaField || column?.name || '');
+    const transforms = ['identity', 'json_string'];
+    const transform = transforms.includes(column?.transform) ? column.transform : 'identity';
+    const transformOptions = transforms
+      .map((value) => `<option value="${value}"${transform === value ? ' selected' : ''}>${value === 'json_string' ? 'JSON string' : 'Identity'}</option>`)
+      .join('');
     return `
       <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
-        <input type="text" data-role="result-contract-name" placeholder="column_name" value="${this.escapeHtml(column?.name || '')}" aria-label="Column name" />
-        <select data-role="result-contract-type" aria-label="Column type">${optionsHtml}</select>
+        <label class="workspace-task-result-contract-field workspace-task-result-contract-field-name">
+          <span>CSV column</span>
+          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="CSV column name" />
+        </label>
+        <label class="workspace-task-result-contract-field">
+          <span>Type</span>
+          <select data-role="result-contract-type" aria-label="Column type">${optionsHtml}</select>
+        </label>
         <label class="workspace-task-result-contract-required">
           <input type="checkbox" data-role="result-contract-required"${required ? ' checked' : ''} />
-          <span>Required</span>
+          <span>Require value</span>
         </label>
-        <input type="text" data-role="result-contract-description" placeholder="description" value="${this.escapeHtml(column?.description || '')}" aria-label="Column description" />
         <button type="button" class="workspace-task-result-contract-remove" data-action="remove-result-contract-row" data-row-index="${index}" aria-label="Remove column">&times;</button>
+        <details class="workspace-task-result-contract-advanced">
+          <summary>Advanced mapping</summary>
+          <div class="workspace-task-result-contract-advanced-grid">
+            <label class="workspace-task-result-contract-field">
+              <span>Assistant field</span>
+              <input type="text" data-role="result-contract-schema-field" placeholder="pollen_count" value="${this.escapeHtml(schemaField)}" aria-label="Assistant field" />
+            </label>
+            <label class="workspace-task-result-contract-field">
+              <span>Transform</span>
+              <select data-role="result-contract-transform" aria-label="Mapping transform">${transformOptions}</select>
+            </label>
+            <label class="workspace-task-result-contract-field workspace-task-result-contract-field-description">
+              <span>Notes</span>
+              <input type="text" data-role="result-contract-description" placeholder="Optional note for this column" value="${this.escapeHtml(column?.description || '')}" aria-label="Column notes" />
+            </label>
+          </div>
+        </details>
       </div>`;
+  }
+
+  renderResultFormatPreview(columns = []) {
+    const usableColumns = Array.isArray(columns)
+      ? columns
+        .map((column) => ({
+          name: String(column?.name || '').trim(),
+          type: String(column?.type || 'string').trim() || 'string',
+        }))
+        .filter((column) => column.name)
+      : [];
+    if (usableColumns.length === 0) return '';
+    const metadataFields = this.getResultMetadataPolicyDraft(this.resultOutputSpecDraft || this.getActiveOutputSpec()).fields
+      .filter((field) => field.include !== false)
+      .map((field) => ({ name: field.name, type: 'run_info', metadata: true }));
+    const previewColumns = [...metadataFields, ...usableColumns].slice(0, 10);
+    const hiddenCount = Math.max(0, metadataFields.length + usableColumns.length - previewColumns.length);
+    const sampleRow = this.getResultFormatPreviewRow(usableColumns);
+    const headerHtml = previewColumns
+      .map((column) => `<th scope="col"${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(column.name)}</th>`)
+      .join('');
+    const rowHtml = previewColumns
+      .map((column) => {
+        const value = column.metadata
+          ? this.previewMetadataValue(column.name)
+          : sampleRow[column.name] || this.previewValueForType(column.type);
+        return `<td${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(value)}</td>`;
+      })
+      .join('');
+    return `
+      <div class="workspace-task-result-format-preview">
+        <div class="workspace-task-result-format-preview-header">
+          <div>
+            <div class="workspace-task-page-mini-label">CSV preview</div>
+            <span>First row shape after the assistant parses a run result.</span>
+          </div>
+          ${hiddenCount ? `<small>+${this.escapeHtml(hiddenCount)} more column${hiddenCount === 1 ? '' : 's'}</small>` : ''}
+        </div>
+        <div class="workspace-task-result-format-preview-table" role="region" aria-label="CSV preview" tabindex="0">
+          <table>
+            <thead><tr>${headerHtml}</tr></thead>
+            <tbody><tr>${rowHtml}</tr></tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  getResultFormatPreviewRow(columns = []) {
+    const artifact = this.currentResultArtifact || buildTaskResultArtifact(this.task);
+    const rows = Array.isArray(artifact?.rows) ? artifact.rows : [];
+    const candidate = rows.find((row) => row && typeof row === 'object') || {};
+    const row = {};
+    columns.forEach((column) => {
+      const value = this.getCaseInsensitiveValue(candidate, column.name);
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        row[column.name] = String(value);
+      }
+    });
+    return row;
+  }
+
+  previewMetadataValue(name) {
+    const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
+    const latest = history.length ? history[history.length - 1] : null;
+    switch (String(name || '').trim()) {
+    case 'run_id':
+      return latest?.run_id ? String(latest.run_id).slice(0, 8) : 'run_1234';
+    case 'executed_at':
+      return latest?.executed_at ? String(latest.executed_at).slice(0, 10) : '2026-05-22';
+    case 'status':
+      return latest?.status ? String(latest.status) : 'success';
+    case 'duration_ms':
+      return latest?.duration !== undefined && latest?.duration !== null ? String(latest.duration) : '1200';
+    default:
+      return '';
+    }
+  }
+
+  previewValueForType(type) {
+    switch (String(type || '').trim().toLowerCase()) {
+    case 'number':
+      return '9.7';
+    case 'boolean':
+      return 'true';
+    case 'date':
+      return '2026-05-22';
+    default:
+      return 'parsed from result';
+    }
   }
 
   // getAppendCSVContext returns the effective CSV-append storage for the task
@@ -4266,7 +4501,13 @@ export class WorkspaceTaskPage {
       ?.addEventListener('click', () => this.addResultContractRow());
     root
       .querySelector('[data-action="suggest-result-contract"]')
-      ?.addEventListener('click', () => this.suggestResultContractColumns());
+      ?.addEventListener('click', () => {
+        if (Array.isArray(this.resultContractDraft)) {
+          this.suggestResultContractColumns();
+          return;
+        }
+        this.startResultContractEdit({ suggest: true });
+      });
     root
       .querySelector('[data-action="save-result-contract"]')
       ?.addEventListener('click', () => this.saveResultContractDraft());
@@ -4291,30 +4532,40 @@ export class WorkspaceTaskPage {
     rows.forEach((row) => {
       const name = row.querySelector('[data-role="result-contract-name"]')?.value?.trim() || '';
       const type = row.querySelector('[data-role="result-contract-type"]')?.value || 'string';
+      const schemaField = row.querySelector('[data-role="result-contract-schema-field"]')?.value?.trim() || name;
+      const transform = row.querySelector('[data-role="result-contract-transform"]')?.value || 'identity';
       const required = Boolean(row.querySelector('[data-role="result-contract-required"]')?.checked);
       const description = row.querySelector('[data-role="result-contract-description"]')?.value?.trim() || '';
-      next.push({ name, type, required, description });
+      next.push({ name, type, schema_field: schemaField, transform, required, description });
     });
     this.resultContractDraft = next;
   }
 
-  startResultContractEdit() {
+  startResultContractEdit({ suggest = false } = {}) {
     const existing = this.getResultContractColumns();
+    this.resultOutputSpecDraft = this.getActiveOutputSpec();
+    const mappingsByColumn = this.getOutputSpecMappingsByColumn(this.resultOutputSpecDraft);
     this.resultContractDraft = existing.length
       ? existing.map((column) => ({
         name: String(column?.name || ''),
         type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        schema_field: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.schemaField || String(column?.name || ''),
+        transform: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.transform || 'identity',
         required: column?.required !== false,
         description: String(column?.description || ''),
       }))
-      : [{ name: '', type: 'string', required: true, description: '' }];
+      : (suggest ? [] : [{ name: '', type: 'string', schema_field: '', transform: 'identity', required: true, description: '' }]);
     this.resultContractSuggesting = false;
     this.setResultContractError('');
     this.refreshResultRender();
+    if (suggest) {
+      void this.suggestResultContractColumns();
+    }
   }
 
   cancelResultContractEdit() {
     this.resultContractDraft = null;
+    this.resultOutputSpecDraft = null;
     this.resultContractSuggesting = false;
     this.resultContractSaving = false;
     this.setResultContractError('');
@@ -4326,7 +4577,7 @@ export class WorkspaceTaskPage {
     if (!Array.isArray(this.resultContractDraft)) {
       this.resultContractDraft = [];
     }
-    this.resultContractDraft.push({ name: '', type: 'string', required: true, description: '' });
+    this.resultContractDraft.push({ name: '', type: 'string', schema_field: '', transform: 'identity', required: true, description: '' });
     this.refreshResultRender();
   }
 
@@ -4350,20 +4601,18 @@ export class WorkspaceTaskPage {
     error.textContent = message;
   }
 
-  // refreshResultRender re-runs the result-card render so a state change in
-  // the contract designer (rows added, suggestion applied, save complete)
-  // shows up immediately. Falls back to a full task reload if the card isn't
-  // available, which also re-fetches the latest task state.
-  // refreshResultRender re-renders the Automation columns sub-section after a
-  // designer state change. Falls back to a full data reload when the
-  // container is missing (which also re-fetches the latest task state).
+  // refreshResultRender re-renders the Automation card after a designer state
+  // change. It routes through renderSchedule because that method owns the
+  // card hidden/visible decision as well as the columns and destination blocks.
   refreshResultRender() {
-    if (typeof this.renderAutomationColumns === 'function' && this.elements.automationColumns) {
+    if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
       try {
-        this.renderAutomationColumns();
+        if (this._renderCache) delete this._renderCache.schedule;
+        this.renderSchedule();
+        this.refreshTaskTabEmptyStates();
         return;
       } catch (error) {
-        console.warn('Failed to re-render Automation columns; falling back to data reload:', error);
+        console.warn('Failed to re-render Automation card; falling back to data reload:', error);
       }
     }
     void this.loadData();
@@ -4390,7 +4639,7 @@ export class WorkspaceTaskPage {
       this.elements.scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (this.getAppendCSVContext().configured) {
-      this.startResultContractEdit();
+      this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
     }
   }
 
@@ -4435,9 +4684,7 @@ export class WorkspaceTaskPage {
       this.notify('success', checked ? 'CSV storage enabled.' : 'CSV storage disabled.');
       await this.loadData();
       if (checked) {
-        // Auto-start the column designer so the next decision (what columns
-        // to emit) is right there. Suggest button uses the captured sample.
-        this.startResultContractEdit();
+        this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
       }
     } catch (error) {
       console.error('Failed to update CSV storage:', error);
@@ -4661,6 +4908,51 @@ export class WorkspaceTaskPage {
     return String(candidate || '').trim().slice(0, 4000);
   }
 
+  getRecentExecutionSamplesForSuggestion(limit = 5) {
+    const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
+    return history
+      .slice(-limit)
+      .map((entry) => String(entry?.result || entry?.summary || entry?.error || '').trim())
+      .filter(Boolean)
+      .map((sample) => sample.slice(0, 1200));
+  }
+
+  suggestFallbackResultContractColumns() {
+    const artifact = this.currentResultArtifact || buildTaskResultArtifact(this.task);
+    const artifactColumns = Array.isArray(artifact?.columns) ? artifact.columns : [];
+    if (artifactColumns.length > 0) {
+      const rows = Array.isArray(artifact?.rows) ? artifact.rows.slice(0, 25) : [];
+      return artifactColumns
+        .map((column) => String(column || '').trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((name) => ({
+          name,
+          type: this.inferResultContractColumnType(name, rows),
+          required: rows.length > 0 ? rows.every((row) => String(row?.[name] ?? '').trim() !== '') : true,
+          description: 'Column from the latest task result',
+        }));
+    }
+
+    return [
+      { name: 'date', type: 'date', required: true, description: 'Run date' },
+      { name: 'summary', type: 'string', required: true, description: 'Short result summary' },
+    ];
+  }
+
+  inferResultContractColumnType(columnName, rows = []) {
+    const values = rows
+      .map((row) => String(row?.[columnName] ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (values.length === 0) return 'string';
+    const booleanValues = new Set(['true', 'false', 'yes', 'no']);
+    if (values.every((value) => booleanValues.has(value.toLowerCase()))) return 'boolean';
+    if (values.every((value) => Number.isFinite(Number(value.replace(/,/g, ''))))) return 'number';
+    if (values.every((value) => !Number.isNaN(Date.parse(value)))) return 'date';
+    return 'string';
+  }
+
   async suggestResultContractColumns() {
     if (this.resultContractSuggesting) return;
     this.syncResultContractDraftFromDOM();
@@ -4670,22 +4962,27 @@ export class WorkspaceTaskPage {
 
     try {
       const owner = this.getTaskResultStorageTask();
-      const response = await fetch('/api/orchestration/tasks/output-contract/suggest', {
+      const storage = owner?.result_storage || {};
+      const response = await fetch('/api/orchestration/tasks/output-spec/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: this.task?.description || owner?.description || '',
           details: this.task?.details || '',
           workspace_id: this.workspaceId || '',
-          schedule: null,
-          schedule_enabled: false,
-          schedule_name: '',
+          task_id: owner?.id || this.taskId || '',
+          schedule: owner?.schedule || this.task?.schedule || null,
+          schedule_enabled: Boolean(owner?.schedule_enabled || this.task?.schedule_enabled),
+          schedule_name: owner?.schedule_name || this.task?.schedule_name || '',
           result_storage: {
             enabled: true,
             format: 'csv',
             write_mode: 'append',
+            file_path: String(storage.file_path || ''),
+            store_node_id: String(storage.store_node_id || ''),
           },
           result_sample: this.getResultSampleForSuggestion(),
+          recent_execution_samples: this.getRecentExecutionSamplesForSuggestion(),
         }),
       });
       const text = await response.text();
@@ -4699,17 +4996,28 @@ export class WorkspaceTaskPage {
       if (columns.length === 0) {
         throw new Error('No columns suggested.');
       }
+      this.resultOutputSpecDraft = parsed?.output_spec || null;
+      const mappingsByColumn = this.getOutputSpecMappingsByColumn(this.resultOutputSpecDraft);
       this.resultContractDraft = columns.map((column) => ({
         name: String(column?.name || ''),
         type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        schema_field: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.schemaField || String(column?.name || ''),
+        transform: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.transform || 'identity',
         required: column?.required !== false,
         description: String(column?.description || ''),
       }));
-      this.notify('success', `Suggested ${columns.length} column${columns.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Suggested a result format with ${columns.length} CSV column${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
-      this.setResultContractError(error?.message || 'Could not suggest columns.');
-      this.notify('error', error?.message || 'Could not suggest columns.');
+      const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
+      if (!hasDraftColumns) {
+        this.resultContractDraft = this.suggestFallbackResultContractColumns();
+        this.resultOutputSpecDraft = null;
+        this.notify('warning', 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
+      } else {
+        this.setResultContractError(error?.message || 'Could not suggest columns.');
+        this.notify('error', error?.message || 'Could not suggest columns.');
+      }
     } finally {
       this.resultContractSuggesting = false;
       this.refreshResultRender();
@@ -4724,6 +5032,8 @@ export class WorkspaceTaskPage {
       .map((column) => ({
         name: String(column?.name || '').trim(),
         type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+        schema_field: String(column?.schema_field || column?.schemaField || column?.name || '').trim(),
+        transform: ['identity', 'json_string'].includes(column?.transform) ? column.transform : 'identity',
         required: Boolean(column?.required),
         description: String(column?.description || '').trim(),
       }))
@@ -4759,26 +5069,47 @@ export class WorkspaceTaskPage {
     this.refreshResultRender();
 
     try {
-      const response = await fetch(
+      const outputSpec = this.buildOutputSpecDraftFromColumns(cleaned);
+      const draftResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}/output-spec/draft`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_spec: outputSpec,
+            overwrite: true,
+          }),
+        }
+      );
+      const draftText = await draftResponse.text();
+      if (!draftResponse.ok) {
+        throw new Error(draftText || `Draft save failed (HTTP ${draftResponse.status})`);
+      }
+      const approveResponse = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}/output-spec/approve`,
+        { method: 'POST' }
+      );
+      const approveText = await approveResponse.text();
+      if (!approveResponse.ok) {
+        throw new Error(approveText || `Approve failed (HTTP ${approveResponse.status})`);
+      }
+      const storageResponse = await fetch(
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(ownerId)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            output_contract: {
-              source: 'manual',
-              columns: cleaned,
-            },
             result_storage: nextStorage,
           }),
         }
       );
-      const text = await response.text();
-      if (!response.ok) {
-        throw new Error(text || `Save failed (HTTP ${response.status})`);
+      const storageText = await storageResponse.text();
+      if (!storageResponse.ok) {
+        throw new Error(storageText || `Storage save failed (HTTP ${storageResponse.status})`);
       }
-      this.notify('success', `Saved ${cleaned.length} column${cleaned.length === 1 ? '' : 's'}. Future runs will validate against this contract.`);
+      this.notify('success', `Saved result format with ${cleaned.length} CSV column${cleaned.length === 1 ? '' : 's'}.`);
       this.resultContractDraft = null;
+      this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
       await this.loadData();
     } catch (error) {
@@ -4788,6 +5119,101 @@ export class WorkspaceTaskPage {
       this.notify('error', error?.message || 'Save failed.');
       this.refreshResultRender();
     }
+  }
+
+  buildOutputSpecDraftFromColumns(columns) {
+    const existingSpec = this.resultOutputSpecDraft && typeof this.resultOutputSpecDraft === 'object'
+      ? JSON.parse(JSON.stringify(this.resultOutputSpecDraft))
+      : null;
+    const normalizedColumns = columns.map((column) => ({
+      name: String(column?.name || '').trim(),
+      type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
+      schema_field: String(column?.schema_field || column?.schemaField || column?.name || '').trim(),
+      transform: ['identity', 'json_string'].includes(column?.transform) ? column.transform : 'identity',
+      required: column?.required !== false,
+      description: String(column?.description || '').trim(),
+    }));
+    const columnNames = normalizedColumns.map((column) => column.name);
+    const contractColumns = normalizedColumns.map((column) => ({
+      name: column.name,
+      type: column.type,
+      required: column.required,
+      description: column.description,
+    }));
+    const existingContractNames = Array.isArray(existingSpec?.contract?.columns)
+      ? existingSpec.contract.columns.map((column) => String(column?.name || '').trim())
+      : [];
+    const fieldsByName = new Map();
+    normalizedColumns.forEach((column) => {
+      const name = column.schema_field || column.name;
+      if (!name || fieldsByName.has(name.toLowerCase())) return;
+      fieldsByName.set(name.toLowerCase(), {
+        name,
+        type: column.type === 'number' || column.type === 'boolean' ? column.type : 'string',
+        required: column.required,
+        description: column.description,
+      });
+    });
+    const fields = Array.from(fieldsByName.values());
+    if (
+      existingSpec &&
+      existingContractNames.length === columnNames.length &&
+      existingContractNames.every((name, index) => name === columnNames[index])
+    ) {
+      existingSpec.source = existingSpec.source || 'manual';
+      existingSpec.contract = {
+        ...(existingSpec.contract || {}),
+        source: existingSpec.contract?.source || existingSpec.source || 'manual',
+        columns: contractColumns,
+      };
+      existingSpec.schema = {
+        ...(existingSpec.schema || {}),
+        name: existingSpec.schema?.name || 'task_result',
+        description: existingSpec.schema?.description || 'One normalized task result row.',
+        strict: existingSpec.schema?.strict !== false,
+        fields,
+      };
+      existingSpec.mappings = normalizedColumns.map((column) => ({
+        schema_field: column.schema_field || column.name,
+        csv_column: column.name,
+        transform: column.transform || 'identity',
+      }));
+      existingSpec.metadata_policy = this.getResultMetadataPolicyDraft(existingSpec);
+      return existingSpec;
+    }
+    return {
+      source: existingSpec?.source || 'manual',
+      schema: {
+        name: 'task_result',
+        description: 'One normalized task result row.',
+        strict: true,
+        fields,
+      },
+      contract: {
+        source: existingSpec?.contract?.source || existingSpec?.source || 'manual',
+        columns: contractColumns,
+      },
+      mappings: normalizedColumns.map((column) => ({
+        schema_field: column.schema_field || column.name,
+        csv_column: column.name,
+        transform: column.transform || 'identity',
+      })),
+      metadata_policy: this.getResultMetadataPolicyDraft(existingSpec),
+    };
+  }
+
+  getResultMetadataPolicyDraft(existingSpec = null) {
+    const fieldsFromDOM = Array.from(this.elements.automationColumns?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
+    if (fieldsFromDOM.length > 0) {
+      return {
+        fields: fieldsFromDOM.map((input) => ({
+          name: String(input.getAttribute('data-field-name') || '').trim(),
+          include: Boolean(input.checked),
+        })).filter((field) => field.name),
+      };
+    }
+    const fields = this.getOutputSpecMetadataFields(existingSpec || this.resultOutputSpecDraft || this.getActiveOutputSpec());
+    return { fields };
   }
 
   // handleAppendArtifactClick is the entry point for the Append button.
@@ -5583,8 +6009,12 @@ export class WorkspaceTaskPage {
       });
   }
 
-  getReviewContractColumns(task = this.getTaskResultStorageTask()) {
-    return (Array.isArray(task?.output_contract?.columns) ? task.output_contract.columns : [])
+  getReviewContractColumns(task = this.getTaskResultStorageTask(), validation = null) {
+    const columns =
+      (Array.isArray(validation?.output_spec_snapshot?.contract?.columns) ? validation.output_spec_snapshot.contract.columns : null) ||
+      (Array.isArray(task?.output_spec?.contract?.columns) ? task.output_spec.contract.columns : null) ||
+      (Array.isArray(task?.output_contract?.columns) ? task.output_contract.columns : []);
+    return columns
       .map((column) => ({
         name: String(column?.name || '').trim(),
         type: String(column?.type || 'string').trim() || 'string',
@@ -5654,9 +6084,10 @@ export class WorkspaceTaskPage {
     return { row: emptyRow, parsed: false };
   }
 
-  renderReviewTableEditor(rawOutput, columns = []) {
+  renderReviewTableEditor(rawOutput, columns = [], outputFormat = 'csv') {
     if (!columns.length) return '';
     const { row } = this.parseReviewDraftRow(rawOutput, columns);
+    const rawLabel = outputFormat === 'json' ? 'Raw JSON' : 'Raw CSV';
     const headerHtml = columns
       .map((column) => `<th scope="col">${this.escapeHtml(column.name)}<small>${this.escapeHtml(column.type)}${column.required ? ' required' : ''}</small></th>`)
       .join('');
@@ -5676,10 +6107,10 @@ export class WorkspaceTaskPage {
 
     return `
       <div class="workspace-task-review-mode-tabs" role="tablist" aria-label="Review editor mode">
-        <button type="button" class="is-active" data-review-view-toggle="table">Table</button>
-        <button type="button" data-review-view-toggle="raw">Raw CSV</button>
+        <button type="button" class="is-active" data-review-view-toggle="table">Edit row</button>
+        <button type="button" data-review-view-toggle="raw">${this.escapeHtml(rawLabel)}</button>
       </div>
-      <div class="workspace-task-review-table-pane" data-review-table-pane>
+      <div class="workspace-task-review-table-pane" data-review-table-pane data-review-output-format="${this.escapeHtml(outputFormat)}">
         <div class="workspace-task-review-table-wrap" role="region" aria-label="Editable CSV row" tabindex="0">
           <table>
             <thead><tr>${headerHtml}</tr></thead>
@@ -5699,38 +6130,77 @@ export class WorkspaceTaskPage {
     const validation = latest.entry?.validation_result || latest.entry?.validation || {};
     const errors = Array.isArray(validation.errors) ? validation.errors : [];
     const errorList = errors.length > 0
-      ? errors.map((error) => `<li>${this.escapeHtml(error?.message || error?.code || 'Validation failed')}</li>`).join('')
+      ? errors.map((error) => {
+        const expected = Array.isArray(error?.expected) && error.expected.length ? ` Expected: ${error.expected.join(', ')}.` : '';
+        const actual = Array.isArray(error?.actual) && error.actual.length ? ` Actual: ${error.actual.join(', ')}.` : '';
+        return `<li>${this.escapeHtml(`${error?.message || error?.code || 'Validation failed'}${expected}${actual}`)}</li>`;
+      }).join('')
       : '<li>Result did not match the output contract.</li>';
     const rawOutput = String(latest.entry?.result || latest.entry?.summary || this.task?.result || '').trim();
+    const normalizedRow = validation?.normalized_row && typeof validation.normalized_row === 'object' ? validation.normalized_row : null;
+    const reviewDraft = normalizedRow ? JSON.stringify(normalizedRow, null, 2) : rawOutput;
     const sourceTaskId = String(sourceTask?.id || this.taskId || '').trim();
-    const contractColumns = this.getReviewContractColumns(sourceTask);
+    const outputSpecSnapshot = validation?.output_spec_snapshot || sourceTask?.output_spec || null;
+    const contractColumns = this.getReviewContractColumns(sourceTask, validation);
+    const reviewColumns = outputSpecSnapshot ? this.getOutputSpecSchemaFields(outputSpecSnapshot) : contractColumns;
     const contractColumnNames = contractColumns.map((column) => column.name);
-    const tableEditor = this.renderReviewTableEditor(rawOutput, contractColumns);
+    const tableEditor = this.renderReviewTableEditor(reviewDraft, reviewColumns, outputSpecSnapshot ? 'json' : 'csv');
     const rawHidden = tableEditor ? ' hidden' : '';
-    const currentContractVersion = String(sourceTask?.output_contract?.version || '').trim();
+    const currentContractVersion = String(sourceTask?.output_spec?.version || sourceTask?.output_contract?.version || '').trim();
     const runContractVersion = String(validation?.contract_version || '').trim();
     const contractMismatchWarning = currentContractVersion && runContractVersion && currentContractVersion !== runContractVersion
       ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The task now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
       : '';
+    const headerMismatch = errors.find((error) => String(error?.code || '') === 'csv_header_mismatch');
+    const headerMismatchHtml = headerMismatch ? `
+      <div class="workspace-task-review-reconcile">
+        <div>
+          <strong>Destination CSV uses different columns</strong>
+          <span>The row is ready, but the existing file header does not match this result format.</span>
+        </div>
+        <dl>
+          <div><dt>Expected</dt><dd>${this.escapeHtml((headerMismatch.expected || []).join(', ') || 'No expected header')}</dd></div>
+          <div><dt>Actual</dt><dd>${this.escapeHtml((headerMismatch.actual || []).join(', ') || 'No existing header')}</dd></div>
+        </dl>
+        <div class="workspace-task-review-reconcile-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-append-storage">Change destination</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-action="design-output-columns-from-result">Edit format</button>
+        </div>
+      </div>` : '';
+    const normalizedPreviewHtml = normalizedRow ? `
+      <details class="workspace-task-review-normalized" open>
+        <summary>Normalized row</summary>
+        <pre>${this.escapeHtml(JSON.stringify(normalizedRow, null, 2))}</pre>
+      </details>` : '';
+    const repairStatus = String(validation?.repair_status || '').trim();
+    const storageStatus = String(validation?.storage_status || '').trim();
 
     return `
       <section class="workspace-task-review-panel" data-review-task-id="${this.escapeHtml(sourceTaskId)}" data-review-history-index="${this.escapeHtml(latest.index)}">
         <div class="workspace-task-page-mini-label">Needs Review</div>
         <div class="workspace-task-review-card">
           <div class="workspace-task-review-copy">
-            <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} held from CSV storage.</strong>
-            <span>${contractColumnNames.length > 0 ? `Expected columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result must match the output contract before it can be appended.'}</span>
+            <strong>${this.escapeHtml(entries.length)} run${entries.length === 1 ? '' : 's'} waiting before CSV save.</strong>
+            <span>${contractColumnNames.length > 0 ? `Expected CSV columns: ${this.escapeHtml(contractColumnNames.join(', '))}` : 'The result needs to match the saved format before it can be written.'}</span>
+          </div>
+          <div class="workspace-task-review-status-row">
+            ${runContractVersion ? `<span>Contract ${this.escapeHtml(runContractVersion)}</span>` : ''}
+            ${storageStatus ? `<span>Storage ${this.escapeHtml(storageStatus.replace(/_/g, ' '))}</span>` : ''}
+            ${repairStatus ? `<span>Repair ${this.escapeHtml(repairStatus.replace(/_/g, ' '))}</span>` : ''}
           </div>
           ${contractMismatchWarning}
+          ${headerMismatchHtml}
           <ul class="workspace-task-review-errors">${errorList}</ul>
+          ${normalizedPreviewHtml}
           ${tableEditor}
           <label class="workspace-task-review-editor" data-review-raw-pane${rawHidden}>
-            <span>Edit result before approving append</span>
-            <textarea rows="7" data-review-draft>${this.escapeHtml(rawOutput)}</textarea>
+            <span>Edit the row before saving</span>
+            <textarea rows="7" data-review-draft>${this.escapeHtml(reviewDraft)}</textarea>
           </label>
           <div class="workspace-task-review-actions">
-            <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Approve Append</button>
-            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy Raw</button>
+            <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Save row</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="copy">Copy row</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-review-action="retry_normalization">Retry parsing</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="rerun">Re-run Task</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-review-action="dismiss">Dismiss</button>
           </div>
@@ -5786,7 +6256,8 @@ export class WorkspaceTaskPage {
       columns.push(column);
       row[column] = input.value || '';
     });
-    const csv = rowsToCSV(columns, [row]);
+    const format = panel.querySelector('[data-review-table-pane]')?.getAttribute('data-review-output-format') || 'csv';
+    const csv = format === 'json' ? JSON.stringify(row, null, 2) : rowsToCSV(columns, [row]);
     const textarea = panel.querySelector('[data-review-draft]');
     if (textarea) textarea.value = csv;
     return csv;
@@ -5850,6 +6321,43 @@ export class WorkspaceTaskPage {
       return;
     }
 
+    if (action === 'retry_normalization') {
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'retry_normalization',
+            history_index: historyIndex
+          })
+        });
+        const payloadText = await response.text();
+        let payload = null;
+        if (payloadText) {
+          try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+        }
+        if (!response.ok) {
+          throw new Error(payload?.message || payloadText || 'Failed to retry normalization');
+        }
+        const updatedTask = payload?.task || null;
+        const updatedEntry = Array.isArray(updatedTask?.execution_history)
+          ? updatedTask.execution_history[historyIndex]
+          : null;
+        const status = String(updatedEntry?.validation_result?.validation_status || '').trim().toLowerCase();
+        this.notify(status === 'needs_review' ? 'warning' : 'success', status === 'needs_review'
+          ? 'Normalization retried; review is still needed.'
+          : 'Normalization retried and stored.');
+        await this.loadData();
+      } catch (error) {
+        console.error('Failed to retry normalization:', error);
+        this.notify('error', error?.message || 'Failed to retry normalization');
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
     if (!panel.querySelector('[data-review-table-pane]')?.hidden) {
       this.syncReviewRawFromTable(panel);
     }
@@ -5879,7 +6387,16 @@ export class WorkspaceTaskPage {
           : '';
         throw new Error(validationErrors || payload?.message || payloadText || `${label} failed`);
       }
-      this.notify('success', action === 'dismiss' ? 'Review dismissed' : 'Approved result appended');
+      const updatedTask = payload?.task || null;
+      const updatedEntry = Array.isArray(updatedTask?.execution_history)
+        ? updatedTask.execution_history[historyIndex]
+        : null;
+      const status = String(updatedEntry?.validation_result?.validation_status || '').trim().toLowerCase();
+      this.notify(status === 'needs_review' ? 'warning' : 'success', action === 'dismiss'
+        ? 'Review dismissed'
+        : status === 'needs_review'
+          ? 'Append blocked; review is still needed.'
+          : 'Approved result appended');
       await this.loadData();
     } catch (error) {
       console.error('Failed to resolve output review:', error);

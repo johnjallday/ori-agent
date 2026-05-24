@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -314,7 +315,13 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			te.mu.Unlock()
 		}()
 
-		// Execute the task
+		// Execute the task with a run-start output spec snapshot so later
+		// approvals do not change prompt/validation semantics in-flight.
+		task.OutputSpec = SnapshotTaskOutputSpec(task.OutputSpec)
+		if task.OutputSpec != nil {
+			task.OutputSchema = task.OutputSpec.Schema
+			task.OutputContract = task.OutputSpec.Contract
+		}
 		taskRun, err := ExecuteTaskWithRunMetadata(ctx, te.taskHandler, task.To, task)
 		result := taskRun.Result
 
@@ -410,7 +417,16 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			// per-workspace lock, so a concurrent Update can interleave; that's
 			// accepted today (store-node bookkeeping is not load-bearing).
 			if fresh, getErr := te.workspaceStore.Get(workspaceID); getErr == nil {
-				te.autoStoreResult(fresh, &task, result)
+				taskForStorage := task
+				if persisted, taskErr := fresh.GetTask(task.ID); taskErr == nil && persisted != nil {
+					taskForStorage = *persisted
+					taskForStorage.OutputSpec = SnapshotTaskOutputSpec(task.OutputSpec)
+					if taskForStorage.OutputSpec != nil {
+						taskForStorage.OutputSchema = taskForStorage.OutputSpec.Schema
+						taskForStorage.OutputContract = taskForStorage.OutputSpec.Contract
+					}
+				}
+				te.autoStoreResult(ctx, fresh, &taskForStorage, result)
 			}
 
 			if te.eventBus != nil {
@@ -480,9 +496,19 @@ func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
 // 2. Agent's connected store node (if auto-store enabled)
 // This is a package-level function so it can be called from both executor and HTTP handlers
 func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+	AutoStoreResultWithAssistant(context.Background(), ws, task, result, workspaceStore, nil)
+}
+
+// AutoStoreResultWithAssistant automatically stores task result based on:
+// 1. Task-level ResultStorage configuration (if enabled)
+// 2. Agent's connected store node (if auto-store enabled)
+//
+// When an active output spec exists, assistant can perform one bounded
+// normalize/repair pass before CSV projection.
+func AutoStoreResultWithAssistant(ctx context.Context, ws *Workspace, task *Task, result string, workspaceStore Store, assistant TaskOutputSpecAssistant) {
 	// Check for task-level result storage configuration first
 	if task.ResultStorage != nil && task.ResultStorage.Enabled {
-		autoStoreTaskResult(ws, task, result, workspaceStore)
+		autoStoreTaskResult(ctx, ws, task, result, workspaceStore, assistant)
 		return
 	}
 
@@ -512,7 +538,7 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		return
 	}
 
-	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	validation, contractCSV := validateTaskOutputForStorage(ctx, task, result, assistant)
 	if validation.ValidationStatus == TaskValidationNeedsReview {
 		recordTaskStorageValidation(ws, task, workspaceStore, validation)
 		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
@@ -606,8 +632,18 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 	}
 }
 
+func validateTaskOutputForStorage(ctx context.Context, task *Task, result string, assistant TaskOutputSpecAssistant) (*TaskValidationResult, string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if task != nil && task.OutputSpec != nil {
+		return ValidateTaskOutputSpecResultWithAssistant(ctx, task, result, assistant)
+	}
+	return ValidateTaskOutputContractResult(task, result)
+}
+
 // autoStoreTaskResult handles task-level result storage configuration
-func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result string, workspaceStore Store, assistant TaskOutputSpecAssistant) {
 	storage := task.ResultStorage
 	if storage == nil || !storage.Enabled {
 		return
@@ -616,7 +652,7 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	// Generate filename
 	timestamp := time.Now().Format("20060102-150405")
 
-	validation, contractCSV := ValidateTaskOutputContractResult(task, result)
+	validation, contractCSV := validateTaskOutputForStorage(ctx, task, result, assistant)
 	if validation.ValidationStatus == TaskValidationNeedsReview {
 		recordTaskStorageValidation(ws, task, workspaceStore, validation)
 		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
@@ -725,7 +761,20 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 			storeNodeCopy := *storeNode
 			storeNodeCopy.WriteMode = "append"
 			storeNodeCopy.Format = "csv"
-			if err := WriteToStore(&storeNodeCopy, storeFilePath, csvWithoutHeaderForExistingStore(storeNode, storeFilePath, dataToStore)); err != nil {
+			payload, err := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, dataToStore)
+			if err != nil {
+				if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
+					return
+				}
+				logger.Error("Failed to prepare task result CSV append for store node", logger.Fields{
+					"task_id":       task.ID,
+					"store_node_id": storeNode.ID,
+					"filename":      storeFilePath,
+					"err":           err,
+				})
+				return
+			}
+			if err := WriteToStore(&storeNodeCopy, storeFilePath, payload); err != nil {
 				logger.Error("Failed to append task result to store node", logger.Fields{
 					"task_id":       task.ID,
 					"store_node_id": storeNode.ID,
@@ -798,7 +847,10 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	}
 
 	if appendCSV {
-		if err := AppendCSVToFile(filePath, dataToStore); err != nil {
+		if err := AppendCSVToFileStrict(filePath, dataToStore); err != nil {
+			if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
+				return
+			}
 			logger.Error("Failed to append task result to CSV file", logger.Fields{
 				"task_id":   task.ID,
 				"file_path": filePath,
@@ -835,6 +887,52 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 		validation.StorageStatus = TaskStorageSaved
 		recordTaskStorageValidation(ws, task, workspaceStore, validation)
 	}
+}
+
+func recordCSVHeaderMismatchValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult, err error) bool {
+	var mismatch *CSVHeaderMismatchError
+	if !errors.As(err, &mismatch) {
+		return false
+	}
+	if validation == nil {
+		validation = notApplicableValidationResult()
+	}
+	validation.ValidationStatus = TaskValidationNeedsReview
+	validation.StorageStatus = TaskStorageSkippedInvalid
+	if validation.RawOutputRef == "" {
+		validation.RawOutputRef = taskOutputRawResultRefLatest
+	}
+	validation.Errors = append(validation.Errors, TaskValidationError{
+		Code:     "csv_header_mismatch",
+		Message:  mismatch.Error(),
+		Expected: append([]string(nil), mismatch.Expected...),
+		Actual:   append([]string(nil), mismatch.Actual...),
+	})
+	recordTaskStorageValidation(ws, task, workspaceStore, validation)
+	logger.Info("Task output storage telemetry", logger.Fields{
+		"action":            "storage_blocked_header_mismatch",
+		"workspace_id":      workspaceIDFromTaskStorageContext(ws),
+		"task_id":           task.ID,
+		"run_id":            latestTaskExecutionRunID(task),
+		"contract_version":  validation.ContractVersion,
+		"validation_status": validation.ValidationStatus,
+		"storage_status":    validation.StorageStatus,
+		"expected":          strings.Join(mismatch.Expected, ","),
+		"actual":            strings.Join(mismatch.Actual, ","),
+	})
+	logger.Warn("Task result held for review; CSV header mismatch", logger.Fields{
+		"task_id":  task.ID,
+		"expected": strings.Join(mismatch.Expected, ","),
+		"actual":   strings.Join(mismatch.Actual, ","),
+	})
+	return true
+}
+
+func workspaceIDFromTaskStorageContext(ws *Workspace) string {
+	if ws == nil {
+		return ""
+	}
+	return ws.ID
 }
 
 func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult) {
@@ -899,9 +997,13 @@ func latestTaskExecutionRunID(task *Task) string {
 	return task.ExecutionHistory[len(task.ExecutionHistory)-1].RunID
 }
 
-// autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store
-func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string) {
-	AutoStoreResult(ws, task, result, te.workspaceStore)
+// autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store.
+func (te *TaskExecutor) autoStoreResult(ctx context.Context, ws *Workspace, task *Task, result string) {
+	var assistant TaskOutputSpecAssistant
+	if candidate, ok := te.taskHandler.(TaskOutputSpecAssistant); ok {
+		assistant = candidate
+	}
+	AutoStoreResultWithAssistant(ctx, ws, task, result, te.workspaceStore, assistant)
 }
 
 // GetRunningTaskCount returns the number of currently running tasks

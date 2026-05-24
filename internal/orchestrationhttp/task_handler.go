@@ -336,6 +336,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		CombinationInstruction string                         `json:"combination_instruction"`
 		OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
 		OutputContract         *workspace.TaskOutputContract  `json:"output_contract"`
+		OutputSpec             *workspace.TaskOutputSpec      `json:"output_spec"`
+		DraftOutputSpec        *workspace.TaskOutputSpec      `json:"draft_output_spec"`
 		TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 		Schedule               json.RawMessage                `json:"schedule"`
 		ScheduleEnabled        bool                           `json:"schedule_enabled"`
@@ -374,6 +376,16 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
+	outputSpec, outputSpecErrors := workspace.NormalizeTaskOutputSpec(req.OutputSpec)
+	if len(outputSpecErrors) > 0 {
+		orihttp.BadRequest(w, "Invalid output_spec: "+strings.Join(outputSpecErrors, "; "))
+		return
+	}
+	draftOutputSpec, draftSpecErrors := workspace.NormalizeTaskOutputSpec(req.DraftOutputSpec)
+	if len(draftSpecErrors) > 0 {
+		orihttp.BadRequest(w, "Invalid draft_output_spec: "+strings.Join(draftSpecErrors, "; "))
+		return
+	}
 
 	// Create task
 	task := workspace.Task{
@@ -392,6 +404,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
 		OutputSchema:           workspace.NormalizeTaskOutputSchema(req.OutputSchema),
 		OutputContract:         workspace.NormalizeTaskOutputContract(req.OutputContract),
+		OutputSpec:             outputSpec,
+		DraftOutputSpec:        draftOutputSpec,
 		TemplateRef:            req.TemplateRef,
 		Status:                 workspace.TaskStatusPending,
 		Schedule:               schedule,
@@ -403,8 +417,9 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
 	}
-	if task.OutputContract == nil {
-		task.OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &task)
+	if task.OutputSpec != nil {
+		task.OutputSchema = task.OutputSpec.Schema
+		task.OutputContract = task.OutputSpec.Contract
 	}
 
 	// Validate: scheduled tasks must be assigned to an agent
@@ -519,6 +534,8 @@ type taskUpdateRequest struct {
 	CombinationInstruction *string                        `json:"combination_instruction"`
 	OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
 	OutputContract         *workspace.TaskOutputContract  `json:"output_contract"`
+	OutputSpec             *workspace.TaskOutputSpec      `json:"output_spec"`
+	DraftOutputSpec        *workspace.TaskOutputSpec      `json:"draft_output_spec"`
 	TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 	Schedule               json.RawMessage                `json:"schedule"`
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
@@ -538,7 +555,8 @@ func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
 		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
-		r.OutputContract != nil || r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
+		r.OutputContract != nil || r.OutputSpec != nil || r.DraftOutputSpec != nil ||
+		r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
 		r.KanbanLabels != nil || r.KanbanDueDate != nil
 }
 
@@ -609,6 +627,24 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.OutputContract != nil {
 		task.OutputContract = workspace.NormalizeTaskOutputContract(req.OutputContract)
 		logger.Debug("Updated task output contract", logger.Fields{"task_id": req.TaskID, "has_output_contract": task.OutputContract != nil})
+	}
+	if req.OutputSpec != nil {
+		outputSpec, errs := workspace.NormalizeTaskOutputSpec(req.OutputSpec)
+		if len(errs) == 0 {
+			task.OutputSpec = outputSpec
+			if outputSpec != nil {
+				task.OutputSchema = outputSpec.Schema
+				task.OutputContract = outputSpec.Contract
+			}
+		}
+		logger.Debug("Updated task output spec", logger.Fields{"task_id": req.TaskID, "has_output_spec": task.OutputSpec != nil, "error_count": len(errs)})
+	}
+	if req.DraftOutputSpec != nil {
+		draftOutputSpec, errs := workspace.NormalizeTaskOutputSpec(req.DraftOutputSpec)
+		if len(errs) == 0 {
+			task.DraftOutputSpec = draftOutputSpec
+		}
+		logger.Debug("Updated task draft output spec", logger.Fields{"task_id": req.TaskID, "has_draft_output_spec": task.DraftOutputSpec != nil, "error_count": len(errs)})
 	}
 	if req.TemplateRef != nil {
 		task.TemplateRef = req.TemplateRef
@@ -845,9 +881,6 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 				// Apply basic field updates
 				th.applyBasicFieldUpdates(&ws.Tasks[i], &req)
-				if req.OutputContract == nil {
-					ws.Tasks[i].OutputContract = workspace.BootstrapOutputContractFromCSVHeader(ws, &ws.Tasks[i])
-				}
 
 				// Update assignment using helper
 				if req.To != nil {
@@ -1585,6 +1618,13 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Set by the cases that attempt to store a row so the shared response
+	// below can report whether the row was actually written. A CSV header
+	// mismatch holds the row for review (StorageStatus=skipped_invalid) while
+	// the action itself succeeds, so "success" alone is not enough for a
+	// non-UI client to tell that nothing was appended.
+	var reviewValidation *workspace.TaskValidationResult
+
 	switch action {
 	case "inspect", "copy_raw":
 		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
@@ -1599,6 +1639,46 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			"validation_result": entry.Validation,
 		})
 		return
+	case "retry_normalization":
+		entry := task.ExecutionHistory[historyIndex]
+		rawResult := strings.TrimSpace(entry.Result)
+		if rawResult == "" {
+			rawResult = strings.TrimSpace(entry.Summary)
+		}
+		if rawResult == "" {
+			rawResult = strings.TrimSpace(task.Result)
+		}
+		if rawResult == "" {
+			orihttp.BadRequest(w, "raw result is required to retry normalization")
+			return
+		}
+		reviewTask := taskOutputReviewValidationTaskForEntry(task, entry)
+		if reviewTask == nil || reviewTask.OutputSpec == nil {
+			orihttp.BadRequest(w, "retry_normalization requires a structured output spec snapshot")
+			return
+		}
+		var assistant workspace.TaskOutputSpecAssistant
+		if candidate, ok := th.taskHandler.(workspace.TaskOutputSpecAssistant); ok {
+			assistant = candidate
+		}
+		validation, csvData := workspace.ValidateTaskOutputSpecResultWithAssistant(r.Context(), reviewTask, rawResult, assistant)
+		if validation.ValidationStatus == workspace.TaskValidationPassed {
+			if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+				if !recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
+					orihttp.InternalError(w, fmt.Sprintf("Failed to append retried normalization: %v", err))
+					return
+				}
+			} else {
+				validation.StorageStatus = workspace.TaskStorageAppended
+			}
+		}
+		now := time.Now().UTC()
+		validation.ValidatedAt = &now
+		if err := th.recordTaskOutputReviewValidation(ws.ID, taskID, historyIndex, action, validation); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to record normalization retry: %v", err))
+			return
+		}
+		reviewValidation = validation
 	case "rerun":
 		if err := th.startTaskOutputReviewRerun(ws.ID, task.ID); err != nil {
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to re-run task", err)
@@ -1646,7 +1726,8 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			orihttp.BadRequest(w, "result is required for manual approval")
 			return
 		}
-		validation, csvData := workspace.ValidateTaskOutputContractResult(task, draft)
+		reviewTask := taskOutputReviewValidationTask(task, task.ExecutionHistory[historyIndex].Validation)
+		validation, csvData := validateTaskOutputReviewApproval(reviewTask, draft)
 		if validation.ValidationStatus != workspace.TaskValidationPassed {
 			th.publishOutputContractReviewEvent(ws.ID, task.ID, action, validation)
 			w.WriteHeader(http.StatusBadRequest)
@@ -1658,6 +1739,16 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			return
 		}
 		if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+			if recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
+				now := time.Now().UTC()
+				validation.ValidatedAt = &now
+				if err := th.recordTaskOutputReviewValidation(ws.ID, taskID, historyIndex, action, validation); err != nil {
+					orihttp.InternalError(w, fmt.Sprintf("Failed to record append review: %v", err))
+					return
+				}
+				reviewValidation = validation
+				break
+			}
 			orihttp.InternalError(w, fmt.Sprintf("Failed to append approved result: %v", err))
 			return
 		}
@@ -1684,8 +1775,9 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			orihttp.InternalError(w, fmt.Sprintf("Failed to record approval: %v", err))
 			return
 		}
+		reviewValidation = validation
 	default:
-		orihttp.BadRequest(w, "action must be inspect, copy_raw, dismiss, rerun, or approve_append")
+		orihttp.BadRequest(w, "action must be inspect, copy_raw, dismiss, rerun, retry_normalization, or approve_append")
 		return
 	}
 
@@ -1694,11 +1786,23 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		orihttp.InternalError(w, fmt.Sprintf("Failed to load updated task: %v", err))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]any{
+	resp := map[string]any{
 		"success": true,
 		"task":    updatedTask,
-	})
+	}
+	// When the action attempted to store a row, report whether it actually
+	// landed. A CSV header mismatch holds the row for review rather than
+	// appending it, so "success" (the action was processed) must not be read
+	// as "the row was stored".
+	if reviewValidation != nil {
+		resp["validation_status"] = reviewValidation.ValidationStatus
+		resp["storage_status"] = reviewValidation.StorageStatus
+		resp["stored"] = reviewValidation.StorageStatus == workspace.TaskStorageAppended ||
+			reviewValidation.StorageStatus == workspace.TaskStorageSaved ||
+			reviewValidation.StorageStatus == workspace.TaskStorageManuallyAppended
+	}
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, resp)
 }
 
 func (th *TaskHandler) publishOutputContractReviewEvent(workspaceID, taskID, action string, validation *workspace.TaskValidationResult) {
@@ -1717,6 +1821,76 @@ func (th *TaskHandler) publishOutputContractReviewEvent(workspaceID, taskID, act
 		data["error_count"] = len(validation.Errors)
 	}
 	th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, workspaceID, "task.output_contract", data))
+}
+
+func (th *TaskHandler) recordTaskOutputReviewValidation(workspaceID, taskID string, historyIndex int, action string, validation *workspace.TaskValidationResult) error {
+	return th.workspaceStore.Update(workspaceID, func(fresh *workspace.Workspace) error {
+		return fresh.MutateTask(taskID, func(t *workspace.Task) error {
+			if historyIndex < 0 || historyIndex >= len(t.ExecutionHistory) {
+				return fmt.Errorf("history entry no longer exists")
+			}
+			t.ExecutionHistory[historyIndex].Validation = validation
+			workspace.MirrorTaskValidationResult(fresh.ID, t.ID, t.ExecutionHistory[historyIndex].RunID, validation)
+			th.publishOutputContractReviewEvent(fresh.ID, t.ID, action, validation)
+			return nil
+		})
+	})
+}
+
+func recordTaskOutputReviewCSVHeaderMismatch(validation *workspace.TaskValidationResult, err error) bool {
+	var mismatch *workspace.CSVHeaderMismatchError
+	if !errors.As(err, &mismatch) {
+		return false
+	}
+	if validation == nil {
+		return false
+	}
+	validation.ValidationStatus = workspace.TaskValidationNeedsReview
+	validation.StorageStatus = workspace.TaskStorageSkippedInvalid
+	validation.Errors = append(validation.Errors, workspace.TaskValidationError{
+		Code:     "csv_header_mismatch",
+		Message:  mismatch.Error(),
+		Expected: append([]string(nil), mismatch.Expected...),
+		Actual:   append([]string(nil), mismatch.Actual...),
+	})
+	return true
+}
+
+func validateTaskOutputReviewApproval(task *workspace.Task, result string) (*workspace.TaskValidationResult, string) {
+	if task != nil && task.OutputSpec != nil {
+		return workspace.ValidateTaskOutputSpecResult(task, result)
+	}
+	return workspace.ValidateTaskOutputContractResult(task, result)
+}
+
+func taskOutputReviewValidationTask(task *workspace.Task, validation *workspace.TaskValidationResult) *workspace.Task {
+	if task == nil {
+		return nil
+	}
+	reviewTask := *task
+	if validation != nil && validation.OutputSpec != nil {
+		reviewTask.OutputSpec = workspace.SnapshotTaskOutputSpec(validation.OutputSpec)
+		reviewTask.OutputSchema = nil
+		reviewTask.OutputContract = nil
+		if reviewTask.OutputSpec != nil {
+			reviewTask.OutputSchema = reviewTask.OutputSpec.Schema
+			reviewTask.OutputContract = reviewTask.OutputSpec.Contract
+		}
+	}
+	return &reviewTask
+}
+
+func taskOutputReviewValidationTaskForEntry(task *workspace.Task, entry workspace.TaskExecution) *workspace.Task {
+	reviewTask := taskOutputReviewValidationTask(task, entry.Validation)
+	if reviewTask == nil {
+		return nil
+	}
+	reviewTask.CurrentRunID = strings.TrimSpace(entry.RunID)
+	reviewTask.ExecutionHistory = []workspace.TaskExecution{entry}
+	if reviewTask.Context == nil {
+		reviewTask.Context = map[string]any{}
+	}
+	return reviewTask
 }
 
 func resolveTaskReviewHistoryIndex(task *workspace.Task, requested *int) int {
@@ -1834,11 +2008,11 @@ func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvDat
 		storeNodeCopy.WriteMode = "append"
 		storeNodeCopy.Format = "csv"
 		dataToStore := csvData
-		if finalPath, err := workspace.BuildFinalPath(storeNode.BaseDir, storeFilePath); err == nil {
-			if info, statErr := os.Stat(finalPath); statErr == nil && info.Size() > 0 {
-				dataToStore = csvWithoutHeaderForReview(csvData)
-			}
+		strictData, err := workspace.CSVWithoutHeaderForExistingStoreStrict(&storeNodeCopy, storeFilePath, dataToStore)
+		if err != nil {
+			return err
 		}
+		dataToStore = strictData
 		if err := workspace.WriteToStore(&storeNodeCopy, storeFilePath, dataToStore); err != nil {
 			return err
 		}
@@ -1860,7 +2034,7 @@ func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvDat
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
 		filePath = filepath.Join(filePath, taskResultAppendCSVFilename(task))
 	}
-	return workspace.AppendCSVToFile(filePath, csvData)
+	return workspace.AppendCSVToFileStrict(filePath, csvData)
 }
 
 func taskResultAppendCSVFilename(task *workspace.Task) string {
@@ -1880,15 +2054,6 @@ func taskResultAppendCSVFilename(task *workspace.Task) string {
 		return "task.csv"
 	}
 	return sanitized.String() + ".csv"
-}
-
-func csvWithoutHeaderForReview(csvData string) string {
-	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
-	lines := strings.Split(normalized, "\n")
-	if len(lines) <= 1 {
-		return ""
-	}
-	return strings.TrimSpace(strings.Join(lines[1:], "\n"))
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk

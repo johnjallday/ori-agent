@@ -629,7 +629,11 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 		prompt.WriteString("\n")
 	}
 
-	if outputInstructions := BuildTaskOutputSchemaPrompt(task.OutputSchema); outputInstructions != "" {
+	if outputInstructions := BuildTaskOutputSpecPrompt(ActiveTaskOutputSpec(&task)); outputInstructions != "" {
+		prompt.WriteString("## Required Output Format\n\n")
+		prompt.WriteString(outputInstructions)
+		prompt.WriteString("\n\n")
+	} else if outputInstructions := BuildTaskOutputSchemaPrompt(task.OutputSchema); outputInstructions != "" {
 		prompt.WriteString("## Required Output Format\n\n")
 		prompt.WriteString(outputInstructions)
 		prompt.WriteString("\n\n")
@@ -647,7 +651,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 	prompt.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
 	prompt.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
 	prompt.WriteString("respond directly without calling tools. ")
-	if NormalizeTaskOutputSchema(task.OutputSchema) != nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
+	if ActiveTaskOutputSpec(&task) != nil || NormalizeTaskOutputSchema(task.OutputSchema) != nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
 		prompt.WriteString("When you are done, your final answer must be the JSON object described above and nothing else.")
 	} else {
 		prompt.WriteString("Provide a clear, concise response with your findings or results.")

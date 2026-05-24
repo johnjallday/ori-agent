@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 )
@@ -59,6 +60,20 @@ func cloneTaskValidationResultValue(validation *TaskValidationResult) TaskValida
 		out.ValidatedAt = &t
 	}
 	out.Errors = append([]TaskValidationError(nil), validation.Errors...)
+	for i := range out.Errors {
+		out.Errors[i].Expected = append([]string(nil), validation.Errors[i].Expected...)
+		out.Errors[i].Actual = append([]string(nil), validation.Errors[i].Actual...)
+	}
+	if validation.NormalizedRow != nil {
+		data, err := json.Marshal(validation.NormalizedRow)
+		if err == nil {
+			var row map[string]any
+			if json.Unmarshal(data, &row) == nil {
+				out.NormalizedRow = row
+			}
+		}
+	}
+	out.OutputSpec = SnapshotTaskOutputSpec(validation.OutputSpec)
 	if validation.ManualApproval != nil {
 		approval := *validation.ManualApproval
 		out.ManualApproval = &approval

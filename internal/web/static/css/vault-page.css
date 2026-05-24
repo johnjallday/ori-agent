@@ -41,19 +41,19 @@
   --vault-page-indicator-border: rgba(201, 204, 209, 0.14);
   --vault-page-hero-bg:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.14), transparent 30%),
-    linear-gradient(160deg, rgba(13, 20, 13, 0.96) 0%, rgba(13, 20, 13, 0.96) 100%);
+    linear-gradient(160deg, rgba(31, 33, 40, 0.96) 0%, rgba(31, 33, 40, 0.96) 100%);
   --vault-page-panel-bg:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.1), transparent 36%),
-    linear-gradient(180deg, rgba(13, 20, 13, 0.94), rgba(13, 20, 13, 0.94));
+    linear-gradient(180deg, rgba(31, 33, 40, 0.94), rgba(31, 33, 40, 0.94));
   --vault-page-panel-highlight-bg:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.12), transparent 40%),
-    linear-gradient(160deg, rgba(13, 20, 13, 0.96), rgba(13, 20, 13, 0.96));
+    linear-gradient(160deg, rgba(31, 33, 40, 0.96), rgba(31, 33, 40, 0.96));
   --vault-page-panel-primary-bg:
     radial-gradient(circle at top right, rgba(92, 92, 94, 0.12), transparent 38%),
-    linear-gradient(160deg, rgba(13, 20, 13, 0.97), rgba(13, 20, 13, 0.97));
+    linear-gradient(160deg, rgba(31, 33, 40, 0.97), rgba(31, 33, 40, 0.97));
   --vault-page-chip-bg: rgba(31, 33, 40, 0.72);
   --vault-page-chip-border: rgba(201, 204, 209, 0.16);
-  --vault-page-indicator-bg: rgba(13, 20, 13, 0.76);
+  --vault-page-indicator-bg: rgba(31, 33, 40, 0.76);
   --vault-page-note-bg: rgba(31, 33, 40, 0.72);
   --vault-page-meta-bg: rgba(31, 33, 40, 0.72);
   --vault-page-record-bg: rgba(31, 33, 40, 0.72);
@@ -544,7 +544,7 @@ body.vault-page-dialog-open {
 .dark-mode .vault-page-email-connect-panel {
   background:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.12), transparent 34%),
-    linear-gradient(180deg, rgba(13, 20, 13, 0.92), rgba(13, 20, 13, 0.88));
+    linear-gradient(180deg, rgba(31, 33, 40, 0.92), rgba(31, 33, 40, 0.88));
 }
 
 .vault-page-email-connect-copy {

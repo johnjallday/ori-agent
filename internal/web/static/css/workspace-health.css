@@ -4,7 +4,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
-    linear-gradient(180deg, rgba(13, 20, 13, 0.96), rgba(13, 20, 13, 0.92));
+    linear-gradient(180deg, rgba(31, 33, 40, 0.96), rgba(31, 33, 40, 0.92));
 }
 
 .workspace-detail-health-card::before {
@@ -201,7 +201,7 @@
   padding: 0.95rem 1rem;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(13, 20, 13, 0.66);
+  background: rgba(31, 33, 40, 0.66);
 }
 
 .workspace-detail-health-issue.is-error {
@@ -292,7 +292,7 @@
   margin: 0 1.35rem 1.35rem;
   border-radius: 18px;
   border: 1px solid rgba(125, 176, 255, 0.18);
-  background: rgba(13, 20, 13, 0.58);
+  background: rgba(31, 33, 40, 0.58);
   overflow: hidden;
 }
 

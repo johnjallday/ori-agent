@@ -136,13 +136,16 @@ type OutputContractColumn struct {
 
 // OutputContractSuggestionRequest asks the system model to propose an append-to-CSV contract.
 type OutputContractSuggestionRequest struct {
-	Title           string               `json:"title"`
-	Details         string               `json:"details"`
-	WorkspaceID     string               `json:"workspace_id"`
-	Schedule        *ScheduleConfig      `json:"schedule"`
-	ScheduleEnabled bool                 `json:"schedule_enabled"`
-	ScheduleName    string               `json:"schedule_name"`
-	ResultStorage   *ResultStorageConfig `json:"result_storage"`
+	Title                  string               `json:"title"`
+	Details                string               `json:"details"`
+	WorkspaceID            string               `json:"workspace_id"`
+	TaskID                 string               `json:"task_id,omitempty"`
+	Schedule               *ScheduleConfig      `json:"schedule"`
+	ScheduleEnabled        bool                 `json:"schedule_enabled"`
+	ScheduleName           string               `json:"schedule_name"`
+	ResultStorage          *ResultStorageConfig `json:"result_storage"`
+	ExistingCSVHeader      []string             `json:"existing_csv_header,omitempty"`
+	RecentExecutionSamples []string             `json:"recent_execution_samples,omitempty"`
 	// ResultSample is an optional excerpt of a prior task result. When present
 	// the model can ground its column suggestions in the concrete data the
 	// task actually produces instead of just guessing from title/details.
@@ -151,8 +154,9 @@ type OutputContractSuggestionRequest struct {
 
 // OutputContractSuggestionResponse is the AI-generated CSV output contract suggestion.
 type OutputContractSuggestionResponse struct {
-	OutputContract *OutputContractConfig `json:"output_contract" jsonschema_description:"Suggested CSV output contract"`
-	Reasoning      string                `json:"reasoning" jsonschema_description:"Brief explanation of why these columns were selected"`
+	OutputContract *OutputContractConfig     `json:"output_contract" jsonschema_description:"Suggested CSV output contract"`
+	OutputSpec     *workspace.TaskOutputSpec `json:"output_spec,omitempty" jsonschema_description:"Suggested structured output spec including schema, contract, mappings, and metadata policy"`
+	Reasoning      string                    `json:"reasoning" jsonschema_description:"Brief explanation of why these columns were selected"`
 }
 
 type OutputContractTelemetryRequest struct {
@@ -241,12 +245,14 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 		_ = orihttp.RespondBadRequest(w, "title or details is required")
 		return
 	}
+	h.publishOutputSpecSuggestionEvent(req, "suggestion_requested", "")
 
 	systemProvider, systemModel := h.configManager.GetSystemModel()
 	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		logger.Error("System model not available for output contract suggestion", logger.Fields{"error": err})
+		h.publishOutputSpecSuggestionEvent(req, "suggestion_failed", err.Error())
 		_ = orihttp.RespondServiceUnavailable(w, "System model not configured")
 		return
 	}
@@ -254,11 +260,37 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 	suggestion, err := h.suggestOutputContract(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req)
 	if err != nil {
 		logger.Error("Output contract suggestion failed", logger.Fields{"error": err})
+		h.publishOutputSpecSuggestionEvent(req, "suggestion_failed", err.Error())
 		_ = orihttp.RespondInternalError(w, "Failed to suggest output contract: "+err.Error())
 		return
 	}
 
 	orihttp.WriteJSON(w, suggestion)
+}
+
+func (h *AutoTaskHandler) publishOutputSpecSuggestionEvent(req OutputContractSuggestionRequest, action, message string) {
+	if h.eventBus == nil {
+		return
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		return
+	}
+	data := map[string]any{
+		"task_id":        strings.TrimSpace(req.TaskID),
+		"action":         action,
+		"has_header":     len(req.ExistingCSVHeader) > 0,
+		"sample_count":   len(req.RecentExecutionSamples),
+		"storage_format": "",
+	}
+	if req.ResultStorage != nil {
+		data["storage_format"] = strings.TrimSpace(req.ResultStorage.Format)
+		data["write_mode"] = strings.TrimSpace(req.ResultStorage.WriteMode)
+	}
+	if message != "" {
+		data["error"] = message
+	}
+	h.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventTaskOutput, workspaceID, "task.output_spec", data))
 }
 
 // HandleOutputContractTelemetry handles non-raw output-contract UX telemetry.
@@ -300,6 +332,7 @@ func (h *AutoTaskHandler) HandleOutputContractTelemetry(w http.ResponseWriter, r
 func normalizeOutputContractTelemetryAction(action string) string {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "suggestion_accepted", "suggestion_edited", "suggestion_regenerated", "suggestion_failed",
+		"suggestion_requested", "draft_saved", "draft_approved", "draft_discarded",
 		"validation_outcome", "review_action", "storage_gating_outcome":
 		return strings.ToLower(strings.TrimSpace(action))
 	default:
@@ -317,10 +350,40 @@ func (h *AutoTaskHandler) suggestOutputContract(
 ) (*OutputContractSuggestionResponse, error) {
 	scheduleJSON, _ := json.Marshal(req.Schedule)
 	storageJSON, _ := json.Marshal(req.ResultStorage)
-	systemPrompt := `Suggest a compact CSV output contract for a recurring task that appends one row per run.
+	headerJSON, _ := json.Marshal(req.ExistingCSVHeader)
+	samplesJSON, _ := json.Marshal(trimOutputSuggestionSamples(req.RecentExecutionSamples, 5, 1200))
+	systemPrompt := `Suggest a compact structured output spec for a recurring task that appends one row per run.
 
 Return a JSON object with exactly this shape:
 {
+  "output_spec": {
+    "source": "ai_suggested",
+    "schema": {
+      "name": "short_schema_name",
+      "description": "what one normalized row represents",
+      "strict": true,
+      "fields": [
+        {"name": "date", "type": "string", "required": true, "description": "Observation date"}
+      ]
+    },
+    "contract": {
+      "source": "ai_suggested",
+      "columns": [
+        {"name": "date", "type": "date", "required": true, "description": "Observation date"}
+      ]
+    },
+    "mappings": [
+      {"schema_field": "date", "csv_column": "date", "transform": "identity"}
+    ],
+    "metadata_policy": {
+      "fields": [
+        {"name": "run_id", "include": true},
+        {"name": "executed_at", "include": true},
+        {"name": "status", "include": true},
+        {"name": "duration_ms", "include": true}
+      ]
+    }
+  },
   "output_contract": {
     "source": "ai_suggested",
     "columns": [
@@ -331,11 +394,16 @@ Return a JSON object with exactly this shape:
 }
 
 Rules:
-- Use 3-8 practical columns that the task can realistically produce every run.
+- Use 3-8 practical task-data fields and columns that the task can realistically produce every run.
 - Prefer stable facts over prose blobs.
-- Include a date or timestamp column when the task is scheduled or recurring.
-- Use only these types: string, number, boolean, date.
+- Do not include system/run-history fields like run_id, executed_at, status, or duration_ms in the contract columns; those belong in metadata_policy.
+- Include a domain date or observation date column when the task result has one.
+- Schema field types: string, number, integer, boolean, object, array.
+- Contract column types: string, number, boolean, date.
 - Mark columns required only when a run should always provide them.
+- Every required contract column must have a mapping from a schema field.
+- Mapping transform must be identity or json_string. Use json_string for array fields unless a scalar field is better.
+- If an existing CSV header is provided, preserve that header order and names where possible. Suggest additions only when clearly needed.
 - Do not include markdown fences or prose outside the JSON object.`
 
 	resultSample := strings.TrimSpace(req.ResultSample)
@@ -348,8 +416,10 @@ Schedule enabled: %t
 Schedule name: %s
 Schedule JSON: %s
 Result storage JSON: %s
+Existing CSV header JSON: %s
+Recent execution samples JSON: %s
 Sample result from a prior run (use this to derive concrete columns when available):
-%s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON), resultSample)
+%s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON), string(headerJSON), string(samplesJSON), resultSample)
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -411,8 +481,32 @@ func parseOutputContractSuggestion(content string) (*OutputContractSuggestionRes
 	if err := json.Unmarshal([]byte(payload), &suggestion); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
+
+	if suggestion.OutputSpec != nil {
+		normalizedSpec, errs := workspace.NormalizeTaskOutputSpec(suggestion.OutputSpec)
+		if normalizedSpec == nil {
+			return nil, fmt.Errorf("suggestion did not include a usable output spec: %s", strings.Join(errs, "; "))
+		}
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("suggestion output spec is invalid: %s", strings.Join(errs, "; "))
+		}
+		normalizedSpec.Source = "ai_suggested"
+		normalizedSpec.Approval = nil
+		normalizedSpec.Version = ""
+		if normalizedSpec.Contract != nil {
+			normalizedSpec.Contract.Source = "ai_suggested"
+			suggestion.OutputContract = &OutputContractConfig{
+				Source:  normalizedSpec.Contract.Source,
+				Columns: outputContractColumnsFromWorkspace(normalizedSpec.Contract.Columns),
+			}
+		}
+		suggestion.OutputSpec = normalizedSpec
+		suggestion.Reasoning = strings.TrimSpace(suggestion.Reasoning)
+		return &suggestion, nil
+	}
+
 	if suggestion.OutputContract == nil {
-		return nil, fmt.Errorf("suggestion did not include an output contract")
+		return nil, fmt.Errorf("suggestion did not include an output spec or output contract")
 	}
 	normalized := workspace.NormalizeTaskOutputContract(&workspace.TaskOutputContract{
 		Source:  suggestion.OutputContract.Source,
@@ -421,12 +515,75 @@ func parseOutputContractSuggestion(content string) (*OutputContractSuggestionRes
 	if normalized == nil {
 		return nil, fmt.Errorf("suggestion did not include usable columns")
 	}
+	spec := synthesizeSuggestionSpecFromContract(normalized)
 	suggestion.OutputContract = &OutputContractConfig{
 		Source:  normalized.Source,
 		Columns: outputContractColumnsFromWorkspace(normalized.Columns),
 	}
+	suggestion.OutputSpec = spec
 	suggestion.Reasoning = strings.TrimSpace(suggestion.Reasoning)
 	return &suggestion, nil
+}
+
+func trimOutputSuggestionSamples(samples []string, maxSamples int, maxLen int) []string {
+	if maxSamples <= 0 || maxLen <= 0 {
+		return nil
+	}
+	trimmed := make([]string, 0, min(len(samples), maxSamples))
+	for _, sample := range samples {
+		value := strings.TrimSpace(sample)
+		if value == "" {
+			continue
+		}
+		if len(value) > maxLen {
+			value = value[:maxLen] + "\n...[truncated]"
+		}
+		trimmed = append(trimmed, value)
+		if len(trimmed) >= maxSamples {
+			break
+		}
+	}
+	return trimmed
+}
+
+func synthesizeSuggestionSpecFromContract(contract *workspace.TaskOutputContract) *workspace.TaskOutputSpec {
+	if contract == nil {
+		return nil
+	}
+	fields := make([]workspace.TaskOutputField, 0, len(contract.Columns))
+	mappings := make([]workspace.TaskOutputMapping, 0, len(contract.Columns))
+	for _, column := range contract.Columns {
+		fieldType := "string"
+		switch column.Type {
+		case "number":
+			fieldType = "number"
+		case "boolean":
+			fieldType = "boolean"
+		}
+		fields = append(fields, workspace.TaskOutputField{
+			Name:        column.Name,
+			Type:        fieldType,
+			Required:    column.Required,
+			Description: column.Description,
+		})
+		mappings = append(mappings, workspace.TaskOutputMapping{
+			SchemaField: column.Name,
+			CSVColumn:   column.Name,
+			Transform:   workspace.TaskOutputMappingTransformIdentity,
+		})
+	}
+	spec, _ := workspace.NormalizeTaskOutputSpec(&workspace.TaskOutputSpec{
+		Source: "ai_suggested",
+		Schema: &workspace.TaskOutputSchema{
+			Name:        "task_result",
+			Description: "One normalized task result row.",
+			Strict:      true,
+			Fields:      fields,
+		},
+		Contract: contract,
+		Mappings: mappings,
+	})
+	return spec
 }
 
 // parseTaskDescription uses LLM to parse natural language into task configuration

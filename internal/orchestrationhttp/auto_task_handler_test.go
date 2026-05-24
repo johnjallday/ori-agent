@@ -37,11 +37,78 @@ func TestParseOutputContractSuggestionNormalizesColumns(t *testing.T) {
 	if response.OutputContract.Columns[1].Name != "pollen_count" || response.OutputContract.Columns[1].Type != "number" {
 		t.Fatalf("unexpected second column: %+v", response.OutputContract.Columns[1])
 	}
+	if response.OutputSpec == nil {
+		t.Fatalf("expected legacy contract response to synthesize output spec")
+	}
+	if response.OutputSpec.Approval != nil || response.OutputSpec.Version != "" {
+		t.Fatalf("suggested spec should be an unapproved draft: %+v", response.OutputSpec)
+	}
 }
 
 func TestParseOutputContractSuggestionRejectsMissingContract(t *testing.T) {
 	if _, err := parseOutputContractSuggestion(`{"reasoning":"no columns"}`); err == nil {
 		t.Fatal("expected missing contract to fail")
+	}
+}
+
+func TestParseOutputContractSuggestionAcceptsStructuredSpec(t *testing.T) {
+	response, err := parseOutputContractSuggestion(`{
+		"output_spec": {
+			"source": "ai_suggested",
+			"version": "should_be_cleared",
+			"schema": {
+				"name": "pollen",
+				"strict": true,
+				"fields": [
+					{"name": "forecast_date", "type": "string", "required": true},
+					{"name": "top_allergens", "type": "array", "required": false}
+				]
+			},
+			"contract": {
+				"source": "manual",
+				"columns": [
+					{"name": "forecast_date", "type": "date", "required": true},
+					{"name": "top_allergens", "type": "string", "required": false}
+				]
+			},
+			"mappings": [
+				{"schema_field": "forecast_date", "csv_column": "forecast_date"},
+				{"schema_field": "top_allergens", "csv_column": "top_allergens", "transform": "json_string"}
+			],
+			"metadata_policy": {"fields": [{"name": "run_id", "include": false}]},
+			"approval": {"approved_at": "2026-05-21T00:00:00Z"}
+		},
+		"reasoning": "Pollen reports produce one row per forecast."
+	}`)
+	if err != nil {
+		t.Fatalf("parseOutputContractSuggestion returned error: %v", err)
+	}
+	if response.OutputSpec == nil {
+		t.Fatal("expected output spec")
+	}
+	if response.OutputSpec.Version != "" || response.OutputSpec.Approval != nil {
+		t.Fatalf("suggested spec should not be approved/versioned: %+v", response.OutputSpec)
+	}
+	if response.OutputSpec.Source != "ai_suggested" {
+		t.Fatalf("source=%q, want ai_suggested", response.OutputSpec.Source)
+	}
+	if response.OutputContract == nil || len(response.OutputContract.Columns) != 2 {
+		t.Fatalf("expected mirrored output contract, got %+v", response.OutputContract)
+	}
+	if response.OutputSpec.Mappings[1].Transform != workspace.TaskOutputMappingTransformJSONString {
+		t.Fatalf("expected json_string transform, got %+v", response.OutputSpec.Mappings[1])
+	}
+}
+
+func TestParseOutputContractSuggestionRejectsInvalidStructuredSpec(t *testing.T) {
+	if _, err := parseOutputContractSuggestion(`{
+		"output_spec": {
+			"schema": {"fields": [{"name": "value", "type": "number", "required": true}]},
+			"contract": {"columns": [{"name": "value", "type": "number", "required": true}]},
+			"mappings": [{"schema_field": "value", "csv_column": "value", "transform": "not_supported"}]
+		}
+	}`); err == nil {
+		t.Fatal("expected invalid output spec to fail")
 	}
 }
 

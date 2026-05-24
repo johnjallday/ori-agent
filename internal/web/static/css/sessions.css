@@ -1507,9 +1507,9 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .chat-agent-edit-btn:hover {
-  background: rgba(42, 135, 98, 0.15);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
   text-decoration: none;
 }
 
@@ -1523,9 +1523,9 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .chat-agent-change-btn:hover {
-  background: rgba(42, 135, 98, 0.15);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
 }
 
 .agent-edit-color-picker {
@@ -1698,8 +1698,8 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .folder-note-item.active {
-  background: rgba(42, 135, 98, 0.15);
-  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
+  color: var(--text-primary);
 }
 
 .folder-note-icon {
@@ -1830,7 +1830,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .folder-tasks-add-btn:hover {
   background: var(--bg-hover);
-  color: var(--primary-color);
+  color: var(--text-primary);
 }
 
 /* ============================================================================
@@ -5686,8 +5686,8 @@ body.task-modal-open {
 }
 
 .note-tab-strip-action:hover {
-  background: var(--bg-hover, rgba(42, 135, 98, 0.08));
-  color: var(--primary-color, #6366f1);
+  background: var(--bg-hover, var(--bg-tertiary));
+  color: var(--text-primary);
 }
 
 .note-tab-strip-action:disabled,
@@ -5950,14 +5950,14 @@ body.task-modal-open {
 }
 
 .note-rail-note-item:hover {
-  background: var(--bg-hover, rgba(42, 135, 98, 0.06));
+  background: var(--bg-hover, var(--bg-tertiary));
   border-color: var(--border-color, #E8EAED);
 }
 
 .note-rail-note-item.is-active {
-  background: rgba(42, 135, 98, 0.1);
+  background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
   border-color: var(--primary-color, #6366f1);
-  color: var(--primary-color, #6366f1);
+  color: var(--text-primary);
   font-weight: 500;
 }
 
@@ -5980,8 +5980,8 @@ body.task-modal-open {
 }
 
 .note-rail-new-note:hover {
-  border-color: var(--primary-color, #6366f1);
-  color: var(--primary-color, #6366f1);
+  border-color: var(--border-light, var(--border-color));
+  color: var(--text-primary);
 }
 
 /* When the rail is collapsed the tab strip and panes should hide too. The
