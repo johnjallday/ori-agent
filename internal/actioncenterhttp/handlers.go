@@ -119,7 +119,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	sortItems(items, sortKey)
 
 	resp := listResponse{Items: items, Total: len(items)}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, resp)
 }
 
 // Get handles GET /api/action-center/opportunities/{workspaceID}/{opportunityID}.
@@ -157,7 +157,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		resp.WorkspaceName = ws.Name
 		resp.WorkspaceKind = ws.Kind
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, resp)
 }
 
 // dismissRequest is the body shape for the dismiss endpoint.
@@ -185,7 +185,7 @@ func (h *Handler) Dismiss(w http.ResponseWriter, r *http.Request) {
 		writeMutationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "dismissed"})
+	writeJSON(w, map[string]any{"status": "dismissed"})
 }
 
 // snoozeRequest is the body for the snooze endpoint. Accepts either a preset
@@ -219,7 +219,7 @@ func (h *Handler) Snooze(w http.ResponseWriter, r *http.Request) {
 		writeMutationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, map[string]any{
 		"status":        "snoozed",
 		"snoozed_until": until.UTC(),
 	})
@@ -237,7 +237,7 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 		writeMutationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "resolved"})
+	writeJSON(w, map[string]any{"status": "resolved"})
 }
 
 // --- helpers ---
@@ -372,9 +372,9 @@ func writeMutationError(w http.ResponseWriter, err error) {
 	orihttp.InternalError(w, err.Error())
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
+func writeJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		logger.Error("action center: encode response", logger.Fields{"error": err})
 	}

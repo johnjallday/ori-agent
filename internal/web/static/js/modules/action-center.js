@@ -14,7 +14,6 @@
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
   // --- State ---
-  let lastItems = [];
   // The single opportunity targeted by the open dismiss/snooze modal. Set
   // when the user clicks Dismiss/Snooze on a row; consumed when the modal's
   // primary action fires.
@@ -95,7 +94,6 @@
   }
 
   function render(items) {
-    lastItems = items;
     const list = $('#action-center-list');
     const empty = $('#action-center-empty');
     if (!list) return;
@@ -156,10 +154,6 @@
   }
 
   // --- Event wiring ---
-  function findItem(workspaceID, opportunityID) {
-    return lastItems.find((i) => i.workspace_id === workspaceID && i.id === opportunityID);
-  }
-
   function handleRowClick(evt) {
     const row = evt.target.closest('.action-center-row');
     if (!row) return;
