@@ -53,7 +53,26 @@
     goalActionStatus: '#workspace-detail-goal-action-status',
     goalEditBtn: '#workspace-detail-goal-edit',
     goalRunBtn: '#workspace-detail-goal-run',
+    goalModal: '#workspace-detail-goal-modal',
+    goalModalForm: '#workspace-detail-goal-modal-form',
+    goalModalTitle: '#workspace-detail-goal-modal-title',
+    goalModalText: '#workspace-detail-goal-modal-text',
+    goalModalEnabled: '#workspace-detail-goal-modal-enabled',
+    goalModalStatus: '#workspace-detail-goal-modal-status',
+    goalModalSaveBtn: '#workspace-detail-goal-modal-save',
+    goalModalAdvancedBtn: '#workspace-detail-goal-modal-advanced',
+    goalModalCadenceType: '#workspace-detail-goal-modal-cadence-type',
+    goalModalCadenceTime: '#workspace-detail-goal-modal-cadence-time',
+    goalModalCadenceDow: '#workspace-detail-goal-modal-cadence-dow',
+    goalModalCadenceDom: '#workspace-detail-goal-modal-cadence-dom',
+    goalModalCadenceInterval: '#workspace-detail-goal-modal-cadence-interval',
+    goalModalCadenceTimeWrap: '#workspace-detail-goal-modal-cadence-time-wrap',
+    goalModalCadenceDowWrap: '#workspace-detail-goal-modal-cadence-dow-wrap',
+    goalModalCadenceDomWrap: '#workspace-detail-goal-modal-cadence-dom-wrap',
+    goalModalCadenceIntervalWrap: '#workspace-detail-goal-modal-cadence-interval-wrap',
   };
+
+  let latestState = null;
 
   function $(sel) {
     return document.querySelector(sel);
@@ -92,6 +111,13 @@
     el.classList.toggle('is-error', kind === 'error');
   }
 
+  function setGoalModalStatus(msg, kind) {
+    const el = $(SELECTORS.goalModalStatus);
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('is-error', kind === 'error');
+  }
+
   function cadenceLabel(cadence) {
     const config = cadence || {};
     const type = config.type || '';
@@ -111,6 +137,102 @@
       return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
     }
     return type;
+  }
+
+  function applyGoalModalCadenceVisibility(type) {
+    const wraps = {
+      daily: ['goalModalCadenceTimeWrap'],
+      weekly: ['goalModalCadenceTimeWrap', 'goalModalCadenceDowWrap'],
+      monthly: ['goalModalCadenceTimeWrap', 'goalModalCadenceDomWrap'],
+      interval: ['goalModalCadenceIntervalWrap'],
+    };
+    const visible = new Set(wraps[type] || []);
+    for (const key of [
+      'goalModalCadenceTimeWrap',
+      'goalModalCadenceDowWrap',
+      'goalModalCadenceDomWrap',
+      'goalModalCadenceIntervalWrap',
+    ]) {
+      const el = $(SELECTORS[key]);
+      if (el) el.style.display = visible.has(key) ? '' : 'none';
+    }
+  }
+
+  function populateGoalModalFromState(state) {
+    const current = state || latestState || {};
+    const mission = String(current.mission || '');
+    const cadence = current.cadence || {};
+    const type = cadence.type || '';
+    const title = $(SELECTORS.goalModalTitle);
+    const text = $(SELECTORS.goalModalText);
+    const enabled = $(SELECTORS.goalModalEnabled);
+    const cadenceType = $(SELECTORS.goalModalCadenceType);
+
+    if (title) title.textContent = mission.trim() ? 'Edit goal' : 'Set goal';
+    if (text) text.value = mission;
+    if (enabled) enabled.checked = !!current.mission_enabled;
+    if (cadenceType) cadenceType.value = type;
+    if (cadence.time_of_day) $(SELECTORS.goalModalCadenceTime).value = cadence.time_of_day;
+    if (typeof cadence.day_of_week === 'number') {
+      $(SELECTORS.goalModalCadenceDow).value = String(cadence.day_of_week);
+    }
+    if (typeof cadence.day_of_month === 'number') {
+      $(SELECTORS.goalModalCadenceDom).value = String(cadence.day_of_month);
+    }
+    if (cadence.interval) {
+      const hours = Math.max(1, Math.round(cadence.interval / 3.6e12));
+      $(SELECTORS.goalModalCadenceInterval).value = String(hours);
+    }
+    applyGoalModalCadenceVisibility(type);
+    setGoalModalStatus('');
+  }
+
+  function readGoalModalState() {
+    const cadenceType = $(SELECTORS.goalModalCadenceType).value;
+    let cadence = null;
+    if (cadenceType === 'daily') {
+      cadence = { type: 'daily', time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00' };
+    } else if (cadenceType === 'weekly') {
+      cadence = {
+        type: 'weekly',
+        time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00',
+        day_of_week: parseInt($(SELECTORS.goalModalCadenceDow).value, 10),
+      };
+    } else if (cadenceType === 'monthly') {
+      cadence = {
+        type: 'monthly',
+        time_of_day: $(SELECTORS.goalModalCadenceTime).value || '09:00',
+        day_of_month: parseInt($(SELECTORS.goalModalCadenceDom).value, 10) || 1,
+      };
+    } else if (cadenceType === 'interval') {
+      const hours = parseInt($(SELECTORS.goalModalCadenceInterval).value, 10) || 24;
+      cadence = { type: 'interval', interval: hours * 3.6e12 };
+    }
+
+    return {
+      mission: $(SELECTORS.goalModalText).value,
+      cadence,
+      mission_enabled: $(SELECTORS.goalModalEnabled).checked,
+    };
+  }
+
+  function openGoalModal() {
+    populateGoalModalFromState(latestState);
+    const modalEl = $(SELECTORS.goalModal);
+    if (typeof bootstrap !== 'undefined' && modalEl) {
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+    setTimeout(() => {
+      const text = $(SELECTORS.goalModalText);
+      if (text) text.focus();
+    }, 120);
+  }
+
+  function hideGoalModal() {
+    const modalEl = $(SELECTORS.goalModal);
+    if (typeof bootstrap !== 'undefined' && modalEl) {
+      bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    }
   }
 
   function missionStatus(state) {
@@ -375,8 +497,10 @@
   async function reload() {
     try {
       const state = await fetchMissionState();
+      latestState = state;
       renderGoalCard(state);
       populateFormFromState(state);
+      populateGoalModalFromState(state);
       renderStatus(state);
       renderBindingsWarning(state);
       setStatusText('');
@@ -420,6 +544,51 @@
     const cadenceType = $(SELECTORS.cadenceType);
     if (cadenceType) {
       cadenceType.addEventListener('change', () => applyCadenceVisibility(cadenceType.value));
+    }
+
+    const goalModalCadenceType = $(SELECTORS.goalModalCadenceType);
+    if (goalModalCadenceType) {
+      goalModalCadenceType.addEventListener('change', () =>
+        applyGoalModalCadenceVisibility(goalModalCadenceType.value)
+      );
+    }
+
+    const goalModalForm = $(SELECTORS.goalModalForm);
+    if (goalModalForm) {
+      goalModalForm.addEventListener('submit', async (evt) => {
+        evt.preventDefault();
+        const payload = readGoalModalState();
+        if (payload.mission_enabled && !String(payload.mission || '').trim()) {
+          setGoalModalStatus('Add a goal before enabling automation.', 'error');
+          return;
+        }
+
+        const saveBtn = $(SELECTORS.goalModalSaveBtn);
+        if (saveBtn) saveBtn.disabled = true;
+        setGoalModalStatus('Saving...');
+        try {
+          await saveMission(payload);
+          await reload();
+          hideGoalModal();
+          setGoalActionStatus('Goal saved.');
+        } catch (e) {
+          if (e.status === 412) {
+            setGoalModalStatus('Classify workspace bindings before enabling automation.', 'error');
+          } else {
+            setGoalModalStatus(`Save failed: ${e.message}`, 'error');
+          }
+        } finally {
+          if (saveBtn) saveBtn.disabled = false;
+        }
+      });
+    }
+
+    const goalModalAdvancedBtn = $(SELECTORS.goalModalAdvancedBtn);
+    if (goalModalAdvancedBtn) {
+      goalModalAdvancedBtn.addEventListener('click', () => {
+        hideGoalModal();
+        openGoalSettings();
+      });
     }
 
     const form = $(SELECTORS.form);
@@ -506,7 +675,7 @@
     if (refreshBtn) refreshBtn.addEventListener('click', reload);
 
     const goalEditBtn = $(SELECTORS.goalEditBtn);
-    if (goalEditBtn) goalEditBtn.addEventListener('click', openGoalSettings);
+    if (goalEditBtn) goalEditBtn.addEventListener('click', openGoalModal);
 
     const goalRunBtn = $(SELECTORS.goalRunBtn);
     if (goalRunBtn) {
