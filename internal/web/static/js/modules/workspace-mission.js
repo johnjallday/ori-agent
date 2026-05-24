@@ -54,6 +54,7 @@
     goalActionStatus: '#workspace-detail-goal-action-status',
     goalEditBtn: '#workspace-detail-goal-edit',
     goalRunBtn: '#workspace-detail-goal-run',
+    goalFindingsBtn: '#workspace-detail-goal-findings',
     goalModal: '#workspace-detail-goal-modal',
     goalModalForm: '#workspace-detail-goal-modal-form',
     goalModalTitle: '#workspace-detail-goal-modal-title',
@@ -296,6 +297,16 @@
     if (runBtn) {
       runBtn.disabled = !mission;
       runBtn.title = mission ? 'Run this goal check now' : 'Set a goal before running';
+    }
+
+    // Scope the Findings link to this workspace so the user lands on its
+    // opportunities rather than the cross-workspace firehose.
+    const findingsBtn = $(SELECTORS.goalFindingsBtn);
+    if (findingsBtn) {
+      const wsId = getWorkspaceId();
+      findingsBtn.href = wsId
+        ? `/action-center?workspace=${encodeURIComponent(wsId)}`
+        : '/action-center';
     }
 
     const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
@@ -773,7 +784,10 @@
   }
 
   function init() {
-    if (!$(SELECTORS.tab)) return; // Goal settings tab not on this page.
+    // Bail only if neither the visible goal card nor the advanced settings tab
+    // is present — the card must function on its own, without depending on the
+    // advanced tab existing on the page.
+    if (!$(SELECTORS.goalCard) && !$(SELECTORS.tab)) return;
     wireForm();
 
     // The visible goal card needs immediate state. Pages without the card can
@@ -790,9 +804,11 @@
     }
 
     const trigger = $(SELECTORS.tab);
-    trigger.addEventListener('shown.bs.tab', () => {
-      loadOnce();
-    });
+    if (trigger) {
+      trigger.addEventListener('shown.bs.tab', () => {
+        loadOnce();
+      });
+    }
   }
 
   if (document.readyState === 'loading') {
