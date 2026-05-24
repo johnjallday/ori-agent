@@ -33,6 +33,12 @@ type TaskScheduler struct {
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	// missionInFlight tracks workspaces with a mission run currently executing
+	// on a background goroutine, so a later poll tick doesn't launch a second
+	// concurrent run before the first finishes and advances NextMissionRunAt.
+	missionMu       sync.Mutex
+	missionInFlight map[string]bool
 }
 
 // WakeCandidate describes the next task run that may need a macOS wake event.
@@ -62,10 +68,11 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 	}
 
 	return &TaskScheduler{
-		workspaceStore: store,
-		pollInterval:   config.PollInterval,
-		wakeScheduler:  config.WakeScheduler,
-		stopChan:       make(chan struct{}),
+		workspaceStore:  store,
+		pollInterval:    config.PollInterval,
+		wakeScheduler:   config.WakeScheduler,
+		stopChan:        make(chan struct{}),
+		missionInFlight: make(map[string]bool),
 	}
 }
 
@@ -205,9 +212,18 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 		// Also check legacy ScheduledTasks for backward compatibility during migration
 		ts.checkLegacyScheduledTasks(ws, now)
-		// Check workspace mission cadence — fires a mission run via the
-		// configured MissionTrigger when NextMissionRunAt has arrived.
-		ts.checkMissionCadence(ws, now)
+		// Check workspace mission cadence. A mission run executes a full LLM
+		// pipeline, so it runs on its own goroutine rather than inline — doing
+		// it inline would stall every later workspace's scheduled-task and wake
+		// checks for the duration. The in-flight claim prevents the next tick
+		// from launching a second run before this one advances NextMissionRunAt.
+		if ts.missionDue(ws, now) && ts.claimMission(ws.ID) {
+			missionWS, missionNow := ws, now
+			ts.wg.Go(func() {
+				defer ts.releaseMission(missionWS.ID)
+				ts.checkMissionCadence(missionWS, missionNow)
+			})
+		}
 		wakeCandidates = append(wakeCandidates, collectWakeCandidates(ws, now)...)
 	}
 

@@ -190,6 +190,42 @@ func TestCheckMissionCadence_FailureDoesNotDoubleCountWhenTriggerRecorded(t *tes
 	}
 }
 
+func TestCheckScheduledTasks_MissionDoesNotDoubleFireWhileInFlight(t *testing.T) {
+	store := NewInMemoryStore()
+	ts := NewTaskScheduler(store, SchedulerConfig{PollInterval: time.Minute})
+	release := make(chan struct{})
+	trig := &stubMissionTrigger{returnRunID: "run-1"}
+	// Block the run inside the trigger so it stays "in flight" across the next
+	// two poll ticks.
+	trig.onCall = func(string, int) { <-release }
+	ts.SetMissionTrigger(trig)
+
+	now := time.Now()
+	past := now.Add(-time.Hour)
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws.MissionEnabled = true
+	ws.NextMissionRunAt = &past
+	ws.Cadence = &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	ts.checkScheduledTasks() // launches run #1 (blocks in onCall)
+	ts.checkScheduledTasks() // still in flight — must not launch a second run
+	ts.checkScheduledTasks() // still in flight — must not launch a second run
+
+	close(release)
+	ts.wg.Wait()
+
+	if got := trig.callCount(); got != 1 {
+		t.Errorf("mission should fire once while a run is in flight; fired %d times", got)
+	}
+	// After completion the workspace is free to fire again on a future tick.
+	if ts.claimMission(ws.ID) != true {
+		t.Error("mission should be claimable again after the run finishes")
+	}
+}
+
 func TestTriggerMissionManually_NoTriggerConfigured(t *testing.T) {
 	store := NewInMemoryStore()
 	ts := NewTaskScheduler(store, SchedulerConfig{PollInterval: time.Minute})

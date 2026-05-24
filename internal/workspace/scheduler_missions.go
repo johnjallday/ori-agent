@@ -49,7 +49,11 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 	// inside an atomic store Update; failures here just log and let the
 	// next poll tick retry on the same NextMissionRunAt (since the trigger
 	// did not advance it).
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	//
+	// The context is bounded only by scheduler shutdown — the bridge applies
+	// its own per-run execution timeout. (This used to be a hard 30s cap that,
+	// composed with the bridge timeout, silently truncated every cadence run.)
+	ctx, cancel := ts.missionRunContext()
 	defer cancel()
 
 	runID, err := ts.missionTrigger.TriggerMissionRun(ctx, ws.ID, cycleOrdinal)
@@ -95,6 +99,56 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 			})
 		}
 	}
+}
+
+// missionDue reports whether the workspace's mission cadence is ready to fire
+// now. It mirrors the eligibility checks at the top of checkMissionCadence so
+// the poll loop can decide whether to spawn a run without paying for a
+// goroutine (and an in-flight claim) on every workspace every tick.
+func (ts *TaskScheduler) missionDue(ws *Workspace, now time.Time) bool {
+	return ws != nil &&
+		ws.MissionEnabled &&
+		ts.missionTrigger != nil &&
+		ws.NextMissionRunAt != nil &&
+		!ws.NextMissionRunAt.After(now)
+}
+
+// claimMission marks a workspace's mission as in flight, returning false if a
+// run is already executing for it.
+func (ts *TaskScheduler) claimMission(workspaceID string) bool {
+	ts.missionMu.Lock()
+	defer ts.missionMu.Unlock()
+	if ts.missionInFlight[workspaceID] {
+		return false
+	}
+	if ts.missionInFlight == nil {
+		ts.missionInFlight = make(map[string]bool)
+	}
+	ts.missionInFlight[workspaceID] = true
+	return true
+}
+
+// releaseMission clears the in-flight marker once a run finishes.
+func (ts *TaskScheduler) releaseMission(workspaceID string) {
+	ts.missionMu.Lock()
+	delete(ts.missionInFlight, workspaceID)
+	ts.missionMu.Unlock()
+}
+
+// missionRunContext returns a context for a background mission run that is
+// cancelled when the scheduler stops, so Stop()'s wg.Wait() isn't held for the
+// bridge's full per-run execution timeout. The bridge applies its own upper
+// bound on top of this.
+func (ts *TaskScheduler) missionRunContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-ts.stopChan:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
 
 // TriggerMissionManually fires a mission run on demand regardless of cadence.
