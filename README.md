@@ -56,11 +56,31 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
   - Requires: `ANTHROPIC_API_KEY`
   - Best for: Long context windows, detailed reasoning
 
+- **Google Gemini**
+  - Requires: `GEMINI_API_KEY`
+  - Best for: Large context, multimodal tasks
+
 ### Local Providers
+
+Run models entirely on your machine—no API key required. Each defaults to a local endpoint you can override via environment variable.
+
 - **Ollama** - Run models locally on your machine
-  - Requires: Ollama installed and running (http://localhost:11434)
+  - Endpoint: `OLLAMA_BASE_URL` (default `http://localhost:11434`)
   - Best for: Privacy, offline use, cost savings
   - Supports: Llama 3, Mistral, Phi-3, and other Ollama models
+
+- **LM Studio** - OpenAI-compatible local server
+  - Endpoint: `LM_STUDIO_BASE_URL` (default `http://localhost:1234/v1`), model via `LM_STUDIO_MODEL`
+
+- **MLX LM** - Apple Silicon local inference via `mlx_lm.server`
+  - Endpoint: `MLX_LM_BASE_URL` (default `http://localhost:8080/v1`), model via `MLX_LM_MODEL`
+
+### CLI Agent Providers
+
+If you already use a coding-agent CLI, Ori Agent auto-detects its login and registers it as a provider—no extra API key needed.
+
+- **Codex** - registered when OpenAI Codex CLI credentials are found
+- **Claude Code** - registered when Claude CLI credentials are found
 
 ## 🚀 Quick Start
 ### For Mac Users
@@ -74,7 +94,7 @@ Open the DMG and drag `OriAgent.app` to Applications. On macOS, Ori Agent runs a
 
 ### Prerequisites
 - Go 1.25 or later
-- An API key from one of the supported providers (OpenAI, Claude) **OR** Ollama installed locally
+- An API key from one of the cloud providers (OpenAI, Claude, or Gemini) **OR** a local provider running (Ollama, LM Studio, or MLX LM)
 
 ### Installation
 
