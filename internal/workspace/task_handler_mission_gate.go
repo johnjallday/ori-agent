@@ -6,21 +6,17 @@ import "fmt"
 // mission runs. Called only after IsMissionTask returns true. Returns nil if
 // the call should proceed; returns a non-nil error if the call must be blocked.
 //
-// v1 implementation (heuristic-based):
+// v1 implementation:
 //  1. Read the workspace's AutonomyPolicy from the task's mission context.
-//  2. Look up the tool's binding (MCP/skill) on the workspace to resolve
-//     SideEffect via DefaultSideEffect + ToolOverrides.
-//  3. If no binding owns the tool, fall back to SuggestSideEffect's name
-//     heuristic — a read-prefixed name gets SideEffectRead, everything else
-//     stays unclassified.
-//  4. Apply IsAllowedUnderPolicy. Unclassified always denies.
+//  2. Resolve the tool's SideEffect via resolveMissionToolSideEffect
+//     (per-tool override → binding default → name heuristic).
+//  3. Apply IsAllowedUnderPolicy. Unclassified always denies.
 //
 // Known limitations called out in the PRD's Open Questions:
-//   - The binding-by-tool-name lookup uses ToolOverrides keys + binding default;
-//     it does not introspect MCP server tool listings. If a binding has a tool
-//     that isn't in ToolOverrides and the binding default itself is unclassified,
-//     we fall back to the heuristic. Per-tool binding-driven resolution that
-//     consults the MCP registry's actual tool list is a follow-up.
+//   - Tool→binding attribution does not introspect MCP server tool listings, so
+//     a tool without an explicit override inherits the most restrictive default
+//     across enabled bindings rather than its owning binding's default. Precise
+//     per-binding resolution via the MCP registry's tool list is a follow-up.
 //   - "Workspace-internal write" detection isn't precise — Propose currently
 //     allows ALL SideEffectWrite tools. Differentiating internal vs. external
 //     write is what the SideEffectExternal classification is for; that's why
@@ -40,17 +36,21 @@ func (h *LLMTaskHandler) evaluateMissionGate(task Task, toolName string) error {
 		toolName, dec.Reason, dec.Classification, dec.Policy)
 }
 
-// resolveMissionToolSideEffect walks workspace bindings looking for one whose
-// ToolOverrides map names this tool, or whose DefaultSideEffect should apply.
-// Returns the first definitive classification found; falls back to the
-// heuristic (SuggestSideEffect) if nothing matches.
+// resolveMissionToolSideEffect classifies a tool for the autonomy gate.
+// Precedence: per-tool override → binding default → name heuristic → empty.
 //
-// Iteration order: ToolOverrides take precedence (most specific). Then we
-// scan bindings for a non-empty DefaultSideEffect — but only when we can
-// reasonably attribute this tool to that binding. v1 attribution is naive:
-// we have no MCP-registry lookup here, so a DefaultSideEffect only applies
-// when no other binding has classified the tool. This biases toward the
-// heuristic, which is the safer choice during initial rollout.
+// The binding default is the primary classifier for tools without an explicit
+// override: MissionBindingsReady guarantees every enabled binding has a valid
+// DefaultSideEffect before a mission can start, and ResolveSideEffect documents
+// "override → default → empty" as the resolution contract. We honor that here
+// (an earlier version skipped the default and denied every non-read tool, which
+// blocked Propose missions from using the writes their bindings authorized).
+//
+// We can't yet attribute a tool to its owning binding (no MCP-registry lookup —
+// a follow-up), so we apply the most restrictive default across enabled
+// bindings. That fails closed (never grants more than the strictest binding
+// allows) and is deliberately checked BEFORE the name heuristic so an external
+// binding's read-prefixed tool (e.g. "fetch_url") isn't mis-allowed as a read.
 func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName string) SideEffect {
 	if h.workspaceStore == nil {
 		return SuggestSideEffect(toolName)
@@ -60,7 +60,7 @@ func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName stri
 		return SuggestSideEffect(toolName)
 	}
 
-	// 1) Exact per-tool override on any enabled binding.
+	// 1) Exact per-tool override on any enabled binding (most specific).
 	for _, b := range ws.MCPBindings {
 		if !b.Enabled {
 			continue
@@ -78,17 +78,58 @@ func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName stri
 		}
 	}
 
-	// 2) Heuristic suggestion from the tool name. Returns SideEffectRead
-	// for read-prefixed names; empty for everything else.
+	// 2) Most restrictive DefaultSideEffect among enabled bindings.
+	if def := missionDefaultSideEffect(ws); def != "" {
+		return def
+	}
+
+	// 3) Heuristic from the tool name — only reached when no enabled binding
+	// has a classified default (e.g. an as-yet-unclassified workspace). Returns
+	// SideEffectRead for read-prefixed names; empty for everything else.
 	if se := SuggestSideEffect(toolName); se != "" {
 		return se
 	}
 
-	// 3) No override and no heuristic hit — unclassified. The gate will
-	// deny. (We deliberately do NOT fall back to DefaultSideEffect across
-	// the whole workspace because that could allow a tool from binding A
-	// to inherit binding B's permissive default.)
+	// 4) No override, no binding default, no heuristic hit — unclassified; the
+	// gate will deny.
 	return ""
+}
+
+// missionDefaultSideEffect returns the most restrictive DefaultSideEffect among
+// the workspace's enabled bindings, or "" when none carry a valid default.
+// "Most restrictive" is the classification the gate is least likely to allow
+// (external > write > read), so when a tool can't be attributed to a specific
+// binding we inherit the strictest default rather than the most permissive one.
+func missionDefaultSideEffect(ws *Workspace) SideEffect {
+	rank := func(se SideEffect) int {
+		switch se {
+		case SideEffectExternal:
+			return 3
+		case SideEffectWrite:
+			return 2
+		case SideEffectRead:
+			return 1
+		default:
+			return 0
+		}
+	}
+	var best SideEffect
+	consider := func(se SideEffect) {
+		if isValidSideEffect(se) && rank(se) > rank(best) {
+			best = se
+		}
+	}
+	for _, b := range ws.MCPBindings {
+		if b.Enabled {
+			consider(b.DefaultSideEffect)
+		}
+	}
+	for _, b := range ws.SkillBindings {
+		if b.Enabled {
+			consider(b.DefaultSideEffect)
+		}
+	}
+	return best
 }
 
 // EvaluateMissionToolCallDecision is a thin wrapper around the package-level

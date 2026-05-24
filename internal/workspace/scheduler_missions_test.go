@@ -151,6 +151,45 @@ func TestCheckMissionCadence_FailureAdvancesStateToPreventStorm(t *testing.T) {
 	}
 }
 
+func TestCheckMissionCadence_FailureDoesNotDoubleCountWhenTriggerRecorded(t *testing.T) {
+	ts, store, trig := newSchedulerWithStub(t)
+	now := time.Now()
+	past := now.Add(-time.Hour)
+
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws.MissionEnabled = true
+	ws.NextMissionRunAt = &past
+	ws.Cadence = &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Simulate the real bridge on an execution failure: the run was created, so
+	// the bridge records the failed outcome (advancing NextMissionRunAt) and
+	// then returns an error. The scheduler must NOT record the outcome again,
+	// or the failure is counted twice.
+	trig.returnErr = errors.New("execute mission run: boom")
+	trig.onCall = func(workspaceID string, cycleOrdinal int) {
+		_ = store.Update(workspaceID, func(w *Workspace) error {
+			ApplyMissionRunOutcome(w, MissionRunOutcome{StartedAt: now, Succeeded: false})
+			return nil
+		})
+	}
+
+	ts.checkMissionCadence(ws, now)
+
+	got, _ := store.Get(ws.ID)
+	if got.MissionExecutionCount != 1 {
+		t.Errorf("execution count = %d; want 1 (no double-count)", got.MissionExecutionCount)
+	}
+	if got.MissionFailureCount != 1 {
+		t.Errorf("failure count = %d; want 1 (no double-count)", got.MissionFailureCount)
+	}
+	if got.NextMissionRunAt == nil || !got.NextMissionRunAt.After(now) {
+		t.Errorf("next run should remain advanced: %v", got.NextMissionRunAt)
+	}
+}
+
 func TestTriggerMissionManually_NoTriggerConfigured(t *testing.T) {
 	store := NewInMemoryStore()
 	ts := NewTaskScheduler(store, SchedulerConfig{PollInterval: time.Minute})

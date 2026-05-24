@@ -194,10 +194,11 @@ func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID strin
 		CycleOrdinal:      cycleOrdinal,
 	})
 	if err != nil {
-		// Run wasn't created — record an outcome so the scheduler advances
-		// state and doesn't storm. We do this from the scheduler side too;
-		// double-applying is harmless because the next-run recompute is
-		// idempotent for the same cadence + start time.
+		// Run wasn't created — record an outcome here so state advances and the
+		// scheduler doesn't storm. This is the single place this failure is
+		// counted: the scheduler only records an outcome when NextMissionRunAt
+		// is still in the past (i.e. control never reached here), so it will not
+		// double-count the advance we just made.
 		_ = b.workspaceStore.Update(workspaceID, func(w *workspace.Workspace) error {
 			workspace.ApplyMissionRunOutcome(w, workspace.MissionRunOutcome{StartedAt: time.Now(), Succeeded: false})
 			return nil

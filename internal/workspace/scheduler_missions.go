@@ -59,11 +59,18 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 			"cycle_ordinal": cycleOrdinal,
 			"error":         err,
 		})
-		// Even on failure, advance LastMissionRunAt + NextMissionRunAt so the
-		// scheduler doesn't re-fire on every poll tick. Increment failure
-		// count but do not increment success count.
+		// The trigger records the outcome (counters + LastMissionRunAt +
+		// NextMissionRunAt advance) for every path where a run was actually
+		// created, so applying it again here would inflate MissionExecutionCount
+		// and MissionFailureCount (and skew cycleOrdinal). Only record the
+		// outcome ourselves when the trigger failed *before* it could — e.g. a
+		// workspace-load or config error — which we detect by NextMissionRunAt
+		// still being in the past. This fixes the double-count while still
+		// advancing state so the scheduler doesn't re-fire every poll tick.
 		_ = ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
-			ApplyMissionRunOutcome(w, MissionRunOutcome{StartedAt: now, Succeeded: false})
+			if w.NextMissionRunAt != nil && !w.NextMissionRunAt.After(now) {
+				ApplyMissionRunOutcome(w, MissionRunOutcome{StartedAt: now, Succeeded: false})
+			}
 			return nil
 		})
 		return

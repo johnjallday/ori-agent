@@ -70,7 +70,7 @@ func TestResolveMissionToolSideEffect_FallsBackToHeuristic(t *testing.T) {
 	}
 }
 
-func TestResolveMissionToolSideEffect_UnknownReturnsEmpty(t *testing.T) {
+func TestResolveMissionToolSideEffect_InheritsBindingDefault(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
 	ws.MCPBindings = []WorkspaceMCPBinding{{
@@ -81,12 +81,83 @@ func TestResolveMissionToolSideEffect_UnknownReturnsEmpty(t *testing.T) {
 	_ = store.Save(ws)
 
 	h := &LLMTaskHandler{workspaceStore: store}
-	// No override for this tool, no heuristic match — must remain
-	// unclassified so the gate denies. (We deliberately don't let the
-	// binding's permissive default leak to unknown tools.)
+	// No override and no read-prefix match: the tool inherits the binding's
+	// classified default. external still denies under every policy, so the
+	// gate outcome is unchanged — but a write default must now classify as
+	// write (see TestResolveMissionToolSideEffect_WriteDefaultAllowsWrites).
 	got := h.resolveMissionToolSideEffect(ws.ID, "wipe_database")
-	if got != "" {
-		t.Errorf("unknown tool with no override should be unclassified; got %q", got)
+	if got != SideEffectExternal {
+		t.Errorf("unknown tool should inherit the binding default; got %q", got)
+	}
+}
+
+func TestResolveMissionToolSideEffect_WriteDefaultAllowsWrites(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	// A write-classified binding with no per-tool overrides — the common case
+	// after the one-time mission classification flow sets a binding default.
+	ws.MCPBindings = []WorkspaceMCPBinding{{
+		ID:                "b1",
+		Enabled:           true,
+		DefaultSideEffect: SideEffectWrite,
+	}}
+	_ = store.Save(ws)
+
+	h := &LLMTaskHandler{workspaceStore: store}
+	// Regression: this used to resolve to "" (unclassified → denied), which
+	// blocked Propose missions from performing any binding-authorized write.
+	if got := h.resolveMissionToolSideEffect(ws.ID, "create_note"); got != SideEffectWrite {
+		t.Fatalf("write-default binding should classify writes; got %q", got)
+	}
+	task := Task{
+		WorkspaceID: ws.ID,
+		Context: map[string]any{
+			MissionTaskContextOriginKey: MissionTaskContextOriginValue,
+			MissionTaskContextPolicyKey: string(AutonomyPropose),
+		},
+	}
+	if err := h.evaluateMissionGate(task, "create_note"); err != nil {
+		t.Errorf("Propose should allow a write tool authorized by the binding default; got: %v", err)
+	}
+	// The same write tool must still be denied under Watch (observe-only).
+	task.Context[MissionTaskContextPolicyKey] = string(AutonomyWatch)
+	if err := h.evaluateMissionGate(task, "create_note"); err == nil {
+		t.Error("Watch should deny a write tool")
+	}
+}
+
+func TestResolveMissionToolSideEffect_MostRestrictiveDefaultWins(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	// Mixed defaults: without per-tool attribution we fail closed to the most
+	// restrictive (external) so an unknown tool is never under-classified.
+	ws.MCPBindings = []WorkspaceMCPBinding{
+		{ID: "b1", Enabled: true, DefaultSideEffect: SideEffectRead},
+		{ID: "b2", Enabled: true, DefaultSideEffect: SideEffectExternal},
+	}
+	_ = store.Save(ws)
+
+	h := &LLMTaskHandler{workspaceStore: store}
+	if got := h.resolveMissionToolSideEffect(ws.ID, "do_thing"); got != SideEffectExternal {
+		t.Errorf("mixed defaults should resolve to the most restrictive; got %q", got)
+	}
+}
+
+func TestResolveMissionToolSideEffect_ExternalDefaultBeatsReadHeuristic(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	// fetch_ matches the read-prefix heuristic, but the binding is external —
+	// the default must win so a read-named external tool isn't wrongly allowed.
+	ws.MCPBindings = []WorkspaceMCPBinding{{
+		ID:                "b1",
+		Enabled:           true,
+		DefaultSideEffect: SideEffectExternal,
+	}}
+	_ = store.Save(ws)
+
+	h := &LLMTaskHandler{workspaceStore: store}
+	if got := h.resolveMissionToolSideEffect(ws.ID, "fetch_url"); got != SideEffectExternal {
+		t.Errorf("binding default must take precedence over the read heuristic; got %q", got)
 	}
 }
 
