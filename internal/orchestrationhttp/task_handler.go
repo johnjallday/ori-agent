@@ -1618,6 +1618,13 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Set by the cases that attempt to store a row so the shared response
+	// below can report whether the row was actually written. A CSV header
+	// mismatch holds the row for review (StorageStatus=skipped_invalid) while
+	// the action itself succeeds, so "success" alone is not enough for a
+	// non-UI client to tell that nothing was appended.
+	var reviewValidation *workspace.TaskValidationResult
+
 	switch action {
 	case "inspect", "copy_raw":
 		th.publishOutputContractReviewEvent(ws.ID, task.ID, action, task.ExecutionHistory[historyIndex].Validation)
@@ -1671,6 +1678,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			orihttp.InternalError(w, fmt.Sprintf("Failed to record normalization retry: %v", err))
 			return
 		}
+		reviewValidation = validation
 	case "rerun":
 		if err := th.startTaskOutputReviewRerun(ws.ID, task.ID); err != nil {
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to re-run task", err)
@@ -1738,6 +1746,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 					orihttp.InternalError(w, fmt.Sprintf("Failed to record append review: %v", err))
 					return
 				}
+				reviewValidation = validation
 				break
 			}
 			orihttp.InternalError(w, fmt.Sprintf("Failed to append approved result: %v", err))
@@ -1766,6 +1775,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			orihttp.InternalError(w, fmt.Sprintf("Failed to record approval: %v", err))
 			return
 		}
+		reviewValidation = validation
 	default:
 		orihttp.BadRequest(w, "action must be inspect, copy_raw, dismiss, rerun, retry_normalization, or approve_append")
 		return
@@ -1776,11 +1786,23 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		orihttp.InternalError(w, fmt.Sprintf("Failed to load updated task: %v", err))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	orihttp.WriteJSON(w, map[string]any{
+	resp := map[string]any{
 		"success": true,
 		"task":    updatedTask,
-	})
+	}
+	// When the action attempted to store a row, report whether it actually
+	// landed. A CSV header mismatch holds the row for review rather than
+	// appending it, so "success" (the action was processed) must not be read
+	// as "the row was stored".
+	if reviewValidation != nil {
+		resp["validation_status"] = reviewValidation.ValidationStatus
+		resp["storage_status"] = reviewValidation.StorageStatus
+		resp["stored"] = reviewValidation.StorageStatus == workspace.TaskStorageAppended ||
+			reviewValidation.StorageStatus == workspace.TaskStorageSaved ||
+			reviewValidation.StorageStatus == workspace.TaskStorageManuallyAppended
+	}
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, resp)
 }
 
 func (th *TaskHandler) publishOutputContractReviewEvent(workspaceID, taskID, action string, validation *workspace.TaskValidationResult) {
@@ -2032,15 +2054,6 @@ func taskResultAppendCSVFilename(task *workspace.Task) string {
 		return "task.csv"
 	}
 	return sanitized.String() + ".csv"
-}
-
-func csvWithoutHeaderForReview(csvData string) string {
-	normalized := strings.TrimSpace(strings.ReplaceAll(csvData, "\r\n", "\n"))
-	lines := strings.Split(normalized, "\n")
-	if len(lines) <= 1 {
-		return ""
-	}
-	return strings.TrimSpace(strings.Join(lines[1:], "\n"))
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk
