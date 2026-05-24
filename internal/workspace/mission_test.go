@@ -1,10 +1,34 @@
 package workspace
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestUpdateMissionRequest_CadenceNullClearsSchedule(t *testing.T) {
+	var req UpdateMissionRequest
+	if err := json.Unmarshal([]byte(`{"cadence": null}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if !req.CadenceSet {
+		t.Fatal("expected cadence presence to be tracked")
+	}
+	if req.Cadence != nil {
+		t.Fatalf("expected nil cadence for explicit null, got %#v", req.Cadence)
+	}
+}
+
+func TestUpdateMissionRequest_CadenceOmittedLeavesScheduleUntouched(t *testing.T) {
+	var req UpdateMissionRequest
+	if err := json.Unmarshal([]byte(`{"mission": "Keep quality high"}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.CadenceSet {
+		t.Fatal("expected omitted cadence to leave cadence unset")
+	}
+}
 
 func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 	got := BuildMissionSystemPrompt(MissionPromptInputs{
