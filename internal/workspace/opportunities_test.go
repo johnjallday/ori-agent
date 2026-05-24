@@ -165,6 +165,79 @@ func TestOpportunityStore_UpsertMergePreservesUserStatus(t *testing.T) {
 	}
 }
 
+func TestOpportunityStore_UpsertReopensResolvedOnRecurrence(t *testing.T) {
+	store, ws := newTestWorkspaceWithStore(t)
+	opps := NewOpportunityStore(store)
+
+	first, _, err := opps.Upsert(Opportunity{WorkspaceID: ws.ID, Title: "Brand voice drift"})
+	if err != nil {
+		t.Fatalf("first Upsert: %v", err)
+	}
+	// User sees and resolves it.
+	if err := opps.MarkSeen(ws.ID, first.ID); err != nil {
+		t.Fatalf("MarkSeen: %v", err)
+	}
+	if err := opps.MarkResolved(ws.ID, first.ID); err != nil {
+		t.Fatalf("MarkResolved: %v", err)
+	}
+
+	// A later run re-detects the same issue.
+	merged, wasMerged, err := opps.Upsert(Opportunity{
+		WorkspaceID: ws.ID,
+		Title:       "Brand voice drift",
+		Evidence:    "came back",
+	})
+	if err != nil {
+		t.Fatalf("recurrence Upsert: %v", err)
+	}
+	if !wasMerged {
+		t.Fatal("expected merge into the resolved record")
+	}
+	if merged.ID != first.ID {
+		t.Errorf("merged ID changed: %q vs %q", merged.ID, first.ID)
+	}
+	if merged.Status != OpportunityNew {
+		t.Errorf("recurring resolved item should re-open as new; got %q", merged.Status)
+	}
+	if merged.ResolvedAt != nil {
+		t.Error("re-opened item should clear ResolvedAt")
+	}
+	if merged.SeenAt != nil {
+		t.Error("re-opened item should read as unseen")
+	}
+	if !merged.IsOpen() {
+		t.Error("re-opened item must be in the active backlog")
+	}
+}
+
+func TestOpportunityStore_UpsertKeepsDismissedOnRecurrence(t *testing.T) {
+	store, ws := newTestWorkspaceWithStore(t)
+	opps := NewOpportunityStore(store)
+
+	first, _, err := opps.Upsert(Opportunity{WorkspaceID: ws.ID, Title: "Off-brand emoji"})
+	if err != nil {
+		t.Fatalf("first Upsert: %v", err)
+	}
+	if err := opps.Dismiss(ws.ID, first.ID, DismissalNotUseful); err != nil {
+		t.Fatalf("Dismiss: %v", err)
+	}
+
+	merged, wasMerged, err := opps.Upsert(Opportunity{
+		WorkspaceID: ws.ID,
+		Title:       "Off-brand emoji",
+		Evidence:    "still here",
+	})
+	if err != nil {
+		t.Fatalf("recurrence Upsert: %v", err)
+	}
+	if !wasMerged {
+		t.Fatal("expected merge into the dismissed record")
+	}
+	if merged.Status != OpportunityDismissed {
+		t.Errorf("an explicit dismissal must survive recurrence; got %q", merged.Status)
+	}
+}
+
 func TestOpportunityStore_GetAndDelete(t *testing.T) {
 	store, ws := newTestWorkspaceWithStore(t)
 	opps := NewOpportunityStore(store)

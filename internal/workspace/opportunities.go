@@ -203,8 +203,7 @@ func (s *workspaceOpportunityStore) Upsert(opp Opportunity) (Opportunity, bool, 
 				continue
 			}
 			// Merge: append new evidence, bump UpdatedAt, re-evaluate
-			// priority/confidence (highest wins). Preserve status — a
-			// snoozed/resolved opportunity stays where the user put it.
+			// priority/confidence (highest wins).
 			if opp.Evidence != "" {
 				if existing.Evidence != "" {
 					existing.Evidence += "\n---\n" + opp.Evidence
@@ -223,6 +222,16 @@ func (s *workspaceOpportunityStore) Upsert(opp Opportunity) (Opportunity, bool, 
 			}
 			if opp.SourceRunID != "" {
 				existing.SourceRunID = opp.SourceRunID
+			}
+			// Status handling on recurrence: a finding the user had marked
+			// resolved has come back, so re-open it for triage (and mark it
+			// unseen again so it reads as new). snoozed is a deferral the user
+			// chose and dismissed is an explicit "don't surface this" — both
+			// keep their status.
+			if existing.Status == OpportunityResolved {
+				existing.Status = OpportunityNew
+				existing.ResolvedAt = nil
+				existing.SeenAt = nil
 			}
 			existing.UpdatedAt = now
 			ws.Opportunities[i] = existing
