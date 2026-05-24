@@ -71,6 +71,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if sortKey == "" {
 		sortKey = "priority"
 	}
+	now := time.Now()
 
 	wsIDs, err := h.workspaces.List()
 	if err != nil {
@@ -93,14 +94,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, o := range opps {
-			if !statusMatches(o.Status, statusFilter) {
+			// Promote an expired snooze back to `new` at read time. This is
+			// the model's lighter-weight stand-in for a background job that
+			// would flip the status when SnoozedUntil passes: a still-snoozed
+			// item keeps Status=snoozed (and is hidden from the default view),
+			// while an elapsed snooze re-surfaces as `new`. We mutate the loop
+			// copy only — the stored record is untouched.
+			eff := effectiveOpportunityStatus(o, now)
+			if !statusMatches(eff, statusFilter) {
 				continue
 			}
-			// Suppress snoozed items whose snooze window has expired only
-			// when the caller hasn't explicitly asked for snoozed items.
-			// They re-surface as `new` once the SnoozedUntil passes; this
-			// is the model's lighter-weight stand-in for an actual job
-			// that promotes them at the right time.
+			if eff != o.Status {
+				o.Status = eff
+				o.SnoozedUntil = nil
+			}
 			items = append(items, AggregatedOpportunity{
 				Opportunity:   o,
 				WorkspaceName: ws.Name,
@@ -238,10 +245,13 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 func parseStatusFilter(s string) map[workspace.OpportunityStatus]bool {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		// Default: show "active" items only (new + snoozed-that-have-expired).
+		// Default: the "active" inbox. Filtering runs against each item's
+		// effective status (see effectiveOpportunityStatus), where a snooze
+		// whose window has elapsed counts as `new` again — so matching `new`
+		// here surfaces both genuinely-new items and expired snoozes while
+		// still hiding those that are currently snoozed.
 		return map[workspace.OpportunityStatus]bool{
-			workspace.OpportunityNew:     true,
-			workspace.OpportunitySnoozed: true,
+			workspace.OpportunityNew: true,
 		}
 	}
 	if strings.EqualFold(s, "all") {
@@ -264,6 +274,16 @@ func statusMatches(s workspace.OpportunityStatus, filter map[workspace.Opportuni
 		return true
 	}
 	return filter[s]
+}
+
+// effectiveOpportunityStatus returns the status to filter/display by. A snoozed
+// opportunity whose SnoozedUntil has elapsed (or was never set) counts as `new`
+// again — it has re-surfaced for triage. Every other status is returned as-is.
+func effectiveOpportunityStatus(o workspace.Opportunity, now time.Time) workspace.OpportunityStatus {
+	if o.Status == workspace.OpportunitySnoozed && (o.SnoozedUntil == nil || !o.SnoozedUntil.After(now)) {
+		return workspace.OpportunityNew
+	}
+	return o.Status
 }
 
 // sortItems sorts in-place by the requested key. priority sorts by

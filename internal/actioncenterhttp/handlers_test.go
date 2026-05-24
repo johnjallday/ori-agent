@@ -115,6 +115,52 @@ func TestList_AllIncludesResolved(t *testing.T) {
 	}
 }
 
+func TestList_SnoozeSuppressionAndExpiry(t *testing.T) {
+	h, store, opps := newTestHandler(t)
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+	makeWorkspaceWithOpportunities(t, store, opps, "X", []workspace.Opportunity{
+		{Title: "fresh"},
+		{Title: "still-snoozed", Status: workspace.OpportunitySnoozed, SnoozedUntil: &future},
+		{Title: "expired-snooze", Status: workspace.OpportunitySnoozed, SnoozedUntil: &past},
+	})
+
+	// Default (active) view.
+	req := httptest.NewRequest("GET", "/api/action-center/opportunities", nil)
+	rec := httptest.NewRecorder()
+	h.List(rec, req)
+	body := decodeList(t, rec)
+
+	got := map[string]workspace.OpportunityStatus{}
+	for _, it := range body.Items {
+		got[it.Title] = it.Status
+	}
+	if _, shown := got["still-snoozed"]; shown {
+		t.Error("a still-snoozed item must be hidden from the default view")
+	}
+	if got["fresh"] != workspace.OpportunityNew {
+		t.Errorf("fresh status = %q; want new", got["fresh"])
+	}
+	if st, ok := got["expired-snooze"]; !ok {
+		t.Error("an expired snooze must re-surface in the default view")
+	} else if st != workspace.OpportunityNew {
+		t.Errorf("expired snooze should re-surface as new; got %q", st)
+	}
+
+	// Explicit status=snoozed still shows the currently-snoozed item.
+	req = httptest.NewRequest("GET", "/api/action-center/opportunities?status=snoozed", nil)
+	rec = httptest.NewRecorder()
+	h.List(rec, req)
+	snoozed := decodeList(t, rec)
+	titles := map[string]bool{}
+	for _, it := range snoozed.Items {
+		titles[it.Title] = true
+	}
+	if !titles["still-snoozed"] {
+		t.Error("status=snoozed should list the currently-snoozed item")
+	}
+}
+
 func TestList_WorkspaceFilter(t *testing.T) {
 	h, store, opps := newTestHandler(t)
 	a := makeWorkspaceWithOpportunities(t, store, opps, "A", []workspace.Opportunity{{Title: "in A"}})
