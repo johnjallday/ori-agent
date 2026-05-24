@@ -1,15 +1,16 @@
 /**
  * workspace-mission.js
  *
- * Controls the Mission tab on the workspace detail page. Talks to the mission
+ * Controls goal settings on the workspace detail page. Talks to the mission
  * HTTP endpoints (GET/PUT /api/workspaces/{id}/mission, POST .../trigger,
  * POST .../baseline). Lives as a standalone module rather than being folded
  * into the giant workspace-detail.js so it can be reviewed and iterated on
  * independently.
  *
  * Lifecycle:
- *   - Init on DOMContentLoaded after the workspace ID is known (window.currentWorkspaceId).
- *   - Lazy-load mission state the first time the Mission tab is shown.
+ *   - Init on DOMContentLoaded; read the workspace ID from window.currentWorkspaceId
+ *     or the URL.
+ *   - Load mission state immediately for the visible Workspace Goal card.
  *   - Refresh button + after-save pull a fresh state snapshot.
  */
 
@@ -42,6 +43,16 @@
     cadenceIntervalWrap: '#workspace-detail-mission-cadence-interval-wrap',
     notifPriority: '#workspace-detail-mission-notif-priority',
     notifOnFindings: '#workspace-detail-mission-notif-onfindings',
+    goalCard: '#workspace-detail-goal-card',
+    goalStatus: '#workspace-detail-goal-status',
+    goalTitle: '#workspace-detail-goal-title',
+    goalText: '#workspace-detail-goal-text',
+    goalCadence: '#workspace-detail-goal-cadence',
+    goalNextRun: '#workspace-detail-goal-next-run',
+    goalLastRun: '#workspace-detail-goal-last-run',
+    goalActionStatus: '#workspace-detail-goal-action-status',
+    goalEditBtn: '#workspace-detail-goal-edit',
+    goalRunBtn: '#workspace-detail-goal-run',
   };
 
   function $(sel) {
@@ -72,6 +83,107 @@
     } catch {
       return iso;
     }
+  }
+
+  function setGoalActionStatus(msg, kind) {
+    const el = $(SELECTORS.goalActionStatus);
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('is-error', kind === 'error');
+  }
+
+  function cadenceLabel(cadence) {
+    const config = cadence || {};
+    const type = config.type || '';
+    if (!type) return 'Manual only';
+    if (type === 'daily') return `Daily at ${config.time_of_day || '09:00'}`;
+    if (type === 'weekly') {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const day = typeof config.day_of_week === 'number' ? days[config.day_of_week] : 'Monday';
+      return `Weekly ${day || 'Monday'} at ${config.time_of_day || '09:00'}`;
+    }
+    if (type === 'monthly') {
+      const day = typeof config.day_of_month === 'number' ? config.day_of_month : 1;
+      return `Monthly day ${day} at ${config.time_of_day || '09:00'}`;
+    }
+    if (type === 'interval') {
+      const hours = config.interval ? Math.max(1, Math.round(config.interval / 3.6e12)) : 24;
+      return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+    return type;
+  }
+
+  function missionStatus(state) {
+    const mission = String(state.mission || '').trim();
+    if (!mission) return { label: 'Not set', className: 'is-empty' };
+    if (state.mission_enabled) return { label: 'Enabled', className: 'is-enabled' };
+    if (state.cadence && state.cadence.type) return { label: 'Paused', className: 'is-paused' };
+    return { label: 'Manual only', className: 'is-manual' };
+  }
+
+  function renderGoalCard(state) {
+    if (!$(SELECTORS.goalCard)) return;
+    const mission = String(state.mission || '').trim();
+    const status = missionStatus(state);
+    const statusEl = $(SELECTORS.goalStatus);
+    const titleEl = $(SELECTORS.goalTitle);
+    const textEl = $(SELECTORS.goalText);
+    const cadenceEl = $(SELECTORS.goalCadence);
+    const nextEl = $(SELECTORS.goalNextRun);
+    const lastEl = $(SELECTORS.goalLastRun);
+    const editBtn = $(SELECTORS.goalEditBtn);
+    const runBtn = $(SELECTORS.goalRunBtn);
+
+    if (statusEl) {
+      statusEl.textContent = status.label;
+      statusEl.className = `workspace-detail-goal-status ${status.className}`;
+    }
+    if (titleEl) titleEl.textContent = mission ? 'Current goal' : 'No goal set';
+    if (textEl) {
+      textEl.textContent = mission || 'No workspace goal yet.';
+      textEl.classList.toggle('is-empty', !mission);
+    }
+    if (cadenceEl) cadenceEl.textContent = `Cadence: ${cadenceLabel(state.cadence)}`;
+    if (nextEl) nextEl.textContent = `Next: ${fmtTime(state.next_mission_run_at)}`;
+    if (lastEl) lastEl.textContent = `Last: ${fmtTime(state.last_mission_run_at)}`;
+    if (editBtn) editBtn.textContent = mission ? 'Edit goal' : 'Set goal';
+    if (runBtn) {
+      runBtn.disabled = !mission;
+      runBtn.title = mission ? 'Run this goal check now' : 'Set a goal before running';
+    }
+
+    const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
+    const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids : [];
+    if (mission && mcp.length + skills.length > 0) {
+      setGoalActionStatus('Classify MCP or skill bindings before scheduled runs.', 'error');
+    } else {
+      setGoalActionStatus('');
+    }
+  }
+
+  function renderGoalCardError(message) {
+    if (!$(SELECTORS.goalCard)) return;
+    const statusEl = $(SELECTORS.goalStatus);
+    const titleEl = $(SELECTORS.goalTitle);
+    const textEl = $(SELECTORS.goalText);
+    const cadenceEl = $(SELECTORS.goalCadence);
+    const nextEl = $(SELECTORS.goalNextRun);
+    const lastEl = $(SELECTORS.goalLastRun);
+    const runBtn = $(SELECTORS.goalRunBtn);
+    if (statusEl) {
+      statusEl.textContent = 'Unavailable';
+      statusEl.className = 'workspace-detail-goal-status is-empty';
+    }
+    if (titleEl) titleEl.textContent = 'Goal unavailable';
+    if (textEl) {
+      textEl.textContent = message || 'Could not load workspace goal.';
+      textEl.classList.add('is-empty');
+    }
+    if (cadenceEl) cadenceEl.textContent = 'Cadence: unavailable';
+    if (nextEl) nextEl.textContent = 'Next: —';
+    if (lastEl) lastEl.textContent = 'Last: —';
+    if (runBtn) runBtn.disabled = true;
+    setGoalActionStatus(message || 'Could not load workspace goal.', 'error');
   }
 
   function renderStatus(state) {
@@ -263,13 +375,45 @@
   async function reload() {
     try {
       const state = await fetchMissionState();
+      renderGoalCard(state);
       populateFormFromState(state);
       renderStatus(state);
       renderBindingsWarning(state);
       setStatusText('');
     } catch (e) {
-      setStatusText(`Failed to load mission: ${e.message}`, 'error');
+      renderGoalCardError(`Failed to load goal: ${e.message}`);
+      setStatusText(`Failed to load goal settings: ${e.message}`, 'error');
     }
+  }
+
+  function openGoalSettings() {
+    if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.setWorkspaceConfigExpanded === 'function'
+    ) {
+      window.workspaceDetail.setWorkspaceConfigExpanded(true);
+    } else {
+      const panel = document.getElementById('workspace-detail-settings-panel');
+      const content = document.getElementById('workspace-detail-config-content');
+      const toggle = document.getElementById('workspace-detail-config-toggle');
+      const label = document.getElementById('workspace-detail-config-toggle-label');
+      if (panel) panel.classList.remove('is-collapsed');
+      if (content) content.hidden = false;
+      if (toggle) toggle.setAttribute('aria-expanded', 'true');
+      if (label) label.textContent = 'Hide Configuration';
+    }
+
+    const tab = $(SELECTORS.tab);
+    if (tab && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+      bootstrap.Tab.getOrCreateInstance(tab).show();
+    } else if (tab) {
+      tab.click();
+    }
+
+    setTimeout(() => {
+      const textarea = $(SELECTORS.text);
+      if (textarea) textarea.focus();
+    }, 80);
   }
 
   function wireForm() {
@@ -287,13 +431,16 @@
         setStatusText('Saving...');
         try {
           await saveMission(readFormState());
-          setStatusText('Mission saved.');
+          setStatusText('Goal settings saved.');
           await reload();
+          setGoalActionStatus('Goal saved.');
         } catch (e) {
           if (e.status === 412) {
-            setStatusText('Classify your workspace bindings before enabling this mission.', 'error');
+            setStatusText('Classify your workspace bindings before enabling goal automation.', 'error');
+            setGoalActionStatus('Classify workspace bindings before enabling this goal.', 'error');
           } else {
             setStatusText(`Save failed: ${e.message}`, 'error');
+            setGoalActionStatus(`Save failed: ${e.message}`, 'error');
           }
         } finally {
           if (saveBtn) saveBtn.disabled = false;
@@ -310,13 +457,17 @@
           const r = await triggerMission('baseline');
           setStatusText(`Baseline run started (${r.run_id || 'no id'}).`);
           await reload();
+          setGoalActionStatus(`Baseline run started (${r.run_id || 'no id'}).`);
         } catch (e) {
           if (e.status === 412) {
             setStatusText('Classify your workspace bindings before running.', 'error');
+            setGoalActionStatus('Classify workspace bindings before running.', 'error');
           } else if (e.status === 503) {
-            setStatusText('Mission runner is not configured on this server.', 'error');
+            setStatusText('Goal runner is not configured on this server.', 'error');
+            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
           } else {
             setStatusText(`Trigger failed: ${e.message}`, 'error');
+            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
           }
         } finally {
           baselineBtn.disabled = false;
@@ -328,18 +479,22 @@
     if (triggerBtn) {
       triggerBtn.addEventListener('click', async () => {
         triggerBtn.disabled = true;
-        setStatusText('Triggering mission run...');
+        setStatusText('Starting goal check...');
         try {
           const r = await triggerMission('trigger');
           setStatusText(`Run started (${r.run_id || 'no id'}).`);
           await reload();
+          setGoalActionStatus(`Run started (${r.run_id || 'no id'}).`);
         } catch (e) {
           if (e.status === 412) {
             setStatusText('Classify your workspace bindings before running.', 'error');
+            setGoalActionStatus('Classify workspace bindings before running.', 'error');
           } else if (e.status === 503) {
-            setStatusText('Mission runner is not configured on this server.', 'error');
+            setStatusText('Goal runner is not configured on this server.', 'error');
+            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
           } else {
             setStatusText(`Trigger failed: ${e.message}`, 'error');
+            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
           }
         } finally {
           triggerBtn.disabled = false;
@@ -349,20 +504,54 @@
 
     const refreshBtn = $(SELECTORS.refreshBtn);
     if (refreshBtn) refreshBtn.addEventListener('click', reload);
+
+    const goalEditBtn = $(SELECTORS.goalEditBtn);
+    if (goalEditBtn) goalEditBtn.addEventListener('click', openGoalSettings);
+
+    const goalRunBtn = $(SELECTORS.goalRunBtn);
+    if (goalRunBtn) {
+      goalRunBtn.addEventListener('click', async () => {
+        goalRunBtn.disabled = true;
+        setGoalActionStatus('Starting run...');
+        try {
+          const r = await triggerMission('trigger');
+          await reload();
+          setGoalActionStatus(`Run started (${r.run_id || 'no id'}).`);
+        } catch (e) {
+          if (e.status === 412) {
+            setGoalActionStatus('Classify workspace bindings before running.', 'error');
+          } else if (e.status === 503) {
+            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
+          } else {
+            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
+          }
+        } finally {
+          goalRunBtn.disabled = false;
+        }
+      });
+    }
   }
 
   function init() {
-    if (!$(SELECTORS.tab)) return; // Mission tab not on this page.
+    if (!$(SELECTORS.tab)) return; // Goal settings tab not on this page.
     wireForm();
 
-    // Lazy-load the first time the user opens the tab so we don't hit the
-    // API on every workspace detail page even when missions are unused.
+    // The visible goal card needs immediate state. Pages without the card can
+    // still lazy-load when the advanced goal settings tab opens.
     let loaded = false;
-    const trigger = $(SELECTORS.tab);
-    trigger.addEventListener('shown.bs.tab', () => {
+    const loadOnce = () => {
       if (loaded) return;
       loaded = true;
       reload();
+    };
+
+    if ($(SELECTORS.goalCard)) {
+      loadOnce();
+    }
+
+    const trigger = $(SELECTORS.tab);
+    trigger.addEventListener('shown.bs.tab', () => {
+      loadOnce();
     });
   }
 
