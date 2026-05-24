@@ -214,6 +214,12 @@
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body workspace-detail-goal-modal-body">
+                  <div class="workspace-detail-goal-modal-warning" id="workspace-detail-goal-modal-bindings-warning" style="display: none;" role="status">
+                    <strong>Classify workspace bindings before this goal can run.</strong>
+                    <div class="workspace-detail-goal-modal-warning-list" id="workspace-detail-goal-modal-unclassified-list"></div>
+                    <div class="workspace-detail-goal-modal-warning-hint">Open <em>Advanced settings</em> → MCP or Workspace Skills to set each binding's side effect (read / write / external).</div>
+                  </div>
+
                   <div class="workspace-detail-goal-modal-field">
                     <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
                     <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="4" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
@@ -263,6 +269,7 @@
                       Enable goal automation
                     </label>
                   </div>
+                  <div class="workspace-detail-goal-modal-enabled-hint" id="workspace-detail-goal-modal-enabled-hint" style="display: none;">Pick a cadence above to enable automatic runs.</div>
                   <div class="workspace-detail-goal-modal-status" id="workspace-detail-goal-modal-status" aria-live="polite"></div>
                 </div>
                 <div class="modal-footer workspace-detail-goal-modal-footer">
@@ -833,6 +840,7 @@
                           <label class="form-check-label" for="workspace-detail-mission-enabled">
                             <strong>Enable goal automation</strong>
                             <div class="workspace-detail-settings-field-hint">When on, the Workspace Manager checks this goal on the cadence above.</div>
+                            <div class="workspace-detail-settings-field-hint" id="workspace-detail-mission-enabled-hint" style="display: none; color: var(--warning-color, #f5a623);">Pick a cadence above to enable automatic runs.</div>
                           </label>
                         </div>
                       </div>
@@ -2770,8 +2778,33 @@
       gap: 0.85rem;
     }
 
+    .workspace-detail-goal-modal-warning {
+      border-left: 3px solid var(--warning-color, #f5a623);
+      background: var(--warning-bg, rgba(245, 166, 35, 0.08));
+      border-radius: 6px;
+      padding: 0.7rem 0.85rem;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-goal-modal-warning-list {
+      margin-top: 0.35rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-goal-modal-warning-hint {
+      margin-top: 0.35rem;
+      color: var(--text-secondary);
+    }
+
     .workspace-detail-goal-modal-switch {
       margin-top: 0.1rem;
+    }
+
+    .workspace-detail-goal-modal-enabled-hint {
+      margin-top: 0.1rem;
+      color: var(--warning-color, #f5a623);
+      font-size: 0.76rem;
     }
 
     .workspace-detail-goal-modal-status {

@@ -41,6 +41,7 @@
     cadenceDowWrap: '#workspace-detail-mission-cadence-dow-wrap',
     cadenceDomWrap: '#workspace-detail-mission-cadence-dom-wrap',
     cadenceIntervalWrap: '#workspace-detail-mission-cadence-interval-wrap',
+    enabledHint: '#workspace-detail-mission-enabled-hint',
     notifPriority: '#workspace-detail-mission-notif-priority',
     notifOnFindings: '#workspace-detail-mission-notif-onfindings',
     goalCard: '#workspace-detail-goal-card',
@@ -70,6 +71,9 @@
     goalModalCadenceDowWrap: '#workspace-detail-goal-modal-cadence-dow-wrap',
     goalModalCadenceDomWrap: '#workspace-detail-goal-modal-cadence-dom-wrap',
     goalModalCadenceIntervalWrap: '#workspace-detail-goal-modal-cadence-interval-wrap',
+    goalModalEnabledHint: '#workspace-detail-goal-modal-enabled-hint',
+    goalModalBindingsWarning: '#workspace-detail-goal-modal-bindings-warning',
+    goalModalUnclassifiedList: '#workspace-detail-goal-modal-unclassified-list',
   };
 
   let latestState = null;
@@ -156,6 +160,21 @@
       const el = $(SELECTORS[key]);
       if (el) el.style.display = visible.has(key) ? '' : 'none';
     }
+    syncGoalModalEnableState(type);
+  }
+
+  // Automation can only run on a cadence. With "Manual only" selected there is
+  // nothing to enable, so force the toggle off and disabled to avoid a green
+  // "Enabled" goal that never actually runs.
+  function syncGoalModalEnableState(type) {
+    const enabled = $(SELECTORS.goalModalEnabled);
+    const hint = $(SELECTORS.goalModalEnabledHint);
+    const manualOnly = !type;
+    if (enabled) {
+      if (manualOnly) enabled.checked = false;
+      enabled.disabled = manualOnly;
+    }
+    if (hint) hint.style.display = manualOnly ? '' : 'none';
   }
 
   function populateGoalModalFromState(state) {
@@ -184,6 +203,7 @@
       $(SELECTORS.goalModalCadenceInterval).value = String(hours);
     }
     applyGoalModalCadenceVisibility(type);
+    renderGoalModalBindingsWarning(current);
     setGoalModalStatus('');
   }
 
@@ -238,8 +258,12 @@
   function missionStatus(state) {
     const mission = String(state.mission || '').trim();
     if (!mission) return { label: 'Not set', className: 'is-empty' };
-    if (state.mission_enabled) return { label: 'Enabled', className: 'is-enabled' };
-    if (state.cadence && state.cadence.type) return { label: 'Paused', className: 'is-paused' };
+    const hasCadence = !!(state.cadence && state.cadence.type);
+    // "Enabled" means automation will actually fire — that requires a cadence.
+    // An enabled goal with no cadence never runs on its own, so report it as
+    // manual-only rather than showing a misleading green badge.
+    if (state.mission_enabled && hasCadence) return { label: 'Enabled', className: 'is-enabled' };
+    if (hasCadence) return { label: 'Paused', className: 'is-paused' };
     return { label: 'Manual only', className: 'is-manual' };
   }
 
@@ -326,22 +350,46 @@
     `;
   }
 
+  // Counts of bindings that still need a side-effect classification before the
+  // goal can run (manually or on a schedule).
+  function unclassifiedCounts(state) {
+    const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids.length : 0;
+    const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids.length : 0;
+    return { mcp, skills, total: mcp + skills };
+  }
+
+  function unclassifiedSummaryHTML(state) {
+    const { mcp, skills } = unclassifiedCounts(state);
+    const parts = [];
+    if (mcp) parts.push(`<strong>${mcp}</strong> MCP binding${mcp === 1 ? '' : 's'}`);
+    if (skills) parts.push(`<strong>${skills}</strong> skill binding${skills === 1 ? '' : 's'}`);
+    return `Affected: ${parts.join(' and ')}.`;
+  }
+
   function renderBindingsWarning(state) {
     const wrap = $(SELECTORS.warning);
     const list = $(SELECTORS.unclassifiedList);
     if (!wrap) return;
-    const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
-    const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids : [];
-    const total = mcp.length + skills.length;
-    if (total === 0) {
+    if (unclassifiedCounts(state).total === 0) {
       wrap.style.display = 'none';
       return;
     }
     wrap.style.display = 'block';
-    const parts = [];
-    if (mcp.length) parts.push(`<strong>${mcp.length}</strong> MCP binding${mcp.length === 1 ? '' : 's'}`);
-    if (skills.length) parts.push(`<strong>${skills.length}</strong> skill binding${skills.length === 1 ? '' : 's'}`);
-    if (list) list.innerHTML = `Affected: ${parts.join(' and ')}.`;
+    if (list) list.innerHTML = unclassifiedSummaryHTML(state);
+  }
+
+  // Surface the same readiness warning inside the quick-edit modal so users see
+  // it up front instead of hitting a 412 only after pressing Save.
+  function renderGoalModalBindingsWarning(state) {
+    const wrap = $(SELECTORS.goalModalBindingsWarning);
+    const list = $(SELECTORS.goalModalUnclassifiedList);
+    if (!wrap) return;
+    if (unclassifiedCounts(state).total === 0) {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = 'block';
+    if (list) list.innerHTML = unclassifiedSummaryHTML(state);
   }
 
   function applyCadenceVisibility(type) {
@@ -356,6 +404,20 @@
       const el = $(SELECTORS[key]);
       if (el) el.style.display = visible.has(key) ? '' : 'none';
     }
+    syncFormEnableState(type);
+  }
+
+  // Mirror of syncGoalModalEnableState for the advanced form: a goal with no
+  // cadence cannot be "enabled" in any meaningful way, so keep the toggle off.
+  function syncFormEnableState(type) {
+    const enabled = $(SELECTORS.enabled);
+    const hint = $(SELECTORS.enabledHint);
+    const manualOnly = !type;
+    if (enabled) {
+      if (manualOnly) enabled.checked = false;
+      enabled.disabled = manualOnly;
+    }
+    if (hint) hint.style.display = manualOnly ? '' : 'none';
   }
 
   function populateFormFromState(state) {
@@ -562,6 +624,10 @@
           setGoalModalStatus('Add a goal before enabling automation.', 'error');
           return;
         }
+        if (payload.mission_enabled && !payload.cadence) {
+          setGoalModalStatus('Pick a cadence before enabling automation.', 'error');
+          return;
+        }
 
         const saveBtn = $(SELECTORS.goalModalSaveBtn);
         if (saveBtn) saveBtn.disabled = true;
@@ -595,11 +661,16 @@
     if (form) {
       form.addEventListener('submit', async (evt) => {
         evt.preventDefault();
+        const payload = readFormState();
+        if (payload.mission_enabled && !payload.cadence) {
+          setStatusText('Pick a cadence before enabling goal automation.', 'error');
+          return;
+        }
         const saveBtn = $(SELECTORS.saveBtn);
         if (saveBtn) saveBtn.disabled = true;
         setStatusText('Saving...');
         try {
-          await saveMission(readFormState());
+          await saveMission(payload);
           setStatusText('Goal settings saved.');
           await reload();
           setGoalActionStatus('Goal saved.');
