@@ -2944,31 +2944,24 @@ export class WorkspaceTaskPage {
     if (!this.elements.overview) return;
 
     const progress = this.task?.progress;
-    const templateRef = this.task?.template_ref;
-    const executionMode = String(this.task?.execution_mode || 'auto').replace(/_/g, ' ');
-    const orchestrationMode = String(this.task?.orchestration_mode || '').replace(/_/g, ' ');
     const isBlocked = Boolean(this.currentBlockedTask);
 
+    // Keep the default Overview to the essentials a non-technical user cares
+    // about. Configuration internals (execution mode, orchestration mode,
+    // template ref) are intentionally omitted here — they remain in the
+    // Developer tab's Technical details (raw context).
     const items = [
       {
-        title: 'Requested By',
-        value: String(this.task?.from || 'Workspace').trim() || 'Workspace'
-      },
-      {
-        title: 'Assigned To',
+        title: 'Agent',
         value: String(this.task?.to || 'Unassigned').trim() || 'Unassigned'
-      },
-      {
-        title: 'Execution Mode',
-        value: executionMode ? executionMode.replace(/\b\w/g, (char) => char.toUpperCase()) : 'Auto'
       }
     ];
 
-    if (orchestrationMode) {
-      items.push({
-        title: 'Orchestration',
-        value: orchestrationMode.replace(/\b\w/g, (char) => char.toUpperCase())
-      });
+    // "Requested By" is only meaningful when something other than the
+    // workspace itself created the task; hide the noisy default.
+    const requestedBy = String(this.task?.from || '').trim();
+    if (requestedBy && requestedBy.toLowerCase() !== 'workspace') {
+      items.push({ title: 'Requested By', value: requestedBy });
     }
 
     if (progress && (progress.current_step || Number.isFinite(progress.percentage))) {
@@ -2985,35 +2978,26 @@ export class WorkspaceTaskPage {
       });
     }
 
-    if (templateRef?.template_name || templateRef?.step_name) {
-      items.push({
-        title: 'Template',
-        value: [templateRef.template_name, templateRef.step_name].filter(Boolean).join(' / ')
-      });
-    }
-
     const currentRunId = String(this.task?.current_run_id || '').trim();
     if (currentRunId) {
       const currentRun = this.currentRun || {};
+      // Plain-language summary: status + when. The profile snapshot id,
+      // validation status, and raw run id are developer details and live on
+      // the run page / Developer tab, not here.
       const runBits = [
         this.formatWorkspaceRunStatus(currentRun.status),
-        String(currentRun?.profile_snapshot?.id || '').trim(),
-        currentRun?.report?.validation_status
-          ? `validation ${String(currentRun.report.validation_status).trim()}`
-          : '',
-        currentRun?.started_at ? `started ${formatDateTime(currentRun.started_at)}` : ''
+        currentRun?.started_at ? formatDateTime(currentRun.started_at) : ''
       ].filter(Boolean);
 
       items.push({
         title: 'Latest Run',
-        value: `${runBits.join(' • ') || 'Recorded'}\n${currentRunId}`,
-        full: true,
+        value: runBits.join(' • ') || 'Recorded',
         href: this.getRunHref(currentRunId)
       });
     } else {
       items.push({
         title: 'Latest Run',
-        value: 'No workspace run recorded yet.'
+        value: 'No run recorded yet.'
       });
     }
 
