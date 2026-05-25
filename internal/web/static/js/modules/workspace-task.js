@@ -4812,6 +4812,7 @@ export class WorkspaceTaskPage {
     const defaultPathHint = defaultPath
       ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(defaultPath)}">${this.escapeHtml(defaultPath)}</span>`
       : '';
+    const fileName = String(storage.file_name || '').trim() || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -4820,6 +4821,7 @@ export class WorkspaceTaskPage {
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
             <span>Default output folder${defaultPathHint}</span>
+            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.csv)" value="${this.escapeHtml(fileName)}" aria-label="CSV file name" />
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
@@ -4859,6 +4861,7 @@ export class WorkspaceTaskPage {
     const target = container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')?.value || 'default';
     const storeNodeId = container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
     const customPath = container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
+    const fileNameInput = container.querySelector('[data-role="automation-storage-filename"]')?.value?.trim() || '';
 
     const setError = (message) => {
       const error = container.querySelector('[data-role="automation-storage-error"]');
@@ -4885,17 +4888,27 @@ export class WorkspaceTaskPage {
     const owner = this.getTaskResultStorageTask();
     const ownerId = owner?.id || this.taskId;
     const existing = owner?.result_storage || {};
+    // Only persist file_name when the user actually customized it (i.e. it
+    // differs from the description-derived default); otherwise leave it blank
+    // so the filename keeps tracking the task description. A full custom path
+    // carries its own filename, so file_name doesn't apply there.
+    const derivedFileName = this.defaultAppendCsvFilename(owner);
+    const customFileName = (target !== 'custom' && fileNameInput && fileNameInput !== derivedFileName)
+      ? fileNameInput
+      : '';
     const nextStorage = {
       enabled: true,
       format: 'csv',
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
       store_node_id: target === 'store' ? storeNodeId : '',
+      file_name: customFileName,
     };
     // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
     if (
       String(existing.file_path || '') === nextStorage.file_path &&
-      String(existing.store_node_id || '') === nextStorage.store_node_id
+      String(existing.store_node_id || '') === nextStorage.store_node_id &&
+      String(existing.file_name || '') === nextStorage.file_name
     ) {
       this.notify('info', 'Destination is already set.');
       return;
@@ -4957,7 +4970,10 @@ export class WorkspaceTaskPage {
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
-    const filename = filePathIsFile ? this.basename(filePath) : this.defaultAppendCsvFilename(owner);
+    const customFileName = String(storage.file_name || '').trim();
+    const filename = filePathIsFile
+      ? this.basename(filePath)
+      : (customFileName || this.defaultAppendCsvFilename(owner));
     const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
 
     let dest;

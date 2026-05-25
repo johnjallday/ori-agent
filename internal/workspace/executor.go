@@ -703,7 +703,9 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
 	if appendCSV {
-		filename = fmt.Sprintf("%s.%s", sanitized, ext)
+		// Honors a user-set storage.FileName; otherwise derives from the
+		// task description.
+		filename = AppendCSVFileName(task, storage)
 	}
 
 	// Prepare data for storage

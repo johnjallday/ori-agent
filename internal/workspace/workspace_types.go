@@ -293,6 +293,7 @@ type ResultStorageConfig struct {
 	Enabled     bool   `json:"enabled"`                 // Enable auto-save on completion
 	StoreNodeID string `json:"store_node_id,omitempty"` // Save to specific store node (if set)
 	FilePath    string `json:"file_path,omitempty"`     // Custom file path (if no store node)
+	FileName    string `json:"file_name,omitempty"`     // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
 	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown, csv
 	WriteMode   string `json:"write_mode,omitempty"`    // Output mode: new_file, append
 }

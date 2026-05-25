@@ -2070,7 +2070,7 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 
 	storeFilePath := storage.FilePath
 	if strings.TrimSpace(storeFilePath) == "" {
-		storeFilePath = taskResultAppendCSVFilename(task)
+		storeFilePath = workspace.AppendCSVFileName(task, storage)
 	}
 
 	if strings.TrimSpace(storage.StoreNodeID) != "" {
@@ -2119,28 +2119,9 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		}
 		filePath = filepath.Join(baseOutputDir, storeFilePath)
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, taskResultAppendCSVFilename(task))
+		filePath = filepath.Join(filePath, workspace.AppendCSVFileName(task, storage))
 	}
 	return workspace.AppendCSVToFileStrict(filePath, csvData)
-}
-
-func taskResultAppendCSVFilename(task *workspace.Task) string {
-	name := strings.TrimSpace(task.Description)
-	if len(name) > 30 {
-		name = name[:30]
-	}
-	var sanitized strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			sanitized.WriteRune(r)
-		} else if r == ' ' {
-			sanitized.WriteRune('_')
-		}
-	}
-	if sanitized.Len() == 0 {
-		return "task.csv"
-	}
-	return sanitized.String() + ".csv"
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk

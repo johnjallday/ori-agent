@@ -12,6 +12,43 @@ import (
 	"strings"
 )
 
+// AppendCSVFileName returns the file name an append-CSV run writes to within
+// the default/derived output folder: the user's custom FileName when set,
+// otherwise a slug derived from the task description. Any directory component
+// in FileName is stripped so it stays within the chosen folder.
+func AppendCSVFileName(task *Task, storage *ResultStorageConfig) string {
+	if storage != nil {
+		if custom := sanitizeAppendCSVFileName(storage.FileName); custom != "" {
+			return custom
+		}
+	}
+	return defaultAppendCSVFilename(task)
+}
+
+func sanitizeAppendCSVFileName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	name = filepath.Base(filepath.Clean(name))
+	if strings.HasSuffix(strings.ToLower(name), ".csv") {
+		name = name[:len(name)-len(".csv")]
+	}
+	var slug strings.Builder
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-':
+			slug.WriteRune(r)
+		case r == ' ':
+			slug.WriteByte('_')
+		}
+	}
+	if slug.Len() == 0 {
+		return ""
+	}
+	return slug.String() + ".csv"
+}
+
 // TaskResultToCSV converts a task result into importable CSV for result storage.
 func TaskResultToCSV(task *Task, result, timestamp, agent string) string {
 	if looksLikeCSV(result) {

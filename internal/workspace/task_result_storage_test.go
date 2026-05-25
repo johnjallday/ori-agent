@@ -8,6 +8,30 @@ import (
 	"time"
 )
 
+func TestAppendCSVFileName(t *testing.T) {
+	task := &Task{Description: "check pollen count in nyc"}
+
+	cases := []struct {
+		name    string
+		storage *ResultStorageConfig
+		want    string
+	}{
+		{"no storage uses description slug", nil, "check_pollen_count_in_nyc.csv"},
+		{"empty file name uses description slug", &ResultStorageConfig{}, "check_pollen_count_in_nyc.csv"},
+		{"custom name with extension", &ResultStorageConfig{FileName: "nyc_pollen.csv"}, "nyc_pollen.csv"},
+		{"custom name without extension", &ResultStorageConfig{FileName: "nyc pollen"}, "nyc_pollen.csv"},
+		{"strips directory and odd chars", &ResultStorageConfig{FileName: "../../etc/we!rd*name"}, "werdname.csv"},
+		{"all-invalid falls back to description", &ResultStorageConfig{FileName: "!!!"}, "check_pollen_count_in_nyc.csv"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AppendCSVFileName(task, tc.storage); got != tc.want {
+				t.Errorf("AppendCSVFileName=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTaskResultToCSV_UsesStructuredOutput(t *testing.T) {
 	task := &Task{
 		ID:          "task-1",
