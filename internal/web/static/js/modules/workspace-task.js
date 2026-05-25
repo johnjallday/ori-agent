@@ -7789,32 +7789,26 @@ export class WorkspaceTaskPage {
     this.elements.workspaceRunsCard.hidden = false;
     this.elements.workspaceRuns.innerHTML = runs.map((run) => {
       const status = String(run?.status || '').trim();
-      const profile = String(run?.profile_snapshot?.id || '').trim();
-      const executorKind = String(run?.executor?.kind || '').trim();
-      const executorRef = String(run?.executor?.ref || '').trim();
-      const validationStatus = String(run?.report?.validation_status || '').trim();
+      const validationStatus = String(run?.report?.validation_status || '').trim().toLowerCase();
       const summary = String(run?.report?.summary || '').trim();
-      const createdAt = run?.created_at ? formatDateTime(run.created_at) : '';
-      const finishedAt = run?.finished_at ? formatDateTime(run.finished_at) : '';
-      const title = [profile || 'general', executorKind || 'executor'].filter(Boolean).join(' / ');
-      const meta = [
-        executorRef ? `worker ${executorRef}` : '',
-        createdAt ? `created ${createdAt}` : '',
-        finishedAt ? `finished ${finishedAt}` : '',
-        validationStatus ? `validation ${validationStatus}` : ''
-      ].filter(Boolean).join(' • ');
+      // Read like a history entry: when it ran is the clickable title. The
+      // profile snapshot, executor kind/worker ref, validation status, and
+      // raw run id are developer details — they live on the run page and the
+      // Developer tab, not in this friendly list.
+      const when = run?.started_at || run?.created_at || run?.finished_at;
+      const title = when ? formatDateTime(when) : 'Run';
+      const needsReview = validationStatus === 'needs_review';
 
       return `
         <article class="workspace-task-workspace-run">
           <div class="workspace-task-workspace-run-head">
             <div class="workspace-task-workspace-run-title">
               <strong><a href="${this.escapeHtml(this.getRunHref(run?.id || ''))}" class="workspace-task-workspace-run-link">${this.escapeHtml(title)}</a></strong>
-              ${meta ? `<div class="workspace-task-workspace-run-meta">${this.escapeHtml(meta)}</div>` : ''}
+              ${needsReview ? '<div class="workspace-task-workspace-run-meta">Needs review before saving</div>' : ''}
             </div>
             <span class="workspace-task-workspace-run-status" data-state="${this.escapeHtml(status)}">${this.escapeHtml(this.formatWorkspaceRunStatus(status) || 'Recorded')}</span>
           </div>
           ${summary ? `<div class="workspace-task-workspace-run-summary">${this.escapeHtml(summary)}</div>` : ''}
-          <div class="workspace-task-workspace-run-id">${this.escapeHtml(String(run?.id || ''))}</div>
         </article>
       `;
     }).join('');
