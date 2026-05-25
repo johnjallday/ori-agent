@@ -286,8 +286,6 @@ export class WorkspaceRunPage {
     if (!this.run) return;
 
     const workspaceName = String(this.workspace?.name || 'Workspace').trim() || 'Workspace';
-    const profile = String(this.run?.profile_snapshot?.id || this.run?.profile_id || 'general').trim();
-    const executor = [this.run?.executor?.kind, this.run?.executor?.ref].filter(Boolean).join(' / ');
     const prompt = compactText(this.run?.prompt);
     const taskID = String(this.run?.scope?.target_task_id || '').trim();
 
@@ -301,12 +299,9 @@ export class WorkspaceRunPage {
       this.elements.breadcrumbTitle.textContent = this.shortID(this.run.id);
     }
     if (this.elements.subtitle) {
-      const summaryParts = [
-        profile ? `Profile ${profile}` : '',
-        executor ? `Executor ${executor}` : '',
-        prompt || ''
-      ].filter(Boolean);
-      this.elements.subtitle.textContent = summaryParts.join(' | ') || 'Workspace run detail.';
+      // Lead with what the run was asked to do; profile/executor are
+      // developer details and live in the Run summary's Technical details.
+      this.elements.subtitle.textContent = prompt || 'Run detail.';
     }
     if (this.elements.status) {
       this.elements.status.dataset.state = String(this.run.status || '');
@@ -325,23 +320,16 @@ export class WorkspaceRunPage {
     const parentRunID = String(this.run?.parent_run_id || '').trim();
     const repoPath = String(this.run?.scope?.repo_path || '').trim();
     const targetNoteID = String(this.run?.scope?.target_note_id || '').trim();
-    const overviewItems = [
-      { label: 'Run ID', value: this.run.id, full: true },
-      { label: 'Profile', value: this.run?.profile_snapshot?.id || this.run?.profile_id || 'general' },
-      { label: 'Executor', value: [this.run?.executor?.kind, this.run?.executor?.ref].filter(Boolean).join(' / ') || 'Unknown' },
+
+    // Friendly essentials shown by default: timing, cost, an error if any,
+    // and a link back to the task. Everything else is configuration detail.
+    const summaryItems = [
       { label: 'Created', value: formatDateTime(this.run.created_at) || 'Unknown' },
       { label: 'Started', value: formatDateTime(this.run.started_at) || 'Not started' },
-      { label: 'Finished', value: formatDateTime(this.run.finished_at) || 'Not finished' },
-      { label: 'Approval', value: this.run?.policy?.approval || 'none' },
-      { label: 'Mutation', value: this.run?.policy?.mutation || 'unknown' }
+      { label: 'Finished', value: formatDateTime(this.run.finished_at) || 'Not finished' }
     ];
-
-    if (taskID) overviewItems.push({ label: 'Target Task', value: taskID, href: this.taskHref(taskID) });
-    if (targetNoteID) overviewItems.push({ label: 'Target Note', value: targetNoteID });
-    if (repoPath) overviewItems.push({ label: 'Repo Path', value: repoPath, full: true });
-    if (parentRunID) overviewItems.push({ label: 'Parent Run', value: parentRunID, href: this.runHref(parentRunID), full: true });
     if (this.run?.cost) {
-      overviewItems.push({
+      summaryItems.push({
         label: 'Cost',
         value: [
           Number.isFinite(Number(this.run.cost.total_tokens)) ? `${Number(this.run.cost.total_tokens)} tokens` : '',
@@ -349,9 +337,23 @@ export class WorkspaceRunPage {
         ].filter(Boolean).join(' / ') || 'Tracked'
       });
     }
-    if (this.run?.error) overviewItems.push({ label: 'Error', value: this.run.error, full: true });
+    if (taskID) summaryItems.push({ label: 'Task', value: taskID, href: this.taskHref(taskID) });
+    if (this.run?.error) summaryItems.push({ label: 'Error', value: this.run.error, full: true });
 
-    this.elements.overview.innerHTML = overviewItems.map((item) => `
+    // Developer-facing run internals, tucked into a collapsed disclosure so
+    // they don't dominate the page for non-technical users.
+    const technicalItems = [
+      { label: 'Run ID', value: this.run.id, full: true },
+      { label: 'Profile', value: this.run?.profile_snapshot?.id || this.run?.profile_id || 'general' },
+      { label: 'Executor', value: [this.run?.executor?.kind, this.run?.executor?.ref].filter(Boolean).join(' / ') || 'Unknown' },
+      { label: 'Approval', value: this.run?.policy?.approval || 'none' },
+      { label: 'Mutation', value: this.run?.policy?.mutation || 'unknown' }
+    ];
+    if (targetNoteID) technicalItems.push({ label: 'Target Note', value: targetNoteID });
+    if (repoPath) technicalItems.push({ label: 'Repo Path', value: repoPath, full: true });
+    if (parentRunID) technicalItems.push({ label: 'Parent Run', value: parentRunID, href: this.runHref(parentRunID), full: true });
+
+    const renderItem = (item) => `
       <article class="workspace-run-overview-item${item.full ? ' full' : ''}">
         <div class="workspace-run-overview-label">${escapeHtml(item.label)}</div>
         <div class="workspace-run-overview-value">
@@ -360,7 +362,16 @@ export class WorkspaceRunPage {
             : escapeHtml(item.value)}
         </div>
       </article>
-    `).join('');
+    `;
+
+    const technicalHtml = technicalItems.length
+      ? `<details class="workspace-run-advanced">
+          <summary class="workspace-run-advanced-summary">Technical details</summary>
+          <div class="workspace-run-overview-grid">${technicalItems.map(renderItem).join('')}</div>
+        </details>`
+      : '';
+
+    this.elements.overview.innerHTML = summaryItems.map(renderItem).join('') + technicalHtml;
   }
 
   renderReport() {

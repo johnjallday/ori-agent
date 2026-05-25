@@ -54,11 +54,21 @@
         <div id="workspace-run-empty" class="workspace-run-empty" hidden>Workspace run not found.</div>
 
         <main id="workspace-run-content" class="workspace-run-content" hidden>
+          <section id="workspace-run-report-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Result</div>
+                <h2>What this run produced</h2>
+              </div>
+            </div>
+            <div id="workspace-run-report" class="workspace-run-report"></div>
+          </section>
+
           <section class="workspace-run-card">
             <div class="workspace-run-card-header">
               <div>
-                <div class="workspace-run-card-kicker">Overview</div>
-                <h2>Run contract</h2>
+                <div class="workspace-run-card-kicker">Summary</div>
+                <h2>Run summary</h2>
               </div>
             </div>
             <div id="workspace-run-overview" class="workspace-run-overview-grid"></div>
@@ -67,28 +77,18 @@
           <section id="workspace-run-context-card" class="workspace-run-card" hidden>
             <div class="workspace-run-card-header">
               <div>
-                <div class="workspace-run-card-kicker">Context</div>
-                <h2>Prepared inputs</h2>
+                <div class="workspace-run-card-kicker">Inputs</div>
+                <h2>What it received</h2>
               </div>
             </div>
             <div id="workspace-run-context" class="workspace-run-context"></div>
           </section>
 
-          <section id="workspace-run-report-card" class="workspace-run-card" hidden>
-            <div class="workspace-run-card-header">
-              <div>
-                <div class="workspace-run-card-kicker">Report</div>
-                <h2>Final output</h2>
-              </div>
-            </div>
-            <div id="workspace-run-report" class="workspace-run-report"></div>
-          </section>
-
           <section id="workspace-run-validation-card" class="workspace-run-card" hidden>
             <div class="workspace-run-card-header">
               <div>
-                <div class="workspace-run-card-kicker">Validation</div>
-                <h2>Checks</h2>
+                <div class="workspace-run-card-kicker">Quality</div>
+                <h2>Validation</h2>
               </div>
             </div>
             <div id="workspace-run-validation" class="workspace-run-validation-list"></div>
@@ -97,8 +97,8 @@
           <section id="workspace-run-artifacts-card" class="workspace-run-card" hidden>
             <div class="workspace-run-card-header">
               <div>
-                <div class="workspace-run-card-kicker">Artifacts</div>
-                <h2>Evidence</h2>
+                <div class="workspace-run-card-kicker">Files</div>
+                <h2>Saved files</h2>
               </div>
             </div>
             <div id="workspace-run-artifacts" class="workspace-run-artifact-list"></div>
@@ -107,8 +107,8 @@
           <section class="workspace-run-card">
             <div class="workspace-run-card-header">
               <div>
-                <div class="workspace-run-card-kicker">Trace</div>
-                <h2>Lifecycle events</h2>
+                <div class="workspace-run-card-kicker">Activity</div>
+                <h2>Activity log</h2>
               </div>
               <div id="workspace-run-trace-count" class="workspace-run-trace-count"></div>
             </div>
@@ -344,6 +344,46 @@
 
     .workspace-run-overview-item.full {
       grid-column: 1 / -1;
+    }
+
+    /* Collapsible "Technical details" inside the Run summary grid. Spans the
+       full width and nests its own grid of developer fields. */
+    .workspace-run-advanced {
+      grid-column: 1 / -1;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      padding-top: 0.5rem;
+    }
+
+    .workspace-run-advanced > .workspace-run-advanced-summary {
+      cursor: pointer;
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0.3rem 0;
+      user-select: none;
+    }
+
+    .workspace-run-advanced > .workspace-run-advanced-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-run-advanced > .workspace-run-advanced-summary::before {
+      content: "▸";
+      display: inline-block;
+      font-size: 0.72rem;
+      transition: transform 0.15s ease;
+    }
+
+    .workspace-run-advanced[open] > .workspace-run-advanced-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-run-advanced > .workspace-run-overview-grid {
+      margin-top: 0.6rem;
     }
 
     .workspace-run-overview-label {
