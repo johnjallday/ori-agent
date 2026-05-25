@@ -6236,6 +6236,7 @@ export class WorkspaceTaskPage {
           <div><dt>Actual</dt><dd>${this.escapeHtml((headerMismatch.actual || []).join(', ') || 'No existing header')}</dd></div>
         </dl>
         <div class="workspace-task-review-reconcile-actions">
+          <button type="button" class="modern-btn modern-btn-primary" data-review-action="reproject_to_destination">Reorganize to match</button>
           <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-append-storage">Change destination</button>
           <button type="button" class="modern-btn modern-btn-secondary" data-action="design-output-columns-from-result">Edit format</button>
         </div>
@@ -6425,6 +6426,42 @@ export class WorkspaceTaskPage {
       } catch (error) {
         console.error('Failed to retry normalization:', error);
         this.notify('error', error?.message || 'Failed to retry normalization');
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (action === 'reproject_to_destination') {
+      // One-click recovery for a CSV header mismatch: ask the harness to rebuild
+      // the result into the destination file's columns (deterministically for
+      // known fields, via the assistant for the rest) and append it.
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'reproject_to_destination',
+            history_index: historyIndex
+          })
+        });
+        const payloadText = await response.text();
+        let payload = null;
+        if (payloadText) {
+          try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+        }
+        if (!response.ok) {
+          throw new Error(payload?.message || payloadText || 'Failed to reorganize result');
+        }
+        const stored = Boolean(payload?.stored);
+        this.notify(stored ? 'success' : 'warning', stored
+          ? 'Reorganized to match the destination and saved.'
+          : 'Reorganized, but the row still needs review.');
+        await this.loadData();
+      } catch (error) {
+        console.error('Failed to reorganize result:', error);
+        this.notify('error', error?.message || 'Failed to reorganize result');
       } finally {
         button.disabled = false;
       }
