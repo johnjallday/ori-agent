@@ -7637,12 +7637,73 @@ export class WorkspaceTaskPage {
       </div>
     ` : '';
 
-    // "Recent runs" history is intentionally omitted from this Automation
-    // card — it duplicated the friendly Activity > Runs list and added a lot
-    // of density (each row carried an expandable full result). The card now
-    // stays focused on schedule + saved results; run history lives in Activity.
-    this.elements.schedule.innerHTML = bannerHtml + statsHtml;
+    // Recent runs: a compact history list collapsed by default so it doesn't
+    // add density to the Overview. The full friendly history also lives in the
+    // Activity > Runs tab; this is a quick in-context peek.
+    let historyHtml = '';
+    if (history.length > 0) {
+      const recentRuns = history.slice(-10).reverse();
+      historyHtml = `
+        <details class="workspace-task-advanced workspace-task-schedule-history-disclosure">
+          <summary class="workspace-task-advanced-summary">Recent runs</summary>
+          <div class="workspace-task-schedule-history">
+            ${recentRuns.map((run, idx) => {
+              const runStatus = String(run?.status || 'completed').trim().toLowerCase();
+              const statusClass = getStatusClass(runStatus);
+              // TaskExecution carries executed_at; completed_at/started_at are
+              // legacy fallbacks for any older history shape that may still be
+              // sitting in the workspace store.
+              const ts = run?.executed_at || run?.completed_at || run?.started_at;
+              const durationMs = Number(run?.duration) || 0;
+              const durationLabel = durationMs > 0
+                ? (durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`)
+                : '';
+              const summary = String(run?.summary || run?.error || '').trim();
+              // Result is the full body (capped server-side at 16 KiB). Older
+              // history rows recorded before that field existed only have
+              // summary; treat that as a "no full result available" case.
+              const fullResult = String(run?.result || '').trim();
+              const hasExpandable = fullResult && fullResult !== summary;
+              const panelId = `workspace-task-schedule-run-panel-${idx}`;
+              return `
+                <div class="workspace-task-schedule-run">
+                  <div class="workspace-task-schedule-run-row">
+                    <span class="workspace-task-schedule-run-meta">${this.escapeHtml(formatDateTime(ts))}${durationLabel ? ` <span class="workspace-task-schedule-run-duration">· ${this.escapeHtml(durationLabel)}</span>` : ''}${summary ? `<div class="workspace-task-schedule-run-summary" title="${this.escapeHtml(summary)}">${this.escapeHtml(summary)}</div>` : ''}</span>
+                    <div class="workspace-task-schedule-run-trail">
+                      <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
+                      ${hasExpandable ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7,10L12,15L17,10H7Z"/></svg>
+                        <span>Result</span>
+                      </button>` : ''}
+                    </div>
+                  </div>
+                  ${hasExpandable ? `<div id="${panelId}" class="workspace-task-schedule-run-panel" hidden><pre class="workspace-task-schedule-run-result">${this.escapeHtml(fullResult)}</pre></div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </details>
+      `;
+    }
+
+    this.elements.schedule.innerHTML = bannerHtml + statsHtml + historyHtml;
     this.renderAutomationSections();
+
+    // Wire expand/collapse for run rows that captured a full result. The
+    // chevron flips and the <pre> below toggles between hidden and visible.
+    this.elements.schedule.querySelectorAll('[data-task-run-toggle]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const panelId = btn.getAttribute('aria-controls');
+        const panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+        const next = panel.hidden;
+        panel.hidden = !next;
+        btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+        btn.classList.toggle('is-open', next);
+        btn.title = next ? 'Hide full result' : 'Show full result';
+      });
+    });
   }
 
 
