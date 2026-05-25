@@ -87,6 +87,12 @@
 
   let latestState = null;
 
+  // Guards against overlapping runs and keeps the goal card's Run button
+  // disabled while a run is in flight (see renderGoalCard).
+  let runInProgress = false;
+  const RUN_POLL_INTERVAL_MS = 2000;
+  const RUN_POLL_TIMEOUT_MS = 120000;
+
   // Cadence intervals come back from the API as Go durations in nanoseconds.
   const NS_PER_HOUR = 3.6e12;
 
@@ -349,7 +355,7 @@
     if (lastEl) lastEl.textContent = `Last: ${fmtTime(state.last_mission_run_at)}`;
     if (editBtn) editBtn.textContent = mission ? 'Edit goal' : 'Set goal';
     if (runBtn) {
-      runBtn.disabled = !mission;
+      runBtn.disabled = !mission || runInProgress;
       runBtn.title = mission ? 'Run this goal check now' : 'Set a goal before running';
     }
 
@@ -363,12 +369,16 @@
         : '/action-center';
     }
 
-    const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
-    const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids : [];
-    if (mission && mcp.length + skills.length > 0) {
-      setGoalActionStatus('Classify MCP or skill bindings before scheduled runs.', 'error');
-    } else {
-      setGoalActionStatus('');
+    // Don't touch the action-status line mid-run — handleRunClick owns it then
+    // (the live "Running…" / result message must not be cleared by a poll).
+    if (!runInProgress) {
+      const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
+      const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids : [];
+      if (mission && mcp.length + skills.length > 0) {
+        setGoalActionStatus('Classify MCP or skill bindings before scheduled runs.', 'error');
+      } else {
+        setGoalActionStatus('');
+      }
     }
   }
 
@@ -608,6 +618,100 @@
     }, 80);
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Repaint the read-only surfaces (goal card + advanced status strip) without
+  // touching the editable form/modal inputs, so a poll mid-run never clobbers
+  // anything the user is typing.
+  function renderReadOnly(state) {
+    renderGoalCard(state);
+    renderStatus(state);
+    renderBindingsWarning(state);
+  }
+
+  // Trigger a goal run and wait for it to actually finish. The execution
+  // counter always advances on completion (success or failure), so poll
+  // GetMission until it moves past the pre-run value. Returns
+  // {done, failed, runId}; done=false means it's still running at the timeout.
+  async function executeRun(endpoint, onProgress) {
+    const before = latestState || {};
+    const beforeRuns = before.mission_execution_count || 0;
+    const beforeFailures = before.mission_failure_count || 0;
+
+    const r = await triggerMission(endpoint);
+    if (onProgress) onProgress(`Run started (${r.run_id || 'no id'}) — working…`);
+
+    const deadline = Date.now() + RUN_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await sleep(RUN_POLL_INTERVAL_MS);
+      let state;
+      try {
+        state = await fetchMissionState();
+      } catch {
+        continue; // transient error — keep trying until the deadline
+      }
+      latestState = state;
+      renderReadOnly(state);
+      if ((state.mission_execution_count || 0) > beforeRuns) {
+        return {
+          done: true,
+          failed: (state.mission_failure_count || 0) > beforeFailures,
+          runId: r.run_id,
+        };
+      }
+    }
+    return { done: false, runId: r.run_id };
+  }
+
+  // Shared handler for every run button (card "Run now", advanced "Run now"
+  // and baseline). Disables the button with a live "Running…" label, polls for
+  // completion, then reports the real outcome instead of just "started".
+  async function handleRunClick(endpoint, button, report) {
+    if (runInProgress) return;
+    runInProgress = true;
+    let originalLabel;
+    if (button) {
+      button.disabled = true;
+      originalLabel = button.textContent;
+      button.textContent = 'Running…';
+    }
+    report('Starting run…');
+
+    let message = 'Run complete.';
+    let kind = null;
+    try {
+      const result = await executeRun(endpoint, (msg) => report(msg));
+      if (!result.done) {
+        message = 'Still running — this is taking a while. Use Refresh to check status.';
+        kind = 'error';
+      } else if (result.failed) {
+        message = 'Run finished with an error. Check the Action Center or server logs.';
+        kind = 'error';
+      }
+    } catch (e) {
+      kind = 'error';
+      if (e.status === 412) {
+        message = 'Classify workspace bindings before running.';
+      } else if (e.status === 503) {
+        message = 'Goal runner is not configured on this server.';
+      } else {
+        message = `Run failed: ${e.message}`;
+      }
+    }
+
+    runInProgress = false;
+    if (button) {
+      button.disabled = false;
+      if (originalLabel !== undefined) button.textContent = originalLabel;
+    }
+    // Restore the card's button/bindings state, then set the result message
+    // last so the render pass doesn't overwrite it.
+    renderGoalCard(latestState || {});
+    report(message, kind);
+  }
+
   function wireForm() {
     const cadenceType = $(SELECTORS.cadenceType);
     if (cadenceType) {
@@ -696,58 +800,24 @@
       });
     }
 
+    // Advanced status strip + card both reflect run progress/outcome.
+    const reportAdvanced = (msg, kind) => {
+      setStatusText(msg, kind);
+      setGoalActionStatus(msg, kind);
+    };
+
     const baselineBtn = $(SELECTORS.baselineBtn);
     if (baselineBtn) {
-      baselineBtn.addEventListener('click', async () => {
-        baselineBtn.disabled = true;
-        setStatusText('Starting baseline run...');
-        try {
-          const r = await triggerMission('baseline');
-          setStatusText(`Baseline run started (${r.run_id || 'no id'}).`);
-          await reload();
-          setGoalActionStatus(`Baseline run started (${r.run_id || 'no id'}).`);
-        } catch (e) {
-          if (e.status === 412) {
-            setStatusText('Classify your workspace bindings before running.', 'error');
-            setGoalActionStatus('Classify workspace bindings before running.', 'error');
-          } else if (e.status === 503) {
-            setStatusText('Goal runner is not configured on this server.', 'error');
-            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
-          } else {
-            setStatusText(`Trigger failed: ${e.message}`, 'error');
-            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
-          }
-        } finally {
-          baselineBtn.disabled = false;
-        }
-      });
+      baselineBtn.addEventListener('click', () =>
+        handleRunClick('baseline', baselineBtn, reportAdvanced)
+      );
     }
 
     const triggerBtn = $(SELECTORS.triggerBtn);
     if (triggerBtn) {
-      triggerBtn.addEventListener('click', async () => {
-        triggerBtn.disabled = true;
-        setStatusText('Starting goal check...');
-        try {
-          const r = await triggerMission('trigger');
-          setStatusText(`Run started (${r.run_id || 'no id'}).`);
-          await reload();
-          setGoalActionStatus(`Run started (${r.run_id || 'no id'}).`);
-        } catch (e) {
-          if (e.status === 412) {
-            setStatusText('Classify your workspace bindings before running.', 'error');
-            setGoalActionStatus('Classify workspace bindings before running.', 'error');
-          } else if (e.status === 503) {
-            setStatusText('Goal runner is not configured on this server.', 'error');
-            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
-          } else {
-            setStatusText(`Trigger failed: ${e.message}`, 'error');
-            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
-          }
-        } finally {
-          triggerBtn.disabled = false;
-        }
-      });
+      triggerBtn.addEventListener('click', () =>
+        handleRunClick('trigger', triggerBtn, reportAdvanced)
+      );
     }
 
     const refreshBtn = $(SELECTORS.refreshBtn);
@@ -758,25 +828,9 @@
 
     const goalRunBtn = $(SELECTORS.goalRunBtn);
     if (goalRunBtn) {
-      goalRunBtn.addEventListener('click', async () => {
-        goalRunBtn.disabled = true;
-        setGoalActionStatus('Starting run...');
-        try {
-          const r = await triggerMission('trigger');
-          await reload();
-          setGoalActionStatus(`Run started (${r.run_id || 'no id'}).`);
-        } catch (e) {
-          if (e.status === 412) {
-            setGoalActionStatus('Classify workspace bindings before running.', 'error');
-          } else if (e.status === 503) {
-            setGoalActionStatus('Goal runner is not configured on this server.', 'error');
-          } else {
-            setGoalActionStatus(`Run failed: ${e.message}`, 'error');
-          }
-        } finally {
-          goalRunBtn.disabled = false;
-        }
-      });
+      goalRunBtn.addEventListener('click', () =>
+        handleRunClick('trigger', goalRunBtn, (msg, kind) => setGoalActionStatus(msg, kind))
+      );
     }
   }
 
