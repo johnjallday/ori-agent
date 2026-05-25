@@ -636,13 +636,23 @@
 
   // "Run baseline now" and "Run now" are functionally identical; showing both
   // at once is just confusing. The first run is the baseline, so surface only
-  // "Run baseline now" until a run has happened, then only "Run now".
+  // "Run baseline now" until a run has happened, then only "Run now". Also
+  // disable whichever is shown when there's no saved goal to run (mirrors the
+  // card's Run button) — running uses the saved goal, so an empty one is a
+  // no-op that would just fail.
   function applyRunButtonModes(state) {
     const isFirstRun = (state.mission_execution_count || 0) === 0;
-    const baselineBtn = $(SELECTORS.baselineBtn);
-    const triggerBtn = $(SELECTORS.triggerBtn);
-    if (baselineBtn) baselineBtn.style.display = isFirstRun ? '' : 'none';
-    if (triggerBtn) triggerBtn.style.display = isFirstRun ? 'none' : '';
+    const noGoal = !String(state.mission || '').trim();
+    const buttons = [
+      [$(SELECTORS.baselineBtn), isFirstRun],
+      [$(SELECTORS.triggerBtn), !isFirstRun],
+    ];
+    for (const [btn, visible] of buttons) {
+      if (!btn) continue;
+      btn.style.display = visible ? '' : 'none';
+      btn.disabled = noGoal || runInProgress;
+      btn.title = noGoal ? 'Set a goal before running' : '';
+    }
   }
 
   // Trigger a goal run and wait for it to actually finish. The execution
@@ -717,12 +727,12 @@
 
     runInProgress = false;
     if (button) {
-      button.disabled = false;
       if (originalLabel !== undefined) button.textContent = originalLabel;
     }
-    // Restore the card's button/bindings state, then set the result message
-    // last so the render pass doesn't overwrite it.
-    renderGoalCard(latestState || {});
+    // Restore the read-only surfaces (card button + advanced run buttons,
+    // which may have swapped baseline->run after a first run), then set the
+    // result message last so the render pass doesn't overwrite it.
+    renderReadOnly(latestState || {});
     report(message, kind);
   }
 
