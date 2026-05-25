@@ -158,6 +158,39 @@
     }
   }
 
+  // Relative time in both directions: "in 3h" for the future, "2d ago" for the
+  // past. Falls back to an absolute date once it's more than a week out.
+  function fmtRelative(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const diff = d.getTime() - Date.now(); // > 0 future, < 0 past
+    const abs = Math.abs(diff);
+    const ahead = diff >= 0;
+    if (abs < 60000) return 'just now';
+    const mins = Math.round(abs / 60000);
+    if (mins < 60) return ahead ? `in ${mins}m` : `${mins}m ago`;
+    const hours = Math.round(abs / 3600000);
+    if (hours < 24) return ahead ? `in ${hours}h` : `${hours}h ago`;
+    const days = Math.round(abs / 86400000);
+    if (days < 7) return ahead ? `in ${days}d` : `${days}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  // Next scheduled run: nothing scheduled, already due (past but not yet picked
+  // up by the scheduler), or a relative time in the future.
+  function fmtNextRun(iso) {
+    if (!iso) return 'not scheduled';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    if (d.getTime() <= Date.now()) return 'due now';
+    return fmtRelative(iso);
+  }
+
+  function fmtLastRun(iso) {
+    if (!iso) return 'never';
+    return fmtRelative(iso);
+  }
+
   function setGoalActionStatus(msg, kind) {
     const el = $(SELECTORS.goalActionStatus);
     if (!el) return;
@@ -351,8 +384,14 @@
       textEl.classList.toggle('is-empty', !mission);
     }
     if (cadenceEl) cadenceEl.textContent = `Cadence: ${cadenceLabel(state.cadence)}`;
-    if (nextEl) nextEl.textContent = `Next: ${fmtTime(state.next_mission_run_at)}`;
-    if (lastEl) lastEl.textContent = `Last: ${fmtTime(state.last_mission_run_at)}`;
+    if (nextEl) {
+      nextEl.textContent = `Next: ${fmtNextRun(state.next_mission_run_at)}`;
+      nextEl.title = state.next_mission_run_at ? fmtTime(state.next_mission_run_at) : '';
+    }
+    if (lastEl) {
+      lastEl.textContent = `Last: ${fmtLastRun(state.last_mission_run_at)}`;
+      lastEl.title = state.last_mission_run_at ? fmtTime(state.last_mission_run_at) : '';
+    }
     if (editBtn) editBtn.textContent = mission ? 'Edit goal' : 'Set goal';
     if (runBtn) {
       runBtn.disabled = !mission || runInProgress;
@@ -415,8 +454,8 @@
     const body = $(SELECTORS.statusBody);
     if (!body) return;
     const enabled = state.mission_enabled ? 'Enabled' : 'Paused';
-    const nextRun = fmtTime(state.next_mission_run_at);
-    const lastRun = fmtTime(state.last_mission_run_at);
+    const nextRun = fmtNextRun(state.next_mission_run_at);
+    const lastRun = fmtLastRun(state.last_mission_run_at);
     const runs = state.mission_execution_count || 0;
     const failures = state.mission_failure_count || 0;
     body.innerHTML = `
