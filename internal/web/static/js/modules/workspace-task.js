@@ -831,6 +831,9 @@ export class WorkspaceTaskPage {
     this.resultNoteSaving = false;
     this.currentResultArtifact = null;
     this.resultArtifactNoteSaving = false;
+    this.columnDesignerModalOpen = false;
+    this.columnModalOverlay = null;
+    this.columnModalBody = null;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
     this.resultPromotionPending = false;
@@ -4505,18 +4508,19 @@ export class WorkspaceTaskPage {
       .querySelector('[data-action="submit-append-chooser"]')
       ?.addEventListener('click', () => this.submitAppendChooser());
     root
-      .querySelector('[data-action="edit-append-storage"]')
-      ?.addEventListener('click', () => this.openTaskStorageEditor());
+      .querySelectorAll('[data-action="edit-append-storage"]')
+      .forEach((btn) => btn.addEventListener('click', () => this.openTaskStorageEditor()));
+    // This action can appear in more than one place (review panel + result
+    // CTA), so bind every match rather than just the first.
     root
-      .querySelector('[data-action="design-output-columns-from-result"]')
-      ?.addEventListener('click', () => this.designOutputColumnsFromResult());
+      .querySelectorAll('[data-action="design-output-columns-from-result"]')
+      .forEach((btn) => btn.addEventListener('click', () => this.designOutputColumnsFromResult()));
   }
 
   // bindAutomationColumnsActions wires events on the column-designer DOM
   // inside the Automation card. Called by renderAutomationColumns whenever
   // that container re-renders.
-  bindAutomationColumnsActions() {
-    const root = this.elements.automationColumns;
+  bindAutomationColumnsActions(root = this.elements.automationColumns) {
     if (!root) return;
     root
       .querySelector('[data-action="edit-result-contract"]')
@@ -4554,7 +4558,7 @@ export class WorkspaceTaskPage {
   // input to keep focus stable while typing.
   syncResultContractDraftFromDOM() {
     if (!Array.isArray(this.resultContractDraft)) return;
-    const rows = this.elements.automationColumns?.querySelectorAll?.('[data-result-contract-row]');
+    const rows = this._designerRoot()?.querySelectorAll?.('[data-result-contract-row]');
     if (!rows || rows.length === 0) return;
     const next = [];
     rows.forEach((row) => {
@@ -4592,6 +4596,12 @@ export class WorkspaceTaskPage {
   }
 
   cancelResultContractEdit() {
+    // In modal mode, cancelling just closes the modal (which clears the draft
+    // and refreshes the inline card).
+    if (this.columnDesignerModalOpen) {
+      this.closeColumnDesignerModal();
+      return;
+    }
     this.resultContractDraft = null;
     this.resultOutputSpecDraft = null;
     this.resultContractSuggesting = false;
@@ -4618,7 +4628,7 @@ export class WorkspaceTaskPage {
   }
 
   setResultContractError(message) {
-    const error = this.elements.automationColumns?.querySelector?.('[data-role="result-contract-error"]');
+    const error = this._designerRoot()?.querySelector?.('[data-role="result-contract-error"]');
     if (!error) return;
     if (!message) {
       error.hidden = true;
@@ -4633,6 +4643,13 @@ export class WorkspaceTaskPage {
   // change. It routes through renderSchedule because that method owns the
   // card hidden/visible decision as well as the columns and destination blocks.
   refreshResultRender() {
+    // When the column-designer modal is open, the designer lives in the modal
+    // body — re-render there and rebind, leaving the inline card untouched.
+    if (this.columnDesignerModalOpen && this.columnModalBody) {
+      this.columnModalBody.innerHTML = this.renderResultContractBlock();
+      this.bindAutomationColumnsActions(this.columnModalBody);
+      return;
+    }
     if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
       try {
         if (this._renderCache) delete this._renderCache.schedule;
@@ -4654,21 +4671,85 @@ export class WorkspaceTaskPage {
     this.lastSuggestionResultSample = this.getResultSampleForSuggestion();
   }
 
-  // designOutputColumnsFromResult is the Result-card entrypoint. Always
-  // captures the visible result as the suggestion sample and scrolls the
-  // Automation card into view; only opens the designer when storage is
-  // already configured. When storage is off, the user lands on the
-  // Automation toggle and decides to opt in first — the same one-decision-
-  // at-a-time flow that motivated moving the checkbox here.
+  // designOutputColumnsFromResult is the one-click "turn this result into CSV
+  // columns" entry point used by the Result card and the review panel. It
+  // captures the visible result as the suggestion sample, reveals the
+  // Automation card, opens its "Advanced settings" disclosure (the designer
+  // lives there), turns on append-CSV storage if it's off (which asks the
+  // assistant to suggest columns), and scrolls the designer into view.
+  // designOutputColumnsFromResult opens the dedicated column-designer modal,
+  // pre-seeded with the current result as the suggestion sample. Used by the
+  // Result-card CTA, the result-artifact link, and the review panel's "Edit
+  // format". Saving approves the output spec and turns on append-CSV storage,
+  // so the next run returns structured JSON in the designed shape.
   designOutputColumnsFromResult() {
+    this.openColumnDesignerModal({ suggest: this.getResultContractColumns().length === 0 });
+  }
+
+  // _designerRoot returns the DOM container the column designer currently
+  // renders into: the modal body when the modal is open, otherwise the inline
+  // Automation-card container. Render/read/error helpers route through this so
+  // the same designer logic drives both surfaces.
+  _designerRoot() {
+    return (this.columnDesignerModalOpen && this.columnModalBody)
+      ? this.columnModalBody
+      : this.elements.automationColumns;
+  }
+
+  openColumnDesignerModal({ suggest = false } = {}) {
+    if (this.columnDesignerModalOpen) return;
     this.captureSuggestionSampleFromCurrentResult();
-    if (this.elements.scheduleCard) {
-      this.elements.scheduleCard.hidden = false;
-      this.elements.scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'workspace-task-column-modal-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Design CSV columns');
+    overlay.innerHTML = `
+      <div class="workspace-task-column-modal" role="document">
+        <div class="workspace-task-column-modal-header">
+          <h2>Design CSV columns</h2>
+          <button type="button" class="workspace-task-page-icon-btn" data-action="close-column-modal" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
+          </button>
+        </div>
+        <div class="workspace-task-column-modal-body" data-role="column-modal-body"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    this.columnModalOverlay = overlay;
+    this.columnModalBody = overlay.querySelector('[data-role="column-modal-body"]');
+    this.columnDesignerModalOpen = true;
+
+    overlay.addEventListener('mousedown', (event) => {
+      if (event.target === overlay) this.closeColumnDesignerModal();
+    });
+    overlay.querySelector('[data-action="close-column-modal"]')
+      ?.addEventListener('click', () => this.closeColumnDesignerModal());
+    this._columnModalKeydown = (event) => {
+      if (event.key === 'Escape') this.closeColumnDesignerModal();
+    };
+    document.addEventListener('keydown', this._columnModalKeydown);
+
+    // Initializes resultContractDraft and, because the modal is open, renders
+    // the editor into the modal body via refreshResultRender.
+    this.startResultContractEdit({ suggest });
+  }
+
+  closeColumnDesignerModal() {
+    if (!this.columnDesignerModalOpen) return;
+    this.columnDesignerModalOpen = false;
+    if (this._columnModalKeydown) {
+      document.removeEventListener('keydown', this._columnModalKeydown);
+      this._columnModalKeydown = null;
     }
-    if (this.getAppendCSVContext().configured) {
-      this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
-    }
+    this.columnModalOverlay?.remove();
+    this.columnModalOverlay = null;
+    this.columnModalBody = null;
+    // Drop the editing draft so the inline card doesn't render in edit mode,
+    // then refresh the inline card to reflect any saved spec.
+    this.resultContractDraft = null;
+    this.resultOutputSpecDraft = null;
+    this.refreshResultRender();
   }
 
   // setCsvStorageEnabled drives the Automation card's storage checkbox.
@@ -5078,12 +5159,17 @@ export class WorkspaceTaskPage {
     this.setResultContractError('');
     this.refreshResultRender();
 
+    // Don't let a slow model leave the designer spinning forever. Abort after
+    // 50s (just under the backend's 60s cap) and fall back to local columns.
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 50000);
     try {
       const owner = this.getTaskResultStorageTask();
       const storage = owner?.result_storage || {};
       const response = await fetch('/api/orchestration/tasks/output-spec/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           title: this.task?.description || owner?.description || '',
           details: this.task?.details || '',
@@ -5127,16 +5213,21 @@ export class WorkspaceTaskPage {
       this.notify('success', `Suggested a result format with ${columns.length} CSV column${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
+      const timedOut = error?.name === 'AbortError';
       const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
       if (!hasDraftColumns) {
         this.resultContractDraft = this.suggestFallbackResultContractColumns();
         this.resultOutputSpecDraft = null;
-        this.notify('warning', 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
+        this.notify('warning', timedOut
+          ? 'The assistant took too long, so a local result format draft was created from the result. Edit it or try again.'
+          : 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
       } else {
-        this.setResultContractError(error?.message || 'Could not suggest columns.');
-        this.notify('error', error?.message || 'Could not suggest columns.');
+        const message = timedOut ? 'The assistant took too long. Edit the draft or try again.' : (error?.message || 'Could not suggest columns.');
+        this.setResultContractError(message);
+        this.notify(timedOut ? 'warning' : 'error', message);
       }
     } finally {
+      window.clearTimeout(timeoutId);
       this.resultContractSuggesting = false;
       this.refreshResultRender();
     }
@@ -5229,6 +5320,7 @@ export class WorkspaceTaskPage {
       this.resultContractDraft = null;
       this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
+      this.closeColumnDesignerModal();
       await this.loadData();
     } catch (error) {
       console.error('Failed to save result contract:', error);
@@ -5321,7 +5413,7 @@ export class WorkspaceTaskPage {
   }
 
   getResultMetadataPolicyDraft(existingSpec = null) {
-    const fieldsFromDOM = Array.from(this.elements.automationColumns?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
+    const fieldsFromDOM = Array.from(this._designerRoot()?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
     if (fieldsFromDOM.length > 0) {
       return {
         fields: fieldsFromDOM.map((input) => ({
@@ -6072,6 +6164,21 @@ export class WorkspaceTaskPage {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
         ${this.renderMarkdownOrPre(result)}
+      `);
+    }
+    // Entry point to structure a plain-text result into CSV columns. The
+    // artifact card carries its own "Design columns" link, so only offer this
+    // when there's a result, no tabular artifact, and no columns yet.
+    if (result && !artifact && this.getResultContractColumns().length === 0) {
+      const ctaLabel = this.getAppendCSVContext().configured
+        ? 'Design CSV columns from this result →'
+        : 'Save future runs as CSV columns →';
+      blocks.push(`
+        <div class="workspace-task-output-design-cta">
+          <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
+            <i class="bi bi-table" aria-hidden="true"></i> ${this.escapeHtml(ctaLabel)}
+          </button>
+        </div>
       `);
     }
     if (error) {

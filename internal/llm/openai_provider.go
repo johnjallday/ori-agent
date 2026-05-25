@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 
@@ -169,7 +171,58 @@ func GenerateSchema[T any]() any {
 		DoNotReference:            true,
 	}
 	var v T
-	return reflector.Reflect(v)
+	schema := reflector.Reflect(v)
+
+	// OpenAI/Codex strict structured outputs require every object — recursively,
+	// including nested array items — to set additionalProperties:false and list
+	// *every* property in "required". The reflector omits fields tagged
+	// `,omitempty` from "required", which strict mode rejects with
+	// invalid_json_schema. Round-trip through a plain map and enforce the rule.
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return schema
+	}
+	var generic any
+	if err := json.Unmarshal(data, &generic); err != nil {
+		return schema
+	}
+	enforceStrictObjectSchema(generic)
+	return generic
+}
+
+// enforceStrictObjectSchema walks a JSON-schema document and, for every object
+// node (one with a "properties" map), sets additionalProperties:false and
+// "required" to all property keys. Recurses into properties and array items so
+// nested objects (e.g. schema.fields[]) satisfy strict mode too.
+func enforceStrictObjectSchema(node any) {
+	switch typed := node.(type) {
+	case map[string]any:
+		if props, ok := typed["properties"].(map[string]any); ok {
+			typed["additionalProperties"] = false
+			keys := make([]string, 0, len(props))
+			for key := range props {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			typed["required"] = keys
+			for _, child := range props {
+				enforceStrictObjectSchema(child)
+			}
+		}
+		if items, ok := typed["items"]; ok {
+			enforceStrictObjectSchema(items)
+		}
+		// Recurse into schema combinators that may hold nested objects.
+		for _, key := range []string{"anyOf", "allOf", "oneOf", "$defs", "definitions"} {
+			if nested, ok := typed[key]; ok {
+				enforceStrictObjectSchema(nested)
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			enforceStrictObjectSchema(child)
+		}
+	}
 }
 
 // ChatWithStructuredOutput sends a chat request with structured output format

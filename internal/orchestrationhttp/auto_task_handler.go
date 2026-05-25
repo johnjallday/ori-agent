@@ -348,6 +348,13 @@ func (h *AutoTaskHandler) suggestOutputContract(
 	reasoningEffort string,
 	req OutputContractSuggestionRequest,
 ) (*OutputContractSuggestionResponse, error) {
+	// Column suggestion is a lightweight, well-constrained JSON task. Cap the
+	// reasoning effort so it returns quickly regardless of the (possibly heavy)
+	// system reasoning setting — only lower it, never raise it.
+	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
+	case "", "medium", "high":
+		reasoningEffort = "low"
+	}
 	scheduleJSON, _ := json.Marshal(req.Schedule)
 	storageJSON, _ := json.Marshal(req.ResultStorage)
 	headerJSON, _ := json.Marshal(req.ExistingCSVHeader)

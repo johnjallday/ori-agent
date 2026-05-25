@@ -1911,6 +1911,55 @@
 
     /* Plain-language one-liner shown above the collapsed advanced controls,
        e.g. "Saves each run to: pollen/outputs". Always visible. */
+    .workspace-task-output-design-cta {
+      margin-top: 0.75rem;
+      padding-top: 0.6rem;
+      border-top: 1px dashed color-mix(in srgb, var(--border-color) 80%, transparent);
+    }
+
+    /* Dedicated column-designer modal (popup over the page). */
+    .workspace-task-column-modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1050;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: color-mix(in srgb, #000 55%, transparent);
+    }
+
+    .workspace-task-column-modal {
+      width: min(680px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-secondary, #15171c);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .workspace-task-column-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .workspace-task-column-modal-header h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .workspace-task-column-modal-body {
+      padding: 1rem 1.25rem 1.25rem;
+      overflow-y: auto;
+    }
+
     .workspace-task-automation-summary {
       margin-top: 0.85rem;
       font-size: 0.9rem;

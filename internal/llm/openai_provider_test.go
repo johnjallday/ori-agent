@@ -376,3 +376,69 @@ func TestOpenAIProviderIntegration(t *testing.T) {
 	t.Logf("Response: %s", resp.Content)
 	t.Logf("Usage: %+v", resp.Usage)
 }
+
+func TestGenerateSchema_StrictModeNestedItems(t *testing.T) {
+	type field struct {
+		Name string `json:"name"`
+		Type string `json:"type,omitempty"`
+	}
+	type innerSchema struct {
+		Fields []field `json:"fields,omitempty"`
+	}
+	type root struct {
+		Schema *innerSchema `json:"schema,omitempty"`
+	}
+
+	raw := GenerateSchema[root]()
+	// Round-trip to a generic map to inspect the produced JSON schema.
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+
+	requiredSet := func(node map[string]any) map[string]bool {
+		set := map[string]bool{}
+		if arr, ok := node["required"].([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					set[s] = true
+				}
+			}
+		}
+		return set
+	}
+	obj := func(node map[string]any, key string) map[string]any {
+		m, _ := node[key].(map[string]any)
+		return m
+	}
+
+	// Root must require every property and forbid extras.
+	if !requiredSet(doc)["schema"] {
+		t.Errorf("root.required missing 'schema': %v", doc["required"])
+	}
+	if doc["additionalProperties"] != false {
+		t.Errorf("root.additionalProperties = %v, want false", doc["additionalProperties"])
+	}
+
+	// Navigate properties.schema.properties.fields.items and assert the nested
+	// array-item object lists every key in required (the original bug).
+	schema := obj(obj(doc, "properties"), "schema")
+	fields := obj(obj(schema, "properties"), "fields")
+	items := obj(fields, "items")
+	if items == nil {
+		t.Fatalf("could not navigate to schema.fields.items; doc=%s", data)
+	}
+	req := requiredSet(items)
+	for _, key := range []string{"name", "type"} {
+		if !req[key] {
+			t.Errorf("fields.items.required missing %q: %v", key, items["required"])
+		}
+	}
+	if items["additionalProperties"] != false {
+		t.Errorf("fields.items.additionalProperties = %v, want false", items["additionalProperties"])
+	}
+}
