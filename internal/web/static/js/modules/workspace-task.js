@@ -935,6 +935,7 @@ export class WorkspaceTaskPage {
       workspaceName: document.getElementById('workspace-task-workspace-name'),
       title: document.getElementById('workspace-task-title'),
       breadcrumbTitle: document.getElementById('workspace-task-breadcrumb-title'),
+      idValue: document.getElementById('workspace-task-id-value'),
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
@@ -1020,6 +1021,7 @@ export class WorkspaceTaskPage {
       executionTraceCount: document.getElementById('workspace-task-execution-trace-count'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
+      automationSummary: document.getElementById('workspace-task-automation-summary'),
       automationColumns: document.getElementById('workspace-task-automation-columns'),
       automationStorage: document.getElementById('workspace-task-automation-storage'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
@@ -1060,7 +1062,6 @@ export class WorkspaceTaskPage {
         developer: document.getElementById('workspace-task-tab-developer')
       },
       activityEmpty: document.getElementById('workspace-task-activity-empty'),
-      developerEmpty: document.getElementById('workspace-task-developer-empty'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
       blockedReason: document.getElementById('workspace-task-blocked-reason'),
       blockedRequestWrap: document.getElementById('workspace-task-blocked-request-wrap'),
@@ -2622,6 +2623,9 @@ export class WorkspaceTaskPage {
     if (this.elements.breadcrumbTitle) {
       this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40) || 'Task';
     }
+    if (this.elements.idValue) {
+      this.elements.idValue.textContent = String(this.task?.id || this.taskId || '').trim();
+    }
     if (this.elements.status) {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
@@ -2672,7 +2676,10 @@ export class WorkspaceTaskPage {
     }
 
     if (this.canCreateSkillFromTask()) {
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="create-skill">
+      // Secondary (not primary): "Create Skill" is an advanced/power-user
+      // action and shouldn't compete with Run/Re-run for attention on a
+      // non-technical user's first read of the page.
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="create-skill">
         <i class="bi bi-magic" aria-hidden="true"></i>Create Skill
       </button>`);
     }
@@ -4938,8 +4945,43 @@ export class WorkspaceTaskPage {
   }
 
   renderAutomationSections() {
+    this.renderAutomationSummary();
     this.renderAutomationColumns();
     this.renderAutomationStorage();
+  }
+
+  // renderAutomationSummary writes the always-visible, plain-language line that
+  // sits above the collapsed "Advanced settings" disclosure. Non-technical
+  // users see where results go (or that none are saved) without opening the
+  // CSV/storage/columns controls.
+  renderAutomationSummary() {
+    const container = this.elements.automationSummary;
+    if (!container) return;
+
+    const ctx = this.getAppendCSVContext();
+    if (!ctx.configured) {
+      container.innerHTML = '<span>Results are not saved automatically.</span>';
+      return;
+    }
+
+    // Mirror getAppendCSVContext's destination resolution, but prefer the
+    // resolved default-output path so the line reads as a real folder.
+    const owner = this.getTaskResultStorageTask();
+    const storage = owner?.result_storage || {};
+    const storeNodeId = String(storage.store_node_id || '').trim();
+    const filePath = String(storage.file_path || '').trim();
+    let dest;
+    if (storeNodeId) {
+      dest = this.getStoreNodeDisplayLabel(storeNodeId);
+    } else if (filePath) {
+      dest = filePath;
+    } else {
+      dest = String(this.workspaceOutputDir || '').trim() || 'the default output folder';
+    }
+
+    container.innerHTML =
+      '<span>Saves each run to:</span>'
+      + `<span class="workspace-task-automation-summary-path" title="${this.escapeHtml(dest)}">${this.escapeHtml(dest)}</span>`;
   }
 
   // Get a trimmed sample of the current task result, used to ground the
@@ -7845,11 +7887,12 @@ export class WorkspaceTaskPage {
   refreshTaskTabEmptyStates() {
     const visible = (el) => el && !el.hidden;
 
+    // Run details (workspace-task-runs-card) moved to the Developer tab, so it
+    // no longer counts toward Activity's populated state.
     const activityCards = [
       document.getElementById('workspace-task-workspace-runs-card'),
       document.getElementById('workspace-task-relationships-card'),
-      document.getElementById('workspace-task-workflow-card'),
-      document.getElementById('workspace-task-runs-card')
+      document.getElementById('workspace-task-workflow-card')
     ];
     const populatedActivityCount = activityCards.filter(visible).length;
 
@@ -7871,10 +7914,8 @@ export class WorkspaceTaskPage {
       }
     }
 
-    if (this.elements.developerEmpty) {
-      const anyDeveloper = visible(document.getElementById('workspace-task-context-card'));
-      this.elements.developerEmpty.hidden = anyDeveloper;
-    }
+    // The Developer tab always has the Task ID card, so it never needs an
+    // empty-state placeholder.
   }
 
   renderContext() {
