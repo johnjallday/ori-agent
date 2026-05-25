@@ -763,6 +763,16 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 			storeNodeCopy.Format = "csv"
 			payload, err := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, dataToStore)
 			if err != nil {
+				// Lever B: reproject into the store file's existing columns and
+				// retry once before holding the run for manual review.
+				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant); ok {
+					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, reCSV); retryErr == nil {
+						payload = rePayload
+						err = nil
+					}
+				}
+			}
+			if err != nil {
 				if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
 					return
 				}
@@ -856,6 +866,21 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	if appendCSV {
 		if err := AppendCSVToFileStrict(filePath, dataToStore); err != nil {
+			// Lever B: when the row doesn't match the destination's existing
+			// header, reproject into those columns and retry once before
+			// holding the run for manual review.
+			if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant); ok {
+				if retryErr := AppendCSVToFileStrict(filePath, reCSV); retryErr == nil {
+					logger.Info("Task result reprojected to destination columns and appended", logger.Fields{
+						"task_id":   task.ID,
+						"file_path": filePath,
+					})
+					validation.StorageStatus = TaskStorageAppended
+					validation.Errors = nil
+					recordTaskStorageValidation(ws, task, workspaceStore, validation)
+					return
+				}
+			}
 			if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
 				return
 			}
