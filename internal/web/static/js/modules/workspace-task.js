@@ -812,6 +812,7 @@ export class WorkspaceTaskPage {
     this.workspaceId = workspaceId;
     this.taskId = taskId;
     this.workspace = null;
+    this.workspaceOutputDir = '';
     this.task = null;
     this.currentRun = null;
     this.workspaceRuns = [];
@@ -1247,14 +1248,16 @@ export class WorkspaceTaskPage {
     this.setAlert('');
 
     try {
-      const [workspace, taskResponse, agents, taskEvents] = await Promise.all([
+      const [workspace, taskResponse, agents, taskEvents, outputDir] = await Promise.all([
         this.fetchWorkspace(),
         this.fetchTask(),
         this.fetchAgents().catch(() => []),
-        this.fetchTaskEvents().catch(() => [])
+        this.fetchTaskEvents().catch(() => []),
+        this.fetchWorkspaceOutputDir().catch(() => '')
       ]);
 
       this.workspace = workspace || null;
+      this.workspaceOutputDir = outputDir || '';
       this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
       this.availableAgents = Array.isArray(agents) ? agents : [];
       this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
@@ -1289,6 +1292,16 @@ export class WorkspaceTaskPage {
       throw new Error('Failed to load workspace details.');
     }
     return response.json();
+  }
+
+  // fetchWorkspaceOutputDir returns the resolved default output directory for
+  // this workspace (<workspace>/outputs), used to show where "Default output
+  // folder" actually writes.
+  async fetchWorkspaceOutputDir() {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`);
+    if (!response.ok) return '';
+    const data = await response.json();
+    return String(data?.output_dir || '').trim();
   }
 
   async fetchTask() {
@@ -3086,7 +3099,10 @@ export class WorkspaceTaskPage {
       ? 'Append each run to CSV'
       : `Save each run as a new ${format.toUpperCase()} file`;
 
-    let target = 'Default output folder';
+    const defaultOutputDir = String(this.workspaceOutputDir || '').trim();
+    let target = defaultOutputDir
+      ? `Default output folder: ${defaultOutputDir}`
+      : 'Default output folder';
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     if (storeNodeId) {
@@ -4019,6 +4035,10 @@ export class WorkspaceTaskPage {
       })
       .filter(Boolean)
       .join('');
+    const appendDefaultPath = String(this.workspaceOutputDir || '').trim();
+    const appendDefaultPathHint = appendDefaultPath
+      ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(appendDefaultPath)}">${this.escapeHtml(appendDefaultPath)}</span>`
+      : '';
     const chooserHtml = appendCtx.configured ? '' : `
       <div class="workspace-task-result-artifact-chooser" data-role="append-chooser" hidden>
         <div class="workspace-task-result-artifact-chooser-header">
@@ -4028,7 +4048,7 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-artifact-chooser-options" role="radiogroup" aria-label="Choose append destination">
           <label class="workspace-task-result-artifact-chooser-option">
             <input type="radio" name="workspace-task-append-target" value="default" checked />
-            <span>Default output folder</span>
+            <span>Default output folder${appendDefaultPathHint}</span>
           </label>
           <label class="workspace-task-result-artifact-chooser-option${storeNodeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-append-target" value="store"${storeNodeOptions ? '' : ' disabled'} />
@@ -4695,6 +4715,12 @@ export class WorkspaceTaskPage {
     } finally {
       this.automationStorageToggleBusy = false;
       if (checkbox) checkbox.disabled = false;
+      // Force a direct, un-gated re-render of the Automation sub-sections so
+      // the storage destination editor (and the checkbox/columns) reflect the
+      // new state immediately. loadData()'s render() is cache-gated and can
+      // skip this section, which previously left it stale until a manual
+      // refresh. Mirrors saveAutomationStorageDestination's finally.
+      this.renderAutomationSections();
     }
   }
 
@@ -4774,6 +4800,10 @@ export class WorkspaceTaskPage {
       .filter(Boolean)
       .join('');
     const saving = Boolean(this.automationStorageSaving);
+    const defaultPath = String(this.workspaceOutputDir || '').trim();
+    const defaultPathHint = defaultPath
+      ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(defaultPath)}">${this.escapeHtml(defaultPath)}</span>`
+      : '';
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -4781,7 +4811,7 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-automation-storage-options" role="radiogroup" aria-label="Storage destination">
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
-            <span>Default output folder</span>
+            <span>Default output folder${defaultPathHint}</span>
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />

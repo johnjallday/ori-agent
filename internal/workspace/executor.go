@@ -820,14 +820,22 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	// Otherwise use file path (or default output directory)
 	filePath := storage.FilePath
 	if filePath == "" {
-		// Default to workspace output directory: ~/Documents/Ori/outputs/<workspace-name>/
-		baseOutputDir, err := platform.GetDefaultOutputDir()
-		if err != nil {
-			// Fallback to relative path if home dir lookup fails
-			baseOutputDir = "outputs"
-			logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+		// Default to the workspace's own folder: <workspace>/outputs/
+		baseOutputDir := ""
+		if workspaceStore != nil {
+			baseOutputDir = workspaceStore.GetOutputsPath(ws.ID)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, filename)
+		if baseOutputDir == "" {
+			// Fallback to the global output directory if the workspace folder
+			// can't be resolved (e.g. in-memory stores during tests).
+			fallback, err := platform.GetDefaultOutputDir()
+			if err != nil {
+				fallback = "outputs"
+				logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
+		}
+		filePath = filepath.Join(baseOutputDir, filename)
 	} else {
 		// If user specified a directory-like path, append filename
 		if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {

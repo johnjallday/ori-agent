@@ -192,6 +192,10 @@ func (s *preflightWorkspaceStore) GetFilesPath(workspaceID string) string {
 	return "/tmp/" + workspaceID
 }
 
+func (s *preflightWorkspaceStore) GetOutputsPath(workspaceID string) string {
+	return "/tmp/" + workspaceID + "/outputs"
+}
+
 func (s *preflightWorkspaceStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
 	return nil, false, nil
 }

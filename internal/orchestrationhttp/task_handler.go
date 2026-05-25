@@ -1663,7 +1663,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		}
 		validation, csvData := workspace.ValidateTaskOutputSpecResultWithAssistant(r.Context(), reviewTask, rawResult, assistant)
 		if validation.ValidationStatus == workspace.TaskValidationPassed {
-			if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+			if err := appendApprovedTaskCSV(th.workspaceStore, ws, task, csvData); err != nil {
 				if !recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
 					orihttp.InternalError(w, fmt.Sprintf("Failed to append retried normalization: %v", err))
 					return
@@ -1738,7 +1738,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+		if err := appendApprovedTaskCSV(th.workspaceStore, ws, task, csvData); err != nil {
 			if recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
 				now := time.Now().UTC()
 				validation.ValidatedAt = &now
@@ -1973,7 +1973,7 @@ func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) er
 	return nil
 }
 
-func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvData string) error {
+func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task *workspace.Task, csvData string) error {
 	if ws == nil || task == nil {
 		return fmt.Errorf("workspace and task are required")
 	}
@@ -2026,11 +2026,18 @@ func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvDat
 
 	filePath := storage.FilePath
 	if strings.TrimSpace(filePath) == "" {
-		baseOutputDir, err := platform.GetDefaultOutputDir()
-		if err != nil {
-			baseOutputDir = "outputs"
+		baseOutputDir := ""
+		if store != nil {
+			baseOutputDir = store.GetOutputsPath(ws.ID)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, storeFilePath)
+		if baseOutputDir == "" {
+			fallback, err := platform.GetDefaultOutputDir()
+			if err != nil {
+				fallback = "outputs"
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
+		}
+		filePath = filepath.Join(baseOutputDir, storeFilePath)
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
 		filePath = filepath.Join(filePath, taskResultAppendCSVFilename(task))
 	}

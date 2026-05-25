@@ -18,6 +18,10 @@ const (
 	// NotesDir is the subdirectory for workspace notes stored as markdown files.
 	NotesDir = "notes"
 
+	// OutputsDir is the subdirectory for auto-saved task results when no store
+	// node or explicit file path is configured.
+	OutputsDir = "outputs"
+
 	// WorkspaceAgentsDir is the subdirectory for workspace-local agent snapshots.
 	// Each agent lives at <workspace>/agents/<agent-name>/config.json.
 	WorkspaceAgentsDir = "agents"

@@ -566,6 +566,17 @@ func (a *WorkspaceStoreAdapter) GetFilesPath(workspaceID string) string {
 	return filepath.Join(baseDir, workspaceID, "files")
 }
 
+// GetOutputsPath returns the path for auto-saved task results for a workspace.
+// Uses a workspaces directory under the current working directory.
+func (a *WorkspaceStoreAdapter) GetOutputsPath(workspaceID string) string {
+	// Default to "workspaces" directory, similar to FileStore
+	baseDir := "workspaces"
+	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
+		baseDir = p
+	}
+	return filepath.Join(baseDir, workspaceID, "outputs")
+}
+
 // GetWorkspaceAgent returns a workspace-local agent snapshot from disk.
 // The session-backed adapter does not store snapshots itself; it reads from
 // the workspace folder when one is available via WORKSPACE_DIR.

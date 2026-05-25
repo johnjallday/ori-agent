@@ -522,11 +522,15 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if filePath == "" {
-		baseOutputDir, dirErr := platform.GetDefaultOutputDir()
-		if dirErr != nil {
-			baseOutputDir = "outputs"
+		baseOutputDir := h.store.GetOutputsPath(ws.ID)
+		if baseOutputDir == "" {
+			fallback, dirErr := platform.GetDefaultOutputDir()
+			if dirErr != nil {
+				fallback = "outputs"
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, defaultAppendCSVFilename(task))
+		filePath = filepath.Join(baseOutputDir, defaultAppendCSVFilename(task))
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
 		filePath = filepath.Join(filePath, defaultAppendCSVFilename(task))
 	}

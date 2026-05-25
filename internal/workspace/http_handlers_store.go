@@ -479,14 +479,18 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Default output directory: ~/Documents/Ori/outputs/<workspace-name>/
-	baseOutputDir, err := platform.GetDefaultOutputDir()
-	if err != nil {
-		// Fallback to relative path if home dir lookup fails
-		baseOutputDir = "outputs"
-		logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+	// Default output directory: the workspace's own folder (<workspace>/outputs/).
+	outputDir := h.store.GetOutputsPath(workspaceID)
+	if outputDir == "" {
+		// Fallback to the global output directory if the workspace folder
+		// can't be resolved.
+		baseOutputDir, err := platform.GetDefaultOutputDir()
+		if err != nil {
+			baseOutputDir = "outputs"
+			logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+		}
+		outputDir = filepath.Join(baseOutputDir, workspace.Name)
 	}
-	outputDir := filepath.Join(baseOutputDir, workspace.Name)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
