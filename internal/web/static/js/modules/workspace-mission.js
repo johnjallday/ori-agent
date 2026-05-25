@@ -580,11 +580,9 @@
     try {
       const state = await fetchMissionState();
       latestState = state;
-      renderGoalCard(state);
+      renderReadOnly(state);
       populateFormFromState(state);
       populateGoalModalFromState(state);
-      renderStatus(state);
-      renderBindingsWarning(state);
       setStatusText('');
     } catch (e) {
       renderGoalCardError(`Failed to load goal: ${e.message}`);
@@ -626,13 +624,25 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  // Repaint the read-only surfaces (goal card + advanced status strip) without
-  // touching the editable form/modal inputs, so a poll mid-run never clobbers
-  // anything the user is typing.
+  // Repaint the read-only surfaces (goal card + advanced status strip + run
+  // button modes) without touching the editable form/modal inputs, so a poll
+  // mid-run never clobbers anything the user is typing.
   function renderReadOnly(state) {
     renderGoalCard(state);
     renderStatus(state);
     renderBindingsWarning(state);
+    applyRunButtonModes(state);
+  }
+
+  // "Run baseline now" and "Run now" are functionally identical; showing both
+  // at once is just confusing. The first run is the baseline, so surface only
+  // "Run baseline now" until a run has happened, then only "Run now".
+  function applyRunButtonModes(state) {
+    const isFirstRun = (state.mission_execution_count || 0) === 0;
+    const baselineBtn = $(SELECTORS.baselineBtn);
+    const triggerBtn = $(SELECTORS.triggerBtn);
+    if (baselineBtn) baselineBtn.style.display = isFirstRun ? '' : 'none';
+    if (triggerBtn) triggerBtn.style.display = isFirstRun ? 'none' : '';
   }
 
   // Trigger a goal run and wait for it to actually finish. The execution
