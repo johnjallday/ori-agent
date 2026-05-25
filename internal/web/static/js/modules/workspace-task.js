@@ -2263,18 +2263,23 @@ export class WorkspaceTaskPage {
     return declared.some(matches);
   }
 
-  getAssignableAgentNames(currentAgent = '') {
-    const runnable = this.getAvailableAgentNames();
-    if (runnable.length > 0) {
-      return runnable;
-    }
-
-    const fallback = this.getWorkspaceAgentNames();
-    const normalizedCurrent = String(currentAgent || '').trim();
-    if (normalizedCurrent && !fallback.some((name) => String(name || '').trim().toLowerCase() === normalizedCurrent.toLowerCase())) {
-      fallback.unshift(normalizedCurrent);
-    }
-    return fallback;
+  getAssignableAgentNames() {
+    // Merge global agents (/api/agents) with the workspace's own declared
+    // agents so workspace-scoped agents stay selectable even when global
+    // agents exist. We intentionally read the declared agents directly
+    // (workspace.agents + agent_instances) rather than getWorkspaceAgentNames(),
+    // which self-includes task.to and would surface a genuinely-missing
+    // assignment as a normal option (it's shown as a disabled "(Unavailable)"
+    // entry instead).
+    const names = new Set();
+    const add = (name) => {
+      const trimmed = String(name || '').trim();
+      if (trimmed) names.add(trimmed);
+    };
+    this.getAvailableAgentNames().forEach(add);
+    (this.workspace?.agents || []).forEach(add);
+    (this.workspace?.agent_instances || []).forEach((instance) => add(instance?.role || instance?.name || ''));
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
   }
 
   getWorkspaceAgentNames() {
