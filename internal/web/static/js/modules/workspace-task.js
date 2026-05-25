@@ -4948,24 +4948,53 @@ export class WorkspaceTaskPage {
       return;
     }
 
-    // Mirror getAppendCSVContext's destination resolution, but prefer the
-    // resolved default-output path so the line reads as a real folder.
+    // Show the full destination including the CSV filename the run actually
+    // writes, mirroring the backend: an explicit file path is used as-is; a
+    // directory (or the default output folder) gets the task's derived
+    // <slug>.csv appended.
     const owner = this.getTaskResultStorageTask();
     const storage = owner?.result_storage || {};
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
+    const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
+    const filename = filePathIsFile ? this.basename(filePath) : this.defaultAppendCsvFilename(owner);
+    const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
+
     let dest;
     if (storeNodeId) {
-      dest = this.getStoreNodeDisplayLabel(storeNodeId);
-    } else if (filePath) {
+      dest = `${this.getStoreNodeDisplayLabel(storeNodeId)} · ${filename}`;
+    } else if (filePathIsFile) {
       dest = filePath;
+    } else if (filePath) {
+      dest = joinFile(filePath);
     } else {
-      dest = String(this.workspaceOutputDir || '').trim() || 'the default output folder';
+      const dir = String(this.workspaceOutputDir || '').trim();
+      dest = dir ? joinFile(dir) : `the default output folder (${filename})`;
     }
 
     container.innerHTML =
       '<span>Saves each run to:</span>'
       + `<span class="workspace-task-automation-summary-path" title="${this.escapeHtml(dest)}">${this.escapeHtml(dest)}</span>`;
+  }
+
+  basename(path) {
+    const parts = String(path || '').replace(/\/+$/, '').split('/');
+    return parts[parts.length - 1] || '';
+  }
+
+  // defaultAppendCsvFilename mirrors the backend (defaultAppendCSVFilename):
+  // the task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped
+  // and spaces turned into underscores, plus a .csv suffix.
+  defaultAppendCsvFilename(task = this.task) {
+    let name = String(task?.description || '');
+    if (name.length > 30) name = name.slice(0, 30);
+    let slug = '';
+    for (const ch of name) {
+      if (/[A-Za-z0-9_-]/.test(ch)) slug += ch;
+      else if (ch === ' ') slug += '_';
+    }
+    if (!slug) slug = 'task';
+    return `${slug}.csv`;
   }
 
   // Get a trimmed sample of the current task result, used to ground the
