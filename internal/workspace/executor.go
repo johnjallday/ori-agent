@@ -764,8 +764,10 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 			payload, err := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, dataToStore)
 			if err != nil {
 				// Lever B: reproject into the store file's existing columns and
-				// retry once before holding the run for manual review.
-				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant); ok {
+				// retry once before holding the run for manual review. Only
+				// reconcile fallback rows (contractCSV == ""); a designed
+				// contract's mismatch stays a hard review.
+				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
 					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, reCSV); retryErr == nil {
 						payload = rePayload
 						err = nil
@@ -868,8 +870,10 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		if err := AppendCSVToFileStrict(filePath, dataToStore); err != nil {
 			// Lever B: when the row doesn't match the destination's existing
 			// header, reproject into those columns and retry once before
-			// holding the run for manual review.
-			if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant); ok {
+			// holding the run for manual review. Only reconcile fallback rows
+			// (contractCSV == ""); a designed contract's mismatch stays a hard
+			// review so we don't discard the user's chosen columns.
+			if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
 				if retryErr := AppendCSVToFileStrict(filePath, reCSV); retryErr == nil {
 					logger.Info("Task result reprojected to destination columns and appended", logger.Fields{
 						"task_id":   task.ID,

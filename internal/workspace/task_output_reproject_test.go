@@ -87,14 +87,15 @@ func TestReprojectResultToColumns_NoColumns(t *testing.T) {
 func TestReprojectResultForAppendMismatch(t *testing.T) {
 	task := &Task{ID: "t1", Description: "d", To: "agent-a"}
 
-	// Header mismatch → reproject into the expected columns.
+	// Header mismatch on a fallback row (allowReconcile=true) → reproject into
+	// the expected columns.
 	mismatch := &CSVHeaderMismatchError{
 		Expected: []string{"task_id", "result"},
 		Actual:   []string{"executed_at", "status"},
 	}
-	csv, ok := reprojectResultForAppendMismatch(context.Background(), task, "hello", mismatch, nil)
+	csv, ok := reprojectResultForAppendMismatch(context.Background(), task, "hello", mismatch, nil, true)
 	if !ok {
-		t.Fatalf("expected reprojection on a header mismatch")
+		t.Fatalf("expected reprojection on a fallback header mismatch")
 	}
 	lines := strings.Split(csv, "\n")
 	if lines[0] != "task_id,result" {
@@ -104,8 +105,14 @@ func TestReprojectResultForAppendMismatch(t *testing.T) {
 		t.Errorf("row = %q, want t1,hello", lines[1])
 	}
 
+	// A designed contract's mismatch (allowReconcile=false) must NOT be
+	// silently reconciled — it stays a hard review.
+	if _, ok := reprojectResultForAppendMismatch(context.Background(), task, "hello", mismatch, nil, false); ok {
+		t.Errorf("designed-contract mismatch should not auto-reconcile")
+	}
+
 	// A non-mismatch error must not trigger reprojection.
-	if _, ok := reprojectResultForAppendMismatch(context.Background(), task, "hello", errors.New("disk full"), nil); ok {
+	if _, ok := reprojectResultForAppendMismatch(context.Background(), task, "hello", errors.New("disk full"), nil, true); ok {
 		t.Errorf("non-mismatch error should not reproject")
 	}
 }

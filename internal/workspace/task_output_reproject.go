@@ -12,10 +12,19 @@ import (
 // reprojectResultForAppendMismatch rebuilds result into the columns a
 // destination CSV expects (taken from a CSVHeaderMismatchError) so an append
 // can succeed instead of dropping to needs-review. This is the automatic
-// (Lever B) counterpart to the manual "Reorganize to match" action: every run
-// reconciles to the existing file's header on its own. Returns the reprojected
-// CSV and true when the error was a header mismatch and reprojection succeeded.
-func reprojectResultForAppendMismatch(ctx context.Context, task *Task, result string, appendErr error, assistant TaskOutputSpecAssistant) (string, bool) {
+// (Lever B) counterpart to the manual "Reorganize to match" action.
+//
+// allowReconcile gates the behaviour: it is only safe to silently reconcile a
+// fallback row (no designed output contract) to the file's header. When the
+// task has a designed contract/spec whose columns genuinely differ from the
+// file, that's a configuration conflict the user should resolve, so the run is
+// held for manual review instead. Returns the reprojected CSV and true when the
+// error was a header mismatch, reconciliation is allowed, and reprojection
+// succeeded.
+func reprojectResultForAppendMismatch(ctx context.Context, task *Task, result string, appendErr error, assistant TaskOutputSpecAssistant, allowReconcile bool) (string, bool) {
+	if !allowReconcile {
+		return "", false
+	}
 	var mismatch *CSVHeaderMismatchError
 	if !errors.As(appendErr, &mismatch) || len(mismatch.Expected) == 0 {
 		return "", false
