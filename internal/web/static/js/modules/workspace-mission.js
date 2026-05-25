@@ -360,13 +360,17 @@
     }
 
     // Scope the Findings link to this workspace so the user lands on its
-    // opportunities rather than the cross-workspace firehose.
+    // opportunities rather than the cross-workspace firehose, and show how many
+    // are open so the card reflects whether runs are producing anything.
     const findingsBtn = $(SELECTORS.goalFindingsBtn);
     if (findingsBtn) {
       const wsId = getWorkspaceId();
       findingsBtn.href = wsId
         ? `/action-center?workspace=${encodeURIComponent(wsId)}`
         : '/action-center';
+      const openFindings = Number(state.open_findings_count) || 0;
+      findingsBtn.textContent = openFindings > 0 ? `Findings (${openFindings})` : 'Findings';
+      findingsBtn.classList.toggle('has-findings', openFindings > 0);
     }
 
     // Don't touch the action-status line mid-run — handleRunClick owns it then

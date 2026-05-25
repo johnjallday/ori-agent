@@ -27,6 +27,15 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	}
 	mcpUnclassified, skillUnclassified := UnclassifiedBindings(ws)
 
+	// Count findings still awaiting triage (new or snoozed) so the UI can show
+	// whether the goal's runs are actually producing actionable output.
+	openFindings := 0
+	for _, opp := range ws.Opportunities {
+		if opp.IsOpen() {
+			openFindings++
+		}
+	}
+
 	resp := map[string]any{
 		"mission":                 ws.Mission,
 		"cadence":                 ws.Cadence,
@@ -37,6 +46,7 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"next_mission_run_at":     ws.NextMissionRunAt,
 		"mission_execution_count": ws.MissionExecutionCount,
 		"mission_failure_count":   ws.MissionFailureCount,
+		"open_findings_count":     openFindings,
 		"unclassified_mcp_ids":    mcpUnclassified,
 		"unclassified_skill_ids":  skillUnclassified,
 		"bindings_ready":          len(mcpUnclassified) == 0 && len(skillUnclassified) == 0,
