@@ -2248,7 +2248,19 @@ export class WorkspaceTaskPage {
     const normalizedTarget = String(agentName || '').trim().toLowerCase();
     if (!normalizedTarget || normalizedTarget === 'unassigned') return true;
 
-    return this.getAvailableAgentNames().some((name) => String(name || '').trim().toLowerCase() === normalizedTarget);
+    const matches = (name) => String(name || '').trim().toLowerCase() === normalizedTarget;
+    if (this.getAvailableAgentNames().some(matches)) return true;
+
+    // A workspace-scoped agent (declared in the workspace, with a local
+    // snapshot) is runnable for this workspace's tasks even when it isn't in
+    // the global /api/agents registry. Check the workspace's declared agents
+    // only — not getWorkspaceAgentNames(), which self-includes task.to and
+    // would mask a genuinely-missing assignment.
+    const declared = [
+      ...(this.workspace?.agents || []),
+      ...((this.workspace?.agent_instances || []).map((instance) => instance?.role || instance?.name || '')),
+    ];
+    return declared.some(matches);
   }
 
   getAssignableAgentNames(currentAgent = '') {
