@@ -5224,10 +5224,12 @@ export class WorkspaceTaskPage {
     this.setResultContractError('');
     this.refreshResultRender();
 
-    // Don't let a slow model leave the designer spinning forever. Abort after
-    // 50s (just under the backend's 60s cap) and fall back to local columns.
+    // Don't let a slow model leave the designer spinning forever. Abort just
+    // above the backend's 90s cap (the Codex CLI cold start can take ~50-90s;
+    // warm calls are ~15s) so the backend's timeout governs and we don't kill
+    // a call it would have completed.
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 50000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 95000);
     try {
       const owner = this.getTaskResultStorageTask();
       const storage = owner?.result_storage || {};

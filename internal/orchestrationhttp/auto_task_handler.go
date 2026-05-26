@@ -460,7 +460,9 @@ Sample result from a prior run (use this to derive concrete columns when availab
 		ReasoningEffort: reasoningEffort,
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Allow headroom for a slow first invocation (e.g. the Codex CLI cold
+	// start can take ~50-90s; warm calls are ~15s).
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	logger.Info("Output contract suggestion request", logger.Fields{
