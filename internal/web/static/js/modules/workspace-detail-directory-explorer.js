@@ -45,6 +45,8 @@ export class WorkspaceDirectoryExplorer {
     this.previewCache = new Map();
     this.previewAbortController = null;
     this.loadToken = 0;
+    this.draggedFile = null;
+    this.dropTargetEl = null;
   }
 
   bindEvents() {
@@ -153,6 +155,18 @@ export class WorkspaceDirectoryExplorer {
       const path = this.decodeDataPath(crumb.dataset.path);
       this.selectNode(path, 'dir', { autoExpand: true });
     });
+
+    // Drag-and-drop file moves: drag a file row onto a folder (tree row or
+    // breadcrumb folder, including root) to move it into that folder.
+    const treeEl = elements.directoryExplorerTree;
+    if (treeEl) {
+      treeEl.addEventListener('dragstart', event => this.handleTreeDragStart(event));
+      treeEl.addEventListener('dragend', () => this.clearDragState());
+      this.bindDropZone(treeEl, event => this.resolveTreeDropTarget(event));
+    }
+    this.bindDropZone(elements.directoryExplorerBreadcrumb, event =>
+      this.resolveBreadcrumbDropTarget(event)
+    );
 
     elements.directoryExplorerModal?.addEventListener('hidden.bs.modal', () => {
       this.abortPreviewRequest();
@@ -697,6 +711,12 @@ export class WorkspaceDirectoryExplorer {
         ? `<div class="workspace-directory-tree-children">${this.renderTreeChildren(node.children, depth + 1, forceExpanded)}</div>`
         : '';
 
+    const isDraggableFile =
+      this.source === 'owned' && !isDirectory && Boolean(node.attachmentId);
+    const dragAttrs = isDraggableFile
+      ? ` draggable="true" data-attachment-id="${this.encodeDataPath(node.attachmentId)}"`
+      : '';
+
     return `
       <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''}">
         <div class="workspace-directory-tree-row" style="--tree-depth:${depth};">
@@ -705,7 +725,7 @@ export class WorkspaceDirectoryExplorer {
                   class="workspace-directory-tree-main"
                   data-action="select-node"
                   data-path="${encodedPath}"
-                  data-type="${isDirectory ? 'dir' : 'file'}">
+                  data-type="${isDirectory ? 'dir' : 'file'}"${dragAttrs}>
             <span class="workspace-directory-tree-icon">${icon}</span>
             <span class="workspace-directory-tree-label">${this.host.escapeHtml(node.name || node.path || 'Untitled')}</span>
             <span class="workspace-directory-tree-meta">${this.host.escapeHtml(metaText)}</span>
@@ -945,18 +965,25 @@ export class WorkspaceDirectoryExplorer {
     const targetFolder = this.normalizeRelativePath(rawPath);
     if (targetFolder === currentFolder) return;
 
+    await this.moveFileToFolder(selectedNode.attachmentId, targetFolder, selectedNode.name);
+  }
+
+  async moveFileToFolder(attachmentId, targetFolder, fileName) {
+    if (this.source !== 'owned' || !attachmentId) return;
+
+    const normalizedTarget = this.normalizeRelativePath(targetFolder);
     try {
       const payload = await this.requestWorkspaceJSON(
-        `/attachments/${encodeURIComponent(selectedNode.attachmentId)}/move`,
+        `/attachments/${encodeURIComponent(attachmentId)}/move`,
         {
           method: 'PATCH',
-          body: { target_folder: targetFolder }
+          body: { target_folder: normalizedTarget }
         }
       );
       const nextPath = this.normalizeRelativePath(
         payload?.attachment?.file_meta?.relative_path ||
           payload?.attachment?.file?.relative_path ||
-          (targetFolder ? `${targetFolder}/${selectedNode.name}` : selectedNode.name)
+          (normalizedTarget ? `${normalizedTarget}/${fileName}` : fileName)
       );
       this.selectedPath = nextPath;
       this.selectedType = 'file';
@@ -967,6 +994,125 @@ export class WorkspaceDirectoryExplorer {
       console.error('Failed to move workspace file:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to move file');
     }
+  }
+
+  handleTreeDragStart(event) {
+    const main = event.target.closest('[data-action="select-node"][draggable="true"]');
+    if (!main) return;
+
+    const path = this.decodeDataPath(main.dataset.path);
+    const node = this.nodeIndex.get(path);
+    const attachmentId =
+      node?.attachmentId || this.decodeDataPath(main.dataset.attachmentId || '');
+
+    if (this.source !== 'owned' || !node || node.type !== 'file' || !attachmentId) {
+      event.preventDefault();
+      return;
+    }
+
+    this.draggedFile = { path, attachmentId, name: node.name };
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      try {
+        event.dataTransfer.setData('text/plain', path);
+      } catch {
+        // Some browsers disallow setData here; the in-memory state is enough.
+      }
+    }
+    main.classList.add('is-dragging');
+  }
+
+  bindDropZone(element, resolver) {
+    if (!element) return;
+    element.addEventListener('dragover', event => this.handleDragOver(event, resolver));
+    element.addEventListener('dragleave', event => this.handleDragLeave(event, element));
+    element.addEventListener('drop', event => {
+      void this.handleDrop(event, resolver);
+    });
+  }
+
+  handleDragOver(event, resolver) {
+    if (!this.draggedFile) return;
+
+    const drop = resolver(event);
+    const currentFolder = this.parentPathFor(this.draggedFile.path);
+    if (!drop || drop.path === currentFolder) {
+      this.setDropTarget(null);
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    this.setDropTarget(drop.element);
+  }
+
+  handleDragLeave(event, container) {
+    if (!event.relatedTarget || !container.contains(event.relatedTarget)) {
+      this.setDropTarget(null);
+    }
+  }
+
+  async handleDrop(event, resolver) {
+    if (!this.draggedFile) return;
+
+    const drop = resolver(event);
+    this.setDropTarget(null);
+    if (!drop) return;
+
+    const dragged = this.draggedFile;
+    const currentFolder = this.parentPathFor(dragged.path);
+    if (drop.path === currentFolder) {
+      this.clearDragState();
+      return;
+    }
+
+    event.preventDefault();
+    this.clearDragState();
+    await this.moveFileToFolder(dragged.attachmentId, drop.path, dragged.name);
+  }
+
+  resolveTreeDropTarget(event) {
+    const row = event.target.closest('.workspace-directory-tree-row');
+    if (!row) return null;
+
+    const main = row.querySelector('[data-action="select-node"][data-type="dir"]');
+    if (!main) return null;
+
+    const path = this.decodeDataPath(main.dataset.path);
+    if (!this.nodeIndex.has(path)) return null;
+
+    return { element: row.closest('.workspace-directory-tree-node'), path };
+  }
+
+  resolveBreadcrumbDropTarget(event) {
+    const crumb = event.target.closest('[data-action="breadcrumb"]');
+    if (!crumb) return null;
+
+    const path = this.decodeDataPath(crumb.dataset.path);
+    // Only folders are valid targets: the directory root ('') or a dir node.
+    if (path !== '' && this.nodeIndex.get(path)?.type !== 'dir') return null;
+
+    return { element: crumb, path };
+  }
+
+  setDropTarget(element) {
+    if (this.dropTargetEl === element) return;
+    if (this.dropTargetEl) {
+      this.dropTargetEl.classList.remove('is-drop-target');
+    }
+    this.dropTargetEl = element || null;
+    if (this.dropTargetEl) {
+      this.dropTargetEl.classList.add('is-drop-target');
+    }
+  }
+
+  clearDragState() {
+    this.draggedFile = null;
+    this.setDropTarget(null);
+    const treeEl = this.host.elements.directoryExplorerTree;
+    treeEl
+      ?.querySelectorAll('.is-dragging')
+      .forEach(el => el.classList.remove('is-dragging'));
   }
 
   async refreshOwnedTree() {

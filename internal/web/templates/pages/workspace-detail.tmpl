@@ -7358,6 +7358,27 @@
       border: 1px solid rgba(255, 166, 110, 0.45);
     }
 
+    .workspace-directory-tree-main[draggable="true"] {
+      cursor: grab;
+    }
+
+    .workspace-directory-tree-main.is-dragging {
+      opacity: 0.45;
+    }
+
+    .workspace-directory-tree-node.is-drop-target > .workspace-directory-tree-row {
+      background: rgba(56, 189, 248, 0.18);
+      outline: 1px dashed rgba(56, 189, 248, 0.7);
+      outline-offset: -1px;
+      border-radius: 6px;
+    }
+
+    .workspace-directory-crumb.is-drop-target {
+      background: rgba(56, 189, 248, 0.22);
+      outline: 1px dashed rgba(56, 189, 248, 0.7);
+      outline-offset: 1px;
+    }
+
     .workspace-directory-tree-children {
       position: relative;
     }
