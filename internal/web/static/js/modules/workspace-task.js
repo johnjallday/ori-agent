@@ -835,6 +835,7 @@ export class WorkspaceTaskPage {
     this.columnModalOverlay = null;
     this.columnModalBody = null;
     this.suggestionPreviewOpen = false;
+    this.suggestionPromptEcho = null;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
     this.resultPromotionPending = false;
@@ -4695,6 +4696,29 @@ export class WorkspaceTaskPage {
   // are exactly what the request sends; the instruction line is a faithful
   // summary of the backend system prompt (kept short to avoid drift).
   renderSuggestionInputsPreview() {
+    const busy = Boolean(this.resultContractSuggesting);
+    const line = (label, value) => value
+      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
+      : '';
+    const block = (label, value) => `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(value)}</pre></div>`;
+
+    // Once a suggestion has run, show the exact prompt the backend echoed back.
+    const echo = this.suggestionPromptEcho;
+    if (echo && (echo.system || echo.user)) {
+      const meta = [echo.provider, echo.model, echo.reasoning_effort ? `reasoning ${echo.reasoning_effort}` : '']
+        .filter(Boolean).join(' · ');
+      return `
+        <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
+          <summary>Exact prompt sent${busy ? ' <span class="workspace-task-suggestion-busy">· suggesting…</span>' : ''}</summary>
+          <div class="workspace-task-suggestion-preview-body">
+            ${meta ? line('Model', meta) : ''}
+            ${block('System prompt', echo.system || '')}
+            ${block('User message', echo.user || '')}
+          </div>
+        </details>`;
+    }
+
+    // Before the first suggestion (no echo yet), show the inputs being sent.
     const owner = this.getTaskResultStorageTask();
     const title = String(this.task?.description || owner?.description || '').trim();
     const details = String(this.task?.details || '').trim();
@@ -4702,16 +4726,11 @@ export class WorkspaceTaskPage {
     const recent = this.getRecentExecutionSamplesForSuggestion() || [];
     const scheduleEnabled = Boolean(owner?.schedule_enabled || this.task?.schedule_enabled);
     const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
-    const busy = Boolean(this.resultContractSuggesting);
 
     const instruction = 'Asks the assistant to propose 3–8 practical CSV columns (with a JSON schema and field→column mappings) this task can produce every run, grounded in the inputs below. Run metadata (run_id, executed_at, status, duration_ms) is added automatically.';
 
-    const line = (label, value) => value
-      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
-      : '';
-
     const sampleBlock = sample
-      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Sample result</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(sample)}</pre></div>`
+      ? block('Sample result', sample)
       : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Sample result</span><span>None captured — the assistant will rely on the task title and details.</span></div>`;
 
     return `
@@ -5236,6 +5255,11 @@ export class WorkspaceTaskPage {
         throw new Error(text || `Suggestion failed (HTTP ${response.status})`);
       }
       const parsed = text ? JSON.parse(text) : {};
+      // Capture the verbatim prompt the backend echoed back so the preview can
+      // show exactly what was sent.
+      if (parsed?.prompt && (parsed.prompt.system || parsed.prompt.user)) {
+        this.suggestionPromptEcho = parsed.prompt;
+      }
       const columns = Array.isArray(parsed?.output_contract?.columns)
         ? parsed.output_contract.columns
         : [];
