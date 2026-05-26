@@ -186,6 +186,8 @@ export class AgentCanvasInitialization {
         this.state.setDirectoryReferences(directories);
       }
 
+      await this.loadWorkspaceFileFolders();
+
       // Initialize agent positions
       this.initializeAgents();
 
@@ -220,6 +222,109 @@ export class AgentCanvasInitialization {
       console.error('Failed to initialize canvas:', error);
       document.getElementById('canvas-info').textContent = 'Error loading workspace';
     }
+  }
+
+  async loadWorkspaceFileFolders() {
+    if (!this.parent.workspaceId) {
+      this.state.setWorkspaceFileTree([]);
+      this.state.setWorkspaceFolders([]);
+      return;
+    }
+
+    try {
+      const payload = await apiGet(
+        `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/files/tree`
+      );
+      const files = Array.isArray(payload?.files) ? payload.files : [];
+      this.state.setWorkspaceFileTree(files);
+      this.state.setWorkspaceFolders(this.buildWorkspaceFolderNodes(files));
+    } catch (error) {
+      console.warn('Failed to load workspace file folders for canvas:', error);
+      this.state.setWorkspaceFileTree([]);
+      this.state.setWorkspaceFolders([]);
+    }
+  }
+
+  buildWorkspaceFolderNodes(files) {
+    const existingByID = new Map(
+      (this.state.workspaceFolders || []).map(folder => [folder.folder_id || folder.id, folder])
+    );
+    const layoutPositions = this.parent.workspace?.layout?.folder_positions || {};
+    const folderEntries = files
+      .filter(item => item?.is_dir && item?.folder_id)
+      .sort((left, right) =>
+        String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
+          sensitivity: 'base',
+          numeric: true
+        })
+      );
+    const threshold = 6;
+
+    return folderEntries.map((folder, index) => {
+      const id = folder.folder_id || folder.id || folder.relative_path;
+      const existing = existingByID.get(id);
+      const savedPosition = layoutPositions[id];
+      const children = this.getDirectWorkspaceFileChildren(files, folder.relative_path);
+      const childFolderCount = children.filter(child => child.is_dir).length;
+      const childFileCount = children.length - childFolderCount;
+      const collapsed =
+        existing?.collapsed !== undefined
+          ? existing.collapsed
+          : children.length > threshold;
+
+      return {
+        id,
+        folder_id: id,
+        name: folder.name || String(folder.relative_path || '').split('/').pop() || 'Folder',
+        path: folder.relative_path || '',
+        relative_path: folder.relative_path || '',
+        x: savedPosition?.x ?? existing?.x ?? (520 + (index % 3) * 240),
+        y: savedPosition?.y ?? existing?.y ?? (220 + Math.floor(index / 3) * 170),
+        width: existing?.width || 220,
+        height: existing?.height || 96,
+        collapsed,
+        children,
+        childFolderCount,
+        childFileCount
+      };
+    });
+  }
+
+  getDirectWorkspaceFileChildren(files, folderPath) {
+    const normalizedFolder = this.normalizeWorkspaceRelativePath(folderPath);
+    return files
+      .filter(item => {
+        const relativePath = this.normalizeWorkspaceRelativePath(item?.relative_path);
+        if (!relativePath || relativePath === normalizedFolder) return false;
+        return this.parentPathFor(relativePath) === normalizedFolder;
+      })
+      .map(item => ({
+        id: item.id || item.attachment_id || item.folder_id || item.relative_path,
+        attachment_id: item.attachment_id || '',
+        folder_id: item.folder_id || '',
+        name: item.name || String(item.relative_path || '').split('/').pop() || 'Item',
+        relative_path: item.relative_path || '',
+        is_dir: Boolean(item.is_dir),
+        size: Number(item.size || 0)
+      }));
+  }
+
+  normalizeWorkspaceRelativePath(path) {
+    return String(path || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '');
+  }
+
+  parentPathFor(path) {
+    const normalizedPath = this.normalizeWorkspaceRelativePath(path);
+    if (!normalizedPath || !normalizedPath.includes('/')) {
+      return '';
+    }
+    return normalizedPath.slice(0, normalizedPath.lastIndexOf('/'));
   }
 
   /**

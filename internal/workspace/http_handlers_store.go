@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,13 +17,15 @@ import (
 
 // CreateStoreNodeRequest represents the request to create a store node
 type CreateStoreNodeRequest struct {
-	Name          string  `json:"name"`
-	BaseDir       string  `json:"base_dir"`
-	Format        string  `json:"format"`
-	WriteMode     string  `json:"write_mode"`
-	AutoCreateDir bool    `json:"auto_create_dir"`
-	X             float64 `json:"x"`
-	Y             float64 `json:"y"`
+	Name            string  `json:"name"`
+	BaseDir         string  `json:"base_dir"`
+	StorageTarget   string  `json:"storage_target"`
+	WorkspaceFolder string  `json:"workspace_folder"`
+	Format          string  `json:"format"`
+	WriteMode       string  `json:"write_mode"`
+	AutoCreateDir   bool    `json:"auto_create_dir"`
+	X               float64 `json:"x"`
+	Y               float64 `json:"y"`
 }
 
 // CreateStoreNode handles POST /api/workspaces/:id/store-nodes
@@ -50,7 +53,8 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Store node name is required")
 		return
 	}
-	if req.BaseDir == "" {
+	storageTarget := NormalizeStorageTarget(req.StorageTarget)
+	if req.BaseDir == "" && storageTarget != StorageTargetWorkspaceFolder {
 		orihttp.BadRequest(w, "Base directory is required")
 		return
 	}
@@ -76,17 +80,32 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate base directory - absolute paths allowed, relative paths must use these prefixes
-	allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
-	if err := ValidateBaseDir(req.BaseDir, allowedRelativeDirs); err != nil {
-		orihttp.BadRequest(w, fmt.Sprintf("Invalid base directory: %v", err))
-		return
-	}
-
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
+	}
+
+	workspaceFolder := ""
+	if storageTarget == StorageTargetWorkspaceFolder {
+		absFolder, clean, err := workspaceFolderPathWithinRoot(h.store.GetFilesPath(workspaceID), req.WorkspaceFolder)
+		if err != nil {
+			orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder: %v", err))
+			return
+		}
+		if err := os.MkdirAll(absFolder, 0755); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to create workspace folder: %v", err))
+			return
+		}
+		workspaceFolder = clean
+		req.BaseDir = clean
+	} else {
+		// Validate base directory - absolute paths allowed, relative paths must use these prefixes
+		allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
+		if err := ValidateBaseDir(req.BaseDir, allowedRelativeDirs); err != nil {
+			orihttp.BadRequest(w, fmt.Sprintf("Invalid base directory: %v", err))
+			return
+		}
 	}
 
 	// Generate unique canvas node ID
@@ -94,23 +113,25 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	canvasNodeID := fmt.Sprintf("store-node-%d", len(workspace.StoreNodes)+1)
 
 	storeNode := StoreNode{
-		ID:            uuid.New().String(),
-		CanvasNodeID:  canvasNodeID,
-		WorkspaceID:   workspaceID,
-		Name:          req.Name,
-		BaseDir:       req.BaseDir,
-		Format:        req.Format,
-		WriteMode:     req.WriteMode,
-		AutoCreateDir: req.AutoCreateDir,
-		AutoStore:     true,        // Default to enabled for automatic task result storage
-		LastWriteTime: time.Time{}, // Zero value
-		WriteCount:    0,
-		LastError:     "",
-		LastFilePath:  "",
-		X:             req.X,
-		Y:             req.Y,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ID:              uuid.New().String(),
+		CanvasNodeID:    canvasNodeID,
+		WorkspaceID:     workspaceID,
+		Name:            req.Name,
+		BaseDir:         req.BaseDir,
+		StorageTarget:   storageTarget,
+		WorkspaceFolder: workspaceFolder,
+		Format:          req.Format,
+		WriteMode:       req.WriteMode,
+		AutoCreateDir:   req.AutoCreateDir,
+		AutoStore:       true,        // Default to enabled for automatic task result storage
+		LastWriteTime:   time.Time{}, // Zero value
+		WriteCount:      0,
+		LastError:       "",
+		LastFilePath:    "",
+		X:               req.X,
+		Y:               req.Y,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	// Add to workspace
@@ -187,15 +208,17 @@ func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
 
 // UpdateStoreNodeRequest represents the request to update a store node
 type UpdateStoreNodeRequest struct {
-	Name          *string  `json:"name"`
-	BaseDir       *string  `json:"base_dir"`
-	Format        *string  `json:"format"`
-	WriteMode     *string  `json:"write_mode"`
-	AutoCreateDir *bool    `json:"auto_create_dir"`
-	AutoStore     *bool    `json:"auto_store"`
-	AgentNodeID   *string  `json:"agent_node_id"`
-	X             *float64 `json:"x"`
-	Y             *float64 `json:"y"`
+	Name            *string  `json:"name"`
+	BaseDir         *string  `json:"base_dir"`
+	StorageTarget   *string  `json:"storage_target"`
+	WorkspaceFolder *string  `json:"workspace_folder"`
+	Format          *string  `json:"format"`
+	WriteMode       *string  `json:"write_mode"`
+	AutoCreateDir   *bool    `json:"auto_create_dir"`
+	AutoStore       *bool    `json:"auto_store"`
+	AgentNodeID     *string  `json:"agent_node_id"`
+	X               *float64 `json:"x"`
+	Y               *float64 `json:"y"`
 }
 
 // UpdateStoreNode handles PUT /api/workspaces/:id/store-nodes/:node_id
@@ -252,14 +275,44 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		storeNode.Name = *req.Name
 	}
-	if req.BaseDir != nil {
-		// Re-validate base directory - absolute paths allowed, relative paths must use prefixes
-		allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
-		if err := ValidateBaseDir(*req.BaseDir, allowedRelativeDirs); err != nil {
-			orihttp.BadRequest(w, fmt.Sprintf("Invalid base directory: %v", err))
-			return
+	if req.StorageTarget != nil || req.WorkspaceFolder != nil || req.BaseDir != nil {
+		nextTarget := storeNode.StorageTarget
+		if req.StorageTarget != nil {
+			nextTarget = NormalizeStorageTarget(*req.StorageTarget)
 		}
-		storeNode.BaseDir = *req.BaseDir
+
+		if nextTarget == StorageTargetWorkspaceFolder {
+			rawFolder := storeNode.WorkspaceFolder
+			if req.WorkspaceFolder != nil {
+				rawFolder = *req.WorkspaceFolder
+			} else if req.BaseDir != nil {
+				rawFolder = *req.BaseDir
+			}
+			absFolder, clean, err := workspaceFolderPathWithinRoot(h.store.GetFilesPath(workspaceID), rawFolder)
+			if err != nil {
+				orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder: %v", err))
+				return
+			}
+			if err := os.MkdirAll(absFolder, 0755); err != nil {
+				orihttp.InternalError(w, fmt.Sprintf("Failed to create workspace folder: %v", err))
+				return
+			}
+			storeNode.StorageTarget = StorageTargetWorkspaceFolder
+			storeNode.WorkspaceFolder = clean
+			storeNode.BaseDir = clean
+		} else {
+			if req.BaseDir != nil {
+				// Re-validate base directory - absolute paths allowed, relative paths must use prefixes
+				allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
+				if err := ValidateBaseDir(*req.BaseDir, allowedRelativeDirs); err != nil {
+					orihttp.BadRequest(w, fmt.Sprintf("Invalid base directory: %v", err))
+					return
+				}
+				storeNode.BaseDir = *req.BaseDir
+			}
+			storeNode.StorageTarget = ""
+			storeNode.WorkspaceFolder = ""
+		}
 	}
 	if req.Format != nil {
 		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "csv": true, "binary": true}

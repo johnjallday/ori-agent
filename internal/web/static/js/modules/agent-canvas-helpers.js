@@ -123,6 +123,9 @@ export class AgentCanvasHelpers {
     const storeNode = this.state.storeNodes.find(s => s.canvas_node_id === nodeId || s.id === nodeId);
     if (storeNode) return { type: 'store', node: storeNode };
 
+    const folder = this.state.workspaceFolders.find(f => f.id === nodeId || f.folder_id === nodeId);
+    if (folder) return { type: 'workspace_folder', node: folder };
+
     return null;
   }
 

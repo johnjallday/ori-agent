@@ -593,6 +593,113 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspaceFoldersPersistence(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(time.Second)
+
+	initialFoldersJSON, err := json.Marshal([]map[string]any{
+		{
+			"id":         "folder-1",
+			"path":       "research/notes",
+			"created_at": now.Format(time.RFC3339),
+			"updated_at": now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal initial folders: %v", err)
+	}
+
+	workspace := &Workspace{
+		ID:          "workspace-folders",
+		Name:        "Workspace Folders",
+		FoldersJSON: initialFoldersJSON,
+		Layout: &CanvasLayout{
+			FolderPositions: map[string]Position{
+				"folder-1": {X: 40, Y: 80},
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch workspace: %v", err)
+	}
+
+	var folders []map[string]any
+	if err := json.Unmarshal(got.FoldersJSON, &folders); err != nil {
+		t.Fatalf("failed to decode folders: %v", err)
+	}
+	if len(folders) != 1 {
+		t.Fatalf("expected 1 persisted folder, got %d", len(folders))
+	}
+	if folders[0]["path"] != "research/notes" {
+		t.Fatalf("expected folder path research/notes, got %#v", folders[0]["path"])
+	}
+	if got.Layout == nil {
+		t.Fatalf("expected layout to persist")
+	}
+	if pos := got.Layout.FolderPositions["folder-1"]; pos.X != 40 || pos.Y != 80 {
+		t.Fatalf("expected folder position to persist, got %#v", pos)
+	}
+
+	updatedFoldersJSON, err := json.Marshal([]map[string]any{
+		{
+			"id":         "folder-1",
+			"path":       "archive",
+			"created_at": now.Format(time.RFC3339),
+			"updated_at": now.Add(time.Minute).Format(time.RFC3339),
+		},
+		{
+			"id":         "folder-2",
+			"path":       "drafts",
+			"created_at": now.Format(time.RFC3339),
+			"updated_at": now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal updated folders: %v", err)
+	}
+
+	got.FoldersJSON = updatedFoldersJSON
+	got.Layout.FolderPositions = map[string]Position{
+		"folder-1": {X: 140, Y: 180},
+		"folder-2": {X: 240, Y: 280},
+	}
+	got.UpdatedAt = now.Add(time.Minute)
+
+	if err := store.UpdateWorkspace(ctx, got); err != nil {
+		t.Fatalf("failed to update workspace folders: %v", err)
+	}
+
+	updated, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated workspace: %v", err)
+	}
+	var updatedFolders []map[string]any
+	if err := json.Unmarshal(updated.FoldersJSON, &updatedFolders); err != nil {
+		t.Fatalf("failed to decode updated folders: %v", err)
+	}
+	if len(updatedFolders) != 2 {
+		t.Fatalf("expected 2 updated folders, got %d", len(updatedFolders))
+	}
+	if updatedFolders[0]["path"] != "archive" {
+		t.Fatalf("expected updated first folder path archive, got %#v", updatedFolders[0]["path"])
+	}
+	if pos := updated.Layout.FolderPositions["folder-2"]; pos.X != 240 || pos.Y != 280 {
+		t.Fatalf("expected second folder position to persist, got %#v", pos)
+	}
+}
+
 func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

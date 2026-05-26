@@ -3118,8 +3118,12 @@ export class WorkspaceTaskPage {
       : 'Default output folder';
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
+    const storageTarget = String(storage.storage_target || '').trim();
+    const workspaceFolder = String(storage.workspace_folder || '').trim();
     if (storeNodeId) {
       target = `Store node: ${this.getStoreNodeDisplayLabel(storeNodeId)}`;
+    } else if (storageTarget === 'workspace_folder') {
+      target = `Workspace files: ${workspaceFolder || 'root'}`;
     } else if (filePath) {
       target = `Path: ${filePath}`;
     }
@@ -4836,6 +4840,8 @@ export class WorkspaceTaskPage {
       write_mode: checked ? 'append' : String(existing.write_mode || 'append'),
       file_path: String(existing.file_path || ''),
       store_node_id: String(existing.store_node_id || ''),
+      storage_target: String(existing.storage_target || ''),
+      workspace_folder: String(existing.workspace_folder || ''),
     };
 
     if (checked) {
@@ -4937,10 +4943,14 @@ export class WorkspaceTaskPage {
     }
 
     const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
+    const workspaceFolders = Array.isArray(this.workspace?.folders) ? this.workspace.folders : [];
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
+    const storageTarget = String(storage.storage_target || '').trim();
+    const workspaceFolder = String(storage.workspace_folder || '').trim();
     let target = 'default';
     if (storeNodeId) target = 'store';
+    else if (storageTarget === 'workspace_folder') target = 'workspace_folder';
     else if (filePath) target = 'custom';
 
     const storeOptions = storeNodes
@@ -4953,6 +4963,15 @@ export class WorkspaceTaskPage {
       })
       .filter(Boolean)
       .join('');
+    const folderOptions = [
+      '<option value="">Workspace files</option>',
+      ...workspaceFolders.map((folder) => {
+        const path = String(folder?.path || '').trim();
+        if (!path) return '';
+        const selected = path === workspaceFolder ? ' selected' : '';
+        return `<option value="${this.escapeHtml(path)}"${selected}>${this.escapeHtml(path)}</option>`;
+      })
+    ].filter(Boolean).join('');
     const saving = Boolean(this.automationStorageSaving);
     const defaultPath = String(this.workspaceOutputDir || '').trim();
     const defaultPathHint = defaultPath
@@ -4974,6 +4993,13 @@ export class WorkspaceTaskPage {
             <span>Store node</span>
             <select data-role="automation-storage-store-node" class="workspace-task-automation-storage-select"${storeOptions ? '' : ' disabled'}>
               ${storeOptions || '<option value="">No store nodes available</option>'}
+            </select>
+          </label>
+          <label class="workspace-task-automation-storage-option">
+            <input type="radio" name="workspace-task-automation-storage-target" value="workspace_folder"${target === 'workspace_folder' ? ' checked' : ''} />
+            <span>Workspace file folder</span>
+            <select data-role="automation-storage-workspace-folder" class="workspace-task-automation-storage-select">
+              ${folderOptions}
             </select>
           </label>
           <label class="workspace-task-automation-storage-option">
@@ -5006,6 +5032,7 @@ export class WorkspaceTaskPage {
     if (!container) return;
     const target = container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')?.value || 'default';
     const storeNodeId = container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
+    const workspaceFolder = container.querySelector('[data-role="automation-storage-workspace-folder"]')?.value || '';
     const customPath = container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
     const fileNameInput = container.querySelector('[data-role="automation-storage-filename"]')?.value?.trim() || '';
 
@@ -5048,12 +5075,16 @@ export class WorkspaceTaskPage {
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
       store_node_id: target === 'store' ? storeNodeId : '',
+      storage_target: target === 'workspace_folder' ? 'workspace_folder' : '',
+      workspace_folder: target === 'workspace_folder' ? workspaceFolder : '',
       file_name: customFileName,
     };
     // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
     if (
       String(existing.file_path || '') === nextStorage.file_path &&
       String(existing.store_node_id || '') === nextStorage.store_node_id &&
+      String(existing.storage_target || '') === nextStorage.storage_target &&
+      String(existing.workspace_folder || '') === nextStorage.workspace_folder &&
       String(existing.file_name || '') === nextStorage.file_name
     ) {
       this.notify('info', 'Destination is already set.');
@@ -5115,6 +5146,8 @@ export class WorkspaceTaskPage {
     const storage = owner?.result_storage || {};
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
+    const storageTarget = String(storage.storage_target || '').trim();
+    const workspaceFolder = String(storage.workspace_folder || '').trim();
     const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
     const customFileName = String(storage.file_name || '').trim();
     const filename = filePathIsFile
@@ -5125,6 +5158,8 @@ export class WorkspaceTaskPage {
     let dest;
     if (storeNodeId) {
       dest = `${this.getStoreNodeDisplayLabel(storeNodeId)} · ${filename}`;
+    } else if (storageTarget === 'workspace_folder') {
+      dest = joinFile(`Workspace files/${workspaceFolder}`);
     } else if (filePathIsFile) {
       dest = filePath;
     } else if (filePath) {

@@ -24,6 +24,7 @@ type workspaceJSONFields struct {
 	messages            []byte
 	tasks               []byte
 	attachments         []byte
+	folders             []byte
 	scheduledTasks      []byte
 	storeNodes          []byte
 	workflows           []byte
@@ -158,6 +159,10 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 	if fields.attachments == nil {
 		fields.attachments = []byte("[]")
 	}
+	fields.folders = workspace.FoldersJSON
+	if fields.folders == nil {
+		fields.folders = []byte("[]")
+	}
 	fields.scheduledTasks = workspace.ScheduledTasksJSON
 	if fields.scheduledTasks == nil {
 		fields.scheduledTasks = []byte("[]")
@@ -220,13 +225,13 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
+			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, version)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
-		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), workspace.Version)
 
 	if err != nil {
@@ -274,6 +279,7 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var messagesJSON sql.NullString
 	var tasksJSON sql.NullString
 	var attachmentsJSON sql.NullString
+	var foldersJSON sql.NullString
 	var scheduledTasksJSON sql.NullString
 	var storeNodesJSON sql.NullString
 	var workflowsJSON sql.NullString
@@ -288,13 +294,13 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
+			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, version
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
-		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
+		&messagesJSON, &tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
 		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &workspace.Version)
 
 	if err == sql.ErrNoRows {
@@ -342,6 +348,9 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	if attachmentsJSON.Valid && attachmentsJSON.String != "" {
 		workspace.AttachmentsJSON = json.RawMessage(attachmentsJSON.String)
 	}
+	if foldersJSON.Valid && foldersJSON.String != "" {
+		workspace.FoldersJSON = json.RawMessage(foldersJSON.String)
+	}
 	if scheduledTasksJSON.Valid && scheduledTasksJSON.String != "" {
 		workspace.ScheduledTasksJSON = json.RawMessage(scheduledTasksJSON.String)
 	}
@@ -379,12 +388,12 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 		UPDATE workspaces
 		SET name = ?, kind = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
-			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
+			messages_json = ?, tasks_json = ?, attachments_json = ?, folders_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
 			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?, version = ?
 		WHERE id = ?
 	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
-		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), workspace.Version,
 		workspace.ID)
 

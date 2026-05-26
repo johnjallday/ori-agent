@@ -13,6 +13,7 @@ export function createEventStream(workspaceId, handlers) {
 
   source.addEventListener('initial', (event) => safe(handlers.onInitial)(event));
   source.addEventListener('workspace.progress', (event) => safe(handlers.onWorkspaceProgress)(event));
+  source.addEventListener('workspace.updated', (event) => safe(handlers.onWorkspaceUpdated)(event));
   source.addEventListener('task.created', (event) => safe(handlers.onTaskEvent)(event));
   source.addEventListener('task.started', (event) => safe(handlers.onTaskEvent)(event));
   source.addEventListener('task.completed', (event) => safe(handlers.onTaskEvent)(event));
@@ -61,6 +62,10 @@ export function connectProgressStream(workspaceId, handlers) {
     onWorkspaceProgress: (event) => {
       const data = parseJSON(event);
       if (data && handlers.onWorkspaceProgress) handlers.onWorkspaceProgress(data);
+    },
+    onWorkspaceUpdated: (event) => {
+      const data = parseJSON(event);
+      if (data && handlers.onWorkspaceUpdated) handlers.onWorkspaceUpdated(data);
     },
     onTaskEvent: (event) => {
       const data = parseJSON(event);

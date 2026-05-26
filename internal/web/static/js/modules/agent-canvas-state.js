@@ -92,6 +92,10 @@ export const EVENT_TYPES = {
   ATTACHMENT_MOVED: 'attachment.moved',
   ATTACHMENT_DELETED: 'attachment.deleted',
 
+  // Workspace file folder events
+  WORKSPACE_FOLDER_UPDATED: 'workspace_folder.updated',
+  WORKSPACE_FOLDER_MOVED: 'workspace_folder.moved',
+
   // Store Node events
   STORE_NODE_CREATED: 'store_node.created',
   STORE_NODE_UPDATED: 'store_node.updated',
@@ -155,6 +159,8 @@ export class AgentCanvasState {
     this.attachments = [];
     this.storeNodes = [];  // Store nodes (file storage nodes)
     this.directoryReferences = [];  // Directory references (read-only file paths)
+    this.workspaceFileTree = [];  // Workspace-owned files/folders from /files/tree
+    this.workspaceFolders = [];  // Workspace-owned folder container nodes
 
     // Data & Communication
     this.messages = [];
@@ -183,6 +189,10 @@ export class AgentCanvasState {
     // Drag State - Attachment
     this.isDraggingAttachment = false;
     this.draggedAttachment = null;
+
+    // Drag State - Workspace file folder
+    this.isDraggingFolder = false;
+    this.draggedFolder = null;
 
     // Drag State - Connection
     this.isDraggingConnection = false;
@@ -490,6 +500,30 @@ export class AgentCanvasState {
    */
   setDirectoryReferences(directories) {
     this.directoryReferences = directories || [];
+  }
+
+  /**
+   * Set workspace-owned file tree entries
+   */
+  setWorkspaceFileTree(files) {
+    this.workspaceFileTree = files || [];
+  }
+
+  /**
+   * Set workspace-owned folder container nodes
+   */
+  setWorkspaceFolders(folders) {
+    this.workspaceFolders = folders || [];
+    this.eventBus.emit(EVENT_TYPES.WORKSPACE_FOLDER_UPDATED, { folders: this.workspaceFolders });
+  }
+
+  /**
+   * Update folder node position
+   */
+  updateWorkspaceFolderPosition(folder, x, y) {
+    folder.x = x;
+    folder.y = y;
+    this.eventBus.emit(EVENT_TYPES.WORKSPACE_FOLDER_MOVED, { folder, x, y });
   }
 
   /**

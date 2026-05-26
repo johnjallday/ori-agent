@@ -738,6 +738,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 	if !strings.HasPrefix(path, "/api/workspaces/") {
 		return false
 	}
+	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
+	parts := strings.Split(trimmed, "/")
 
 	if strings.HasSuffix(path, "/events") {
 		s.Handlers.Workspace.GetWorkspaceEvents(w, r)
@@ -788,6 +790,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 			s.Handlers.Workspace.RestoreFromTrash(w, r)
 		} else if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.RelinkAttachmentFile(w, r)
+		} else if strings.HasSuffix(path, "/move") && r.Method == http.MethodPatch {
+			s.Handlers.Workspace.MoveAttachmentFile(w, r)
 		} else if strings.HasSuffix(path, "/bulk-trash") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.BulkMoveToTrash(w, r)
 		} else {
@@ -845,6 +849,29 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		} else if r.Method == http.MethodDelete {
 			s.Handlers.Workspace.DeleteStoreNode(w, r)
 		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if len(parts) == 3 && parts[1] == "files" && parts[2] == "tree" {
+		if r.Method == http.MethodGet {
+			s.Handlers.Workspace.GetWorkspaceFilesTree(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if len(parts) >= 2 && parts[1] == "folders" {
+		switch r.Method {
+		case http.MethodPost:
+			s.Handlers.Workspace.CreateWorkspaceFolder(w, r)
+		case http.MethodPatch, http.MethodPut:
+			s.Handlers.Workspace.UpdateWorkspaceFolder(w, r)
+		case http.MethodDelete:
+			s.Handlers.Workspace.DeleteWorkspaceFolder(w, r)
+		default:
 			orihttp.MethodNotAllowed(w)
 		}
 		return true

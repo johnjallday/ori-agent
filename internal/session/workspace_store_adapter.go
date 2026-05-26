@@ -178,6 +178,13 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.AttachmentsJSON = data
 		}
 	}
+	if len(ws.Folders) > 0 {
+		if data, err := json.Marshal(ws.Folders); err != nil {
+			logger.Warn("Failed to marshal workspace folders", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.FoldersJSON = data
+		}
+	}
 	if len(ws.ScheduledTasks) > 0 {
 		if data, err := json.Marshal(ws.ScheduledTasks); err != nil {
 			logger.Warn("Failed to marshal workspace scheduled tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
@@ -307,6 +314,15 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 
+	if len(ws.FoldersJSON) > 0 {
+		if err := json.Unmarshal(ws.FoldersJSON, &agentWS.Folders); err != nil {
+			logger.Warn("Failed to unmarshal workspace folders", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	if agentWS.Folders == nil {
+		agentWS.Folders = []workspace.WorkspaceFolder{}
+	}
+
 	if len(ws.ScheduledTasksJSON) > 0 {
 		if err := json.Unmarshal(ws.ScheduledTasksJSON, &agentWS.ScheduledTasks); err != nil {
 			logger.Warn("Failed to unmarshal workspace scheduled tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
@@ -427,6 +443,20 @@ func convertToSessionLayout(layout *workspace.CanvasLayout) *CanvasLayout {
 		}
 	}
 
+	if layout.DirectoryPositions != nil {
+		sessionLayout.DirectoryPositions = make(map[string]Position)
+		for k, v := range layout.DirectoryPositions {
+			sessionLayout.DirectoryPositions[k] = Position{X: v.X, Y: v.Y}
+		}
+	}
+
+	if layout.FolderPositions != nil {
+		sessionLayout.FolderPositions = make(map[string]Position)
+		for k, v := range layout.FolderPositions {
+			sessionLayout.FolderPositions[k] = Position{X: v.X, Y: v.Y}
+		}
+	}
+
 	if len(layout.WorkflowConnections) > 0 {
 		sessionLayout.WorkflowConnections = make([]WorkflowConnectionLayout, len(layout.WorkflowConnections))
 		for i, conn := range layout.WorkflowConnections {
@@ -489,6 +519,20 @@ func convertToAgentWorkspaceLayout(layout *CanvasLayout) *workspace.CanvasLayout
 		agentLayout.StorePositions = make(map[string]workspace.Position)
 		for k, v := range layout.StorePositions {
 			agentLayout.StorePositions[k] = workspace.Position{X: v.X, Y: v.Y}
+		}
+	}
+
+	if layout.DirectoryPositions != nil {
+		agentLayout.DirectoryPositions = make(map[string]workspace.Position)
+		for k, v := range layout.DirectoryPositions {
+			agentLayout.DirectoryPositions[k] = workspace.Position{X: v.X, Y: v.Y}
+		}
+	}
+
+	if layout.FolderPositions != nil {
+		agentLayout.FolderPositions = make(map[string]workspace.Position)
+		for k, v := range layout.FolderPositions {
+			agentLayout.FolderPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 

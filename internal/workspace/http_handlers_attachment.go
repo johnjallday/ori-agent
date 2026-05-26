@@ -100,6 +100,10 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
+	fileMeta := sanitizeAttachmentFileMeta(workspaceID, req.File)
+	if fileMeta != nil && fileMeta.RelativePath != "" && strings.TrimSpace(fileMeta.URL) == "" {
+		fileMeta.URL = workspaceFileURL(workspaceID, fileMeta.RelativePath)
+	}
 
 	attachment := Attachment{
 		ID:          uuid.New().String(),
@@ -109,7 +113,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		Type:        attType,
 		Color:       req.Color,
 		LinkURL:     req.LinkURL,
-		File:        sanitizeAttachmentFileMeta(workspaceID, req.File),
+		File:        fileMeta,
 		VaultRef:    vaultref.Normalize(req.VaultRef),
 		X:           req.X,
 		Y:           req.Y,
@@ -236,7 +240,11 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		attachment.LinkURL = *req.LinkURL
 	}
 	if req.File != nil {
-		attachment.File = sanitizeAttachmentFileMeta(workspaceID, req.File)
+		fileMeta := sanitizeAttachmentFileMeta(workspaceID, req.File)
+		if fileMeta != nil && fileMeta.RelativePath != "" && strings.TrimSpace(fileMeta.URL) == "" {
+			fileMeta.URL = workspaceFileURL(workspaceID, fileMeta.RelativePath)
+		}
+		attachment.File = fileMeta
 	}
 	if req.VaultRef != nil {
 		attachment.VaultRef = vaultref.Normalize(req.VaultRef)
@@ -343,9 +351,18 @@ func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	targetFolder, suppliedTargetFolder := workspaceFolderFormValue(r)
+	if !suppliedTargetFolder {
+		targetFolder = workspaceFolderFromRelativePath(extractAttachmentRelativePath(workspaceID, attachment.File))
+	}
+
 	filesPath := h.store.GetFilesPath(workspaceID)
-	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename, targetFolder)
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid folder path") {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
 		orihttp.InternalError(w, "Failed to save replacement file: "+err.Error())
 		return
 	}

@@ -175,6 +175,7 @@ func (h *HTTPHandler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		"status":               workspace.Status,
 		"tasks":                workspace.Tasks,
 		"attachments":          workspace.Attachments,
+		"folders":              workspace.Folders,
 		"scheduled_tasks":      workspace.ScheduledTasks, // Include scheduled tasks for scheduler nodes
 		"store_nodes":          workspace.StoreNodes,     // Include store nodes
 		"directory_references": workspace.DirectoryReferences,

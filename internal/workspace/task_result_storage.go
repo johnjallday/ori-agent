@@ -347,7 +347,7 @@ func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string)
 	if node == nil {
 		return csvData
 	}
-	finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+	finalPath, err := BuildFinalStorePath(node, nil, "", filePath)
 	if err != nil {
 		return csvData
 	}
@@ -358,10 +358,14 @@ func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string)
 }
 
 func csvWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
+	return csvWithoutHeaderForExistingStoreStrictWithResolver(node, nil, "", filePath, csvData)
+}
+
+func csvWithoutHeaderForExistingStoreStrictWithResolver(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath, csvData string) (string, error) {
 	if node == nil {
 		return csvData, nil
 	}
-	finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+	finalPath, err := BuildFinalStorePath(node, resolver, workspaceID, filePath)
 	if err != nil {
 		return csvData, err
 	}
@@ -387,6 +391,12 @@ func csvWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData s
 // auto-storage.
 func CSVWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
 	return csvWithoutHeaderForExistingStoreStrict(node, filePath, csvData)
+}
+
+// CSVWithoutHeaderForExistingStoreStrictInWorkspace resolves workspace-folder
+// store nodes before checking the destination CSV header.
+func CSVWithoutHeaderForExistingStoreStrictInWorkspace(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath, csvData string) (string, error) {
+	return csvWithoutHeaderForExistingStoreStrictWithResolver(node, resolver, workspaceID, filePath, csvData)
 }
 
 // BootstrapOutputContractFromCSVHeader derives a string-typed output contract from an existing CSV header.
@@ -417,7 +427,7 @@ func BootstrapOutputContractFromCSVHeader(ws *Workspace, task *Task) *TaskOutput
 		if node == nil {
 			return nil
 		}
-		finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+		finalPath, err := BuildFinalStorePath(node, nil, ws.ID, filePath)
 		if err != nil {
 			return nil
 		}

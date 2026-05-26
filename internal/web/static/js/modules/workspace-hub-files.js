@@ -149,15 +149,23 @@
       elements.filesList.innerHTML = '<div class="hub-loading">Loading files...</div>';
     }
     if (elements.directoriesList) {
-      elements.directoriesList.innerHTML = '<div class="hub-loading">Loading directories...</div>';
+      elements.directoriesList.innerHTML = '<div class="hub-loading">Loading linked folders...</div>';
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
-      if (!response.ok) throw new Error('Failed to load workspace');
+      const [workspaceResponse, treeResponse] = await Promise.all([
+        fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`),
+        fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree`)
+      ]);
+      if (!workspaceResponse.ok) throw new Error('Failed to load workspace');
 
-      const workspace = await response.json();
-      state.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      const workspace = await workspaceResponse.json();
+      if (treeResponse.ok) {
+        const tree = await treeResponse.json();
+        state.files = Array.isArray(tree.files) ? tree.files : [];
+      } else {
+        state.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      }
       state.directories = workspace.directory_references || [];
       renderFiles(state.files);
       renderDirectories(state.directories);
@@ -167,7 +175,7 @@
         elements.filesList.innerHTML = '<div class="hub-empty">Unable to load files.</div>';
       }
       if (elements.directoriesList) {
-        elements.directoriesList.innerHTML = '<div class="hub-empty">Unable to load directories.</div>';
+        elements.directoriesList.innerHTML = '<div class="hub-empty">Unable to load linked folders.</div>';
       }
     }
   }
@@ -190,36 +198,42 @@
     const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
     const selectedSet = state.selectedItems.files;
 
-    const items = files.slice(0, 5).map((file) => {
-      const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
-      const size = file.file_meta ? formatFileSize(file.file_meta.size) : '';
-      const icon = getFileIcon(file.type, file.file_meta?.mime);
-      const isSelected = selectedSet.has(file.id);
+    const items = files.slice(0, 8).map((file) => {
+      const isFolder = Boolean(file.is_dir);
+      const attachmentId = file.attachment_id || (!isFolder && file.file_meta ? file.id : '');
+      const itemId = attachmentId || file.id || file.relative_path || '';
+      const title = file.title || file.name || (file.file_meta && file.file_meta.name) || 'Untitled File';
+      const size = file.file_meta ? formatFileSize(file.file_meta.size) : (!isFolder ? formatFileSize(file.size) : '');
+      const icon = isFolder
+        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>'
+        : getFileIcon(file.type, file.file_meta?.mime);
+      const isSelected = attachmentId ? selectedSet.has(attachmentId) : false;
       const isMissing = file.file_meta?.status === 'missing';
+      const pathText = file.relative_path && file.relative_path !== title ? file.relative_path : '';
       const metaText = [isMissing ? 'Missing from disk' : '', size].filter(Boolean).join(' · ');
 
       return `
-        <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(file.id)}">
+        <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(itemId)}" data-attachment-id="${escapeHtml(attachmentId)}" data-relative-path="${escapeHtml(file.relative_path || '')}" data-is-folder="${isFolder ? 'true' : 'false'}">
           <div class="hub-item-checkbox">
-            <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select file">
+            ${attachmentId ? `<input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select file">` : ''}
           </div>
           <div class="hub-file-icon">${icon}</div>
           <div class="hub-file-info">
             <div class="hub-file-title">${escapeHtml(title)}</div>
-            ${metaText ? `<div class="hub-file-meta">${isMissing ? '<span class="hub-file-status-badge is-missing">Missing</span>' : ''}${escapeHtml(size)}</div>` : ''}
+            ${metaText || pathText ? `<div class="hub-file-meta">${isMissing ? '<span class="hub-file-status-badge is-missing">Missing</span>' : ''}${escapeHtml(metaText || pathText)}</div>` : ''}
           </div>
-          ${isMissing ? `
+          ${isMissing && attachmentId ? `
             <button class="hub-item-secondary-btn" data-action="relink" title="Relink missing file">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
               </svg>
             </button>
           ` : ''}
-          <button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
+          ${attachmentId ? `<button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
             </svg>
-          </button>
+          </button>` : ''}
         </div>
       `;
     });
@@ -238,12 +252,12 @@
     if (!elements.directoriesList) return;
 
     if (!directories || directories.length === 0) {
-      elements.directoriesList.innerHTML = '<div class="hub-empty">No directories yet.</div>';
+      elements.directoriesList.innerHTML = '<div class="hub-empty">No linked folders yet.</div>';
       return;
     }
 
     const items = directories.slice(0, 5).map((directory) => {
-      const title = directory.name || 'Untitled Directory';
+      const title = directory.name || 'Untitled Linked Folder';
       const path = directory.path || 'Path unavailable';
       return `
         <div class="hub-directory-item" data-directory-id="${escapeHtml(directory.id)}">
@@ -277,7 +291,8 @@
     const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
 
     elements.filesList.querySelectorAll('.hub-file-item').forEach((item) => {
-      const fileId = item.dataset.fileId;
+      const fileId = item.dataset.attachmentId || '';
+      const isFolder = item.dataset.isFolder === 'true';
 
       const checkbox = item.querySelector('input[type="checkbox"]');
       if (checkbox) {
@@ -289,16 +304,19 @@
 
       item.querySelector('[data-action="trash"]')?.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (!fileId) return;
         moveFileToTrash(fileId);
       });
 
       item.querySelector('[data-action="relink"]')?.addEventListener('click', (event) => {
         event.stopPropagation();
+        if (!fileId) return;
         promptRelinkFile(fileId);
       });
 
       item.addEventListener('click', (event) => {
-        if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
+        if (isFolder) return;
+        if (inSelectionMode && fileId && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('files', fileId);
         } else if (!inSelectionMode && !event.target.closest('button')) {
           openFile(fileId);
@@ -315,8 +333,8 @@
     const state = window.WorkspaceHubState.getState();
 
     const confirmed = await window.WorkspaceHubModals.showDeleteConfirm({
-      title: 'Remove Directory Reference',
-      message: 'Remove this directory reference? The actual folder on disk will not be deleted.',
+      title: 'Remove Linked Folder',
+      message: 'Remove this linked folder? The actual folder on disk will not be deleted.',
       variant: 'delete'
     });
     if (!confirmed) return;
@@ -327,7 +345,7 @@
       });
       if (!response.ok) throw new Error('Failed to remove directory reference');
 
-      if (window.Toast) window.Toast.success('Directory reference removed');
+      if (window.Toast) window.Toast.success('Linked folder removed');
       await loadFiles(state.selectedId);
     } catch (error) {
       console.error('Failed to remove directory reference:', error);
@@ -370,10 +388,13 @@
     state.pendingFiles = [];
     if (elements.fileTitle) elements.fileTitle.value = '';
     if (elements.fileNotes) elements.fileNotes.value = '';
+    if (elements.fileFolderPath) elements.fileFolderPath.value = '';
+    if (elements.fileFolderSelect) elements.fileFolderSelect.value = '';
     if (elements.selectedFilesPreview) elements.selectedFilesPreview.style.display = 'none';
     if (elements.selectedFilesList) elements.selectedFilesList.innerHTML = '';
     if (elements.fileUploadProgress) elements.fileUploadProgress.style.display = 'none';
     if (elements.addFileSubmitBtn) elements.addFileSubmitBtn.disabled = true;
+    void loadUploadFolderOptions('');
 
     if (elements.addFileModal && window.bootstrap) {
       const modal = new bootstrap.Modal(elements.addFileModal);
@@ -499,7 +520,7 @@
       if (isLikelyFolder) {
         if (window.Toast) {
           window.Toast.info(
-            'To add a folder, use the "Directory" button in the canvas toolbar instead.',
+            'To add a linked folder, use the "Linked Folder" button in the canvas toolbar instead.',
             { title: 'Folder Detected' }
           );
         }
@@ -533,6 +554,7 @@
 
     const title = elements.fileTitle?.value?.trim() || '';
     const notes = elements.fileNotes?.value?.trim() || '';
+    const folderPath = getUploadFolderPath();
 
     if (elements.addFileSubmitBtn) {
       elements.addFileSubmitBtn.disabled = true;
@@ -558,7 +580,7 @@
       }
 
       try {
-        await uploadFileAttachment(file, title, notes);
+        await uploadFileAttachment(file, title, notes, folderPath);
         successCount++;
       } catch (error) {
         console.error('Failed to upload file:', file.name, error);
@@ -611,65 +633,165 @@
    * @param {File} file - File to upload
    * @param {string} title - Optional title
    * @param {string} notes - Optional notes
+   * @param {string} folderPath - Optional destination folder path
    * @returns {Promise} Resolves with upload result
    */
-  async function uploadFileAttachment(file, title, notes) {
+  async function uploadFileAttachment(file, title, notes, folderPath = '') {
     const state = window.WorkspaceHubState.getState();
 
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+    const formData = new FormData();
+    formData.append('file', file);
+    if (title) formData.append('title', title);
+    if (notes) formData.append('notes', notes);
+    if (folderPath) formData.append('folder_path', folderPath);
 
-      reader.onload = async (e) => {
-        try {
-          let content = e.target.result;
-          if (content.includes(',')) {
-            content = content.split(',')[1];
-          }
-
-          let type = 'other';
-          const mime = file.type || '';
-          const ext = file.name.split('.').pop().toLowerCase();
-
-          if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-            type = 'image';
-          } else if (mime.includes('pdf') || ext === 'pdf') {
-            type = 'pdf';
-          } else if (mime.includes('text') || ['txt', 'md', 'json', 'xml', 'csv', 'html'].includes(ext)) {
-            type = 'doc';
-          }
-
-          const attachment = {
-            title: title || file.name,
-            body: notes || '',
-            type: type,
-            file_meta: {
-              name: file.name,
-              size: file.size,
-              mime: mime || 'application/octet-stream',
-              content: content
-            }
-          };
-
-          const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(attachment)
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Upload failed');
-          }
-
-          resolve(await response.json());
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/files`, {
+      method: 'POST',
+      body: formData
     });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || payload.message || 'Upload failed');
+    }
+
+    return response.json();
+  }
+
+  function getUploadFolderPath() {
+    const elements = window.WorkspaceHubState.getElements();
+    return String(
+      elements.fileFolderPath?.value ||
+      elements.fileFolderSelect?.value ||
+      elements.fileDestinationFolder?.value ||
+      ''
+    ).trim();
+  }
+
+  function normalizeUploadFolderPath(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '');
+  }
+
+  function setUploadFolderPath(value) {
+    const elements = window.WorkspaceHubState.getElements();
+    const normalizedPath = normalizeUploadFolderPath(value);
+    if (elements.fileFolderPath) {
+      elements.fileFolderPath.value = normalizedPath;
+    }
+    if (elements.fileFolderSelect) {
+      elements.fileFolderSelect.value = normalizedPath;
+    }
+    return normalizedPath;
+  }
+
+  async function loadUploadFolderOptions(selectedPath = '') {
+    const state = window.WorkspaceHubState.getState();
+    const elements = window.WorkspaceHubState.getElements();
+    const select = elements.fileFolderSelect;
+    if (!select) return;
+
+    const normalizedSelected = normalizeUploadFolderPath(selectedPath);
+    select.disabled = true;
+    select.innerHTML = '<option value="">Workspace files</option>';
+
+    if (!state.selectedId) {
+      setUploadFolderPath('');
+      select.disabled = false;
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/files/tree`
+      );
+      if (!response.ok) {
+        throw new Error('Failed to load workspace folders');
+      }
+      const payload = await response.json();
+      const folders = (Array.isArray(payload.files) ? payload.files : [])
+        .filter(item => item?.is_dir && item?.relative_path)
+        .sort((left, right) =>
+          String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
+            sensitivity: 'base',
+            numeric: true
+          })
+        );
+
+      select.innerHTML = [
+        '<option value="">Workspace files</option>',
+        ...folders.map(folder => {
+          const path = normalizeUploadFolderPath(folder.relative_path);
+          return `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`;
+        })
+      ].join('');
+
+      const hasSelectedOption = Array.from(select.options).some(
+        option => option.value === normalizedSelected
+      );
+      setUploadFolderPath(hasSelectedOption ? normalizedSelected : '');
+    } catch (error) {
+      console.error('Failed to load upload folder options:', error);
+      setUploadFolderPath('');
+    } finally {
+      select.disabled = false;
+    }
+  }
+
+  async function createUploadFolderFromPicker() {
+    const state = window.WorkspaceHubState.getState();
+    if (!state.selectedId) return;
+
+    const currentPath = getUploadFolderPath();
+    const defaultPath = currentPath ? `${currentPath}/New Folder` : 'New Folder';
+    const rawPath = window.prompt('New folder path inside Workspace files', defaultPath);
+    if (rawPath === null) return;
+
+    const folderPath = normalizeUploadFolderPath(rawPath);
+    if (!folderPath) return;
+
+    const elements = window.WorkspaceHubState.getElements();
+    const button = elements.createUploadFolderBtn;
+    const originalText = button?.textContent || '';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Creating...';
+    }
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/folders`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: folderPath })
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || 'Failed to create folder');
+      }
+
+      const createdPath = normalizeUploadFolderPath(payload?.folder?.path || folderPath);
+      await loadUploadFolderOptions(createdPath);
+      if (window.Toast) window.Toast.success('Folder created');
+      if (window.EventBus) {
+        EventBus.emit('workspace:files:updated', { workspaceId: state.selectedId });
+      }
+    } catch (error) {
+      console.error('Failed to create upload destination folder:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to create folder');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText || 'New Folder';
+      }
+    }
   }
 
   /**
@@ -732,6 +854,16 @@
     if (elements.addFileSubmitBtn) {
       elements.addFileSubmitBtn.addEventListener('click', submitAddFile);
     }
+    if (elements.fileFolderSelect) {
+      elements.fileFolderSelect.addEventListener('change', () => {
+        setUploadFolderPath(elements.fileFolderSelect.value);
+      });
+    }
+    if (elements.createUploadFolderBtn) {
+      elements.createUploadFolderBtn.addEventListener('click', () => {
+        void createUploadFolderFromPicker();
+      });
+    }
     if (elements.addDirectoryPanelBtn) {
       elements.addDirectoryPanelBtn.addEventListener('click', async () => {
         const button = elements.addDirectoryPanelBtn;
@@ -762,6 +894,8 @@
     addFilesToPending,
     submitAddFile,
     uploadFileAttachment,
+    loadUploadFolderOptions,
+    createUploadFolderFromPicker,
     launchFolderPicker,
     bindFileUploadEvents
   };

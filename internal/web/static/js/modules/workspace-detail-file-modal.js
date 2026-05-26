@@ -43,6 +43,9 @@ export class WorkspaceFileModalManager {
     const selectedFilesList = document.getElementById('hubSelectedFilesList');
     const titleInput = document.getElementById('hubFileTitle');
     const notesInput = document.getElementById('hubFileNotes');
+    const folderSelect = document.getElementById('hubFileFolderSelect');
+    const folderPath = document.getElementById('hubFileFolderPath');
+    const createFolderBtn = document.getElementById('hubCreateUploadFolderBtn');
     const devicePane = document.getElementById('hubFileDevicePane');
     const vaultPane = document.getElementById('hubFileVaultPane');
     const deviceBtn = document.getElementById('hubFileSourceDeviceBtn');
@@ -77,6 +80,9 @@ export class WorkspaceFileModalManager {
       selectedFilesList,
       titleInput,
       notesInput,
+      folderSelect,
+      folderPath,
+      createFolderBtn,
       devicePane,
       vaultPane,
       deviceBtn,
@@ -174,6 +180,14 @@ export class WorkspaceFileModalManager {
       }
     });
 
+    folderSelect?.addEventListener('change', () => {
+      this.setFileModalFolderPath(folderSelect.value);
+    });
+
+    createFolderBtn?.addEventListener('click', async () => {
+      await this.createFileModalFolder();
+    });
+
     vaultAttachmentList?.addEventListener('click', event => {
       const trigger = event.target.closest('[data-vault-attachment-id]');
       if (!trigger) {
@@ -194,6 +208,7 @@ export class WorkspaceFileModalManager {
       this.resetFileModalState();
       this.renderFileModalSource();
       this.renderFileModalSelectionPreview();
+      await this.loadFileModalFolderOptions('');
     });
 
     modal.addEventListener('hidden.bs.modal', () => {
@@ -218,6 +233,8 @@ export class WorkspaceFileModalManager {
       fileInput,
       titleInput,
       notesInput,
+      folderSelect,
+      folderPath,
       vaultSelect,
       vaultSearchInput,
       vaultUnlockPassword
@@ -231,6 +248,14 @@ export class WorkspaceFileModalManager {
     }
     if (notesInput) {
       notesInput.value = '';
+    }
+    if (folderPath) {
+      folderPath.value = '';
+    }
+    if (folderSelect) {
+      folderSelect.innerHTML = '<option value="">Workspace files</option>';
+      folderSelect.value = '';
+      folderSelect.disabled = false;
     }
     if (vaultSelect) {
       vaultSelect.innerHTML = '<option value="">Loading vaults...</option>';
@@ -246,6 +271,131 @@ export class WorkspaceFileModalManager {
     this.renderFileModalSource();
     this.renderFileModalSelectionPreview();
     this.renderFileModalVaultAttachments();
+  }
+
+  normalizeFileModalFolderPath(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '');
+  }
+
+  setFileModalFolderPath(value) {
+    const normalizedPath = this.normalizeFileModalFolderPath(value);
+    const { folderPath, folderSelect } = this.fileModalElements;
+    if (folderPath) {
+      folderPath.value = normalizedPath;
+    }
+    if (folderSelect) {
+      folderSelect.value = normalizedPath;
+    }
+    return normalizedPath;
+  }
+
+  async loadFileModalFolderOptions(selectedPath = '') {
+    const { folderSelect } = this.fileModalElements;
+    if (!folderSelect || !this.host.workspaceId) {
+      return;
+    }
+
+    const normalizedSelected = this.normalizeFileModalFolderPath(selectedPath);
+    folderSelect.disabled = true;
+    folderSelect.innerHTML = '<option value="">Workspace files</option>';
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/files/tree`
+      );
+      if (!response.ok) {
+        throw new Error('Failed to load workspace folders');
+      }
+
+      const payload = await response.json();
+      const folders = (Array.isArray(payload.files) ? payload.files : [])
+        .filter(item => item?.is_dir && item?.relative_path)
+        .sort((left, right) =>
+          String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
+            sensitivity: 'base',
+            numeric: true
+          })
+        );
+
+      folderSelect.innerHTML = [
+        '<option value="">Workspace files</option>',
+        ...folders.map(folder => {
+          const path = this.normalizeFileModalFolderPath(folder.relative_path);
+          return `<option value="${this.host.escapeHtml(path)}">${this.host.escapeHtml(path)}</option>`;
+        })
+      ].join('');
+
+      const hasSelectedOption = Array.from(folderSelect.options).some(
+        option => option.value === normalizedSelected
+      );
+      this.setFileModalFolderPath(hasSelectedOption ? normalizedSelected : '');
+    } catch (error) {
+      console.error('Failed to load file modal folder options:', error);
+      this.setFileModalFolderPath('');
+    } finally {
+      folderSelect.disabled = false;
+    }
+  }
+
+  async createFileModalFolder() {
+    if (!this.host.workspaceId) {
+      return;
+    }
+
+    const currentPath = this.normalizeFileModalFolderPath(
+      this.fileModalElements.folderPath?.value || this.fileModalElements.folderSelect?.value || ''
+    );
+    const defaultPath = currentPath ? `${currentPath}/New Folder` : 'New Folder';
+    const rawPath = window.prompt('New folder path inside Workspace files', defaultPath);
+    if (rawPath === null) return;
+
+    const folderPath = this.normalizeFileModalFolderPath(rawPath);
+    if (!folderPath) return;
+
+    const { createFolderBtn } = this.fileModalElements;
+    const originalText = createFolderBtn?.textContent || '';
+    if (createFolderBtn) {
+      createFolderBtn.disabled = true;
+      createFolderBtn.textContent = 'Creating...';
+    }
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/folders`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: folderPath })
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || 'Failed to create folder');
+      }
+
+      const createdPath = this.normalizeFileModalFolderPath(payload?.folder?.path || folderPath);
+      await this.loadFileModalFolderOptions(createdPath);
+      if (window.Toast) window.Toast.success('Folder created');
+      if (typeof this.host.loadFiles === 'function') {
+        await this.host.loadFiles();
+      }
+    } catch (error) {
+      console.error('Failed to create file modal folder:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to create folder');
+      }
+    } finally {
+      if (createFolderBtn) {
+        createFolderBtn.disabled = false;
+        createFolderBtn.textContent = originalText || 'New Folder';
+      }
+    }
   }
 
   async setFileModalSource(source) {
@@ -764,6 +914,11 @@ export class WorkspaceFileModalManager {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('workspace_id', this.host.workspaceId);
+        const folderPath =
+          typeof this.host.getSelectedUploadFolderPath === 'function'
+            ? this.host.getSelectedUploadFolderPath()
+            : '';
+        if (folderPath) formData.append('folder_path', folderPath);
         if (title) formData.append('title', title);
         const vaultReference =
           item.source === 'vault' ? this.host.buildVaultReferenceFromItem(item, 'file') : null;

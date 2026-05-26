@@ -1196,7 +1196,9 @@ export class RendererNodes {
       // Directory path (truncated if too long)
       this.ctx.fillStyle = '#64748b';
       this.ctx.font = '10px system-ui';
-      let basedir = storeNode.base_dir || '/path/to/store';
+      let basedir = storeNode.storage_target === 'workspace_folder'
+        ? `Workspace files/${storeNode.workspace_folder || ''}`
+        : (storeNode.base_dir || '/path/to/store');
       if (basedir.length > 25) {
         basedir = '...' + basedir.slice(-22);
       }
@@ -1414,6 +1416,148 @@ export class RendererNodes {
         y: outputPortY + outputPortSize / 2
       };
     });
+  }
+
+  /**
+   * Draw workspace-owned folder container nodes.
+   */
+  drawWorkspaceFolderNodes() {
+    if (!this.state.workspaceFolders || this.state.workspaceFolders.length === 0) return;
+
+    this.state.workspaceFolders.forEach(folder => {
+      if (!folder || folder.x == null || folder.y == null) return;
+
+      const cardWidth = 220;
+      const children = Array.isArray(folder.children) ? folder.children : [];
+      const visibleChildren = folder.collapsed ? [] : children.slice(0, 6);
+      const moreCount = Math.max(0, children.length - visibleChildren.length);
+      const cardHeight = folder.collapsed
+        ? 94
+        : Math.min(240, 112 + visibleChildren.length * 22 + (moreCount > 0 ? 18 : 0));
+      const cardX = folder.x - cardWidth / 2;
+      const cardY = folder.y - cardHeight / 2;
+      const baseColor = '#2563eb';
+
+      folder.width = cardWidth;
+      folder.height = cardHeight;
+      folder.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+      folder.dropZoneBounds = folder.cardBounds;
+
+      if (this.state.isNodeSelected(folder.id)) {
+        const isPrimary = this.state.isFirstSelected(folder.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
+      }
+
+      this.ctx.save();
+      const gradient = this.ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardHeight);
+      gradient.addColorStop(0, '#f8fafc');
+      gradient.addColorStop(1, '#eef6ff');
+      this.ctx.fillStyle = gradient;
+      this.ctx.shadowColor = 'rgba(15, 23, 42, 0.12)';
+      this.ctx.shadowBlur = 10;
+      this.ctx.shadowOffsetY = 3;
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.stroke();
+
+      const iconX = cardX + 12;
+      const iconY = cardY + 15;
+      this.ctx.fillStyle = baseColor;
+      this.ctx.beginPath();
+      this.ctx.moveTo(iconX, iconY + 5);
+      this.ctx.lineTo(iconX + 8, iconY + 5);
+      this.ctx.lineTo(iconX + 11, iconY);
+      this.ctx.lineTo(iconX + 24, iconY);
+      this.ctx.lineTo(iconX + 24, iconY + 18);
+      this.ctx.lineTo(iconX, iconY + 18);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#0f172a';
+      this.ctx.font = 'bold 12px system-ui';
+      const title = this.truncateCanvasText(folder.name || 'Folder', 118);
+      this.ctx.fillText(title, iconX + 34, iconY + 12);
+
+      const badgeX = cardX + cardWidth - 56;
+      const badgeY = cardY + 9;
+      this.ctx.fillStyle = 'rgba(37, 99, 235, 0.12)';
+      this.primitives.roundRect(badgeX, badgeY, 44, 18, 4);
+      this.ctx.fill();
+      this.ctx.fillStyle = baseColor;
+      this.ctx.font = 'bold 9px system-ui';
+      this.ctx.fillText('FILES', badgeX + 8, badgeY + 12);
+
+      const collapseSize = 18;
+      const collapseX = cardX + cardWidth - collapseSize - 12;
+      const collapseY = cardY + 32;
+      this.ctx.fillStyle = folder.collapsed ? '#dbeafe' : '#eff6ff';
+      this.primitives.roundRect(collapseX, collapseY, collapseSize, collapseSize, 4);
+      this.ctx.fill();
+      this.ctx.fillStyle = baseColor;
+      this.ctx.font = 'bold 13px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(folder.collapsed ? '+' : '-', collapseX + collapseSize / 2, collapseY + 13);
+      this.ctx.textAlign = 'left';
+      folder.collapseButton = {
+        x: collapseX,
+        y: collapseY,
+        width: collapseSize,
+        height: collapseSize
+      };
+
+      this.ctx.fillStyle = '#475569';
+      this.ctx.font = '10px system-ui';
+      const countText = `${folder.childFileCount || 0} files | ${folder.childFolderCount || 0} folders`;
+      this.ctx.fillText(countText, cardX + 12, cardY + 54);
+
+      const pathText = this.truncateCanvasText(folder.relative_path || folder.path || '', cardWidth - 24);
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText(pathText, cardX + 12, cardY + 70);
+
+      if (folder.collapsed) {
+        this.ctx.fillStyle = '#2563eb';
+        this.ctx.font = 'bold 9px system-ui';
+        this.ctx.fillText('Collapsed', cardX + 12, cardY + 86);
+        return;
+      }
+
+      let rowY = cardY + 94;
+      visibleChildren.forEach(child => {
+        this.ctx.fillStyle = child.is_dir ? '#1d4ed8' : '#64748b';
+        this.ctx.font = '10px system-ui';
+        this.ctx.fillText(child.is_dir ? 'folder' : 'file', cardX + 12, rowY);
+        this.ctx.fillStyle = '#0f172a';
+        const childName = this.truncateCanvasText(child.name || 'Item', cardWidth - 82);
+        this.ctx.fillText(childName, cardX + 58, rowY);
+        rowY += 22;
+      });
+
+      if (moreCount > 0) {
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = '10px system-ui';
+        this.ctx.fillText(`+ ${moreCount} more`, cardX + 12, rowY);
+      }
+    });
+  }
+
+  truncateCanvasText(value, maxWidth) {
+    let text = String(value || '').trim();
+    if (!text) return '';
+    if (this.ctx.measureText(text).width <= maxWidth) {
+      return text;
+    }
+
+    while (text.length > 1 && this.ctx.measureText(`${text}...`).width > maxWidth) {
+      text = text.slice(0, -1);
+    }
+    return `${text}...`;
   }
 
   /**

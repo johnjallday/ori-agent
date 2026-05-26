@@ -509,10 +509,10 @@
         </button>
         <div class="hub-panel-header">
           <div>
-            <h2 class="hub-panel-title">Directories</h2>
+            <h2 class="hub-panel-title">Linked Folders</h2>
           </div>
           <div class="hub-panel-actions">
-            <button id="hubAddDirectoryPanelBtn" class="modern-btn modern-btn-primary hub-panel-btn" type="button" title="Add directory">
+            <button id="hubAddDirectoryPanelBtn" class="modern-btn modern-btn-primary hub-panel-btn" type="button" title="Add linked folder">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
               </svg>
@@ -521,7 +521,7 @@
         </div>
         <div class="hub-panel-body">
           <div id="hubDirectoriesList" class="hub-directory-list">
-            <div class="hub-empty">No directories yet.</div>
+            <div class="hub-empty">No linked folders yet.</div>
           </div>
         </div>
       </div>
@@ -731,6 +731,16 @@
               <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Selected Files</label>
               <div id="hubSelectedFilesList" class="hub-selected-files-list"></div>
             </div>
+            <div class="mb-3">
+              <label for="hubFileFolderSelect" class="form-label" style="color: var(--text-primary); font-weight: 500;">Destination folder</label>
+              <div class="d-flex gap-2">
+                <select id="hubFileFolderSelect" class="form-select">
+                  <option value="">Workspace files</option>
+                </select>
+                <button type="button" id="hubCreateUploadFolderBtn" class="btn btn-outline-secondary">New Folder</button>
+              </div>
+              <small class="text-muted">Choose where the uploaded file will be stored.</small>
+            </div>
             <!-- Title -->
             <div class="mb-3">
               <label for="hubFileTitle" class="form-label" style="color: var(--text-primary); font-weight: 500;">Title (optional)</label>
@@ -742,6 +752,7 @@
               <label for="hubFileNotes" class="form-label" style="color: var(--text-primary); font-weight: 500;">Notes (optional)</label>
               <textarea class="form-control" id="hubFileNotes" rows="2" placeholder="Add notes or description..."></textarea>
             </div>
+            <input type="hidden" id="hubFileFolderPath" value="">
           </form>
           <!-- Upload Progress -->
           <div id="hubFileUploadProgress" class="hub-file-upload-progress" style="display: none;">
