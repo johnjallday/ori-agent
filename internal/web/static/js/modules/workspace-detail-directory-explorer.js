@@ -142,6 +142,17 @@ export class WorkspaceDirectoryExplorer {
         return;
       }
 
+      const locateButton = event.target.closest('[data-action="locate-orphan"]');
+      if (locateButton) {
+        event.preventDefault();
+        const selectedNode = this.getSelectedNode();
+        const targetPath = this.decodeDataPath(locateButton.dataset.path);
+        if (selectedNode?.attachmentId && targetPath) {
+          void this.locateMissingFile(selectedNode.attachmentId, targetPath);
+        }
+        return;
+      }
+
       const entryButton = event.target.closest('[data-action="select-node"]');
       if (!entryButton) return;
       const path = this.decodeDataPath(entryButton.dataset.path);
@@ -331,7 +342,8 @@ export class WorkspaceDirectoryExplorer {
             path: normalizedPath,
             isDir: Boolean(item?.is_dir),
             size: Number(item?.size) || 0,
-            modTime: item?.mod_time || ''
+            modTime: item?.mod_time || '',
+            status: item?.status || ''
           };
         })
         .filter(Boolean);
@@ -477,6 +489,7 @@ export class WorkspaceDirectoryExplorer {
         folderId: entry.folderId || '',
         source: entry.source || this.source,
         url: entry.url || '',
+        status: entry.status || '',
         children: null
       };
       parentNode.children.push(fileNode);
@@ -681,12 +694,15 @@ export class WorkspaceDirectoryExplorer {
     const isExpanded =
       isDirectory && (forceExpanded || this.expandedPaths.has(node.path));
     const isSelected = this.selectedPath === node.path;
+    const isMissing = !isDirectory && node.status === 'missing';
     const sizeText =
       !isDirectory && Number.isFinite(node.size) ? this.host.formatFileSize(node.size) : '';
     const modifiedText = node.modTime ? formatDate(node.modTime) : '';
     const metaText = isDirectory
       ? `${(node.children || []).length} item${(node.children || []).length === 1 ? '' : 's'}`
-      : [sizeText, modifiedText].filter(Boolean).join(' · ');
+      : isMissing
+        ? 'Missing'
+        : [sizeText, modifiedText].filter(Boolean).join(' · ');
 
     const icon = isDirectory
       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>'
@@ -712,13 +728,13 @@ export class WorkspaceDirectoryExplorer {
         : '';
 
     const isDraggableFile =
-      this.source === 'owned' && !isDirectory && Boolean(node.attachmentId);
+      this.source === 'owned' && !isDirectory && !isMissing && Boolean(node.attachmentId);
     const dragAttrs = isDraggableFile
       ? ` draggable="true" data-attachment-id="${this.encodeDataPath(node.attachmentId)}"`
       : '';
 
     return `
-      <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''}">
+      <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''} ${isMissing ? 'is-missing' : ''}">
         <div class="workspace-directory-tree-row" style="--tree-depth:${depth};">
           ${toggleButton}
           <button type="button"
@@ -1180,7 +1196,104 @@ export class WorkspaceDirectoryExplorer {
       return;
     }
 
+    if (node.status === 'missing') {
+      this.renderMissingFilePreview(node);
+      return;
+    }
+
     void this.renderFilePreview(node);
+  }
+
+  // renderMissingFilePreview shows the DAW-style "missing → locate" state for an
+  // attachment whose backing file is gone from disk and could not be matched to a
+  // rename automatically. It offers to re-link the attachment to an unlinked file
+  // ("orphan") that exists in this workspace.
+  renderMissingFilePreview(node) {
+    const previewEl = this.host.elements.directoryExplorerPreview;
+    if (!previewEl) return;
+
+    const orphans = this.getOrphanCandidates();
+    const canLocate = this.source === 'owned' && Boolean(node.attachmentId);
+
+    const orphanList = !canLocate
+      ? ''
+      : orphans.length === 0
+        ? '<div class="workspace-directory-preview-empty-inline">No unlinked files were found in this workspace to relink to. Re-add the file to restore it.</div>'
+        : `
+          <div class="workspace-directory-preview-note">Link this entry to a file that appeared in the workspace:</div>
+          <div class="workspace-directory-preview-directory-list">
+            ${orphans
+              .map(
+                orphan => `
+              <button type="button"
+                      class="workspace-directory-preview-entry"
+                      data-action="locate-orphan"
+                      data-path="${this.encodeDataPath(orphan.path)}">
+                <span>${this.host.escapeHtml(orphan.name)}</span>
+                <span>${this.host.escapeHtml(this.host.formatFileSize(orphan.size || 0))}</span>
+              </button>
+            `
+              )
+              .join('')}
+          </div>
+        `;
+
+    previewEl.innerHTML = `
+      <div class="workspace-directory-preview-header">
+        <div class="workspace-directory-preview-title">${this.host.escapeHtml(node.name || 'File')}</div>
+        <div class="workspace-directory-preview-subtitle">${this.host.escapeHtml(node.path || '')}</div>
+      </div>
+      <div class="workspace-directory-preview-stats">
+        <span class="workspace-directory-pill is-missing">Missing from disk</span>
+      </div>
+      <div class="workspace-directory-preview-empty-inline">
+        This file is no longer on disk. It may have been renamed, moved, or deleted outside the app.
+      </div>
+      ${orphanList}
+    `;
+  }
+
+  // getOrphanCandidates returns workspace files present on disk that no attachment
+  // owns yet — the candidates for relinking a missing attachment.
+  getOrphanCandidates() {
+    return (this.files || [])
+      .filter(entry => !entry.isDir && !entry.attachmentId && entry.status !== 'missing')
+      .sort((a, b) =>
+        String(a.path || '').localeCompare(String(b.path || ''), undefined, {
+          sensitivity: 'base',
+          numeric: true
+        })
+      );
+  }
+
+  async locateMissingFile(attachmentId, relativePath) {
+    if (this.source !== 'owned' || !attachmentId) return;
+
+    const targetPath = this.normalizeRelativePath(relativePath);
+    if (!targetPath) return;
+
+    try {
+      const payload = await this.requestWorkspaceJSON(
+        `/attachments/${encodeURIComponent(attachmentId)}/locate`,
+        {
+          method: 'PATCH',
+          body: { relative_path: targetPath }
+        }
+      );
+      const nextPath = this.normalizeRelativePath(
+        payload?.attachment?.file_meta?.relative_path ||
+          payload?.attachment?.file?.relative_path ||
+          targetPath
+      );
+      this.selectedPath = nextPath;
+      this.selectedType = 'file';
+      this.ensureAncestorsExpanded(nextPath, 'file');
+      await this.refreshOwnedTree();
+      if (window.Toast) window.Toast.success('File relinked');
+    } catch (error) {
+      console.error('Failed to locate workspace file:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to relink file');
+    }
   }
 
   renderFolderPreview(node) {

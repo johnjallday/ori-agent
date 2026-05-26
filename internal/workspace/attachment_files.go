@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/url"
@@ -8,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -98,6 +101,8 @@ type storedWorkspaceFile struct {
 	RelativePath string
 	Size         int64
 	MimeType     string
+	Checksum     string
+	ModTime      time.Time
 }
 
 func HydrateAttachment(attachment Attachment, resolver AttachmentFilePathResolver) Attachment {
@@ -136,12 +141,14 @@ func sanitizeAttachmentFileMeta(workspaceID string, meta *AttachmentFileMeta) *A
 	}
 
 	clean := &AttachmentFileMeta{
-		Name:         strings.TrimSpace(meta.Name),
-		Size:         meta.Size,
-		Mime:         strings.TrimSpace(meta.Mime),
-		URL:          strings.TrimSpace(meta.URL),
-		RelativePath: sanitizeWorkspaceRelativePath(meta.RelativePath),
-		OriginalPath: strings.TrimSpace(meta.OriginalPath),
+		Name:            strings.TrimSpace(meta.Name),
+		Size:            meta.Size,
+		Mime:            strings.TrimSpace(meta.Mime),
+		URL:             strings.TrimSpace(meta.URL),
+		RelativePath:    sanitizeWorkspaceRelativePath(meta.RelativePath),
+		OriginalPath:    strings.TrimSpace(meta.OriginalPath),
+		Checksum:        strings.TrimSpace(meta.Checksum),
+		ChecksumModTime: meta.ChecksumModTime,
 	}
 
 	if clean.RelativePath == "" {
@@ -169,12 +176,14 @@ func sanitizeAttachmentFileMeta(workspaceID string, meta *AttachmentFileMeta) *A
 
 func buildWorkspaceOwnedAttachmentFileMeta(workspaceID string, file storedWorkspaceFile, originalPath string) *AttachmentFileMeta {
 	return &AttachmentFileMeta{
-		Name:         file.Name,
-		Size:         file.Size,
-		Mime:         file.MimeType,
-		URL:          workspaceFileURL(workspaceID, file.RelativePath),
-		RelativePath: sanitizeWorkspaceRelativePath(file.RelativePath),
-		OriginalPath: strings.TrimSpace(originalPath),
+		Name:            file.Name,
+		Size:            file.Size,
+		Mime:            file.MimeType,
+		URL:             workspaceFileURL(workspaceID, file.RelativePath),
+		RelativePath:    sanitizeWorkspaceRelativePath(file.RelativePath),
+		OriginalPath:    strings.TrimSpace(originalPath),
+		Checksum:        file.Checksum,
+		ChecksumModTime: file.ModTime,
 	}
 }
 
@@ -212,18 +221,61 @@ func storeWorkspaceFile(filesPath string, reader io.Reader, filename string, fol
 	}
 	defer func() { _ = destFile.Close() }()
 
-	written, err := io.Copy(destFile, reader)
+	// Hash while streaming to disk so we get a content fingerprint without a
+	// second read pass. The checksum lets us re-identify this file if it is
+	// renamed or moved outside the app.
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(destFile, hasher), reader)
 	if err != nil {
 		_ = os.Remove(destPath)
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	return &storedWorkspaceFile{
+	stored := &storedWorkspaceFile{
 		Name:         filename,
 		RelativePath: cleanRelativePath,
 		Size:         written,
 		MimeType:     detectMimeType(filename),
-	}, nil
+		Checksum:     hex.EncodeToString(hasher.Sum(nil)),
+	}
+	if info, statErr := os.Stat(destPath); statErr == nil {
+		stored.ModTime = info.ModTime()
+	}
+	return stored, nil
+}
+
+// hashFileSHA256 returns the hex SHA-256 of the file at absPath along with its
+// mod time and size, in a single read pass.
+func hashFileSHA256(absPath string) (sum string, modTime time.Time, size int64, err error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return "", time.Time{}, 0, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", time.Time{}, 0, err
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", time.Time{}, 0, err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), info.ModTime(), info.Size(), nil
+}
+
+// checksumFresh reports whether meta's cached checksum still describes the
+// on-disk file: it is valid only when both size and mod time are unchanged
+// since the hash was taken. A missing checksum is never fresh.
+func checksumFresh(meta *AttachmentFileMeta, info os.FileInfo) bool {
+	if meta == nil || info == nil || meta.Checksum == "" {
+		return false
+	}
+	if meta.Size != info.Size() {
+		return false
+	}
+	return meta.ChecksumModTime.Equal(info.ModTime())
 }
 
 func removeWorkspaceOwnedAttachmentFile(resolver AttachmentFilePathResolver, workspaceID string, meta *AttachmentFileMeta, keepRelativePath string) {

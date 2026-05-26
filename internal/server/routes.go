@@ -790,6 +790,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 			s.Handlers.Workspace.RestoreFromTrash(w, r)
 		} else if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.RelinkAttachmentFile(w, r)
+		} else if strings.HasSuffix(path, "/locate") && r.Method == http.MethodPatch {
+			s.Handlers.Workspace.LocateAttachmentFile(w, r)
 		} else if strings.HasSuffix(path, "/move") && r.Method == http.MethodPatch {
 			s.Handlers.Workspace.MoveAttachmentFile(w, r)
 		} else if strings.HasSuffix(path, "/bulk-trash") && r.Method == http.MethodPost {

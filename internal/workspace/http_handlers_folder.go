@@ -23,6 +23,10 @@ type moveAttachmentFileRequest struct {
 	FolderPath   string `json:"folder_path"`
 }
 
+type locateAttachmentFileRequest struct {
+	RelativePath string `json:"relative_path"`
+}
+
 func (h *HTTPHandler) CreateWorkspaceFolder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -315,21 +319,76 @@ func (h *HTTPHandler) GetWorkspaceFilesTree(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+
+	unlock := h.store.Lock(workspaceID)
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
+		unlock()
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	files, err := buildWorkspaceFileTree(ws, h.store.GetFilesPath(workspaceID))
+	filesPath := h.store.GetFilesPath(workspaceID)
+
+	// Reconcile attachment metadata with what is actually on disk before building
+	// the tree, so files renamed/moved outside the app are re-bound (and genuine
+	// deletions flagged). Failures here are non-fatal: fall back to current state.
+	changed, syncEvents, syncErr := reconcileWorkspaceFiles(ws, filesPath)
+	if syncErr != nil {
+		logger.Warn("Workspace file reconcile failed", logger.Fields{
+			"workspace_id": workspaceID,
+			"error":        syncErr,
+		})
+	} else if changed {
+		if saveErr := h.store.Save(ws); saveErr != nil {
+			logger.Error("Failed to save workspace after file reconcile", logger.Fields{
+				"workspace_id": workspaceID,
+				"error":        saveErr,
+			})
+		}
+	}
+
+	files, err := buildWorkspaceFileTree(ws, filesPath)
 	if err != nil {
+		unlock()
 		orihttp.InternalError(w, fmt.Sprintf("Failed to build file tree: %v", err))
 		return
 	}
+	unlock()
+
+	h.publishFileSyncEvents(workspaceID, syncEvents)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"files":     files,
 		"workspace": workspaceID,
 	})
+}
+
+// publishFileSyncEvents emits a "file.moved" event for each attachment that
+// reconciliation re-bound to a new on-disk path, mirroring the manual move flow
+// so live UI clients refresh.
+func (h *HTTPHandler) publishFileSyncEvents(workspaceID string, events []fileSyncEvent) {
+	if h.eventBus == nil || len(events) == 0 {
+		return
+	}
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		return
+	}
+	for _, ev := range events {
+		for i := range ws.Attachments {
+			if ws.Attachments[i].ID != ev.attachmentID {
+				continue
+			}
+			h.publishWorkspaceFolderEvent(workspaceID, "file.moved", map[string]any{
+				"attachment": HydrateAttachment(ws.Attachments[i], h.store),
+				"old_path":   ev.oldPath,
+				"new_path":   ev.newPath,
+				"reason":     "external_sync",
+			})
+			break
+		}
+	}
 }
 
 func (h *HTTPHandler) MoveAttachmentFile(w http.ResponseWriter, r *http.Request) {
@@ -458,10 +517,127 @@ func (h *HTTPHandler) MoveAttachmentFile(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// LocateAttachmentFile handles PATCH /api/workspaces/:id/attachments/:attachment_id/locate
+//
+// It re-points a "missing" attachment at an existing on-disk file already inside
+// the workspace files folder (typically an orphan whose content changed after a
+// rename, so checksum reconciliation could not match it automatically). This is
+// the DAW-style "Locate" action: unlike MoveAttachmentFile it does not move the
+// file, and unlike RelinkAttachmentFile it does not upload a replacement — it
+// adopts the file the user points to. JSON body: { "relative_path": "..." }.
+func (h *HTTPHandler) LocateAttachmentFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	workspaceID, attachmentID, ok := attachmentRouteParts(w, r)
+	if !ok {
+		return
+	}
+	var req locateAttachmentFileRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	unlock := h.store.Lock(workspaceID)
+	defer unlock()
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	attachmentIdx := -1
+	for i := range ws.Attachments {
+		if ws.Attachments[i].ID == attachmentID {
+			attachmentIdx = i
+			break
+		}
+	}
+	if attachmentIdx < 0 {
+		orihttp.NotFound(w, "Attachment not found")
+		return
+	}
+	attachment := &ws.Attachments[attachmentIdx]
+	if attachment.File == nil {
+		orihttp.BadRequest(w, "Attachment does not reference a workspace file")
+		return
+	}
+
+	filesPath := h.store.GetFilesPath(workspaceID)
+	targetAbs, cleanTarget, err := workspaceFilePathWithinRoot(filesPath, req.RelativePath)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	info, err := os.Stat(targetAbs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			orihttp.NotFound(w, "Target file not found")
+			return
+		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to inspect target file: %v", err))
+		return
+	}
+	if info.IsDir() {
+		orihttp.BadRequest(w, "Target path is a directory")
+		return
+	}
+
+	// Reject linking to a file another active attachment already owns.
+	for i := range ws.Attachments {
+		if i == attachmentIdx || ws.Attachments[i].DeletedAt != nil || ws.Attachments[i].File == nil {
+			continue
+		}
+		if extractAttachmentRelativePath(workspaceID, ws.Attachments[i].File) == cleanTarget {
+			orihttp.Conflict(w, "Another attachment already references that file")
+			return
+		}
+	}
+
+	oldRelativePath := extractAttachmentRelativePath(workspaceID, attachment.File)
+	sum, modTime, size, err := hashFileSHA256(targetAbs)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to read target file: %v", err))
+		return
+	}
+
+	attachment.File.RelativePath = cleanTarget
+	attachment.File.Name = filepath.Base(cleanTarget)
+	attachment.File.URL = workspaceFileURL(workspaceID, cleanTarget)
+	attachment.File.Size = size
+	attachment.File.Checksum = sum
+	attachment.File.ChecksumModTime = modTime
+	attachment.File.Status = ""
+	attachment.UpdatedAt = time.Now()
+	ws.UpdatedAt = attachment.UpdatedAt
+
+	if err := h.store.Save(ws); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
+		return
+	}
+
+	hydrated := HydrateAttachment(*attachment, h.store)
+	h.publishWorkspaceFolderEvent(workspaceID, "file.moved", map[string]any{
+		"attachment": hydrated,
+		"old_path":   oldRelativePath,
+		"new_path":   cleanTarget,
+		"reason":     "locate",
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message":    "Attachment file located successfully",
+		"attachment": hydrated,
+		"workspace":  workspaceID,
+	})
+}
+
 func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error) {
 	items := make(map[string]FileInfo)
 	managedFolders := make(map[string]WorkspaceFolder)
 	trashedAttachmentPaths := make(map[string]bool)
+	diskFilePaths := make(map[string]bool)
 	for _, attachment := range ws.Attachments {
 		if attachment.DeletedAt == nil || attachment.File == nil {
 			continue
@@ -542,6 +718,7 @@ func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error)
 				}
 			} else {
 				fileInfo.URL = workspaceFileURL(ws.ID, clean)
+				diskFilePaths[clean] = true
 			}
 			items[clean] = mergeWorkspaceFileInfo(items[clean], fileInfo)
 			return nil
@@ -574,6 +751,11 @@ func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error)
 		info.Size = attachment.File.Size
 		info.IsDir = false
 		info.DeletedAt = attachment.DeletedAt
+		// Flag attachments whose backing file is absent on disk so the UI can
+		// offer a Locate action instead of rendering a broken entry.
+		if !diskFilePaths[relativePath] {
+			info.Status = string(AttachmentFileStatusMissing)
+		}
 		items[relativePath] = info
 	}
 

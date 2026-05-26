@@ -181,6 +181,12 @@ type AttachmentFileMeta struct {
 	RelativePath string `json:"relative_path,omitempty"`
 	OriginalPath string `json:"original_path,omitempty"`
 	Status       string `json:"status,omitempty"`
+	// Checksum is the SHA-256 (hex) of the on-disk file, used to re-identify a
+	// workspace-owned file after it is renamed or moved outside the app. It is
+	// cached against ChecksumModTime: the hash is only recomputed when the file's
+	// mod time (or size) changes. Empty for legacy attachments until backfilled.
+	Checksum        string    `json:"checksum,omitempty"`
+	ChecksumModTime time.Time `json:"checksum_mod_time,omitempty"`
 }
 
 // Attachment represents a note/file/link pinned to the workspace canvas
@@ -734,6 +740,7 @@ type FileInfo struct {
 	IsDir        bool       `json:"is_dir"`                  // True if this is a directory
 	ModTime      time.Time  `json:"mod_time"`                // Last modification time
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`    // Soft-delete timestamp when the item is trashed
+	Status       string     `json:"status,omitempty"`        // e.g. "missing" when an attachment's file is absent on disk
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace
