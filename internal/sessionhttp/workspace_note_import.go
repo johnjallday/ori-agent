@@ -76,11 +76,21 @@ func (h *Handler) importWorkspaceNoteFiles(ctx context.Context, workspaceID stri
 
 		if existing, err := h.store.GetNote(ctx, note.ID); err == nil {
 			if existing.WorkspaceID == workspaceID {
+				if synced, err := h.syncImportedNoteIfChanged(ctx, existing, note, path); err != nil {
+					return imported, err
+				} else if synced {
+					imported++
+				}
 				continue
 			}
 			note.ID = importedNoteStableID(workspaceID, entry.Name())
 			if existing, err := h.store.GetNote(ctx, note.ID); err == nil {
 				if existing.WorkspaceID == workspaceID {
+					if synced, err := h.syncImportedNoteIfChanged(ctx, existing, note, path); err != nil {
+						return imported, err
+					} else if synced {
+						imported++
+					}
 					continue
 				}
 				return imported, fmt.Errorf("fallback note id %s already belongs to workspace %s", note.ID, existing.WorkspaceID)
@@ -105,6 +115,58 @@ func (h *Handler) importWorkspaceNoteFiles(ctx context.Context, workspaceID stri
 	}
 
 	return imported, nil
+}
+
+// syncImportedNoteIfChanged refreshes a DB note when its on-disk markdown file
+// has been edited outside the app. The DB is the source of truth, but external
+// edits to the note file (e.g. in an editor or Obsidian) are pulled back in so
+// the app stops serving stale cached content. Returns true if a write occurred.
+//
+// Change detection is content/name based, not timestamp based: an external
+// editor changes the body but leaves the frontmatter timestamp untouched, so a
+// timestamp comparison would miss the edit. VaultRef and CreatedAt on the
+// existing note are preserved; UpdatedAt is bumped to the file's mod time.
+func (h *Handler) syncImportedNoteIfChanged(ctx context.Context, existing, parsed *session.WorkspaceNote, path string) (bool, error) {
+	if !importedNoteDiffers(existing, parsed) {
+		return false, nil
+	}
+
+	existing.Name = parsed.Name
+	existing.Content = parsed.Content
+	existing.UpdatedAt = noteFileModTime(path, time.Now())
+
+	if err := h.store.UpdateNote(ctx, existing); err != nil {
+		return false, fmt.Errorf("sync edited note %s: %w", existing.ID, err)
+	}
+
+	logger.Info("Synced externally edited note from file", logger.Fields{
+		"note_id":      existing.ID,
+		"workspace_id": existing.WorkspaceID,
+		"path":         path,
+	})
+	return true, nil
+}
+
+// importedNoteDiffers reports whether the parsed file diverges from the stored
+// note. Trailing newline differences are ignored because SyncNoteFile appends a
+// trailing newline when writing notes to disk; without this the first sync of
+// every note would be a spurious no-op write.
+func importedNoteDiffers(existing, parsed *session.WorkspaceNote) bool {
+	if existing.Name != parsed.Name {
+		return true
+	}
+	return normalizeImportedNoteContent(existing.Content) != normalizeImportedNoteContent(parsed.Content)
+}
+
+func normalizeImportedNoteContent(content string) string {
+	return strings.TrimRight(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+}
+
+func noteFileModTime(path string, fallback time.Time) time.Time {
+	if info, err := os.Stat(path); err == nil && !info.ModTime().IsZero() {
+		return info.ModTime()
+	}
+	return fallback
 }
 
 func parseImportedWorkspaceNoteFile(workspaceID, path, filename string) (*session.WorkspaceNote, error) {

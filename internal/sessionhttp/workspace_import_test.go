@@ -510,6 +510,87 @@ func TestListWorkspaceNotesHydratesExistingNoteFiles(t *testing.T) {
 	}
 }
 
+func TestListWorkspaceNotesSyncsExternallyEditedFiles(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	storeDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	workspaceID := createTestWorkspace(t, handler, "Edit Sync")
+	folderPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 8, 13, 45, 0, 0, time.UTC)
+	noteID := "1f2e3d4c-5b6a-7980-a1b2-c3d4e5f60718"
+	notePath := filepath.Join(folderPath, agentworkspace.NotesDir, agentworkspace.NoteFilename("Roadmap", noteID))
+	writeNoteFile := func(body string) {
+		markdown := "---\n" +
+			"id: \"" + noteID + "\"\n" +
+			"name: \"Roadmap\"\n" +
+			"created_at: \"" + createdAt.Format(time.RFC3339) + "\"\n" +
+			"updated_at: \"" + createdAt.Format(time.RFC3339) + "\"\n" +
+			"---\n\n" + body
+		if err := os.WriteFile(notePath, []byte(markdown), 0644); err != nil {
+			t.Fatalf("write note file: %v", err)
+		}
+	}
+
+	// First hydration imports the note into the DB.
+	writeNoteFile("# Roadmap\n\nFirst draft.\n")
+	if _, err := handler.importWorkspaceNoteFilesForWorkspace(context.Background(), workspaceID); err != nil {
+		t.Fatalf("import (create): %v", err)
+	}
+	note, err := handler.store.GetNote(context.Background(), noteID)
+	if err != nil {
+		t.Fatalf("GetNote after import: %v", err)
+	}
+	if note.Content != "# Roadmap\n\nFirst draft.\n" {
+		t.Fatalf("unexpected imported content %q", note.Content)
+	}
+
+	// Re-hydrating without changes must not rewrite the note (no spurious churn).
+	importedUpdatedAt := note.UpdatedAt
+	if _, err := handler.importWorkspaceNoteFilesForWorkspace(context.Background(), workspaceID); err != nil {
+		t.Fatalf("import (unchanged): %v", err)
+	}
+	note, err = handler.store.GetNote(context.Background(), noteID)
+	if err != nil {
+		t.Fatalf("GetNote after no-op import: %v", err)
+	}
+	if !note.UpdatedAt.Equal(importedUpdatedAt) {
+		t.Fatalf("expected unchanged note to keep updated_at %s, got %s", importedUpdatedAt, note.UpdatedAt)
+	}
+
+	// Edit the note file outside the app, then re-hydrate.
+	editedAt := createdAt.Add(time.Hour)
+	writeNoteFile("# Roadmap\n\nSecond draft with new content.\n")
+	if err := os.Chtimes(notePath, editedAt, editedAt); err != nil {
+		t.Fatalf("set note mod time: %v", err)
+	}
+	if _, err := handler.importWorkspaceNoteFilesForWorkspace(context.Background(), workspaceID); err != nil {
+		t.Fatalf("import (edited): %v", err)
+	}
+
+	note, err = handler.store.GetNote(context.Background(), noteID)
+	if err != nil {
+		t.Fatalf("GetNote after edit: %v", err)
+	}
+	if note.Content != "# Roadmap\n\nSecond draft with new content.\n" {
+		t.Fatalf("expected externally edited content to sync, got %q", note.Content)
+	}
+	if !note.UpdatedAt.Equal(editedAt) {
+		t.Fatalf("expected updated_at to track file mod time %s, got %s", editedAt, note.UpdatedAt)
+	}
+}
+
 func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
