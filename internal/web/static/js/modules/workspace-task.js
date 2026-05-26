@@ -834,6 +834,7 @@ export class WorkspaceTaskPage {
     this.columnDesignerModalOpen = false;
     this.columnModalOverlay = null;
     this.columnModalBody = null;
+    this.suggestionPreviewOpen = false;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
     this.resultPromotionPending = false;
@@ -4646,8 +4647,10 @@ export class WorkspaceTaskPage {
     // When the column-designer modal is open, the designer lives in the modal
     // body — re-render there and rebind, leaving the inline card untouched.
     if (this.columnDesignerModalOpen && this.columnModalBody) {
-      this.columnModalBody.innerHTML = this.renderResultContractBlock();
+      this.columnModalBody.innerHTML = this.renderResultContractBlock() + this.renderSuggestionInputsPreview();
       this.bindAutomationColumnsActions(this.columnModalBody);
+      const preview = this.columnModalBody.querySelector('.workspace-task-suggestion-preview');
+      preview?.addEventListener('toggle', () => { this.suggestionPreviewOpen = preview.open; });
       return;
     }
     if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
@@ -4684,6 +4687,45 @@ export class WorkspaceTaskPage {
   // so the next run returns structured JSON in the designed shape.
   designOutputColumnsFromResult() {
     this.openColumnDesignerModal({ suggest: this.getResultContractColumns().length === 0 });
+  }
+
+  // renderSuggestionInputsPreview renders a collapsed "What the assistant sees"
+  // disclosure for the modal so users can inspect the inputs feeding the column
+  // suggestion (including while it's running). The task/details/schedule/sample
+  // are exactly what the request sends; the instruction line is a faithful
+  // summary of the backend system prompt (kept short to avoid drift).
+  renderSuggestionInputsPreview() {
+    const owner = this.getTaskResultStorageTask();
+    const title = String(this.task?.description || owner?.description || '').trim();
+    const details = String(this.task?.details || '').trim();
+    const sample = String(this.getResultSampleForSuggestion() || '').trim();
+    const recent = this.getRecentExecutionSamplesForSuggestion() || [];
+    const scheduleEnabled = Boolean(owner?.schedule_enabled || this.task?.schedule_enabled);
+    const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
+    const busy = Boolean(this.resultContractSuggesting);
+
+    const instruction = 'Asks the assistant to propose 3–8 practical CSV columns (with a JSON schema and field→column mappings) this task can produce every run, grounded in the inputs below. Run metadata (run_id, executed_at, status, duration_ms) is added automatically.';
+
+    const line = (label, value) => value
+      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
+      : '';
+
+    const sampleBlock = sample
+      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Sample result</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(sample)}</pre></div>`
+      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Sample result</span><span>None captured — the assistant will rely on the task title and details.</span></div>`;
+
+    return `
+      <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
+        <summary>What the assistant sees${busy ? ' <span class="workspace-task-suggestion-busy">· suggesting…</span>' : ''}</summary>
+        <div class="workspace-task-suggestion-preview-body">
+          <p class="workspace-task-suggestion-instruction">${this.escapeHtml(instruction)}</p>
+          ${line('Task', title)}
+          ${line('Details', details)}
+          ${scheduleEnabled ? line('Schedule', scheduleName || 'enabled') : ''}
+          ${sampleBlock}
+          ${recent.length ? line('Recent runs sampled', String(recent.length)) : ''}
+        </div>
+      </details>`;
   }
 
   // _designerRoot returns the DOM container the column designer currently

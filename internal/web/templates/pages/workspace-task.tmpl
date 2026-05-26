@@ -1960,6 +1960,72 @@
       overflow-y: auto;
     }
 
+    /* "What the assistant sees" prompt-input preview in the modal. */
+    .workspace-task-suggestion-preview {
+      margin-top: 1rem;
+      border-top: 1px solid var(--border-color);
+      padding-top: 0.6rem;
+    }
+
+    .workspace-task-suggestion-preview > summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      user-select: none;
+    }
+
+    .workspace-task-suggestion-preview > summary:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-suggestion-busy {
+      color: var(--primary-color, #4ade80);
+      font-weight: 500;
+    }
+
+    .workspace-task-suggestion-preview-body {
+      margin-top: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .workspace-task-suggestion-instruction {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-suggestion-input {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      font-size: 0.82rem;
+    }
+
+    .workspace-task-suggestion-input-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-suggestion-sample {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      max-height: 180px;
+      overflow: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.76rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     .workspace-task-automation-summary {
       margin-top: 0.85rem;
       font-size: 0.9rem;
