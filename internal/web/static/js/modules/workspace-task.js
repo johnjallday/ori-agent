@@ -5198,10 +5198,50 @@ export class WorkspaceTaskPage {
         }));
     }
 
+    // Try to parse a "Label: value" list (e.g. markdown bullets) out of the
+    // result so a plain-text result still yields meaningful fields without the
+    // assistant. Falls back to date+summary only when nothing parseable.
+    const parsed = this.parseFieldsFromResultText(this.getResultSampleForSuggestion());
+    if (parsed.length > 0) return parsed;
+
     return [
       { name: 'date', type: 'date', required: true, description: 'Run date' },
       { name: 'summary', type: 'string', required: true, description: 'Short result summary' },
     ];
+  }
+
+  // parseFieldsFromResultText extracts up to 8 fields from "Label: value" lines
+  // in a result (bullets like "- Today's pollen index: 10.5" included), turning
+  // each label into a slug field with a best-guess type. Lines that are URLs,
+  // questions, or have no value are skipped.
+  parseFieldsFromResultText(text) {
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    const fields = [];
+    const seen = new Set();
+    for (const raw of lines) {
+      // Strip leading list markers ("-", "*", "•", digits) and whitespace.
+      const line = raw.replace(/^\s*[-*•\d.)]+\s*/, '').trim();
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const label = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (!value || /^https?:\/\//i.test(value) || label.length > 40 || label.endsWith('?')) continue;
+      // Slugify the label into a field name.
+      const slug = label
+        .toLowerCase()
+        .replace(/['’]/g, '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      if (!slug || slug === 'page' || slug === 'source_url' || seen.has(slug)) continue;
+      seen.add(slug);
+      let type = 'string';
+      if (/^\d{4}-\d{2}-\d{2}/.test(value)) type = 'date';
+      else if (/^-?\d+(\.\d+)?$/.test(value)) type = 'number';
+      fields.push({ name: slug, type, required: false, description: `Parsed from "${label}"` });
+      if (fields.length >= 8) break;
+    }
+    return fields;
   }
 
   inferResultContractColumnType(columnName, rows = []) {
