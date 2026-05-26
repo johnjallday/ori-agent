@@ -703,7 +703,9 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
 	if appendCSV {
-		filename = fmt.Sprintf("%s.%s", sanitized, ext)
+		// Honors a user-set storage.FileName; otherwise derives from the
+		// task description.
+		filename = AppendCSVFileName(task, storage)
 	}
 
 	// Prepare data for storage
@@ -763,6 +765,18 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 			storeNodeCopy.Format = "csv"
 			payload, err := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, dataToStore)
 			if err != nil {
+				// Lever B: reproject into the store file's existing columns and
+				// retry once before holding the run for manual review. Only
+				// reconcile fallback rows (contractCSV == ""); a designed
+				// contract's mismatch stays a hard review.
+				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
+					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, reCSV); retryErr == nil {
+						payload = rePayload
+						err = nil
+					}
+				}
+			}
+			if err != nil {
 				if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
 					return
 				}
@@ -820,14 +834,22 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	// Otherwise use file path (or default output directory)
 	filePath := storage.FilePath
 	if filePath == "" {
-		// Default to workspace output directory: ~/Documents/Ori/outputs/<workspace-name>/
-		baseOutputDir, err := platform.GetDefaultOutputDir()
-		if err != nil {
-			// Fallback to relative path if home dir lookup fails
-			baseOutputDir = "outputs"
-			logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+		// Default to the workspace's own folder: <workspace>/outputs/
+		baseOutputDir := ""
+		if workspaceStore != nil {
+			baseOutputDir = workspaceStore.GetOutputsPath(ws.ID)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, filename)
+		if baseOutputDir == "" {
+			// Fallback to the global output directory if the workspace folder
+			// can't be resolved (e.g. in-memory stores during tests).
+			fallback, err := platform.GetDefaultOutputDir()
+			if err != nil {
+				fallback = "outputs"
+				logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
+		}
+		filePath = filepath.Join(baseOutputDir, filename)
 	} else {
 		// If user specified a directory-like path, append filename
 		if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
@@ -848,6 +870,23 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	if appendCSV {
 		if err := AppendCSVToFileStrict(filePath, dataToStore); err != nil {
+			// Lever B: when the row doesn't match the destination's existing
+			// header, reproject into those columns and retry once before
+			// holding the run for manual review. Only reconcile fallback rows
+			// (contractCSV == ""); a designed contract's mismatch stays a hard
+			// review so we don't discard the user's chosen columns.
+			if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
+				if retryErr := AppendCSVToFileStrict(filePath, reCSV); retryErr == nil {
+					logger.Info("Task result reprojected to destination columns and appended", logger.Fields{
+						"task_id":   task.ID,
+						"file_path": filePath,
+					})
+					validation.StorageStatus = TaskStorageAppended
+					validation.Errors = nil
+					recordTaskStorageValidation(ws, task, workspaceStore, validation)
+					return
+				}
+			}
 			if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
 				return
 			}

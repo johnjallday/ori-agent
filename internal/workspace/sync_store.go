@@ -84,6 +84,15 @@ func (s *SyncStore) GetFilesPath(workspaceID string) string {
 	return s.primary.GetFilesPath(workspaceID)
 }
 
+// GetOutputsPath returns the outputs path from the FileStore so auto-saved
+// task results go to the correct workspace folder on disk.
+func (s *SyncStore) GetOutputsPath(workspaceID string) string {
+	if s.fileSync != nil {
+		return s.fileSync.GetOutputsPath(workspaceID)
+	}
+	return s.primary.GetOutputsPath(workspaceID)
+}
+
 // GetWorkspaceAgent reads a workspace-local agent snapshot. Reads prefer the
 // FileStore (which holds the on-disk snapshot) so an imported workspace folder
 // can resolve its entry agent before the primary store is hydrated.

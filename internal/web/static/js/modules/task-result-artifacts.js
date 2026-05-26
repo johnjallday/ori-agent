@@ -417,7 +417,12 @@ export function buildRunHistoryArtifact(task) {
 
 export function buildTaskResultArtifact(task) {
   const historyArtifact = buildRunHistoryArtifact(task);
-  if (historyArtifact) return historyArtifact;
+  // Only let the accumulated history take over the "Latest result" view when
+  // runs actually produced a tabular dataset (run_history_table). A
+  // summary-only history (run_history_summary) is just execution metadata and
+  // duplicates the "Recent runs" list, so fall through to the latest run's own
+  // result instead.
+  if (historyArtifact && historyArtifact.kind === 'run_history_table') return historyArtifact;
   return detectTabularResult(task?.result || '', task);
 }
 

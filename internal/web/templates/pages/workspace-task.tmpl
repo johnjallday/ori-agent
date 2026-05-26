@@ -39,16 +39,6 @@
               <div class="workspace-task-page-title-actions">
                 <button
                   type="button"
-                  id="workspace-task-copy-id"
-                  class="workspace-task-page-icon-btn"
-                  aria-label="Copy task ID"
-                  title="Copy task ID">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
                   id="workspace-task-copy-link"
                   class="workspace-task-page-icon-btn"
                   aria-label="Copy link to task"
@@ -150,8 +140,8 @@
               <section class="workspace-task-page-card">
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Task Brief</div>
-                    <h2>Current scope</h2>
+                    <div class="workspace-task-page-card-kicker">Overview</div>
+                    <h2>What this task does</h2>
                   </div>
                 </div>
                 <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
@@ -180,7 +170,7 @@
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Result</div>
-                    <h2>Latest output</h2>
+                    <h2>Latest result</h2>
                   </div>
                   <!--
                     Three competing primaries (Save as Note, Create Skill,
@@ -278,7 +268,7 @@
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Automation</div>
-                    <h2>Cadence, output, and storage</h2>
+                    <h2>Schedule &amp; saved results</h2>
                   </div>
                   <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
                     <i class="bi bi-calendar2-week" aria-hidden="true"></i>
@@ -286,8 +276,14 @@
                   </button>
                 </div>
                 <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
-                <div id="workspace-task-automation-columns" class="workspace-task-automation-section"></div>
-                <div id="workspace-task-automation-storage" class="workspace-task-automation-section"></div>
+                <div id="workspace-task-automation-summary" class="workspace-task-automation-summary"></div>
+                <details class="workspace-task-advanced">
+                  <summary class="workspace-task-advanced-summary">Advanced settings</summary>
+                  <div class="workspace-task-advanced-body">
+                    <div id="workspace-task-automation-columns" class="workspace-task-automation-section"></div>
+                    <div id="workspace-task-automation-storage" class="workspace-task-automation-section"></div>
+                  </div>
+                </details>
               </section>
             </div>
 
@@ -295,8 +291,8 @@
               <section id="workspace-task-workspace-runs-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Harness</div>
-                    <h2>Workspace Runs</h2>
+                    <div class="workspace-task-page-card-kicker">Runs</div>
+                    <h2>Runs</h2>
                   </div>
                 </div>
                 <div id="workspace-task-workspace-runs" class="workspace-task-workspace-runs-list"></div>
@@ -305,8 +301,8 @@
               <section id="workspace-task-relationships-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Task Graph</div>
-                    <h2>Dependencies and parents</h2>
+                    <div class="workspace-task-page-card-kicker">Connections</div>
+                    <h2>Connected tasks</h2>
                   </div>
                 </div>
                 <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
@@ -330,11 +326,36 @@
                 <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
               </section>
 
+              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
+                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
+              </div>
+            </div>
+
+            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
+              <section class="workspace-task-page-card">
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Developer</div>
+                    <h2>Task ID</h2>
+                  </div>
+                  <button
+                    type="button"
+                    id="workspace-task-copy-id"
+                    class="modern-btn modern-btn-secondary"
+                    aria-label="Copy task ID"
+                    title="Copy task ID">
+                    <i class="bi bi-copy" aria-hidden="true"></i>
+                    <span>Copy ID</span>
+                  </button>
+                </div>
+                <code id="workspace-task-id-value" class="workspace-task-id-value"></code>
+              </section>
+
               <section id="workspace-task-runs-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Run history</div>
-                    <h2>Runs and tool calls</h2>
+                    <h2>Run details</h2>
                   </div>
                 </div>
                 <div id="workspace-task-tool-summary" class="workspace-task-tool-summary" hidden></div>
@@ -356,25 +377,15 @@
                 <div id="workspace-task-execution-trace" class="workspace-task-trace-list" role="tabpanel" aria-labelledby="workspace-task-runs-tab-trace" hidden></div>
               </section>
 
-              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
-                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
-              </div>
-            </div>
-
-            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
               <section id="workspace-task-context-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Developer</div>
-                    <h2>Raw task context</h2>
+                    <h2>Technical details</h2>
                   </div>
                 </div>
                 <div id="workspace-task-context"></div>
               </section>
-
-              <div id="workspace-task-developer-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
-                <p class="workspace-task-tab-empty-copy">No developer context available for this task yet.</p>
-              </div>
             </div>
           </main>
         </div>
@@ -1898,6 +1909,263 @@
       display: none;
     }
 
+    /* Plain-language one-liner shown above the collapsed advanced controls,
+       e.g. "Saves each run to: pollen/outputs". Always visible. */
+    .workspace-task-result-contract-projection {
+      font-size: 0.76rem;
+      color: var(--text-secondary, #6b7280);
+    }
+
+    .workspace-task-output-design-cta {
+      margin-top: 0.75rem;
+      padding-top: 0.6rem;
+      border-top: 1px dashed color-mix(in srgb, var(--border-color) 80%, transparent);
+    }
+
+    /* Dedicated column-designer modal (popup over the page). */
+    .workspace-task-column-modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1050;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: color-mix(in srgb, #000 55%, transparent);
+    }
+
+    .workspace-task-column-modal {
+      width: min(680px, 100%);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-secondary, #15171c);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .workspace-task-column-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .workspace-task-column-modal-header h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .workspace-task-column-modal-body {
+      padding: 1rem 1.25rem 1.25rem;
+      overflow-y: auto;
+    }
+
+    /* "What the assistant sees" prompt-input preview in the modal. */
+    .workspace-task-suggestion-preview {
+      margin-top: 1rem;
+      border-top: 1px solid var(--border-color);
+      padding-top: 0.6rem;
+    }
+
+    .workspace-task-suggestion-preview > summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      user-select: none;
+    }
+
+    .workspace-task-suggestion-preview > summary:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-suggestion-busy {
+      color: var(--primary-color, #4ade80);
+      font-weight: 500;
+    }
+
+    /* Spinning indicator reused wherever a suggestion is in flight. Inherits
+       the surrounding text color via currentColor. */
+    .workspace-task-spinner {
+      display: inline-block;
+      width: 0.85em;
+      height: 0.85em;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      vertical-align: -0.12em;
+      margin-right: 0.1rem;
+      animation: workspace-task-spin 0.6s linear infinite;
+    }
+
+    @keyframes workspace-task-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Animated "…" — three dots that pulse in sequence. */
+    .workspace-task-dots {
+      display: inline-flex;
+      gap: 0.12em;
+      margin-left: 0.15em;
+      vertical-align: middle;
+    }
+
+    .workspace-task-dots > span {
+      width: 0.28em;
+      height: 0.28em;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.25;
+      animation: workspace-task-dot 1.2s infinite ease-in-out;
+    }
+
+    .workspace-task-dots > span:nth-child(2) { animation-delay: 0.2s; }
+    .workspace-task-dots > span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes workspace-task-dot {
+      0%, 60%, 100% { opacity: 0.25; }
+      30% { opacity: 1; }
+    }
+
+    .workspace-task-suggestion-preview-body {
+      margin-top: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .workspace-task-suggestion-instruction {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-suggestion-context-label {
+      margin-top: 0.25rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      opacity: 0.7;
+    }
+
+    .workspace-task-suggestion-input {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      font-size: 0.82rem;
+    }
+
+    .workspace-task-suggestion-input-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-suggestion-sample {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      max-height: 180px;
+      overflow: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.76rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-task-automation-summary {
+      margin-top: 0.85rem;
+      font-size: 0.9rem;
+      color: var(--text-secondary, #6b7280);
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-automation-summary:empty {
+      display: none;
+    }
+
+    .workspace-task-automation-summary .workspace-task-automation-summary-path {
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.82rem;
+      color: var(--text-primary, #e5e7eb);
+      word-break: break-all;
+    }
+
+    /* Collapsible "Advanced settings" wrapper. Keeps developer-facing
+       controls (CSV storage, columns, store nodes) out of the default view
+       for non-technical users while staying one click away. */
+    .workspace-task-advanced {
+      margin-top: 0.85rem;
+      border-top: 1px solid var(--border-color);
+      padding-top: 0.5rem;
+    }
+
+    .workspace-task-advanced > .workspace-task-advanced-summary {
+      cursor: pointer;
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--text-secondary, #6b7280);
+      padding: 0.35rem 0;
+      user-select: none;
+    }
+
+    .workspace-task-advanced > .workspace-task-advanced-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-advanced > .workspace-task-advanced-summary::before {
+      content: "▸";
+      display: inline-block;
+      transition: transform 0.15s ease;
+      font-size: 0.75rem;
+    }
+
+    .workspace-task-advanced[open] > .workspace-task-advanced-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-task-advanced > .workspace-task-advanced-summary:hover {
+      color: var(--text-primary, #e5e7eb);
+    }
+
+    /* The first nested automation section already has its own top border via
+       .workspace-task-automation-section; drop the extra rule inside the
+       opened disclosure so it doesn't double up under the summary. */
+    .workspace-task-advanced-body > .workspace-task-automation-section:first-child {
+      margin-top: 0.5rem;
+      padding-top: 0;
+      border-top: none;
+    }
+
+    /* Monospace task-ID readout in the Developer tab (the hero no longer
+       carries a copy-ID icon). */
+    .workspace-task-id-value {
+      display: block;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.82rem;
+      color: var(--text-secondary, #6b7280);
+      word-break: break-all;
+      user-select: all;
+    }
+
     .workspace-task-automation-storage-block {
       display: flex;
       flex-direction: column;
@@ -1959,6 +2227,16 @@
 
     .workspace-task-automation-storage-option > span {
       font-weight: 600;
+    }
+
+    .workspace-task-automation-storage-path {
+      display: block;
+      margin-top: 0.2rem;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.74rem;
+      font-weight: 400;
+      color: var(--text-secondary, #6b7280);
+      word-break: break-all;
     }
 
     .workspace-task-automation-storage-select,

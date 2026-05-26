@@ -27,6 +27,15 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	}
 	mcpUnclassified, skillUnclassified := UnclassifiedBindings(ws)
 
+	// Count findings still awaiting triage (new or snoozed) so the UI can show
+	// whether the goal's runs are actually producing actionable output.
+	openFindings := 0
+	for _, opp := range ws.Opportunities {
+		if opp.IsOpen() {
+			openFindings++
+		}
+	}
+
 	resp := map[string]any{
 		"mission":                 ws.Mission,
 		"cadence":                 ws.Cadence,
@@ -37,6 +46,7 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"next_mission_run_at":     ws.NextMissionRunAt,
 		"mission_execution_count": ws.MissionExecutionCount,
 		"mission_failure_count":   ws.MissionFailureCount,
+		"open_findings_count":     openFindings,
 		"unclassified_mcp_ids":    mcpUnclassified,
 		"unclassified_skill_ids":  skillUnclassified,
 		"bindings_ready":          len(mcpUnclassified) == 0 && len(skillUnclassified) == 0,
@@ -49,14 +59,46 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 
 // UpdateMissionRequest is the body for PUT /api/workspaces/{workspaceID}/mission.
 // Every field uses a pointer so the caller can update one field at a time.
+// Cadence tracks explicit null separately so callers can clear scheduling.
 // Setting MissionEnabled to true with unclassified bindings is rejected with
 // 412 — the UI must surface the classification prompt first.
 type UpdateMissionRequest struct {
 	Mission            *string             `json:"mission,omitempty"`
 	Cadence            *ScheduleConfig     `json:"cadence,omitempty"`
+	CadenceSet         bool                `json:"-"`
 	AutonomyPolicy     *AutonomyPolicy     `json:"autonomy_policy,omitempty"`
 	NotificationPolicy *NotificationPolicy `json:"notification_policy,omitempty"`
 	MissionEnabled     *bool               `json:"mission_enabled,omitempty"`
+}
+
+func (req *UpdateMissionRequest) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Mission            *string             `json:"mission,omitempty"`
+		Cadence            json.RawMessage     `json:"cadence,omitempty"`
+		AutonomyPolicy     *AutonomyPolicy     `json:"autonomy_policy,omitempty"`
+		NotificationPolicy *NotificationPolicy `json:"notification_policy,omitempty"`
+		MissionEnabled     *bool               `json:"mission_enabled,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	req.Mission = raw.Mission
+	req.AutonomyPolicy = raw.AutonomyPolicy
+	req.NotificationPolicy = raw.NotificationPolicy
+	req.MissionEnabled = raw.MissionEnabled
+	req.Cadence = nil
+	req.CadenceSet = raw.Cadence != nil
+	if !req.CadenceSet || string(raw.Cadence) == "null" {
+		return nil
+	}
+
+	var cadence ScheduleConfig
+	if err := json.Unmarshal(raw.Cadence, &cadence); err != nil {
+		return fmt.Errorf("cadence: %w", err)
+	}
+	req.Cadence = &cadence
+	return nil
 }
 
 // UpdateMission handles PUT/PATCH /api/workspaces/{workspaceID}/mission.
@@ -89,7 +131,7 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 		if req.Mission != nil {
 			ws.Mission = *req.Mission
 		}
-		if req.Cadence != nil {
+		if req.CadenceSet {
 			ws.Cadence = req.Cadence
 		}
 		if req.AutonomyPolicy != nil {

@@ -1,8 +1,8 @@
 # <img src="assets/logo-readme.svg" alt="Ori Agent logo" width="28" height="28" style="vertical-align: text-bottom;" /> Ori Agent
 
-![Version](https://img.shields.io/badge/Version-v0.0.69-blue) ![Go](https://img.shields.io/badge/Go-1.25.10-00add8)
+![Version](https://img.shields.io/badge/Version-v0.0.70-blue) ![Go](https://img.shields.io/badge/Go-1.25.10-00add8)
 
-**Ori Agent** is a local-first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents use MCP (Model Context Protocol) servers and Skills for tool capabilities—everything stays on your machine unless you opt into cloud LLMs.
+**Ori Agent** is a local-first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Group agents into **workspaces** to collaborate on tasks, give a workspace an autonomous **mission** that runs on a schedule, and triage everything it finds from a single **Action Center**. Agents use MCP (Model Context Protocol) servers and Skills for tool capabilities—everything stays on your machine unless you opt into cloud LLMs.
 
 If you want to keep your information local, this is a way to go.
 
@@ -30,6 +30,19 @@ Additional terms:
 - `TRADEMARKS.md` (branding and trademark use)
 
 
+## ✨ What You Can Do
+
+- **Multiple agents** — create named agents, each with its own provider/model, system prompt, skills, and MCP servers.
+- **Workspaces** — group agents to collaborate, with shared notes, files, and tasks scoped to the workspace.
+- **Tasks & scheduling** — assign tasks to agents and run them on a cron-like schedule, with structured result storage (CSV/JSON output specs).
+- **Missions & Action Center** — let a workspace work autonomously on a recurring cadence under an autonomy policy, and triage its findings (“opportunities”) from one cross-workspace inbox.
+- **Multi-agent orchestration** — chain agents into workflows and combine their results.
+- **MCP servers & Skills** — extend agents with external tools (MCP) and reusable prompt-based capabilities (Skills), bound per workspace.
+- **Sessions** — persistent, searchable chat history with folders and tagging.
+- **Private Vault** — local encrypted storage for secrets and sensitive records, backed by the OS keychain.
+- **Usage & cost tracking** — monitor token usage and spend across providers.
+- **Runs anywhere** — browser UI, HTTP API, or the macOS menu bar app.
+
 ## 🤖 Supported Providers
 
 Ori Agent supports multiple AI providers, giving you flexibility in choosing your preferred AI model:
@@ -43,25 +56,45 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
   - Requires: `ANTHROPIC_API_KEY`
   - Best for: Long context windows, detailed reasoning
 
+- **Google Gemini**
+  - Requires: `GEMINI_API_KEY`
+  - Best for: Large context, multimodal tasks
+
 ### Local Providers
+
+Run models entirely on your machine—no API key required. Each defaults to a local endpoint you can override via environment variable.
+
 - **Ollama** - Run models locally on your machine
-  - Requires: Ollama installed and running (http://localhost:11434)
+  - Endpoint: `OLLAMA_BASE_URL` (default `http://localhost:11434`)
   - Best for: Privacy, offline use, cost savings
   - Supports: Llama 3, Mistral, Phi-3, and other Ollama models
+
+- **LM Studio** - OpenAI-compatible local server
+  - Endpoint: `LM_STUDIO_BASE_URL` (default `http://localhost:1234/v1`), model via `LM_STUDIO_MODEL`
+
+- **MLX LM** - Apple Silicon local inference via `mlx_lm.server`
+  - Endpoint: `MLX_LM_BASE_URL` (default `http://localhost:8080/v1`), model via `MLX_LM_MODEL`
+
+### CLI Agent Providers
+
+If you already use a coding-agent CLI, Ori Agent auto-detects its login and registers it as a provider—no extra API key needed.
+
+- **Codex** - registered when OpenAI Codex CLI credentials are found
+- **Claude Code** - registered when Claude CLI credentials are found
 
 ## 🚀 Quick Start
 ### For Mac Users
 Download and install the DMG from the latest release:
 - https://github.com/johnjallday/ori-agent/releases/latest
 
-Open the DMG and drag `OriAgent.app` to Applications.
+Open the DMG and drag `OriAgent.app` to Applications. On macOS, Ori Agent runs as a **menu bar app** that starts/stops the server, shows status, and can auto-start on login.
 
 
 ### For Devs
 
 ### Prerequisites
 - Go 1.25 or later
-- An API key from one of the supported providers (OpenAI, Claude) **OR** Ollama installed locally
+- An API key from one of the cloud providers (OpenAI, Claude, or Gemini) **OR** a local provider running (Ollama, LM Studio, or MLX LM)
 
 ### Installation
 
@@ -180,6 +213,35 @@ Open the DMG and drag `OriAgent.app` to Applications.
 
 5. **Access the interface** at `http://localhost:8765`
 
+## 🗂️ Workspaces, Missions & Action Center
+
+A **workspace** groups one or more agents around a shared context—notes, files, and tasks—so they can collaborate instead of running in isolation. Each workspace binds its own MCP servers and Skills, so the same agent can have different tool access in different workspaces.
+
+### Tasks & Scheduling
+
+- Assign tasks to agents and run them on demand or on a **cron-like schedule**.
+- Capture results in a structured format with **output specs** (CSV/JSON), so recurring runs append clean, validated rows you can use downstream.
+- Multi-step **workflows** let you orchestrate several agents and combine their outputs.
+
+### Missions
+
+Give a workspace a **mission** and it runs autonomously on a cadence, surfacing findings without you kicking off each run. A mission's reach is bounded by its **autonomy policy**:
+
+| Policy | What it can do |
+|--------|----------------|
+| **Watch** | Read-only tools. No writes anywhere. |
+| **Propose** | Reads plus workspace-internal writes (draft notes/artifacts, recommended-task drafts). External-effect tools stay denied. |
+
+Each MCP/skill binding is classified by side effect (read / write / external), and the autonomy gate enforces the policy per tool call—so a mission can't take an action you haven't authorized for that workspace.
+
+### Action Center
+
+Missions produce **opportunities** (findings) that collect in the **Action Center**, a cross-workspace triage inbox. From there you can open, **snooze**, **resolve**, or **dismiss** each item. Snoozed items drop out of the active view until their window elapses; a resolved issue that a later run re-detects re-surfaces automatically so it doesn't get silently buried.
+
+## 🔌 MCP Servers
+
+Ori Agent connects to **Model Context Protocol** servers for external tool capabilities. MCP servers are configured and enabled per workspace, and the **MCP** page lets you add servers, browse the tools they expose, and classify each binding's side effect for use under mission autonomy policies.
+
 ## 🧩 Skills
 
 Ori Agent supports per-agent Skills compatible with the Claude/OpenAI skill format.
@@ -258,6 +320,14 @@ Configure session storage limits via the Settings page or `settings.json`:
 | `/api/sessions/storage/stats` | GET | Get storage statistics |
 | `/api/sessions/cleanup` | POST | Trigger manual cleanup |
 
+### Performance
+
+The session system is optimized for handling many sessions efficiently:
+
+- **100+ Sessions**: Tested to handle 150+ sessions with sub-millisecond list operations
+- **Concurrent Access**: Thread-safe operations support multiple tabs and clients
+- **Efficient Search**: Full-text search returns results in under 500µs for typical workloads
+
 ## 🔐 Private Vault
 
 Ori Agent now includes a local encrypted vault for sensitive records that should not live in normal session history.
@@ -299,14 +369,6 @@ Use **Settings → Private Vault** to:
 - create, browse, update, and delete saved vault entries
 - review or revoke workspace-scoped persistent grants
 - export encrypted vault bundles with explicit confirmation and a vault password
-
-### Performance
-
-The session system is optimized for handling many sessions efficiently:
-
-- **100+ Sessions**: Tested to handle 150+ sessions with sub-millisecond list operations
-- **Concurrent Access**: Thread-safe operations support multiple tabs and clients
-- **Efficient Search**: Full-text search returns results in under 500µs for typical workloads
 
 ## 📄 License
 

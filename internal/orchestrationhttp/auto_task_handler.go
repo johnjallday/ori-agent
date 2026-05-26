@@ -159,6 +159,26 @@ type OutputContractSuggestionResponse struct {
 	Reasoning      string                    `json:"reasoning" jsonschema_description:"Brief explanation of why these columns were selected"`
 }
 
+// suggestionPromptEcho is the verbatim prompt the suggestion sent to the model,
+// echoed back so the UI can show exactly what was asked. It is HTTP-only and is
+// deliberately NOT part of OutputContractSuggestionResponse (that struct defines
+// the model's structured-output schema).
+type suggestionPromptEcho struct {
+	System          string `json:"system"`
+	User            string `json:"user"`
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+// outputContractSuggestionHTTPResponse embeds the model's suggestion fields
+// (output_contract, output_spec, reasoning) at the top level and adds the
+// verbatim prompt echo under "prompt".
+type outputContractSuggestionHTTPResponse struct {
+	*OutputContractSuggestionResponse
+	Prompt *suggestionPromptEcho `json:"prompt,omitempty"`
+}
+
 type OutputContractTelemetryRequest struct {
 	WorkspaceID      string `json:"workspace_id"`
 	TaskID           string `json:"task_id,omitempty"`
@@ -257,7 +277,7 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 		return
 	}
 
-	suggestion, err := h.suggestOutputContract(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req)
+	suggestion, promptEcho, err := h.suggestOutputContract(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req)
 	if err != nil {
 		logger.Error("Output contract suggestion failed", logger.Fields{"error": err})
 		h.publishOutputSpecSuggestionEvent(req, "suggestion_failed", err.Error())
@@ -265,7 +285,10 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 		return
 	}
 
-	orihttp.WriteJSON(w, suggestion)
+	orihttp.WriteJSON(w, &outputContractSuggestionHTTPResponse{
+		OutputContractSuggestionResponse: suggestion,
+		Prompt:                           promptEcho,
+	})
 }
 
 func (h *AutoTaskHandler) publishOutputSpecSuggestionEvent(req OutputContractSuggestionRequest, action, message string) {
@@ -347,7 +370,14 @@ func (h *AutoTaskHandler) suggestOutputContract(
 	model string,
 	reasoningEffort string,
 	req OutputContractSuggestionRequest,
-) (*OutputContractSuggestionResponse, error) {
+) (*OutputContractSuggestionResponse, *suggestionPromptEcho, error) {
+	// Column suggestion is a lightweight, well-constrained JSON task. Cap the
+	// reasoning effort so it returns quickly regardless of the (possibly heavy)
+	// system reasoning setting — only lower it, never raise it.
+	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
+	case "", "medium", "high":
+		reasoningEffort = "low"
+	}
 	scheduleJSON, _ := json.Marshal(req.Schedule)
 	storageJSON, _ := json.Marshal(req.ResultStorage)
 	headerJSON, _ := json.Marshal(req.ExistingCSVHeader)
@@ -421,7 +451,18 @@ Recent execution samples JSON: %s
 Sample result from a prior run (use this to derive concrete columns when available):
 %s`, strings.TrimSpace(req.Title), strings.TrimSpace(req.Details), req.ScheduleEnabled, strings.TrimSpace(req.ScheduleName), string(scheduleJSON), string(storageJSON), string(headerJSON), string(samplesJSON), resultSample)
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Echo the exact prompt back to the UI so users can see what was asked.
+	promptEcho := &suggestionPromptEcho{
+		System:          systemPrompt,
+		User:            userMessage,
+		Provider:        providerName,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+	}
+
+	// Allow headroom for a slow first invocation (e.g. the Codex CLI cold
+	// start can take ~50-90s; warm calls are ~15s).
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	logger.Info("Output contract suggestion request", logger.Fields{
@@ -442,11 +483,12 @@ Sample result from a prior run (use this to derive concrete columns when availab
 		})
 		if err != nil {
 			if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
-				return nil, fmt.Errorf("%s", friendlyMsg)
+				return nil, promptEcho, fmt.Errorf("%s", friendlyMsg)
 			}
-			return nil, fmt.Errorf("structured output request failed: %w", err)
+			return nil, promptEcho, fmt.Errorf("structured output request failed: %w", err)
 		}
-		return parseOutputContractSuggestion(resp.Content)
+		parsed, perr := parseOutputContractSuggestion(resp.Content)
+		return parsed, promptEcho, perr
 	}
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -461,11 +503,12 @@ Sample result from a prior run (use this to derive concrete columns when availab
 	})
 	if err != nil {
 		if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
-			return nil, fmt.Errorf("%s", friendlyMsg)
+			return nil, promptEcho, fmt.Errorf("%s", friendlyMsg)
 		}
-		return nil, fmt.Errorf("LLM request failed: %w", err)
+		return nil, promptEcho, fmt.Errorf("LLM request failed: %w", err)
 	}
-	return parseOutputContractSuggestion(resp.Content)
+	parsed, perr := parseOutputContractSuggestion(resp.Content)
+	return parsed, promptEcho, perr
 }
 
 func parseOutputContractSuggestion(content string) (*OutputContractSuggestionResponse, error) {

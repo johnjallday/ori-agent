@@ -1,10 +1,75 @@
 package workspace
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGetMission_OpenFindingsCount(t *testing.T) {
+	store := NewInMemoryStore()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := &Workspace{
+		ID:     "ws-find",
+		Name:   "Findings",
+		Status: StatusActive,
+		Opportunities: []Opportunity{
+			{ID: "o1", WorkspaceID: "ws-find", Status: OpportunityNew},
+			{ID: "o2", WorkspaceID: "ws-find", Status: OpportunitySnoozed},
+			{ID: "o3", WorkspaceID: "ws-find", Status: OpportunityResolved},
+			{ID: "o4", WorkspaceID: "ws-find", Status: OpportunityDismissed},
+		},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-find/mission", nil)
+	req.SetPathValue("workspaceID", "ws-find")
+	rec := httptest.NewRecorder()
+	handler.GetMission(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		OpenFindingsCount int `json:"open_findings_count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Only new + snoozed are open; resolved + dismissed are archived.
+	if resp.OpenFindingsCount != 2 {
+		t.Fatalf("open_findings_count=%d; want 2", resp.OpenFindingsCount)
+	}
+}
+
+func TestUpdateMissionRequest_CadenceNullClearsSchedule(t *testing.T) {
+	var req UpdateMissionRequest
+	if err := json.Unmarshal([]byte(`{"cadence": null}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if !req.CadenceSet {
+		t.Fatal("expected cadence presence to be tracked")
+	}
+	if req.Cadence != nil {
+		t.Fatalf("expected nil cadence for explicit null, got %#v", req.Cadence)
+	}
+}
+
+func TestUpdateMissionRequest_CadenceOmittedLeavesScheduleUntouched(t *testing.T) {
+	var req UpdateMissionRequest
+	if err := json.Unmarshal([]byte(`{"mission": "Keep quality high"}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.CadenceSet {
+		t.Fatal("expected omitted cadence to leave cadence unset")
+	}
+}
 
 func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 	got := BuildMissionSystemPrompt(MissionPromptInputs{

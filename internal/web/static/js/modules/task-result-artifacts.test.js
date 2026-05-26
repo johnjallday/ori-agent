@@ -64,7 +64,22 @@ test('buildRunHistoryArtifact turns repeated runs into CSV rows', () => {
   assert.match(artifact.csv, /2026-05-19T12:00:00Z,success,NYC,High/);
 });
 
-test('buildTaskResultArtifact prefers run history when multiple runs exist', () => {
+test('buildTaskResultArtifact prefers the run-history dataset when runs produced data', () => {
+  const artifact = buildTaskResultArtifact({
+    result: '{"location":"NYC","level":"High"}',
+    execution_history: [
+      { executed_at: '2026-05-18T12:00:00Z', status: 'success', result: '{"location":"NYC","level":"Moderate"}' },
+      { executed_at: '2026-05-19T12:00:00Z', status: 'success', result: '{"location":"NYC","level":"High"}' },
+    ],
+  });
+  assert.equal(artifact.source, 'run_history');
+  assert.ok(artifact.columns.includes('level'));
+});
+
+test('buildTaskResultArtifact shows the latest result when the history is summary-only', () => {
+  // Summary-only runs produce a run_history_summary, which just mirrors the
+  // "Recent runs" list. The Latest result card should show the latest run's
+  // own output instead of that metadata table.
   const artifact = buildTaskResultArtifact({
     result: '{"location":"NYC","level":"High"}',
     execution_history: [
@@ -72,8 +87,8 @@ test('buildTaskResultArtifact prefers run history when multiple runs exist', () 
       { executed_at: '2026-05-19T12:00:00Z', status: 'success', summary: 'High' },
     ],
   });
-  assert.equal(artifact.source, 'run_history');
-  assert.deepEqual(artifact.columns, ['executed_at', 'status', 'summary']);
+  assert.notEqual(artifact?.source, 'run_history');
+  assert.ok(artifact && artifact.columns.includes('level'));
 });
 
 test('rowsToCSV quotes values and artifactToCSVFence wraps output', () => {

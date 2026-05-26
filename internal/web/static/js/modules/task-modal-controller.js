@@ -537,16 +537,18 @@ class TaskModalController {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}`);
+      // Use the backend-resolved workspace outputs path (<workspace>/outputs)
+      // so the modal matches where runs actually save.
+      const response = await fetch(`/api/workspaces/${workspaceId}/output-dir`);
       if (response.ok) {
-        const workspace = await response.json();
-        // Construct the workspace output path
-        const workspaceName = workspace.name || 'workspace';
-        const outputPath = workspace.output_dir || `workspaces/${workspaceName}/outputs/`;
-        this.updateOutputPathDisplay(outputPath);
-      } else {
-        this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');
+        const data = await response.json();
+        const outputPath = String(data?.output_dir || '').trim();
+        if (outputPath) {
+          this.updateOutputPathDisplay(outputPath);
+          return;
+        }
       }
+      this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');
     } catch (err) {
       console.error('Failed to fetch workspace output path:', err);
       this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');

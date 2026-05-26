@@ -171,6 +171,23 @@ func TestFileStore_GetFilesPath(t *testing.T) {
 	}
 }
 
+func TestFileStore_GetOutputsPath(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "My Project")
+	_ = store.Save(ws)
+
+	got := store.GetOutputsPath("ws-1")
+	want := filepath.Join(dir, "my-project", OutputsDir)
+	if got != want {
+		t.Errorf("GetOutputsPath=%q, want %q", got, want)
+	}
+}
+
 func TestFileStore_Rename(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

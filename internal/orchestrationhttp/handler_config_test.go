@@ -139,6 +139,7 @@ func (m *mockWorkspaceStore) List() ([]string, error)                     { retu
 func (m *mockWorkspaceStore) Delete(id string) error                      { return nil }
 func (m *mockWorkspaceStore) ListActive() ([]*workspace.Workspace, error) { return nil, nil }
 func (m *mockWorkspaceStore) GetFilesPath(workspaceID string) string      { return "" }
+func (m *mockWorkspaceStore) GetOutputsPath(workspaceID string) string    { return "" }
 func (m *mockWorkspaceStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
 	return nil, false, nil
 }

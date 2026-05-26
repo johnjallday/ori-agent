@@ -14,6 +14,9 @@
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
   // --- State ---
+  // Optional workspace scope from the URL (?workspace=<id>). When set, the list
+  // is filtered to one workspace and a banner offers a way back to all findings.
+  const workspaceFilter = new URLSearchParams(window.location.search).get('workspace') || '';
   // The single opportunity targeted by the open dismiss/snooze modal. Set
   // when the user clicks Dismiss/Snooze on a row; consumed when the modal's
   // primary action fires.
@@ -110,6 +113,21 @@
     list.innerHTML = items.map(rowHTML).join('');
   }
 
+  function renderFilterBanner(items) {
+    const el = $('#action-center-filter-banner');
+    if (!el) return;
+    if (!workspaceFilter) {
+      el.style.display = 'none';
+      return;
+    }
+    // Prefer the human-readable workspace name from a returned item; fall back
+    // to the id when the filtered workspace currently has no findings.
+    const match = items.find((i) => i.workspace_id === workspaceFilter);
+    const name = (match && match.workspace_name) || workspaceFilter;
+    el.style.display = '';
+    el.innerHTML = `Showing findings for <strong>${escapeHtml(name)}</strong>. <a href="/action-center">Show all findings</a>`;
+  }
+
   function setStatus(msg, kind) {
     const el = $('#action-center-status');
     if (!el) return;
@@ -124,6 +142,7 @@
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (sort) params.set('sort', sort);
+    if (workspaceFilter) params.set('workspace', workspaceFilter);
     const url = `/api/action-center/opportunities${params.toString() ? '?' + params.toString() : ''}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`status ${resp.status}`);
@@ -146,7 +165,9 @@
     try {
       setStatus('Loading...');
       const data = await fetchList();
-      render(data.items || []);
+      const items = data.items || [];
+      render(items);
+      renderFilterBanner(items);
       setStatus(data.total ? `${data.total} finding${data.total === 1 ? '' : 's'}` : '');
     } catch (e) {
       setStatus(`Failed to load: ${e.message}`, 'error');

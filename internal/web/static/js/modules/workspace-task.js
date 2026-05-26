@@ -812,6 +812,7 @@ export class WorkspaceTaskPage {
     this.workspaceId = workspaceId;
     this.taskId = taskId;
     this.workspace = null;
+    this.workspaceOutputDir = '';
     this.task = null;
     this.currentRun = null;
     this.workspaceRuns = [];
@@ -830,6 +831,11 @@ export class WorkspaceTaskPage {
     this.resultNoteSaving = false;
     this.currentResultArtifact = null;
     this.resultArtifactNoteSaving = false;
+    this.columnDesignerModalOpen = false;
+    this.columnModalOverlay = null;
+    this.columnModalBody = null;
+    this.suggestionPreviewOpen = false;
+    this.suggestionPromptEcho = null;
     this.savedResultNote = null;
     this.savedResultNoteResult = '';
     this.resultPromotionPending = false;
@@ -934,6 +940,7 @@ export class WorkspaceTaskPage {
       workspaceName: document.getElementById('workspace-task-workspace-name'),
       title: document.getElementById('workspace-task-title'),
       breadcrumbTitle: document.getElementById('workspace-task-breadcrumb-title'),
+      idValue: document.getElementById('workspace-task-id-value'),
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
@@ -1019,6 +1026,7 @@ export class WorkspaceTaskPage {
       executionTraceCount: document.getElementById('workspace-task-execution-trace-count'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
+      automationSummary: document.getElementById('workspace-task-automation-summary'),
       automationColumns: document.getElementById('workspace-task-automation-columns'),
       automationStorage: document.getElementById('workspace-task-automation-storage'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
@@ -1059,7 +1067,6 @@ export class WorkspaceTaskPage {
         developer: document.getElementById('workspace-task-tab-developer')
       },
       activityEmpty: document.getElementById('workspace-task-activity-empty'),
-      developerEmpty: document.getElementById('workspace-task-developer-empty'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
       blockedReason: document.getElementById('workspace-task-blocked-reason'),
       blockedRequestWrap: document.getElementById('workspace-task-blocked-request-wrap'),
@@ -1247,14 +1254,16 @@ export class WorkspaceTaskPage {
     this.setAlert('');
 
     try {
-      const [workspace, taskResponse, agents, taskEvents] = await Promise.all([
+      const [workspace, taskResponse, agents, taskEvents, outputDir] = await Promise.all([
         this.fetchWorkspace(),
         this.fetchTask(),
         this.fetchAgents().catch(() => []),
-        this.fetchTaskEvents().catch(() => [])
+        this.fetchTaskEvents().catch(() => []),
+        this.fetchWorkspaceOutputDir().catch(() => '')
       ]);
 
       this.workspace = workspace || null;
+      this.workspaceOutputDir = outputDir || '';
       this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
       this.availableAgents = Array.isArray(agents) ? agents : [];
       this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
@@ -1289,6 +1298,16 @@ export class WorkspaceTaskPage {
       throw new Error('Failed to load workspace details.');
     }
     return response.json();
+  }
+
+  // fetchWorkspaceOutputDir returns the resolved default output directory for
+  // this workspace (<workspace>/outputs), used to show where "Default output
+  // folder" actually writes.
+  async fetchWorkspaceOutputDir() {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`);
+    if (!response.ok) return '';
+    const data = await response.json();
+    return String(data?.output_dir || '').trim();
   }
 
   async fetchTask() {
@@ -2235,21 +2254,38 @@ export class WorkspaceTaskPage {
     const normalizedTarget = String(agentName || '').trim().toLowerCase();
     if (!normalizedTarget || normalizedTarget === 'unassigned') return true;
 
-    return this.getAvailableAgentNames().some((name) => String(name || '').trim().toLowerCase() === normalizedTarget);
+    const matches = (name) => String(name || '').trim().toLowerCase() === normalizedTarget;
+    if (this.getAvailableAgentNames().some(matches)) return true;
+
+    // A workspace-scoped agent (declared in the workspace, with a local
+    // snapshot) is runnable for this workspace's tasks even when it isn't in
+    // the global /api/agents registry. Check the workspace's declared agents
+    // only — not getWorkspaceAgentNames(), which self-includes task.to and
+    // would mask a genuinely-missing assignment.
+    const declared = [
+      ...(this.workspace?.agents || []),
+      ...((this.workspace?.agent_instances || []).map((instance) => instance?.role || instance?.name || '')),
+    ];
+    return declared.some(matches);
   }
 
-  getAssignableAgentNames(currentAgent = '') {
-    const runnable = this.getAvailableAgentNames();
-    if (runnable.length > 0) {
-      return runnable;
-    }
-
-    const fallback = this.getWorkspaceAgentNames();
-    const normalizedCurrent = String(currentAgent || '').trim();
-    if (normalizedCurrent && !fallback.some((name) => String(name || '').trim().toLowerCase() === normalizedCurrent.toLowerCase())) {
-      fallback.unshift(normalizedCurrent);
-    }
-    return fallback;
+  getAssignableAgentNames() {
+    // Merge global agents (/api/agents) with the workspace's own declared
+    // agents so workspace-scoped agents stay selectable even when global
+    // agents exist. We intentionally read the declared agents directly
+    // (workspace.agents + agent_instances) rather than getWorkspaceAgentNames(),
+    // which self-includes task.to and would surface a genuinely-missing
+    // assignment as a normal option (it's shown as a disabled "(Unavailable)"
+    // entry instead).
+    const names = new Set();
+    const add = (name) => {
+      const trimmed = String(name || '').trim();
+      if (trimmed) names.add(trimmed);
+    };
+    this.getAvailableAgentNames().forEach(add);
+    (this.workspace?.agents || []).forEach(add);
+    (this.workspace?.agent_instances || []).forEach((instance) => add(instance?.role || instance?.name || ''));
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
   }
 
   getWorkspaceAgentNames() {
@@ -2592,6 +2628,9 @@ export class WorkspaceTaskPage {
     if (this.elements.breadcrumbTitle) {
       this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40) || 'Task';
     }
+    if (this.elements.idValue) {
+      this.elements.idValue.textContent = String(this.task?.id || this.taskId || '').trim();
+    }
     if (this.elements.status) {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
@@ -2642,7 +2681,10 @@ export class WorkspaceTaskPage {
     }
 
     if (this.canCreateSkillFromTask()) {
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="create-skill">
+      // Secondary (not primary): "Create Skill" is an advanced/power-user
+      // action and shouldn't compete with Run/Re-run for attention on a
+      // non-technical user's first read of the page.
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="create-skill">
         <i class="bi bi-magic" aria-hidden="true"></i>Create Skill
       </button>`);
     }
@@ -2907,31 +2949,24 @@ export class WorkspaceTaskPage {
     if (!this.elements.overview) return;
 
     const progress = this.task?.progress;
-    const templateRef = this.task?.template_ref;
-    const executionMode = String(this.task?.execution_mode || 'auto').replace(/_/g, ' ');
-    const orchestrationMode = String(this.task?.orchestration_mode || '').replace(/_/g, ' ');
     const isBlocked = Boolean(this.currentBlockedTask);
 
+    // Keep the default Overview to the essentials a non-technical user cares
+    // about. Configuration internals (execution mode, orchestration mode,
+    // template ref) are intentionally omitted here — they remain in the
+    // Developer tab's Technical details (raw context).
     const items = [
       {
-        title: 'Requested By',
-        value: String(this.task?.from || 'Workspace').trim() || 'Workspace'
-      },
-      {
-        title: 'Assigned To',
+        title: 'Agent',
         value: String(this.task?.to || 'Unassigned').trim() || 'Unassigned'
-      },
-      {
-        title: 'Execution Mode',
-        value: executionMode ? executionMode.replace(/\b\w/g, (char) => char.toUpperCase()) : 'Auto'
       }
     ];
 
-    if (orchestrationMode) {
-      items.push({
-        title: 'Orchestration',
-        value: orchestrationMode.replace(/\b\w/g, (char) => char.toUpperCase())
-      });
+    // "Requested By" is only meaningful when something other than the
+    // workspace itself created the task; hide the noisy default.
+    const requestedBy = String(this.task?.from || '').trim();
+    if (requestedBy && requestedBy.toLowerCase() !== 'workspace') {
+      items.push({ title: 'Requested By', value: requestedBy });
     }
 
     if (progress && (progress.current_step || Number.isFinite(progress.percentage))) {
@@ -2948,35 +2983,26 @@ export class WorkspaceTaskPage {
       });
     }
 
-    if (templateRef?.template_name || templateRef?.step_name) {
-      items.push({
-        title: 'Template',
-        value: [templateRef.template_name, templateRef.step_name].filter(Boolean).join(' / ')
-      });
-    }
-
     const currentRunId = String(this.task?.current_run_id || '').trim();
     if (currentRunId) {
       const currentRun = this.currentRun || {};
+      // Plain-language summary: status + when. The profile snapshot id,
+      // validation status, and raw run id are developer details and live on
+      // the run page / Developer tab, not here.
       const runBits = [
         this.formatWorkspaceRunStatus(currentRun.status),
-        String(currentRun?.profile_snapshot?.id || '').trim(),
-        currentRun?.report?.validation_status
-          ? `validation ${String(currentRun.report.validation_status).trim()}`
-          : '',
-        currentRun?.started_at ? `started ${formatDateTime(currentRun.started_at)}` : ''
+        currentRun?.started_at ? formatDateTime(currentRun.started_at) : ''
       ].filter(Boolean);
 
       items.push({
         title: 'Latest Run',
-        value: `${runBits.join(' • ') || 'Recorded'}\n${currentRunId}`,
-        full: true,
+        value: runBits.join(' • ') || 'Recorded',
         href: this.getRunHref(currentRunId)
       });
     } else {
       items.push({
         title: 'Latest Run',
-        value: 'No workspace run recorded yet.'
+        value: 'No run recorded yet.'
       });
     }
 
@@ -3086,7 +3112,10 @@ export class WorkspaceTaskPage {
       ? 'Append each run to CSV'
       : `Save each run as a new ${format.toUpperCase()} file`;
 
-    let target = 'Default output folder';
+    const defaultOutputDir = String(this.workspaceOutputDir || '').trim();
+    let target = defaultOutputDir
+      ? `Default output folder: ${defaultOutputDir}`
+      : 'Default output folder';
     const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     if (storeNodeId) {
@@ -4019,6 +4048,10 @@ export class WorkspaceTaskPage {
       })
       .filter(Boolean)
       .join('');
+    const appendDefaultPath = String(this.workspaceOutputDir || '').trim();
+    const appendDefaultPathHint = appendDefaultPath
+      ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(appendDefaultPath)}">${this.escapeHtml(appendDefaultPath)}</span>`
+      : '';
     const chooserHtml = appendCtx.configured ? '' : `
       <div class="workspace-task-result-artifact-chooser" data-role="append-chooser" hidden>
         <div class="workspace-task-result-artifact-chooser-header">
@@ -4028,7 +4061,7 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-artifact-chooser-options" role="radiogroup" aria-label="Choose append destination">
           <label class="workspace-task-result-artifact-chooser-option">
             <input type="radio" name="workspace-task-append-target" value="default" checked />
-            <span>Default output folder</span>
+            <span>Default output folder${appendDefaultPathHint}</span>
           </label>
           <label class="workspace-task-result-artifact-chooser-option${storeNodeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-append-target" value="store"${storeNodeOptions ? '' : ' disabled'} />
@@ -4226,11 +4259,12 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Result format${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
+            <span class="workspace-task-page-mini-label">Each run returns${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
+            <span class="workspace-task-result-contract-projection">Stored as CSV columns (plus run info)</span>
           </div>
           ${this.renderOutputSpecOverview(activeSpec)}
-          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit format</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit fields</button>
         </div>`;
     }
     if (!editing) {
@@ -4238,9 +4272,9 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-contract" data-state="empty">
           <div class="workspace-task-result-contract-warning">
             <i class="bi bi-magic" aria-hidden="true"></i>
-            <span>Let the assistant choose the CSV columns from the latest result.</span>
+            <span>Let the assistant design the fields each run should return, from the latest result.</span>
           </div>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest result format</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest fields</button>
         </div>`;
     }
 
@@ -4254,33 +4288,33 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-contract" data-state="edit">
         <div class="workspace-task-result-contract-header">
           <div>
-            <div class="workspace-task-page-mini-label">Result format</div>
-            <p class="workspace-task-result-contract-help">Review what each future run will save to CSV. The assistant extracts one row, checks it, then appends it only when the row matches this format.</p>
+            <div class="workspace-task-page-mini-label">What each run returns</div>
+            <p class="workspace-task-result-contract-help">Define the fields each run should return as structured data. The assistant extracts them into one row, checks it, then saves it as a CSV row (plus run info) only when it matches.</p>
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
-              <i class="bi bi-magic" aria-hidden="true"></i>
-              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Ask assistant')}</span>
+              ${suggesting ? '<span class="workspace-task-spinner" aria-hidden="true"></span>' : '<i class="bi bi-magic" aria-hidden="true"></i>'}
+              <span>${this.escapeHtml(suggesting ? 'Suggesting' : 'Ask assistant')}${suggesting ? '<span class="workspace-task-dots" aria-hidden="true"><span></span><span></span><span></span></span>' : ''}</span>
             </button>
           </div>
         </div>
         <div class="workspace-task-result-format-steps" aria-label="Result storage setup steps">
           <span class="is-complete">Storage on</span>
-          <span class="is-active">Review columns</span>
-          <span>Save format</span>
+          <span class="is-active">Review fields</span>
+          <span>Save</span>
         </div>
         <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
-          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No result format yet. Add a CSV column or ask the assistant to suggest one from the latest result.</div>'}
+          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No fields yet. Add one or ask the assistant to design them from the latest result.</div>'}
         </div>
         ${this.renderResultFormatPreview(this.resultContractDraft)}
         ${this.renderOutputSpecMetadataEditor()}
         <div class="workspace-task-result-contract-row-add">
-          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add CSV column</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add field</button>
         </div>
         <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
         <div class="workspace-task-result-contract-actions">
           <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save format')}</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save output')}</button>
         </div>
       </div>`;
   }
@@ -4300,8 +4334,8 @@ export class WorkspaceTaskPage {
     return `
       <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
         <label class="workspace-task-result-contract-field workspace-task-result-contract-field-name">
-          <span>CSV column</span>
-          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="CSV column name" />
+          <span>Field</span>
+          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="Field name" />
         </label>
         <label class="workspace-task-result-contract-field">
           <span>Type</span>
@@ -4477,18 +4511,19 @@ export class WorkspaceTaskPage {
       .querySelector('[data-action="submit-append-chooser"]')
       ?.addEventListener('click', () => this.submitAppendChooser());
     root
-      .querySelector('[data-action="edit-append-storage"]')
-      ?.addEventListener('click', () => this.openTaskStorageEditor());
+      .querySelectorAll('[data-action="edit-append-storage"]')
+      .forEach((btn) => btn.addEventListener('click', () => this.openTaskStorageEditor()));
+    // This action can appear in more than one place (review panel + result
+    // CTA), so bind every match rather than just the first.
     root
-      .querySelector('[data-action="design-output-columns-from-result"]')
-      ?.addEventListener('click', () => this.designOutputColumnsFromResult());
+      .querySelectorAll('[data-action="design-output-columns-from-result"]')
+      .forEach((btn) => btn.addEventListener('click', () => this.designOutputColumnsFromResult()));
   }
 
   // bindAutomationColumnsActions wires events on the column-designer DOM
   // inside the Automation card. Called by renderAutomationColumns whenever
   // that container re-renders.
-  bindAutomationColumnsActions() {
-    const root = this.elements.automationColumns;
+  bindAutomationColumnsActions(root = this.elements.automationColumns) {
     if (!root) return;
     root
       .querySelector('[data-action="edit-result-contract"]')
@@ -4526,7 +4561,7 @@ export class WorkspaceTaskPage {
   // input to keep focus stable while typing.
   syncResultContractDraftFromDOM() {
     if (!Array.isArray(this.resultContractDraft)) return;
-    const rows = this.elements.automationColumns?.querySelectorAll?.('[data-result-contract-row]');
+    const rows = this._designerRoot()?.querySelectorAll?.('[data-result-contract-row]');
     if (!rows || rows.length === 0) return;
     const next = [];
     rows.forEach((row) => {
@@ -4564,6 +4599,12 @@ export class WorkspaceTaskPage {
   }
 
   cancelResultContractEdit() {
+    // In modal mode, cancelling just closes the modal (which clears the draft
+    // and refreshes the inline card).
+    if (this.columnDesignerModalOpen) {
+      this.closeColumnDesignerModal();
+      return;
+    }
     this.resultContractDraft = null;
     this.resultOutputSpecDraft = null;
     this.resultContractSuggesting = false;
@@ -4590,7 +4631,7 @@ export class WorkspaceTaskPage {
   }
 
   setResultContractError(message) {
-    const error = this.elements.automationColumns?.querySelector?.('[data-role="result-contract-error"]');
+    const error = this._designerRoot()?.querySelector?.('[data-role="result-contract-error"]');
     if (!error) return;
     if (!message) {
       error.hidden = true;
@@ -4605,6 +4646,15 @@ export class WorkspaceTaskPage {
   // change. It routes through renderSchedule because that method owns the
   // card hidden/visible decision as well as the columns and destination blocks.
   refreshResultRender() {
+    // When the column-designer modal is open, the designer lives in the modal
+    // body — re-render there and rebind, leaving the inline card untouched.
+    if (this.columnDesignerModalOpen && this.columnModalBody) {
+      this.columnModalBody.innerHTML = this.renderResultContractBlock() + this.renderSuggestionInputsPreview();
+      this.bindAutomationColumnsActions(this.columnModalBody);
+      const preview = this.columnModalBody.querySelector('.workspace-task-suggestion-preview');
+      preview?.addEventListener('toggle', () => { this.suggestionPreviewOpen = preview.open; });
+      return;
+    }
     if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
       try {
         if (this._renderCache) delete this._renderCache.schedule;
@@ -4626,21 +4676,145 @@ export class WorkspaceTaskPage {
     this.lastSuggestionResultSample = this.getResultSampleForSuggestion();
   }
 
-  // designOutputColumnsFromResult is the Result-card entrypoint. Always
-  // captures the visible result as the suggestion sample and scrolls the
-  // Automation card into view; only opens the designer when storage is
-  // already configured. When storage is off, the user lands on the
-  // Automation toggle and decides to opt in first — the same one-decision-
-  // at-a-time flow that motivated moving the checkbox here.
+  // designOutputColumnsFromResult is the one-click "turn this result into CSV
+  // columns" entry point used by the Result card and the review panel. It
+  // captures the visible result as the suggestion sample, reveals the
+  // Automation card, opens its "Advanced settings" disclosure (the designer
+  // lives there), turns on append-CSV storage if it's off (which asks the
+  // assistant to suggest columns), and scrolls the designer into view.
+  // designOutputColumnsFromResult opens the dedicated column-designer modal,
+  // pre-seeded with the current result as the suggestion sample. Used by the
+  // Result-card CTA, the result-artifact link, and the review panel's "Edit
+  // format". Saving approves the output spec and turns on append-CSV storage,
+  // so the next run returns structured JSON in the designed shape.
   designOutputColumnsFromResult() {
+    this.openColumnDesignerModal({ suggest: this.getResultContractColumns().length === 0 });
+  }
+
+  // renderSuggestionInputsPreview renders a collapsed "What the assistant sees"
+  // disclosure for the modal so users can inspect the inputs feeding the column
+  // suggestion (including while it's running). The task/details/schedule/sample
+  // are exactly what the request sends; the instruction line is a faithful
+  // summary of the backend system prompt (kept short to avoid drift).
+  renderSuggestionInputsPreview() {
+    const busy = Boolean(this.resultContractSuggesting);
+    const line = (label, value) => value
+      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
+      : '';
+    const block = (label, value) => `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(value)}</pre></div>`;
+
+    // Once a suggestion has run, show the exact prompt the backend echoed back.
+    const echo = this.suggestionPromptEcho;
+    if (echo && (echo.system || echo.user)) {
+      const meta = [echo.provider, echo.model, echo.reasoning_effort ? `reasoning ${echo.reasoning_effort}` : '']
+        .filter(Boolean).join(' · ');
+      return `
+        <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
+          <summary>Exact prompt sent${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
+          <div class="workspace-task-suggestion-preview-body">
+            ${meta ? line('Model', meta) : ''}
+            ${block('System prompt', echo.system || '')}
+            ${block('User message', echo.user || '')}
+          </div>
+        </details>`;
+    }
+
+    // Before the first suggestion (no echo yet), show the inputs being sent.
+    const owner = this.getTaskResultStorageTask();
+    const title = String(this.task?.description || owner?.description || '').trim();
+    const details = String(this.task?.details || '').trim();
+    const sample = String(this.getResultSampleForSuggestion() || '').trim();
+    const recent = this.getRecentExecutionSamplesForSuggestion() || [];
+    const scheduleEnabled = Boolean(owner?.schedule_enabled || this.task?.schedule_enabled);
+    const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
+
+    const instruction = 'Reads the latest result below and proposes the structured fields it contains (3–8) that this task can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
+
+    // The latest result is the primary basis for the suggestion, so show it
+    // first; task/details/schedule are supporting context.
+    const sampleBlock = sample
+      ? block('Latest result (basis for fields)', sample)
+      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Latest result (basis for fields)</span><span>None captured yet — the assistant will fall back to the task title and details.</span></div>`;
+
+    return `
+      <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
+        <summary>What the assistant sees${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
+        <div class="workspace-task-suggestion-preview-body">
+          <p class="workspace-task-suggestion-instruction">${this.escapeHtml(instruction)}</p>
+          ${sampleBlock}
+          <div class="workspace-task-suggestion-context-label">Supporting context</div>
+          ${line('Task', title)}
+          ${line('Details', details)}
+          ${scheduleEnabled ? line('Schedule', scheduleName || 'enabled') : ''}
+          ${recent.length ? line('Earlier runs sampled', String(recent.length)) : ''}
+        </div>
+      </details>`;
+  }
+
+  // _designerRoot returns the DOM container the column designer currently
+  // renders into: the modal body when the modal is open, otherwise the inline
+  // Automation-card container. Render/read/error helpers route through this so
+  // the same designer logic drives both surfaces.
+  _designerRoot() {
+    return (this.columnDesignerModalOpen && this.columnModalBody)
+      ? this.columnModalBody
+      : this.elements.automationColumns;
+  }
+
+  openColumnDesignerModal({ suggest = false } = {}) {
+    if (this.columnDesignerModalOpen) return;
     this.captureSuggestionSampleFromCurrentResult();
-    if (this.elements.scheduleCard) {
-      this.elements.scheduleCard.hidden = false;
-      this.elements.scheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'workspace-task-column-modal-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Define what each run returns');
+    overlay.innerHTML = `
+      <div class="workspace-task-column-modal" role="document">
+        <div class="workspace-task-column-modal-header">
+          <h2>Define what each run returns</h2>
+          <button type="button" class="workspace-task-page-icon-btn" data-action="close-column-modal" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
+          </button>
+        </div>
+        <div class="workspace-task-column-modal-body" data-role="column-modal-body"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    this.columnModalOverlay = overlay;
+    this.columnModalBody = overlay.querySelector('[data-role="column-modal-body"]');
+    this.columnDesignerModalOpen = true;
+
+    overlay.addEventListener('mousedown', (event) => {
+      if (event.target === overlay) this.closeColumnDesignerModal();
+    });
+    overlay.querySelector('[data-action="close-column-modal"]')
+      ?.addEventListener('click', () => this.closeColumnDesignerModal());
+    this._columnModalKeydown = (event) => {
+      if (event.key === 'Escape') this.closeColumnDesignerModal();
+    };
+    document.addEventListener('keydown', this._columnModalKeydown);
+
+    // Initializes resultContractDraft and, because the modal is open, renders
+    // the editor into the modal body via refreshResultRender.
+    this.startResultContractEdit({ suggest });
+  }
+
+  closeColumnDesignerModal() {
+    if (!this.columnDesignerModalOpen) return;
+    this.columnDesignerModalOpen = false;
+    if (this._columnModalKeydown) {
+      document.removeEventListener('keydown', this._columnModalKeydown);
+      this._columnModalKeydown = null;
     }
-    if (this.getAppendCSVContext().configured) {
-      this.startResultContractEdit({ suggest: this.getResultContractColumns().length === 0 });
-    }
+    this.columnModalOverlay?.remove();
+    this.columnModalOverlay = null;
+    this.columnModalBody = null;
+    // Drop the editing draft so the inline card doesn't render in edit mode,
+    // then refresh the inline card to reflect any saved spec.
+    this.resultContractDraft = null;
+    this.resultOutputSpecDraft = null;
+    this.refreshResultRender();
   }
 
   // setCsvStorageEnabled drives the Automation card's storage checkbox.
@@ -4695,6 +4869,12 @@ export class WorkspaceTaskPage {
     } finally {
       this.automationStorageToggleBusy = false;
       if (checkbox) checkbox.disabled = false;
+      // Force a direct, un-gated re-render of the Automation sub-sections so
+      // the storage destination editor (and the checkbox/columns) reflect the
+      // new state immediately. loadData()'s render() is cache-gated and can
+      // skip this section, which previously left it stale until a manual
+      // refresh. Mirrors saveAutomationStorageDestination's finally.
+      this.renderAutomationSections();
     }
   }
 
@@ -4774,6 +4954,11 @@ export class WorkspaceTaskPage {
       .filter(Boolean)
       .join('');
     const saving = Boolean(this.automationStorageSaving);
+    const defaultPath = String(this.workspaceOutputDir || '').trim();
+    const defaultPathHint = defaultPath
+      ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(defaultPath)}">${this.escapeHtml(defaultPath)}</span>`
+      : '';
+    const fileName = String(storage.file_name || '').trim() || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -4781,7 +4966,8 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-automation-storage-options" role="radiogroup" aria-label="Storage destination">
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
-            <span>Default output folder</span>
+            <span>Default output folder${defaultPathHint}</span>
+            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.csv)" value="${this.escapeHtml(fileName)}" aria-label="CSV file name" />
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
@@ -4821,6 +5007,7 @@ export class WorkspaceTaskPage {
     const target = container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')?.value || 'default';
     const storeNodeId = container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
     const customPath = container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
+    const fileNameInput = container.querySelector('[data-role="automation-storage-filename"]')?.value?.trim() || '';
 
     const setError = (message) => {
       const error = container.querySelector('[data-role="automation-storage-error"]');
@@ -4847,17 +5034,27 @@ export class WorkspaceTaskPage {
     const owner = this.getTaskResultStorageTask();
     const ownerId = owner?.id || this.taskId;
     const existing = owner?.result_storage || {};
+    // Only persist file_name when the user actually customized it (i.e. it
+    // differs from the description-derived default); otherwise leave it blank
+    // so the filename keeps tracking the task description. A full custom path
+    // carries its own filename, so file_name doesn't apply there.
+    const derivedFileName = this.defaultAppendCsvFilename(owner);
+    const customFileName = (target !== 'custom' && fileNameInput && fileNameInput !== derivedFileName)
+      ? fileNameInput
+      : '';
     const nextStorage = {
       enabled: true,
       format: 'csv',
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
       store_node_id: target === 'store' ? storeNodeId : '',
+      file_name: customFileName,
     };
     // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
     if (
       String(existing.file_path || '') === nextStorage.file_path &&
-      String(existing.store_node_id || '') === nextStorage.store_node_id
+      String(existing.store_node_id || '') === nextStorage.store_node_id &&
+      String(existing.file_name || '') === nextStorage.file_name
     ) {
       this.notify('info', 'Destination is already set.');
       return;
@@ -4891,8 +5088,75 @@ export class WorkspaceTaskPage {
   }
 
   renderAutomationSections() {
+    this.renderAutomationSummary();
     this.renderAutomationColumns();
     this.renderAutomationStorage();
+  }
+
+  // renderAutomationSummary writes the always-visible, plain-language line that
+  // sits above the collapsed "Advanced settings" disclosure. Non-technical
+  // users see where results go (or that none are saved) without opening the
+  // CSV/storage/columns controls.
+  renderAutomationSummary() {
+    const container = this.elements.automationSummary;
+    if (!container) return;
+
+    const ctx = this.getAppendCSVContext();
+    if (!ctx.configured) {
+      container.innerHTML = '<span>Results are not saved automatically.</span>';
+      return;
+    }
+
+    // Show the full destination including the CSV filename the run actually
+    // writes, mirroring the backend: an explicit file path is used as-is; a
+    // directory (or the default output folder) gets the task's derived
+    // <slug>.csv appended.
+    const owner = this.getTaskResultStorageTask();
+    const storage = owner?.result_storage || {};
+    const storeNodeId = String(storage.store_node_id || '').trim();
+    const filePath = String(storage.file_path || '').trim();
+    const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
+    const customFileName = String(storage.file_name || '').trim();
+    const filename = filePathIsFile
+      ? this.basename(filePath)
+      : (customFileName || this.defaultAppendCsvFilename(owner));
+    const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
+
+    let dest;
+    if (storeNodeId) {
+      dest = `${this.getStoreNodeDisplayLabel(storeNodeId)} · ${filename}`;
+    } else if (filePathIsFile) {
+      dest = filePath;
+    } else if (filePath) {
+      dest = joinFile(filePath);
+    } else {
+      const dir = String(this.workspaceOutputDir || '').trim();
+      dest = dir ? joinFile(dir) : `the default output folder (${filename})`;
+    }
+
+    container.innerHTML =
+      '<span>Saves each run to:</span>'
+      + `<span class="workspace-task-automation-summary-path" title="${this.escapeHtml(dest)}">${this.escapeHtml(dest)}</span>`;
+  }
+
+  basename(path) {
+    const parts = String(path || '').replace(/\/+$/, '').split('/');
+    return parts[parts.length - 1] || '';
+  }
+
+  // defaultAppendCsvFilename mirrors the backend (defaultAppendCSVFilename):
+  // the task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped
+  // and spaces turned into underscores, plus a .csv suffix.
+  defaultAppendCsvFilename(task = this.task) {
+    let name = String(task?.description || '');
+    if (name.length > 30) name = name.slice(0, 30);
+    let slug = '';
+    for (const ch of name) {
+      if (/[A-Za-z0-9_-]/.test(ch)) slug += ch;
+      else if (ch === ' ') slug += '_';
+    }
+    if (!slug) slug = 'task';
+    return `${slug}.csv`;
   }
 
   // Get a trimmed sample of the current task result, used to ground the
@@ -4934,10 +5198,50 @@ export class WorkspaceTaskPage {
         }));
     }
 
+    // Try to parse a "Label: value" list (e.g. markdown bullets) out of the
+    // result so a plain-text result still yields meaningful fields without the
+    // assistant. Falls back to date+summary only when nothing parseable.
+    const parsed = this.parseFieldsFromResultText(this.getResultSampleForSuggestion());
+    if (parsed.length > 0) return parsed;
+
     return [
       { name: 'date', type: 'date', required: true, description: 'Run date' },
       { name: 'summary', type: 'string', required: true, description: 'Short result summary' },
     ];
+  }
+
+  // parseFieldsFromResultText extracts up to 8 fields from "Label: value" lines
+  // in a result (bullets like "- Today's pollen index: 10.5" included), turning
+  // each label into a slug field with a best-guess type. Lines that are URLs,
+  // questions, or have no value are skipped.
+  parseFieldsFromResultText(text) {
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    const fields = [];
+    const seen = new Set();
+    for (const raw of lines) {
+      // Strip leading list markers ("-", "*", "•", digits) and whitespace.
+      const line = raw.replace(/^\s*[-*•\d.)]+\s*/, '').trim();
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const label = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (!value || /^https?:\/\//i.test(value) || label.length > 40 || label.endsWith('?')) continue;
+      // Slugify the label into a field name.
+      const slug = label
+        .toLowerCase()
+        .replace(/['’]/g, '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      if (!slug || slug === 'page' || slug === 'source_url' || seen.has(slug)) continue;
+      seen.add(slug);
+      let type = 'string';
+      if (/^\d{4}-\d{2}-\d{2}/.test(value)) type = 'date';
+      else if (/^-?\d+(\.\d+)?$/.test(value)) type = 'number';
+      fields.push({ name: slug, type, required: false, description: `Parsed from "${label}"` });
+      if (fields.length >= 8) break;
+    }
+    return fields;
   }
 
   inferResultContractColumnType(columnName, rows = []) {
@@ -4960,12 +5264,19 @@ export class WorkspaceTaskPage {
     this.setResultContractError('');
     this.refreshResultRender();
 
+    // Don't let a slow model leave the designer spinning forever. Abort just
+    // above the backend's 90s cap (the Codex CLI cold start can take ~50-90s;
+    // warm calls are ~15s) so the backend's timeout governs and we don't kill
+    // a call it would have completed.
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 95000);
     try {
       const owner = this.getTaskResultStorageTask();
       const storage = owner?.result_storage || {};
       const response = await fetch('/api/orchestration/tasks/output-spec/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           title: this.task?.description || owner?.description || '',
           details: this.task?.details || '',
@@ -4990,6 +5301,11 @@ export class WorkspaceTaskPage {
         throw new Error(text || `Suggestion failed (HTTP ${response.status})`);
       }
       const parsed = text ? JSON.parse(text) : {};
+      // Capture the verbatim prompt the backend echoed back so the preview can
+      // show exactly what was sent.
+      if (parsed?.prompt && (parsed.prompt.system || parsed.prompt.user)) {
+        this.suggestionPromptEcho = parsed.prompt;
+      }
       const columns = Array.isArray(parsed?.output_contract?.columns)
         ? parsed.output_contract.columns
         : [];
@@ -5006,19 +5322,24 @@ export class WorkspaceTaskPage {
         required: column?.required !== false,
         description: String(column?.description || ''),
       }));
-      this.notify('success', `Suggested a result format with ${columns.length} CSV column${columns.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Suggested ${columns.length} output field${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
+      const timedOut = error?.name === 'AbortError';
       const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
       if (!hasDraftColumns) {
         this.resultContractDraft = this.suggestFallbackResultContractColumns();
         this.resultOutputSpecDraft = null;
-        this.notify('warning', 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
+        this.notify('warning', timedOut
+          ? 'The assistant took too long, so a local result format draft was created from the result. Edit it or try again.'
+          : 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
       } else {
-        this.setResultContractError(error?.message || 'Could not suggest columns.');
-        this.notify('error', error?.message || 'Could not suggest columns.');
+        const message = timedOut ? 'The assistant took too long. Edit the draft or try again.' : (error?.message || 'Could not suggest columns.');
+        this.setResultContractError(message);
+        this.notify(timedOut ? 'warning' : 'error', message);
       }
     } finally {
+      window.clearTimeout(timeoutId);
       this.resultContractSuggesting = false;
       this.refreshResultRender();
     }
@@ -5107,10 +5428,11 @@ export class WorkspaceTaskPage {
       if (!storageResponse.ok) {
         throw new Error(storageText || `Storage save failed (HTTP ${storageResponse.status})`);
       }
-      this.notify('success', `Saved result format with ${cleaned.length} CSV column${cleaned.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Saved ${cleaned.length} output field${cleaned.length === 1 ? '' : 's'}. Future runs will return them.`);
       this.resultContractDraft = null;
       this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
+      this.closeColumnDesignerModal();
       await this.loadData();
     } catch (error) {
       console.error('Failed to save result contract:', error);
@@ -5203,7 +5525,7 @@ export class WorkspaceTaskPage {
   }
 
   getResultMetadataPolicyDraft(existingSpec = null) {
-    const fieldsFromDOM = Array.from(this.elements.automationColumns?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
+    const fieldsFromDOM = Array.from(this._designerRoot()?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
     if (fieldsFromDOM.length > 0) {
       return {
         fields: fieldsFromDOM.map((input) => ({
@@ -5956,6 +6278,21 @@ export class WorkspaceTaskPage {
         ${this.renderMarkdownOrPre(result)}
       `);
     }
+    // Entry point to structure a plain-text result into CSV columns. The
+    // artifact card carries its own "Design columns" link, so only offer this
+    // when there's a result, no tabular artifact, and no columns yet.
+    if (result && !artifact && this.getResultContractColumns().length === 0) {
+      const ctaLabel = this.getAppendCSVContext().configured
+        ? 'Define the structured output →'
+        : 'Make this task return structured output →';
+      blocks.push(`
+        <div class="workspace-task-output-design-cta">
+          <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
+            <i class="bi bi-table" aria-hidden="true"></i> ${this.escapeHtml(ctaLabel)}
+          </button>
+        </div>
+      `);
+    }
     if (error) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Error</div>
@@ -6163,6 +6500,7 @@ export class WorkspaceTaskPage {
           <div><dt>Actual</dt><dd>${this.escapeHtml((headerMismatch.actual || []).join(', ') || 'No existing header')}</dd></div>
         </dl>
         <div class="workspace-task-review-reconcile-actions">
+          <button type="button" class="modern-btn modern-btn-primary" data-review-action="reproject_to_destination">Reorganize to match</button>
           <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-append-storage">Change destination</button>
           <button type="button" class="modern-btn modern-btn-secondary" data-action="design-output-columns-from-result">Edit format</button>
         </div>
@@ -6352,6 +6690,42 @@ export class WorkspaceTaskPage {
       } catch (error) {
         console.error('Failed to retry normalization:', error);
         this.notify('error', error?.message || 'Failed to retry normalization');
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (action === 'reproject_to_destination') {
+      // One-click recovery for a CSV header mismatch: ask the harness to rebuild
+      // the result into the destination file's columns (deterministically for
+      // known fields, via the assistant for the rest) and append it.
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'reproject_to_destination',
+            history_index: historyIndex
+          })
+        });
+        const payloadText = await response.text();
+        let payload = null;
+        if (payloadText) {
+          try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+        }
+        if (!response.ok) {
+          throw new Error(payload?.message || payloadText || 'Failed to reorganize result');
+        }
+        const stored = Boolean(payload?.stored);
+        this.notify(stored ? 'success' : 'warning', stored
+          ? 'Reorganized to match the destination and saved.'
+          : 'Reorganized, but the row still needs review.');
+        await this.loadData();
+      } catch (error) {
+        console.error('Failed to reorganize result:', error);
+        this.notify('error', error?.message || 'Failed to reorganize result');
       } finally {
         button.disabled = false;
       }
@@ -7564,47 +7938,52 @@ export class WorkspaceTaskPage {
       </div>
     ` : '';
 
+    // Recent runs: a compact history list collapsed by default so it doesn't
+    // add density to the Overview. The full friendly history also lives in the
+    // Activity > Runs tab; this is a quick in-context peek.
     let historyHtml = '';
     if (history.length > 0) {
       const recentRuns = history.slice(-10).reverse();
       historyHtml = `
-        <div class="workspace-task-page-mini-label">Recent runs</div>
-        <div class="workspace-task-schedule-history">
-          ${recentRuns.map((run, idx) => {
-            const runStatus = String(run?.status || 'completed').trim().toLowerCase();
-            const statusClass = getStatusClass(runStatus);
-            // TaskExecution carries executed_at; completed_at/started_at are
-            // legacy fallbacks for any older history shape that may still be
-            // sitting in the workspace store.
-            const ts = run?.executed_at || run?.completed_at || run?.started_at;
-            const durationMs = Number(run?.duration) || 0;
-            const durationLabel = durationMs > 0
-              ? (durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`)
-              : '';
-            const summary = String(run?.summary || run?.error || '').trim();
-            // Result is the full body (capped server-side at 16 KiB). Older
-            // history rows recorded before that field existed only have
-            // summary; treat that as a "no full result available" case.
-            const fullResult = String(run?.result || '').trim();
-            const hasExpandable = fullResult && fullResult !== summary;
-            const panelId = `workspace-task-schedule-run-panel-${idx}`;
-            return `
-              <div class="workspace-task-schedule-run">
-                <div class="workspace-task-schedule-run-row">
-                  <span class="workspace-task-schedule-run-meta">${this.escapeHtml(formatDateTime(ts))}${durationLabel ? ` <span class="workspace-task-schedule-run-duration">· ${this.escapeHtml(durationLabel)}</span>` : ''}${summary ? `<div class="workspace-task-schedule-run-summary" title="${this.escapeHtml(summary)}">${this.escapeHtml(summary)}</div>` : ''}</span>
-                  <div class="workspace-task-schedule-run-trail">
-                    <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
-                    ${hasExpandable ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7,10L12,15L17,10H7Z"/></svg>
-                      <span>Result</span>
-                    </button>` : ''}
+        <details class="workspace-task-advanced workspace-task-schedule-history-disclosure">
+          <summary class="workspace-task-advanced-summary">Recent runs</summary>
+          <div class="workspace-task-schedule-history">
+            ${recentRuns.map((run, idx) => {
+              const runStatus = String(run?.status || 'completed').trim().toLowerCase();
+              const statusClass = getStatusClass(runStatus);
+              // TaskExecution carries executed_at; completed_at/started_at are
+              // legacy fallbacks for any older history shape that may still be
+              // sitting in the workspace store.
+              const ts = run?.executed_at || run?.completed_at || run?.started_at;
+              const durationMs = Number(run?.duration) || 0;
+              const durationLabel = durationMs > 0
+                ? (durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`)
+                : '';
+              const summary = String(run?.summary || run?.error || '').trim();
+              // Result is the full body (capped server-side at 16 KiB). Older
+              // history rows recorded before that field existed only have
+              // summary; treat that as a "no full result available" case.
+              const fullResult = String(run?.result || '').trim();
+              const hasExpandable = fullResult && fullResult !== summary;
+              const panelId = `workspace-task-schedule-run-panel-${idx}`;
+              return `
+                <div class="workspace-task-schedule-run">
+                  <div class="workspace-task-schedule-run-row">
+                    <span class="workspace-task-schedule-run-meta">${this.escapeHtml(formatDateTime(ts))}${durationLabel ? ` <span class="workspace-task-schedule-run-duration">· ${this.escapeHtml(durationLabel)}</span>` : ''}${summary ? `<div class="workspace-task-schedule-run-summary" title="${this.escapeHtml(summary)}">${this.escapeHtml(summary)}</div>` : ''}</span>
+                    <div class="workspace-task-schedule-run-trail">
+                      <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
+                      ${hasExpandable ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7,10L12,15L17,10H7Z"/></svg>
+                        <span>Result</span>
+                      </button>` : ''}
+                    </div>
                   </div>
+                  ${hasExpandable ? `<div id="${panelId}" class="workspace-task-schedule-run-panel" hidden><pre class="workspace-task-schedule-run-result">${this.escapeHtml(fullResult)}</pre></div>` : ''}
                 </div>
-                ${hasExpandable ? `<div id="${panelId}" class="workspace-task-schedule-run-panel" hidden><pre class="workspace-task-schedule-run-result">${this.escapeHtml(fullResult)}</pre></div>` : ''}
-              </div>
-            `;
-          }).join('')}
-        </div>
+              `;
+            }).join('')}
+          </div>
+        </details>
       `;
     }
 
@@ -7619,7 +7998,7 @@ export class WorkspaceTaskPage {
         const panelId = btn.getAttribute('aria-controls');
         const panel = panelId ? document.getElementById(panelId) : null;
         if (!panel) return;
-        const next = !panel.hidden ? false : true;
+        const next = panel.hidden;
         panel.hidden = !next;
         btn.setAttribute('aria-expanded', next ? 'true' : 'false');
         btn.classList.toggle('is-open', next);
@@ -7716,32 +8095,26 @@ export class WorkspaceTaskPage {
     this.elements.workspaceRunsCard.hidden = false;
     this.elements.workspaceRuns.innerHTML = runs.map((run) => {
       const status = String(run?.status || '').trim();
-      const profile = String(run?.profile_snapshot?.id || '').trim();
-      const executorKind = String(run?.executor?.kind || '').trim();
-      const executorRef = String(run?.executor?.ref || '').trim();
-      const validationStatus = String(run?.report?.validation_status || '').trim();
+      const validationStatus = String(run?.report?.validation_status || '').trim().toLowerCase();
       const summary = String(run?.report?.summary || '').trim();
-      const createdAt = run?.created_at ? formatDateTime(run.created_at) : '';
-      const finishedAt = run?.finished_at ? formatDateTime(run.finished_at) : '';
-      const title = [profile || 'general', executorKind || 'executor'].filter(Boolean).join(' / ');
-      const meta = [
-        executorRef ? `worker ${executorRef}` : '',
-        createdAt ? `created ${createdAt}` : '',
-        finishedAt ? `finished ${finishedAt}` : '',
-        validationStatus ? `validation ${validationStatus}` : ''
-      ].filter(Boolean).join(' • ');
+      // Read like a history entry: when it ran is the clickable title. The
+      // profile snapshot, executor kind/worker ref, validation status, and
+      // raw run id are developer details — they live on the run page and the
+      // Developer tab, not in this friendly list.
+      const when = run?.started_at || run?.created_at || run?.finished_at;
+      const title = when ? formatDateTime(when) : 'Run';
+      const needsReview = validationStatus === 'needs_review';
 
       return `
         <article class="workspace-task-workspace-run">
           <div class="workspace-task-workspace-run-head">
             <div class="workspace-task-workspace-run-title">
               <strong><a href="${this.escapeHtml(this.getRunHref(run?.id || ''))}" class="workspace-task-workspace-run-link">${this.escapeHtml(title)}</a></strong>
-              ${meta ? `<div class="workspace-task-workspace-run-meta">${this.escapeHtml(meta)}</div>` : ''}
+              ${needsReview ? '<div class="workspace-task-workspace-run-meta">Needs review before saving</div>' : ''}
             </div>
             <span class="workspace-task-workspace-run-status" data-state="${this.escapeHtml(status)}">${this.escapeHtml(this.formatWorkspaceRunStatus(status) || 'Recorded')}</span>
           </div>
           ${summary ? `<div class="workspace-task-workspace-run-summary">${this.escapeHtml(summary)}</div>` : ''}
-          <div class="workspace-task-workspace-run-id">${this.escapeHtml(String(run?.id || ''))}</div>
         </article>
       `;
     }).join('');
@@ -7798,11 +8171,12 @@ export class WorkspaceTaskPage {
   refreshTaskTabEmptyStates() {
     const visible = (el) => el && !el.hidden;
 
+    // Run details (workspace-task-runs-card) moved to the Developer tab, so it
+    // no longer counts toward Activity's populated state.
     const activityCards = [
       document.getElementById('workspace-task-workspace-runs-card'),
       document.getElementById('workspace-task-relationships-card'),
-      document.getElementById('workspace-task-workflow-card'),
-      document.getElementById('workspace-task-runs-card')
+      document.getElementById('workspace-task-workflow-card')
     ];
     const populatedActivityCount = activityCards.filter(visible).length;
 
@@ -7824,10 +8198,8 @@ export class WorkspaceTaskPage {
       }
     }
 
-    if (this.elements.developerEmpty) {
-      const anyDeveloper = visible(document.getElementById('workspace-task-context-card'));
-      this.elements.developerEmpty.hidden = anyDeveloper;
-    }
+    // The Developer tab always has the Task ID card, so it never needs an
+    // empty-state placeholder.
   }
 
   renderContext() {

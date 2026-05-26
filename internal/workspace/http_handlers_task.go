@@ -459,18 +459,18 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	storeNodeID := strings.TrimSpace(req.StoreNodeID)
 	filePath := strings.TrimSpace(req.FilePath)
 
+	var storageCfg *ResultStorageConfig
+	if owner := ResolveTaskResultStorageOwner(ws, task); owner != nil {
+		storageCfg = owner.ResultStorage
+	}
+
 	if req.UseStorage {
-		owner := ResolveTaskResultStorageOwner(ws, task)
-		var storage *ResultStorageConfig
-		if owner != nil {
-			storage = owner.ResultStorage
-		}
-		if storage == nil || !storage.Enabled || strings.ToLower(strings.TrimSpace(storage.WriteMode)) != "append" {
+		if storageCfg == nil || !storageCfg.Enabled || strings.ToLower(strings.TrimSpace(storageCfg.WriteMode)) != "append" {
 			orihttp.BadRequest(w, "Task is not configured to append results to a CSV file")
 			return
 		}
-		storeNodeID = strings.TrimSpace(storage.StoreNodeID)
-		filePath = strings.TrimSpace(storage.FilePath)
+		storeNodeID = strings.TrimSpace(storageCfg.StoreNodeID)
+		filePath = strings.TrimSpace(storageCfg.FilePath)
 	}
 
 	appendedRows := csvRowCount(csvData)
@@ -489,7 +489,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		storeFilePath := filePath
 		if storeFilePath == "" {
-			storeFilePath = defaultAppendCSVFilename(task)
+			storeFilePath = AppendCSVFileName(task, storageCfg)
 		}
 		nodeCopy := *storeNode
 		nodeCopy.WriteMode = "append"
@@ -522,13 +522,17 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if filePath == "" {
-		baseOutputDir, dirErr := platform.GetDefaultOutputDir()
-		if dirErr != nil {
-			baseOutputDir = "outputs"
+		baseOutputDir := h.store.GetOutputsPath(ws.ID)
+		if baseOutputDir == "" {
+			fallback, dirErr := platform.GetDefaultOutputDir()
+			if dirErr != nil {
+				fallback = "outputs"
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, defaultAppendCSVFilename(task))
+		filePath = filepath.Join(baseOutputDir, AppendCSVFileName(task, storageCfg))
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, defaultAppendCSVFilename(task))
+		filePath = filepath.Join(filePath, AppendCSVFileName(task, storageCfg))
 	}
 
 	if err := AppendCSVToFile(filePath, csvData); err != nil {

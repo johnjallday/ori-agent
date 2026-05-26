@@ -34,6 +34,11 @@ type Store interface {
 	// GetFilesPath returns the path for storing files for a workspace
 	GetFilesPath(workspaceID string) string
 
+	// GetOutputsPath returns the path for auto-saved task results inside the
+	// workspace's own folder (<workspace>/outputs). This is the default
+	// destination when a task has no store node or explicit file path.
+	GetOutputsPath(workspaceID string) string
+
 	// GetWorkspaceAgent returns a workspace-local agent snapshot if one exists
 	// at <workspace>/agents/<slug>/config.json. The bool is false when the
 	// workspace has no snapshot for the named agent.
@@ -760,6 +765,20 @@ func (s *FileStore) GetFilesPath(workspaceID string) string {
 	return filepath.Join(s.resolveFolder(slug), FilesDir)
 }
 
+// GetOutputsPath returns the path for auto-saved task results inside the
+// workspace's own folder (<workspace>/outputs).
+func (s *FileStore) GetOutputsPath(workspaceID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	slug, ok := s.idToPath[workspaceID]
+	if !ok {
+		// Fallback for unknown workspaces
+		return filepath.Join(s.basePath, workspaceID, OutputsDir)
+	}
+	return filepath.Join(s.resolveFolder(slug), OutputsDir)
+}
+
 // Rename changes a workspace's folder name. The workspace ID is preserved.
 func (s *FileStore) Rename(id, newName string) error {
 	return s.RenameWithSlug(id, newName, "")
@@ -1414,4 +1433,9 @@ func (s *InMemoryStore) ListActive() ([]*Workspace, error) {
 // GetFilesPath returns the path for storing files for a workspace (in-memory uses temp dir)
 func (s *InMemoryStore) GetFilesPath(workspaceID string) string {
 	return filepath.Join(os.TempDir(), "ori-workspace-files", workspaceID, FilesDir)
+}
+
+// GetOutputsPath returns the path for auto-saved task results (in-memory uses temp dir)
+func (s *InMemoryStore) GetOutputsPath(workspaceID string) string {
+	return filepath.Join(os.TempDir(), "ori-workspace-files", workspaceID, OutputsDir)
 }

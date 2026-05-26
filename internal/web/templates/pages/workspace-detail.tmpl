@@ -180,12 +180,114 @@
 
           <!-- Workspace Health moved to /workspaces/{id}/diagnostics -->
 
+          <!-- Workspace Goal -->
+          <section class="modern-card workspace-detail-goal-card mb-4" id="workspace-detail-goal-card" aria-labelledby="workspace-detail-goal-title">
+            <div class="workspace-detail-goal-main">
+              <div class="workspace-detail-goal-label-row">
+                <div class="workspace-detail-goal-kicker">Workspace Goal</div>
+                <span class="workspace-detail-goal-status is-loading" id="workspace-detail-goal-status">Loading</span>
+              </div>
+              <h2 class="workspace-detail-goal-title" id="workspace-detail-goal-title">Goal</h2>
+              <p class="workspace-detail-goal-text" id="workspace-detail-goal-text">Loading workspace goal...</p>
+              <div class="workspace-detail-goal-meta" aria-label="Goal automation timing">
+                <span id="workspace-detail-goal-cadence">Cadence: loading</span>
+                <span id="workspace-detail-goal-next-run">Next run: loading</span>
+                <span id="workspace-detail-goal-last-run">Last run: loading</span>
+              </div>
+              <div class="workspace-detail-goal-action-status" id="workspace-detail-goal-action-status" aria-live="polite"></div>
+            </div>
+            <div class="workspace-detail-goal-actions">
+              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="workspace-detail-goal-edit">Edit goal</button>
+              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" id="workspace-detail-goal-run">Run now</button>
+              <a href="/action-center" class="modern-btn modern-btn-secondary modern-btn-sm" id="workspace-detail-goal-findings">Findings</a>
+            </div>
+          </section>
+
+          <div class="modal fade" id="workspace-detail-goal-modal" tabindex="-1" aria-labelledby="workspace-detail-goal-modal-title" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <form class="modal-content workspace-detail-goal-modal-content" id="workspace-detail-goal-modal-form">
+                <div class="modal-header workspace-detail-goal-modal-header">
+                  <div>
+                    <div class="workspace-detail-goal-kicker">Workspace Goal</div>
+                    <h2 class="modal-title workspace-detail-goal-modal-title" id="workspace-detail-goal-modal-title">Set goal</h2>
+                  </div>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body workspace-detail-goal-modal-body">
+                  <div class="workspace-detail-goal-modal-warning" id="workspace-detail-goal-modal-bindings-warning" style="display: none;" role="status">
+                    <strong>Classify workspace bindings before this goal can run.</strong>
+                    <div class="workspace-detail-goal-modal-warning-list" id="workspace-detail-goal-modal-unclassified-list"></div>
+                    <div class="workspace-detail-goal-modal-warning-hint">Open <em>Advanced settings</em> → MCP or Workspace Skills to set each binding's side effect (read / write / external).</div>
+                  </div>
+
+                  <div class="workspace-detail-goal-modal-field">
+                    <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
+                    <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="4" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
+                  </div>
+
+                  <div class="workspace-detail-goal-modal-grid">
+                    <div class="workspace-detail-goal-modal-field">
+                      <label for="workspace-detail-goal-modal-cadence-type" class="form-label">Cadence</label>
+                      <select id="workspace-detail-goal-modal-cadence-type" class="form-select">
+                        <option value="">Manual only</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="interval">Custom interval</option>
+                      </select>
+                    </div>
+
+                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-time-wrap" style="display: none;">
+                      <label for="workspace-detail-goal-modal-cadence-time" class="form-label">Time of day</label>
+                      <input id="workspace-detail-goal-modal-cadence-time" type="time" class="form-control" value="09:00">
+                    </div>
+                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dow-wrap" style="display: none;">
+                      <label for="workspace-detail-goal-modal-cadence-dow" class="form-label">Day of week</label>
+                      <select id="workspace-detail-goal-modal-cadence-dow" class="form-select">
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                        <option value="0">Sunday</option>
+                      </select>
+                    </div>
+                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dom-wrap" style="display: none;">
+                      <label for="workspace-detail-goal-modal-cadence-dom" class="form-label">Day of month</label>
+                      <input id="workspace-detail-goal-modal-cadence-dom" type="number" class="form-control" min="1" max="31" value="1">
+                    </div>
+                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-interval-wrap" style="display: none;">
+                      <label for="workspace-detail-goal-modal-cadence-interval" class="form-label">Interval (hours)</label>
+                      <input id="workspace-detail-goal-modal-cadence-interval" type="number" class="form-control" min="1" value="24">
+                    </div>
+                  </div>
+
+                  <div class="form-check form-switch workspace-detail-goal-modal-switch">
+                    <input class="form-check-input" type="checkbox" id="workspace-detail-goal-modal-enabled">
+                    <label class="form-check-label" for="workspace-detail-goal-modal-enabled">
+                      Enable goal automation
+                    </label>
+                  </div>
+                  <div class="workspace-detail-goal-modal-enabled-hint" id="workspace-detail-goal-modal-enabled-hint" style="display: none;">Pick a cadence above to enable automatic runs.</div>
+                  <div class="workspace-detail-goal-modal-autonomy" id="workspace-detail-goal-modal-autonomy"></div>
+                  <div class="workspace-detail-goal-modal-status" id="workspace-detail-goal-modal-status" aria-live="polite"></div>
+                </div>
+                <div class="modal-footer workspace-detail-goal-modal-footer">
+                  <button type="button" class="btn btn-link" id="workspace-detail-goal-modal-advanced">Advanced settings</button>
+                  <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="submit" class="btn btn-primary" id="workspace-detail-goal-modal-save">Save goal</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
           <!-- Workspace Configuration -->
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
               <div>
                 <div class="workspace-detail-config-kicker">Workspace Configuration</div>
-                <h2 class="workspace-detail-config-title">Manager settings, MCP, and skill policy</h2>
+                <h2 class="workspace-detail-config-title">Goal automation, manager behavior, MCP, and skills</h2>
                 <div class="workspace-detail-config-summary" id="workspace-detail-config-summary">
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Workspace: General · Guided</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">MCP: 0</span>
@@ -259,7 +361,7 @@
                   role="tab"
                   aria-controls="workspace-detail-config-mission-pane"
                   aria-selected="false">
-                  Mission
+                  Goal Settings
                 </button>
               </div>
               <div class="tab-content workspace-detail-config-body">
@@ -608,13 +710,13 @@
                   tabindex="0">
                   <div class="workspace-detail-config-pane-header">
                     <div>
-                      <div class="workspace-detail-config-pane-title">Workspace Mission</div>
+                      <div class="workspace-detail-config-pane-title">Goal Automation</div>
                       <div class="workspace-detail-config-pane-copy">
-                        Give this workspace a persistent goal. The Workspace Manager will work on it on schedule and surface findings to the Action Center.
+                        Configure how the Workspace Manager works against this workspace goal, including cadence, autonomy, and Action Center findings.
                       </div>
                     </div>
                     <div class="workspace-detail-config-pane-actions">
-                      <button id="workspace-detail-mission-refresh" class="workspace-detail-panel-btn" type="button" title="Refresh mission status">
+                      <button id="workspace-detail-mission-refresh" class="workspace-detail-panel-btn" type="button" title="Refresh goal automation status">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>
                       </button>
                     </div>
@@ -622,13 +724,13 @@
 
                   <!-- Status strip: enabled state, next run, counters, bindings readiness -->
                   <div id="workspace-detail-mission-status" class="workspace-detail-settings-summary-card" style="margin-bottom: 1rem;">
-                    <div class="workspace-detail-settings-summary-title">Mission Status</div>
-                    <div id="workspace-detail-mission-status-body" class="workspace-detail-settings-summary-copy">Loading mission status...</div>
+                    <div class="workspace-detail-settings-summary-title">Goal Automation Status</div>
+                    <div id="workspace-detail-mission-status-body" class="workspace-detail-settings-summary-copy">Loading goal automation status...</div>
                   </div>
 
                   <!-- Bindings readiness warning (shown only when bindings unclassified) -->
                   <div id="workspace-detail-mission-bindings-warning" class="workspace-detail-empty" style="display: none; border-left: 3px solid var(--warning-color, #f5a623); background: var(--warning-bg, rgba(245,166,35,0.08)); padding: 0.75rem 1rem; margin-bottom: 1rem;">
-                    <strong>Classify your bindings before enabling this mission.</strong>
+                    <strong>Classify your bindings before enabling goal automation.</strong>
                     <div id="workspace-detail-mission-unclassified-list" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted-color);"></div>
                     <div style="margin-top: 0.5rem; font-size: 0.85rem;">Open the MCP or Workspace Skills tab to set each binding's default side effect (read / write / external).</div>
                   </div>
@@ -636,10 +738,10 @@
                   <form id="workspace-detail-mission-form" class="workspace-detail-settings-form">
                     <div class="row g-3">
                       <div class="col-12">
-                        <label for="workspace-detail-mission-text" class="form-label">Mission</label>
+                        <label for="workspace-detail-mission-text" class="form-label">Goal</label>
                         <textarea id="workspace-detail-mission-text" class="form-control" rows="3" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
                         <div class="workspace-detail-settings-field-hint">
-                          The Workspace Manager will reread this each cycle. Be specific about what to watch and what counts as a finding.
+                          The Workspace Manager rereads this goal each cycle. Be specific about what to watch and what counts as a finding.
                         </div>
                       </div>
 
@@ -653,7 +755,7 @@
                           <option value="interval">Custom interval</option>
                         </select>
                         <div class="workspace-detail-settings-field-hint">
-                          How often the mission runs automatically. Manual-only missions only fire when you press "Run now".
+                          How often the Workspace Manager checks this goal. Manual-only goals run only when you press "Run now".
                         </div>
                       </div>
 
@@ -737,8 +839,9 @@
                         <div class="form-check form-switch" style="padding-top: 0.5rem;">
                           <input class="form-check-input" type="checkbox" id="workspace-detail-mission-enabled">
                           <label class="form-check-label" for="workspace-detail-mission-enabled">
-                            <strong>Enable mission</strong>
-                            <div class="workspace-detail-settings-field-hint">When on, the Workspace Manager runs the mission on the cadence above.</div>
+                            <strong>Enable goal automation</strong>
+                            <div class="workspace-detail-settings-field-hint">When on, the Workspace Manager checks this goal on the cadence above.</div>
+                            <div class="workspace-detail-settings-field-hint" id="workspace-detail-mission-enabled-hint" style="display: none; color: var(--warning-color, #f5a623);">Pick a cadence above to enable automatic runs.</div>
                           </label>
                         </div>
                       </div>
@@ -747,8 +850,8 @@
                     <div class="workspace-detail-settings-actions">
                       <div id="workspace-detail-mission-status-text" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
                       <button type="button" class="btn btn-outline-primary" id="workspace-detail-mission-baseline">Run baseline now</button>
-                      <button type="button" class="btn btn-outline-secondary" id="workspace-detail-mission-trigger">Trigger now</button>
-                      <button type="submit" class="btn btn-primary" id="workspace-detail-mission-save">Save mission</button>
+                      <button type="button" class="btn btn-outline-secondary" id="workspace-detail-mission-trigger">Run now</button>
+                      <button type="submit" class="btn btn-primary" id="workspace-detail-mission-save">Save goal settings</button>
                     </div>
                   </form>
                 </div>
@@ -2516,6 +2619,249 @@
     .workspace-detail-config-card {
       padding: 0;
       overflow: hidden;
+    }
+
+    .workspace-detail-goal-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: stretch;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-color: color-mix(in srgb, var(--primary-color) 22%, var(--border-color));
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 8%, transparent), transparent 46%),
+        var(--bg-secondary);
+    }
+
+    .workspace-detail-goal-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+
+    .workspace-detail-goal-label-row {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-detail-goal-kicker {
+      color: var(--primary-color);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-goal-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.45rem;
+      padding: 0.22rem 0.52rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      font-size: 0.68rem;
+      font-weight: 700;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-goal-status.is-enabled {
+      border-color: color-mix(in srgb, var(--success-color) 55%, var(--border-color));
+      color: var(--success-color);
+    }
+
+    .workspace-detail-goal-status.is-paused,
+    .workspace-detail-goal-status.is-manual {
+      border-color: color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
+      color: var(--warning-color);
+    }
+
+    .workspace-detail-goal-status.is-empty,
+    .workspace-detail-goal-status.is-loading {
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-goal-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 1rem;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .workspace-detail-goal-text {
+      max-width: 82ch;
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .workspace-detail-goal-text.is-empty {
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-goal-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+    }
+
+    .workspace-detail-goal-meta span {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.22rem 0.48rem;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+    }
+
+    .workspace-detail-goal-action-status {
+      min-height: 1rem;
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+    }
+
+    .workspace-detail-goal-action-status.is-error {
+      color: var(--danger-color, #c0392b);
+    }
+
+    .workspace-detail-goal-actions {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-goal-actions .has-findings {
+      border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
+      color: var(--primary-color);
+      font-weight: 600;
+    }
+
+    .workspace-detail-goal-modal-content {
+      background:
+        linear-gradient(145deg, color-mix(in srgb, var(--primary-color) 7%, transparent), transparent 42%),
+        var(--bg-secondary);
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-goal-modal-header {
+      align-items: flex-start;
+      border-bottom-color: var(--border-color);
+    }
+
+    .workspace-detail-goal-modal-title {
+      margin-top: 0.2rem;
+      color: var(--text-primary);
+      font-size: 1.12rem;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .workspace-detail-goal-modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+
+    .workspace-detail-goal-modal-field {
+      min-width: 0;
+    }
+
+    .workspace-detail-goal-modal-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.85rem;
+    }
+
+    .workspace-detail-goal-modal-warning {
+      border-left: 3px solid var(--warning-color, #f5a623);
+      background: var(--warning-bg, rgba(245, 166, 35, 0.08));
+      border-radius: 6px;
+      padding: 0.7rem 0.85rem;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-goal-modal-warning-list {
+      margin-top: 0.35rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-goal-modal-warning-hint {
+      margin-top: 0.35rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-goal-modal-switch {
+      margin-top: 0.1rem;
+    }
+
+    .workspace-detail-goal-modal-enabled-hint {
+      margin-top: 0.1rem;
+      color: var(--warning-color, #f5a623);
+      font-size: 0.76rem;
+    }
+
+    .workspace-detail-goal-modal-autonomy {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+    }
+
+    .workspace-detail-goal-modal-autonomy strong {
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-goal-modal-status {
+      min-height: 1.1rem;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+    }
+
+    .workspace-detail-goal-modal-status.is-error {
+      color: var(--danger-color, #c0392b);
+    }
+
+    .workspace-detail-goal-modal-footer {
+      border-top-color: var(--border-color);
+      gap: 0.4rem;
+    }
+
+    .workspace-detail-goal-modal-footer .btn-link {
+      margin-right: auto;
+      color: var(--primary-color);
+      text-decoration: none;
+    }
+
+    .workspace-detail-goal-modal-footer .btn-link:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 900px) {
+      .workspace-detail-goal-card {
+        flex-direction: column;
+      }
+
+      .workspace-detail-goal-actions {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .workspace-detail-goal-modal-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     .workspace-detail-config-header {

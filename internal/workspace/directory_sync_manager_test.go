@@ -53,6 +53,10 @@ func (s *directorySyncTestStore) GetFilesPath(workspaceID string) string {
 	return filepath.Join("workspaces", workspaceID, "files")
 }
 
+func (s *directorySyncTestStore) GetOutputsPath(workspaceID string) string {
+	return filepath.Join("workspaces", workspaceID, "outputs")
+}
+
 func (s *directorySyncTestStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
 	return nil, false, nil
 }

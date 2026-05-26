@@ -1576,10 +1576,11 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 }
 
 type taskOutputReviewRequest struct {
-	Action       string `json:"action"`
-	HistoryIndex *int   `json:"history_index"`
-	Result       string `json:"result,omitempty"`
-	ApprovedBy   string `json:"approved_by,omitempty"`
+	Action        string   `json:"action"`
+	HistoryIndex  *int     `json:"history_index"`
+	Result        string   `json:"result,omitempty"`
+	ApprovedBy    string   `json:"approved_by,omitempty"`
+	TargetColumns []string `json:"target_columns,omitempty"`
 }
 
 func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Request) {
@@ -1663,7 +1664,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 		}
 		validation, csvData := workspace.ValidateTaskOutputSpecResultWithAssistant(r.Context(), reviewTask, rawResult, assistant)
 		if validation.ValidationStatus == workspace.TaskValidationPassed {
-			if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+			if err := appendApprovedTaskCSV(th.workspaceStore, ws, task, csvData); err != nil {
 				if !recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
 					orihttp.InternalError(w, fmt.Sprintf("Failed to append retried normalization: %v", err))
 					return
@@ -1738,7 +1739,7 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		if err := appendApprovedTaskCSV(ws, task, csvData); err != nil {
+		if err := appendApprovedTaskCSV(th.workspaceStore, ws, task, csvData); err != nil {
 			if recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
 				now := time.Now().UTC()
 				validation.ValidatedAt = &now
@@ -1776,8 +1777,72 @@ func (th *TaskHandler) handleTaskOutputReview(w http.ResponseWriter, r *http.Req
 			return
 		}
 		reviewValidation = validation
+	case "reproject_to_destination":
+		entry := task.ExecutionHistory[historyIndex]
+		rawResult := strings.TrimSpace(entry.Result)
+		if rawResult == "" {
+			rawResult = strings.TrimSpace(entry.Summary)
+		}
+		if rawResult == "" {
+			rawResult = strings.TrimSpace(task.Result)
+		}
+		if rawResult == "" {
+			orihttp.BadRequest(w, "raw result is required to reproject")
+			return
+		}
+		targetColumns := req.TargetColumns
+		if len(targetColumns) == 0 {
+			targetColumns = expectedColumnsFromValidation(entry.Validation)
+		}
+		if len(targetColumns) == 0 {
+			orihttp.BadRequest(w, "no destination columns available to match; provide target_columns")
+			return
+		}
+		var assistant workspace.TaskOutputSpecAssistant
+		if candidate, ok := th.taskHandler.(workspace.TaskOutputSpecAssistant); ok {
+			assistant = candidate
+		}
+		csvData, _, reprojErr := workspace.ReprojectResultToColumns(r.Context(), task, rawResult, targetColumns, assistant)
+		if reprojErr != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to reorganize result: %v", reprojErr))
+			return
+		}
+		validation := entry.Validation
+		if validation == nil {
+			validation = &workspace.TaskValidationResult{}
+		}
+		if err := appendApprovedTaskCSV(th.workspaceStore, ws, task, csvData); err != nil {
+			// A mismatch here would be unexpected (we matched the file's header),
+			// but surface it for review rather than failing silently.
+			if recordTaskOutputReviewCSVHeaderMismatch(validation, err) {
+				now := time.Now().UTC()
+				validation.ValidatedAt = &now
+				if recordErr := th.recordTaskOutputReviewValidation(ws.ID, taskID, historyIndex, action, validation); recordErr != nil {
+					orihttp.InternalError(w, fmt.Sprintf("Failed to record reorganize review: %v", recordErr))
+					return
+				}
+				reviewValidation = validation
+				break
+			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to append reorganized result: %v", err))
+			return
+		}
+		now := time.Now().UTC()
+		validation.ValidationStatus = workspace.TaskValidationManuallyApproved
+		validation.StorageStatus = workspace.TaskStorageManuallyAppended
+		validation.Errors = nil
+		validation.ManualApproval = &workspace.TaskManualApproval{
+			ApprovedAt: now,
+			ApprovedBy: strings.TrimSpace(req.ApprovedBy),
+		}
+		validation.ValidatedAt = &now
+		if err := th.recordTaskOutputReviewValidation(ws.ID, taskID, historyIndex, action, validation); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to record reorganized append: %v", err))
+			return
+		}
+		reviewValidation = validation
 	default:
-		orihttp.BadRequest(w, "action must be inspect, copy_raw, dismiss, rerun, retry_normalization, or approve_append")
+		orihttp.BadRequest(w, "action must be inspect, copy_raw, dismiss, rerun, retry_normalization, reproject_to_destination, or approve_append")
 		return
 	}
 
@@ -1835,6 +1900,21 @@ func (th *TaskHandler) recordTaskOutputReviewValidation(workspaceID, taskID stri
 			return nil
 		})
 	})
+}
+
+// expectedColumnsFromValidation pulls the destination file's column header out
+// of a recorded csv_header_mismatch error, so a reproject can target the exact
+// columns the existing CSV expects.
+func expectedColumnsFromValidation(validation *workspace.TaskValidationResult) []string {
+	if validation == nil {
+		return nil
+	}
+	for _, e := range validation.Errors {
+		if strings.EqualFold(strings.TrimSpace(e.Code), "csv_header_mismatch") && len(e.Expected) > 0 {
+			return append([]string(nil), e.Expected...)
+		}
+	}
+	return nil
 }
 
 func recordTaskOutputReviewCSVHeaderMismatch(validation *workspace.TaskValidationResult, err error) bool {
@@ -1973,7 +2053,7 @@ func (th *TaskHandler) startTaskOutputReviewRerun(workspaceID, taskID string) er
 	return nil
 }
 
-func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvData string) error {
+func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task *workspace.Task, csvData string) error {
 	if ws == nil || task == nil {
 		return fmt.Errorf("workspace and task are required")
 	}
@@ -1990,7 +2070,7 @@ func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvDat
 
 	storeFilePath := storage.FilePath
 	if strings.TrimSpace(storeFilePath) == "" {
-		storeFilePath = taskResultAppendCSVFilename(task)
+		storeFilePath = workspace.AppendCSVFileName(task, storage)
 	}
 
 	if strings.TrimSpace(storage.StoreNodeID) != "" {
@@ -2026,34 +2106,22 @@ func appendApprovedTaskCSV(ws *workspace.Workspace, task *workspace.Task, csvDat
 
 	filePath := storage.FilePath
 	if strings.TrimSpace(filePath) == "" {
-		baseOutputDir, err := platform.GetDefaultOutputDir()
-		if err != nil {
-			baseOutputDir = "outputs"
+		baseOutputDir := ""
+		if store != nil {
+			baseOutputDir = store.GetOutputsPath(ws.ID)
 		}
-		filePath = filepath.Join(baseOutputDir, ws.Name, storeFilePath)
+		if baseOutputDir == "" {
+			fallback, err := platform.GetDefaultOutputDir()
+			if err != nil {
+				fallback = "outputs"
+			}
+			baseOutputDir = filepath.Join(fallback, ws.Name)
+		}
+		filePath = filepath.Join(baseOutputDir, storeFilePath)
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, taskResultAppendCSVFilename(task))
+		filePath = filepath.Join(filePath, workspace.AppendCSVFileName(task, storage))
 	}
 	return workspace.AppendCSVToFileStrict(filePath, csvData)
-}
-
-func taskResultAppendCSVFilename(task *workspace.Task) string {
-	name := strings.TrimSpace(task.Description)
-	if len(name) > 30 {
-		name = name[:30]
-	}
-	var sanitized strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			sanitized.WriteRune(r)
-		} else if r == ' ' {
-			sanitized.WriteRune('_')
-		}
-	}
-	if sanitized.Len() == 0 {
-		return "task.csv"
-	}
-	return sanitized.String() + ".csv"
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk
