@@ -4259,11 +4259,12 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Result format${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
+            <span class="workspace-task-page-mini-label">Each run returns${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
+            <span class="workspace-task-result-contract-projection">Stored as CSV columns (plus run info)</span>
           </div>
           ${this.renderOutputSpecOverview(activeSpec)}
-          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit format</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit fields</button>
         </div>`;
     }
     if (!editing) {
@@ -4271,9 +4272,9 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-result-contract" data-state="empty">
           <div class="workspace-task-result-contract-warning">
             <i class="bi bi-magic" aria-hidden="true"></i>
-            <span>Let the assistant choose the CSV columns from the latest result.</span>
+            <span>Let the assistant design the fields each run should return, from the latest result.</span>
           </div>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest result format</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="suggest-result-contract">Suggest fields</button>
         </div>`;
     }
 
@@ -4287,8 +4288,8 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-contract" data-state="edit">
         <div class="workspace-task-result-contract-header">
           <div>
-            <div class="workspace-task-page-mini-label">Result format</div>
-            <p class="workspace-task-result-contract-help">Review what each future run will save to CSV. The assistant extracts one row, checks it, then appends it only when the row matches this format.</p>
+            <div class="workspace-task-page-mini-label">What each run returns</div>
+            <p class="workspace-task-result-contract-help">Define the fields each run should return as structured data. The assistant extracts them into one row, checks it, then saves it as a CSV row (plus run info) only when it matches.</p>
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
@@ -4299,21 +4300,21 @@ export class WorkspaceTaskPage {
         </div>
         <div class="workspace-task-result-format-steps" aria-label="Result storage setup steps">
           <span class="is-complete">Storage on</span>
-          <span class="is-active">Review columns</span>
-          <span>Save format</span>
+          <span class="is-active">Review fields</span>
+          <span>Save</span>
         </div>
         <div class="workspace-task-result-contract-rows" data-role="result-contract-rows">
-          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No result format yet. Add a CSV column or ask the assistant to suggest one from the latest result.</div>'}
+          ${rowsHtml || '<div class="workspace-task-result-contract-empty">No fields yet. Add one or ask the assistant to design them from the latest result.</div>'}
         </div>
         ${this.renderResultFormatPreview(this.resultContractDraft)}
         ${this.renderOutputSpecMetadataEditor()}
         <div class="workspace-task-result-contract-row-add">
-          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add CSV column</button>
+          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add field</button>
         </div>
         <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
         <div class="workspace-task-result-contract-actions">
           <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
-          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save format')}</button>
+          <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save output')}</button>
         </div>
       </div>`;
   }
@@ -4333,8 +4334,8 @@ export class WorkspaceTaskPage {
     return `
       <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
         <label class="workspace-task-result-contract-field workspace-task-result-contract-field-name">
-          <span>CSV column</span>
-          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="CSV column name" />
+          <span>Field</span>
+          <input type="text" data-role="result-contract-name" placeholder="pollen_count" value="${this.escapeHtml(column?.name || '')}" aria-label="Field name" />
         </label>
         <label class="workspace-task-result-contract-field">
           <span>Type</span>
@@ -4765,11 +4766,11 @@ export class WorkspaceTaskPage {
     overlay.className = 'workspace-task-column-modal-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', 'Design CSV columns');
+    overlay.setAttribute('aria-label', 'Define what each run returns');
     overlay.innerHTML = `
       <div class="workspace-task-column-modal" role="document">
         <div class="workspace-task-column-modal-header">
-          <h2>Design CSV columns</h2>
+          <h2>Define what each run returns</h2>
           <button type="button" class="workspace-task-page-icon-btn" data-action="close-column-modal" aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
           </button>
@@ -5276,7 +5277,7 @@ export class WorkspaceTaskPage {
         required: column?.required !== false,
         description: String(column?.description || ''),
       }));
-      this.notify('success', `Suggested a result format with ${columns.length} CSV column${columns.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Suggested ${columns.length} output field${columns.length === 1 ? '' : 's'}.`);
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
       const timedOut = error?.name === 'AbortError';
@@ -5382,7 +5383,7 @@ export class WorkspaceTaskPage {
       if (!storageResponse.ok) {
         throw new Error(storageText || `Storage save failed (HTTP ${storageResponse.status})`);
       }
-      this.notify('success', `Saved result format with ${cleaned.length} CSV column${cleaned.length === 1 ? '' : 's'}.`);
+      this.notify('success', `Saved ${cleaned.length} output field${cleaned.length === 1 ? '' : 's'}. Future runs will return them.`);
       this.resultContractDraft = null;
       this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
@@ -6237,8 +6238,8 @@ export class WorkspaceTaskPage {
     // when there's a result, no tabular artifact, and no columns yet.
     if (result && !artifact && this.getResultContractColumns().length === 0) {
       const ctaLabel = this.getAppendCSVContext().configured
-        ? 'Design CSV columns from this result →'
-        : 'Save future runs as CSV columns →';
+        ? 'Define the structured output →'
+        : 'Make this task return structured output →';
       blocks.push(`
         <div class="workspace-task-output-design-cta">
           <button type="button" class="workspace-task-page-text-button" data-action="design-output-columns-from-result">
