@@ -604,7 +604,7 @@ func AutoStoreResultWithAssistant(ctx context.Context, ws *Workspace, task *Task
 	}
 
 	// Write result to store
-	if err := WriteToStore(assignedStore, filename, dataToStore); err != nil {
+	if err := WriteToStoreForWorkspace(assignedStore, workspaceStore, ws.ID, filename, dataToStore); err != nil {
 		logger.Error("Failed to auto-store task result", logger.Fields{
 			"task_id":       task.ID,
 			"store_node_id": assignedStore.ID,
@@ -763,14 +763,14 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 			storeNodeCopy := *storeNode
 			storeNodeCopy.WriteMode = "append"
 			storeNodeCopy.Format = "csv"
-			payload, err := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, dataToStore)
+			payload, err := csvWithoutHeaderForExistingStoreStrictWithResolver(storeNode, workspaceStore, ws.ID, storeFilePath, dataToStore)
 			if err != nil {
 				// Lever B: reproject into the store file's existing columns and
 				// retry once before holding the run for manual review. Only
 				// reconcile fallback rows (contractCSV == ""); a designed
 				// contract's mismatch stays a hard review.
 				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
-					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrict(storeNode, storeFilePath, reCSV); retryErr == nil {
+					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrictWithResolver(storeNode, workspaceStore, ws.ID, storeFilePath, reCSV); retryErr == nil {
 						payload = rePayload
 						err = nil
 					}
@@ -788,7 +788,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 				})
 				return
 			}
-			if err := WriteToStore(&storeNodeCopy, storeFilePath, payload); err != nil {
+			if err := WriteToStoreForWorkspace(&storeNodeCopy, workspaceStore, ws.ID, storeFilePath, payload); err != nil {
 				logger.Error("Failed to append task result to store node", logger.Fields{
 					"task_id":       task.ID,
 					"store_node_id": storeNode.ID,
@@ -806,7 +806,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 				validation.StorageStatus = TaskStorageAppended
 				recordTaskStorageValidation(ws, task, workspaceStore, validation)
 			}
-		} else if err := WriteToStore(storeNode, storeFilePath, dataToStore); err != nil {
+		} else if err := WriteToStoreForWorkspace(storeNode, workspaceStore, ws.ID, storeFilePath, dataToStore); err != nil {
 			logger.Error("Failed to auto-store task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
@@ -833,7 +833,33 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 
 	// Otherwise use file path (or default output directory)
 	filePath := storage.FilePath
-	if filePath == "" {
+	if ResultStorageUsesWorkspaceFolder(storage) {
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(workspaceStore, ws.ID, storage.WorkspaceFolder)
+		if err != nil {
+			logger.Error("Failed to resolve workspace folder for task result storage", logger.Fields{
+				"task_id": task.ID,
+				"folder":  storage.WorkspaceFolder,
+				"err":     err,
+			})
+			return
+		}
+		relativeFilePath := strings.TrimSpace(filePath)
+		if relativeFilePath == "" {
+			relativeFilePath = filename
+		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
+			relativeFilePath = filepath.Join(relativeFilePath, filename)
+		}
+		finalPath, err := BuildFinalPath(baseDir, relativeFilePath)
+		if err != nil {
+			logger.Error("Failed to resolve task result path inside workspace folder", logger.Fields{
+				"task_id": task.ID,
+				"path":    relativeFilePath,
+				"err":     err,
+			})
+			return
+		}
+		filePath = finalPath
+	} else if filePath == "" {
 		// Default to the workspace's own folder: <workspace>/outputs/
 		baseOutputDir := ""
 		if workspaceStore != nil {

@@ -222,6 +222,8 @@ type CanvasLayout struct {
 	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"`
 	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`
 	StorePositions      map[string]Position        `json:"store_positions,omitempty"`
+	DirectoryPositions  map[string]Position        `json:"directory_positions,omitempty"`
+	FolderPositions     map[string]Position        `json:"folder_positions,omitempty"`
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"`
 	Scale               float64                    `json:"scale,omitempty"`
 	OffsetX             float64                    `json:"offset_x,omitempty"`
@@ -311,6 +313,9 @@ type Workspace struct {
 
 	// AttachmentsJSON contains serialized attachments.
 	AttachmentsJSON json.RawMessage `json:"attachments,omitempty"`
+
+	// FoldersJSON contains serialized managed workspace file folders.
+	FoldersJSON json.RawMessage `json:"folders,omitempty"`
 
 	// ScheduledTasksJSON contains serialized scheduled task templates.
 	ScheduledTasksJSON json.RawMessage `json:"scheduled_tasks,omitempty"`

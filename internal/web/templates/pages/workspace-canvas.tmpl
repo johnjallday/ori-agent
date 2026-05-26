@@ -462,9 +462,25 @@
 
             <!-- Base Directory -->
             <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Storage Target</label>
+              <select class="form-select" id="store-storage-target">
+                <option value="">External or allowed relative directory</option>
+                <option value="workspace_folder">Workspace file folder</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Base Directory</label>
               <input type="text" class="form-control" id="store-base-dir" placeholder="/path/to/store/directory" required>
               <small class="text-muted">Absolute path where files will be written</small>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Workspace file folder</label>
+              <select class="form-select" id="store-workspace-folder">
+                <option value="">Workspace files</option>
+              </select>
+              <small class="text-muted">Used when Storage Target is set to Workspace file folder.</small>
             </div>
 
             <!-- Format -->

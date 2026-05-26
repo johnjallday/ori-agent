@@ -129,6 +129,9 @@ class AgentCanvas {
   get attachments() { return this.state.attachments; }
   set attachments(value) { this.state.setAttachments(value); }
 
+  get workspaceFolders() { return this.state.workspaceFolders; }
+  set workspaceFolders(value) { this.state.setWorkspaceFolders(value); }
+
   get messages() { return this.state.messages; }
   set messages(value) { this.state.messages = value; }
 
@@ -393,6 +396,9 @@ class AgentCanvas {
     // Draw task flows
     this.renderer.drawTaskFlows();
 
+    // Draw workspace-owned folder container nodes
+    this.renderer.drawWorkspaceFolderNodes();
+
     // Draw attachments
     this.renderer.drawAttachments();
 
@@ -571,6 +577,8 @@ class AgentCanvas {
 
 
   calculateTaskLevels() { return this.layout.calculateTaskLevels(); }
+
+  refreshWorkspaceFileFolders() { return this.initModule.loadWorkspaceFileFolders(); }
 
   // Helper methods delegated to helpers module
   getAgentColor(index) { return this.helpers.getAgentColor(index); }
@@ -884,6 +892,57 @@ class AgentCanvas {
       console.error('Failed to delete attachment', err);
       alert('Failed to delete attachment: ' + (err?.message || err));
     }
+  }
+
+  async moveAttachmentToWorkspaceFolder(attachment, folder) {
+    const targetFolder = String(folder?.relative_path || folder?.path || '').trim();
+    const fileMeta = attachment?.file || attachment?.file_meta;
+    if (!attachment?.id || !this.workspaceId || !fileMeta?.relative_path || !targetFolder) {
+      this.notifications?.showNotification?.('Only workspace files can be moved into folders', 'warning');
+      return;
+    }
+
+    const currentFolder = this.getParentRelativePath(fileMeta.relative_path);
+    if (currentFolder === targetFolder) {
+      this.notifications?.showNotification?.('File is already in that folder', 'info');
+      return;
+    }
+
+    try {
+      const response = await apiPatch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(attachment.id)}/move`,
+        { target_folder: targetFolder }
+      );
+      const updated = response?.attachment || {};
+      Object.assign(attachment, updated);
+      attachment.file = updated.file || updated.file_meta || attachment.file || attachment.file_meta;
+      await this.refreshWorkspaceFileFolders();
+      this.draw();
+      this.notifications?.showNotification?.('File moved to folder', 'success');
+      if (window.EventBus) {
+        EventBus.emit('workspace:files:updated', { workspaceId: this.workspaceId });
+      }
+    } catch (err) {
+      console.error('Failed to move attachment to workspace folder', err);
+      this.notifications?.showNotification?.(
+        `Failed to move file: ${err?.message || err}`,
+        'error'
+      );
+    }
+  }
+
+  getParentRelativePath(path) {
+    const normalizedPath = String(path || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '');
+    if (!normalizedPath || !normalizedPath.includes('/')) {
+      return '';
+    }
+    return normalizedPath.slice(0, normalizedPath.lastIndexOf('/'));
   }
 
   /**

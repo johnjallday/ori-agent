@@ -72,6 +72,14 @@ type AgentInstance struct {
 	CreatedAt      time.Time `json:"created_at"`            // When this instance was added
 }
 
+// WorkspaceFolder represents a managed folder under the workspace files root.
+type WorkspaceFolder struct {
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Workspace stores shared context between collaborating agents
 type Workspace struct {
 	ID                   string                      `json:"id"`
@@ -90,6 +98,7 @@ type Workspace struct {
 	PendingPlan          *types.PendingPlan          `json:"pending_plan,omitempty"`
 	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
 	Attachments          []Attachment                `json:"attachments,omitempty"`
+	Folders              []WorkspaceFolder           `json:"folders,omitempty"`
 	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
 	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
 	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
@@ -130,6 +139,7 @@ type CanvasLayout struct {
 	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
 	StorePositions      map[string]Position        `json:"store_positions,omitempty"`      // store node ID -> position
 	DirectoryPositions  map[string]Position        `json:"directory_positions,omitempty"`  // directory reference ID -> position
+	FolderPositions     map[string]Position        `json:"folder_positions,omitempty"`     // managed workspace folder ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -290,12 +300,14 @@ type TaskRuntimeInputs struct {
 
 // ResultStorageConfig specifies how task results should be automatically stored
 type ResultStorageConfig struct {
-	Enabled     bool   `json:"enabled"`                 // Enable auto-save on completion
-	StoreNodeID string `json:"store_node_id,omitempty"` // Save to specific store node (if set)
-	FilePath    string `json:"file_path,omitempty"`     // Custom file path (if no store node)
-	FileName    string `json:"file_name,omitempty"`     // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
-	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown, csv
-	WriteMode   string `json:"write_mode,omitempty"`    // Output mode: new_file, append
+	Enabled         bool   `json:"enabled"`                    // Enable auto-save on completion
+	StoreNodeID     string `json:"store_node_id,omitempty"`    // Save to specific store node (if set)
+	StorageTarget   string `json:"storage_target,omitempty"`   // Destination mode: workspace_folder or external/default
+	WorkspaceFolder string `json:"workspace_folder,omitempty"` // Folder path under the workspace-owned files root
+	FilePath        string `json:"file_path,omitempty"`        // Custom file path (if no store node)
+	FileName        string `json:"file_name,omitempty"`        // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
+	Format          string `json:"format,omitempty"`           // Output format: text, json, markdown, csv
+	WriteMode       string `json:"write_mode,omitempty"`       // Output mode: new_file, append
 }
 
 // TaskStatus represents the current state of a task
@@ -619,24 +631,26 @@ type ScheduledTask struct {
 
 // StoreNode represents a file storage node on the canvas
 type StoreNode struct {
-	ID            string    `json:"id"`
-	CanvasNodeID  string    `json:"canvas_node_id"`
-	AgentNodeID   string    `json:"agent_node_id"` // Agent instance this store is connected to
-	WorkspaceID   string    `json:"workspace_id"`
-	Name          string    `json:"name"`
-	BaseDir       string    `json:"base_dir"`   // Base directory (e.g., "reports/")
-	Format        string    `json:"format"`     // "json", "text", "markdown", "csv", "binary"
-	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
-	AutoCreateDir bool      `json:"auto_create_dir"`
-	AutoStore     bool      `json:"auto_store"` // Automatically store task results on completion
-	LastWriteTime time.Time `json:"last_write_time"`
-	WriteCount    int       `json:"write_count"`
-	LastError     string    `json:"last_error"`
-	LastFilePath  string    `json:"last_file_path"` // Last written file (relative to base_dir)
-	X             float64   `json:"x"`
-	Y             float64   `json:"y"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	CanvasNodeID    string    `json:"canvas_node_id"`
+	AgentNodeID     string    `json:"agent_node_id"` // Agent instance this store is connected to
+	WorkspaceID     string    `json:"workspace_id"`
+	Name            string    `json:"name"`
+	BaseDir         string    `json:"base_dir"` // Base directory (e.g., "reports/")
+	StorageTarget   string    `json:"storage_target,omitempty"`
+	WorkspaceFolder string    `json:"workspace_folder,omitempty"`
+	Format          string    `json:"format"`     // "json", "text", "markdown", "csv", "binary"
+	WriteMode       string    `json:"write_mode"` // "overwrite", "append"
+	AutoCreateDir   bool      `json:"auto_create_dir"`
+	AutoStore       bool      `json:"auto_store"` // Automatically store task results on completion
+	LastWriteTime   time.Time `json:"last_write_time"`
+	WriteCount      int       `json:"write_count"`
+	LastError       string    `json:"last_error"`
+	LastFilePath    string    `json:"last_file_path"` // Last written file (relative to base_dir)
+	X               float64   `json:"x"`
+	Y               float64   `json:"y"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // WorkspaceMCPBinding represents a concrete MCP binding owned by the workspace.
@@ -709,11 +723,17 @@ type DirectoryReference struct {
 
 // FileInfo represents information about a file in a directory
 type FileInfo struct {
-	Name         string    `json:"name"`          // File name
-	RelativePath string    `json:"relative_path"` // Path relative to directory root
-	Size         int64     `json:"size"`          // File size in bytes
-	IsDir        bool      `json:"is_dir"`        // True if this is a directory
-	ModTime      time.Time `json:"mod_time"`      // Last modification time
+	ID           string     `json:"id,omitempty"`            // Stable item ID when available
+	AttachmentID string     `json:"attachment_id,omitempty"` // Attachment ID for workspace-owned files
+	FolderID     string     `json:"folder_id,omitempty"`     // Managed folder ID for workspace-owned folders
+	Source       string     `json:"source,omitempty"`        // Source namespace, e.g. workspace or linked_directory
+	Name         string     `json:"name"`                    // File name
+	RelativePath string     `json:"relative_path"`           // Path relative to directory root
+	URL          string     `json:"url,omitempty"`           // Workspace file URL when available
+	Size         int64      `json:"size"`                    // File size in bytes
+	IsDir        bool       `json:"is_dir"`                  // True if this is a directory
+	ModTime      time.Time  `json:"mod_time"`                // Last modification time
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`    // Soft-delete timestamp when the item is trashed
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace

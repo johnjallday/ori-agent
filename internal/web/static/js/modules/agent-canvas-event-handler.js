@@ -28,6 +28,9 @@ export class AgentCanvasEventHandler {
       onWorkspaceProgress: (data) => {
         this.processWorkspacePayload(data, { setTasks: false, source: 'workspace.progress' });
       },
+      onWorkspaceUpdated: (data) => {
+        this.handleWorkspaceUpdated(data);
+      },
       onTaskEvent: (type, data) => {
         const evt = { type, data };
         this.handleTaskEvent(evt);
@@ -89,6 +92,18 @@ export class AgentCanvasEventHandler {
 
     // Emit a synthetic workspace snapshot immediately so UI reacts without waiting for server tick
     this.emitImmediateWorkspaceProgress();
+  }
+
+  async handleWorkspaceUpdated(data) {
+    const action = data?.data?.action || '';
+    if (
+      action.startsWith('folder.') ||
+      action === 'file.moved' ||
+      data?.source === 'workspace-files'
+    ) {
+      await this.parent.refreshWorkspaceFileFolders();
+      this.parent.draw();
+    }
   }
 
   /**

@@ -123,6 +123,7 @@ func TestMigrations(t *testing.T) {
 		"agent_mcp_access_json":   false,
 		"skill_bindings_json":     false,
 		"agent_skill_access_json": false,
+		"folders_json":            false,
 	}
 	vaultColumns := map[string]bool{
 		"name":        false,

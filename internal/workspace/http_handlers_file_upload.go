@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		title = filename
 	}
 	notes := r.FormValue("notes")
+	folderPath, _ := workspaceFolderFormValue(r)
 	vaultRef, ok := parseWorkspaceUploadVaultReference(w, r.FormValue("vault_reference"))
 	if !ok {
 		return
@@ -87,9 +89,13 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filesPath := h.store.GetFilesPath(workspaceID)
-	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename, folderPath)
 	if err != nil {
 		logger.Error("Failed to store workspace file", logger.Fields{"error": err, "path": filesPath})
+		if strings.Contains(err.Error(), "invalid folder path") {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
 		orihttp.InternalError(w, "Failed to save file")
 		return
 	}
@@ -166,6 +172,23 @@ func parseWorkspaceUploadVaultReference(w http.ResponseWriter, raw string) (*vau
 	return vaultref.Normalize(&ref), true
 }
 
+func workspaceFolderFormValue(r *http.Request) (string, bool) {
+	if r == nil || r.MultipartForm == nil {
+		return "", false
+	}
+	for _, key := range []string{"folder_path", "folder"} {
+		values, ok := r.MultipartForm.Value[key]
+		if !ok {
+			continue
+		}
+		if len(values) == 0 {
+			return "", true
+		}
+		return values[0], true
+	}
+	return "", false
+}
+
 // ServeFile handles GET /api/workspaces/:id/files/:filename
 // Serves uploaded files from the workspace files directory.
 func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +205,10 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := parts[0]
-	filename := parts[2]
+	relativePath := strings.Join(parts[2:], "/")
+	if unescaped, err := url.PathUnescape(relativePath); err == nil {
+		relativePath = unescaped
+	}
 
 	// Validate the workspace exists
 	_, err := h.store.Get(workspaceID)
@@ -193,12 +219,8 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 
 	// Construct file path
 	filesPath := h.store.GetFilesPath(workspaceID)
-	filePath := filepath.Join(filesPath, filename)
-
-	// Security: Ensure the resolved path is within the files directory
-	absFilesPath, _ := filepath.Abs(filesPath)
-	absFilePath, _ := filepath.Abs(filePath)
-	if !isPathWithin(absFilePath, absFilesPath) {
+	filePath, cleanRelativePath, err := workspaceFilePathWithinRoot(filesPath, relativePath)
+	if err != nil {
 		orihttp.BadRequest(w, "Invalid file path")
 		return
 	}
@@ -210,7 +232,7 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set content type based on file extension
-	contentType := detectMimeType(filename)
+	contentType := detectMimeType(cleanRelativePath)
 	w.Header().Set("Content-Type", contentType)
 
 	// Serve the file

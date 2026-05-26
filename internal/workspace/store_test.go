@@ -96,6 +96,69 @@ func TestFileStore_SaveAndGet(t *testing.T) {
 	}
 }
 
+func TestFileStore_WorkspaceFoldersRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	now := time.Now().UTC().Round(time.Second)
+
+	ws := newTestWorkspace("ws-folders", "Folder Workspace")
+	ws.Folders = []WorkspaceFolder{
+		{
+			ID:        "folder-1",
+			Path:      "research/notes",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+	ws.Layout = &CanvasLayout{
+		FolderPositions: map[string]Position{
+			"folder-1": {X: 72, Y: 144},
+		},
+	}
+
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Folders) != 1 {
+		t.Fatalf("expected 1 folder, got %d", len(got.Folders))
+	}
+	if got.Folders[0].Path != "research/notes" {
+		t.Fatalf("expected folder path research/notes, got %q", got.Folders[0].Path)
+	}
+	if got.Layout == nil {
+		t.Fatalf("expected layout")
+	}
+	if pos := got.Layout.FolderPositions["folder-1"]; pos.X != 72 || pos.Y != 144 {
+		t.Fatalf("expected folder position to persist, got %#v", pos)
+	}
+
+	reloaded, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore reload: %v", err)
+	}
+	reloadedWorkspace, err := reloaded.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Get reloaded: %v", err)
+	}
+	if len(reloadedWorkspace.Folders) != 1 {
+		t.Fatalf("expected 1 reloaded folder, got %d", len(reloadedWorkspace.Folders))
+	}
+	if reloadedWorkspace.Folders[0].ID != "folder-1" {
+		t.Fatalf("expected reloaded folder id folder-1, got %q", reloadedWorkspace.Folders[0].ID)
+	}
+	if pos := reloadedWorkspace.Layout.FolderPositions["folder-1"]; pos.X != 72 || pos.Y != 144 {
+		t.Fatalf("expected reloaded folder position to persist, got %#v", pos)
+	}
+}
+
 func TestFileStore_List(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

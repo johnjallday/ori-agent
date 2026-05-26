@@ -107,6 +107,10 @@ export class AgentCanvasRenderer {
     return this.nodes.drawDirectoryNodes();
   }
 
+  drawWorkspaceFolderNodes() {
+    return this.nodes.drawWorkspaceFolderNodes();
+  }
+
   drawAgentToStoreConnections() {
     return this.connections.drawAgentToStoreConnections();
   }

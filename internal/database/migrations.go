@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 21
+const schemaVersion = 22
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -107,6 +107,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration020HomeAssistantIntakeTraces(ctx)
 	case 21:
 		return db.migration021WorkspaceRunTaskOutput(ctx)
+	case 22:
+		return db.migration022WorkspaceFolders(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -134,6 +136,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			messages_json TEXT DEFAULT '[]',
 			tasks_json TEXT DEFAULT '[]',
 			attachments_json TEXT DEFAULT '[]',
+			folders_json TEXT DEFAULT '[]',
 			scheduled_tasks_json TEXT DEFAULT '[]',
 			store_nodes_json TEXT DEFAULT '[]',
 			workflows_json TEXT DEFAULT '{}',
@@ -1055,6 +1058,30 @@ func (db *DB) migration020HomeAssistantIntakeTraces(ctx context.Context) error {
 func (db *DB) migration021WorkspaceRunTaskOutput(ctx context.Context) error {
 	if _, err := db.ExecContext(ctx, `ALTER TABLE workspace_runs ADD COLUMN task_output_json TEXT`); err != nil {
 		return fmt.Errorf("failed to extend workspace run task output schema: %w", err)
+	}
+	return nil
+}
+
+// migration022WorkspaceFolders persists managed workspace file folders.
+func (db *DB) migration022WorkspaceFolders(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN folders_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace folders column: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workspaces
+		SET folders_json = '[]'
+		WHERE folders_json IS NULL OR TRIM(folders_json) = ''
+	`); err != nil {
+		return fmt.Errorf("failed to backfill workspace folders: %w", err)
 	}
 	return nil
 }

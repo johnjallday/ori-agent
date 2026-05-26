@@ -715,6 +715,8 @@ export class WorkspaceDetailPage {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('workspace_id', this.workspaceId);
+      const folderPath = this.getSelectedUploadFolderPath();
+      if (folderPath) formData.append('folder_path', folderPath);
       const vaultReference = this.buildVaultReferenceFromItem(item, 'file');
       if (vaultReference) {
         formData.append('vault_reference', JSON.stringify(vaultReference));
@@ -808,6 +810,7 @@ export class WorkspaceDetailPage {
       agentsList: document.getElementById('workspace-detail-agents-list'),
       sessionsList: document.getElementById('workspace-detail-sessions-list'),
       filesList: document.getElementById('workspace-detail-files-list'),
+      browseFilesBtn: document.getElementById('workspace-detail-browse-files'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
       mcpList: document.getElementById('workspace-detail-mcp-list'),
@@ -1121,8 +1124,20 @@ export class WorkspaceDetailPage {
       directoryExplorerSearch: document.getElementById('workspace-directory-explorer-search'),
       directoryExplorerSortBtn: document.getElementById('workspace-directory-explorer-sort'),
       directoryExplorerRefreshBtn: document.getElementById('workspace-directory-explorer-refresh'),
+      directoryExplorerCreateFolderBtn: document.getElementById(
+        'workspace-directory-explorer-create-folder'
+      ),
+      directoryExplorerRenameFolderBtn: document.getElementById(
+        'workspace-directory-explorer-rename-folder'
+      ),
+      directoryExplorerDeleteFolderBtn: document.getElementById(
+        'workspace-directory-explorer-delete-folder'
+      ),
       directoryExplorerTree: document.getElementById('workspace-directory-explorer-tree'),
-      directoryExplorerPreview: document.getElementById('workspace-directory-explorer-preview')
+      directoryExplorerPreview: document.getElementById('workspace-directory-explorer-preview'),
+      fileFolderPath: document.getElementById('hubFileFolderPath'),
+      fileFolderSelect: document.getElementById('hubFileFolderSelect'),
+      createUploadFolderBtn: document.getElementById('hubCreateUploadFolderBtn')
     };
   }
 
@@ -1153,7 +1168,14 @@ export class WorkspaceDetailPage {
     this.elements.refreshSessionsBtn?.addEventListener('click', () => this.loadSessions());
 
     // File buttons
-    this.elements.addFileBtn?.addEventListener('click', () => this.showFileModal());
+    this.elements.addFileBtn?.addEventListener('click', event => {
+      event.stopPropagation();
+      this.showFileModal();
+    });
+    this.elements.browseFilesBtn?.addEventListener('click', event => {
+      event.stopPropagation();
+      this.openWorkspaceFilesExplorer();
+    });
 
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
@@ -13274,6 +13296,10 @@ export class WorkspaceDetailPage {
     return this.directoryExplorer.open(directoryId, source);
   }
 
+  openWorkspaceFilesExplorer() {
+    return this.directoryExplorer.open('__workspace_files__', 'owned');
+  }
+
   /**
    * Show add directory modal - launches the folder picker
    */
@@ -14045,10 +14071,12 @@ export class WorkspaceDetailPage {
   async uploadFiles(files) {
     if (!files || files.length === 0) return;
 
+    const folderPath = this.getSelectedUploadFolderPath();
     for (const file of files) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('workspace_id', this.workspaceId);
+      if (folderPath) formData.append('folder_path', folderPath);
 
       try {
         const response = await fetch(
@@ -14069,6 +14097,19 @@ export class WorkspaceDetailPage {
 
     if (window.Toast) window.Toast.success('File(s) uploaded');
     await this.loadFiles();
+  }
+
+  getSelectedUploadFolderPath() {
+    const candidates = [
+      this.elements.fileFolderPath,
+      document.getElementById('workspaceFileFolderPath'),
+      document.getElementById('hubFileFolderPath')
+    ];
+    for (const candidate of candidates) {
+      const value = String(candidate?.value || '').trim();
+      if (value) return value;
+    }
+    return '';
   }
 
   /**

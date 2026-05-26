@@ -53,6 +53,18 @@ export class WorkspaceDirectoryExplorer {
       this.loadFiles({ force: true })
     );
 
+    elements.directoryExplorerCreateFolderBtn?.addEventListener('click', () => {
+      void this.promptCreateFolder();
+    });
+
+    elements.directoryExplorerRenameFolderBtn?.addEventListener('click', () => {
+      void this.promptRenameSelectedFolder();
+    });
+
+    elements.directoryExplorerDeleteFolderBtn?.addEventListener('click', () => {
+      void this.promptDeleteSelectedFolder();
+    });
+
     elements.directoryExplorerSortBtn?.addEventListener('click', () => {
       this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
       this.render();
@@ -121,6 +133,13 @@ export class WorkspaceDirectoryExplorer {
     });
 
     elements.directoryExplorerPreview?.addEventListener('click', event => {
+      const moveButton = event.target.closest('[data-action="move-workspace-file"]');
+      if (moveButton) {
+        event.preventDefault();
+        void this.promptMoveSelectedFile();
+        return;
+      }
+
       const entryButton = event.target.closest('[data-action="select-node"]');
       if (!entryButton) return;
       const path = this.decodeDataPath(entryButton.dataset.path);
@@ -145,10 +164,17 @@ export class WorkspaceDirectoryExplorer {
   }
 
   async open(directoryId, source = 'reference') {
-    if (!directoryId) return;
+    const normalizedSource =
+      source === 'owned' ? 'owned' : source === 'attachment' ? 'attachment' : 'reference';
+    if (!directoryId && normalizedSource !== 'owned') return;
 
-    const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
-    const directory = this.host.directories.find(entry => entry.id === directoryId);
+    const directory = normalizedSource === 'owned'
+      ? {
+          id: '__workspace_files__',
+          name: 'Workspace files',
+          path: 'Managed files in this workspace'
+        }
+      : this.host.directories.find(entry => entry.id === directoryId);
     if (!directory) {
       if (window.Toast) window.Toast.error('Directory not found');
       return;
@@ -170,7 +196,7 @@ export class WorkspaceDirectoryExplorer {
     this.selectedType = '';
     this.previewCache = new Map();
 
-    this.loadPersistedState(directory.id);
+    this.loadPersistedState(this.cacheKeyForDirectory(directory));
 
     const elements = this.host.elements;
     if (elements.directoryExplorerSearch) {
@@ -184,6 +210,7 @@ export class WorkspaceDirectoryExplorer {
       elements.directoryExplorerSubtitle.textContent = directory.path || '';
     }
 
+    this.updateFolderActionControls();
     modal.show();
     this.renderLoading();
     await this.loadFiles();
@@ -206,6 +233,7 @@ export class WorkspaceDirectoryExplorer {
 
   renderLoading(message = 'Scanning directory...') {
     const elements = this.host.elements;
+    this.updateFolderActionControls();
     if (elements.directoryExplorerTree) {
       elements.directoryExplorerTree.innerHTML = `<div class="workspace-directory-tree-empty">${this.host.escapeHtml(message)}</div>`;
     }
@@ -224,9 +252,9 @@ export class WorkspaceDirectoryExplorer {
 
     const loadToken = this.loadToken + 1;
     this.loadToken = loadToken;
-    const cacheKey = currentDirectory.id;
+    const cacheKey = this.cacheKeyForDirectory(currentDirectory);
 
-    if (this.source !== 'reference') {
+    if (this.source === 'attachment') {
       const elements = this.host.elements;
       if (elements.directoryExplorerTree) {
         elements.directoryExplorerTree.innerHTML = `
@@ -260,7 +288,9 @@ export class WorkspaceDirectoryExplorer {
     this.renderLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
 
     try {
-      const endpoint = `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
+      const endpoint = this.source === 'owned'
+        ? `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/files/tree`
+        : `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
       const response = await fetch(endpoint);
       if (!response.ok) {
         const errorText = await response.text();
@@ -278,6 +308,11 @@ export class WorkspaceDirectoryExplorer {
           if (!normalizedPath) return null;
 
           return {
+            id: item?.id || '',
+            attachmentId: item?.attachment_id || item?.attachmentId || '',
+            folderId: item?.folder_id || item?.folderId || '',
+            source: item?.source || '',
+            url: item?.url || '',
             name: item?.name || normalizedPath.split('/').pop() || normalizedPath,
             path: normalizedPath,
             isDir: Boolean(item?.is_dir),
@@ -354,6 +389,11 @@ export class WorkspaceDirectoryExplorer {
       path: '',
       size: 0,
       modTime: '',
+      id: '',
+      attachmentId: '',
+      folderId: '',
+      source: this.source,
+      url: '',
       children: []
     };
     const nodeIndex = new Map();
@@ -378,6 +418,11 @@ export class WorkspaceDirectoryExplorer {
         path: normalizedPath,
         size: 0,
         modTime: '',
+        id: '',
+        attachmentId: '',
+        folderId: '',
+        source: this.source,
+        url: '',
         children: []
       };
       parentNode.children.push(node);
@@ -392,6 +437,10 @@ export class WorkspaceDirectoryExplorer {
       if (entry.isDir) {
         const dirNode = ensureDirectoryNode(normalizedPath);
         dirNode.modTime = entry.modTime || dirNode.modTime;
+        dirNode.id = entry.id || dirNode.id;
+        dirNode.folderId = entry.folderId || dirNode.folderId;
+        dirNode.source = entry.source || dirNode.source;
+        dirNode.url = entry.url || dirNode.url;
         return;
       }
 
@@ -409,6 +458,11 @@ export class WorkspaceDirectoryExplorer {
         path: normalizedPath,
         size: entry.size || 0,
         modTime: entry.modTime || '',
+        id: entry.id || '',
+        attachmentId: entry.attachmentId || '',
+        folderId: entry.folderId || '',
+        source: entry.source || this.source,
+        url: entry.url || '',
         children: null
       };
       parentNode.children.push(fileNode);
@@ -452,6 +506,7 @@ export class WorkspaceDirectoryExplorer {
       `;
     }
 
+    this.updateFolderActionControls();
     this.renderSummary();
     this.renderBreadcrumb();
 
@@ -468,6 +523,7 @@ export class WorkspaceDirectoryExplorer {
         elements.directoryExplorerPreview.innerHTML =
           '<div class="workspace-directory-preview-empty">No files to preview yet.</div>';
       }
+      this.updateFolderActionControls();
       return;
     }
 
@@ -730,6 +786,231 @@ export class WorkspaceDirectoryExplorer {
     }
   }
 
+  updateFolderActionControls() {
+    const elements = this.host.elements;
+    const isOwnedSource = this.source === 'owned';
+    const selectedNode = this.getSelectedNode();
+    const canManageSelectedFolder =
+      isOwnedSource &&
+      selectedNode?.type === 'dir' &&
+      Boolean(selectedNode.path) &&
+      Boolean(selectedNode.folderId);
+
+    [
+      elements.directoryExplorerCreateFolderBtn,
+      elements.directoryExplorerRenameFolderBtn,
+      elements.directoryExplorerDeleteFolderBtn
+    ].forEach(button => {
+      if (button) {
+        button.hidden = !isOwnedSource;
+      }
+    });
+
+    if (elements.directoryExplorerCreateFolderBtn) {
+      elements.directoryExplorerCreateFolderBtn.disabled = !isOwnedSource;
+    }
+    if (elements.directoryExplorerRenameFolderBtn) {
+      elements.directoryExplorerRenameFolderBtn.disabled = !canManageSelectedFolder;
+    }
+    if (elements.directoryExplorerDeleteFolderBtn) {
+      elements.directoryExplorerDeleteFolderBtn.disabled = !canManageSelectedFolder;
+    }
+  }
+
+  getSelectedNode() {
+    return this.nodeIndex.get(this.normalizeRelativePath(this.selectedPath)) || null;
+  }
+
+  getSelectedFolderPathForCreate() {
+    const selectedNode = this.getSelectedNode();
+    if (!selectedNode) return '';
+    if (selectedNode.type === 'dir') {
+      return selectedNode.path || '';
+    }
+    return this.parentPathFor(selectedNode.path || '');
+  }
+
+  getSelectedManagedFolderNode() {
+    const selectedNode = this.getSelectedNode();
+    if (
+      this.source === 'owned' &&
+      selectedNode?.type === 'dir' &&
+      selectedNode.path &&
+      selectedNode.folderId
+    ) {
+      return selectedNode;
+    }
+    return null;
+  }
+
+  async promptCreateFolder() {
+    if (this.source !== 'owned') return;
+
+    const selectedFolder = this.getSelectedFolderPathForCreate();
+    const defaultPath = selectedFolder ? `${selectedFolder}/New Folder` : 'New Folder';
+    const rawPath = window.prompt('New folder path inside Workspace files', defaultPath);
+    if (rawPath === null) return;
+
+    const folderPath = this.normalizeRelativePath(rawPath);
+    if (!folderPath) return;
+
+    try {
+      const payload = await this.requestWorkspaceJSON('/folders', {
+        method: 'POST',
+        body: { path: folderPath }
+      });
+      const nextPath = this.normalizeRelativePath(payload?.folder?.path || folderPath);
+      this.selectedPath = nextPath;
+      this.selectedType = 'dir';
+      this.expandedPaths.add(nextPath);
+      this.ensureAncestorsExpanded(nextPath, 'dir');
+      await this.refreshOwnedTree();
+      if (window.Toast) window.Toast.success('Folder created');
+    } catch (error) {
+      console.error('Failed to create workspace file folder:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to create folder');
+    }
+  }
+
+  async promptRenameSelectedFolder() {
+    const folderNode = this.getSelectedManagedFolderNode();
+    if (!folderNode) return;
+
+    const rawPath = window.prompt(
+      'Rename folder path inside Workspace files',
+      folderNode.path || ''
+    );
+    if (rawPath === null) return;
+
+    const nextPath = this.normalizeRelativePath(rawPath);
+    if (!nextPath || nextPath === folderNode.path) return;
+
+    try {
+      const payload = await this.requestWorkspaceJSON(`/folders/${encodeURIComponent(folderNode.folderId)}`, {
+        method: 'PATCH',
+        body: { path: nextPath }
+      });
+      const updatedPath = this.normalizeRelativePath(payload?.folder?.path || nextPath);
+      this.selectedPath = updatedPath;
+      this.selectedType = 'dir';
+      this.expandedPaths.delete(folderNode.path);
+      this.expandedPaths.add(updatedPath);
+      this.ensureAncestorsExpanded(updatedPath, 'dir');
+      await this.refreshOwnedTree();
+      if (window.Toast) window.Toast.success('Folder renamed');
+    } catch (error) {
+      console.error('Failed to rename workspace file folder:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to rename folder');
+    }
+  }
+
+  async promptDeleteSelectedFolder() {
+    const folderNode = this.getSelectedManagedFolderNode();
+    if (!folderNode) return;
+
+    const confirmed = window.confirm(
+      `Delete the empty folder "${folderNode.path}" from Workspace files?`
+    );
+    if (!confirmed) return;
+
+    try {
+      await this.requestWorkspaceJSON(`/folders/${encodeURIComponent(folderNode.folderId)}`, {
+        method: 'DELETE'
+      });
+      const parentPath = this.parentPathFor(folderNode.path);
+      this.selectedPath = parentPath;
+      this.selectedType = parentPath ? 'dir' : '';
+      this.expandedPaths.delete(folderNode.path);
+      await this.refreshOwnedTree();
+      if (window.Toast) window.Toast.success('Folder deleted');
+    } catch (error) {
+      console.error('Failed to delete workspace file folder:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to delete folder');
+    }
+  }
+
+  async promptMoveSelectedFile() {
+    const selectedNode = this.getSelectedNode();
+    if (this.source !== 'owned' || selectedNode?.type !== 'file' || !selectedNode.attachmentId) {
+      return;
+    }
+
+    const currentFolder = this.parentPathFor(selectedNode.path);
+    const rawPath = window.prompt(
+      'Move file to folder path inside Workspace files. Leave blank for root.',
+      currentFolder
+    );
+    if (rawPath === null) return;
+
+    const targetFolder = this.normalizeRelativePath(rawPath);
+    if (targetFolder === currentFolder) return;
+
+    try {
+      const payload = await this.requestWorkspaceJSON(
+        `/attachments/${encodeURIComponent(selectedNode.attachmentId)}/move`,
+        {
+          method: 'PATCH',
+          body: { target_folder: targetFolder }
+        }
+      );
+      const nextPath = this.normalizeRelativePath(
+        payload?.attachment?.file_meta?.relative_path ||
+          payload?.attachment?.file?.relative_path ||
+          (targetFolder ? `${targetFolder}/${selectedNode.name}` : selectedNode.name)
+      );
+      this.selectedPath = nextPath;
+      this.selectedType = 'file';
+      this.ensureAncestorsExpanded(nextPath, 'file');
+      await this.refreshOwnedTree();
+      if (window.Toast) window.Toast.success('File moved');
+    } catch (error) {
+      console.error('Failed to move workspace file:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to move file');
+    }
+  }
+
+  async refreshOwnedTree() {
+    const cacheKey = this.cacheKeyForDirectory(this.directory);
+    if (cacheKey) {
+      this.fileCache.delete(cacheKey);
+    }
+    this.previewCache = new Map();
+    await this.loadFiles({ force: true });
+    if (typeof this.host.loadFiles === 'function') {
+      await this.host.loadFiles();
+    }
+  }
+
+  async requestWorkspaceJSON(path, options = {}) {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}${path}`,
+      {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
+        body:
+          options.body && typeof options.body !== 'string'
+            ? JSON.stringify(options.body)
+            : options.body
+      }
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || payload.message || 'Request failed');
+    }
+    return payload;
+  }
+
+  parentPathFor(path) {
+    const normalizedPath = this.normalizeRelativePath(path);
+    if (!normalizedPath || !normalizedPath.includes('/')) {
+      return '';
+    }
+    return normalizedPath.slice(0, normalizedPath.lastIndexOf('/'));
+  }
+
   renderPreview() {
     const previewEl = this.host.elements.directoryExplorerPreview;
     if (!previewEl) return;
@@ -831,7 +1112,7 @@ export class WorkspaceDirectoryExplorer {
           </div>
           <div class="workspace-directory-preview-stats">
             <span class="workspace-directory-pill">${this.host.escapeHtml(metadata)}</span>
-            <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+            ${this.renderFilePreviewActions(endpoint, node)}
           </div>
           <div class="workspace-directory-preview-empty-inline">
             ${preview.tooLarge ? 'File is too large for inline preview.' : 'Binary file preview is unavailable.'}
@@ -847,7 +1128,7 @@ export class WorkspaceDirectoryExplorer {
         </div>
         <div class="workspace-directory-preview-stats">
           <span class="workspace-directory-pill">${this.host.escapeHtml(metadata)}</span>
-          <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+          ${this.renderFilePreviewActions(endpoint, node)}
         </div>
         <pre class="workspace-directory-preview-code">${this.host.escapeHtml(preview.text)}</pre>
         ${preview.truncated ? '<div class="workspace-directory-preview-note">Preview truncated for readability.</div>' : ''}
@@ -861,6 +1142,17 @@ export class WorkspaceDirectoryExplorer {
         </div>
       `;
     }
+  }
+
+  renderFilePreviewActions(endpoint, node) {
+    const moveButton =
+      this.source === 'owned' && node?.attachmentId
+        ? '<button type="button" class="workspace-directory-preview-open-link" data-action="move-workspace-file">Move</button>'
+        : '';
+    return `
+      <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+      ${moveButton}
+    `;
   }
 
   collectStats(node) {
@@ -890,7 +1182,7 @@ export class WorkspaceDirectoryExplorer {
     }
 
     const normalizedPath = this.normalizeRelativePath(relativePath);
-    const cacheKey = `${directoryId}:${normalizedPath}`;
+    const cacheKey = `${this.cacheKeyForDirectory(this.directory)}:${normalizedPath}`;
     const cached = this.previewCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -1000,7 +1292,18 @@ export class WorkspaceDirectoryExplorer {
       .map(part => encodeURIComponent(part))
       .join('/');
 
+    if (this.source === 'owned') {
+      return `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/files/${encodedPath}`;
+    }
+
     return `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
+  }
+
+  cacheKeyForDirectory(directory) {
+    if (this.source === 'owned') {
+      return `owned:${this.host.workspaceId}`;
+    }
+    return directory?.id || '';
   }
 
   normalizeRelativePath(path) {
@@ -1052,7 +1355,7 @@ export class WorkspaceDirectoryExplorer {
   }
 
   persistState() {
-    const directoryId = this.directory?.id;
+    const directoryId = this.cacheKeyForDirectory(this.directory);
     if (!directoryId || typeof localStorage === 'undefined') return;
 
     try {

@@ -178,3 +178,62 @@ func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
 		t.Fatalf("expected round-tripped agent_instance_id agent-1, got %q", roundTripped.AgentSkillAccess[0].AgentInstanceID)
 	}
 }
+
+func TestWorkspaceStoreAdapter_WorkspaceFoldersRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-folders",
+		Name:      "Workspace Folders",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Folders: []workspace.WorkspaceFolder{
+			{
+				ID:        "folder-1",
+				Path:      "research/notes",
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+		Layout: &workspace.CanvasLayout{
+			DirectoryPositions: map[string]workspace.Position{
+				"dir-1": {X: 100, Y: 120},
+			},
+			FolderPositions: map[string]workspace.Position{
+				"folder-1": {X: 320, Y: 240},
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if len(sessionWS.FoldersJSON) == 0 {
+		t.Fatalf("expected folders JSON to be serialized")
+	}
+	if sessionWS.Layout == nil {
+		t.Fatalf("expected layout to be converted")
+	}
+	if got := sessionWS.Layout.FolderPositions["folder-1"]; got.X != 320 || got.Y != 240 {
+		t.Fatalf("expected folder position to convert to session layout, got %#v", got)
+	}
+	if got := sessionWS.Layout.DirectoryPositions["dir-1"]; got.X != 100 || got.Y != 120 {
+		t.Fatalf("expected directory position to convert to session layout, got %#v", got)
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if len(roundTripped.Folders) != 1 {
+		t.Fatalf("expected 1 round-tripped folder, got %d", len(roundTripped.Folders))
+	}
+	if roundTripped.Folders[0].Path != "research/notes" {
+		t.Fatalf("expected folder path research/notes, got %q", roundTripped.Folders[0].Path)
+	}
+	if roundTripped.Layout == nil {
+		t.Fatalf("expected round-tripped layout")
+	}
+	if got := roundTripped.Layout.FolderPositions["folder-1"]; got.X != 320 || got.Y != 240 {
+		t.Fatalf("expected folder position to round-trip, got %#v", got)
+	}
+	if got := roundTripped.Layout.DirectoryPositions["dir-1"]; got.X != 100 || got.Y != 120 {
+		t.Fatalf("expected directory position to round-trip, got %#v", got)
+	}
+}

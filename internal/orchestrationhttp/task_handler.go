@@ -1513,12 +1513,12 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		}
 
 		// Write to store
-		if err := workspace.WriteToStore(storeNode, req.FilePath, dataToStore); err != nil {
+		if err := workspace.WriteToStoreForWorkspace(storeNode, th.workspaceStore, ws.ID, req.FilePath, dataToStore); err != nil {
 			orihttp.InternalError(w, fmt.Sprintf("Failed to save result: %v", err))
 			return
 		}
 
-		finalPath = filepath.Join(storeNode.BaseDir, req.FilePath)
+		finalPath, _ = workspace.BuildFinalStorePath(storeNode, th.workspaceStore, ws.ID, req.FilePath)
 
 		// Save workspace to persist store node stats
 		if err := th.workspaceStore.Save(ws); err != nil {
@@ -2088,12 +2088,12 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		storeNodeCopy.WriteMode = "append"
 		storeNodeCopy.Format = "csv"
 		dataToStore := csvData
-		strictData, err := workspace.CSVWithoutHeaderForExistingStoreStrict(&storeNodeCopy, storeFilePath, dataToStore)
+		strictData, err := workspace.CSVWithoutHeaderForExistingStoreStrictInWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, dataToStore)
 		if err != nil {
 			return err
 		}
 		dataToStore = strictData
-		if err := workspace.WriteToStore(&storeNodeCopy, storeFilePath, dataToStore); err != nil {
+		if err := workspace.WriteToStoreForWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, dataToStore); err != nil {
 			return err
 		}
 		storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
@@ -2105,7 +2105,23 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 	}
 
 	filePath := storage.FilePath
-	if strings.TrimSpace(filePath) == "" {
+	if workspace.ResultStorageUsesWorkspaceFolder(storage) {
+		baseDir, _, err := workspace.ResolveWorkspaceFolderBaseDir(store, ws.ID, storage.WorkspaceFolder)
+		if err != nil {
+			return err
+		}
+		relativeFilePath := strings.TrimSpace(filePath)
+		if relativeFilePath == "" {
+			relativeFilePath = storeFilePath
+		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
+			relativeFilePath = filepath.Join(relativeFilePath, workspace.AppendCSVFileName(task, storage))
+		}
+		finalPath, err := workspace.BuildFinalPath(baseDir, relativeFilePath)
+		if err != nil {
+			return err
+		}
+		filePath = finalPath
+	} else if strings.TrimSpace(filePath) == "" {
 		baseOutputDir := ""
 		if store != nil {
 			baseOutputDir = store.GetOutputsPath(ws.ID)

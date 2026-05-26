@@ -519,6 +519,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		AttachmentPositions map[string]workspace.Position        `json:"attachment_positions"`
 		SchedulerPositions  map[string]workspace.Position        `json:"scheduler_positions"`
 		StorePositions      map[string]workspace.Position        `json:"store_positions"`
+		FolderPositions     map[string]workspace.Position        `json:"folder_positions"`
 		WorkflowConnections []workspace.WorkflowConnectionLayout `json:"workflow_connections"`
 		Scale               float64                              `json:"scale"`
 		OffsetX             float64                              `json:"offset_x"`
@@ -552,6 +553,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	ws.Layout.AttachmentPositions = req.AttachmentPositions
 	ws.Layout.SchedulerPositions = req.SchedulerPositions
 	ws.Layout.StorePositions = req.StorePositions
+	ws.Layout.FolderPositions = req.FolderPositions
 	ws.Layout.WorkflowConnections = req.WorkflowConnections
 	ws.Layout.Scale = req.Scale
 	ws.Layout.OffsetX = req.OffsetX

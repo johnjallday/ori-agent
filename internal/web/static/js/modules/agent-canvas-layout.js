@@ -67,6 +67,17 @@ export class AgentCanvasLayoutManager {
       }
     });
 
+    // Include workspace file folders
+    this.state.workspaceFolders.forEach(folder => {
+      if (folder.x != null && folder.y != null) {
+        minX = Math.min(minX, folder.x);
+        maxX = Math.max(maxX, folder.x);
+        minY = Math.min(minY, folder.y);
+        maxY = Math.max(maxY, folder.y);
+        hasContent = true;
+      }
+    });
+
     // Include combiner nodes
     this.state.combinerNodes.forEach(c => {
       if (c.x != null && c.y != null) {
@@ -148,6 +159,7 @@ export class AgentCanvasLayoutManager {
       (this.state.agents && this.state.agents.length > 0) ||
       (this.state.attachments && this.state.attachments.length > 0) ||
       (this.state.storeNodes && this.state.storeNodes.length > 0) ||
+      (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) ||
       (this.state.combinerNodes && this.state.combinerNodes.length > 0);
 
     if (!hasContent) {
@@ -200,6 +212,17 @@ export class AgentCanvasLayoutManager {
       maxX = Math.max(maxX, s.x + nodeWidth / 2);
       minY = Math.min(minY, s.y - nodeHeight / 2);
       maxY = Math.max(maxY, s.y + nodeHeight / 2);
+    });
+
+    // Include workspace file folders
+    this.state.workspaceFolders.forEach(folder => {
+      if (folder.x == null || folder.y == null) return;
+      const nodeWidth = folder.width || 220;
+      const nodeHeight = folder.height || 96;
+      minX = Math.min(minX, folder.x - nodeWidth / 2);
+      maxX = Math.max(maxX, folder.x + nodeWidth / 2);
+      minY = Math.min(minY, folder.y - nodeHeight / 2);
+      maxY = Math.max(maxY, folder.y + nodeHeight / 2);
     });
 
     // Include combiner nodes
@@ -341,6 +364,16 @@ export class AgentCanvasLayoutManager {
         storePositions[key] = { x: s.x, y: s.y };
       });
 
+      // Collect workspace folder positions
+      const folderPositions = {};
+      this.state.workspaceFolders.forEach(folder => {
+        if (folder.x == null || folder.y == null) return;
+        const key = folder.folder_id || folder.id;
+        if (key) {
+          folderPositions[key] = { x: folder.x, y: folder.y };
+        }
+      });
+
       // Collect workflow connections (agents/tasks/combiners)
       const workflowConnections = this.state.connections.map(conn => ({
         id: conn.id,
@@ -358,6 +391,7 @@ export class AgentCanvasLayoutManager {
         agent_positions: agentPositions,
         attachment_positions: attachmentPositions,
         store_positions: storePositions,
+        folder_positions: folderPositions,
         combiner_nodes: combinerNodes,
         workflow_connections: workflowConnections,
         scale: this.state.scale,
@@ -622,6 +656,54 @@ export class AgentCanvasLayoutManager {
         storesWithoutPositions.forEach((s, index) => {
           s.x = baseX + spacing * (index + 1);
           s.y = baseY;
+        });
+      }
+    }
+
+    // Restore workspace folder positions
+    if (layout.folder_positions) {
+      const foldersWithPositions = [];
+      const foldersWithoutPositions = [];
+
+      this.state.workspaceFolders.forEach(folder => {
+        const key = folder.folder_id || folder.id;
+        const savedPos = layout.folder_positions[key];
+        if (savedPos) {
+          folder.x = savedPos.x;
+          folder.y = savedPos.y;
+          foldersWithPositions.push(folder);
+        } else {
+          foldersWithoutPositions.push(folder);
+        }
+      });
+
+      if (foldersWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 220;
+
+        if (foldersWithPositions.length > 0) {
+          let maxX = -Infinity;
+          let totalY = 0;
+          foldersWithPositions.forEach(folder => {
+            maxX = Math.max(maxX, folder.x);
+            totalY += folder.y;
+          });
+          baseX = maxX;
+          baseY = totalY / foldersWithPositions.length;
+        } else {
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        foldersWithoutPositions.forEach((folder, index) => {
+          folder.x = baseX + spacing * (index + 1);
+          folder.y = baseY;
         });
       }
     }

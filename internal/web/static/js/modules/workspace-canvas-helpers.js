@@ -1115,6 +1115,15 @@ function showStoreDetails(storeNode) {
              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
     </div>
 
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Storage Target</label>
+      <select id="store-edit-storage-target" class="form-select form-select-sm"
+              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+        <option value="" ${storeNode.storage_target === 'workspace_folder' ? '' : 'selected'}>External or allowed relative directory</option>
+        <option value="workspace_folder" ${storeNode.storage_target === 'workspace_folder' ? 'selected' : ''}>Workspace file folder</option>
+      </select>
+    </div>
+
     <!-- Editable Base Directory -->
     <div class="mb-3">
       <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Base Directory</label>
@@ -1122,6 +1131,14 @@ function showStoreDetails(storeNode) {
              value="${storeNode.base_dir || ''}"
              placeholder="/path/to/store"
              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: monospace; font-size: 0.85rem;">
+    </div>
+
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Workspace File Folder</label>
+      <select id="store-edit-workspace-folder" class="form-select form-select-sm"
+              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+        <option value="">Workspace files</option>
+      </select>
     </div>
 
     <!-- Assigned Agent Dropdown -->
@@ -1227,6 +1244,7 @@ function showStoreDetails(storeNode) {
   if (saveBtn) {
     saveBtn.addEventListener('click', () => saveStoreDetails(storeNode));
   }
+  void loadWorkspaceFolderSelect('store-edit-workspace-folder', storeNode.workspace_folder || '');
 }
 
 /**
@@ -1241,6 +1259,8 @@ async function saveStoreDetails(storeNode) {
 
   const name = document.getElementById('store-edit-name')?.value?.trim();
   const baseDir = document.getElementById('store-edit-basedir')?.value?.trim();
+  const storageTarget = document.getElementById('store-edit-storage-target')?.value || '';
+  const workspaceFolder = normalizeWorkspaceFolderPath(document.getElementById('store-edit-workspace-folder')?.value || '');
   const agentNodeId = document.getElementById('store-edit-agent')?.value || null;
   const format = document.getElementById('store-edit-format')?.value;
   const writeMode = document.getElementById('store-edit-writemode')?.value;
@@ -1256,6 +1276,8 @@ async function saveStoreDetails(storeNode) {
       body: JSON.stringify({
         name: name,
         base_dir: baseDir,
+        storage_target: storageTarget,
+        workspace_folder: workspaceFolder,
         agent_node_id: agentNodeId,
         format: format,
         write_mode: writeMode,
@@ -1272,6 +1294,8 @@ async function saveStoreDetails(storeNode) {
     // Update local state
     storeNode.name = name;
     storeNode.base_dir = baseDir;
+    storeNode.storage_target = storageTarget;
+    storeNode.workspace_folder = workspaceFolder;
     storeNode.agent_node_id = agentNodeId;
     storeNode.format = format;
     storeNode.write_mode = writeMode;
@@ -2788,6 +2812,64 @@ function parseCronExpression(cronExpr) {
 // Store Node Functions
 // =============================================================================
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeWorkspaceFolderPath(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .replace(/\/+$/, '');
+}
+
+async function loadWorkspaceFolderSelect(selectId, selectedPath = '') {
+  const select = document.getElementById(selectId);
+  const workspaceId = window.currentWorkspaceId || window.agentCanvas?.workspaceId;
+  if (!select || !workspaceId) return;
+
+  const normalizedSelected = normalizeWorkspaceFolderPath(selectedPath);
+  select.disabled = true;
+  select.innerHTML = '<option value="">Workspace files</option>';
+
+  try {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/tree`);
+    if (!response.ok) throw new Error('Failed to load workspace folders');
+    const payload = await response.json();
+    const folders = (Array.isArray(payload.files) ? payload.files : [])
+      .filter(item => item?.is_dir && item?.relative_path)
+      .sort((left, right) =>
+        String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
+          sensitivity: 'base',
+          numeric: true
+        })
+      );
+
+    select.innerHTML = [
+      '<option value="">Workspace files</option>',
+      ...folders.map(folder => {
+        const path = normalizeWorkspaceFolderPath(folder.relative_path);
+        return `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`;
+      })
+    ].join('');
+    if (Array.from(select.options).some(option => option.value === normalizedSelected)) {
+      select.value = normalizedSelected;
+    }
+  } catch (error) {
+    console.warn('Failed to load workspace folder options:', error);
+  } finally {
+    select.disabled = false;
+  }
+}
+
 /**
  * Show the add store node modal
  */
@@ -2797,6 +2879,8 @@ async function showAddStoreNodeModal() {
   // Reset form
   document.getElementById('storeNodeForm').reset();
   document.getElementById('store-auto-create-dir').checked = true;
+  document.getElementById('store-storage-target').value = '';
+  await loadWorkspaceFolderSelect('store-workspace-folder', '');
 
   modal.show();
 }
@@ -2807,11 +2891,13 @@ async function showAddStoreNodeModal() {
 async function submitStoreNode() {
   const name = document.getElementById('store-name').value.trim();
   const baseDir = document.getElementById('store-base-dir').value.trim();
+  const storageTarget = document.getElementById('store-storage-target')?.value || '';
+  const workspaceFolder = normalizeWorkspaceFolderPath(document.getElementById('store-workspace-folder')?.value || '');
   const format = document.getElementById('store-format').value;
   const writeMode = document.getElementById('store-write-mode').value;
   const autoCreateDir = document.getElementById('store-auto-create-dir').checked;
 
-  if (!name || !baseDir) {
+  if (!name || (storageTarget !== 'workspace_folder' && !baseDir)) {
     alert('Please fill in all required fields');
     return;
   }
@@ -2843,6 +2929,8 @@ async function submitStoreNode() {
       body: JSON.stringify({
         name: name,
         base_dir: baseDir,
+        storage_target: storageTarget,
+        workspace_folder: workspaceFolder,
         format: format,
         write_mode: writeMode,
         auto_create_dir: autoCreateDir,

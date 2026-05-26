@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { Buffer } from 'node:buffer';
 
 /**
  * Smoke tests to verify basic frontend functionality.
@@ -493,6 +494,93 @@ test.describe('Task Output Contracts', () => {
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Custom path');
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('Result format');
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('date');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+});
+
+test.describe('Workspace File Folders', () => {
+  test('creates a folder, uploads into it, browses it, and moves the file', async ({ page, request }) => {
+    test.setTimeout(60000);
+
+    let workspaceId = '';
+    const workspaceResp = await request.post('/api/orchestration/workspace', {
+      data: {
+        name: `Playwright File Folders ${Date.now()}`,
+        description: 'Temporary workspace for workspace file folder smoke coverage'
+      }
+    });
+    expect(workspaceResp.ok()).toBeTruthy();
+    const workspaceData = await workspaceResp.json();
+    workspaceId = workspaceData.workspace_id;
+
+    try {
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await page.waitForFunction(() =>
+        Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
+      );
+      const entryAgentDialog = page.getByRole('dialog', {
+        name: 'Create an entry agent for this workspace?'
+      });
+      const notNowButton = entryAgentDialog.getByRole('button', { name: 'Not Now' });
+      if (await notNowButton.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
+        await entryAgentDialog.getByRole('button', { name: 'Not Now' }).click();
+        await expect(entryAgentDialog).toBeHidden();
+      }
+
+      await page.locator('#workspace-detail-add-file').click();
+      await expect(page.locator('#hubAddFileModal')).toBeVisible();
+
+      page.once('dialog', async dialog => {
+        expect(dialog.type()).toBe('prompt');
+        await dialog.accept('research');
+      });
+      await page.locator('#hubCreateUploadFolderBtn').click();
+      await expect(page.locator('#hubFileFolderSelect')).toHaveValue('research');
+
+      await page.locator('#hubFileInput').setInputFiles({
+        name: 'folder-smoke-report.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('workspace folder smoke test')
+      });
+      await expect(page.locator('#hubSelectedFilesPreview')).toBeVisible();
+
+      const uploadResponse = page.waitForResponse(response =>
+        response.url().includes(`/api/workspaces/${workspaceId}/files`) &&
+        response.request().method() === 'POST'
+      );
+      await page.locator('#hubAddFileSubmitBtn').click();
+      expect((await uploadResponse).ok()).toBeTruthy();
+      await expect(page.locator('#hubAddFileModal.show')).toHaveCount(0);
+      await expect(page.locator('#workspace-detail-files-list')).toContainText('folder-smoke-report.txt');
+
+      await page.locator('#workspace-detail-browse-files').click();
+      const explorer = page.locator('#workspace-directory-explorer-modal');
+      await expect(explorer).toBeVisible();
+      await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'research' })).toBeVisible();
+
+      await expect(explorer.locator('.workspace-directory-preview-code')).toContainText('workspace folder smoke test');
+
+      page.once('dialog', async dialog => {
+        expect(dialog.type()).toBe('prompt');
+        await dialog.accept('archive');
+      });
+      await explorer.locator('[data-action="move-workspace-file"]').click();
+      await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'archive' })).toBeVisible();
+      await expect(explorer.locator('.workspace-directory-preview-subtitle')).toContainText('archive/');
+
+      const treeResp = await request.get(`/api/workspaces/${workspaceId}/files/tree`);
+      expect(treeResp.ok()).toBeTruthy();
+      const treeData = await treeResp.json();
+      const movedFile = (treeData.files || []).find((item: any) =>
+        item.relative_path?.includes('archive/') &&
+        item.relative_path?.endsWith('folder-smoke-report.txt')
+      );
+      expect(movedFile).toBeTruthy();
     } finally {
       if (workspaceId) {
         await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);

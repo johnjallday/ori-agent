@@ -98,6 +98,152 @@ func TestHTTPHandler_AppendResultToCSV_UsesTaskStorage(t *testing.T) {
 	}
 }
 
+func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := &Workspace{
+		ID:     "ws-folder-storage",
+		Name:   "Folder Storage",
+		Status: StatusActive,
+		Tasks: []Task{{
+			ID:          "task-folder",
+			Description: "Folder CSV",
+			ResultStorage: &ResultStorageConfig{
+				Enabled:         true,
+				Format:          "csv",
+				WriteMode:       "append",
+				StorageTarget:   StorageTargetWorkspaceFolder,
+				WorkspaceFolder: "reports",
+				FilePath:        "runs.csv",
+			},
+		}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/ws-folder-storage/tasks/task-folder/results/append-csv",
+		strings.NewReader(`{"csv":"timestamp,value\n2026-05-26,high","use_storage":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.AppendResultToCSV(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	wantPath := filepath.Join(store.GetFilesPath(ws.ID), "reports", "runs.csv")
+	var resp struct {
+		FilePath string `json:"file_path"`
+		Label    string `json:"label"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.FilePath != wantPath {
+		t.Fatalf("file_path=%q, want %q", resp.FilePath, wantPath)
+	}
+	if resp.Label != "runs.csv" {
+		t.Fatalf("label=%q, want runs.csv", resp.Label)
+	}
+	contents, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if strings.TrimSpace(string(contents)) != "timestamp,value\n2026-05-26,high" {
+		t.Fatalf("unexpected csv contents: %q", string(contents))
+	}
+
+	treeReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
+	treeRR := httptest.NewRecorder()
+	handler.GetWorkspaceFilesTree(treeRR, treeReq)
+	if treeRR.Code != http.StatusOK {
+		t.Fatalf("tree status=%d body=%s", treeRR.Code, treeRR.Body.String())
+	}
+	files := decodeFileTreeResponse(t, treeRR.Body.Bytes())
+	assertFileInfo(t, files, filepath.Join("reports", "runs.csv"), false)
+	if item := findFileInfo(files, filepath.Join("reports", "runs.csv")); item == nil || item.AttachmentID != "" {
+		t.Fatalf("expected disk-backed tree entry without attachment id, got %#v", item)
+	}
+}
+
+func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := &Workspace{
+		ID:     "ws-folder-store-node",
+		Name:   "Folder Store Node",
+		Status: StatusActive,
+		StoreNodes: []StoreNode{{
+			ID:              "store-1",
+			CanvasNodeID:    "store-node-1",
+			WorkspaceID:     "ws-folder-store-node",
+			Name:            "CSV Store",
+			StorageTarget:   StorageTargetWorkspaceFolder,
+			WorkspaceFolder: "exports",
+			Format:          "csv",
+			WriteMode:       "append",
+			AutoCreateDir:   true,
+		}},
+		Tasks: []Task{{
+			ID:          "task-store-node",
+			Description: "Store Node CSV",
+			ResultStorage: &ResultStorageConfig{
+				Enabled:     true,
+				Format:      "csv",
+				WriteMode:   "append",
+				StoreNodeID: "store-1",
+				FilePath:    "runs.csv",
+			},
+		}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/ws-folder-store-node/tasks/task-store-node/results/append-csv",
+		strings.NewReader(`{"csv":"timestamp,value\n2026-05-26,stored","use_storage":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.AppendResultToCSV(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	wantPath := filepath.Join(store.GetFilesPath(ws.ID), "exports", "runs.csv")
+	contents, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if strings.TrimSpace(string(contents)) != "timestamp,value\n2026-05-26,stored" {
+		t.Fatalf("unexpected csv contents: %q", string(contents))
+	}
+
+	updated, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	if updated.StoreNodes[0].WriteCount != 1 {
+		t.Fatalf("expected store node write count 1, got %d", updated.StoreNodes[0].WriteCount)
+	}
+	if updated.StoreNodes[0].LastFilePath != "runs.csv" {
+		t.Fatalf("expected last file path runs.csv, got %q", updated.StoreNodes[0].LastFilePath)
+	}
+}
+
 func TestHTTPHandler_AppendResultToCSV_OneShotCustomPath(t *testing.T) {
 	store := NewInMemoryStore()
 	handler := NewHTTPHandler(store, nil, nil)

@@ -15,7 +15,61 @@ import (
 const (
 	// MaxFileSize is the maximum file size allowed for store writes (10MB)
 	MaxFileSize = 10 * 1024 * 1024
+
+	StorageTargetWorkspaceFolder = "workspace_folder"
 )
+
+func NormalizeStorageTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case StorageTargetWorkspaceFolder:
+		return StorageTargetWorkspaceFolder
+	default:
+		return ""
+	}
+}
+
+func StoreNodeUsesWorkspaceFolder(node *StoreNode) bool {
+	if node == nil {
+		return false
+	}
+	return NormalizeStorageTarget(node.StorageTarget) == StorageTargetWorkspaceFolder
+}
+
+func ResultStorageUsesWorkspaceFolder(storage *ResultStorageConfig) bool {
+	if storage == nil {
+		return false
+	}
+	return NormalizeStorageTarget(storage.StorageTarget) == StorageTargetWorkspaceFolder
+}
+
+func ResolveWorkspaceFolderBaseDir(resolver AttachmentFilePathResolver, workspaceID, folderPath string) (string, string, error) {
+	if resolver == nil {
+		return "", "", fmt.Errorf("workspace store is required")
+	}
+	return workspaceFolderPathWithinRoot(resolver.GetFilesPath(workspaceID), folderPath)
+}
+
+func ResolveStoreNodeBaseDir(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID string) (string, error) {
+	if node == nil {
+		return "", fmt.Errorf("store node is required")
+	}
+	if StoreNodeUsesWorkspaceFolder(node) {
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(resolver, workspaceID, node.WorkspaceFolder)
+		return baseDir, err
+	}
+	if strings.TrimSpace(node.BaseDir) == "" {
+		return "", fmt.Errorf("base directory is empty")
+	}
+	return node.BaseDir, nil
+}
+
+func BuildFinalStorePath(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath string) (string, error) {
+	baseDir, err := ResolveStoreNodeBaseDir(node, resolver, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return BuildFinalPath(baseDir, filePath)
+}
 
 // ValidateBaseDir validates that a base directory is safe (prevents directory traversal)
 // Users can specify any absolute path they choose (e.g., Documents, project folders)
@@ -110,9 +164,17 @@ func BuildFinalPath(baseDir, filePath string) (string, error) {
 		return "", fmt.Errorf("failed to resolve final path: %w", err)
 	}
 
-	// Ensure final path starts with base directory
-	if !strings.HasPrefix(absFinal, absBase) {
+	// Ensure final path is within the base directory. Use filepath.Rel instead
+	// of prefix matching so sibling paths with similar names cannot pass.
+	if !isPathWithin(absFinal, absBase) {
 		return "", fmt.Errorf("file path escapes base directory: %s", filePath)
+	}
+	if _, statErr := os.Stat(absBase); statErr == nil {
+		if !pathWithinRootAfterSymlinks(absFinal, absBase) {
+			return "", fmt.Errorf("file path escapes base directory: %s", filePath)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return "", fmt.Errorf("failed to inspect base directory: %w", statErr)
 	}
 
 	return finalPath, nil
@@ -174,13 +236,27 @@ func createDirectories(path string) error {
 
 // WriteToStore writes data to a store node with the specified file path
 func WriteToStore(node *StoreNode, filePath, data string) error {
+	return writeToStoreAtBaseDir(node, node.BaseDir, filePath, data)
+}
+
+// WriteToStoreForWorkspace writes through a store node, resolving
+// workspace-folder-backed nodes against the workspace's managed files root.
+func WriteToStoreForWorkspace(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath, data string) error {
+	baseDir, err := ResolveStoreNodeBaseDir(node, resolver, workspaceID)
+	if err != nil {
+		return err
+	}
+	return writeToStoreAtBaseDir(node, baseDir, filePath, data)
+}
+
+func writeToStoreAtBaseDir(node *StoreNode, baseDir, filePath, data string) error {
 	// Validate file path
 	if err := ValidateFilePath(filePath); err != nil {
 		return fmt.Errorf("invalid file path: %w", err)
 	}
 
 	// Build final path
-	finalPath, err := BuildFinalPath(node.BaseDir, filePath)
+	finalPath, err := BuildFinalPath(baseDir, filePath)
 	if err != nil {
 		return fmt.Errorf("path validation failed: %w", err)
 	}

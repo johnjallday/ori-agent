@@ -28,7 +28,7 @@ export class AgentCanvasInteractionHandler {
   /**
    * Find a node at the given canvas coordinates
    * Returns { id, type, node } or null if no node found
-   * Checks in order: tasks, stores, attachments, agents (top to bottom visual order)
+   * Checks in order: tasks, stores, attachments, folders, agents (top to bottom visual order)
    * @param {number} x - Canvas X coordinate
    * @param {number} y - Canvas Y coordinate
    * @returns {{id: string, type: string, node: object}|null}
@@ -78,6 +78,30 @@ export class AgentCanvasInteractionHandler {
               y >= cardY && y <= cardY + cardHeight) {
             return { id: attachment.id, type: 'attachment', node: attachment };
           }
+        }
+      }
+    }
+
+    // Check workspace file folders
+    if (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) {
+      for (let i = this.state.workspaceFolders.length - 1; i >= 0; i--) {
+        const folder = this.state.workspaceFolders[i];
+        if (folder && folder.cardBounds) {
+          const cardBounds = folder.cardBounds;
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            return { id: folder.id, type: 'workspace_folder', node: folder };
+          }
+        }
+      }
+    }
+
+    // Check workspace file folders
+    if (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) {
+      for (const folder of this.state.workspaceFolders) {
+        const bounds = folder?.cardBounds;
+        if (bounds && intersects(bounds.x, bounds.y, bounds.width, bounds.height)) {
+          this.state.selectNode(folder.id, 'workspace_folder', folder);
         }
       }
     }
@@ -615,6 +639,45 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
+    // Check if clicking on a workspace file folder
+    if (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) {
+      for (let i = this.state.workspaceFolders.length - 1; i >= 0; i--) {
+        const folder = this.state.workspaceFolders[i];
+        if (!folder || !folder.cardBounds) continue;
+        const cardBounds = folder.cardBounds;
+
+        if (folder.collapseButton) {
+          const btn = folder.collapseButton;
+          if (x >= btn.x && x <= btn.x + btn.width &&
+              y >= btn.y && y <= btn.y + btn.height) {
+            e.stopPropagation();
+            e.preventDefault();
+            folder.collapsed = !folder.collapsed;
+            this.parent.draw();
+            return;
+          }
+        }
+
+        if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+            y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+          if (e.shiftKey) {
+            e.stopPropagation();
+            e.preventDefault();
+            this.handleShiftClickSelection(folder.id, 'workspace_folder', folder);
+            return;
+          }
+          e.stopPropagation();
+          e.preventDefault();
+          this.state.isDraggingFolder = true;
+          this.state.draggedFolder = folder;
+          this.state.dragStartX = x;
+          this.state.dragStartY = y;
+          this.canvas.style.cursor = 'move';
+          return;
+        }
+      }
+    }
+
     // Check if clicking on an agent (rectangle hitbox)
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
@@ -796,6 +859,15 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
+    if (this.state.isDraggingFolder && this.state.draggedFolder) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.draggedFolder.x = x;
+      this.state.draggedFolder.y = y;
+      this.parent.draw();
+      return;
+    }
+
     if (this.state.isDraggingAttachment && this.state.draggedAttachment) {
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
@@ -858,7 +930,9 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingAttachment = this.state.isDraggingAttachment;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
+    const wasDraggingFolder = this.state.isDraggingFolder;
     const wasAssigning = this.state.assignmentMode && this.state.assignmentSourceTask;
+    const draggedAttachment = this.state.draggedAttachment;
 
     // Handle marquee selection completion
     if (this.state.isMarqueeSelecting) {
@@ -1079,6 +1153,20 @@ export class AgentCanvasInteractionHandler {
       this.state.storeNodeClickTarget = null;
     }
 
+    if (wasDraggingAttachment && draggedAttachment) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      const dragDistance = Math.sqrt(
+        Math.pow(x - this.state.dragStartX, 2) +
+        Math.pow(y - this.state.dragStartY, 2)
+      );
+      const targetFolder = dragDistance >= 5 ? this.findWorkspaceFolderAtPosition(x, y) : null;
+      if (targetFolder) {
+        void this.parent.moveAttachmentToWorkspaceFolder(draggedAttachment, targetFolder);
+      }
+    }
+
     this.state.isDragging = false;
     this.state.isDraggingAgent = false;
     this.state.draggedAgent = null;
@@ -1087,12 +1175,14 @@ export class AgentCanvasInteractionHandler {
     this.state.draggedStoreNode = null;
     this.state.isDraggingAttachment = false;
     this.state.draggedAttachment = null;
+    this.state.isDraggingFolder = false;
+    this.state.draggedFolder = null;
     this.state.isDraggingCombiner = false;
     this.state.draggedCombiner = null;
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingStoreNode || wasDraggingAttachment || wasDraggingCombiner) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingStoreNode || wasDraggingAttachment || wasDraggingCombiner || wasDraggingFolder) {
       this.parent.saveLayout();
     }
 
@@ -1102,6 +1192,24 @@ export class AgentCanvasInteractionHandler {
     } else {
       this.canvas.style.cursor = 'grab';
     }
+  }
+
+  findWorkspaceFolderAtPosition(x, y) {
+    if (!this.state.workspaceFolders || this.state.workspaceFolders.length === 0) {
+      return null;
+    }
+
+    for (let i = this.state.workspaceFolders.length - 1; i >= 0; i--) {
+      const folder = this.state.workspaceFolders[i];
+      const bounds = folder?.dropZoneBounds || folder?.cardBounds;
+      if (!bounds) continue;
+      if (x >= bounds.x && x <= bounds.x + bounds.width &&
+          y >= bounds.y && y <= bounds.y + bounds.height) {
+        return folder;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -1177,7 +1285,7 @@ export class AgentCanvasInteractionHandler {
    */
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingAttachment) {
+    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingAttachment || this.state.isDraggingFolder) {
       return;
     }
 
@@ -1623,6 +1731,22 @@ export class AgentCanvasInteractionHandler {
           if (window.showAttachmentDetails) {
             window.showAttachmentDetails(att);
           }
+          return;
+        }
+      }
+    }
+
+    // Check if click is on any workspace file folder
+    if (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) {
+      for (let i = this.state.workspaceFolders.length - 1; i >= 0; i--) {
+        const folder = this.state.workspaceFolders[i];
+        const bounds = folder?.cardBounds;
+        if (!bounds) continue;
+        if (x >= bounds.x && x <= bounds.x + bounds.width &&
+            y >= bounds.y && y <= bounds.y + bounds.height) {
+          this.state.clearSelection();
+          this.state.selectNode(folder.id, 'workspace_folder', folder);
+          this.parent.draw();
           return;
         }
       }

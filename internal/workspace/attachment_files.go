@@ -32,6 +32,55 @@ func isPathWithin(absChild, absParent string) bool {
 	return !filepath.IsAbs(rel)
 }
 
+func pathWithinRootAfterSymlinks(absChild, absRoot string) bool {
+	if !isPathWithin(absChild, absRoot) {
+		return false
+	}
+	evaluatedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return false
+	}
+	evaluatedRoot, err = filepath.Abs(evaluatedRoot)
+	if err != nil {
+		return false
+	}
+
+	existing := absChild
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			evaluatedExisting, err := filepath.EvalSymlinks(existing)
+			if err != nil {
+				return false
+			}
+			evaluatedExisting, err = filepath.Abs(evaluatedExisting)
+			if err != nil {
+				return false
+			}
+			suffix, err := filepath.Rel(existing, absChild)
+			if err != nil {
+				return false
+			}
+			evaluatedChild := evaluatedExisting
+			if suffix != "." {
+				evaluatedChild = filepath.Join(evaluatedExisting, suffix)
+			}
+			evaluatedChild, err = filepath.Abs(evaluatedChild)
+			if err != nil {
+				return false
+			}
+			return isPathWithin(evaluatedChild, evaluatedRoot)
+		} else if !os.IsNotExist(err) {
+			return false
+		}
+
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return false
+		}
+		existing = parent
+	}
+}
+
 type AttachmentFileStatus string
 
 const (
@@ -129,16 +178,33 @@ func buildWorkspaceOwnedAttachmentFileMeta(workspaceID string, file storedWorksp
 	}
 }
 
-func storeWorkspaceFile(filesPath string, reader io.Reader, filename string) (*storedWorkspaceFile, error) {
-	if strings.TrimSpace(filename) == "" {
+func storeWorkspaceFile(filesPath string, reader io.Reader, filename string, folderPath ...string) (*storedWorkspaceFile, error) {
+	filename = filepath.Base(strings.TrimSpace(filename))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
 		return nil, fmt.Errorf("filename is required")
 	}
-	if err := os.MkdirAll(filesPath, 0755); err != nil {
+	targetFolder := ""
+	if len(folderPath) > 0 {
+		targetFolder = folderPath[0]
+	}
+
+	targetDir, cleanFolder, err := workspaceFolderPathWithinRoot(filesPath, targetFolder)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create files directory: %w", err)
 	}
 
 	destFilename := uuid.New().String()[:8] + "_" + filename
-	destPath := filepath.Join(filesPath, destFilename)
+	relativePath := destFilename
+	if cleanFolder != "" {
+		relativePath = filepath.Join(cleanFolder, destFilename)
+	}
+	destPath, cleanRelativePath, err := workspaceFilePathWithinRoot(filesPath, relativePath)
+	if err != nil {
+		return nil, err
+	}
 
 	destFile, err := os.Create(destPath)
 	if err != nil {
@@ -154,7 +220,7 @@ func storeWorkspaceFile(filesPath string, reader io.Reader, filename string) (*s
 
 	return &storedWorkspaceFile{
 		Name:         filename,
-		RelativePath: destFilename,
+		RelativePath: cleanRelativePath,
 		Size:         written,
 		MimeType:     detectMimeType(filename),
 	}, nil
@@ -185,7 +251,16 @@ func workspaceFileURL(workspaceID string, relativePath string) string {
 	if clean == "" {
 		return ""
 	}
-	return fmt.Sprintf("/api/workspaces/%s/files/%s", workspaceID, url.PathEscape(filepath.ToSlash(clean)))
+	return fmt.Sprintf("/api/workspaces/%s/files/%s", workspaceID, escapeWorkspaceRelativeURLPath(clean))
+}
+
+func escapeWorkspaceRelativeURLPath(relativePath string) string {
+	slashPath := filepath.ToSlash(relativePath)
+	parts := strings.Split(slashPath, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }
 
 func extractAttachmentRelativePath(workspaceID string, meta *AttachmentFileMeta) string {
@@ -216,25 +291,87 @@ func workspaceOwnedAttachmentPath(resolver AttachmentFilePathResolver, workspace
 	}
 
 	filesPath := resolver.GetFilesPath(workspaceID)
-	clean := sanitizeWorkspaceRelativePath(relativePath)
-	if clean == "" || strings.TrimSpace(filesPath) == "" {
+	absPath, _, err := workspaceFilePathWithinRoot(filesPath, relativePath)
+	if err != nil {
 		return ""
+	}
+
+	return absPath
+}
+
+func workspaceFilePathWithinRoot(filesPath string, relativePath string) (string, string, error) {
+	clean := sanitizeWorkspaceRelativePath(relativePath)
+	if clean == "" {
+		return "", "", fmt.Errorf("invalid file path")
+	}
+	if strings.TrimSpace(filesPath) == "" {
+		return "", "", fmt.Errorf("workspace files path is required")
 	}
 
 	joined := filepath.Join(filesPath, clean)
 	absFilesPath, err := filepath.Abs(filesPath)
 	if err != nil {
-		return ""
+		return "", "", fmt.Errorf("failed to resolve files path: %w", err)
 	}
 	absJoined, err := filepath.Abs(joined)
 	if err != nil {
-		return ""
+		return "", "", fmt.Errorf("failed to resolve file path: %w", err)
 	}
 	if !isPathWithin(absJoined, absFilesPath) {
-		return ""
+		return "", "", fmt.Errorf("invalid file path")
+	}
+	if !pathWithinRootAfterSymlinks(absJoined, absFilesPath) {
+		return "", "", fmt.Errorf("invalid file path")
 	}
 
-	return absJoined
+	return absJoined, clean, nil
+}
+
+func workspaceFolderPathWithinRoot(filesPath string, folderPath string) (string, string, error) {
+	if strings.TrimSpace(filesPath) == "" {
+		return "", "", fmt.Errorf("workspace files path is required")
+	}
+
+	clean := ""
+	if strings.TrimSpace(folderPath) != "" {
+		clean = sanitizeWorkspaceRelativePath(folderPath)
+		if clean == "" {
+			return "", "", fmt.Errorf("invalid folder path")
+		}
+	}
+
+	joined := filesPath
+	if clean != "" {
+		joined = filepath.Join(filesPath, clean)
+	}
+	absFilesPath, err := filepath.Abs(filesPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve files path: %w", err)
+	}
+	absJoined, err := filepath.Abs(joined)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve folder path: %w", err)
+	}
+	if !isPathWithin(absJoined, absFilesPath) {
+		return "", "", fmt.Errorf("invalid folder path")
+	}
+	if !pathWithinRootAfterSymlinks(absJoined, absFilesPath) {
+		return "", "", fmt.Errorf("invalid folder path")
+	}
+
+	return absJoined, clean, nil
+}
+
+func workspaceFolderFromRelativePath(relativePath string) string {
+	clean := sanitizeWorkspaceRelativePath(relativePath)
+	if clean == "" {
+		return ""
+	}
+	dir := filepath.Dir(clean)
+	if dir == "." || dir == string(filepath.Separator) {
+		return ""
+	}
+	return dir
 }
 
 func localAttachmentAbsolutePath(meta *AttachmentFileMeta) string {

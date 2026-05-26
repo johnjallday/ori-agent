@@ -494,8 +494,11 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		nodeCopy := *storeNode
 		nodeCopy.WriteMode = "append"
 		nodeCopy.Format = "csv"
-		payload := csvWithoutHeaderForExistingStore(storeNode, storeFilePath, csvData)
-		if err := WriteToStore(&nodeCopy, storeFilePath, payload); err != nil {
+		payload, err := CSVWithoutHeaderForExistingStoreStrictInWorkspace(storeNode, h.store, ws.ID, storeFilePath, csvData)
+		if err != nil {
+			payload = csvWithoutHeader(csvData)
+		}
+		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, payload); err != nil {
 			logger.Error("Failed to append task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
@@ -512,7 +515,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		if err := h.store.Save(ws); err != nil {
 			logger.Error("Failed to persist workspace after manual append", logger.Fields{"workspace_id": ws.ID, "err": err})
 		}
-		resolved, _ := BuildFinalPath(storeNode.BaseDir, storeFilePath)
+		resolved, _ := BuildFinalStorePath(storeNode, h.store, ws.ID, storeFilePath)
 		orihttp.WriteJSON(w, map[string]any{
 			"appended_rows": appendedRows,
 			"file_path":     resolved,
@@ -521,7 +524,25 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if filePath == "" {
+	if req.UseStorage && ResultStorageUsesWorkspaceFolder(storageCfg) {
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storageCfg.WorkspaceFolder)
+		if err != nil {
+			orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder storage target: %v", err))
+			return
+		}
+		relativeFilePath := filePath
+		if relativeFilePath == "" {
+			relativeFilePath = AppendCSVFileName(task, storageCfg)
+		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
+			relativeFilePath = filepath.Join(relativeFilePath, AppendCSVFileName(task, storageCfg))
+		}
+		finalPath, err := BuildFinalPath(baseDir, relativeFilePath)
+		if err != nil {
+			orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder file path: %v", err))
+			return
+		}
+		filePath = finalPath
+	} else if filePath == "" {
 		baseOutputDir := h.store.GetOutputsPath(ws.ID)
 		if baseOutputDir == "" {
 			fallback, dirErr := platform.GetDefaultOutputDir()
