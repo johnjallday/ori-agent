@@ -4728,22 +4728,25 @@ export class WorkspaceTaskPage {
     const scheduleEnabled = Boolean(owner?.schedule_enabled || this.task?.schedule_enabled);
     const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
 
-    const instruction = 'Asks the assistant to propose 3–8 practical CSV columns (with a JSON schema and field→column mappings) this task can produce every run, grounded in the inputs below. Run metadata (run_id, executed_at, status, duration_ms) is added automatically.';
+    const instruction = 'Reads the latest result below and proposes the structured fields it contains (3–8) that this task can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
 
+    // The latest result is the primary basis for the suggestion, so show it
+    // first; task/details/schedule are supporting context.
     const sampleBlock = sample
-      ? block('Sample result', sample)
-      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Sample result</span><span>None captured — the assistant will rely on the task title and details.</span></div>`;
+      ? block('Latest result (basis for fields)', sample)
+      : `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">Latest result (basis for fields)</span><span>None captured yet — the assistant will fall back to the task title and details.</span></div>`;
 
     return `
       <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
         <summary>What the assistant sees${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
         <div class="workspace-task-suggestion-preview-body">
           <p class="workspace-task-suggestion-instruction">${this.escapeHtml(instruction)}</p>
+          ${sampleBlock}
+          <div class="workspace-task-suggestion-context-label">Supporting context</div>
           ${line('Task', title)}
           ${line('Details', details)}
           ${scheduleEnabled ? line('Schedule', scheduleName || 'enabled') : ''}
-          ${sampleBlock}
-          ${recent.length ? line('Recent runs sampled', String(recent.length)) : ''}
+          ${recent.length ? line('Earlier runs sampled', String(recent.length)) : ''}
         </div>
       </details>`;
   }
