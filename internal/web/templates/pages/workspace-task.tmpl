@@ -1984,6 +1984,49 @@
       font-weight: 500;
     }
 
+    /* Spinning indicator reused wherever a suggestion is in flight. Inherits
+       the surrounding text color via currentColor. */
+    .workspace-task-spinner {
+      display: inline-block;
+      width: 0.85em;
+      height: 0.85em;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      vertical-align: -0.12em;
+      margin-right: 0.1rem;
+      animation: workspace-task-spin 0.6s linear infinite;
+    }
+
+    @keyframes workspace-task-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Animated "…" — three dots that pulse in sequence. */
+    .workspace-task-dots {
+      display: inline-flex;
+      gap: 0.12em;
+      margin-left: 0.15em;
+      vertical-align: middle;
+    }
+
+    .workspace-task-dots > span {
+      width: 0.28em;
+      height: 0.28em;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.25;
+      animation: workspace-task-dot 1.2s infinite ease-in-out;
+    }
+
+    .workspace-task-dots > span:nth-child(2) { animation-delay: 0.2s; }
+    .workspace-task-dots > span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes workspace-task-dot {
+      0%, 60%, 100% { opacity: 0.25; }
+      30% { opacity: 1; }
+    }
+
     .workspace-task-suggestion-preview-body {
       margin-top: 0.6rem;
       display: flex;

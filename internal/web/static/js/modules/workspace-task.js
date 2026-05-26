@@ -4292,8 +4292,8 @@ export class WorkspaceTaskPage {
           </div>
           <div class="workspace-task-result-contract-header-actions">
             <button type="button" class="modern-btn modern-btn-secondary" data-action="suggest-result-contract"${suggesting ? ' disabled' : ''}>
-              <i class="bi bi-magic" aria-hidden="true"></i>
-              <span>${this.escapeHtml(suggesting ? 'Suggesting...' : 'Ask assistant')}</span>
+              ${suggesting ? '<span class="workspace-task-spinner" aria-hidden="true"></span>' : '<i class="bi bi-magic" aria-hidden="true"></i>'}
+              <span>${this.escapeHtml(suggesting ? 'Suggesting' : 'Ask assistant')}${suggesting ? '<span class="workspace-task-dots" aria-hidden="true"><span></span><span></span><span></span></span>' : ''}</span>
             </button>
           </div>
         </div>
@@ -4709,7 +4709,7 @@ export class WorkspaceTaskPage {
         .filter(Boolean).join(' · ');
       return `
         <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
-          <summary>Exact prompt sent${busy ? ' <span class="workspace-task-suggestion-busy">· suggesting…</span>' : ''}</summary>
+          <summary>Exact prompt sent${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
           <div class="workspace-task-suggestion-preview-body">
             ${meta ? line('Model', meta) : ''}
             ${block('System prompt', echo.system || '')}
@@ -4735,7 +4735,7 @@ export class WorkspaceTaskPage {
 
     return `
       <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
-        <summary>What the assistant sees${busy ? ' <span class="workspace-task-suggestion-busy">· suggesting…</span>' : ''}</summary>
+        <summary>What the assistant sees${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
         <div class="workspace-task-suggestion-preview-body">
           <p class="workspace-task-suggestion-instruction">${this.escapeHtml(instruction)}</p>
           ${line('Task', title)}
