@@ -136,6 +136,38 @@
   }
 
   /**
+   * Open or reveal a workspace file via the OS (default app / file manager).
+   * Only works when the server runs on the user's machine; failures surface as
+   * a toast.
+   * @param {'open'|'reveal'} action
+   * @param {string} relativePath - Workspace-relative file path
+   */
+  async function osFileAction(action, relativePath) {
+    const state = window.WorkspaceHubState.getState();
+    const workspaceId = state.selectedId;
+    const path = String(relativePath || '').trim();
+    if (!workspaceId || !path) return;
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/files/${action}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relative_path: path })
+        }
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || `Failed to ${action} file`);
+      }
+    } catch (error) {
+      console.error(`Failed to ${action} workspace file:`, error);
+      if (window.Toast) window.Toast.error(error.message || `Failed to ${action} file`);
+    }
+  }
+
+  /**
    * Load files and directories for a workspace
    * @param {string} workspaceId - Workspace ID
    */
@@ -209,11 +241,12 @@
         : getFileIcon(file.type, file.file_meta?.mime);
       const isSelected = attachmentId ? selectedSet.has(attachmentId) : false;
       const isMissing = file.file_meta?.status === 'missing';
-      const pathText = file.relative_path && file.relative_path !== title ? file.relative_path : '';
+      const relativePath = file.relative_path || (file.file_meta && file.file_meta.relative_path) || '';
+      const pathText = relativePath && relativePath !== title ? relativePath : '';
       const metaText = [isMissing ? 'Missing from disk' : '', size].filter(Boolean).join(' · ');
 
       return `
-        <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(itemId)}" data-attachment-id="${escapeHtml(attachmentId)}" data-relative-path="${escapeHtml(file.relative_path || '')}" data-is-folder="${isFolder ? 'true' : 'false'}">
+        <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(itemId)}" data-attachment-id="${escapeHtml(attachmentId)}" data-relative-path="${escapeHtml(relativePath)}" data-is-folder="${isFolder ? 'true' : 'false'}" data-missing="${isMissing ? 'true' : 'false'}">
           <div class="hub-item-checkbox">
             ${attachmentId ? `<input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select file">` : ''}
           </div>
@@ -222,18 +255,27 @@
             <div class="hub-file-title">${escapeHtml(title)}</div>
             ${metaText || pathText ? `<div class="hub-file-meta">${isMissing ? '<span class="hub-file-status-badge is-missing">Missing</span>' : ''}${escapeHtml(metaText || pathText)}</div>` : ''}
           </div>
-          ${isMissing && attachmentId ? `
-            <button class="hub-item-secondary-btn" data-action="relink" title="Relink missing file">
+          <div class="hub-file-actions">
+            ${relativePath ? `
+              <button class="hub-item-secondary-btn" data-action="reveal" title="Reveal in Finder">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M16.5,12C19,12 21,14 21,16.5C21,17.38 20.75,18.21 20.31,18.9L23.39,22L22,23.39L18.88,20.32C18.19,20.75 17.37,21 16.5,21C14,21 12,19 12,16.5C12,14 14,12 16.5,12M16.5,14A2.5,2.5 0 0,0 14,16.5A2.5,2.5 0 0,0 16.5,19A2.5,2.5 0 0,0 19,16.5A2.5,2.5 0 0,0 16.5,14M9,4L11,6H21A2,2 0 0,1 23,8V11.81C22.39,11.26 21.7,10.8 20.93,10.5L20,9.97V8H10.17L8.17,6H4V18H10.06C10.16,18.7 10.38,19.37 10.68,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4H9Z"/>
+                </svg>
+              </button>
+            ` : ''}
+            ${isMissing && attachmentId ? `
+              <button class="hub-item-secondary-btn" data-action="relink" title="Relink missing file">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+                </svg>
+              </button>
+            ` : ''}
+            ${attachmentId ? `<button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
               </svg>
-            </button>
-          ` : ''}
-          ${attachmentId ? `<button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-          </button>` : ''}
+            </button>` : ''}
+          </div>
         </div>
       `;
     });
@@ -314,13 +356,29 @@
         promptRelinkFile(fileId);
       });
 
+      item.querySelector('[data-action="reveal"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        osFileAction('reveal', item.dataset.relativePath || '');
+      });
+
       item.addEventListener('click', (event) => {
-        if (isFolder) return;
-        if (inSelectionMode && fileId && !event.target.closest('button') && !event.target.closest('input')) {
+        if (event.target.closest('button') || event.target.closest('input')) return;
+
+        if (inSelectionMode && fileId) {
           window.WorkspaceHubSelection.toggleItemSelection('files', fileId);
-        } else if (!inSelectionMode && !event.target.closest('button')) {
-          openFile(fileId);
+          return;
         }
+
+        const relativePath = item.dataset.relativePath || '';
+        if (isFolder) {
+          if (relativePath) osFileAction('open', relativePath);
+          return;
+        }
+        if (item.dataset.missing === 'true') {
+          if (fileId) promptRelinkFile(fileId);
+          return;
+        }
+        if (relativePath) osFileAction('open', relativePath);
       });
     });
   }

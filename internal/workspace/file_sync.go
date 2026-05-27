@@ -17,6 +17,15 @@ type fileSyncEvent struct {
 	newPath      string
 }
 
+// reconcileBackfillByteBudget caps how many bytes of in-place files reconcile
+// will hash on a single call. Backfilling a checksum for a file that is still
+// where we expect it is speculative — it only matters if that file is later
+// renamed — so this work is amortized across loads instead of stalling any one
+// tree request. New uploads are hashed at upload time, so this budget only
+// affects pre-existing (legacy) files. ~64 MB ≈ a few hundred milliseconds.
+// A var (not const) so tests can shrink it.
+var reconcileBackfillByteBudget int64 = 64 << 20
+
 // reconcileWorkspaceFiles brings attachment metadata back in line with what is
 // actually on disk under filesPath. It handles external renames/moves and
 // flags genuine deletions:
@@ -71,8 +80,11 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 	var events []fileSyncEvent
 
 	// Pass 1: refresh/backfill checksums for attachments still in place; collect
-	// the ones whose file is now missing.
+	// the ones whose file is now missing. Hashing is bounded by a byte budget so
+	// a workspace full of large legacy files cannot stall the tree request; any
+	// files left unhashed are picked up on subsequent loads.
 	var missing []ownedAttachment
+	backfillBudget := reconcileBackfillByteBudget
 	for _, oa := range active {
 		info, ok := diskFiles[oa.path]
 		if !ok {
@@ -88,6 +100,10 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 			continue
 		}
 
+		if backfillBudget <= 0 {
+			continue
+		}
+
 		absPath, _, pErr := workspaceFilePathWithinRoot(filesPath, oa.path)
 		if pErr != nil {
 			continue
@@ -96,6 +112,7 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 		if hErr != nil {
 			continue
 		}
+		backfillBudget -= size
 		att.File.Checksum = sum
 		att.File.ChecksumModTime = modTime
 		att.File.Size = size

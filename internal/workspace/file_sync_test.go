@@ -255,6 +255,48 @@ func TestReconcileWorkspaceFilesNoChangeWhenInPlace(t *testing.T) {
 	}
 }
 
+func TestReconcileWorkspaceFilesBackfillBudgetIsAmortized(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-budget", "Sync Budget")
+	filesPath := store.GetFilesPath(ws.ID)
+	addOwnedAttachmentWithFile(t, store, ws, "att-1", "one.txt", []byte("aaaa"))
+	addOwnedAttachmentWithFile(t, store, ws, "att-2", "two.txt", []byte("bbbb"))
+
+	// Simulate pre-checksum (legacy) attachments that still sit in place.
+	for _, id := range []string{"att-1", "att-2"} {
+		att := attachmentByID(ws, id)
+		att.File.Checksum = ""
+		att.File.ChecksumModTime = time.Time{}
+	}
+
+	// A tiny budget lets only the first file hash this pass.
+	orig := reconcileBackfillByteBudget
+	reconcileBackfillByteBudget = 1
+	defer func() { reconcileBackfillByteBudget = orig }()
+
+	if _, _, err := reconcileWorkspaceFiles(ws, filesPath); err != nil {
+		t.Fatalf("reconcile pass 1: %v", err)
+	}
+	hashed := 0
+	for _, id := range []string{"att-1", "att-2"} {
+		if attachmentByID(ws, id).File.Checksum != "" {
+			hashed++
+		}
+	}
+	if hashed != 1 {
+		t.Fatalf("expected exactly 1 file hashed under a tiny budget, got %d", hashed)
+	}
+
+	// Remaining legacy files are backfilled on a later pass.
+	if _, _, err := reconcileWorkspaceFiles(ws, filesPath); err != nil {
+		t.Fatalf("reconcile pass 2: %v", err)
+	}
+	for _, id := range []string{"att-1", "att-2"} {
+		if attachmentByID(ws, id).File.Checksum == "" {
+			t.Fatalf("expected %s checksum backfilled after a second pass", id)
+		}
+	}
+}
+
 func TestGetWorkspaceFilesTreeReconcilesRename(t *testing.T) {
 	store, ws, handler := newFolderHandlerTest(t, "ws-tree-rename", "Tree Rename")
 	filesPath := store.GetFilesPath(ws.ID)

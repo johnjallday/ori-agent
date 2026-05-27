@@ -3766,6 +3766,26 @@ body.chat-panel-open .chat-panel-backdrop {
   border-color: #ef4444;
 }
 
+/* Action button cluster for file rows: lays the secondary (reveal/relink) and
+   delete buttons out side by side so multiple buttons never overlap. Scoped to
+   file rows; directory rows keep their single absolutely-positioned button. */
+.hub-file-actions {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  z-index: 10;
+}
+
+.hub-file-actions .hub-item-secondary-btn,
+.hub-file-actions .hub-item-delete-btn {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
 /* Hide individual delete buttons in selection mode */
 .hub-panel.selection-mode .hub-item-delete-btn,
 .hub-panel.selection-mode .hub-item-secondary-btn {

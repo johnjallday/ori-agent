@@ -320,10 +320,16 @@ func (h *HTTPHandler) GetWorkspaceFilesTree(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	unlock := h.store.Lock(workspaceID)
+	// Get returns a private deep clone, so reconcile and tree-building run on our
+	// own copy with no shared state — no per-workspace lock needed. Deliberately
+	// NOT holding the workspace lock here: this is a read-heavy endpoint, and
+	// holding the exclusive lock across the directory scan serialized concurrent
+	// loads (e.g. two browser tabs), making one hang on "Scanning directory...".
+	// Only Save needs synchronization, which it handles internally. If a
+	// concurrent move races our reconcile save, it self-heals on the next load
+	// since the on-disk layout is the source of truth.
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
-		unlock()
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
@@ -350,11 +356,9 @@ func (h *HTTPHandler) GetWorkspaceFilesTree(w http.ResponseWriter, r *http.Reque
 
 	files, err := buildWorkspaceFileTree(ws, filesPath)
 	if err != nil {
-		unlock()
 		orihttp.InternalError(w, fmt.Sprintf("Failed to build file tree: %v", err))
 		return
 	}
-	unlock()
 
 	h.publishFileSyncEvents(workspaceID, syncEvents)
 
