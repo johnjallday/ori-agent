@@ -39,6 +39,10 @@ export class WorkspaceDirectoryExplorer {
     this.expandedPaths = new Set();
     this.selectedPath = '';
     this.selectedType = '';
+    // Multi-select state for owned workspace files. selectedPaths holds every
+    // selected file path; selectionAnchor is the pivot for Shift range selects.
+    this.selectedPaths = new Set();
+    this.selectionAnchor = '';
     this.searchQuery = '';
     this.sortDirection = 'asc';
     this.fileCache = new Map();
@@ -89,7 +93,11 @@ export class WorkspaceDirectoryExplorer {
       if (nodeButton) {
         const path = this.decodeDataPath(nodeButton.dataset.path);
         const type = nodeButton.dataset.type || 'file';
-        this.selectNode(path, type, { autoExpand: true });
+        this.selectNode(path, type, {
+          autoExpand: true,
+          range: event.shiftKey,
+          toggle: event.metaKey || event.ctrlKey
+        });
       }
     });
 
@@ -117,7 +125,7 @@ export class WorkspaceDirectoryExplorer {
         // Focus the target before triggering the re-render so render()'s
         // focus-restore logic captures and re-applies the new path, not the old.
         target.focus({ preventScroll: false });
-        this.selectNode(targetPath, targetType);
+        this.selectNode(targetPath, targetType, { range: event.shiftKey });
         return;
       }
 
@@ -135,6 +143,28 @@ export class WorkspaceDirectoryExplorer {
     });
 
     elements.directoryExplorerPreview?.addEventListener('click', event => {
+      const bulkMoveButton = event.target.closest('[data-action="bulk-move"]');
+      if (bulkMoveButton) {
+        event.preventDefault();
+        void this.bulkMoveSelectedFiles();
+        return;
+      }
+
+      const bulkTrashButton = event.target.closest('[data-action="bulk-trash"]');
+      if (bulkTrashButton) {
+        event.preventDefault();
+        void this.bulkTrashSelectedFiles();
+        return;
+      }
+
+      const bulkClearButton = event.target.closest('[data-action="bulk-clear"]');
+      if (bulkClearButton) {
+        event.preventDefault();
+        this.clearMultiSelection();
+        this.render();
+        return;
+      }
+
       const moveButton = event.target.closest('[data-action="move-workspace-file"]');
       if (moveButton) {
         event.preventDefault();
@@ -244,6 +274,7 @@ export class WorkspaceDirectoryExplorer {
     this.treeRoot = null;
     this.nodeIndex = new Map();
     this.selectedType = '';
+    this.clearMultiSelection();
     this.previewCache = new Map();
 
     this.loadPersistedState(this.cacheKeyForDirectory(directory));
@@ -408,6 +439,7 @@ export class WorkspaceDirectoryExplorer {
       if (!this.selectedType) {
         this.selectedType = this.nodeIndex.get(this.selectedPath)?.type || 'file';
       }
+      this.setDefaultFileAnchor(this.selectedPath, this.selectedType);
       this.ensureAncestorsExpanded(this.selectedPath, this.selectedType);
       return;
     }
@@ -416,6 +448,7 @@ export class WorkspaceDirectoryExplorer {
     if (firstFile) {
       this.selectedPath = firstFile.path;
       this.selectedType = 'file';
+      this.setDefaultFileAnchor(firstFile.path, 'file');
       this.ensureAncestorsExpanded(firstFile.path, 'file');
       this.persistState();
       return;
@@ -528,6 +561,19 @@ export class WorkspaceDirectoryExplorer {
     const directory = this.directory;
     if (!directory) return;
 
+    // Drop any selected paths that no longer exist (e.g. after a refresh that
+    // removed trashed/moved files) so highlights and counts stay accurate.
+    if (this.selectedPaths.size > 0) {
+      this.selectedPaths = new Set(
+        Array.from(this.selectedPaths).filter(
+          path => this.nodeIndex.get(path)?.type === 'file'
+        )
+      );
+      if (this.selectedPaths.size === 0) {
+        this.selectionAnchor = '';
+      }
+    }
+
     const elements = this.host.elements;
 
     // Capture which tree button (if any) currently has focus. innerHTML rewrite
@@ -615,10 +661,13 @@ export class WorkspaceDirectoryExplorer {
     const files = this.files || [];
     const folderCount = files.filter(entry => entry.isDir).length;
     const fileCount = files.length - folderCount;
+    const selectedFileCount = this.getSelectedFileNodes().length;
     const selectedNode = this.nodeIndex.get(this.selectedPath);
-    const selectedLabel = selectedNode
-      ? `${selectedNode.type === 'dir' ? 'Folder' : 'File'} selected`
-      : 'No selection';
+    const selectedLabel = selectedFileCount > 1
+      ? `${selectedFileCount} files selected`
+      : selectedNode
+        ? `${selectedNode.type === 'dir' ? 'Folder' : 'File'} selected`
+        : 'No selection';
 
     elements.directoryExplorerSummary.innerHTML = `
       <span class="workspace-directory-pill">${fileCount} file${fileCount === 1 ? '' : 's'}</span>
@@ -718,7 +767,9 @@ export class WorkspaceDirectoryExplorer {
     const isDirectory = node.type === 'dir';
     const isExpanded =
       isDirectory && (forceExpanded || this.expandedPaths.has(node.path));
-    const isSelected = this.selectedPath === node.path;
+    const isSelected = isDirectory
+      ? this.selectedPath === node.path
+      : this.selectedPaths.has(node.path) || this.selectedPath === node.path;
     const isMissing = !isDirectory && node.status === 'missing';
     const sizeText =
       !isDirectory && Number.isFinite(node.size) ? this.host.formatFileSize(node.size) : '';
@@ -816,21 +867,115 @@ export class WorkspaceDirectoryExplorer {
     this.render();
   }
 
-  selectNode(path, type, { autoExpand = false } = {}) {
+  selectNode(path, type, { autoExpand = false, range = false, toggle = false } = {}) {
     const normalizedPath = this.normalizeRelativePath(path);
     const node = this.nodeIndex.get(normalizedPath);
     if (!node) return;
 
-    this.selectedPath = normalizedPath;
-    this.selectedType = type === 'dir' ? 'dir' : node.type;
+    const resolvedType = type === 'dir' ? 'dir' : node.type;
+    // Multi-select only applies to files in the owned "Workspace files" view.
+    const multiEligible = this.source === 'owned' && resolvedType === 'file';
+    const anchorIsFile =
+      this.selectionAnchor && this.nodeIndex.get(this.selectionAnchor)?.type === 'file';
+
+    if (multiEligible && range && anchorIsFile) {
+      // Shift-click / Shift-arrow: select the contiguous run of files between
+      // the anchor and this node. The anchor stays put for further extension.
+      this.selectRange(this.selectionAnchor, normalizedPath);
+      this.selectedPath = normalizedPath;
+      this.selectedType = 'file';
+    } else if (multiEligible && toggle) {
+      // Cmd/Ctrl-click: add or remove this single file from the selection.
+      if (this.selectedPaths.has(normalizedPath)) {
+        this.selectedPaths.delete(normalizedPath);
+      } else {
+        this.selectedPaths.add(normalizedPath);
+      }
+      this.selectionAnchor = normalizedPath;
+      if (this.selectedPaths.has(normalizedPath)) {
+        this.selectedPath = normalizedPath;
+      } else {
+        const remaining = Array.from(this.selectedPaths);
+        this.selectedPath = remaining.length ? remaining[remaining.length - 1] : '';
+      }
+      this.selectedType = this.selectedPath ? 'file' : '';
+    } else {
+      // Plain click (or any selection on a folder / non-owned source).
+      this.selectedPaths = multiEligible ? new Set([normalizedPath]) : new Set();
+      this.selectionAnchor = multiEligible ? normalizedPath : '';
+      this.selectedPath = normalizedPath;
+      this.selectedType = resolvedType;
+    }
 
     if (autoExpand && this.selectedType === 'dir') {
       this.expandedPaths.add(normalizedPath);
     }
 
-    this.ensureAncestorsExpanded(normalizedPath, this.selectedType);
+    this.ensureAncestorsExpanded(this.selectedPath || normalizedPath, this.selectedType);
     this.persistState();
     this.render();
+  }
+
+  // selectRange replaces the current selection with every file between two
+  // paths, inclusive, using the rendered (visible) row order. Folders inside
+  // the range are skipped since multi-select targets files only.
+  selectRange(anchorPath, targetPath) {
+    const treeEl = this.host.elements.directoryExplorerTree;
+    if (!treeEl) {
+      this.selectedPaths = new Set([anchorPath, targetPath]);
+      return;
+    }
+
+    const paths = Array.from(
+      treeEl.querySelectorAll('[data-action="select-node"]')
+    ).map(button => this.decodeDataPath(button.dataset.path));
+
+    const anchorIndex = paths.indexOf(anchorPath);
+    const targetIndex = paths.indexOf(targetPath);
+    if (anchorIndex === -1 || targetIndex === -1) {
+      this.selectedPaths = new Set([targetPath]);
+      this.selectionAnchor = targetPath;
+      return;
+    }
+
+    const [start, end] =
+      anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+    const next = new Set();
+    for (let index = start; index <= end; index += 1) {
+      const path = paths[index];
+      if (this.nodeIndex.get(path)?.type === 'file') {
+        next.add(path);
+      }
+    }
+    this.selectedPaths = next;
+  }
+
+  clearMultiSelection() {
+    this.selectedPaths = new Set();
+    this.selectionAnchor = '';
+  }
+
+  // setDefaultFileAnchor seeds the multi-select anchor when a file is selected
+  // by default/restore, so the user's first Shift-click extends a range from it.
+  setDefaultFileAnchor(path, type) {
+    if (this.source !== 'owned' || type !== 'file') return;
+    const normalizedPath = this.normalizeRelativePath(path);
+    if (!normalizedPath) return;
+    this.selectionAnchor = normalizedPath;
+    this.selectedPaths = new Set([normalizedPath]);
+  }
+
+  // getSelectedFileNodes returns the currently selected file nodes that still
+  // exist in the tree (stale paths are ignored).
+  getSelectedFileNodes() {
+    const nodes = [];
+    this.selectedPaths.forEach(path => {
+      const node = this.nodeIndex.get(path);
+      if (node && node.type === 'file') {
+        nodes.push(node);
+      }
+    });
+    return nodes;
   }
 
   ensureAncestorsExpanded(path, type) {
@@ -1037,6 +1182,123 @@ export class WorkspaceDirectoryExplorer {
     }
   }
 
+  renderBulkSelectionPanel() {
+    const previewEl = this.host.elements.directoryExplorerPreview;
+    if (!previewEl) return;
+
+    const nodes = this.getSelectedFileNodes();
+    const count = nodes.length;
+    const totalSize = nodes.reduce(
+      (sum, node) => sum + (Number.isFinite(node.size) ? node.size : 0),
+      0
+    );
+    const canMove = nodes.some(node => node.attachmentId && node.status !== 'missing');
+    const canTrash = nodes.some(node => node.attachmentId);
+    const listItems = nodes
+      .slice(0, 50)
+      .map(
+        node =>
+          `<li class="workspace-directory-bulk-item">${this.host.escapeHtml(node.name || node.path)}</li>`
+      )
+      .join('');
+
+    previewEl.innerHTML = `
+      <div class="workspace-directory-preview-header">
+        <div class="workspace-directory-preview-title">${count} files selected</div>
+        <div class="workspace-directory-preview-subtitle">${this.host.escapeHtml(this.host.formatFileSize(totalSize))} total</div>
+      </div>
+      <div class="workspace-directory-preview-stats">
+        ${canMove ? '<button type="button" class="workspace-directory-preview-open-link" data-action="bulk-move">Move selected</button>' : ''}
+        ${canTrash ? '<button type="button" class="workspace-directory-preview-open-link is-danger" data-action="bulk-trash">Delete selected</button>' : ''}
+        <button type="button" class="workspace-directory-preview-open-link" data-action="bulk-clear">Clear selection</button>
+      </div>
+      <ul class="workspace-directory-bulk-list">${listItems}</ul>
+      ${count > 50 ? `<div class="workspace-directory-preview-note">Showing first 50 of ${count}.</div>` : ''}
+    `;
+  }
+
+  async bulkMoveSelectedFiles() {
+    if (this.source !== 'owned') return;
+    const nodes = this.getSelectedFileNodes().filter(
+      node => node.attachmentId && node.status !== 'missing'
+    );
+    if (nodes.length === 0) return;
+
+    const rawPath = window.prompt(
+      `Move ${nodes.length} file${nodes.length === 1 ? '' : 's'} to folder path inside Workspace files. Leave blank for root.`,
+      ''
+    );
+    if (rawPath === null) return;
+
+    const targetFolder = this.normalizeRelativePath(rawPath);
+    let successCount = 0;
+    for (const node of nodes) {
+      if (this.parentPathFor(node.path) === targetFolder) {
+        // Already in the destination; nothing to do but count as handled.
+        successCount += 1;
+        continue;
+      }
+      try {
+        await this.requestWorkspaceJSON(
+          `/attachments/${encodeURIComponent(node.attachmentId)}/move`,
+          {
+            method: 'PATCH',
+            body: { target_folder: targetFolder }
+          }
+        );
+        successCount += 1;
+      } catch (error) {
+        console.error('Failed to move workspace file:', node.path, error);
+      }
+    }
+
+    if (window.Toast) {
+      if (successCount > 0) {
+        window.Toast.success(`Moved ${successCount} file${successCount === 1 ? '' : 's'}`);
+      } else {
+        window.Toast.error('Failed to move files');
+      }
+    }
+
+    this.clearMultiSelection();
+    this.selectedPath = '';
+    this.selectedType = '';
+    await this.refreshOwnedTree();
+  }
+
+  async bulkTrashSelectedFiles() {
+    if (this.source !== 'owned') return;
+    const nodes = this.getSelectedFileNodes().filter(node => node.attachmentId);
+    if (nodes.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Move ${nodes.length} file${nodes.length === 1 ? '' : 's'} to trash?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const payload = await this.requestWorkspaceJSON('/attachments/bulk-trash', {
+        method: 'POST',
+        body: { attachment_ids: nodes.map(node => node.attachmentId) }
+      });
+      const count = Number.isFinite(payload?.success_count)
+        ? payload.success_count
+        : nodes.length;
+      if (window.Toast) {
+        window.Toast.success(`Moved ${count} file${count === 1 ? '' : 's'} to trash`);
+      }
+      this.clearMultiSelection();
+      this.selectedPath = '';
+      this.selectedType = '';
+      await this.refreshOwnedTree();
+    } catch (error) {
+      console.error('Failed to bulk trash workspace files:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to move files to trash');
+      }
+    }
+  }
+
   handleTreeDragStart(event) {
     const main = event.target.closest('[data-action="select-node"][draggable="true"]');
     if (!main) return;
@@ -1201,6 +1463,11 @@ export class WorkspaceDirectoryExplorer {
   renderPreview() {
     const previewEl = this.host.elements.directoryExplorerPreview;
     if (!previewEl) return;
+
+    if (this.source === 'owned' && this.getSelectedFileNodes().length > 1) {
+      this.renderBulkSelectionPanel();
+      return;
+    }
 
     const selectedPath = this.selectedPath;
     if (!selectedPath) {
@@ -1658,6 +1925,7 @@ export class WorkspaceDirectoryExplorer {
   loadPersistedState(directoryId) {
     this.expandedPaths = new Set();
     this.selectedPath = '';
+    this.clearMultiSelection();
 
     if (!directoryId || typeof localStorage === 'undefined') return;
 
