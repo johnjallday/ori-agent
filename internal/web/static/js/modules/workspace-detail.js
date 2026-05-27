@@ -284,6 +284,7 @@ export class WorkspaceDetailPage {
     this.fileModalManager.setupFileModal();
     this.setupFilesPanelVaultDrop();
     this.setupNotesPanelVaultDrop();
+    this.setupPageDragAndDrop();
     await this.loadWorkspace();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
@@ -476,6 +477,170 @@ export class WorkspaceDetailPage {
 
       await this.attachVaultRecordToFiles(recordPayload);
     });
+  }
+
+  /**
+   * Let the user drop files anywhere on the workspace page to upload them into
+   * this workspace's files (saved to the workspace files root). Only reacts to
+   * OS file drags ("Files" data type); internal vault/record drags use custom
+   * MIME types and are handled by their own panel drop zones.
+   */
+  setupPageDragAndDrop() {
+    if (document.body.dataset.workspaceDetailDropBound === 'true') {
+      return;
+    }
+    document.body.dataset.workspaceDetailDropBound = 'true';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'workspace-detail-drop-overlay';
+    overlay.className = 'workspace-detail-drop-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.innerHTML = `
+      <div class="workspace-detail-drop-overlay-card">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 9 12 4 17 9"></polyline>
+          <line x1="12" y1="4" x2="12" y2="16"></line>
+        </svg>
+        <div class="workspace-detail-drop-overlay-title">Drop files to add to this workspace</div>
+        <div class="workspace-detail-drop-overlay-subtitle">They'll be saved to this workspace's files</div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    let dragDepth = 0;
+
+    const isFileDrag = event => {
+      const types = event.dataTransfer?.types;
+      return Boolean(types) && Array.from(types).includes('Files');
+    };
+    const modalOpen = () => Boolean(document.querySelector('.modal.show'));
+    const handledByDropZone = event =>
+      Boolean(event.target?.closest?.('.modal, #hubFileDropZone, .is-vault-drop-target'));
+    const hideOverlay = () => {
+      dragDepth = 0;
+      overlay.classList.remove('is-active');
+    };
+
+    document.addEventListener('dragenter', event => {
+      if (!isFileDrag(event) || modalOpen()) return;
+      event.preventDefault();
+      dragDepth += 1;
+      overlay.classList.add('is-active');
+    });
+
+    document.addEventListener('dragover', event => {
+      if (!isFileDrag(event) || modalOpen()) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    document.addEventListener('dragleave', event => {
+      if (!isFileDrag(event)) return;
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
+        hideOverlay();
+      }
+    });
+
+    document.addEventListener('drop', event => {
+      if (!isFileDrag(event)) return;
+      // Never let the browser navigate to a dropped file.
+      event.preventDefault();
+      hideOverlay();
+      // Dedicated drop zones (add-file modal, vault panels) own their drops.
+      if (handledByDropZone(event) || modalOpen()) {
+        return;
+      }
+      const files = Array.from(event.dataTransfer?.files || []);
+      if (files.length > 0) {
+        void this.uploadDroppedFiles(files);
+      }
+    });
+
+    window.addEventListener('dragend', hideOverlay);
+  }
+
+  /**
+   * Upload files dropped onto the page into the workspace files root.
+   * @param {File[]} files
+   */
+  async uploadDroppedFiles(files) {
+    if (!this.workspaceId || !Array.isArray(files) || files.length === 0) {
+      return;
+    }
+
+    const maxSize = 10 * 1024 * 1024; // 10MB, matches the add-file modal
+    const valid = [];
+    for (const file of files) {
+      const hasExtension = file.name.includes('.');
+      const isLikelyFolder =
+        (!file.type && file.size === 0) ||
+        (!file.type && !hasExtension && file.size < 4096);
+      if (isLikelyFolder) {
+        if (window.Toast) {
+          window.Toast.info('To add a folder, use the Linked Folders panel instead.', {
+            title: 'Folder detected'
+          });
+        }
+        continue;
+      }
+      if (file.size > maxSize) {
+        if (window.Toast) {
+          window.Toast.warning(`${file.name} exceeds the 10MB limit`);
+        }
+        continue;
+      }
+      valid.push(file);
+    }
+
+    if (valid.length === 0) {
+      return;
+    }
+
+    let successCount = 0;
+    for (const file of valid) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('workspace_id', this.workspaceId);
+        // Dropped files land in the workspace files root (no folder_path).
+
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`,
+          {
+            method: 'POST',
+            body: formData
+          }
+        );
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || payload.message || 'Upload failed');
+        }
+        successCount += 1;
+      } catch (error) {
+        console.error('Failed to upload dropped file:', file.name, error);
+        if (window.Toast) {
+          window.Toast.error(`Failed to add ${file.name}`);
+        }
+      }
+    }
+
+    if (successCount > 0) {
+      if (window.Toast) {
+        window.Toast.success(
+          successCount === 1
+            ? 'File added to workspace'
+            : `${successCount} files added to workspace`
+        );
+      }
+      await this.loadFiles();
+      if (window.EventBus) {
+        window.EventBus.emit('workspace:files:updated', { workspaceId: this.workspaceId });
+      }
+    }
   }
 
   setupNotesPanelVaultDrop() {
