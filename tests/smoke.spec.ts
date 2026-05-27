@@ -558,9 +558,10 @@ test.describe('Workspace File Folders', () => {
       await expect(page.locator('#hubAddFileModal.show')).toHaveCount(0);
       await expect(page.locator('#workspace-detail-files-list')).toContainText('folder-smoke-report.txt');
 
-      await page.locator('#workspace-detail-browse-files').click();
+      await page.locator('#workspace-detail-files-panel .workspace-detail-panel-title').click();
       const explorer = page.locator('#workspace-directory-explorer-modal');
       await expect(explorer).toBeVisible();
+      await expect(page.locator('#workspace-detail-files-panel')).not.toHaveClass(/is-expanded/);
       await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'research' })).toBeVisible();
 
       await expect(explorer.locator('.workspace-directory-preview-code')).toContainText('workspace folder smoke test');

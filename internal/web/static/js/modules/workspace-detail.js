@@ -974,6 +974,7 @@ export class WorkspaceDetailPage {
       // Lists
       agentsList: document.getElementById('workspace-detail-agents-list'),
       sessionsList: document.getElementById('workspace-detail-sessions-list'),
+      filesPanel: document.getElementById('workspace-detail-files-panel'),
       filesList: document.getElementById('workspace-detail-files-list'),
       browseFilesBtn: document.getElementById('workspace-detail-browse-files'),
       notesList: document.getElementById('workspace-detail-notes-list'),
@@ -1339,6 +1340,25 @@ export class WorkspaceDetailPage {
     });
     this.elements.browseFilesBtn?.addEventListener('click', event => {
       event.stopPropagation();
+      this.openWorkspaceFilesExplorer();
+    });
+    this.elements.filesPanel?.addEventListener('click', event => {
+      if (event.target.closest('button, a, input, select, textarea')) {
+        return;
+      }
+
+      this.openWorkspaceFilesExplorer();
+    });
+    this.elements.filesPanel?.addEventListener('keydown', event => {
+      if (event.target.closest('button, a, input, select, textarea')) {
+        return;
+      }
+
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+
+      event.preventDefault();
       this.openWorkspaceFilesExplorer();
     });
 
