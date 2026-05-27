@@ -7431,6 +7431,13 @@
       outline-offset: 1px;
     }
 
+    /* Dropping on empty tree space moves files out to the workspace files root. */
+    .workspace-directory-explorer-tree.is-drop-target {
+      outline: 2px dashed rgba(56, 189, 248, 0.7);
+      outline-offset: -3px;
+      background: rgba(56, 189, 248, 0.08);
+    }
+
     .workspace-directory-tree-node.is-missing > .workspace-directory-tree-row .workspace-directory-tree-label {
       color: rgba(248, 180, 120, 0.85);
       text-decoration: line-through;
