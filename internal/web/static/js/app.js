@@ -2333,44 +2333,21 @@ async function uploadFileToSession(sessionId, file) {
   return data.file || null;
 }
 
-function buildSessionFileUrl(sessionId, fileId) {
-  if (!sessionId || !fileId) return '';
-  return new URL(`/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}/download`, window.location.origin).toString();
-}
+async function uploadFileToWorkspace(workspaceId, file, entry) {
+  if (!workspaceId || !file) return;
 
-function inferWorkspaceAttachmentType(file) {
-  const mime = (file.type || '').toLowerCase();
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || mime.includes('csv') ||
-    mime.includes('pdf') || mime.includes('word') || mime.includes('presentation') || mime.includes('spreadsheet')) {
-    return 'doc';
-  }
-  return 'other';
-}
+  const filename = entry?.name || file.name || 'attachment';
+  const formData = new FormData();
+  formData.append('file', buildUploadBlob(file), filename);
+  formData.append('title', filename);
 
-async function createWorkspaceAttachment(workspaceId, sessionId, file, entry) {
-  if (!workspaceId || !entry) return;
-
-  const fileUrl = buildSessionFileUrl(sessionId, entry.id);
-  const payload = {
-    title: entry.name || file.name || 'Attachment',
-    type: inferWorkspaceAttachmentType(file),
-    file_meta: {
-      name: entry.name || file.name,
-      size: entry.size || file.size || 0,
-      mime: entry.mime_type || file.type || 'application/octet-stream',
-      url: fileUrl
-    }
-  };
-
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`, {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: formData
   });
 
   if (!response.ok) {
-    let message = 'Failed to add attachment to workspace';
+    let message = 'Failed to add file to workspace';
     try {
       const data = await response.json();
       if (data.message) message = data.message;
@@ -2401,12 +2378,12 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
     }
 
     if (workspaceId && successes.length > 0) {
-      const attachmentResults = await Promise.allSettled(
-        successes.map(item => createWorkspaceAttachment(workspaceId, sessionId, item.file, item.entry))
+      const workspaceUploadResults = await Promise.allSettled(
+        successes.map(item => uploadFileToWorkspace(workspaceId, item.file, item.entry))
       );
-      const attachmentFailures = attachmentResults.filter(result => result.status === 'rejected');
-      if (attachmentFailures.length > 0 && window.Toast) {
-        Toast.warning('Some attachments could not be added to the workspace');
+      const workspaceUploadFailures = workspaceUploadResults.filter(result => result.status === 'rejected');
+      if (workspaceUploadFailures.length > 0 && window.Toast) {
+        Toast.warning('Some files could not be copied into the workspace');
       }
       if (window.EventBus) {
         EventBus.emit('workspace:files:updated', { workspaceId });

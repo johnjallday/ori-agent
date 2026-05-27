@@ -255,6 +255,142 @@ func TestReconcileWorkspaceFilesNoChangeWhenInPlace(t *testing.T) {
 	}
 }
 
+func TestReconcileWorkspaceFilesIndexesUntrackedDiskFile(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-index-disk", "Sync Index Disk")
+	filesPath := store.GetFilesPath(ws.ID)
+	relPath := filepath.Join("research", "brief.md")
+	absPath := filepath.Join(filesPath, relPath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte("# Brief\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	changed, events, err := reconcileWorkspaceFiles(ws, filesPath)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected reconcile to report a change")
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no move events for indexing, got %#v", events)
+	}
+	if len(ws.Attachments) != 1 {
+		t.Fatalf("expected one indexed attachment, got %d", len(ws.Attachments))
+	}
+
+	att := ws.Attachments[0]
+	if att.Title != "brief.md" {
+		t.Fatalf("expected title brief.md, got %q", att.Title)
+	}
+	if att.File == nil {
+		t.Fatal("expected file metadata")
+	}
+	if att.File.RelativePath != relPath {
+		t.Fatalf("expected relative path %q, got %q", relPath, att.File.RelativePath)
+	}
+	if att.File.URL != workspaceFileURL(ws.ID, relPath) {
+		t.Fatalf("expected workspace file URL, got %q", att.File.URL)
+	}
+	if att.File.Checksum == "" {
+		t.Fatal("expected indexed file checksum")
+	}
+}
+
+func TestReconcileWorkspaceFilesDoesNotIndexHiddenDiskFiles(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-index-hidden", "Sync Index Hidden")
+	filesPath := store.GetFilesPath(ws.ID)
+	for _, relPath := range []string{".DS_Store", filepath.Join(".cache", "data.json"), filepath.Join("docs", ".secret")} {
+		absPath := filepath.Join(filesPath, relPath)
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", relPath, err)
+		}
+		if err := os.WriteFile(absPath, []byte("hidden"), 0644); err != nil {
+			t.Fatalf("WriteFile %s: %v", relPath, err)
+		}
+	}
+
+	changed, events, err := reconcileWorkspaceFiles(ws, filesPath)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if changed || len(events) != 0 {
+		t.Fatalf("expected hidden files to be ignored, changed=%v events=%#v", changed, events)
+	}
+	if len(ws.Attachments) != 0 {
+		t.Fatalf("expected no indexed attachments, got %#v", ws.Attachments)
+	}
+}
+
+func TestReconcileWorkspaceFilesDoesNotIndexGeneratedResultStorageFiles(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-index-generated", "Sync Index Generated")
+	filesPath := store.GetFilesPath(ws.ID)
+	ws.Tasks = []Task{
+		{
+			ID:          "task-1",
+			WorkspaceID: ws.ID,
+			Description: "Daily report",
+			ResultStorage: &ResultStorageConfig{
+				Enabled:         true,
+				StorageTarget:   StorageTargetWorkspaceFolder,
+				WorkspaceFolder: "reports",
+				FilePath:        "runs.csv",
+				WriteMode:       "append",
+			},
+			CreatedAt: time.Now(),
+		},
+	}
+
+	relPath := filepath.Join("reports", "runs.csv")
+	absPath := filepath.Join(filesPath, relPath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte("timestamp,value\n2026-05-26,high\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	changed, events, err := reconcileWorkspaceFiles(ws, filesPath)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if changed || len(events) != 0 {
+		t.Fatalf("expected generated result file to be ignored, changed=%v events=%#v", changed, events)
+	}
+	if len(ws.Attachments) != 0 {
+		t.Fatalf("expected generated result file to stay unindexed, got %#v", ws.Attachments)
+	}
+}
+
+func TestReconcileWorkspaceFilesRebindsBeforeIndexingUntrackedFiles(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-rebind-before-index", "Sync Rebind Before Index")
+	filesPath := store.GetFilesPath(ws.ID)
+	addOwnedAttachmentWithFile(t, store, ws, "att-1", "old.txt", []byte("same content"))
+
+	if err := os.Rename(filepath.Join(filesPath, "old.txt"), filepath.Join(filesPath, "new.txt")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	changed, events, err := reconcileWorkspaceFiles(ws, filesPath)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected reconcile to report a change")
+	}
+	if len(events) != 1 || events[0].newPath != "new.txt" {
+		t.Fatalf("expected one rebind event, got %#v", events)
+	}
+	if len(ws.Attachments) != 1 {
+		t.Fatalf("expected rebind without duplicate indexing, got %d attachments", len(ws.Attachments))
+	}
+	if got := attachmentByID(ws, "att-1").File.RelativePath; got != "new.txt" {
+		t.Fatalf("expected attachment re-bound to new.txt, got %q", got)
+	}
+}
+
 func TestReconcileWorkspaceFilesBackfillBudgetIsAmortized(t *testing.T) {
 	store, ws, _ := newFolderHandlerTest(t, "ws-sync-budget", "Sync Budget")
 	filesPath := store.GetFilesPath(ws.ID)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // fileSyncEvent records a workspace-owned file that was re-bound to a new path
@@ -60,6 +62,7 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 	}
 	var active []ownedAttachment
 	claimed := make(map[string]bool)
+	generatedFiles := workspaceGeneratedFilePaths(ws)
 	for i := range ws.Attachments {
 		att := &ws.Attachments[i]
 		if att.File == nil {
@@ -121,6 +124,9 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 	}
 
 	if len(missing) == 0 {
+		if indexUntrackedWorkspaceDiskFiles(ws, filesPath, diskFiles, claimed, generatedFiles, nil, &backfillBudget) {
+			changed = true
+		}
 		if changed {
 			ws.UpdatedAt = time.Now()
 		}
@@ -135,10 +141,12 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 		missingSizes[ws.Attachments[oa.idx].File.Size] = true
 	}
 	orphanByChecksum := make(map[string][]string)
+	orphanCandidates := make(map[string]bool)
 	for rel, info := range diskFiles {
 		if claimed[rel] || !missingSizes[info.Size()] {
 			continue
 		}
+		orphanCandidates[rel] = true
 		absPath, _, pErr := workspaceFilePathWithinRoot(filesPath, rel)
 		if pErr != nil {
 			continue
@@ -160,6 +168,7 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 			newPath := matches[0]
 			info := diskFiles[newPath]
 			usedOrphan[newPath] = true
+			claimed[newPath] = true
 
 			att.File.RelativePath = newPath
 			att.File.Name = filepath.Base(newPath)
@@ -183,10 +192,143 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 		}
 	}
 
+	if indexUntrackedWorkspaceDiskFiles(ws, filesPath, diskFiles, claimed, generatedFiles, orphanCandidates, &backfillBudget) {
+		changed = true
+	}
+
 	if changed {
 		ws.UpdatedAt = time.Now()
 	}
 	return changed, events, nil
+}
+
+func indexUntrackedWorkspaceDiskFiles(ws *Workspace, filesPath string, diskFiles map[string]os.FileInfo, claimed map[string]bool, generated map[string]bool, deferred map[string]bool, backfillBudget *int64) bool {
+	if ws == nil || len(diskFiles) == 0 {
+		return false
+	}
+
+	changed := false
+	for rel, info := range diskFiles {
+		if claimed[rel] || generated[rel] || deferred[rel] || !shouldIndexWorkspaceDiskFile(rel, info) {
+			continue
+		}
+
+		meta := storedWorkspaceFile{
+			Name:         info.Name(),
+			RelativePath: rel,
+			Size:         info.Size(),
+			MimeType:     detectMimeType(info.Name()),
+			ModTime:      info.ModTime(),
+		}
+		if backfillBudget != nil && *backfillBudget > 0 {
+			absPath, _, pErr := workspaceFilePathWithinRoot(filesPath, rel)
+			if pErr == nil {
+				sum, modTime, size, hErr := hashFileSHA256(absPath)
+				if hErr == nil {
+					*backfillBudget -= size
+					meta.Checksum = sum
+					meta.ModTime = modTime
+					meta.Size = size
+				}
+			}
+		}
+
+		now := time.Now()
+		if !info.ModTime().IsZero() {
+			now = info.ModTime()
+		}
+		attachment := Attachment{
+			ID:          uuid.New().String(),
+			WorkspaceID: ws.ID,
+			Title:       info.Name(),
+			Type:        inferTypeFromMime(meta.MimeType),
+			File:        buildWorkspaceOwnedAttachmentFileMeta(ws.ID, meta, ""),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := ws.AddAttachment(attachment); err != nil {
+			continue
+		}
+		claimed[rel] = true
+		changed = true
+	}
+	return changed
+}
+
+func workspaceGeneratedFilePaths(ws *Workspace) map[string]bool {
+	paths := make(map[string]bool)
+	if ws == nil {
+		return paths
+	}
+
+	add := func(relativePath string) {
+		clean := sanitizeWorkspaceRelativePath(relativePath)
+		if clean != "" {
+			paths[clean] = true
+		}
+	}
+
+	for _, node := range ws.StoreNodes {
+		if !StoreNodeUsesWorkspaceFolder(&node) || strings.TrimSpace(node.LastFilePath) == "" {
+			continue
+		}
+		relativePath := node.LastFilePath
+		if strings.TrimSpace(node.WorkspaceFolder) != "" {
+			relativePath = filepath.Join(node.WorkspaceFolder, relativePath)
+		}
+		add(relativePath)
+	}
+
+	for i := range ws.Tasks {
+		if relativePath := resultStorageWorkspaceFilePath(&ws.Tasks[i], ws.Tasks[i].ResultStorage); relativePath != "" {
+			add(relativePath)
+		}
+	}
+
+	return paths
+}
+
+func resultStorageWorkspaceFilePath(task *Task, storage *ResultStorageConfig) string {
+	if task == nil || storage == nil || !storage.Enabled || !ResultStorageUsesWorkspaceFolder(storage) {
+		return ""
+	}
+
+	relativePath := strings.TrimSpace(storage.FilePath)
+	filename := ""
+	if strings.EqualFold(strings.TrimSpace(storage.WriteMode), "append") || strings.EqualFold(strings.TrimSpace(storage.Format), "csv") {
+		filename = AppendCSVFileName(task, storage)
+	} else if strings.TrimSpace(storage.FileName) != "" {
+		filename = filepath.Base(filepath.Clean(storage.FileName))
+	}
+
+	if relativePath == "" {
+		relativePath = filename
+	} else if filename != "" && (strings.HasSuffix(relativePath, "/") || !strings.Contains(filepath.Base(relativePath), ".")) {
+		relativePath = filepath.Join(relativePath, filename)
+	}
+	if relativePath == "" {
+		return ""
+	}
+	if strings.TrimSpace(storage.WorkspaceFolder) != "" {
+		relativePath = filepath.Join(storage.WorkspaceFolder, relativePath)
+	}
+	return sanitizeWorkspaceRelativePath(relativePath)
+}
+
+func shouldIndexWorkspaceDiskFile(relativePath string, info os.FileInfo) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	clean := sanitizeWorkspaceRelativePath(relativePath)
+	if clean == "" {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if part == "" || strings.HasPrefix(part, ".") {
+			return false
+		}
+	}
+	return true
 }
 
 // snapshotWorkspaceDiskFiles returns the regular files under filesPath keyed by
