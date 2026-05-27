@@ -257,7 +257,7 @@
           </div>
           <div class="hub-file-actions">
             ${relativePath ? `
-              <button class="hub-item-secondary-btn" data-action="reveal" title="Reveal in Finder">
+              <button class="hub-item-secondary-btn" data-action="reveal" title="Reveal in File Manager">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M16.5,12C19,12 21,14 21,16.5C21,17.38 20.75,18.21 20.31,18.9L23.39,22L22,23.39L18.88,20.32C18.19,20.75 17.37,21 16.5,21C14,21 12,19 12,16.5C12,14 14,12 16.5,12M16.5,14A2.5,2.5 0 0,0 14,16.5A2.5,2.5 0 0,0 16.5,19A2.5,2.5 0 0,0 19,16.5A2.5,2.5 0 0,0 16.5,14M9,4L11,6H21A2,2 0 0,1 23,8V11.81C22.39,11.26 21.7,10.8 20.93,10.5L20,9.97V8H10.17L8.17,6H4V18H10.06C10.16,18.7 10.38,19.37 10.68,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4H9Z"/>
                 </svg>

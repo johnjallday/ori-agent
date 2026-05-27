@@ -341,7 +341,7 @@ export class WorkspaceDirectoryExplorer {
       if (elements.directoryExplorerTree) {
         elements.directoryExplorerTree.innerHTML = `
           <div class="workspace-directory-tree-empty">
-            Legacy directory attachments cannot be browsed yet. Re-add this folder with the folder picker to enable Finder view.
+            Legacy directory attachments cannot be browsed yet. Re-add this folder with the folder picker to enable file manager view.
           </div>
         `;
       }
@@ -1609,7 +1609,7 @@ export class WorkspaceDirectoryExplorer {
 
     const revealButton =
       this.source === 'owned'
-        ? `<button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${this.encodeDataPath(node.path || '')}">Reveal folder in Finder</button>`
+        ? `<button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${this.encodeDataPath(node.path || '')}">Open folder in File Manager</button>`
         : '';
 
     previewEl.innerHTML = `
@@ -1704,6 +1704,10 @@ export class WorkspaceDirectoryExplorer {
 
     const stats = this.collectStats(node);
     const childItems = this.getSortedChildren(node.children || []).slice(0, 16);
+    const openFolderButton =
+      this.source === 'owned' && node.path
+        ? `<button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${this.encodeDataPath(node.path)}">Open in File Manager</button>`
+        : '';
 
     previewEl.innerHTML = `
       <div class="workspace-directory-preview-header">
@@ -1713,6 +1717,7 @@ export class WorkspaceDirectoryExplorer {
       <div class="workspace-directory-preview-stats">
         <span class="workspace-directory-pill">${stats.files} file${stats.files === 1 ? '' : 's'}</span>
         <span class="workspace-directory-pill">${stats.folders} folder${stats.folders === 1 ? '' : 's'}</span>
+        ${openFolderButton}
       </div>
       <div class="workspace-directory-preview-directory-list">
         ${
@@ -1813,7 +1818,7 @@ export class WorkspaceDirectoryExplorer {
     const osButtons = isOwned
       ? `
         <button type="button" class="workspace-directory-preview-open-link" data-action="open-workspace-file" data-path="${encodedPath}">Open</button>
-        <button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${encodedPath}">Reveal in Finder</button>
+        <button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${encodedPath}">Reveal in File Manager</button>
       `
       : '';
     const moveButton =

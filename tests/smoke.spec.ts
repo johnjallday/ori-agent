@@ -582,6 +582,20 @@ test.describe('Workspace File Folders', () => {
         item.relative_path?.endsWith('folder-smoke-report.txt')
       );
       expect(movedFile).toBeTruthy();
+
+      let revealPayload: any = null;
+      await page.route(`**/api/workspaces/${workspaceId}/files/reveal`, async route => {
+        revealPayload = route.request().postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'ok' })
+        });
+      });
+      await explorer.locator('.workspace-directory-tree-main', { hasText: 'archive' }).click();
+      await expect(explorer.getByRole('button', { name: 'Open in File Manager' })).toBeVisible();
+      await explorer.getByRole('button', { name: 'Open in File Manager' }).click();
+      await expect.poll(() => revealPayload?.relative_path).toBe('archive');
     } finally {
       if (workspaceId) {
         await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
