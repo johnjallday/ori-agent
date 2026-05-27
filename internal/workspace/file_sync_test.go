@@ -175,6 +175,40 @@ func TestReconcileWorkspaceFilesAmbiguousDuplicatesStayMissing(t *testing.T) {
 	}
 }
 
+func TestReconcileWorkspaceFilesDoesNotRebindToTrashedAttachmentFile(t *testing.T) {
+	store, ws, _ := newFolderHandlerTest(t, "ws-sync-trash-claimed", "Sync Trash Claimed")
+	filesPath := store.GetFilesPath(ws.ID)
+	addOwnedAttachmentWithFile(t, store, ws, "att-active", "missing.txt", []byte("same bytes"))
+	addOwnedAttachmentWithFile(t, store, ws, "att-trashed", "trashed.txt", []byte("same bytes"))
+	deletedAt := time.Now()
+	attachmentByID(ws, "att-trashed").DeletedAt = &deletedAt
+
+	if err := os.Remove(filepath.Join(filesPath, "missing.txt")); err != nil {
+		t.Fatalf("remove active file: %v", err)
+	}
+
+	changed, events, err := reconcileWorkspaceFiles(ws, filesPath)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected active attachment to be marked missing")
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no rebind to trashed attachment file, got %#v", events)
+	}
+	active := attachmentByID(ws, "att-active")
+	if active.File.RelativePath != "missing.txt" {
+		t.Fatalf("expected active attachment to keep missing.txt, got %q", active.File.RelativePath)
+	}
+	if active.File.Status != string(AttachmentFileStatusMissing) {
+		t.Fatalf("expected active attachment missing status, got %q", active.File.Status)
+	}
+	if trashed := attachmentByID(ws, "att-trashed"); trashed.File.RelativePath != "trashed.txt" || trashed.DeletedAt == nil {
+		t.Fatalf("expected trashed attachment to keep its file claim, got path=%q deleted=%v", trashed.File.RelativePath, trashed.DeletedAt != nil)
+	}
+}
+
 func TestReconcileWorkspaceFilesBackfillsLegacyChecksumThenRebinds(t *testing.T) {
 	store, ws, _ := newFolderHandlerTest(t, "ws-sync-legacy", "Sync Legacy")
 	filesPath := store.GetFilesPath(ws.ID)

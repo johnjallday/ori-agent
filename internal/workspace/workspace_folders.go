@@ -32,6 +32,21 @@ func workspaceFolderContainsPath(folderPath, relativePath string) bool {
 	return strings.HasPrefix(relativePath, folderPath+string(filepath.Separator))
 }
 
+func rebaseWorkspaceFolderPath(oldPath, newPath, currentPath string) (string, bool) {
+	oldPath = sanitizeWorkspaceRelativePath(oldPath)
+	newPath = sanitizeWorkspaceRelativePath(newPath)
+	currentPath = sanitizeWorkspaceRelativePath(currentPath)
+	if oldPath == "" || newPath == "" || !workspaceFolderContainsPath(oldPath, currentPath) {
+		return "", false
+	}
+	suffix := strings.TrimPrefix(currentPath, oldPath)
+	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
+	if suffix == "" {
+		return newPath, true
+	}
+	return filepath.Join(newPath, suffix), true
+}
+
 func findWorkspaceFolderIndexByID(folders []WorkspaceFolder, id string) int {
 	for i := range folders {
 		if folders[i].ID == id {
@@ -94,36 +109,22 @@ func renameWorkspaceFolderMetadata(ws *Workspace, folderID, newPath string) (Wor
 
 	now := time.Now()
 	for i := range ws.Folders {
-		currentPath := sanitizeWorkspaceRelativePath(ws.Folders[i].Path)
-		if !workspaceFolderContainsPath(oldPath, currentPath) {
-			continue
+		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, cleanNewPath, ws.Folders[i].Path); ok {
+			ws.Folders[i].Path = rebasedPath
+			ws.Folders[i].UpdatedAt = now
 		}
-		suffix := strings.TrimPrefix(currentPath, oldPath)
-		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
-		ws.Folders[i].Path = cleanNewPath
-		if suffix != "" {
-			ws.Folders[i].Path = filepath.Join(cleanNewPath, suffix)
-		}
-		ws.Folders[i].UpdatedAt = now
 	}
 	for i := range ws.Attachments {
 		if ws.Attachments[i].File == nil || ws.Attachments[i].DeletedAt != nil {
 			continue
 		}
-		currentPath := extractAttachmentRelativePath(ws.ID, ws.Attachments[i].File)
-		if !workspaceFolderContainsPath(oldPath, currentPath) {
-			continue
+		if newRelativePath, ok := rebaseWorkspaceFolderPath(oldPath, cleanNewPath, extractAttachmentRelativePath(ws.ID, ws.Attachments[i].File)); ok {
+			ws.Attachments[i].File.RelativePath = newRelativePath
+			ws.Attachments[i].File.URL = workspaceFileURL(ws.ID, newRelativePath)
+			ws.Attachments[i].UpdatedAt = now
 		}
-		suffix := strings.TrimPrefix(currentPath, oldPath)
-		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
-		newRelativePath := cleanNewPath
-		if suffix != "" {
-			newRelativePath = filepath.Join(cleanNewPath, suffix)
-		}
-		ws.Attachments[i].File.RelativePath = newRelativePath
-		ws.Attachments[i].File.URL = workspaceFileURL(ws.ID, newRelativePath)
-		ws.Attachments[i].UpdatedAt = now
 	}
+	rebaseWorkspaceFolderStorageReferences(ws, oldPath, cleanNewPath, now)
 	ws.UpdatedAt = now
 	return ws.Folders[idx], oldPath, nil
 }
@@ -137,6 +138,47 @@ func deleteWorkspaceFolderMetadata(ws *Workspace, folderID string) (WorkspaceFol
 	ws.Folders = append(ws.Folders[:idx], ws.Folders[idx+1:]...)
 	ws.UpdatedAt = time.Now()
 	return folder, nil
+}
+
+func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath string, now time.Time) {
+	if ws == nil {
+		return
+	}
+	for i := range ws.StoreNodes {
+		if !StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) {
+			continue
+		}
+		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.StoreNodes[i].WorkspaceFolder); ok {
+			ws.StoreNodes[i].WorkspaceFolder = rebasedPath
+			ws.StoreNodes[i].BaseDir = rebasedPath
+			ws.StoreNodes[i].UpdatedAt = now
+		}
+	}
+	for i := range ws.Tasks {
+		if !ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) {
+			continue
+		}
+		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.Tasks[i].ResultStorage.WorkspaceFolder); ok {
+			ws.Tasks[i].ResultStorage.WorkspaceFolder = rebasedPath
+		}
+	}
+}
+
+func workspaceFolderHasStorageReferences(ws *Workspace, folderPath string) bool {
+	if ws == nil {
+		return false
+	}
+	for i := range ws.StoreNodes {
+		if StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) && workspaceFolderContainsPath(folderPath, ws.StoreNodes[i].WorkspaceFolder) {
+			return true
+		}
+	}
+	for i := range ws.Tasks {
+		if ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) && workspaceFolderContainsPath(folderPath, ws.Tasks[i].ResultStorage.WorkspaceFolder) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortWorkspaceFileInfos(files []FileInfo) {

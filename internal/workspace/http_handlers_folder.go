@@ -258,7 +258,7 @@ func (h *HTTPHandler) DeleteWorkspaceFolder(w http.ResponseWriter, r *http.Reque
 		orihttp.BadRequest(w, "Folder has invalid path")
 		return
 	}
-	if workspaceFolderHasNestedMetadata(ws, folderID, folderPath) || workspaceFolderHasActiveAttachments(ws, folderPath) {
+	if workspaceFolderHasNestedMetadata(ws, folderID, folderPath) || workspaceFolderHasActiveAttachments(ws, folderPath) || workspaceFolderHasStorageReferences(ws, folderPath) {
 		orihttp.Conflict(w, "Folder is not empty")
 		return
 	}

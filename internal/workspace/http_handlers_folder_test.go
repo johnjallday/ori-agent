@@ -83,6 +83,38 @@ func TestHTTPHandlerRenameWorkspaceFolderUpdatesNestedMetadataAndFiles(t *testin
 
 	now := time.Now()
 	ws.Folders = []WorkspaceFolder{{ID: "folder-1", Path: "research", CreatedAt: now, UpdatedAt: now}}
+	ws.StoreNodes = []StoreNode{
+		{
+			ID:              "store-1",
+			CanvasNodeID:    "store-node-1",
+			WorkspaceID:     ws.ID,
+			Name:            "Reports",
+			BaseDir:         filepath.Join("research", "exports"),
+			StorageTarget:   StorageTargetWorkspaceFolder,
+			WorkspaceFolder: filepath.Join("research", "exports"),
+			Format:          "csv",
+			WriteMode:       "append",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	ws.Tasks = []Task{
+		{
+			ID:          "task-1",
+			WorkspaceID: ws.ID,
+			Description: "Store result",
+			Status:      TaskStatusPending,
+			ResultStorage: &ResultStorageConfig{
+				Enabled:         true,
+				StorageTarget:   StorageTargetWorkspaceFolder,
+				WorkspaceFolder: filepath.Join("research", "results"),
+				FileName:        "runs.csv",
+				Format:          "csv",
+				WriteMode:       "append",
+			},
+			CreatedAt: now,
+		},
+	}
 	if err := ws.AddAttachment(Attachment{
 		ID:          "att-1",
 		WorkspaceID: ws.ID,
@@ -133,6 +165,15 @@ func TestHTTPHandlerRenameWorkspaceFolderUpdatesNestedMetadataAndFiles(t *testin
 	if attachment.File.URL != workspaceFileURL(ws.ID, wantRelativePath) {
 		t.Fatalf("expected attachment URL to be updated, got %q", attachment.File.URL)
 	}
+	if stored.StoreNodes[0].WorkspaceFolder != filepath.Join("archive", "exports") {
+		t.Fatalf("expected store node workspace folder archive/exports, got %q", stored.StoreNodes[0].WorkspaceFolder)
+	}
+	if stored.StoreNodes[0].BaseDir != filepath.Join("archive", "exports") {
+		t.Fatalf("expected store node base dir archive/exports, got %q", stored.StoreNodes[0].BaseDir)
+	}
+	if stored.Tasks[0].ResultStorage.WorkspaceFolder != filepath.Join("archive", "results") {
+		t.Fatalf("expected task result storage folder archive/results, got %q", stored.Tasks[0].ResultStorage.WorkspaceFolder)
+	}
 }
 
 func TestHTTPHandlerDeleteWorkspaceFolderRejectsNonEmptyAndDeletesEmpty(t *testing.T) {
@@ -175,6 +216,44 @@ func TestHTTPHandlerDeleteWorkspaceFolderRejectsNonEmptyAndDeletesEmpty(t *testi
 	}
 	if len(stored.Folders) != 0 {
 		t.Fatalf("expected folder metadata to be removed, got %d folders", len(stored.Folders))
+	}
+}
+
+func TestHTTPHandlerDeleteWorkspaceFolderRejectsStorageReferences(t *testing.T) {
+	store, ws, handler := newFolderHandlerTest(t, "ws-folder-delete-storage-ref", "Folder Delete Storage Ref")
+	filesPath := store.GetFilesPath(ws.ID)
+	if err := os.MkdirAll(filepath.Join(filesPath, "reports"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	now := time.Now()
+	ws.Folders = []WorkspaceFolder{{ID: "folder-1", Path: "reports", CreatedAt: now, UpdatedAt: now}}
+	ws.StoreNodes = []StoreNode{
+		{
+			ID:              "store-1",
+			CanvasNodeID:    "store-node-1",
+			WorkspaceID:     ws.ID,
+			Name:            "Reports",
+			BaseDir:         "reports",
+			StorageTarget:   StorageTargetWorkspaceFolder,
+			WorkspaceFolder: "reports",
+			Format:          "csv",
+			WriteMode:       "append",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID+"/folders/folder-1", nil)
+	rr := httptest.NewRecorder()
+	handler.DeleteWorkspaceFolder(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected delete with storage reference status 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(filesPath, "reports")); err != nil {
+		t.Fatalf("expected referenced folder to remain on disk: %v", err)
 	}
 }
 

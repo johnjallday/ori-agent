@@ -42,7 +42,9 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 		return false, nil, err
 	}
 
-	// Index active (non-trashed) owned attachments and the paths they claim.
+	// Index active (non-trashed) owned attachments and every attachment path that
+	// is already claimed. Trashed files still belong to their attachment and must
+	// not be treated as orphan candidates for active missing files.
 	type ownedAttachment struct {
 		idx  int
 		path string
@@ -51,15 +53,18 @@ func reconcileWorkspaceFiles(ws *Workspace, filesPath string) (bool, []fileSyncE
 	claimed := make(map[string]bool)
 	for i := range ws.Attachments {
 		att := &ws.Attachments[i]
-		if att.DeletedAt != nil || att.File == nil {
+		if att.File == nil {
 			continue
 		}
 		rel := extractAttachmentRelativePath(ws.ID, att.File)
 		if rel == "" {
 			continue
 		}
-		active = append(active, ownedAttachment{idx: i, path: rel})
 		claimed[rel] = true
+		if att.DeletedAt != nil {
+			continue
+		}
+		active = append(active, ownedAttachment{idx: i, path: rel})
 	}
 
 	changed := false
