@@ -1020,6 +1020,10 @@ export class WorkspaceDetailPage {
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
+      copyAllNotesBtn: document.getElementById('workspace-detail-copy-all-notes'),
+      selectAllNotesBtn: document.getElementById('workspace-detail-select-all-notes'),
+      notesActions: document.getElementById('workspace-detail-notes-actions'),
+      notesCombinedText: document.getElementById('workspace-detail-notes-combined'),
       viewAllNotesLink: document.getElementById('workspace-detail-view-all-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
@@ -1365,6 +1369,8 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
+    this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
+    this.elements.selectAllNotesBtn?.addEventListener('click', () => this.selectAllNotesText());
 
     // "View all" -> workspace notes app. The href is set here (not in the
     // template) because the workspace ID isn't known at server-render time.
@@ -13039,6 +13045,8 @@ export class WorkspaceDetailPage {
   renderNotes() {
     if (!this.elements.notesList) return;
 
+    this.setCombinedNotesText('');
+
     if (this.notes.length === 0) {
       this.elements.notesList.innerHTML = '<div class="workspace-detail-empty">No notes yet.</div>';
       this.updateCopyNotesButtonState(false);
@@ -14365,16 +14373,32 @@ export class WorkspaceDetailPage {
   }
 
   updateCopyNotesButtonState(isBusy = false) {
-    const button = this.elements.copyNotesBtn;
-    if (!button) return;
-
     const hasNotes = Array.isArray(this.notes) && this.notes.length > 0;
-    button.disabled = Boolean(isBusy) || !hasNotes;
-    if (isBusy) {
-      button.title = 'Copying notes...';
-      return;
+    const disabled = Boolean(isBusy) || !hasNotes;
+    const copyTitle = isBusy
+      ? 'Copying notes...'
+      : hasNotes
+        ? 'Copy all note contents'
+        : 'No notes to copy';
+
+    [this.elements.copyNotesBtn, this.elements.copyAllNotesBtn].forEach(button => {
+      if (!button) return;
+      button.disabled = disabled;
+      button.title = copyTitle;
+    });
+
+    if (this.elements.selectAllNotesBtn) {
+      this.elements.selectAllNotesBtn.disabled = disabled;
+      this.elements.selectAllNotesBtn.title = isBusy
+        ? 'Loading notes...'
+        : hasNotes
+          ? 'Select all note contents'
+          : 'No notes to select';
     }
-    button.title = hasNotes ? 'Copy all note contents' : 'No notes to copy';
+
+    if (this.elements.notesActions) {
+      this.elements.notesActions.hidden = !hasNotes;
+    }
   }
 
   async writeClipboardText(text) {
@@ -14398,6 +14422,71 @@ export class WorkspaceDetailPage {
     if (!copied) throw new Error('Copy command failed');
   }
 
+  async buildAllNotesText() {
+    const sections = await Promise.all(
+      this.notes.map(async (note, index) => {
+        const noteId = String(note?.id || '').trim();
+        const title =
+          String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
+        let content = '';
+
+        if (noteId) {
+          try {
+            const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+            if (response.ok) {
+              const detail = await response.json();
+              content = String(detail?.content || detail?.preview || '').trim();
+            }
+          } catch (error) {
+            console.error('Failed to load note content:', error);
+          }
+        }
+
+        if (!content) {
+          content = String(note?.content || note?.preview || '').trim();
+        }
+
+        return `# ${title}\n${content || '(empty note)'}`;
+      })
+    );
+
+    return sections.join('\n\n---\n\n');
+  }
+
+  setCombinedNotesText(text) {
+    const field = this.elements.notesCombinedText;
+    if (!field) return;
+
+    field.value = text || '';
+    field.hidden = !text;
+  }
+
+  async selectAllNotesText() {
+    if (!this.notes || this.notes.length === 0) {
+      this.updateCopyNotesButtonState(false);
+      if (window.Toast) window.Toast.error('No notes to select');
+      return;
+    }
+
+    this.updateCopyNotesButtonState(true);
+    try {
+      const text = await this.buildAllNotesText();
+      this.setCombinedNotesText(text);
+      const field = this.elements.notesCombinedText;
+      if (field) {
+        field.focus();
+        field.select();
+        field.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      if (window.Toast) window.Toast.success('All note contents selected');
+    } catch (error) {
+      console.error('Failed to select notes:', error);
+      if (window.Toast) window.Toast.error('Failed to select notes');
+    } finally {
+      this.updateCopyNotesButtonState(false);
+    }
+  }
+
   async copyAllNotesToClipboard() {
     if (!this.notes || this.notes.length === 0) {
       this.updateCopyNotesButtonState(false);
@@ -14411,34 +14500,7 @@ export class WorkspaceDetailPage {
 
     this.updateCopyNotesButtonState(true);
     try {
-      const sections = await Promise.all(
-        this.notes.map(async (note, index) => {
-          const noteId = String(note?.id || '').trim();
-          const title =
-            String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
-          let content = '';
-
-          if (noteId) {
-            try {
-              const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
-              if (response.ok) {
-                const detail = await response.json();
-                content = String(detail?.content || detail?.preview || '').trim();
-              }
-            } catch (error) {
-              console.error('Failed to load note content for copy:', error);
-            }
-          }
-
-          if (!content) {
-            content = String(note?.content || note?.preview || '').trim();
-          }
-
-          return `# ${title}\n${content || '(empty note)'}`;
-        })
-      );
-
-      await this.writeClipboardText(sections.join('\n\n---\n\n'));
+      await this.writeClipboardText(await this.buildAllNotesText());
       if (typeof window.notifyToast === 'function') {
         window.notifyToast(
           `Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`,

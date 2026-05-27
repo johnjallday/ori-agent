@@ -971,7 +971,7 @@
                       <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
                     </svg>
                   </a>
-                  <button id="workspace-detail-copy-notes" class="workspace-detail-panel-btn" type="button" title="Copy all note contents" disabled>
+                  <button id="workspace-detail-copy-notes" class="workspace-detail-panel-btn" type="button" title="Copy all note contents" aria-label="Copy all note contents" disabled>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
                     </svg>
@@ -984,6 +984,11 @@
                 </div>
               </div>
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Notes panel content">
+                <div id="workspace-detail-notes-actions" class="workspace-detail-notes-actions" hidden>
+                  <button id="workspace-detail-copy-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Copy all note contents" disabled>Copy all</button>
+                  <button id="workspace-detail-select-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Select all note contents" disabled>Select all</button>
+                </div>
+                <textarea id="workspace-detail-notes-combined" class="workspace-detail-notes-combined" readonly hidden aria-label="All note contents"></textarea>
                 <div id="workspace-detail-notes-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No notes yet.</div>
                 </div>
@@ -3287,6 +3292,55 @@
       flex-direction: column;
       gap: 0.35rem;
       padding-top: 0.5rem;
+    }
+
+    .workspace-detail-notes-actions {
+      display: flex;
+      gap: 0.4rem;
+      padding-top: 0.5rem;
+    }
+
+    .workspace-detail-notes-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 26px;
+      padding: 0 0.65rem;
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      line-height: 1;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-notes-action:hover:not(:disabled) {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--primary-color);
+    }
+
+    .workspace-detail-notes-action:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .workspace-detail-notes-combined {
+      width: 100%;
+      min-height: 180px;
+      margin-top: 0.5rem;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.76rem;
+      line-height: 1.45;
+      resize: vertical;
+      white-space: pre-wrap;
     }
 
     .workspace-detail-agent-grid {

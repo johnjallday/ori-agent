@@ -145,7 +145,7 @@ func findPortPIDs(port int) []int {
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		cmd := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port))
+		cmd := exec.Command("lsof", "-ti", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN")
 		output, err := cmd.Output()
 		if err != nil {
 			return nil

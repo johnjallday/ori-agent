@@ -471,6 +471,54 @@ export function isRedoShortcut(event) {
     && ((key === 'z' && event.shiftKey) || key === 'y');
 }
 
+// isSelectAllShortcut returns true for Cmd+A / Ctrl+A scoped to an editor surface.
+export function isSelectAllShortcut(event) {
+  if (!event) return false;
+  return (event.metaKey || event.ctrlKey)
+    && !event.altKey
+    && !event.shiftKey
+    && String(event.key || '').toLowerCase() === 'a';
+}
+
+export function selectAllTargetRange({
+  lineCount = 0,
+  selectedRange = null,
+  lineIndex = null,
+  selectionAnchorIndex = null,
+  selectionFocusIndex = null,
+} = {}) {
+  const maxIndex = Math.max(0, Number(lineCount || 0) - 1);
+  const normalizedLineIndex = Number.isInteger(lineIndex)
+    ? Math.max(0, Math.min(lineIndex, maxIndex))
+    : null;
+  const hasSelectedRange =
+    selectedRange &&
+    Number.isInteger(selectedRange.start) &&
+    Number.isInteger(selectedRange.end);
+
+  if (hasSelectedRange) {
+    const start = Math.max(0, Math.min(selectedRange.start, maxIndex));
+    const end = Math.max(start, Math.min(selectedRange.end, maxIndex));
+    const isSingleLine = start === end;
+    const isEditorSelectedSingleLine =
+      isSingleLine &&
+      selectionAnchorIndex === start &&
+      selectionFocusIndex === end;
+
+    if (!isSingleLine || isEditorSelectedSingleLine) {
+      return { start: 0, end: maxIndex };
+    }
+
+    return { start, end };
+  }
+
+  if (normalizedLineIndex !== null) {
+    return { start: normalizedLineIndex, end: normalizedLineIndex };
+  }
+
+  return { start: 0, end: maxIndex };
+}
+
 // isPrintableKey returns true if the key would normally insert a character
 // into a textarea (single-character key, no command modifiers).
 export function isPrintableKey(event) {
@@ -665,6 +713,7 @@ export class NoteLiveEditorState {
     this.activeRange = null;
     this.selectionAnchorIndex = null;
     this.selectionFocusIndex = null;
+    this.selectAllRepeatRange = null;
     this.pointerDown = null;
     this.collapsedHeadings = new Set();
   }
@@ -676,6 +725,7 @@ export class NoteLiveEditorState {
     this.activeRange = null;
     this.selectionAnchorIndex = null;
     this.selectionFocusIndex = null;
+    this.selectAllRepeatRange = null;
     this.pointerDown = null;
     this.collapsedHeadings = new Set();
   }
@@ -685,6 +735,7 @@ export class NoteLiveEditorState {
   // multi-select origin intact while dismissing the tail.
   clearSelectionFocus() {
     this.selectionFocusIndex = null;
+    this.selectAllRepeatRange = null;
   }
 
   // toggleHeadingFold flips whether `lineIndex` is folded. Returns the new
@@ -820,10 +871,13 @@ export class NoteLiveEditor {
   // browser's text selection to match. Cancels any active inline edit first
   // (so the selection can paint over the rendered text). DOM-coupled but
   // belongs with the controller because the resulting state lives there.
-  selectLineRange(anchorIndex, focusIndex, containerEl = null) {
+  selectLineRange(anchorIndex, focusIndex, containerEl = null, opts = {}) {
     if (typeof document === 'undefined') return;
     const container = containerEl || document.getElementById(PREVIEW_PANE_ID);
     if (!container) return;
+    if (!opts.preserveSelectAllRepeat) {
+      this.state.selectAllRepeatRange = null;
+    }
 
     if (this.state.activeLineIndex !== null) {
       this.state.activeLineIndex = null;
@@ -853,6 +907,53 @@ export class NoteLiveEditor {
       ?.focus({ preventScroll: true });
     this.state.selectionAnchorIndex = normalizedAnchor;
     this.state.selectionFocusIndex = normalizedFocus;
+  }
+
+  lineIndexFromNode(node, previewContent) {
+    if (!node || typeof node.closest !== 'function' || !previewContent) return null;
+    const renderedLine = node.closest('.note-live-line-rendered');
+    if (!renderedLine || !previewContent.contains(renderedLine)) return null;
+    const lineIndex = Number(renderedLine.dataset.lineIndex);
+    return Number.isInteger(lineIndex) ? lineIndex : null;
+  }
+
+  selectedLineRangeFromState() {
+    if (!Number.isInteger(this.state.selectionAnchorIndex)
+        || !Number.isInteger(this.state.selectionFocusIndex)) {
+      return null;
+    }
+    return {
+      start: Math.min(this.state.selectionAnchorIndex, this.state.selectionFocusIndex),
+      end: Math.max(this.state.selectionAnchorIndex, this.state.selectionFocusIndex),
+    };
+  }
+
+  handleSelectAllShortcut(event, previewContent) {
+    if (!isSelectAllShortcut(event)) return false;
+
+    event.preventDefault();
+    const lines = this.host.getContentLines?.() || [];
+    const selectedRange = getSelectedLineRange(previewContent) || this.selectedLineRangeFromState();
+    const lineIndex =
+      this.lineIndexFromNode(event.target, previewContent) ??
+      this.lineIndexFromNode(document.activeElement, previewContent);
+    const targetRange = selectAllTargetRange({
+      lineCount: lines.length,
+      selectedRange,
+      lineIndex,
+      selectionAnchorIndex: this.state.selectionAnchorIndex,
+      selectionFocusIndex: this.state.selectionFocusIndex,
+    });
+    const repeatRange = this.state.selectAllRepeatRange;
+    const nextRange = repeatRange &&
+      repeatRange.start === repeatRange.end &&
+      targetRange.start === repeatRange.start &&
+      targetRange.end === repeatRange.end
+      ? { start: 0, end: Math.max(0, lines.length - 1) }
+      : targetRange;
+    this.selectLineRange(nextRange.start, nextRange.end, previewContent, { preserveSelectAllRepeat: true });
+    this.state.selectAllRepeatRange = nextRange.start === nextRange.end ? { ...nextRange } : null;
+    return true;
   }
 
   // handleInputChange mutates content from a single-line textarea's input
@@ -930,6 +1031,7 @@ export class NoteLiveEditor {
     if (!previewContent) return;
 
     previewContent.onmousedown = (event) => {
+      this.state.selectAllRepeatRange = null;
       const target = event.target;
       if (!target || typeof target.closest !== 'function') {
         this.state.pointerDown = null;
@@ -986,6 +1088,7 @@ export class NoteLiveEditor {
 
       if (hasTextSelectionInside(previewContent) || pointerDragged(this.state.pointerDown, event)) {
         this.state.selectionAnchorIndex = lineIndex;
+        this.state.selectionFocusIndex = null;
         this.state.pointerDown = null;
         return;
       }
@@ -1019,6 +1122,8 @@ export class NoteLiveEditor {
         return;
       }
 
+      if (this.handleSelectAllShortcut(event, previewContent)) return;
+
       const renderedLine = target.closest('.note-live-line-rendered');
       const selectedRange = getSelectedLineRange(previewContent);
 
@@ -1043,13 +1148,6 @@ export class NoteLiveEditor {
       if (!renderedLine || !previewContent.contains(renderedLine)) return;
       const lineIndex = Number(renderedLine.dataset.lineIndex);
       if (!Number.isInteger(lineIndex)) return;
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault();
-        const lines = this.host.getContentLines?.() || [];
-        this.selectLineRange(0, Math.max(0, lines.length - 1), previewContent);
-        return;
-      }
 
       if (event.key === 'Escape') {
         this.clearSelection();
@@ -1208,6 +1306,11 @@ function clearLiveEditorEvents(previewContent) {
   previewContent.onpaste = null;
   previewContent.oncut = null;
   previewContent.onfocusout = null;
+}
+
+function isEditableShortcutTarget(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 }
 
 // =============================================================================
@@ -1380,6 +1483,33 @@ export function mount(host = {}) {
     },
   });
 
+  const handleDocumentSelectAll = (event) => {
+    if (!isSelectAllShortcut(event)) return;
+    if (!host.isPreviewMode?.()) return;
+
+    const previewContent = document.getElementById(previewPaneId);
+    if (!previewContent) return;
+
+    // Text inputs keep their native Cmd/Ctrl+A behavior. The fallback only
+    // scopes select-all when focus or the current browser selection is inside
+    // the rendered note surface.
+    if (isEditableShortcutTarget(event.target)) return;
+
+    const activeElement = document.activeElement;
+    const eventInside = event.target && previewContent.contains(event.target);
+    const focusInside = activeElement && previewContent.contains(activeElement);
+    const selectionInside = hasTextSelectionInside(previewContent);
+    if (!eventInside && !focusInside && !selectionInside) return;
+
+    if (live.handleSelectAllShortcut(event, previewContent)) {
+      event.stopPropagation();
+    }
+  };
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', handleDocumentSelectAll, true);
+  }
+
   toc = enableToc
     ? new NoteTocController({
         ...sharedHost,
@@ -1418,6 +1548,9 @@ export function mount(host = {}) {
     destroy() {
       autosave.cancel();
       toc?.destroy?.();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('keydown', handleDocumentSelectAll, true);
+      }
     },
   };
 }
@@ -2566,6 +2699,8 @@ const api = {
   updateSaveStatus,
   isUndoShortcut,
   isRedoShortcut,
+  isSelectAllShortcut,
+  selectAllTargetRange,
   isPrintableKey,
   normalizeVaultReference,
   showVaultReferenceBadge,

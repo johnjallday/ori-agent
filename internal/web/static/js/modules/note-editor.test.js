@@ -9,6 +9,8 @@ import {
   normalizeCompactTaskListMarkdown,
   isUndoShortcut,
   isRedoShortcut,
+  isSelectAllShortcut,
+  selectAllTargetRange,
   isPrintableKey,
   normalizeVaultReference,
   NoteHistory,
@@ -165,7 +167,7 @@ test('normalizeCompactTaskListMarkdown: preserves indent and bullet flavor', () 
 });
 
 // =============================================================================
-// isUndoShortcut / isRedoShortcut / isPrintableKey
+// isUndoShortcut / isRedoShortcut / isSelectAllShortcut / isPrintableKey
 // =============================================================================
 
 const evt = (overrides = {}) => ({
@@ -209,6 +211,67 @@ test('isRedoShortcut: rejects Cmd+Z without Shift', () => {
 
 test('isRedoShortcut: rejects Alt-modified', () => {
   assert.equal(isRedoShortcut(evt({ key: 'y', ctrlKey: true, altKey: true })), false);
+});
+
+test('isSelectAllShortcut: matches Cmd+A / Ctrl+A without shift or alt', () => {
+  assert.equal(isSelectAllShortcut(evt({ key: 'a', metaKey: true })), true);
+  assert.equal(isSelectAllShortcut(evt({ key: 'A', ctrlKey: true })), true);
+  assert.equal(isSelectAllShortcut(evt({ key: 'a', metaKey: true, shiftKey: true })), false);
+  assert.equal(isSelectAllShortcut(evt({ key: 'a', ctrlKey: true, altKey: true })), false);
+  assert.equal(isSelectAllShortcut(evt({ key: 'a' })), false);
+});
+
+test('selectAllTargetRange: targets the focused line before the whole note', () => {
+  assert.deepEqual(
+    selectAllTargetRange({
+      lineCount: 5,
+      lineIndex: 2,
+    }),
+    { start: 2, end: 2 },
+  );
+});
+
+test('selectAllTargetRange: expands a browser single-line selection to that whole line first', () => {
+  assert.deepEqual(
+    selectAllTargetRange({
+      lineCount: 5,
+      selectedRange: { start: 2, end: 2 },
+      selectionAnchorIndex: 2,
+      selectionFocusIndex: null,
+    }),
+    { start: 2, end: 2 },
+  );
+});
+
+test('selectAllTargetRange: expands an editor-selected single line to the whole note', () => {
+  assert.deepEqual(
+    selectAllTargetRange({
+      lineCount: 5,
+      selectedRange: { start: 2, end: 2 },
+      selectionAnchorIndex: 2,
+      selectionFocusIndex: 2,
+    }),
+    { start: 0, end: 4 },
+  );
+});
+
+test('selectAllTargetRange: keeps multi-line selections as whole-note select-all', () => {
+  assert.deepEqual(
+    selectAllTargetRange({
+      lineCount: 5,
+      selectedRange: { start: 1, end: 3 },
+    }),
+    { start: 0, end: 4 },
+  );
+});
+
+test('selectAllTargetRange: targets the whole note when no line context exists', () => {
+  assert.deepEqual(
+    selectAllTargetRange({
+      lineCount: 5,
+    }),
+    { start: 0, end: 4 },
+  );
 });
 
 test('isPrintableKey: single-char without modifiers', () => {
@@ -946,6 +1009,7 @@ test('NoteLiveEditorState: defaults are all null/empty', () => {
   assert.equal(s.activeRange, null);
   assert.equal(s.selectionAnchorIndex, null);
   assert.equal(s.selectionFocusIndex, null);
+  assert.equal(s.selectAllRepeatRange, null);
   assert.equal(s.pointerDown, null);
   assert.ok(s.collapsedHeadings instanceof Set);
   assert.equal(s.collapsedHeadings.size, 0);
@@ -957,6 +1021,7 @@ test('NoteLiveEditorState: reset clears every field', () => {
   s.activeRange = { start: 1, end: 4 };
   s.selectionAnchorIndex = 1;
   s.selectionFocusIndex = 4;
+  s.selectAllRepeatRange = { start: 1, end: 1 };
   s.pointerDown = { x: 10, y: 20, lineIndex: 0 };
   s.collapsedHeadings.add(0);
   s.collapsedHeadings.add(2);
@@ -967,6 +1032,7 @@ test('NoteLiveEditorState: reset clears every field', () => {
   assert.equal(s.activeRange, null);
   assert.equal(s.selectionAnchorIndex, null);
   assert.equal(s.selectionFocusIndex, null);
+  assert.equal(s.selectAllRepeatRange, null);
   assert.equal(s.pointerDown, null);
   assert.equal(s.collapsedHeadings.size, 0);
 });
@@ -975,9 +1041,11 @@ test('NoteLiveEditorState: clearSelectionFocus clears focus only, not anchor', (
   const s = new NoteLiveEditorState();
   s.selectionAnchorIndex = 2;
   s.selectionFocusIndex = 5;
+  s.selectAllRepeatRange = { start: 2, end: 2 };
   s.clearSelectionFocus();
   assert.equal(s.selectionAnchorIndex, 2);
   assert.equal(s.selectionFocusIndex, null);
+  assert.equal(s.selectAllRepeatRange, null);
 });
 
 test('NoteLiveEditorState: toggleHeadingFold flips and returns the new state', () => {
@@ -1104,6 +1172,17 @@ test('NoteLiveEditor: clearSelection clears window selection AND state focus', (
   ed.clearSelection();
   assert.equal(ed.state.selectionFocusIndex, null);
   assert.equal(calls.clearWindowSelection, 1);
+});
+
+test('NoteLiveEditor: selectedLineRangeFromState returns editor-made line selection', () => {
+  const { host } = mockHost(['a', 'b', 'c']);
+  const ed = new NoteLiveEditor(host);
+
+  assert.equal(ed.selectedLineRangeFromState(), null);
+
+  ed.state.selectionAnchorIndex = 2;
+  ed.state.selectionFocusIndex = 1;
+  assert.deepEqual(ed.selectedLineRangeFromState(), { start: 1, end: 2 });
 });
 
 // =============================================================================
