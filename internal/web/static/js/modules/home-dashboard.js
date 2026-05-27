@@ -30,7 +30,6 @@
     // Structured console marker — easy to grep, easy to swap for a real
     // analytics beacon (navigator.sendBeacon) once an endpoint exists.
     try {
-      // eslint-disable-next-line no-console
       console.info('[home.ttfa]', { source, ms });
     } catch (_) { /* ignore */ }
   }
@@ -125,7 +124,6 @@
       body.innerHTML = renderWorkspaceCards(visible);
       wireWorkspaceCardClicks(body);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('home-dashboard: failed to load workspaces', err);
       body.innerHTML = '<div class="home-section-placeholder">Could not load workspaces.</div>';
     }
@@ -229,7 +227,6 @@
       }
       body.innerHTML = `<ul class="home-row-list">${rows.map(renderUpcomingRow).join('')}</ul>`;
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('home-dashboard: failed to load upcoming tasks', err);
       body.innerHTML = '<div class="home-section-placeholder">Could not load upcoming tasks.</div>';
     }
@@ -276,7 +273,6 @@
       }
       body.innerHTML = `<ul class="home-row-list">${events.map(renderActivityRow).join('')}</ul>`;
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('home-dashboard: failed to load recent activity', err);
       body.innerHTML = '<div class="home-section-placeholder">Could not load recent activity.</div>';
     }

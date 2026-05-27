@@ -99,7 +99,6 @@ export async function loadBacklinksFor(noteId, scopeRoot) {
   try {
     const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}/backlinks`);
     if (!resp.ok) {
-      // eslint-disable-next-line no-console
       console.warn('Backlinks fetch failed', resp.status);
       renderBacklinksInto(scopeRoot, []);
       return [];
@@ -109,7 +108,6 @@ export async function loadBacklinksFor(noteId, scopeRoot) {
     renderBacklinksInto(scopeRoot, backlinks);
     return backlinks;
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.warn('Backlinks fetch errored', err);
     renderBacklinksInto(scopeRoot, []);
     return [];

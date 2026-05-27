@@ -3111,12 +3111,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         body: JSON.stringify({ behavior: value }),
       });
       if (!resp.ok) {
-        // eslint-disable-next-line no-console
         console.warn('Failed to persist notes_open_behavior:', resp.status);
         if (statusEl) statusEl.textContent = 'Could not save preference.';
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.warn('notes_open_behavior save errored', err);
       if (statusEl) statusEl.textContent = 'Could not save preference.';
     }

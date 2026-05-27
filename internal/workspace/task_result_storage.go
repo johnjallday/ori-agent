@@ -343,20 +343,6 @@ func AppendCSVToFileStrict(filePath, csvData string) error {
 	return AppendCSVToFile(filePath, trimmed)
 }
 
-func csvWithoutHeaderForExistingStore(node *StoreNode, filePath, csvData string) string {
-	if node == nil {
-		return csvData
-	}
-	finalPath, err := BuildFinalStorePath(node, nil, "", filePath)
-	if err != nil {
-		return csvData
-	}
-	if info, err := os.Stat(finalPath); err == nil && info.Size() > 0 {
-		return csvWithoutHeader(csvData)
-	}
-	return csvData
-}
-
 func csvWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
 	return csvWithoutHeaderForExistingStoreStrictWithResolver(node, nil, "", filePath, csvData)
 }

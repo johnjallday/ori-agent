@@ -5860,7 +5860,6 @@ const sessionManager = {
     if (hasContent && previewEmpty) {
       // Diagnostic info — share this output to narrow down the render-path bug.
       const bundle = this.noteMount;
-      // eslint-disable-next-line no-console
       console.warn('[note-modal] preview empty; diag:', {
         noteEditorLoaded: !!window.NoteEditor,
         bundleExists: !!bundle,

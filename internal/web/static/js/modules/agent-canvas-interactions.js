@@ -96,16 +96,6 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
-    // Check workspace file folders
-    if (this.state.workspaceFolders && this.state.workspaceFolders.length > 0) {
-      for (const folder of this.state.workspaceFolders) {
-        const bounds = folder?.cardBounds;
-        if (bounds && intersects(bounds.x, bounds.y, bounds.width, bounds.height)) {
-          this.state.selectNode(folder.id, 'workspace_folder', folder);
-        }
-      }
-    }
-
     // Check agents
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
