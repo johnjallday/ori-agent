@@ -153,6 +153,20 @@ export class WorkspaceDirectoryExplorer {
         return;
       }
 
+      const openButton = event.target.closest('[data-action="open-workspace-file"]');
+      if (openButton) {
+        event.preventDefault();
+        void this.openFileInOS(this.decodeDataPath(openButton.dataset.path));
+        return;
+      }
+
+      const revealButton = event.target.closest('[data-action="reveal-workspace-file"]');
+      if (revealButton) {
+        event.preventDefault();
+        void this.revealFileInOS(this.decodeDataPath(revealButton.dataset.path));
+        return;
+      }
+
       const entryButton = event.target.closest('[data-action="select-node"]');
       if (!entryButton) return;
       const path = this.decodeDataPath(entryButton.dataset.path);
@@ -174,6 +188,17 @@ export class WorkspaceDirectoryExplorer {
       treeEl.addEventListener('dragstart', event => this.handleTreeDragStart(event));
       treeEl.addEventListener('dragend', () => this.clearDragState());
       this.bindDropZone(treeEl, event => this.resolveTreeDropTarget(event));
+
+      // Double-click a file row to open it in the OS default app (owned files).
+      treeEl.addEventListener('dblclick', event => {
+        const main = event.target.closest('[data-action="select-node"][data-type="file"]');
+        if (!main || this.source !== 'owned') return;
+        const path = this.decodeDataPath(main.dataset.path);
+        const node = this.nodeIndex.get(path);
+        if (!node || node.status === 'missing') return;
+        event.preventDefault();
+        void this.openFileInOS(path);
+      });
     }
     this.bindDropZone(elements.directoryExplorerBreadcrumb, event =>
       this.resolveBreadcrumbDropTarget(event)
@@ -1238,6 +1263,11 @@ export class WorkspaceDirectoryExplorer {
           </div>
         `;
 
+    const revealButton =
+      this.source === 'owned'
+        ? `<button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${this.encodeDataPath(node.path || '')}">Reveal folder in Finder</button>`
+        : '';
+
     previewEl.innerHTML = `
       <div class="workspace-directory-preview-header">
         <div class="workspace-directory-preview-title">${this.host.escapeHtml(node.name || 'File')}</div>
@@ -1245,6 +1275,7 @@ export class WorkspaceDirectoryExplorer {
       </div>
       <div class="workspace-directory-preview-stats">
         <span class="workspace-directory-pill is-missing">Missing from disk</span>
+        ${revealButton}
       </div>
       <div class="workspace-directory-preview-empty-inline">
         This file is no longer on disk. It may have been renamed, moved, or deleted outside the app.
@@ -1293,6 +1324,33 @@ export class WorkspaceDirectoryExplorer {
     } catch (error) {
       console.error('Failed to locate workspace file:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to relink file');
+    }
+  }
+
+  openFileInOS(relativePath) {
+    return this.requestOSFileAction('open', relativePath, 'Failed to open file');
+  }
+
+  revealFileInOS(relativePath) {
+    return this.requestOSFileAction('reveal', relativePath, 'Failed to reveal file');
+  }
+
+  // requestOSFileAction asks the server to open or reveal a workspace file with
+  // the native OS. This only works when the server runs on the user's machine;
+  // failures (e.g. a remote server) surface as a toast.
+  async requestOSFileAction(action, relativePath, failMessage) {
+    if (this.source !== 'owned') return;
+    const targetPath = this.normalizeRelativePath(relativePath);
+    if (!targetPath) return;
+
+    try {
+      await this.requestWorkspaceJSON(`/files/${action}`, {
+        method: 'POST',
+        body: { relative_path: targetPath }
+      });
+    } catch (error) {
+      console.error(`Failed to ${action} workspace file:`, error);
+      if (window.Toast) window.Toast.error(error.message || failMessage);
     }
   }
 
@@ -1404,12 +1462,23 @@ export class WorkspaceDirectoryExplorer {
   }
 
   renderFilePreviewActions(endpoint, node) {
+    const isOwned = this.source === 'owned';
+    const encodedPath = this.encodeDataPath(node?.path || '');
+    // OS open/reveal only work when the server is on the user's machine; "Open
+    // raw" stays as the universal, remote-safe fallback.
+    const osButtons = isOwned
+      ? `
+        <button type="button" class="workspace-directory-preview-open-link" data-action="open-workspace-file" data-path="${encodedPath}">Open</button>
+        <button type="button" class="workspace-directory-preview-open-link" data-action="reveal-workspace-file" data-path="${encodedPath}">Reveal in Finder</button>
+      `
+      : '';
     const moveButton =
-      this.source === 'owned' && node?.attachmentId
+      isOwned && node?.attachmentId
         ? '<button type="button" class="workspace-directory-preview-open-link" data-action="move-workspace-file">Move</button>'
         : '';
     return `
       <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+      ${osButtons}
       ${moveButton}
     `;
   }

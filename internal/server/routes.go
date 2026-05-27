@@ -879,6 +879,19 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
+	if len(parts) == 3 && parts[1] == "files" && (parts[2] == "open" || parts[2] == "reveal") {
+		if r.Method != http.MethodPost {
+			orihttp.MethodNotAllowed(w)
+			return true
+		}
+		if parts[2] == "open" {
+			s.Handlers.Workspace.OpenWorkspaceFile(w, r)
+		} else {
+			s.Handlers.Workspace.RevealWorkspaceFile(w, r)
+		}
+		return true
+	}
+
 	if strings.Contains(path, "/files") && !strings.Contains(path, "/directories") {
 		switch r.Method {
 		case http.MethodPost:
