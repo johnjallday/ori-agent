@@ -44,7 +44,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		}
 		baseAgent = cloneAgentForChat(baseAgent)
 		result := &resolvedChatAgent{Agent: baseAgent}
-		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		h.attachWorkspaceTools(result, routeCtx)
 		return result, nil
 	}
 
@@ -57,7 +57,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
 		}
-		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		h.attachWorkspaceTools(result, routeCtx)
 		return result, nil
 	}
 
@@ -75,15 +75,16 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	baseAgent = cloneAgentForChat(baseAgent)
 
 	result := &resolvedChatAgent{Agent: baseAgent}
-	h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+	h.attachWorkspaceTools(result, routeCtx)
 	return result, nil
 }
 
 // attachWorkspaceTools adds workspace-scoped tools to a resolved agent when
 // the necessary stores are available. This must be called on every code path
 // that returns a resolvedChatAgent for a workspace surface.
-func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string) {
-	if h.sessionStore == nil || h.workspaceStore == nil || strings.TrimSpace(workspaceID) == "" {
+func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, routeCtx normalizedChatRouteContext) {
+	workspaceID := strings.TrimSpace(routeCtx.WorkspaceID)
+	if h.sessionStore == nil || h.workspaceStore == nil || workspaceID == "" {
 		logger.Debug("attachWorkspaceTools: skipping", logger.Fields{
 			"workspace_id":    workspaceID,
 			"session_store":   h.sessionStore != nil,
@@ -94,6 +95,9 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string
 	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
 	if h.fileStore != nil {
 		wtp.SetFileStore(h.fileStore)
+	}
+	if taskID := strings.TrimSpace(routeCtx.TaskID); taskID != "" {
+		wtp.SetTaskID(taskID)
 	}
 	if h.store != nil || h.mcpRegistry != nil || h.skillsManager != nil {
 		var mcpLister mcpServerLister
@@ -109,6 +113,7 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string
 	ag.WorkspaceTools = wtp
 	logger.Info("attachWorkspaceTools: attached workspace tools", logger.Fields{
 		"workspace_id": workspaceID,
+		"task_id":      routeCtx.TaskID,
 		"tool_count":   len(wtp.Tools()),
 	})
 }

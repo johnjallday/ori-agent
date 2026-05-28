@@ -27,9 +27,11 @@ const (
 	workspaceSnapshotMaxFiles       = 5
 	workspaceSnapshotMaxDirectories = 5
 	workspaceSnapshotMaxSessions    = 5
+	workspaceSnapshotMaxTaskRuns    = 5
 	workspaceSnapshotTextLimit      = 120
 	workspaceSnapshotPreviewLimit   = 160
 	workspaceSnapshotPathLimit      = 180
+	workspaceSnapshotResultLimit    = 600
 )
 
 func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {
@@ -58,13 +60,19 @@ func buildWorkspaceRuntimeSystemPromptForToolCapability(
 ) string {
 	routePrompt := buildRouteContextSystemPrompt(routeCtx)
 	workspacePrompt := buildWorkspaceSnapshotPromptForToolCapability(ctx, routeCtx, workspaceStore, sessionStore, toolCallable)
-	if workspacePrompt == "" {
-		return routePrompt
+	taskPrompt := buildTaskSnapshotPrompt(routeCtx, workspaceStore)
+
+	parts := []string{}
+	if strings.TrimSpace(routePrompt) != "" {
+		parts = append(parts, routePrompt)
 	}
-	if strings.TrimSpace(routePrompt) == "" {
-		return workspacePrompt
+	if strings.TrimSpace(workspacePrompt) != "" {
+		parts = append(parts, workspacePrompt)
 	}
-	return routePrompt + "\n\n---\n" + workspacePrompt
+	if strings.TrimSpace(taskPrompt) != "" {
+		parts = append(parts, taskPrompt)
+	}
+	return strings.Join(parts, "\n\n---\n")
 }
 
 func buildWorkspaceSnapshotPrompt(
@@ -269,11 +277,111 @@ func shouldAttachWorkspaceSnapshot(routeCtx normalizedChatRouteContext) bool {
 		return false
 	}
 	switch routeCtx.Surface {
-	case "workspace_detail", "workspace_canvas", "workspace_chat":
+	case "workspace_detail", "workspace_canvas", "workspace_chat", "workspace_task":
 		return true
 	default:
 		return false
 	}
+}
+
+func shouldAttachTaskSnapshot(routeCtx normalizedChatRouteContext) bool {
+	if routeCtx.Surface != "workspace_task" {
+		return false
+	}
+	return strings.TrimSpace(routeCtx.WorkspaceID) != "" && strings.TrimSpace(routeCtx.TaskID) != ""
+}
+
+// buildTaskSnapshotPrompt emits a "# Current Task" block describing the task
+// identified by routeCtx.TaskID, including recent run history. Returns "" if
+// the task can't be found or the route surface isn't workspace_task.
+func buildTaskSnapshotPrompt(
+	routeCtx normalizedChatRouteContext,
+	workspaceStore workspaceSnapshotWorkspaceStore,
+) string {
+	if !shouldAttachTaskSnapshot(routeCtx) || workspaceStore == nil {
+		return ""
+	}
+	ws, err := workspaceStore.Get(routeCtx.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	var task *workspace.Task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == routeCtx.TaskID {
+			task = &ws.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		return ""
+	}
+
+	lines := []string{
+		"# Current Task",
+		"This chat is scoped to a single task. Use the active task as the default subject for any user request that doesn't name another target.",
+		"",
+		"Task:",
+		fmt.Sprintf("- ID: %q", sanitizeWorkspaceSnapshotText(task.ID, workspaceSnapshotTextLimit)),
+		fmt.Sprintf("- Description: %q", sanitizeWorkspaceSnapshotText(task.Description, workspaceSnapshotPreviewLimit)),
+		fmt.Sprintf("- Status: %q", sanitizeWorkspaceSnapshotText(string(task.Status), workspaceSnapshotTextLimit)),
+		fmt.Sprintf("- Assigned to: %q", sanitizeWorkspaceTaskAssignee(*task)),
+	}
+	if task.Priority != 0 {
+		lines = append(lines, fmt.Sprintf("- Priority: %d", task.Priority))
+	}
+	if details := sanitizeWorkspaceSnapshotText(task.Details, workspaceSnapshotPreviewLimit); details != "" {
+		lines = append(lines, fmt.Sprintf("- Details: %q", details))
+	}
+	if !task.CreatedAt.IsZero() {
+		lines = append(lines, fmt.Sprintf("- Created at: %q", formatWorkspaceSnapshotTime(task.CreatedAt)))
+	}
+	if task.StartedAt != nil && !task.StartedAt.IsZero() {
+		lines = append(lines, fmt.Sprintf("- Started at: %q", formatWorkspaceSnapshotTime(*task.StartedAt)))
+	}
+	if task.CompletedAt != nil && !task.CompletedAt.IsZero() {
+		lines = append(lines, fmt.Sprintf("- Completed at: %q", formatWorkspaceSnapshotTime(*task.CompletedAt)))
+	}
+	if result := sanitizeWorkspaceSnapshotText(task.Result, workspaceSnapshotResultLimit); result != "" {
+		lines = append(lines, fmt.Sprintf("- Latest result (truncated): %q", result))
+	}
+	if taskErr := sanitizeWorkspaceSnapshotText(task.Error, workspaceSnapshotResultLimit); taskErr != "" {
+		lines = append(lines, fmt.Sprintf("- Latest error (truncated): %q", taskErr))
+	}
+	if task.ScheduleEnabled && task.Schedule != nil {
+		lines = append(lines, fmt.Sprintf("- Schedule: enabled (executions=%d, failures=%d)", task.ExecutionCount, task.FailureCount))
+	}
+	if task.CurrentRunID != "" {
+		lines = append(lines, fmt.Sprintf("- Current run ID: %q", sanitizeWorkspaceSnapshotText(task.CurrentRunID, workspaceSnapshotTextLimit)))
+	}
+
+	runs := task.ExecutionHistory
+	if len(runs) > 0 {
+		lines = append(lines, "", fmt.Sprintf("Recent runs (showing up to %d of %d):", workspaceSnapshotMaxTaskRuns, len(runs)))
+		start := 0
+		if len(runs) > workspaceSnapshotMaxTaskRuns {
+			start = len(runs) - workspaceSnapshotMaxTaskRuns
+		}
+		for _, run := range runs[start:] {
+			summary := sanitizeWorkspaceSnapshotText(run.Summary, workspaceSnapshotPreviewLimit)
+			if summary == "" {
+				summary = sanitizeWorkspaceSnapshotText(run.Result, workspaceSnapshotPreviewLimit)
+			}
+			lines = append(lines, fmt.Sprintf(
+				"- Run: executed_at=%q status=%q duration_ms=%d summary=%q",
+				formatWorkspaceSnapshotTime(run.ExecutedAt),
+				sanitizeWorkspaceSnapshotText(run.Status, workspaceSnapshotTextLimit),
+				run.Duration,
+				summary,
+			))
+		}
+	}
+
+	lines = append(lines,
+		"",
+		"Use current_task and task_runs tools to fetch additional task detail or full result/error bodies before suggesting destructive changes.",
+	)
+
+	return strings.Join(lines, "\n")
 }
 
 type workspaceAgentSummary struct {

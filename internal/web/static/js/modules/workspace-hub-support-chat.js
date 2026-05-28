@@ -101,9 +101,17 @@
 
   function detectSurface() {
     const path = (window.location.pathname || '').toLowerCase();
-    if (/^\/workspaces\/[^/]+\/tasks\/[^/]+/.test(path)) return 'workspace_task';
+    if (/^\/workspaces\/[^/]+\/(?:task|tasks)\/[^/]+/.test(path)) return 'workspace_task';
     if (/^\/workspaces\/[^/]+/.test(path)) return 'workspace_detail';
     return 'workspace_hub';
+  }
+
+  function resolveTaskId() {
+    if (window.workspaceTaskPage && window.workspaceTaskPage.taskId) {
+      return window.workspaceTaskPage.taskId;
+    }
+    const match = (window.location.pathname || '').match(/\/workspaces\/[^/]+\/(?:task|tasks)\/([^/]+)/i);
+    return match ? decodeURIComponent(match[1]) : '';
   }
 
   function resolveWorkspaceId() {
@@ -188,10 +196,14 @@
       const routeContext = {
         page_path: window.location.pathname || '',
         origin: 'support_widget',
-        surface: surface.key === 'workspace_hub' ? 'workspace_hub' : surface.key
+        surface: surface.key
       };
       const workspaceId = resolveWorkspaceId();
       if (workspaceId) routeContext.workspace_id = workspaceId;
+      if (surface.key === 'workspace_task') {
+        const taskId = resolveTaskId();
+        if (taskId) routeContext.task_id = taskId;
+      }
       body.route_context = routeContext;
 
       const response = await fetch('/api/chat', {
