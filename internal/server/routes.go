@@ -755,6 +755,15 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
+	if strings.HasSuffix(path, "/output-dir/open") {
+		if r.Method == http.MethodPost {
+			s.Handlers.Workspace.OpenWorkspaceOutputDir(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
 	if strings.HasSuffix(path, "/agent-snapshots") {
 		s.Handlers.Workspace.ListAgentSnapshots(w, r)
 		return true

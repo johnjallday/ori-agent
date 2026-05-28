@@ -4977,6 +4977,12 @@ export class WorkspaceTaskPage {
     const defaultPathHint = defaultPath
       ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(defaultPath)}">${this.escapeHtml(defaultPath)}</span>`
       : '';
+    const openFolderLabel = this.fileManagerActionLabel();
+    const openFolderBtn = `
+      <button type="button" class="workspace-task-automation-storage-open-btn" data-action="open-output-dir" title="${this.escapeHtml(openFolderLabel)}" aria-label="${this.escapeHtml(openFolderLabel)}">
+        <i class="bi bi-folder2-open" aria-hidden="true"></i>
+        <span>${this.escapeHtml(openFolderLabel)}</span>
+      </button>`;
     const fileName = String(storage.file_name || '').trim() || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
@@ -4985,7 +4991,7 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-automation-storage-options" role="radiogroup" aria-label="Storage destination">
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
-            <span>Default output folder${defaultPathHint}</span>
+            <span>Default output folder${defaultPathHint}${openFolderBtn}</span>
             <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.csv)" value="${this.escapeHtml(fileName)}" aria-label="CSV file name" />
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
@@ -5020,6 +5026,54 @@ export class WorkspaceTaskPage {
     container
       .querySelector('[data-action="open-automation-storage-modal"]')
       ?.addEventListener('click', () => this.openTaskStorageEditor());
+    container
+      .querySelector('[data-action="open-output-dir"]')
+      ?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openWorkspaceOutputDir();
+      });
+  }
+
+  // fileManagerActionLabel returns a platform-appropriate label for buttons
+  // that reveal a path in the OS file manager.
+  fileManagerActionLabel() {
+    const platform = (navigator.platform || navigator.userAgent || '').toLowerCase();
+    if (platform.includes('mac')) return 'Open in Finder';
+    if (platform.includes('win')) return 'Open in Explorer';
+    return 'Open folder';
+  }
+
+  // openWorkspaceOutputDir asks the server to open this workspace's default
+  // outputs folder in the local file manager. The dir is created lazily if it
+  // doesn't exist yet.
+  async openWorkspaceOutputDir() {
+    if (!this.workspaceId) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir/open`,
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        const message = await this.extractErrorMessage(response).catch(() => '');
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+    } catch (err) {
+      if (window.Toast && typeof window.Toast.error === 'function') {
+        window.Toast.error(`Couldn't open output folder: ${err.message || err}`);
+      } else {
+        console.error('Failed to open output folder', err);
+      }
+    }
+  }
+
+  async extractErrorMessage(response) {
+    try {
+      const data = await response.json();
+      return data?.error || data?.message || '';
+    } catch (_) {
+      return '';
+    }
   }
 
   // saveAutomationStorageDestination reads the inline destination editor and

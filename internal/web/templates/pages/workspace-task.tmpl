@@ -2239,6 +2239,31 @@
       word-break: break-all;
     }
 
+    .workspace-task-automation-storage-open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      margin-top: 0.3rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary, var(--primary-color));
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-automation-storage-open-btn:hover {
+      background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
+      border-color: color-mix(in srgb, var(--primary-color) 40%, var(--border-color));
+    }
+
+    .workspace-task-automation-storage-open-btn i {
+      font-size: 0.85rem;
+    }
+
     .workspace-task-automation-storage-select,
     .workspace-task-automation-storage-input {
       grid-column: 1 / -1;
