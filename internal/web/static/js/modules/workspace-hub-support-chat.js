@@ -1,10 +1,15 @@
 /**
  * Workspace Hub Support Chat
  *
- * Floating, Intercom-style chat widget pinned to the bottom-right of the
- * workspace-hub page. Sends messages directly to /api/chat using the agent
- * resolved from the currently-open workspace, and renders the conversation
- * inside its own panel (independent of the main chat UI).
+ * Floating, Intercom-style chat widget pinned to the bottom-right of
+ * workspace pages. The widget routes to a different agent and adopts a
+ * different persona depending on which surface it's loaded on:
+ *
+ *  - workspace_hub    -> "Ori" (system assistant); focused on workspace
+ *                        creation/lookup/navigation.
+ *  - workspace_detail -> workspace.shared_data.entry_agent_name (strict);
+ *                        focused on what's available inside the workspace.
+ *  - workspace_task   -> task.assigned_to (strict); focused on this task.
  *
  * @module workspace-hub-support-chat
  */
@@ -13,8 +18,56 @@
 
   const SESSION_HEADER = 'X-Session-ID';
   const WIDGET_SESSION_PREFIX = 'support-widget-';
+  const SYSTEM_AGENT_NAME = 'Ori';
+
+  const SURFACES = {
+    workspace_hub: {
+      title: 'Workspaces Assistant',
+      subtitle: 'Create, find, and navigate workspaces',
+      placeholder: 'Ask about workspaces...',
+      emptyTitle: 'Hi! How can I help with your workspaces?',
+      emptySub: 'I can help you create, find, or summarize workspaces.',
+      resolveAgent: () => SYSTEM_AGENT_NAME,
+      requireAgent: false
+    },
+    workspace_detail: {
+      title: 'Workspace Assistant',
+      subtitle: 'Ask about this workspace',
+      placeholder: 'Ask about tasks, notes, files, agents...',
+      emptyTitle: 'Hi! How can I help?',
+      emptySub: 'I have context on this workspace.',
+      resolveAgent: () => {
+        const ws = window.workspaceDetail && window.workspaceDetail.workspace;
+        if (!ws) return '';
+        const shared = ws.shared_data || ws.SharedData || {};
+        const entry = shared.entry_agent_name || ws.entry_agent_name || '';
+        return typeof entry === 'string' ? entry.trim() : '';
+      },
+      requireAgent: true,
+      missingAgentMessage:
+        'No entry agent is configured for this workspace yet. ' +
+        'Set one in workspace settings to enable the assistant.'
+    },
+    workspace_task: {
+      title: 'Task Assistant',
+      subtitle: 'Help with this task',
+      placeholder: 'Ask about this task...',
+      emptyTitle: 'Hi! How can I help with this task?',
+      emptySub: 'I have context on this task and workspace.',
+      resolveAgent: () => {
+        const task = window.workspaceTaskPage && window.workspaceTaskPage.task;
+        if (!task || typeof task !== 'object') return '';
+        return typeof task.assigned_to === 'string' ? task.assigned_to.trim() : '';
+      },
+      requireAgent: true,
+      missingAgentMessage:
+        'No agent is assigned to this task yet. ' +
+        'Assign an agent to enable the assistant.'
+    }
+  };
 
   let elements = null;
+  let surface = null;
   let widgetSessionId = '';
   let sending = false;
 
@@ -46,38 +99,11 @@
     return escapeHtml(text).replace(/\n/g, '<br>');
   }
 
-  function pickFirstAgentName(workspace) {
-    if (!workspace || typeof workspace !== 'object') return '';
-    const instances = Array.isArray(workspace.agent_instances) ? workspace.agent_instances : null;
-    if (instances && instances.length > 0) {
-      const first = instances[0];
-      if (first && typeof first === 'object' && first.name) return first.name;
-      if (typeof first === 'string') return first;
-    }
-    const names = Array.isArray(workspace.agents) ? workspace.agents : null;
-    if (names && names.length > 0) return names[0];
-    return '';
-  }
-
-  function resolveWorkspaceAgent() {
-    const detail = window.workspaceDetail;
-    if (detail) {
-      const fromDetail = pickFirstAgentName(detail.workspace);
-      if (fromDetail) return fromDetail;
-    }
-    const taskPage = window.workspaceTaskPage;
-    if (taskPage) {
-      const fromTask = pickFirstAgentName(taskPage.workspace) || pickFirstAgentName(taskPage.workspaceData);
-      if (fromTask) return fromTask;
-      if (taskPage.task && typeof taskPage.task === 'object' && taskPage.task.agent_name) {
-        return taskPage.task.agent_name;
-      }
-    }
-    const activeAgent = window.sessionManager
-      && typeof window.sessionManager.getActiveSession === 'function'
-      ? window.sessionManager.getActiveSession()?.agent_name
-      : '';
-    return activeAgent || '';
+  function detectSurface() {
+    const path = (window.location.pathname || '').toLowerCase();
+    if (/^\/workspaces\/[^/]+\/tasks\/[^/]+/.test(path)) return 'workspace_task';
+    if (/^\/workspaces\/[^/]+/.test(path)) return 'workspace_detail';
+    return 'workspace_hub';
   }
 
   function resolveWorkspaceId() {
@@ -137,6 +163,15 @@
     const trimmed = String(text || '').trim();
     if (!trimmed || sending) return;
 
+    const agentName = surface.resolveAgent();
+    if (surface.requireAgent && !agentName) {
+      appendMessage(trimmed, 'user');
+      elements.input.value = '';
+      autoResizeInput();
+      appendMessage(surface.missingAgentMessage, 'error');
+      return;
+    }
+
     appendMessage(trimmed, 'user');
     elements.input.value = '';
     autoResizeInput();
@@ -149,13 +184,13 @@
         [SESSION_HEADER]: ensureSessionId()
       };
       const body = { question: trimmed };
-      const agentName = resolveWorkspaceAgent();
       if (agentName) body.agent_name = agentName;
-      const workspaceId = resolveWorkspaceId();
       const routeContext = {
         page_path: window.location.pathname || '',
-        origin: 'support_widget'
+        origin: 'support_widget',
+        surface: surface.key === 'workspace_hub' ? 'workspace_hub' : surface.key
       };
+      const workspaceId = resolveWorkspaceId();
       if (workspaceId) routeContext.workspace_id = workspaceId;
       body.route_context = routeContext;
 
@@ -190,6 +225,18 @@
     const el = elements.input;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 96) + 'px';
+  }
+
+  function applySurfaceToUI() {
+    const titleEl = $('hubSupportChatTitle');
+    const subtitleEl = $('hubSupportChatSubtitle');
+    if (titleEl) titleEl.textContent = surface.title;
+    if (subtitleEl) subtitleEl.textContent = surface.subtitle;
+    if (elements.input) elements.input.placeholder = surface.placeholder;
+    const emptyTitle = elements.body.querySelector('.hub-support-chat-empty-title');
+    const emptySub = elements.body.querySelector('.hub-support-chat-empty-sub');
+    if (emptyTitle) emptyTitle.textContent = surface.emptyTitle;
+    if (emptySub) emptySub.textContent = surface.emptySub;
   }
 
   function openPanel() {
@@ -248,12 +295,18 @@
       sendBtn: $('hubSupportChatSendBtn')
     };
     if (!elements.launcher || !elements.panel || !elements.form) return;
+
+    const key = detectSurface();
+    surface = Object.assign({ key }, SURFACES[key] || SURFACES.workspace_hub);
+
+    applySurfaceToUI();
     bindHandlers();
     window.hubSupportChat = {
       open: openPanel,
       close: closePanel,
       toggle: togglePanel,
-      send: sendMessage
+      send: sendMessage,
+      surface: () => surface.key
     };
   }
 
