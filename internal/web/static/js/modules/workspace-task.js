@@ -970,6 +970,8 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
+      outputShapeCard: document.getElementById('workspace-task-output-shape-card'),
+      outputShape: document.getElementById('workspace-task-output-shape'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
       outputCreateSkillBtn: document.getElementById('workspace-task-output-create-skill'),
@@ -2398,6 +2400,7 @@ export class WorkspaceTaskPage {
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
     dispatch('output', () => this.renderOutput());
+    dispatch('outputShape', () => this.renderTaskOutputShape());
     dispatch('workspaceRuns', () => this.renderWorkspaceRunsCard());
     dispatch('runs', () => this.renderRunsCard());
     dispatch('schedule', () => this.renderSchedule());
@@ -2513,6 +2516,12 @@ export class WorkspaceTaskPage {
         t.execution_history?.[t.execution_history.length - 1]?.status || '',
         t.execution_history?.[t.execution_history.length - 1]?.summary || '',
         t.execution_history?.[t.execution_history.length - 1]?.result || '',
+      ]),
+      outputShape: JSON.stringify([
+        t.id,
+        t.output_spec || null,
+        t.output_schema || null,
+        t.output_contract || null,
       ]),
       workspaceRuns: JSON.stringify([
         t.id,
@@ -6322,6 +6331,122 @@ export class WorkspaceTaskPage {
       return;
     }
     await this.copyToClipboard(sectionText, 'Section copied');
+  }
+
+  // renderTaskOutputShape paints the "Expected output shape" card with the
+  // task's declared schema fields, CSV contract columns, and the run-info
+  // metadata flagged for CSV inclusion. Falls back to an empty-state when
+  // no structured spec is configured (LLM returns free text).
+  renderTaskOutputShape() {
+    if (!this.elements.outputShape || !this.elements.outputShapeCard) return;
+
+    const t = this.task || {};
+    const spec = t.output_spec || null;
+    const schemaSource = (spec && spec.schema) || t.output_schema || null;
+    const contractSource = (spec && spec.contract) || t.output_contract || null;
+
+    const schemaFields = Array.isArray(schemaSource?.fields) ? schemaSource.fields : [];
+    const contractColumns = Array.isArray(contractSource?.columns) ? contractSource.columns : [];
+    const metadataFields = this.getOutputSpecMetadataFields(spec);
+
+    const hasAnyStructure = schemaFields.length > 0 || contractColumns.length > 0;
+
+    if (!hasAnyStructure) {
+      this.elements.outputShape.innerHTML = `
+        <div class="workspace-task-output-shape-empty">
+          <strong>Free-text output</strong>
+          The task currently has no structured output spec. The agent returns natural language and the result is stored on each run record as-is.
+          Add a spec in Automation &gt; Advanced settings to enforce a JSON shape and project results into CSV columns.
+        </div>`;
+      return;
+    }
+
+    const includedMetadata = metadataFields.filter((field) => field.include);
+    const summaryStats = [
+      ['Assistant fields', schemaFields.length ? `${schemaFields.length}` : 'none'],
+      ['CSV columns', contractColumns.length ? `${contractColumns.length}` : 'none'],
+      ['Run info in CSV', includedMetadata.length ? `${includedMetadata.length} of ${metadataFields.length}` : 'hidden'],
+    ];
+    const summaryHtml = `
+      <div class="workspace-task-output-shape-summary">
+        ${summaryStats.map(([label, value]) => `
+          <div class="workspace-task-output-shape-stat">
+            <span>${this.escapeHtml(label)}</span>
+            <strong>${this.escapeHtml(value)}</strong>
+          </div>
+        `).join('')}
+      </div>`;
+
+    const schemaBlock = schemaFields.length ? `
+      <div class="workspace-task-output-shape-block">
+        <div class="workspace-task-output-shape-block-header">
+          <span>Assistant fields (JSON shape returned by the agent)</span>
+          ${schemaSource?.name ? `<span class="workspace-task-output-shape-block-meta">${this.escapeHtml(schemaSource.name)}</span>` : ''}
+        </div>
+        <table class="workspace-task-output-shape-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${schemaFields.map((field) => `
+              <tr>
+                <td>${this.escapeHtml(String(field?.name || ''))}</td>
+                <td class="workspace-task-output-shape-col-type">${this.escapeHtml(String(field?.type || 'string'))}</td>
+                <td class="workspace-task-output-shape-col-required ${field?.required ? '' : 'is-optional'}">${field?.required ? 'required' : 'optional'}</td>
+                <td>${this.escapeHtml(String(field?.description || ''))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
+
+    const contractBlock = contractColumns.length ? `
+      <div class="workspace-task-output-shape-block">
+        <div class="workspace-task-output-shape-block-header">
+          <span>CSV columns (row shape stored on append)</span>
+          ${contractSource?.version ? `<span class="workspace-task-output-shape-block-meta">${this.escapeHtml(contractSource.version)}</span>` : ''}
+        </div>
+        <table class="workspace-task-output-shape-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${contractColumns.map((column) => `
+              <tr>
+                <td>${this.escapeHtml(String(column?.name || ''))}</td>
+                <td class="workspace-task-output-shape-col-type">${this.escapeHtml(String(column?.type || 'string'))}</td>
+                <td class="workspace-task-output-shape-col-required ${column?.required ? '' : 'is-optional'}">${column?.required ? 'required' : 'optional'}</td>
+                <td>${this.escapeHtml(String(column?.description || ''))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
+
+    const metadataBlock = metadataFields.length ? `
+      <div class="workspace-task-output-shape-block">
+        <div class="workspace-task-output-shape-block-header">
+          <span>Run info appended to each row</span>
+          <span class="workspace-task-output-shape-block-meta">${this.escapeHtml(`${includedMetadata.length} of ${metadataFields.length} included`)}</span>
+        </div>
+        <div class="workspace-task-output-shape-metadata">
+          ${metadataFields.map((field) => `
+            <span class="workspace-task-output-shape-chip" data-included="${Boolean(field.include)}" title="${field.include ? 'Included in CSV row' : 'Hidden from CSV (kept on run artifact only)'}">${this.escapeHtml(field.name)}</span>
+          `).join('')}
+        </div>
+      </div>` : '';
+
+    this.elements.outputShape.innerHTML = [summaryHtml, schemaBlock, contractBlock, metadataBlock].filter(Boolean).join('');
   }
 
   renderOutput() {
