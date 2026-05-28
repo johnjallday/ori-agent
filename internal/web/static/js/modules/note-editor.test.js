@@ -1185,6 +1185,42 @@ test('NoteLiveEditor: selectedLineRangeFromState returns editor-made line select
   assert.deepEqual(ed.selectedLineRangeFromState(), { start: 1, end: 2 });
 });
 
+test('NoteLiveEditor: isInputFullySelected detects full / partial / empty selection', () => {
+  const { host } = mockHost(['x']);
+  const ed = new NoteLiveEditor(host);
+
+  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 5 }), true);
+  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 5, selectionEnd: 5 }), false);
+  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 3 }), false);
+  assert.equal(ed.isInputFullySelected({ value: '', selectionStart: 0, selectionEnd: 0 }), true);
+  assert.equal(ed.isInputFullySelected(null), false);
+});
+
+test('NoteLiveEditor: Cmd+A on a line escalates to whole-note select only once text is fully selected', () => {
+  const { host } = mockHost(['## Description', 'testing']);
+  const ed = new NoteLiveEditor(host);
+  const wholeNoteCalls = [];
+  ed.selectWholeNote = (preview) => { wholeNoteCalls.push(preview); };
+
+  const cmdA = (input) => {
+    let prevented = false;
+    ed.handleInputKeydown(
+      { key: 'a', metaKey: true, preventDefault: () => { prevented = true; } },
+      input,
+      'PREVIEW',
+    );
+    return prevented;
+  };
+
+  // First press: cursor at end, text not fully selected — defer to browser default.
+  assert.equal(cmdA({ dataset: { lineIndex: '0' }, value: '## Description', selectionStart: 14, selectionEnd: 14 }), false);
+  assert.equal(wholeNoteCalls.length, 0);
+
+  // Second press: text now fully selected — escalate to whole-note selection.
+  assert.equal(cmdA({ dataset: { lineIndex: '0' }, value: '## Description', selectionStart: 0, selectionEnd: 14 }), true);
+  assert.deepEqual(wholeNoteCalls, ['PREVIEW']);
+});
+
 // =============================================================================
 // mount — composite factory
 // =============================================================================

@@ -956,6 +956,30 @@ export class NoteLiveEditor {
     return true;
   }
 
+  // isInputFullySelected reports whether a textarea's entire value is selected
+  // (or empty). Used to detect the "second Cmd+A" while editing a line/block so
+  // it can escalate from selecting the line's text to selecting the whole note.
+  isInputFullySelected(input) {
+    if (!input) return false;
+    const value = input.value || '';
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+    return start === 0 && end === value.length;
+  }
+
+  // selectWholeNote exits any active inline edit and selects every rendered
+  // line. Shared by the single-line and block-edit Cmd+A escalation paths.
+  // A block edit is dismissed here (selectLineRange only tears down a
+  // single-line edit) so the rendered lines exist before we select them.
+  selectWholeNote(previewContent = null) {
+    const lines = this.host.getContentLines?.() || [];
+    if (this.state.activeRange !== null) {
+      this.state.activeRange = null;
+      this.host.render?.();
+    }
+    this.selectLineRange(0, Math.max(0, lines.length - 1), previewContent);
+  }
+
   // handleInputChange mutates content from a single-line textarea's input
   // event. Newlines split the line into multiple source lines.
   handleInputChange(input) {
@@ -1011,14 +1035,21 @@ export class NoteLiveEditor {
   }
 
   // handleRangeInputKeydown — Esc / Cmd-Enter dismisses block edit, applying
-  // the latest input first.
-  handleRangeInputKeydown(event, input) {
+  // the latest input first. Cmd+A escalates to whole-note selection once the
+  // block textarea's text is already fully selected (matches handleInputKeydown).
+  handleRangeInputKeydown(event, input, previewContent = null) {
     if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === 'Enter')) {
       event.preventDefault();
       this.handleRangeInputChange(input);
       this.state.activeRange = null;
       this.state.activeLineIndex = null;
       this.host.render?.();
+      return;
+    }
+
+    if (isSelectAllShortcut(event) && this.isInputFullySelected(input)) {
+      event.preventDefault();
+      this.selectWholeNote(previewContent);
     }
   }
 
@@ -1113,12 +1144,12 @@ export class NoteLiveEditor {
       }
       const blockInput = target.closest('.note-live-block-input');
       if (blockInput && previewContent.contains(blockInput)) {
-        this.handleRangeInputKeydown(event, blockInput);
+        this.handleRangeInputKeydown(event, blockInput, previewContent);
         return;
       }
       const input = target.closest('.note-live-line-input');
       if (input && previewContent.contains(input)) {
-        this.handleInputKeydown(event, input);
+        this.handleInputKeydown(event, input, previewContent);
         return;
       }
 
@@ -1230,8 +1261,10 @@ export class NoteLiveEditor {
 
   // handleInputKeydown — single-line keyboard shortcuts: Enter splits, Backspace
   // at start joins with previous line, Delete at end joins with next line,
-  // Arrow keys move between lines.
-  handleInputKeydown(event, input) {
+  // Arrow keys move between lines. Cmd+A selects the line's text on the first
+  // press (browser default); a second press, once the text is fully selected,
+  // escalates to selecting the whole note.
+  handleInputKeydown(event, input, previewContent = null) {
     const lineIndex = Number(input.dataset.lineIndex);
     if (!Number.isInteger(lineIndex)) return;
 
@@ -1239,6 +1272,16 @@ export class NoteLiveEditor {
     const value = input.value || '';
     const selectionStart = input.selectionStart ?? value.length;
     const selectionEnd = input.selectionEnd ?? selectionStart;
+
+    if (isSelectAllShortcut(event)) {
+      // First press: let the browser select the line's text. Second press
+      // (text already fully selected): select the whole note instead.
+      if (this.isInputFullySelected(input)) {
+        event.preventDefault();
+        this.selectWholeNote(previewContent);
+      }
+      return;
+    }
 
     if (event.key === 'Enter') {
       event.preventDefault();
