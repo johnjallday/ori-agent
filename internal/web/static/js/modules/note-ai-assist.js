@@ -12,12 +12,15 @@
 // for the non-module sessions.js to drive.
 
 const ACTIONS = [
-  { id: 'expand',    label: 'Expand',    icon: '+',    defaultMode: 'replace'      },
-  { id: 'summarize', label: 'Summarize', icon: '≡',    defaultMode: 'replace'      },
-  { id: 'rewrite',   label: 'Rewrite',   icon: '✎',    defaultMode: 'replace'      },
-  { id: 'counter',   label: 'Counter',   icon: '↹',    defaultMode: 'insert-after' },
-  { id: 'cite',      label: 'Cite',      icon: '★',    defaultMode: 'insert-after' },
-  { id: 'ask',       label: 'Ask AI…',   icon: '?',    defaultMode: 'insert-after' },
+  { id: 'expand',    label: 'Expand',         icon: '+',  defaultMode: 'replace'      },
+  { id: 'summarize', label: 'Summarize',      icon: '≡',  defaultMode: 'replace'      },
+  { id: 'rewrite',   label: 'Rewrite',        icon: '✎',  defaultMode: 'replace'      },
+  { id: 'counter',   label: 'Counter',        icon: '↹',  defaultMode: 'insert-after' },
+  { id: 'cite',      label: 'Cite',           icon: '★',  defaultMode: 'insert-after' },
+  { id: 'ask',       label: 'Ask AI…',        icon: '?',  defaultMode: 'insert-after' },
+  // `local: true` — runs entirely client-side (create note + leave a wikilink),
+  // so it skips the /api/notes/assist dispatch and the agent-ready gate.
+  { id: 'extract',   label: 'Extract → note', icon: '⤴', local: true                 },
 ];
 
 const MAX_CARDS_PER_NOTE = 20;
@@ -129,7 +132,11 @@ function buildActionBar() {
   bar.innerHTML = '';
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
   const askShortcut = isMac ? '⌘J' : 'Ctrl+J';
+  const canExtract = typeof state.sessionsApi?.createNote === 'function';
   for (const action of ACTIONS) {
+    // Hide "Extract → note" on surfaces that didn't wire a createNote host
+    // (e.g. the modal) so it never renders a button that can't work.
+    if (action.id === 'extract' && !canExtract) continue;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'note-ai-action-btn';
@@ -147,6 +154,12 @@ function buildActionBar() {
 }
 
 function onActionClick(actionId) {
+  if (actionId === 'extract') {
+    // Local action — no agent required. Spin the selection off into its own
+    // note and leave a wikilink behind.
+    extractSelectionToNote();
+    return;
+  }
   if (!isAgentReady()) {
     notifyAgentMissing();
     return;
@@ -171,6 +184,71 @@ function isAgentReady() {
 
 function notifyAgentMissing() {
   state.sessionsApi?.showToast?.('Select a workspace agent to use inline AI', 'warning');
+}
+
+// =============================================================================
+// Extract → note (local action)
+// =============================================================================
+
+// deriveNoteTitle picks a title for the spun-off note from the selected text:
+// the first Markdown heading wins, else the first non-empty line, else
+// "Untitled". Markdown heading markers are stripped and the result is capped so
+// it makes a sane note name / wikilink target.
+function deriveNoteTitle(text) {
+  const lines = String(text || '').split('\n');
+  for (const line of lines) {
+    const heading = line.match(/^\s*#{1,6}\s+(.+?)\s*$/);
+    if (heading) return heading[1].trim().slice(0, 80);
+  }
+  const firstNonEmpty = lines.find((line) => line.trim());
+  return (firstNonEmpty || 'Untitled').replace(/^\s*#+\s*/, '').trim().slice(0, 80) || 'Untitled';
+}
+
+// buildExtractedContent returns `content` with the [range.start, range.end)
+// character span replaced by a `[[linkTitle]]` wikilink. Offsets are clamped to
+// the content bounds so a stale range can't throw or corrupt the note.
+function buildExtractedContent(content, range, linkTitle) {
+  const src = String(content ?? '');
+  const start = Math.max(0, Math.min(Number(range?.start ?? 0), src.length));
+  const end = Math.max(start, Math.min(Number(range?.end ?? start), src.length));
+  return `${src.slice(0, start)}[[${linkTitle}]]${src.slice(end)}`;
+}
+
+// extractSelectionToNote creates a new note from the pending selection and
+// replaces the selection in the source note with a wikilink to it. Stays on the
+// source note — the user clicks the link to develop the spun-off note, and
+// backlinks point home. No-op without a usable selection or a host createNote.
+async function extractSelectionToNote() {
+  const sel = state.pendingSelection;
+  const api = state.sessionsApi;
+  if (!sel?.text || !sel.text.trim()
+      || !Number.isInteger(sel.range?.start)
+      || !Number.isInteger(sel.range?.end)) {
+    return;
+  }
+  if (typeof api?.createNote !== 'function') {
+    api?.showToast?.('Extract isn’t available here', 'warning');
+    return;
+  }
+
+  const paneId = sel.paneId || '';
+  const title = deriveNoteTitle(sel.text);
+  hideBar();
+
+  const created = await api.createNote(title, sel.text, { workspaceId: state.workspaceId });
+  if (!created) {
+    api.showToast?.('Could not create the extracted note', 'error');
+    return;
+  }
+  // Prefer the backend's saved name (it may have de-duped a collision) so the
+  // wikilink resolves to the note we just made rather than a same-named one.
+  const linkTitle = created.name || title;
+
+  const content = api.getNoteContent?.(paneId) || '';
+  api.pushUndo?.(paneId);
+  api.setNoteContent?.(buildExtractedContent(content, sel.range, linkTitle), paneId);
+  api.scheduleAutoSave?.(paneId);
+  api.showToast?.(`Extracted to “${linkTitle}”`, 'success');
 }
 
 // dispatchAsk creates a suggestion card from an external surface (the
@@ -731,6 +809,7 @@ const api = {
   dispatchAsk,
   hideBar,
   render,
+  extractSelectionToNote,
   // Expose for tasks 5.0 / debugging.
   _state: state,
 };
@@ -740,4 +819,15 @@ if (typeof window !== 'undefined') {
 }
 
 export default api;
-export { init, onNoteOpened, onAgentChanged, onSelectionChanged, dispatchAsk, hideBar, render };
+export {
+  init,
+  onNoteOpened,
+  onAgentChanged,
+  onSelectionChanged,
+  dispatchAsk,
+  hideBar,
+  render,
+  deriveNoteTitle,
+  buildExtractedContent,
+  extractSelectionToNote,
+};

@@ -117,18 +117,22 @@ async function fetchWorkspaceNotes(workspaceId) {
   }
 }
 
-export async function createWorkspaceNote(workspaceId, fetchImpl = fetch) {
+export async function createWorkspaceNoteWithContent(workspaceId, name, content, fetchImpl = fetch) {
   if (!workspaceId) throw new Error('No workspace selected');
   const resp = await fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Untitled', content: '' }),
+    body: JSON.stringify({ name: name || 'Untitled', content: content || '' }),
   });
   if (!resp.ok) {
     throw new Error(`Failed to create note: ${resp.status}`);
   }
   const data = await resp.json();
   return data?.note || data;
+}
+
+export async function createWorkspaceNote(workspaceId, fetchImpl = fetch) {
+  return createWorkspaceNoteWithContent(workspaceId, 'Untitled', '', fetchImpl);
 }
 
 // =============================================================================
@@ -278,6 +282,28 @@ function getPagePaneApi(paneId) {
     render: () => secondaryBundle?.render?.(),
     scheduleTocRebuild: () => {},
   };
+}
+
+// createExtractedNote backs the "Extract → note" assist action: it creates a
+// note in the current workspace from the selected text and returns the saved
+// note ({ id, name }) so the caller can leave an exact wikilink. The wikilinks
+// note cache is invalidated so the freshly-created link resolves on click
+// instead of being treated as broken.
+async function createExtractedNote(title, content) {
+  const workspaceId = currentWorkspaceId();
+  if (!workspaceId) {
+    showToast('Cannot extract without a workspace.', 'error');
+    return null;
+  }
+  try {
+    const note = await createWorkspaceNoteWithContent(workspaceId, title, content);
+    window.NoteWikilinks?.invalidateNotesCache?.(workspaceId);
+    return note;
+  } catch (err) {
+    console.error('Failed to create extracted note:', err);
+    showToast('Failed to create the extracted note', 'error');
+    return null;
+  }
 }
 
 function resetPageAIAssistForCurrentNote(agentId = window.NoteEditor?.getSelectedAgentId?.() || null) {
@@ -1458,6 +1484,7 @@ async function bootstrap() {
       readSelection: readPageSelection,
       showToast,
       getPaneApi: getPagePaneApi,
+      createNote: createExtractedNote,
     },
   });
   bundle.render();

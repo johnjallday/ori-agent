@@ -7,7 +7,16 @@ import {
   parseWikilinks,
   renderWikilinkHTML,
   applyWikilinksToHtml,
+  invalidateNotesCache,
 } from './note-wikilinks.js';
+
+// invalidateNotesCache is the contract note-page.js calls after creating an
+// extracted note so the new wikilink resolves instead of looking broken.
+test('invalidateNotesCache: callable for a workspace id and as a clear-all', () => {
+  assert.equal(typeof invalidateNotesCache, 'function');
+  assert.doesNotThrow(() => invalidateNotesCache('ws-1'));
+  assert.doesNotThrow(() => invalidateNotesCache());
+});
 
 // =============================================================================
 // parseWikilinks — should mirror the Go parser in internal/session/note_links.go

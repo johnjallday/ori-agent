@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 const {
   createWorkspaceNote,
+  createWorkspaceNoteWithContent,
   noteTabsStateKey,
 } = await import('./note-page.js');
 
@@ -36,6 +37,28 @@ test('createWorkspaceNote posts an empty note to the workspace notes endpoint', 
   assert.equal(calls[0].options.method, 'POST');
   assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
   assert.deepEqual(JSON.parse(calls[0].options.body), { name: 'Untitled', content: '' });
+});
+
+test('createWorkspaceNoteWithContent posts the given title and content', async () => {
+  const calls = [];
+  const note = await createWorkspaceNoteWithContent('ws-1', 'Description', '## Description\ntesting', async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, async json() { return { note: { id: 'n2', name: 'Description' } }; } };
+  });
+
+  assert.deepEqual(note, { id: 'n2', name: 'Description' });
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/notes');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { name: 'Description', content: '## Description\ntesting' });
+});
+
+test('createWorkspaceNoteWithContent defaults blank title/content', async () => {
+  let body = null;
+  await createWorkspaceNoteWithContent('ws-1', '', '', async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, async json() { return { note: {} }; } };
+  });
+  assert.deepEqual(body, { name: 'Untitled', content: '' });
 });
 
 test('createWorkspaceNote throws on failed responses', async () => {

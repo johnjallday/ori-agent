@@ -1575,6 +1575,9 @@ export function mount(host = {}) {
       scheduleAutoSave: () => autosave.schedule(),
       showToast: host.aiAssist.showToast,
       readSelection: host.aiAssist.readSelection,
+      // createNote(title, content, opts) → created note ({ id, name }) | null.
+      // Used by the "Extract → note" action; omit it to disable extraction.
+      createNote: host.aiAssist.createNote,
       // Split-view hosts can route content I/O to a non-primary pane by
       // returning a { getContent, setContent, pushUndo, scheduleAutoSave,
       // render, scheduleTocRebuild } object for the given paneId.
@@ -2293,6 +2296,13 @@ export function initAIAssist(host = {}) {
         return host.scheduleAutoSave?.();
       },
       showToast: (msg, kind) => host.showToast?.(msg, kind),
+      // Local "Extract → note" support — host owns the create-note API call and
+      // returns the saved note ({ id, name }) so the wikilink can use its name.
+      // Left undefined when the host doesn't wire it so the action bar hides the
+      // Extract button on surfaces that don't support it (e.g. the modal).
+      createNote: typeof host.createNote === 'function'
+        ? (title, content, opts) => host.createNote(title, content, opts)
+        : undefined,
       showAssistRail: () => showRail('assist'),
       hideAssistRail: () => hideRail('assist'),
     },

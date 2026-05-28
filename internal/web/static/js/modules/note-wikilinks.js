@@ -192,6 +192,14 @@ function resolveTarget(target, notes) {
   return notes.find((n) => (n.name || '').toLowerCase() === lc) || null;
 }
 
+// invalidateNotesCache drops the cached note list for a workspace so the next
+// wikilink resolution refetches. Call after creating a note (e.g. the
+// "Extract → note" action) so a just-made link isn't mistaken for broken.
+function invalidateNotesCache(workspaceId) {
+  if (workspaceId == null) _workspaceNotesCache = new Map();
+  else _workspaceNotesCache.delete(workspaceId);
+}
+
 async function fetchWorkspaceNotes(workspaceId) {
   if (_workspaceNotesCache.has(workspaceId)) return _workspaceNotesCache.get(workspaceId);
   try {
@@ -284,6 +292,7 @@ if (typeof window !== 'undefined') {
     renderWikilinkHTML,
     applyWikilinksToHtml,
     setWorkspaceContext,
+    invalidateNotesCache,
   };
 }
 
@@ -292,4 +301,7 @@ export default {
   renderWikilinkHTML,
   applyWikilinksToHtml,
   setWorkspaceContext,
+  invalidateNotesCache,
 };
+
+export { invalidateNotesCache };
