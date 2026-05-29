@@ -970,7 +970,7 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
-      outputShapeCard: document.getElementById('workspace-task-output-shape-card'),
+      outputShapeWrap: document.getElementById('workspace-task-output-shape-wrap'),
       outputShape: document.getElementById('workspace-task-output-shape'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
@@ -2559,6 +2559,11 @@ export class WorkspaceTaskPage {
         Array.isArray(t.execution_history) ? t.execution_history.length : 0,
         t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
         sigAutomation,
+        // The Automation & output card's visibility now also depends on whether
+        // this task declares a structured output shape, so a spec change must
+        // re-run renderSchedule (sigAutomation tracks the storage owner's spec,
+        // which can differ from this.task's on a workflow parent).
+        t.output_spec || null, t.output_schema || null, t.output_contract || null,
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
       blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
@@ -6339,8 +6344,22 @@ export class WorkspaceTaskPage {
   // task's declared schema fields, CSV contract columns, and the run-info
   // metadata flagged for CSV inclusion. Falls back to an empty-state when
   // no structured spec is configured (LLM returns free text).
+  // hasStructuredOutputShape reports whether the task declares a structured
+  // output — JSON schema fields or CSV contract columns. Drives both the
+  // "Expected output shape" subsection and whether the Automation & output
+  // card is shown at all when nothing else (schedule/storage) keeps it up.
+  hasStructuredOutputShape() {
+    const t = this.task || {};
+    const spec = t.output_spec || null;
+    const schemaSource = (spec && spec.schema) || t.output_schema || null;
+    const contractSource = (spec && spec.contract) || t.output_contract || null;
+    const schemaFields = Array.isArray(schemaSource?.fields) ? schemaSource.fields : [];
+    const contractColumns = Array.isArray(contractSource?.columns) ? contractSource.columns : [];
+    return schemaFields.length > 0 || contractColumns.length > 0;
+  }
+
   renderTaskOutputShape() {
-    if (!this.elements.outputShape || !this.elements.outputShapeCard) return;
+    if (!this.elements.outputShape || !this.elements.outputShapeWrap) return;
 
     const t = this.task || {};
     const spec = t.output_spec || null;
@@ -6353,17 +6372,16 @@ export class WorkspaceTaskPage {
 
     const hasAnyStructure = schemaFields.length > 0 || contractColumns.length > 0;
 
-    // Hide the entire card on free-text tasks. The "Expected output shape" panel
-    // only carries meaning when the task declares a JSON schema or CSV contract;
-    // a developer-flavored empty state ("add a spec to enforce a JSON shape…")
-    // doesn't belong on the Overview tab, which is otherwise kept to the
-    // non-technical essentials. The spec is still editable from the task modal.
+    // Hide just the subsection on free-text tasks. The "Expected output shape"
+    // panel only carries meaning when the task declares a JSON schema or CSV
+    // contract; a developer-flavored empty state doesn't belong here. The
+    // surrounding Automation & output card stays governed by renderSchedule.
     if (!hasAnyStructure) {
-      this.elements.outputShapeCard.hidden = true;
+      this.elements.outputShapeWrap.hidden = true;
       this.elements.outputShape.innerHTML = '';
       return;
     }
-    this.elements.outputShapeCard.hidden = false;
+    this.elements.outputShapeWrap.hidden = false;
 
     const includedMetadata = metadataFields.filter((field) => field.include);
     const summaryStats = [
@@ -8099,15 +8117,16 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
-    // The card is now Automation, not just Schedule, so an output contract
-    // or configured storage destination is enough to surface it even when
-    // the task has never run on a cadence.
+    // The card is now "Automation & output", not just Schedule, so an output
+    // contract, configured storage destination, or a declared output shape is
+    // enough to surface it even when the task has never run on a cadence.
     const storageOwner = this.getTaskResultStorageTask();
     const hasContract = Array.isArray(storageOwner?.output_contract?.columns) && storageOwner.output_contract.columns.length > 0;
     const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
     const editingColumns = Array.isArray(this.resultContractDraft);
+    const hasStructuredOutput = this.hasStructuredOutputShape();
 
-    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns) {
+    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns && !hasStructuredOutput) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
       this.renderAutomationSections();
@@ -8145,7 +8164,12 @@ export class WorkspaceTaskPage {
       stats.push({ label: 'Mac Wake', value: `${this.task?.wake_lead_minutes || 5} min before` });
     }
 
-    const statsHtml = `
+    // Only show the run stats once there's schedule or run activity. A task
+    // that only surfaces this card because it declares an output shape (or a
+    // storage destination) hasn't run on a cadence, so a "Total Runs: 0 /
+    // Failures: 0" block would just be noise.
+    const showStats = hasSchedule || executionCount > 0 || failureCount > 0 || history.length > 0;
+    const statsHtml = showStats ? `
       <div class="workspace-task-schedule-stats">
         ${stats.map((s) => `
           <div class="workspace-task-schedule-stat">
@@ -8154,7 +8178,7 @@ export class WorkspaceTaskPage {
           </div>
         `).join('')}
       </div>
-    `;
+    ` : '';
 
     const bannerHtml = hasSchedule ? `
       <div class="workspace-task-schedule-banner" data-state="${scheduleEnabled ? 'enabled' : 'paused'}">

@@ -264,15 +264,15 @@
                 </div>
               </section>
 
-              <!-- Automation card (cadence + where results are stored) leads the
-                   output-config group; the more technical "Expected output
-                   shape" schema follows it so the human-facing Result above
-                   stays the focus for non-technical users. -->
+              <!-- Single "Automation & output" card: how/when the task runs,
+                   where results are saved, and (for structured tasks) the shape
+                   of those results. The schedule card id is kept so renderSchedule
+                   still owns this card's visibility; renderSchedule's visibility
+                   union now also accounts for a structured output spec. -->
               <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Automation</div>
-                    <h2>Schedule &amp; saved results</h2>
+                    <h2>Automation &amp; output</h2>
                   </div>
                   <div class="workspace-task-schedule-header-actions">
                     <!-- Lifted out of Advanced > storage so a task that writes
@@ -291,6 +291,15 @@
                 </div>
                 <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
                 <div id="workspace-task-automation-summary" class="workspace-task-automation-summary"></div>
+
+                <!-- Expected output shape, folded in as a subsection. Hidden by
+                     default; renderTaskOutputShape reveals it only when the task
+                     declares a structured schema / CSV contract. -->
+                <div id="workspace-task-output-shape-wrap" class="workspace-task-output-shape-section" hidden>
+                  <h3 class="workspace-task-page-subheading">Expected output shape</h3>
+                  <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
+                </div>
+
                 <details class="workspace-task-advanced">
                   <summary class="workspace-task-advanced-summary">Advanced settings</summary>
                   <div class="workspace-task-advanced-body">
@@ -298,19 +307,6 @@
                     <div id="workspace-task-automation-storage" class="workspace-task-automation-section"></div>
                   </div>
                 </details>
-              </section>
-
-              <!-- Hidden by default; renderTaskOutputShape reveals it only when
-                   the task declares a structured schema / CSV contract. Free-text
-                   tasks never show this card. -->
-              <section id="workspace-task-output-shape-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Output</div>
-                    <h2>Expected output shape</h2>
-                  </div>
-                </div>
-                <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
               </section>
             </div>
 
@@ -1278,6 +1274,22 @@
       align-items: center;
       gap: 0.5rem;
       flex-shrink: 0;
+    }
+
+    /* Subsections inside a card (e.g. "Expected output shape" folded into the
+       Automation & output card) are separated by a hairline rule and a small
+       serif subheading rather than getting their own card. */
+    .workspace-task-output-shape-section {
+      margin-top: 1.1rem;
+      padding-top: 1.1rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .workspace-task-page-subheading {
+      margin: 0 0 0.6rem;
+      font-family: "Fraunces", serif;
+      font-size: 1.02rem;
+      color: var(--text-primary);
     }
 
     .workspace-task-page-card-header.is-output-menu-open {
