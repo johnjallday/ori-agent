@@ -4030,6 +4030,10 @@ export class WorkspaceTaskPage {
             <h3>${this.escapeHtml(artifact.title || 'CSV-ready result')}</h3>
           </div>
           <div class="workspace-task-result-artifact-actions">
+            <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="export-result-artifact-csv" title="Download the full stored dataset as a CSV spreadsheet">
+              <i class="bi bi-download" aria-hidden="true"></i>
+              <span>Export CSV</span>
+            </button>
             <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="copy-result-artifact-csv">
               <i class="bi bi-clipboard" aria-hidden="true"></i>
               <span>Copy CSV</span>
@@ -4409,6 +4413,9 @@ export class WorkspaceTaskPage {
     const root = this.elements.output;
     if (!root) return;
 
+    root
+      .querySelector('[data-action="export-result-artifact-csv"]')
+      ?.addEventListener('click', () => this.exportResultArtifactCSV());
     root
       .querySelector('[data-action="copy-result-artifact-csv"]')
       ?.addEventListener('click', () => this.copyCurrentArtifactCSV());
@@ -5671,6 +5678,38 @@ export class WorkspaceTaskPage {
       return;
     }
     await this.copyToClipboard(csv, 'CSV copied');
+  }
+
+  // exportResultArtifactCSV downloads the full stored dataset as a CSV. The
+  // canonical dataset is JSONL on disk; the server derives a spreadsheet CSV
+  // on demand (data columns first). Unlike "Copy CSV" — which copies the
+  // in-page preview — this is the authoritative file with every appended run.
+  async exportResultArtifactCSV() {
+    if (!this.workspaceId || !this.taskId) return;
+    const url = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(this.taskId)}/results/export-csv`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const message = await this.extractErrorMessage(response).catch(() => '');
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = /filename="?([^"]+)"?/i.exec(disposition);
+      const filename = (match && match[1]) || `${this.taskId}.csv`;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      this.notify('success', 'CSV exported');
+    } catch (err) {
+      this.notify('error', `Couldn't export CSV: ${err.message || err}`);
+    }
   }
 
   setResultArtifactNoteSaving(saving) {
