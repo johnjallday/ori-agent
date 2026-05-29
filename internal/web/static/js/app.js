@@ -424,6 +424,30 @@ async function refreshAgentDisplay() {
 
 // ---- System Model Display ----
 
+let systemModelDisplayRequestId = 0;
+
+async function fetchSystemModelStatus() {
+  const options = { cache: 'no-store' };
+  let timeoutId = null;
+  let controller = null;
+
+  if (typeof AbortController !== 'undefined') {
+    controller = new AbortController();
+    options.signal = controller.signal;
+    timeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, 8000);
+  }
+
+  try {
+    return await fetch('/api/settings/system-model', options);
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
 // Fetch and display system model in navbar
 async function refreshSystemModelDisplay() {
   const modelNameEl = document.getElementById('systemModelName');
@@ -432,12 +456,15 @@ async function refreshSystemModelDisplay() {
 
   if (!modelNameEl || !providerEl) return;
 
+  const requestId = ++systemModelDisplayRequestId;
+
   try {
-    const response = await fetch('/api/settings/system-model');
+    const response = await fetchSystemModelStatus();
     if (!response.ok) {
       throw new Error('Failed to fetch system model');
     }
     const data = await response.json();
+    if (requestId !== systemModelDisplayRequestId) return;
 
     if (data.configured && data.model) {
       // Display model name (truncate if too long)
@@ -498,11 +525,14 @@ async function refreshSystemModelDisplay() {
 
     EventBus.emit('systemModel:loaded', data);
   } catch (error) {
+    if (requestId !== systemModelDisplayRequestId) return;
     appLog.error('Failed to load system model:', error);
     modelNameEl.textContent = 'Error';
     providerEl.style.display = 'none';
   }
 }
+
+window.refreshSystemModelDisplay = refreshSystemModelDisplay;
 
 // Listen for settings changes to update the model display
 EventBus.on('settings:saved', () => {
@@ -3035,9 +3065,6 @@ async function initializeApp() {
   // Load Assistant/session display state and restore any local Assistant history.
   await refreshAgentDisplay();
 
-  // Load system model display in navbar
-  await refreshSystemModelDisplay();
-
   // Initialize onboarding for first-time users
   try {
     const { onboardingManager } = await import('./modules/onboarding.js');
@@ -3053,7 +3080,18 @@ async function initializeApp() {
   EventBus.emit('app:initialized');
 }
 
+function refreshSystemModelDisplayIfVisible() {
+  if (document.hidden) return;
+  refreshSystemModelDisplay();
+}
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
+  // Keep the navbar out of the heavier app bootstrap path. Task/detail pages
+  // should resolve "Loading..." even if chat or dashboard initialization stalls.
+  refreshSystemModelDisplay();
   initializeApp();
 });
+
+window.addEventListener('pageshow', refreshSystemModelDisplayIfVisible);
+document.addEventListener('visibilitychange', refreshSystemModelDisplayIfVisible);
