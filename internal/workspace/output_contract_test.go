@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,11 +245,19 @@ func TestAutoStoreResult_AppendCSVUsesContractAndRecordsValidation(t *testing.T)
 
 	data, err := os.ReadFile(task.ResultStorage.FilePath)
 	if err != nil {
-		t.Fatalf("read csv: %v", err)
+		t.Fatalf("read jsonl: %v", err)
 	}
-	want := "date,location,pollen_count,high\n2026-05-20,NYC,8,true"
-	if string(data) != want {
-		t.Fatalf("csv = %q, want %q", string(data), want)
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &record); err != nil {
+		t.Fatalf("append output is not JSONL: %v (%q)", err, string(data))
+	}
+	for _, key := range []string{"date", "location", "pollen_count", "high"} {
+		if _, ok := record[key]; !ok {
+			t.Errorf("appended record missing contract field %q: %#v", key, record)
+		}
+	}
+	if record["run_id"] != "run-1" || record["status"] != "success" {
+		t.Errorf("appended record missing run metadata: %#v", record)
 	}
 
 	updated, err := store.Get(ws.ID)
@@ -330,10 +339,14 @@ func TestAutoStoreResult_NoContractKeepsExistingAppendBehavior(t *testing.T) {
 
 	data, err := os.ReadFile(task.ResultStorage.FilePath)
 	if err != nil {
-		t.Fatalf("read csv: %v", err)
+		t.Fatalf("read jsonl: %v", err)
 	}
-	if !strings.Contains(string(data), "task_id,description,timestamp,agent,result") {
-		t.Fatalf("expected legacy fallback csv, got %q", string(data))
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &record); err != nil {
+		t.Fatalf("fallback output is not JSONL: %v (%q)", err, string(data))
+	}
+	if record["result"] != "Pollen is high." || record["task_id"] != "task-1" {
+		t.Fatalf("expected fallback record with raw result, got %#v", record)
 	}
 
 	updated, err := store.Get(ws.ID)
