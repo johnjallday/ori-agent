@@ -942,11 +942,6 @@ export class WorkspaceTaskPage {
       detailsEditBtn: document.getElementById('workspace-task-details-edit'),
       status: document.getElementById('workspace-task-status'),
       heroActions: document.getElementById('workspace-task-hero-actions'),
-      heroPriority: document.getElementById('workspace-task-hero-priority'),
-      heroPriorityCopy: document.getElementById('workspace-task-hero-priority-copy'),
-      heroPriorityReason: document.getElementById('workspace-task-hero-priority-reason'),
-      heroPriorityReasonText: document.getElementById('workspace-task-hero-priority-reason-text'),
-      heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       overview: document.getElementById('workspace-task-overview'),
       heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
       heroAgent: document.getElementById('workspace-task-hero-agent'),
@@ -1078,10 +1073,7 @@ export class WorkspaceTaskPage {
       assistRetryBtn: document.getElementById('workspace-task-assist-retry'),
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
-      assistFailBtn: document.getElementById('workspace-task-assist-fail'),
-      assistPanel: document.getElementById('workspace-task-assist-panel'),
-      assistBackdrop: document.getElementById('workspace-task-assist-backdrop'),
-      assistCloseBtn: document.getElementById('workspace-task-assist-close')
+      assistFailBtn: document.getElementById('workspace-task-assist-fail')
     };
   }
 
@@ -1219,13 +1211,6 @@ export class WorkspaceTaskPage {
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.assistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.assistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
-    this.elements.assistCloseBtn?.addEventListener('click', () => this.toggleAssistPanel(false));
-    this.elements.assistBackdrop?.addEventListener('click', () => this.toggleAssistPanel(false));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.elements.assistPanel && !this.elements.assistPanel.hidden) {
-        this.toggleAssistPanel(false);
-      }
-    });
   }
 
   async loadData() {
@@ -2364,7 +2349,6 @@ export class WorkspaceTaskPage {
     dispatch('hero', () => this.renderHero(statusInfo));
     dispatch('heroActions', () => this.renderHeroActions(statusInfo));
     dispatch('heroAgent', () => this.renderHeroAgent(statusInfo));
-    dispatch('heroPriority', () => this.renderHeroPriority(statusInfo));
     dispatch('overview', () => this.renderOverview());
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
@@ -2451,7 +2435,6 @@ export class WorkspaceTaskPage {
         t.id, t.to, t.status,
         (this.availableAgents || []).map((a) => a?.name || '').sort().join('|'),
       ]),
-      heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
       overview: JSON.stringify([
         t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
         t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id, t.details,
@@ -2801,127 +2784,6 @@ export class WorkspaceTaskPage {
       if (this._renderCache) delete this._renderCache.heroActions;
       this.renderHeroActions(this.getTaskStatusPresentation());
     }
-  }
-
-  renderHeroPriority(statusInfo) {
-    if (!this.elements.heroPriority || !this.elements.heroPriorityCopy || !this.elements.heroPriorityActions) {
-      return;
-    }
-
-    const blocked = statusInfo.isBlocked && this.currentBlockedTask;
-    if (!blocked) {
-      this.elements.heroPriority.hidden = true;
-      this.elements.heroPriorityCopy.textContent = '';
-      if (this.elements.heroPriorityReason) {
-        this.elements.heroPriorityReason.hidden = true;
-      }
-      if (this.elements.heroPriorityReasonText) {
-        this.elements.heroPriorityReasonText.textContent = '';
-      }
-      this.elements.heroPriorityActions.innerHTML = '';
-      return;
-    }
-
-    const workflowStep = this.currentBlockedTask?.workflowStep || null;
-    const hasAgentResponse = Boolean(String(this.currentBlockedTask?.response || '').trim());
-    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'More Context';
-
-    this.elements.heroPriority.hidden = false;
-    const summary = this.getBlockedHeroSummary(workflowStep);
-    this.elements.heroPriorityCopy.textContent = summary;
-
-    // Show the raw blocked reason inline only when it adds information beyond
-    // the summary (which often is just the agent's question). This lets users
-    // see *why* the task is paused without scrolling to the assist card.
-    const rawReason = String(this.currentBlockedTask?.reason || '').trim();
-    const showReason = Boolean(rawReason) && rawReason !== summary;
-    if (this.elements.heroPriorityReason && this.elements.heroPriorityReasonText) {
-      if (showReason) {
-        this.elements.heroPriorityReasonText.textContent = rawReason;
-        this.elements.heroPriorityReason.hidden = false;
-      } else {
-        this.elements.heroPriorityReasonText.textContent = '';
-        this.elements.heroPriorityReason.hidden = true;
-      }
-    }
-    this.elements.heroPriorityActions.innerHTML = `
-      <button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-hero-priority-action="assist">
-        ${this.escapeHtml(this.getBlockedHeroPrimaryActionLabel(workflowStep))}
-      </button>
-      <button type="button" class="workspace-task-page-hero-btn" data-hero-priority-action="context">
-        ${this.escapeHtml(secondaryLabel)}
-      </button>
-    `;
-
-    this.elements.heroPriorityActions.querySelectorAll('[data-hero-priority-action]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const action = String(button.getAttribute('data-hero-priority-action') || '').trim();
-        if (action === 'assist') {
-          // The banner is now the sole entry into the assist panel (the
-          // floating Respond button has been retired). Open the panel and
-          // hand focus to its first interactive element after the slide-in
-          // animation has settled.
-          this.toggleAssistPanel(true);
-          window.setTimeout(() => {
-            const target = this.getAssistFocusTarget();
-            if (target && typeof target.focus === 'function') {
-              target.focus({ preventScroll: true });
-            }
-          }, 360);
-          return;
-        }
-        if (action === 'context') {
-          const focusTarget = this.elements.blockedRequestToggle && !this.elements.blockedRequestToggle.classList.contains('d-none')
-            ? this.elements.blockedRequestToggle
-            : null;
-          this.scrollToSection(this.elements.blockedContextCard, { focusTarget });
-        }
-      });
-    });
-  }
-
-  getBlockedHeroSummary(workflowStep) {
-    const question = String(this.currentBlockedTask?.question || '').trim();
-    if (question) {
-      return question;
-    }
-    return this.getAssistNeedsSummary(workflowStep);
-  }
-
-  getBlockedHeroPrimaryActionLabel(workflowStep) {
-    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing' &&
-        this.isAssistActionSuggested('switch_agent_retry') &&
-        !this.isAssistActionSuggested('continue_with_instruction')) {
-      return 'Switch Agent';
-    }
-    if (workflowStep?.stepType === 'ask_form') {
-      return 'Answer Questions';
-    }
-    if (workflowStep?.stepType === 'ask_choice') {
-      return 'Choose Next Step';
-    }
-    return 'Review And Continue';
-  }
-
-  scrollToSection(element, { focusTarget = null } = {}) {
-    if (!element) return;
-
-    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    const target = typeof focusTarget === 'function' ? focusTarget() : focusTarget;
-    if (!target || typeof target.focus !== 'function') return;
-
-    window.setTimeout(() => {
-      target.focus({ preventScroll: true });
-    }, 180);
-  }
-
-  getAssistFocusTarget() {
-    if (!this.elements.assistCard) return this.elements.assistContinueBtn || null;
-
-    return this.elements.assistCard.querySelector(
-      '[data-assist-choice-id]:not([disabled]), [data-assist-field-id]:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])'
-    ) || this.elements.assistContinueBtn || null;
   }
 
   renderOverview() {
@@ -8376,12 +8238,15 @@ export class WorkspaceTaskPage {
   renderBlockedState(statusInfo) {
     const blocked = statusInfo.isBlocked && this.currentBlockedTask;
 
+    // The respond UI is an inline card at the top of the flow (no slide-out).
+    // Toggle it with the blocked state; renderAssistCard fills its content.
     if (!blocked) {
-      this.toggleAssistPanel(false);
+      if (this.elements.assistCard) this.elements.assistCard.hidden = true;
       if (this.elements.blockedContextCard) this.elements.blockedContextCard.hidden = true;
       return;
     }
 
+    if (this.elements.assistCard) this.elements.assistCard.hidden = false;
     this.renderBlockedContext();
     this.renderAssistCard();
   }
@@ -9066,28 +8931,6 @@ export class WorkspaceTaskPage {
     this.renderBlockedContext();
   }
 
-  toggleAssistPanel(open) {
-    const panel = this.elements.assistPanel;
-    if (!panel) return;
-
-    clearTimeout(this._assistPanelCloseTimer);
-
-    if (open) {
-      panel.hidden = false;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          panel.classList.add('is-open');
-        });
-      });
-      document.body.style.overflow = 'hidden';
-    } else {
-      if (panel.hidden) return;
-      panel.classList.remove('is-open');
-      this._assistPanelCloseTimer = setTimeout(() => { panel.hidden = true; }, 340);
-      document.body.style.overflow = '';
-    }
-  }
-
   setAssistButtonsDisabled(disabled) {
     [
       this.elements.assistRetryBtn,
@@ -9335,7 +9178,8 @@ export class WorkspaceTaskPage {
       }
 
       this.notify('success', 'Task updated');
-      this.toggleAssistPanel(false);
+      // No explicit close: the inline respond card hides itself on the next
+      // render (renderBlockedState) once loadData shows the task is unblocked.
       if (this.elements.assistMessage) {
         this.elements.assistMessage.value = '';
       }
