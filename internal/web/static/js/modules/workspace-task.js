@@ -3873,14 +3873,38 @@ export class WorkspaceTaskPage {
   renderResultArtifact(artifact) {
     if (!artifact || !Array.isArray(artifact.columns) || !Array.isArray(artifact.rows)) return '';
 
-    const columns = artifact.columns;
+    const rawColumns = artifact.columns;
     const rows = artifact.rows;
-    const previewRows = rows.slice(0, 12);
+
+    // The preview shows only the task's actual output columns. Run bookkeeping
+    // (run_id, executed_at, status, duration_ms, validation / storage status)
+    // is still written to the CSV but dropped from the on-page preview, where
+    // it was audit noise that buried the real data off-screen.
+    const metaNames = new Set(
+      this.getOutputSpecMetadataFields().map((field) => String(field.name || '').trim().toLowerCase())
+    );
+    ['run_id', 'executed_at', 'status', 'duration_ms', 'validation_status', 'storage_status']
+      .forEach((name) => metaNames.add(name));
+    const isRunMetaColumn = (column) => metaNames.has(String(column || '').trim().toLowerCase());
+    const dataColumns = rawColumns.filter((column) => !isRunMetaColumn(column));
+    // Guard: if a task somehow declares only run metadata, keep showing every
+    // column rather than rendering an empty table.
+    const columns = dataColumns.length > 0 ? dataColumns : rawColumns;
+    const hiddenMetaCount = dataColumns.length > 0 ? rawColumns.length - dataColumns.length : 0;
+
+    const previewRows = rows.slice(0, 5);
     const hiddenRows = Math.max(0, rows.length - previewRows.length);
     const sourceLabel = this.getArtifactSourceLabel(artifact.source);
     const rowLabel = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
-    const columnLabel = `${columns.length} column${columns.length === 1 ? '' : 's'}`;
+    // The badge counts the full CSV (data + run-info), matching the row badge;
+    // the footer note explains the columns the preview omits.
+    const columnLabel = `${rawColumns.length} column${rawColumns.length === 1 ? '' : 's'}`;
     const savingLabel = this.resultArtifactNoteSaving ? 'Saving...' : 'Save CSV note';
+
+    const truncationParts = [];
+    if (hiddenRows > 0) truncationParts.push(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'}`);
+    if (hiddenMetaCount > 0) truncationParts.push(`${hiddenMetaCount} run-info column${hiddenMetaCount === 1 ? '' : 's'}`);
+    const truncationNote = truncationParts.length ? `${truncationParts.join(' · ')} in CSV` : '';
 
     const headHtml = columns
       .map((column) => `<th scope="col">${this.escapeHtml(column)}</th>`)
@@ -4030,7 +4054,7 @@ export class WorkspaceTaskPage {
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
-        ${hiddenRows > 0 ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'} in CSV`)}</div>` : ''}
+        ${truncationNote ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(truncationNote)}</div>` : ''}
       </section>
     `;
   }
