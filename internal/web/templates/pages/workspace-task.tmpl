@@ -127,16 +127,11 @@
 
         <div id="workspace-task-page-content" class="workspace-task-page-layout" hidden>
           <main class="workspace-task-page-main">
-            <div class="workspace-task-page-tabs" role="tablist" aria-label="Task sections">
-              <button type="button" class="workspace-task-page-tab is-active" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="workspace-task-tab-overview" id="workspace-task-tab-button-overview">Overview</button>
-              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">
-                <span>Activity</span>
-                <span id="workspace-task-tab-activity-count" class="workspace-task-page-tab-count" hidden aria-hidden="true"></span>
-              </button>
-              <button type="button" class="workspace-task-page-tab" data-task-tab="developer" role="tab" aria-selected="false" aria-controls="workspace-task-tab-developer" id="workspace-task-tab-button-developer">Developer</button>
-            </div>
-
-            <div id="workspace-task-tab-overview" class="workspace-task-tab-pane is-active" role="tabpanel" aria-labelledby="workspace-task-tab-button-overview">
+            <!-- Single flow: the 3-tab structure (Overview / Activity /
+                 Developer) was removed in the simplification pass. Cards now
+                 stack in one scroll; each self-hides when it has nothing to
+                 show, and the developer-facing cards are grouped in a collapsed
+                 disclosure at the bottom. -->
               <section class="workspace-task-page-card">
                 <div class="workspace-task-page-card-header">
                   <div>
@@ -308,9 +303,7 @@
                   </div>
                 </details>
               </section>
-            </div>
 
-            <div id="workspace-task-tab-activity" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-activity" hidden>
               <section id="workspace-task-workspace-runs-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
@@ -349,18 +342,17 @@
                 <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
               </section>
 
-              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
-                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
-              </div>
-            </div>
+              <!-- Developer-facing cards (raw IDs, run trace, technical context)
+                   grouped and collapsed by default so they stay out of the way
+                   of the everyday task view. -->
+              <details class="workspace-task-developer-group">
+                <summary class="workspace-task-developer-summary">Developer details</summary>
 
-            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
-              <section class="workspace-task-page-card">
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Developer</div>
-                    <h2>Task ID</h2>
-                  </div>
+                <section class="workspace-task-page-card">
+                  <div class="workspace-task-page-card-header">
+                    <div>
+                      <h2>Task ID</h2>
+                    </div>
                   <button
                     type="button"
                     id="workspace-task-copy-id"
@@ -409,7 +401,7 @@
                 </div>
                 <div id="workspace-task-context"></div>
               </section>
-            </div>
+              </details>
           </main>
         </div>
 
@@ -1160,81 +1152,46 @@
       background: rgba(248, 113, 113, 0.08);
     }
 
-    .workspace-task-page-tabs {
-      display: inline-flex;
-      gap: 0.35rem;
-      padding: 0.35rem;
-      border-radius: 14px;
-      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
-      border: 1px solid var(--border-color);
+    /* Collapsible "Developer details" group (replaces the old Developer tab).
+       Borderless so the flat cards inside don't become boxes-in-a-box; the
+       summary is a quiet toggle and the cards stack below it when open. */
+    .workspace-task-developer-summary {
+      list-style: none;
+      cursor: pointer;
       width: fit-content;
-    }
-
-    .workspace-task-page-tab {
-      appearance: none;
+      padding: 0.4rem 0;
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      font-weight: 700;
       display: inline-flex;
       align-items: center;
       gap: 0.45rem;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 0.85rem;
-      font-weight: 600;
-      padding: 0.5rem 1rem;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     }
 
-    .workspace-task-page-tab:hover {
-      color: var(--text-primary);
+    .workspace-task-developer-summary::-webkit-details-marker {
+      display: none;
     }
 
-    .workspace-task-page-tab.is-active {
-      background: var(--bg-primary);
-      border-color: var(--border-color);
-      color: var(--text-primary);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    .workspace-task-developer-summary::before {
+      content: "▸";
+      font-size: 0.8em;
+      transition: transform 0.15s ease;
     }
 
-    .workspace-task-page-tab-count {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 1.3rem;
-      padding: 0 0.35rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
-      color: var(--text-secondary);
-      font-size: 0.68rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
+    .workspace-task-developer-group[open] .workspace-task-developer-summary::before {
+      transform: rotate(90deg);
     }
 
-    .workspace-task-page-tab.is-active .workspace-task-page-tab-count {
-      background: color-mix(in srgb, var(--primary-color) 22%, transparent);
-      color: var(--primary-color);
+    .workspace-task-developer-group[open] .workspace-task-developer-summary {
+      margin-bottom: 1.25rem;
     }
 
-    .workspace-task-tab-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
+    .workspace-task-developer-group > .workspace-task-page-card {
+      margin-bottom: 1.25rem;
     }
 
-    .workspace-task-tab-pane[hidden] {
-      display: none !important;
-    }
-
-    .workspace-task-tab-empty {
-      padding: 1.5rem;
-      text-align: center;
-      color: var(--text-secondary);
-    }
-
-    .workspace-task-tab-empty-copy {
-      margin: 0;
-      font-size: 0.9rem;
+    .workspace-task-developer-group > .workspace-task-page-card:last-of-type {
+      margin-bottom: 0;
     }
 
     /* Simplification pass: flat card — single surface, hairline border, no

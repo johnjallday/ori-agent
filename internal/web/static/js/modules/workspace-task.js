@@ -865,12 +865,6 @@ export class WorkspaceTaskPage {
     // so users can tell a still-spinning task is making progress.
     this._latestActivity = null;
     this._activityTickHandle = null;
-    // Tab state (Overview / Activity / Developer). Defaults to Overview but
-    // auto-switches to Activity for failed/cancelled/timeout tasks on first
-    // load so debugging starts in the right place. _taskTabUserPicked turns
-    // true once a user clicks a tab, suppressing further auto-switching.
-    this._taskTab = 'overview';
-    this._taskTabUserPicked = false;
     // Follow-up form lives inline under the result card; only one instance
     // open at a time. _followupSubmitting prevents double-submits.
     this._followupOpen = false;
@@ -1063,13 +1057,6 @@ export class WorkspaceTaskPage {
       scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
       contextCard: document.getElementById('workspace-task-context-card'),
       context: document.getElementById('workspace-task-context'),
-      tabButtons: Array.from(document.querySelectorAll('.workspace-task-page-tab')),
-      tabPanes: {
-        overview: document.getElementById('workspace-task-tab-overview'),
-        activity: document.getElementById('workspace-task-tab-activity'),
-        developer: document.getElementById('workspace-task-tab-developer')
-      },
-      activityEmpty: document.getElementById('workspace-task-activity-empty'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
       blockedReason: document.getElementById('workspace-task-blocked-reason'),
       blockedRequestWrap: document.getElementById('workspace-task-blocked-request-wrap'),
@@ -1128,18 +1115,6 @@ export class WorkspaceTaskPage {
         btn.addEventListener('click', () => {
           const next = btn.getAttribute('data-runs-tab') || 'runs';
           this.setRunsTab(next);
-        });
-      });
-    }
-    if (Array.isArray(this.elements.tabButtons)) {
-      this.elements.tabButtons.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const next = btn.getAttribute('data-task-tab') || 'overview';
-          // Sticky for the rest of the session: once the user picks a tab,
-          // don't fight them by auto-switching back to a status-based default
-          // on the next data refresh.
-          this._taskTabUserPicked = true;
-          this.setTaskTab(next);
         });
       });
     }
@@ -2369,14 +2344,6 @@ export class WorkspaceTaskPage {
     this.taskAssistResponseExpanded = false;
     this.assistReviewMode = false;
 
-    // Pick a default tab on first render based on task status. After the user
-    // clicks a tab we never override their choice.
-    if (!this._taskTabUserPicked) {
-      this.setTaskTab(this.defaultTaskTab());
-    } else {
-      this.refreshTaskTabEmptyStates();
-    }
-
     // Selective rendering: each sub-render is only invoked when its inputs
     // actually changed since the previous render. The first render after
     // page load (or after forceFullRender()) fills the cache and triggers
@@ -2408,10 +2375,6 @@ export class WorkspaceTaskPage {
     dispatch('schedule', () => this.renderSchedule());
     dispatch('context', () => this.renderContext());
     dispatch('blockedState', () => this.renderBlockedState(statusInfo));
-
-    // Tab visibility depends on which cards ended up hidden after the
-    // sub-renders — refresh the per-tab empty placeholders here.
-    this.refreshTaskTabEmptyStates();
   }
 
   // forceFullRender clears the per-section input cache so the next render()
@@ -4679,7 +4642,6 @@ export class WorkspaceTaskPage {
       try {
         if (this._renderCache) delete this._renderCache.schedule;
         this.renderSchedule();
-        this.refreshTaskTabEmptyStates();
         return;
       } catch (error) {
         console.warn('Failed to re-render Automation card; falling back to data reload:', error);
@@ -8386,79 +8348,6 @@ export class WorkspaceTaskPage {
     this.renderRunsCard();
   }
 
-  // defaultTaskTab returns which top-level tab should be active for a fresh
-  // page load given the task's current status. Failed/cancelled/timeout
-  // surface Activity (so debugging starts on the run history) and everything
-  // else opens to Overview.
-  defaultTaskTab() {
-    const status = String(this.task?.status || '').trim().toLowerCase();
-    if (status === 'failed' || status === 'cancelled' || status === 'timeout') {
-      return 'activity';
-    }
-    return 'overview';
-  }
-
-  setTaskTab(name) {
-    const valid = ['overview', 'activity', 'developer'];
-    const next = valid.includes(name) ? name : 'overview';
-    this._taskTab = next;
-
-    if (Array.isArray(this.elements.tabButtons)) {
-      this.elements.tabButtons.forEach((btn) => {
-        const isActive = btn.getAttribute('data-task-tab') === next;
-        btn.classList.toggle('is-active', isActive);
-        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
-      });
-    }
-
-    const panes = this.elements.tabPanes || {};
-    for (const key of valid) {
-      const pane = panes[key];
-      if (!pane) continue;
-      const isActive = key === next;
-      pane.hidden = !isActive;
-      pane.classList.toggle('is-active', isActive);
-    }
-
-    this.refreshTaskTabEmptyStates();
-  }
-
-  // refreshTaskTabEmptyStates shows a small "nothing yet" message inside
-  // Activity / Developer when their cards are all hidden — without it those
-  // tabs would render as empty whitespace and feel broken.
-  refreshTaskTabEmptyStates() {
-    const visible = (el) => el && !el.hidden;
-
-    // Run details (workspace-task-runs-card) moved to the Developer tab, so it
-    // no longer counts toward Activity's populated state.
-    const activityCards = [
-      document.getElementById('workspace-task-workspace-runs-card'),
-      document.getElementById('workspace-task-relationships-card'),
-      document.getElementById('workspace-task-workflow-card')
-    ];
-    const populatedActivityCount = activityCards.filter(visible).length;
-
-    if (this.elements.activityEmpty) {
-      this.elements.activityEmpty.hidden = populatedActivityCount > 0;
-    }
-
-    // Mirror the populated-subcard count onto the Activity tab button so
-    // the user can tell from the tab row whether anything's worth opening,
-    // rather than having to click in to find empty placeholders.
-    const activityCount = document.getElementById('workspace-task-tab-activity-count');
-    if (activityCount) {
-      if (populatedActivityCount > 0) {
-        activityCount.hidden = false;
-        activityCount.textContent = String(populatedActivityCount);
-      } else {
-        activityCount.hidden = true;
-        activityCount.textContent = '';
-      }
-    }
-
-    // The Developer tab always has the Task ID card, so it never needs an
-    // empty-state placeholder.
-  }
 
   renderContext() {
     if (!this.elements.context || !this.elements.contextCard) return;
