@@ -938,6 +938,9 @@ export class WorkspaceTaskPage {
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
+      heroOverflow: document.querySelector('.workspace-task-hero-overflow'),
+      heroOverflowToggle: document.getElementById('workspace-task-hero-overflow-toggle'),
+      heroOverflowMenu: document.getElementById('workspace-task-hero-overflow-menu'),
       subtitle: document.getElementById('workspace-task-subtitle'),
       detailsEditBtn: document.getElementById('workspace-task-details-edit'),
       status: document.getElementById('workspace-task-status'),
@@ -1126,8 +1129,29 @@ export class WorkspaceTaskPage {
     this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
     this.elements.followupDetailsToggle?.addEventListener('click', () => this.toggleFollowupDetails());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
-    this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
-    this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
+    this.elements.copyLinkBtn?.addEventListener('click', () => {
+      this.copyToClipboard(window.location.href, 'Link copied');
+      this.setHeroOverflowOpen(false);
+    });
+    this.elements.deleteBtn?.addEventListener('click', () => {
+      this.setHeroOverflowOpen(false);
+      this.deleteTask();
+    });
+    this.elements.heroOverflowToggle?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.setHeroOverflowOpen(this.elements.heroOverflow?.dataset.open !== 'true');
+    });
+    document.addEventListener('click', (event) => {
+      if (this.elements.heroOverflow?.dataset.open !== 'true') return;
+      if (this.elements.heroOverflow.contains(event.target)) return;
+      this.setHeroOverflowOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.elements.heroOverflow?.dataset.open === 'true') {
+        this.setHeroOverflowOpen(false);
+        this.elements.heroOverflowToggle?.focus();
+      }
+    });
     this.elements.outputCopyBtn?.addEventListener('click', () => {
       this.copyCurrentResult();
       this.setOutputOverflowOpen(false);
@@ -1810,6 +1834,19 @@ export class WorkspaceTaskPage {
       this.render();
     }
     return this.task;
+  }
+
+  // setHeroOverflowOpen toggles the hero "more actions" menu (Copy link,
+  // Delete). CSS-positioned (the hero doesn't clip it), so this only syncs the
+  // data-open / aria-expanded / hidden state.
+  setHeroOverflowOpen(open) {
+    const container = this.elements.heroOverflow;
+    const toggle = this.elements.heroOverflowToggle;
+    const menu = this.elements.heroOverflowMenu;
+    if (!container || !toggle || !menu) return;
+    container.dataset.open = open ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    menu.hidden = !open;
   }
 
   // setOutputOverflowOpen drives the demoted-actions popover (Copy,
@@ -2791,17 +2828,24 @@ export class WorkspaceTaskPage {
 
     const progress = this.task?.progress;
     const isBlocked = Boolean(this.currentBlockedTask);
+    const status = String(this.task?.status || '').trim().toLowerCase();
 
-    // Keep the default Overview to the essentials a non-technical user cares
-    // about. Configuration internals (execution mode, orchestration mode,
-    // template ref) are intentionally omitted here — they remain in the
-    // Developer tab's Technical details (raw context).
-    const items = [
-      {
+    // Keep the overview to the essentials a non-technical user cares about.
+    // Configuration internals (execution mode, orchestration mode, template
+    // ref) are intentionally omitted here — they remain in the collapsed
+    // Developer details (raw context).
+    const items = [];
+
+    // Agent is shown as the hero picker whenever the task is reassignable
+    // (not running, not blocked). Only repeat it in the overview grid when
+    // that picker is hidden, so the agent is visible exactly once.
+    const agentShownInHero = status !== 'in_progress' && !isBlocked;
+    if (!agentShownInHero) {
+      items.push({
         title: 'Agent',
         value: String(this.task?.to || 'Unassigned').trim() || 'Unassigned'
-      }
-    ];
+      });
+    }
 
     // "Requested By" is only meaningful when something other than the
     // workspace itself created the task; hide the noisy default.

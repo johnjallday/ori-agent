@@ -36,27 +36,34 @@
                 tabindex="0"
                 role="button"
                 aria-label="Edit task title">Loading task...</h1>
+              <!-- Copy link + Delete folded into a single overflow menu so the
+                   title row stays clean and the destructive Delete is one step
+                   removed from an accidental click. The button ids are kept so
+                   their existing handlers still bind. -->
               <div class="workspace-task-page-title-actions">
-                <button
-                  type="button"
-                  id="workspace-task-copy-link"
-                  class="workspace-task-page-icon-btn"
-                  aria-label="Copy link to task"
-                  title="Copy link to task">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.64L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  id="workspace-task-delete"
-                  class="workspace-task-page-icon-btn workspace-task-page-icon-btn-danger"
-                  aria-label="Delete task"
-                  title="Delete task">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-                  </svg>
-                </button>
+                <div class="workspace-task-hero-overflow" data-open="false">
+                  <button
+                    type="button"
+                    id="workspace-task-hero-overflow-toggle"
+                    class="workspace-task-page-icon-btn"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="workspace-task-hero-overflow-menu"
+                    aria-label="More task actions"
+                    title="More actions">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"/></svg>
+                  </button>
+                  <div id="workspace-task-hero-overflow-menu" class="workspace-task-hero-overflow-menu" role="menu" hidden>
+                    <button type="button" id="workspace-task-copy-link" class="workspace-task-hero-overflow-item" role="menuitem">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.64L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/></svg>
+                      <span>Copy link</span>
+                    </button>
+                    <button type="button" id="workspace-task-delete" class="workspace-task-hero-overflow-item workspace-task-hero-overflow-item-danger" role="menuitem">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
+                      <span>Delete task</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="workspace-task-page-subtitle-row">
@@ -581,6 +588,55 @@
       gap: 0.35rem;
       margin-top: 0.45rem;
       flex-shrink: 0;
+    }
+
+    /* Hero "more actions" overflow menu (Copy link, Delete). */
+    .workspace-task-hero-overflow {
+      position: relative;
+    }
+
+    .workspace-task-hero-overflow-menu {
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      right: 0;
+      z-index: 20;
+      min-width: 11rem;
+      padding: 0.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      background: var(--bg-primary);
+      box-shadow: 0 10px 30px rgba(10, 10, 10, 0.16);
+    }
+
+    .workspace-task-hero-overflow-item {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workspace-task-hero-overflow-item:hover {
+      background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+    }
+
+    .workspace-task-hero-overflow-item-danger {
+      color: #c23b3b;
+    }
+
+    .workspace-task-hero-overflow-item-danger:hover {
+      background: rgba(194, 59, 59, 0.1);
     }
 
     .workspace-task-page-icon-btn {
