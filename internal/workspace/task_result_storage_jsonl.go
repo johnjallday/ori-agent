@@ -162,6 +162,44 @@ func structuredRecordsFromValue(value any) []map[string]any {
 	}
 }
 
+// BuildAppendJSONL produces the newline-delimited JSON a run appends to its
+// dataset file. It prefers the validated/normalized record from output-spec
+// validation (so it matches what schema validation accepted) and otherwise
+// extracts records from the task's structured output or raw result. Run
+// metadata (run_id, executed_at, status, duration_ms, and validation/storage
+// status) is merged into every record without overwriting data fields. This is
+// the JSONL counterpart to the contractCSV the storage path used to build.
+func BuildAppendJSONL(task *Task, result string, validation *TaskValidationResult) (string, error) {
+	metadata := map[string]any{}
+	for key, value := range latestTaskOutputMetadata(task) {
+		metadata[key] = value
+	}
+	if validation != nil {
+		if status := strings.TrimSpace(string(validation.ValidationStatus)); status != "" {
+			metadata["validation_status"] = status
+		}
+		if status := strings.TrimSpace(string(validation.StorageStatus)); status != "" {
+			metadata["storage_status"] = status
+		}
+	}
+
+	if validation != nil && validation.NormalizedRow != nil {
+		record := cloneTaskOutputNormalizedRow(validation.NormalizedRow)
+		if record == nil {
+			record = map[string]any{}
+		}
+		for key, value := range metadata {
+			if _, exists := record[key]; exists {
+				continue
+			}
+			record[key] = value
+		}
+		return MarshalJSONLRecords([]map[string]any{record})
+	}
+
+	return MarshalJSONLRecords(TaskResultToJSONLRecords(task, result, metadata))
+}
+
 // MarshalJSONLRecords renders records as newline-delimited JSON: one compact
 // object per line, with a trailing newline after each.
 func MarshalJSONLRecords(records []map[string]any) (string, error) {

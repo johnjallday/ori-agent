@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +149,45 @@ func TestExportCSVFromJSONLRejectsBadLine(t *testing.T) {
 	_, err := ExportCSVFromJSONL("{\"ok\":1}\nnot json", nil)
 	if err == nil {
 		t.Fatal("expected an error for a malformed JSONL line")
+	}
+}
+
+func TestBuildAppendJSONLUsesValidatedRow(t *testing.T) {
+	validation := &TaskValidationResult{
+		ValidationStatus: TaskValidationPassed,
+		NormalizedRow:    map[string]any{"date": "2026-05-09", "pollen_index": "7"},
+	}
+	out, err := BuildAppendJSONL(&Task{ID: "t"}, "ignored raw result", validation)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	line := strings.TrimSpace(out)
+	if strings.Count(line, "\n") != 0 {
+		t.Fatalf("expected a single JSONL line, got %q", out)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(line), &record); err != nil {
+		t.Fatalf("invalid JSONL: %v", err)
+	}
+	if record["date"] != "2026-05-09" || record["pollen_index"] != "7" {
+		t.Errorf("validated row not carried through: %#v", record)
+	}
+	if record["validation_status"] != string(TaskValidationPassed) {
+		t.Errorf("validation_status not merged: %#v", record)
+	}
+}
+
+func TestBuildAppendJSONLFallsBackToResult(t *testing.T) {
+	out, err := BuildAppendJSONL(&Task{ID: "t"}, `{"date":"2026-05-12","level":"low"}`, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &record); err != nil {
+		t.Fatalf("invalid JSONL: %v", err)
+	}
+	if record["date"] != "2026-05-12" || record["level"] != "low" {
+		t.Errorf("fallback did not extract result fields: %#v", record)
 	}
 }
 
