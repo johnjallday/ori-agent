@@ -2949,17 +2949,18 @@ export class WorkspaceTaskPage {
         `;
       }
 
+      // Build the value HTML separately and inline it with no surrounding
+      // whitespace: the value uses white-space: pre-wrap (to preserve real line
+      // breaks in a multi-line Task Details brief), so any newlines/indentation
+      // between the <div> tags and ${...} would render as stray blank lines and
+      // a leading indent.
+      const valueHtml = item.href
+        ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
+        : this.escapeHtml(item.value);
       return `
         <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
-          <div class="workspace-task-overview-title">
-            ${this.escapeHtml(item.title)}
-            ${renderEditButton(item)}
-          </div>
-          <div class="workspace-task-overview-value">
-            ${item.href
-              ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
-              : this.escapeHtml(item.value)}
-          </div>
+          <div class="workspace-task-overview-title">${this.escapeHtml(item.title)}${renderEditButton(item)}</div>
+          <div class="workspace-task-overview-value">${valueHtml}</div>
         </article>
       `;
     }).join('');
