@@ -1627,6 +1627,47 @@
       font-weight: 700;
     }
 
+    /* Collapsed wrapper for the run-history dataset, so the Result leads and
+       the CSV preview stays tucked away. Borderless — the artifact section
+       inside keeps its own surface, so there's no box-in-box. */
+    .workspace-task-result-artifact-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      width: fit-content;
+      padding: 0.4rem 0;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-result-artifact-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-result-artifact-summary::before {
+      content: "▸";
+      color: var(--text-secondary);
+      font-size: 0.8em;
+      transition: transform 0.15s ease;
+    }
+
+    .workspace-task-result-artifact-disclosure[open] .workspace-task-result-artifact-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-task-result-artifact-disclosure[open] .workspace-task-result-artifact-summary {
+      margin-bottom: 0.75rem;
+    }
+
+    .workspace-task-result-artifact-summary-meta {
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.82rem;
+    }
+
     .workspace-task-result-artifact {
       margin-bottom: 1rem;
       padding: 1rem;

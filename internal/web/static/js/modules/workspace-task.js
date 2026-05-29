@@ -6398,13 +6398,31 @@ export class WorkspaceTaskPage {
     if (reviewPanel) {
       blocks.push(reviewPanel);
     }
-    if (artifact) {
-      blocks.push(this.renderResultArtifact(artifact));
-    }
     if (result) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
         ${this.renderMarkdownOrPre(result)}
+      `);
+    }
+    // The accumulated run-history dataset (the CSV across every run) is
+    // secondary to the latest result, so tuck it into a disclosure: collapsed
+    // when there's a result to lead with, expanded when the dataset is the only
+    // output this task produced.
+    if (artifact) {
+      const datasetRows = Array.isArray(artifact.rows) ? artifact.rows.length : 0;
+      const datasetCols = Array.isArray(artifact.columns) ? artifact.columns.length : 0;
+      const datasetMeta = [
+        datasetRows ? `${datasetRows} row${datasetRows === 1 ? '' : 's'}` : '',
+        datasetCols ? `${datasetCols} column${datasetCols === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' · ');
+      blocks.push(`
+        <details class="workspace-task-result-artifact-disclosure"${result ? '' : ' open'}>
+          <summary class="workspace-task-result-artifact-summary">
+            <span class="workspace-task-result-artifact-summary-title">${this.escapeHtml(artifact.title || 'Dataset')}</span>
+            ${datasetMeta ? `<span class="workspace-task-result-artifact-summary-meta">${this.escapeHtml(datasetMeta)}</span>` : ''}
+          </summary>
+          ${this.renderResultArtifact(artifact)}
+        </details>
       `);
     }
     // Entry point to structure a plain-text result into CSV columns. The
