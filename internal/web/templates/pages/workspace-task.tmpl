@@ -264,26 +264,30 @@
                 </div>
               </section>
 
-              <section id="workspace-task-output-shape-card" class="workspace-task-page-card">
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Output</div>
-                    <h2>Expected output shape</h2>
-                  </div>
-                </div>
-                <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
-              </section>
-
+              <!-- Automation card (cadence + where results are stored) leads the
+                   output-config group; the more technical "Expected output
+                   shape" schema follows it so the human-facing Result above
+                   stays the focus for non-technical users. -->
               <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Automation</div>
                     <h2>Schedule &amp; saved results</h2>
                   </div>
-                  <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
-                    <i class="bi bi-calendar2-week" aria-hidden="true"></i>
-                    <span>Edit schedule</span>
-                  </button>
+                  <div class="workspace-task-schedule-header-actions">
+                    <!-- Lifted out of Advanced > storage so a task that writes
+                         to the default output folder exposes the reveal action
+                         at the card level. Toggled by renderSchedule based on
+                         whether storage targets the default folder. -->
+                    <button type="button" id="workspace-task-schedule-open-folder" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn" hidden>
+                      <i class="bi bi-folder2-open" aria-hidden="true"></i>
+                      <span>Open output folder</span>
+                    </button>
+                    <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
+                      <i class="bi bi-calendar2-week" aria-hidden="true"></i>
+                      <span>Edit schedule</span>
+                    </button>
+                  </div>
                 </div>
                 <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
                 <div id="workspace-task-automation-summary" class="workspace-task-automation-summary"></div>
@@ -294,6 +298,19 @@
                     <div id="workspace-task-automation-storage" class="workspace-task-automation-section"></div>
                   </div>
                 </details>
+              </section>
+
+              <!-- Hidden by default; renderTaskOutputShape reveals it only when
+                   the task declares a structured schema / CSV contract. Free-text
+                   tasks never show this card. -->
+              <section id="workspace-task-output-shape-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Output</div>
+                    <h2>Expected output shape</h2>
+                  </div>
+                </div>
+                <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
               </section>
             </div>
 
@@ -1259,6 +1276,14 @@
       justify-content: space-between;
       gap: 1rem;
       margin-bottom: 1rem;
+    }
+
+    .workspace-task-schedule-header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
     }
 
     .workspace-task-page-card-header.is-output-menu-open {
@@ -2393,23 +2418,6 @@
     .workspace-task-output-shape-chip[data-included="false"] {
       opacity: 0.5;
       text-decoration: line-through;
-    }
-
-    .workspace-task-output-shape-empty {
-      padding: 0.9rem;
-      border-radius: 10px;
-      border: 1px dashed var(--border-color);
-      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
-      color: var(--text-secondary, #6b7280);
-      font-size: 0.86rem;
-      line-height: 1.45;
-    }
-
-    .workspace-task-output-shape-empty strong {
-      display: block;
-      color: var(--text-primary);
-      font-size: 0.92rem;
-      margin-bottom: 0.2rem;
     }
 
     .workspace-task-automation-storage-select,

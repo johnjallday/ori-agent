@@ -1032,6 +1032,7 @@ export class WorkspaceTaskPage {
       automationColumns: document.getElementById('workspace-task-automation-columns'),
       automationStorage: document.getElementById('workspace-task-automation-storage'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
+      scheduleOpenFolderBtn: document.getElementById('workspace-task-schedule-open-folder'),
       scheduleModal: document.getElementById('workspace-task-schedule-modal'),
       scheduleModalHeading: document.getElementById('workspace-task-schedule-heading'),
       scheduleModalMeta: document.getElementById('workspace-task-schedule-modal-meta'),
@@ -1216,6 +1217,7 @@ export class WorkspaceTaskPage {
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
+    this.elements.scheduleOpenFolderBtn?.addEventListener('click', () => this.openWorkspaceOutputDir());
     this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
     this.elements.scheduleWakeMacInput?.addEventListener('change', () => this.updateScheduleModalFields());
     [
@@ -6351,15 +6353,17 @@ export class WorkspaceTaskPage {
 
     const hasAnyStructure = schemaFields.length > 0 || contractColumns.length > 0;
 
+    // Hide the entire card on free-text tasks. The "Expected output shape" panel
+    // only carries meaning when the task declares a JSON schema or CSV contract;
+    // a developer-flavored empty state ("add a spec to enforce a JSON shape…")
+    // doesn't belong on the Overview tab, which is otherwise kept to the
+    // non-technical essentials. The spec is still editable from the task modal.
     if (!hasAnyStructure) {
-      this.elements.outputShape.innerHTML = `
-        <div class="workspace-task-output-shape-empty">
-          <strong>Free-text output</strong>
-          The task currently has no structured output spec. The agent returns natural language and the result is stored on each run record as-is.
-          Add a spec in Automation &gt; Advanced settings to enforce a JSON shape and project results into CSV columns.
-        </div>`;
+      this.elements.outputShapeCard.hidden = true;
+      this.elements.outputShape.innerHTML = '';
       return;
     }
+    this.elements.outputShapeCard.hidden = false;
 
     const includedMetadata = metadataFields.filter((field) => field.include);
     const summaryStats = [
@@ -8111,6 +8115,22 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.scheduleCard.hidden = false;
+
+    // Surface the "Open output folder" action in the card header whenever the
+    // task writes to the workspace's default output folder. Store-node and
+    // explicit-path destinations are skipped because openWorkspaceOutputDir
+    // only reveals the default folder; for those the buried per-destination
+    // control in Advanced > storage remains the right entry point.
+    if (this.elements.scheduleOpenFolderBtn) {
+      const storage = storageOwner?.result_storage || null;
+      const usesDefaultOutputDir = Boolean(storage?.enabled)
+        && !String(storage.store_node_id || '').trim()
+        && String(storage.storage_target || '').trim() !== 'workspace_folder'
+        && !String(storage.file_path || '').trim();
+      this.elements.scheduleOpenFolderBtn.hidden = !usesDefaultOutputDir;
+      const labelSpan = this.elements.scheduleOpenFolderBtn.querySelector('span');
+      if (labelSpan) labelSpan.textContent = this.fileManagerActionLabel();
+    }
 
     const stats = [];
     stats.push({ label: 'Total Runs', value: String(executionCount) });
