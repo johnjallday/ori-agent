@@ -1111,6 +1111,8 @@
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
+  {{template "support-chat.tmpl" .}}
+
   <!-- Workspace Entry Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
@@ -7826,6 +7828,7 @@
   <script src="/js/modules/workspace-hub-notes.js"></script>
   <script src="/js/modules/workspace-hub-files.js"></script>
   <script src="/js/modules/workspace-mission.js"></script>
+  <script src="/js/modules/workspace-hub-support-chat.js"></script>
 
   <!-- Workspace Detail Page -->
   <script type="module">

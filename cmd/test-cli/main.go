@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -58,24 +61,18 @@ func (r *TestRunner) run() {
 		case "2":
 			r.buildServer()
 		case "3":
-			r.buildPlugins()
-		case "4":
 			r.startServer()
-		case "5":
+		case "4":
 			r.stopServer()
-		case "6":
+		case "5":
 			r.runQuickTest()
-		case "7":
-			r.testPlugin()
-		case "8":
-			r.testWorkflow()
-		case "9":
+		case "6":
 			r.runAllTests()
-		case "10":
+		case "7":
 			r.interactiveChat()
-		case "11":
+		case "8":
 			r.viewLogs()
-		case "12":
+		case "9":
 			r.cleanupTestData()
 		case "h", "help":
 			r.printHelp()
@@ -96,20 +93,17 @@ func (r *TestRunner) printMenu() {
 	fmt.Println(colorWhite + "Setup & Environment" + colorReset)
 	fmt.Println("  1. Check environment")
 	fmt.Println("  2. Build server")
-	fmt.Println("  3. Build plugins")
-	fmt.Println("  4. Start server")
-	fmt.Println("  5. Stop server")
+	fmt.Println("  3. Start server")
+	fmt.Println("  4. Stop server")
 	fmt.Println()
 	fmt.Println(colorWhite + "Testing" + colorReset)
-	fmt.Println("  6. Quick test (health check)")
-	fmt.Println("  7. Test specific plugin")
-	fmt.Println("  8. Test workflow")
-	fmt.Println("  9. Run all automated tests")
-	fmt.Println("  10. Interactive chat test")
+	fmt.Println("  5. Quick test (health check)")
+	fmt.Println("  6. Run all automated tests")
+	fmt.Println("  7. Interactive chat test")
 	fmt.Println()
 	fmt.Println(colorWhite + "Utilities" + colorReset)
-	fmt.Println("  11. View logs")
-	fmt.Println("  12. Cleanup test data")
+	fmt.Println("  8. View logs")
+	fmt.Println("  9. Cleanup test data")
 	fmt.Println()
 	fmt.Println("  h. Help    q. Quit")
 	fmt.Println(colorBlue + "═══════════════════════════════════════" + colorReset)
@@ -124,7 +118,6 @@ func (r *TestRunner) checkEnvironment() {
 	}{
 		{"Go installed", r.checkGo},
 		{"Server binary", r.checkServerBinary},
-		{"Plugins built", r.checkPlugins},
 		{"API key set", r.checkAPIKey},
 		{"Port available", r.checkPort},
 	}
@@ -168,21 +161,6 @@ func (r *TestRunner) buildServer() {
 	fmt.Println(colorGreen + "✓ Server built successfully!" + colorReset)
 }
 
-func (r *TestRunner) buildPlugins() {
-	fmt.Println(colorCyan + "\n🔨 Building plugins..." + colorReset)
-
-	cmd := exec.Command("bash", "./scripts/build-plugins.sh")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("%s✗ Plugin build failed: %v%s\n", colorRed, err, colorReset)
-		return
-	}
-
-	fmt.Println(colorGreen + "✓ Plugins built successfully!" + colorReset)
-}
-
 func (r *TestRunner) startServer() {
 	if r.serverRunning {
 		fmt.Println(colorYellow + "⚠ Server already running" + colorReset)
@@ -216,17 +194,35 @@ func (r *TestRunner) startServer() {
 		return
 	}
 
-	// Wait for server to be ready
+	// Poll /health until the server is ready (or we give up).
 	fmt.Print("Waiting for server to start")
-	for i := 0; i < 20; i++ {
-		time.Sleep(500 * time.Millisecond)
+	healthURL := fmt.Sprintf("%s/health", r.serverURL)
+	client := &http.Client{Timeout: 1 * time.Second}
+	const maxAttempts = 40 // 40 * 250ms = 10s
+	ready := false
+	for range maxAttempts {
+		time.Sleep(250 * time.Millisecond)
 		fmt.Print(".")
-		// TODO: Check if server is actually ready via health check
+		resp, err := client.Get(healthURL)
+		if err != nil {
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			ready = true
+			break
+		}
 	}
 	fmt.Println()
 
+	if !ready {
+		fmt.Printf("%s✗ Server did not become ready within 10s. See test-server.log%s\n", colorRed, colorReset)
+		_ = cmd.Process.Kill()
+		return
+	}
+
 	r.serverRunning = true
-	fmt.Printf("%s✓ Server started on http://localhost:%s%s\n", colorGreen, port, colorReset)
+	fmt.Printf("%s✓ Server started on %s%s\n", colorGreen, r.serverURL, colorReset)
 	fmt.Println("  Logs: test-server.log")
 }
 
@@ -255,7 +251,7 @@ func (r *TestRunner) runQuickTest() {
 	fmt.Println(colorCyan + "\n⚡ Running quick test..." + colorReset)
 
 	if !r.serverRunning {
-		fmt.Println(colorYellow + "⚠ Server not running. Start it first (option 4)" + colorReset)
+		fmt.Println(colorYellow + "⚠ Server not running. Start it first (option 3)" + colorReset)
 		return
 	}
 
@@ -276,41 +272,6 @@ func (r *TestRunner) runQuickTest() {
 	} else {
 		fmt.Printf(colorRed+"✗ Health check failed: HTTP %d\n"+colorReset, resp.StatusCode)
 	}
-}
-
-func (r *TestRunner) testPlugin() {
-	fmt.Println(colorCyan + "\n🔌 Plugin Test" + colorReset)
-
-	if !r.serverRunning {
-		fmt.Println(colorYellow + "⚠ Server not running. Start it first (option 4)" + colorReset)
-		return
-	}
-
-	// List available plugins
-	fmt.Println("\nAvailable plugins:")
-	plugins := []string{"math", "weather", "result-handler"}
-	for i, p := range plugins {
-		fmt.Printf("  %d. %s\n", i+1, p)
-	}
-
-	_ = r.prompt("\nSelect plugin number")
-	// TODO: Implement plugin testing
-
-	fmt.Println(colorGreen + "✓ Plugin test completed" + colorReset)
-}
-
-func (r *TestRunner) testWorkflow() {
-	fmt.Println(colorCyan + "\n🔄 Workflow Test" + colorReset)
-
-	fmt.Println("\nAvailable workflows:")
-	fmt.Println("  1. Create agent → Enable plugin → Chat")
-	fmt.Println("  2. Multi-agent collaboration")
-	fmt.Println("  3. Error recovery")
-
-	_ = r.prompt("\nSelect workflow number")
-	// TODO: Implement workflow testing
-
-	fmt.Println(colorGreen + "✓ Workflow test completed" + colorReset)
 }
 
 func (r *TestRunner) runAllTests() {
@@ -340,18 +301,27 @@ func (r *TestRunner) interactiveChat() {
 	fmt.Println(colorCyan + "\n💬 Interactive Chat Test" + colorReset)
 
 	if !r.serverRunning {
-		fmt.Println(colorYellow + "⚠ Server not running. Start it first (option 4)" + colorReset)
+		fmt.Println(colorYellow + "⚠ Server not running. Start it first (option 3)" + colorReset)
 		return
 	}
 
 	agentName := r.prompt("Agent name")
-	_ = r.prompt("Model (default: gpt-4o)") // Model selection not yet implemented
+	if agentName == "" {
+		fmt.Println(colorRed + "✗ Agent name required" + colorReset)
+		return
+	}
+	model := r.prompt("Model (default: gpt-4o)")
+	if model == "" {
+		model = "gpt-4o"
+	}
 
 	fmt.Printf("\n%sCreating agent '%s'...%s\n", colorCyan, agentName, colorReset)
-	// TODO: Create agent via API
+	if err := r.apiCreateAgent(agentName, model); err != nil {
+		fmt.Printf("%s✗ Failed to create agent: %v%s\n", colorRed, err, colorReset)
+		return
+	}
 
 	r.agents = append(r.agents, agentName)
-
 	fmt.Println(colorGreen + "✓ Agent created!" + colorReset)
 	fmt.Println("\nType messages (or 'exit' to return to menu):")
 
@@ -360,10 +330,99 @@ func (r *TestRunner) interactiveChat() {
 		if msg == "exit" {
 			break
 		}
+		if msg == "" {
+			continue
+		}
 
-		// TODO: Send message to agent
-		fmt.Printf("%s%s:%s Mock response to: %s\n", colorCyan, agentName, colorReset, msg)
+		reply, err := r.apiSendChat(agentName, msg)
+		if err != nil {
+			fmt.Printf("%s✗ Chat failed: %v%s\n", colorRed, err, colorReset)
+			continue
+		}
+		fmt.Printf("%s%s:%s %s\n", colorCyan, agentName, colorReset, reply)
 	}
+}
+
+// apiCreateAgent creates an agent via POST /api/agents.
+// The server defaults missing fields (provider, system prompt, etc.) based on
+// global settings, so we only send the minimum needed to drive a chat round.
+func (r *TestRunner) apiCreateAgent(name, model string) error {
+	body, err := json.Marshal(map[string]any{
+		"name":        name,
+		"type":        "tool-calling",
+		"model":       model,
+		"description": "Created by test-cli",
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, r.serverURL+"/api/agents", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	return nil
+}
+
+// apiSendChat posts a chat turn to /api/chat and returns the reply text.
+// We only surface the "response" field; the chat API returns extra metadata
+// (route info, action plans, etc.) that the CLI doesn't need to render.
+func (r *TestRunner) apiSendChat(agentName, message string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"question":   message,
+		"agent_name": agentName,
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, r.serverURL+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+
+	var payload struct {
+		Response string `json:"response"`
+		Error    string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	if payload.Error != "" {
+		return "", fmt.Errorf("%s", payload.Error)
+	}
+	return payload.Response, nil
+}
+
+func readErrorBody(body io.Reader) string {
+	const maxBytes = 512
+	buf, err := io.ReadAll(io.LimitReader(body, maxBytes))
+	if err != nil {
+		return "(failed to read body)"
+	}
+	return strings.TrimSpace(string(buf))
 }
 
 func (r *TestRunner) viewLogs() {
@@ -389,16 +448,46 @@ func (r *TestRunner) cleanupTestData() {
 		return
 	}
 
-	// Delete test agents
+	// Delete test agents via API. Skip silently when the server is offline,
+	// since cleanup is also useful as a "remove the log file" command.
+	remaining := make([]string, 0, len(r.agents))
 	for _, agent := range r.agents {
 		fmt.Printf("  Deleting agent: %s\n", agent)
-		// TODO: Delete via API
+		if !r.serverRunning {
+			fmt.Printf("    %s⚠ Server not running; agent record left in place%s\n", colorYellow, colorReset)
+			remaining = append(remaining, agent)
+			continue
+		}
+		if err := r.apiDeleteAgent(agent); err != nil {
+			fmt.Printf("    %s✗ %v%s\n", colorRed, err, colorReset)
+			remaining = append(remaining, agent)
+		}
 	}
+	r.agents = remaining
 
 	// Delete logs
 	_ = os.Remove("test-server.log")
 
 	fmt.Println(colorGreen + "✓ Cleanup complete" + colorReset)
+}
+
+// apiDeleteAgent removes an agent via DELETE /api/agents?name=...
+func (r *TestRunner) apiDeleteAgent(name string) error {
+	target := fmt.Sprintf("%s/api/agents?name=%s", r.serverURL, url.QueryEscape(name))
+	req, err := http.NewRequest(http.MethodDelete, target, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	return nil
 }
 
 func (r *TestRunner) printHelp() {
@@ -407,22 +496,20 @@ func (r *TestRunner) printHelp() {
 
 Typical workflow:
   1. Check environment (option 1)
-  2. Build server & plugins (options 2-3)
-  3. Start server (option 4)
-  4. Run tests (options 6-10)
-  5. Stop server (option 5)
+  2. Build server (option 2)
+  3. Start server (option 3)
+  4. Run tests (options 5-7)
+  5. Stop server (option 4)
 
 Test Types:
   - Quick Test: Simple health check
-  - Plugin Test: Test specific plugin functionality
-  - Workflow Test: End-to-end user scenarios
-  - All Tests: Run full automated test suite
-  - Interactive Chat: Manual testing via CLI
+  - All Tests: Run full automated test suite (tests/user/...)
+  - Interactive Chat: Create an agent and chat with it via the HTTP API
 
 Tips:
   - Set OPENAI_API_KEY or ANTHROPIC_API_KEY before testing
-  - View logs (option 11) if tests fail
-  - Clean up (option 12) between test runs`)
+  - View logs (option 8) if tests fail
+  - Clean up (option 9) between test runs to remove test agents`)
 }
 
 // Helper functions
@@ -442,58 +529,6 @@ func (r *TestRunner) checkServerBinary() (bool, string) {
 		return false, "Run 'make build' or option 2"
 	}
 	return true, path
-}
-
-func (r *TestRunner) checkPlugins() (bool, string) {
-	// Check built-in plugins
-	builtInPlugins := []string{"math", "weather"}
-	builtInFound := 0
-
-	for _, p := range builtInPlugins {
-		path := filepath.Join("plugins", p, p)
-		if _, err := os.Stat(path); err == nil {
-			builtInFound++
-		}
-	}
-
-	// Check shared plugins (../plugins)
-	sharedPlugins := []string{
-		"ori-music-project-manager",
-		"ori-reaper",
-		"ori-mac-os-tools",
-		"ori-meta-threads-manager",
-		"ori-agent-doc-builder",
-	}
-	sharedFound := 0
-
-	for _, p := range sharedPlugins {
-		// Check multiple possible locations
-		paths := []string{
-			filepath.Join("..", "plugins", p, p),
-			filepath.Join("uploaded_plugins", p),
-		}
-
-		for _, path := range paths {
-			if _, err := os.Stat(path); err == nil {
-				sharedFound++
-				break
-			}
-		}
-	}
-
-	totalPlugins := len(builtInPlugins) + len(sharedPlugins)
-	totalFound := builtInFound + sharedFound
-
-	if totalFound == 0 {
-		return false, "Run './scripts/build-plugins.sh' or './scripts/build-external-plugins.sh'"
-	}
-
-	status := fmt.Sprintf("%d/%d total (built-in: %d/%d, shared: %d/%d)",
-		totalFound, totalPlugins,
-		builtInFound, len(builtInPlugins),
-		sharedFound, len(sharedPlugins))
-
-	return totalFound > 0, status
 }
 
 func (r *TestRunner) checkAPIKey() (bool, string) {

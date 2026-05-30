@@ -1073,12 +1073,9 @@ func TestHandleTaskOutputReview_ApproveAppend(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read approved csv: %v", err)
-	}
-	if string(data) != "date,location,pollen_count\n2026-05-20,NYC,8" {
-		t.Fatalf("unexpected csv data: %q", string(data))
+	records := readReviewJSONL(t, outputPath)
+	if len(records) != 1 || records[0]["date"] != "2026-05-20" || records[0]["location"] != "NYC" || records[0]["pollen_count"] != "8" {
+		t.Fatalf("unexpected appended records: %#v", records)
 	}
 	updatedWS, err := store.Get(ws.ID)
 	if err != nil {
@@ -1100,14 +1097,16 @@ func TestHandleTaskOutputReview_ApproveAppend(t *testing.T) {
 	}
 }
 
-func TestHandleTaskOutputReview_ApproveAppendBlocksCSVHeaderMismatch(t *testing.T) {
+func TestHandleTaskOutputReview_ApproveAppendWritesJSONL(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})
 	ws.ID = "workspace-review-approve-header-mismatch"
 
-	outputPath := filepath.Join(t.TempDir(), "pollen.csv")
-	if err := os.WriteFile(outputPath, []byte("wrong,header\n1,2"), 0644); err != nil {
-		t.Fatalf("write existing csv: %v", err)
+	outputPath := filepath.Join(t.TempDir(), "pollen.jsonl")
+	// A pre-existing record must not block the approval append (JSONL has no
+	// header to reconcile, unlike the old CSV-append path).
+	if err := os.WriteFile(outputPath, []byte(`{"date":"2026-05-19","location":"Boston"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write existing jsonl: %v", err)
 	}
 	task := workspace.Task{
 		ID:          "task-review-approve-header-mismatch",
@@ -1162,12 +1161,13 @@ func TestHandleTaskOutputReview_ApproveAppendBlocksCSVHeaderMismatch(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read csv: %v", err)
+	records := readReviewJSONL(t, outputPath)
+	if len(records) != 2 {
+		t.Fatalf("expected existing + approved record, got %d", len(records))
 	}
-	if string(data) != "wrong,header\n1,2" {
-		t.Fatalf("csv should not append on header mismatch, got %q", string(data))
+	approved := records[len(records)-1]
+	if approved["date"] != "2026-05-20" || approved["location"] != "NYC" {
+		t.Fatalf("unexpected approved record: %#v", approved)
 	}
 	updatedWS, err := store.Get(ws.ID)
 	if err != nil {
@@ -1178,15 +1178,32 @@ func TestHandleTaskOutputReview_ApproveAppendBlocksCSVHeaderMismatch(t *testing.
 		t.Fatalf("reload task: %v", err)
 	}
 	validation := updatedTask.ExecutionHistory[0].Validation
-	if validation == nil || validation.ValidationStatus != workspace.TaskValidationNeedsReview || validation.StorageStatus != workspace.TaskStorageSkippedInvalid {
-		t.Fatalf("validation = %+v, want needs_review/skipped_invalid", validation)
+	if validation == nil || validation.ValidationStatus != workspace.TaskValidationManuallyApproved || validation.StorageStatus != workspace.TaskStorageManuallyAppended {
+		t.Fatalf("validation = %+v, want manually_approved/manually_appended", validation)
 	}
-	if len(validation.Errors) == 0 || validation.Errors[0].Code != "csv_header_mismatch" {
-		t.Fatalf("expected csv_header_mismatch, got %+v", validation.Errors)
+}
+
+// readReviewJSONL parses a .jsonl dataset file into records. The review/approve
+// append paths now write JSONL (converted from the CSV they validate).
+func readReviewJSONL(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read jsonl: %v", err)
 	}
-	if strings.Join(validation.Errors[0].Expected, ",") != "date,location" || strings.Join(validation.Errors[0].Actual, ",") != "wrong,header" {
-		t.Fatalf("unexpected headers: %+v", validation.Errors[0])
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("line %q is not JSON: %v", line, err)
+		}
+		records = append(records, record)
 	}
+	return records
 }
 
 func TestTaskOutputReviewApproval_UsesValidationSpecSnapshot(t *testing.T) {
@@ -1335,13 +1352,14 @@ func TestHandleTaskOutputReview_RetryNormalizationUsesRunSpecSnapshot(t *testing
 	if executor.normalizeCalls != 1 {
 		t.Fatalf("normalizeCalls=%d, want 1", executor.normalizeCalls)
 	}
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read normalized csv: %v", err)
+	records := readReviewJSONL(t, outputPath)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 normalized record, got %d", len(records))
 	}
-	wantCSV := "run_id,executed_at,status,duration_ms,forecast_date,pollen_count\nrun-review-normalize,2026-05-21T09:30:00Z,success,2500,2026-05-21,9.7"
-	if string(data) != wantCSV {
-		t.Fatalf("csv data = %q, want %q", string(data), wantCSV)
+	record := records[0]
+	if record["forecast_date"] != "2026-05-21" || record["pollen_count"] != "9.7" ||
+		record["run_id"] != "run-review-normalize" || record["status"] != "success" {
+		t.Fatalf("unexpected normalized record: %#v", record)
 	}
 	updatedWS, err := store.Get(ws.ID)
 	if err != nil {
@@ -1467,12 +1485,9 @@ func TestAppendCSVContractReviewSmoke_CreateInvalidApprove(t *testing.T) {
 	if approveRec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", approveRec.Code, approveRec.Body.String())
 	}
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read approved csv: %v", err)
-	}
-	if string(data) != "date,location,pollen_count\n2026-05-20,NYC,8" {
-		t.Fatalf("unexpected approved csv: %q", string(data))
+	records := readReviewJSONL(t, outputPath)
+	if len(records) != 1 || records[0]["date"] != "2026-05-20" || records[0]["location"] != "NYC" || records[0]["pollen_count"] != "8" {
+		t.Fatalf("unexpected approved records: %#v", records)
 	}
 }
 

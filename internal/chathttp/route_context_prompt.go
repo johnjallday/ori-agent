@@ -9,6 +9,7 @@ type chatRouteContext struct {
 	Surface     string `json:"surface,omitempty"`
 	PagePath    string `json:"page_path,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 	Origin      string `json:"origin,omitempty"`
 }
 
@@ -16,12 +17,14 @@ type normalizedChatRouteContext struct {
 	Surface     string
 	PagePath    string
 	WorkspaceID string
+	TaskID      string
 	Origin      string
 }
 
 const (
 	maxRouteContextPagePathLen    = 256
 	maxRouteContextWorkspaceIDLen = 128
+	maxRouteContextTaskIDLen      = 128
 	maxRouteContextOriginLen      = 96
 	maxRouteContextSurfaceLen     = 32
 )
@@ -30,6 +33,7 @@ var allowedRouteSurfaces = map[string]struct{}{
 	"workspace_detail": {},
 	"workspace_canvas": {},
 	"workspace_chat":   {},
+	"workspace_task":   {},
 	"workspace_hub":    {},
 	"dashboard":        {},
 	"chat":             {},
@@ -44,6 +48,10 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 	workspaceID := sanitizeRouteContextIdentifier(input.WorkspaceID, maxRouteContextWorkspaceIDLen)
 	if workspaceID == "" {
 		workspaceID = sanitizeRouteContextIdentifier(extractWorkspaceIDFromPagePath(pagePath), maxRouteContextWorkspaceIDLen)
+	}
+	taskID := sanitizeRouteContextIdentifier(input.TaskID, maxRouteContextTaskIDLen)
+	if taskID == "" {
+		taskID = sanitizeRouteContextIdentifier(extractTaskIDFromPagePath(pagePath), maxRouteContextTaskIDLen)
 	}
 	if pagePath == "" && workspaceID != "" {
 		pagePath = "/workspaces/" + workspaceID
@@ -63,6 +71,7 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 		Surface:     surface,
 		PagePath:    pagePath,
 		WorkspaceID: workspaceID,
+		TaskID:      taskID,
 		Origin:      sanitizeRouteContextOrigin(input.Origin),
 	}
 }
@@ -78,6 +87,9 @@ func inferChatRouteSurface(pathname, workspaceID string) string {
 	if strings.HasPrefix(path, "/workspaces/") {
 		if strings.Contains(path, "/canvas") {
 			return "workspace_canvas"
+		}
+		if strings.Contains(path, "/task/") || strings.Contains(path, "/tasks/") {
+			return "workspace_task"
 		}
 		return "workspace_detail"
 	}
@@ -116,6 +128,36 @@ func extractWorkspaceIDFromPagePath(pathname string) string {
 	return strings.TrimSpace(rest)
 }
 
+// extractTaskIDFromPagePath extracts the task ID from a workspace task page
+// URL like /workspaces/{ws}/task/{taskId} or /workspaces/{ws}/tasks/{taskId}.
+func extractTaskIDFromPagePath(pathname string) string {
+	path := strings.TrimSpace(pathname)
+	if path == "" {
+		return ""
+	}
+	lower := strings.ToLower(path)
+	prefix := "/workspaces/"
+	if !strings.HasPrefix(lower, prefix) {
+		return ""
+	}
+	rest := path[len(prefix):]
+	idx := strings.Index(rest, "/")
+	if idx < 0 {
+		return ""
+	}
+	rest = rest[idx+1:]
+	for _, seg := range []string{"task/", "tasks/"} {
+		if strings.HasPrefix(strings.ToLower(rest), seg) {
+			rest = rest[len(seg):]
+			if endIdx := strings.Index(rest, "/"); endIdx >= 0 {
+				rest = rest[:endIdx]
+			}
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
 func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 	if strings.TrimSpace(ctx.Surface) == "" && strings.TrimSpace(ctx.WorkspaceID) == "" {
 		return ""
@@ -126,6 +168,12 @@ func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 	}
 
 	switch ctx.Surface {
+	case "workspace_task":
+		lines = append(lines,
+			"Primary mode: task-focused assistance.",
+			"Stay focused on the active task identified below. Use current_task and task_runs tools to inspect its details and run history before suggesting changes.",
+			"Only branch into broader workspace topics when explicitly asked.",
+		)
 	case "workspace_detail", "workspace_canvas", "workspace_chat":
 		lines = append(lines,
 			"Primary mode: workspace-focused assistance.",
@@ -157,6 +205,9 @@ func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 
 	if strings.TrimSpace(ctx.WorkspaceID) != "" {
 		lines = append(lines, fmt.Sprintf("Active workspace_id: %q", ctx.WorkspaceID))
+	}
+	if strings.TrimSpace(ctx.TaskID) != "" {
+		lines = append(lines, fmt.Sprintf("Active task_id: %q", ctx.TaskID))
 	}
 	if strings.TrimSpace(ctx.PagePath) != "" {
 		lines = append(lines, fmt.Sprintf("Page path: %q", ctx.PagePath))

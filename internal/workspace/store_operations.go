@@ -208,7 +208,7 @@ func formatData(data string, format string) ([]byte, error) {
 		}
 		return formatted, nil
 
-	case "text", "markdown", "csv":
+	case "text", "markdown", "csv", "jsonl":
 		// Return as-is, preserve newlines
 		return []byte(data), nil
 
@@ -288,8 +288,10 @@ func writeToStoreAtBaseDir(node *StoreNode, baseDir, filePath, data string) erro
 		}
 		defer func() { _ = f.Close() }()
 
-		if info, err := f.Stat(); err == nil && info.Size() > 0 {
-			// Add newline separator before appending
+		if info, err := f.Stat(); err == nil && info.Size() > 0 && node.Format != "jsonl" {
+			// CSV/text rows aren't newline-terminated, so separate them. JSONL
+			// records already end in '\n', so a separator here would insert a
+			// blank line between records.
 			if _, err := f.Write([]byte("\n")); err != nil {
 				return fmt.Errorf("failed to write newline separator: %w", err)
 			}

@@ -755,6 +755,15 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
+	if strings.HasSuffix(path, "/output-dir/open") {
+		if r.Method == http.MethodPost {
+			s.Handlers.Workspace.OpenWorkspaceOutputDir(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
 	if strings.HasSuffix(path, "/agent-snapshots") {
 		s.Handlers.Workspace.ListAgentSnapshots(w, r)
 		return true
@@ -765,6 +774,8 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)
 		} else if strings.HasSuffix(path, "/results/append-csv") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.AppendResultToCSV(w, r)
+		} else if strings.HasSuffix(path, "/results/export-csv") && r.Method == http.MethodGet {
+			s.Handlers.Workspace.ExportResultCSV(w, r)
 		} else if strings.HasSuffix(path, "/output-spec/draft") && (r.Method == http.MethodPost || r.Method == http.MethodPatch) {
 			s.Handlers.Workspace.SaveTaskOutputSpecDraft(w, r)
 		} else if strings.HasSuffix(path, "/output-spec/approve") && r.Method == http.MethodPost {

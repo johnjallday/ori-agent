@@ -865,12 +865,6 @@ export class WorkspaceTaskPage {
     // so users can tell a still-spinning task is making progress.
     this._latestActivity = null;
     this._activityTickHandle = null;
-    // Tab state (Overview / Activity / Developer). Defaults to Overview but
-    // auto-switches to Activity for failed/cancelled/timeout tasks on first
-    // load so debugging starts in the right place. _taskTabUserPicked turns
-    // true once a user clicks a tab, suppressing further auto-switching.
-    this._taskTab = 'overview';
-    this._taskTabUserPicked = false;
     // Follow-up form lives inline under the result card; only one instance
     // open at a time. _followupSubmitting prevents double-submits.
     this._followupOpen = false;
@@ -944,15 +938,13 @@ export class WorkspaceTaskPage {
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       deleteBtn: document.getElementById('workspace-task-delete'),
+      heroOverflow: document.querySelector('.workspace-task-hero-overflow'),
+      heroOverflowToggle: document.getElementById('workspace-task-hero-overflow-toggle'),
+      heroOverflowMenu: document.getElementById('workspace-task-hero-overflow-menu'),
       subtitle: document.getElementById('workspace-task-subtitle'),
       detailsEditBtn: document.getElementById('workspace-task-details-edit'),
       status: document.getElementById('workspace-task-status'),
       heroActions: document.getElementById('workspace-task-hero-actions'),
-      heroPriority: document.getElementById('workspace-task-hero-priority'),
-      heroPriorityCopy: document.getElementById('workspace-task-hero-priority-copy'),
-      heroPriorityReason: document.getElementById('workspace-task-hero-priority-reason'),
-      heroPriorityReasonText: document.getElementById('workspace-task-hero-priority-reason-text'),
-      heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       overview: document.getElementById('workspace-task-overview'),
       heroAgentWrap: document.getElementById('workspace-task-hero-agent-wrap'),
       heroAgent: document.getElementById('workspace-task-hero-agent'),
@@ -970,6 +962,8 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
+      outputShapeWrap: document.getElementById('workspace-task-output-shape-wrap'),
+      outputShape: document.getElementById('workspace-task-output-shape'),
       outputCopyBtn: document.getElementById('workspace-task-output-copy'),
       outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
       outputCreateSkillBtn: document.getElementById('workspace-task-output-create-skill'),
@@ -1030,6 +1024,7 @@ export class WorkspaceTaskPage {
       automationColumns: document.getElementById('workspace-task-automation-columns'),
       automationStorage: document.getElementById('workspace-task-automation-storage'),
       scheduleCardEditBtn: document.getElementById('workspace-task-schedule-card-edit'),
+      scheduleOpenFolderBtn: document.getElementById('workspace-task-schedule-open-folder'),
       scheduleModal: document.getElementById('workspace-task-schedule-modal'),
       scheduleModalHeading: document.getElementById('workspace-task-schedule-heading'),
       scheduleModalMeta: document.getElementById('workspace-task-schedule-modal-meta'),
@@ -1060,13 +1055,6 @@ export class WorkspaceTaskPage {
       scheduleRemoveBtn: document.getElementById('workspace-task-schedule-remove'),
       contextCard: document.getElementById('workspace-task-context-card'),
       context: document.getElementById('workspace-task-context'),
-      tabButtons: Array.from(document.querySelectorAll('.workspace-task-page-tab')),
-      tabPanes: {
-        overview: document.getElementById('workspace-task-tab-overview'),
-        activity: document.getElementById('workspace-task-tab-activity'),
-        developer: document.getElementById('workspace-task-tab-developer')
-      },
-      activityEmpty: document.getElementById('workspace-task-activity-empty'),
       blockedContextCard: document.getElementById('workspace-task-blocked-context-card'),
       blockedReason: document.getElementById('workspace-task-blocked-reason'),
       blockedRequestWrap: document.getElementById('workspace-task-blocked-request-wrap'),
@@ -1088,10 +1076,7 @@ export class WorkspaceTaskPage {
       assistRetryBtn: document.getElementById('workspace-task-assist-retry'),
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
-      assistFailBtn: document.getElementById('workspace-task-assist-fail'),
-      assistPanel: document.getElementById('workspace-task-assist-panel'),
-      assistBackdrop: document.getElementById('workspace-task-assist-backdrop'),
-      assistCloseBtn: document.getElementById('workspace-task-assist-close')
+      assistFailBtn: document.getElementById('workspace-task-assist-fail')
     };
   }
 
@@ -1128,18 +1113,6 @@ export class WorkspaceTaskPage {
         });
       });
     }
-    if (Array.isArray(this.elements.tabButtons)) {
-      this.elements.tabButtons.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const next = btn.getAttribute('data-task-tab') || 'overview';
-          // Sticky for the rest of the session: once the user picks a tab,
-          // don't fight them by auto-switching back to a status-based default
-          // on the next data refresh.
-          this._taskTabUserPicked = true;
-          this.setTaskTab(next);
-        });
-      });
-    }
     if (this.elements.heroAgent) {
       this.elements.heroAgent.addEventListener('change', async (event) => {
         const value = event.target.value || '';
@@ -1156,8 +1129,29 @@ export class WorkspaceTaskPage {
     this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
     this.elements.followupDetailsToggle?.addEventListener('click', () => this.toggleFollowupDetails());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
-    this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
-    this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
+    this.elements.copyLinkBtn?.addEventListener('click', () => {
+      this.copyToClipboard(window.location.href, 'Link copied');
+      this.setHeroOverflowOpen(false);
+    });
+    this.elements.deleteBtn?.addEventListener('click', () => {
+      this.setHeroOverflowOpen(false);
+      this.deleteTask();
+    });
+    this.elements.heroOverflowToggle?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.setHeroOverflowOpen(this.elements.heroOverflow?.dataset.open !== 'true');
+    });
+    document.addEventListener('click', (event) => {
+      if (this.elements.heroOverflow?.dataset.open !== 'true') return;
+      if (this.elements.heroOverflow.contains(event.target)) return;
+      this.setHeroOverflowOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.elements.heroOverflow?.dataset.open === 'true') {
+        this.setHeroOverflowOpen(false);
+        this.elements.heroOverflowToggle?.focus();
+      }
+    });
     this.elements.outputCopyBtn?.addEventListener('click', () => {
       this.copyCurrentResult();
       this.setOutputOverflowOpen(false);
@@ -1214,6 +1208,7 @@ export class WorkspaceTaskPage {
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
+    this.elements.scheduleOpenFolderBtn?.addEventListener('click', () => this.openWorkspaceOutputDir());
     this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
     this.elements.scheduleWakeMacInput?.addEventListener('change', () => this.updateScheduleModalFields());
     [
@@ -1240,13 +1235,6 @@ export class WorkspaceTaskPage {
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.assistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.assistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
-    this.elements.assistCloseBtn?.addEventListener('click', () => this.toggleAssistPanel(false));
-    this.elements.assistBackdrop?.addEventListener('click', () => this.toggleAssistPanel(false));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.elements.assistPanel && !this.elements.assistPanel.hidden) {
-        this.toggleAssistPanel(false);
-      }
-    });
   }
 
   async loadData() {
@@ -1848,6 +1836,19 @@ export class WorkspaceTaskPage {
     return this.task;
   }
 
+  // setHeroOverflowOpen toggles the hero "more actions" menu (Copy link,
+  // Delete). CSS-positioned (the hero doesn't clip it), so this only syncs the
+  // data-open / aria-expanded / hidden state.
+  setHeroOverflowOpen(open) {
+    const container = this.elements.heroOverflow;
+    const toggle = this.elements.heroOverflowToggle;
+    const menu = this.elements.heroOverflowMenu;
+    if (!container || !toggle || !menu) return;
+    container.dataset.open = open ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    menu.hidden = !open;
+  }
+
   // setOutputOverflowOpen drives the demoted-actions popover (Copy,
   // Create Skill, Create Workflow Task). The toggle's aria-expanded and
   // the container's data-open state are kept in sync, and the menu's
@@ -2365,14 +2366,6 @@ export class WorkspaceTaskPage {
     this.taskAssistResponseExpanded = false;
     this.assistReviewMode = false;
 
-    // Pick a default tab on first render based on task status. After the user
-    // clicks a tab we never override their choice.
-    if (!this._taskTabUserPicked) {
-      this.setTaskTab(this.defaultTaskTab());
-    } else {
-      this.refreshTaskTabEmptyStates();
-    }
-
     // Selective rendering: each sub-render is only invoked when its inputs
     // actually changed since the previous render. The first render after
     // page load (or after forceFullRender()) fills the cache and triggers
@@ -2393,20 +2386,16 @@ export class WorkspaceTaskPage {
     dispatch('hero', () => this.renderHero(statusInfo));
     dispatch('heroActions', () => this.renderHeroActions(statusInfo));
     dispatch('heroAgent', () => this.renderHeroAgent(statusInfo));
-    dispatch('heroPriority', () => this.renderHeroPriority(statusInfo));
     dispatch('overview', () => this.renderOverview());
     dispatch('relationships', () => this.renderRelationships());
     dispatch('workflow', () => this.renderWorkflow());
     dispatch('output', () => this.renderOutput());
+    dispatch('outputShape', () => this.renderTaskOutputShape());
     dispatch('workspaceRuns', () => this.renderWorkspaceRunsCard());
     dispatch('runs', () => this.renderRunsCard());
     dispatch('schedule', () => this.renderSchedule());
     dispatch('context', () => this.renderContext());
     dispatch('blockedState', () => this.renderBlockedState(statusInfo));
-
-    // Tab visibility depends on which cards ended up hidden after the
-    // sub-renders — refresh the per-tab empty placeholders here.
-    this.refreshTaskTabEmptyStates();
   }
 
   // forceFullRender clears the per-section input cache so the next render()
@@ -2483,7 +2472,6 @@ export class WorkspaceTaskPage {
         t.id, t.to, t.status,
         (this.availableAgents || []).map((a) => a?.name || '').sort().join('|'),
       ]),
-      heroPriority: JSON.stringify([sigStatusInfo, sigBlocked]),
       overview: JSON.stringify([
         t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
         t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id, t.details,
@@ -2513,6 +2501,12 @@ export class WorkspaceTaskPage {
         t.execution_history?.[t.execution_history.length - 1]?.status || '',
         t.execution_history?.[t.execution_history.length - 1]?.summary || '',
         t.execution_history?.[t.execution_history.length - 1]?.result || '',
+      ]),
+      outputShape: JSON.stringify([
+        t.id,
+        t.output_spec || null,
+        t.output_schema || null,
+        t.output_contract || null,
       ]),
       workspaceRuns: JSON.stringify([
         t.id,
@@ -2548,6 +2542,11 @@ export class WorkspaceTaskPage {
         Array.isArray(t.execution_history) ? t.execution_history.length : 0,
         t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
         sigAutomation,
+        // The Automation & output card's visibility now also depends on whether
+        // this task declares a structured output shape, so a spec change must
+        // re-run renderSchedule (sigAutomation tracks the storage owner's spec,
+        // which can differ from this.task's on a workflow parent).
+        t.output_spec || null, t.output_schema || null, t.output_contract || null,
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
       blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
@@ -2824,143 +2823,29 @@ export class WorkspaceTaskPage {
     }
   }
 
-  renderHeroPriority(statusInfo) {
-    if (!this.elements.heroPriority || !this.elements.heroPriorityCopy || !this.elements.heroPriorityActions) {
-      return;
-    }
-
-    const blocked = statusInfo.isBlocked && this.currentBlockedTask;
-    if (!blocked) {
-      this.elements.heroPriority.hidden = true;
-      this.elements.heroPriorityCopy.textContent = '';
-      if (this.elements.heroPriorityReason) {
-        this.elements.heroPriorityReason.hidden = true;
-      }
-      if (this.elements.heroPriorityReasonText) {
-        this.elements.heroPriorityReasonText.textContent = '';
-      }
-      this.elements.heroPriorityActions.innerHTML = '';
-      return;
-    }
-
-    const workflowStep = this.currentBlockedTask?.workflowStep || null;
-    const hasAgentResponse = Boolean(String(this.currentBlockedTask?.response || '').trim());
-    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'More Context';
-
-    this.elements.heroPriority.hidden = false;
-    const summary = this.getBlockedHeroSummary(workflowStep);
-    this.elements.heroPriorityCopy.textContent = summary;
-
-    // Show the raw blocked reason inline only when it adds information beyond
-    // the summary (which often is just the agent's question). This lets users
-    // see *why* the task is paused without scrolling to the assist card.
-    const rawReason = String(this.currentBlockedTask?.reason || '').trim();
-    const showReason = Boolean(rawReason) && rawReason !== summary;
-    if (this.elements.heroPriorityReason && this.elements.heroPriorityReasonText) {
-      if (showReason) {
-        this.elements.heroPriorityReasonText.textContent = rawReason;
-        this.elements.heroPriorityReason.hidden = false;
-      } else {
-        this.elements.heroPriorityReasonText.textContent = '';
-        this.elements.heroPriorityReason.hidden = true;
-      }
-    }
-    this.elements.heroPriorityActions.innerHTML = `
-      <button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-hero-priority-action="assist">
-        ${this.escapeHtml(this.getBlockedHeroPrimaryActionLabel(workflowStep))}
-      </button>
-      <button type="button" class="workspace-task-page-hero-btn" data-hero-priority-action="context">
-        ${this.escapeHtml(secondaryLabel)}
-      </button>
-    `;
-
-    this.elements.heroPriorityActions.querySelectorAll('[data-hero-priority-action]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const action = String(button.getAttribute('data-hero-priority-action') || '').trim();
-        if (action === 'assist') {
-          // The banner is now the sole entry into the assist panel (the
-          // floating Respond button has been retired). Open the panel and
-          // hand focus to its first interactive element after the slide-in
-          // animation has settled.
-          this.toggleAssistPanel(true);
-          window.setTimeout(() => {
-            const target = this.getAssistFocusTarget();
-            if (target && typeof target.focus === 'function') {
-              target.focus({ preventScroll: true });
-            }
-          }, 360);
-          return;
-        }
-        if (action === 'context') {
-          const focusTarget = this.elements.blockedRequestToggle && !this.elements.blockedRequestToggle.classList.contains('d-none')
-            ? this.elements.blockedRequestToggle
-            : null;
-          this.scrollToSection(this.elements.blockedContextCard, { focusTarget });
-        }
-      });
-    });
-  }
-
-  getBlockedHeroSummary(workflowStep) {
-    const question = String(this.currentBlockedTask?.question || '').trim();
-    if (question) {
-      return question;
-    }
-    return this.getAssistNeedsSummary(workflowStep);
-  }
-
-  getBlockedHeroPrimaryActionLabel(workflowStep) {
-    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing' &&
-        this.isAssistActionSuggested('switch_agent_retry') &&
-        !this.isAssistActionSuggested('continue_with_instruction')) {
-      return 'Switch Agent';
-    }
-    if (workflowStep?.stepType === 'ask_form') {
-      return 'Answer Questions';
-    }
-    if (workflowStep?.stepType === 'ask_choice') {
-      return 'Choose Next Step';
-    }
-    return 'Review And Continue';
-  }
-
-  scrollToSection(element, { focusTarget = null } = {}) {
-    if (!element) return;
-
-    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    const target = typeof focusTarget === 'function' ? focusTarget() : focusTarget;
-    if (!target || typeof target.focus !== 'function') return;
-
-    window.setTimeout(() => {
-      target.focus({ preventScroll: true });
-    }, 180);
-  }
-
-  getAssistFocusTarget() {
-    if (!this.elements.assistCard) return this.elements.assistContinueBtn || null;
-
-    return this.elements.assistCard.querySelector(
-      '[data-assist-choice-id]:not([disabled]), [data-assist-field-id]:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])'
-    ) || this.elements.assistContinueBtn || null;
-  }
-
   renderOverview() {
     if (!this.elements.overview) return;
 
     const progress = this.task?.progress;
     const isBlocked = Boolean(this.currentBlockedTask);
+    const status = String(this.task?.status || '').trim().toLowerCase();
 
-    // Keep the default Overview to the essentials a non-technical user cares
-    // about. Configuration internals (execution mode, orchestration mode,
-    // template ref) are intentionally omitted here — they remain in the
-    // Developer tab's Technical details (raw context).
-    const items = [
-      {
+    // Keep the overview to the essentials a non-technical user cares about.
+    // Configuration internals (execution mode, orchestration mode, template
+    // ref) are intentionally omitted here — they remain in the collapsed
+    // Developer details (raw context).
+    const items = [];
+
+    // Agent is shown as the hero picker whenever the task is reassignable
+    // (not running, not blocked). Only repeat it in the overview grid when
+    // that picker is hidden, so the agent is visible exactly once.
+    const agentShownInHero = status !== 'in_progress' && !isBlocked;
+    if (!agentShownInHero) {
+      items.push({
         title: 'Agent',
         value: String(this.task?.to || 'Unassigned').trim() || 'Unassigned'
-      }
-    ];
+      });
+    }
 
     // "Requested By" is only meaningful when something other than the
     // workspace itself created the task; hide the noisy default.
@@ -3064,17 +2949,18 @@ export class WorkspaceTaskPage {
         `;
       }
 
+      // Build the value HTML separately and inline it with no surrounding
+      // whitespace: the value uses white-space: pre-wrap (to preserve real line
+      // breaks in a multi-line Task Details brief), so any newlines/indentation
+      // between the <div> tags and ${...} would render as stray blank lines and
+      // a leading indent.
+      const valueHtml = item.href
+        ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
+        : this.escapeHtml(item.value);
       return `
         <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
-          <div class="workspace-task-overview-title">
-            ${this.escapeHtml(item.title)}
-            ${renderEditButton(item)}
-          </div>
-          <div class="workspace-task-overview-value">
-            ${item.href
-              ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
-              : this.escapeHtml(item.value)}
-          </div>
+          <div class="workspace-task-overview-title">${this.escapeHtml(item.title)}${renderEditButton(item)}</div>
+          <div class="workspace-task-overview-value">${valueHtml}</div>
         </article>
       `;
     }).join('');
@@ -3987,14 +3873,38 @@ export class WorkspaceTaskPage {
   renderResultArtifact(artifact) {
     if (!artifact || !Array.isArray(artifact.columns) || !Array.isArray(artifact.rows)) return '';
 
-    const columns = artifact.columns;
+    const rawColumns = artifact.columns;
     const rows = artifact.rows;
-    const previewRows = rows.slice(0, 12);
+
+    // The preview shows only the task's actual output columns. Run bookkeeping
+    // (run_id, executed_at, status, duration_ms, validation / storage status)
+    // is still written to the CSV but dropped from the on-page preview, where
+    // it was audit noise that buried the real data off-screen.
+    const metaNames = new Set(
+      this.getOutputSpecMetadataFields().map((field) => String(field.name || '').trim().toLowerCase())
+    );
+    ['run_id', 'executed_at', 'status', 'duration_ms', 'validation_status', 'storage_status']
+      .forEach((name) => metaNames.add(name));
+    const isRunMetaColumn = (column) => metaNames.has(String(column || '').trim().toLowerCase());
+    const dataColumns = rawColumns.filter((column) => !isRunMetaColumn(column));
+    // Guard: if a task somehow declares only run metadata, keep showing every
+    // column rather than rendering an empty table.
+    const columns = dataColumns.length > 0 ? dataColumns : rawColumns;
+    const hiddenMetaCount = dataColumns.length > 0 ? rawColumns.length - dataColumns.length : 0;
+
+    const previewRows = rows.slice(0, 5);
     const hiddenRows = Math.max(0, rows.length - previewRows.length);
     const sourceLabel = this.getArtifactSourceLabel(artifact.source);
     const rowLabel = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
-    const columnLabel = `${columns.length} column${columns.length === 1 ? '' : 's'}`;
+    // The badge counts the full CSV (data + run-info), matching the row badge;
+    // the footer note explains the columns the preview omits.
+    const columnLabel = `${rawColumns.length} column${rawColumns.length === 1 ? '' : 's'}`;
     const savingLabel = this.resultArtifactNoteSaving ? 'Saving...' : 'Save CSV note';
+
+    const truncationParts = [];
+    if (hiddenRows > 0) truncationParts.push(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'}`);
+    if (hiddenMetaCount > 0) truncationParts.push(`${hiddenMetaCount} run-info column${hiddenMetaCount === 1 ? '' : 's'}`);
+    const truncationNote = truncationParts.length ? `${truncationParts.join(' · ')} in CSV` : '';
 
     const headHtml = columns
       .map((column) => `<th scope="col">${this.escapeHtml(column)}</th>`)
@@ -4120,6 +4030,10 @@ export class WorkspaceTaskPage {
             <h3>${this.escapeHtml(artifact.title || 'CSV-ready result')}</h3>
           </div>
           <div class="workspace-task-result-artifact-actions">
+            <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="export-result-artifact-csv" title="Download the full stored dataset as a CSV spreadsheet">
+              <i class="bi bi-download" aria-hidden="true"></i>
+              <span>Export CSV</span>
+            </button>
             <button type="button" class="modern-btn modern-btn-secondary workspace-task-output-action-btn" data-action="copy-result-artifact-csv">
               <i class="bi bi-clipboard" aria-hidden="true"></i>
               <span>Copy CSV</span>
@@ -4144,7 +4058,7 @@ export class WorkspaceTaskPage {
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
-        ${hiddenRows > 0 ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'} in CSV`)}</div>` : ''}
+        ${truncationNote ? `<div class="workspace-task-result-artifact-truncation">${this.escapeHtml(truncationNote)}</div>` : ''}
       </section>
     `;
   }
@@ -4205,29 +4119,6 @@ export class WorkspaceTaskPage {
     return Array.from(byName.values());
   }
 
-  renderOutputSpecOverview(spec) {
-    if (!spec) return '';
-    const fields = this.getOutputSpecSchemaFields(spec);
-    const columns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
-    const metadataFields = this.getOutputSpecMetadataFields(spec);
-    const metadataIncluded = metadataFields.filter((field) => field.include).map((field) => field.name);
-    return `
-      <div class="workspace-task-output-spec-overview">
-        <div class="workspace-task-output-spec-stat">
-          <span>Assistant fields</span>
-          <strong>${this.escapeHtml(`${fields.length} field${fields.length === 1 ? '' : 's'}`)}</strong>
-        </div>
-        <div class="workspace-task-output-spec-stat">
-          <span>CSV columns</span>
-          <strong>${this.escapeHtml(`${columns.length} column${columns.length === 1 ? '' : 's'}`)}</strong>
-        </div>
-        <div class="workspace-task-output-spec-stat">
-          <span>Run info</span>
-          <strong>${this.escapeHtml(metadataIncluded.length ? metadataIncluded.join(', ') : 'hidden')}</strong>
-        </div>
-      </div>`;
-  }
-
   renderOutputSpecMetadataEditor() {
     const fields = this.getOutputSpecMetadataFields(this.resultOutputSpecDraft || this.getActiveOutputSpec());
     return `
@@ -4252,8 +4143,6 @@ export class WorkspaceTaskPage {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
     if (!editing && columns.length > 0) {
-      const activeSpec = this.getActiveOutputSpec();
-      const version = String(activeSpec?.version || this.getTaskResultStorageTask()?.output_contract?.version || '').trim();
       const preview = columns
         .map((column) => String(column?.name || '').trim())
         .filter(Boolean)
@@ -4263,11 +4152,10 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Each run returns${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
+            <span class="workspace-task-page-mini-label">Each run returns</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
-            <span class="workspace-task-result-contract-projection">Stored as CSV columns (plus run info)</span>
+            <span class="workspace-task-result-contract-projection">Saved as a JSON record per run · run info (run_id, executed_at, status…) is added automatically · export to CSV anytime</span>
           </div>
-          ${this.renderOutputSpecOverview(activeSpec)}
           <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit fields</button>
         </div>`;
     }
@@ -4481,7 +4369,7 @@ export class WorkspaceTaskPage {
     let locationHint = '';
     if (storeNodeId) {
       const storeLabel = this.getStoreNodeDisplayLabel(storeNodeId);
-      label = filePath || 'runs.csv';
+      label = filePath || this.defaultAppendCsvFilename();
       locationHint = `in ${storeLabel}`;
     } else if (filePath) {
       const segments = filePath.split('/');
@@ -4499,6 +4387,9 @@ export class WorkspaceTaskPage {
     const root = this.elements.output;
     if (!root) return;
 
+    root
+      .querySelector('[data-action="export-result-artifact-csv"]')
+      ?.addEventListener('click', () => this.exportResultArtifactCSV());
     root
       .querySelector('[data-action="copy-result-artifact-csv"]')
       ?.addEventListener('click', () => this.copyCurrentArtifactCSV());
@@ -4663,7 +4554,6 @@ export class WorkspaceTaskPage {
       try {
         if (this._renderCache) delete this._renderCache.schedule;
         this.renderSchedule();
-        this.refreshTaskTabEmptyStates();
         return;
       } catch (error) {
         console.warn('Failed to re-render Automation card; falling back to data reload:', error);
@@ -4836,7 +4726,7 @@ export class WorkspaceTaskPage {
     const existing = owner?.result_storage || {};
     const nextStorage = {
       enabled: Boolean(checked),
-      format: 'csv',
+      format: 'jsonl',
       write_mode: checked ? 'append' : String(existing.write_mode || 'append'),
       file_path: String(existing.file_path || ''),
       store_node_id: String(existing.store_node_id || ''),
@@ -4900,8 +4790,8 @@ export class WorkspaceTaskPage {
       <label class="workspace-task-automation-storage-toggle">
         <input type="checkbox" data-action="toggle-csv-storage"${ctx.configured ? ' checked' : ''}${busy ? ' disabled' : ''} />
         <span>
-          <strong>Store each run of this task to CSV</strong>
-          <span class="workspace-task-automation-storage-help">Turns on Append mode so every run becomes a row in a shared CSV file.</span>
+          <strong>Save each run of this task to a dataset</strong>
+          <span class="workspace-task-automation-storage-help">Turns on Append mode so every run is saved as a record in a shared JSONL file (export to CSV anytime).</span>
         </span>
       </label>`;
     container.innerHTML = toggleHtml + (ctx.configured ? this.renderResultContractBlock() : '');
@@ -4977,7 +4867,13 @@ export class WorkspaceTaskPage {
     const defaultPathHint = defaultPath
       ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(defaultPath)}">${this.escapeHtml(defaultPath)}</span>`
       : '';
-    const fileName = String(storage.file_name || '').trim() || this.defaultAppendCsvFilename(owner);
+    const openFolderLabel = this.fileManagerActionLabel();
+    const openFolderBtn = `
+      <button type="button" class="workspace-task-automation-storage-open-btn" data-action="open-output-dir" title="${this.escapeHtml(openFolderLabel)}" aria-label="${this.escapeHtml(openFolderLabel)}">
+        <i class="bi bi-folder2-open" aria-hidden="true"></i>
+        <span>${this.escapeHtml(openFolderLabel)}</span>
+      </button>`;
+    const fileName = this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -4985,8 +4881,8 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-automation-storage-options" role="radiogroup" aria-label="Storage destination">
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
-            <span>Default output folder${defaultPathHint}</span>
-            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.csv)" value="${this.escapeHtml(fileName)}" aria-label="CSV file name" />
+            <span>Default output folder${defaultPathHint}${openFolderBtn}</span>
+            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.jsonl)" value="${this.escapeHtml(fileName)}" aria-label="Dataset file name" />
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
@@ -5020,6 +4916,54 @@ export class WorkspaceTaskPage {
     container
       .querySelector('[data-action="open-automation-storage-modal"]')
       ?.addEventListener('click', () => this.openTaskStorageEditor());
+    container
+      .querySelector('[data-action="open-output-dir"]')
+      ?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openWorkspaceOutputDir();
+      });
+  }
+
+  // fileManagerActionLabel returns a platform-appropriate label for buttons
+  // that reveal a path in the OS file manager.
+  fileManagerActionLabel() {
+    const platform = (navigator.platform || navigator.userAgent || '').toLowerCase();
+    if (platform.includes('mac')) return 'Open in Finder';
+    if (platform.includes('win')) return 'Open in Explorer';
+    return 'Open folder';
+  }
+
+  // openWorkspaceOutputDir asks the server to open this workspace's default
+  // outputs folder in the local file manager. The dir is created lazily if it
+  // doesn't exist yet.
+  async openWorkspaceOutputDir() {
+    if (!this.workspaceId) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir/open`,
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        const message = await this.extractErrorMessage(response).catch(() => '');
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+    } catch (err) {
+      if (window.Toast && typeof window.Toast.error === 'function') {
+        window.Toast.error(`Couldn't open output folder: ${err.message || err}`);
+      } else {
+        console.error('Failed to open output folder', err);
+      }
+    }
+  }
+
+  async extractErrorMessage(response) {
+    try {
+      const data = await response.json();
+      return data?.error || data?.message || '';
+    } catch (_) {
+      return '';
+    }
   }
 
   // saveAutomationStorageDestination reads the inline destination editor and
@@ -5066,12 +5010,13 @@ export class WorkspaceTaskPage {
     // so the filename keeps tracking the task description. A full custom path
     // carries its own filename, so file_name doesn't apply there.
     const derivedFileName = this.defaultAppendCsvFilename(owner);
-    const customFileName = (target !== 'custom' && fileNameInput && fileNameInput !== derivedFileName)
-      ? fileNameInput
+    const normalizedFileName = this.normalizeDatasetFileName(fileNameInput);
+    const customFileName = (target !== 'custom' && normalizedFileName && normalizedFileName !== derivedFileName)
+      ? normalizedFileName
       : '';
     const nextStorage = {
       enabled: true,
-      format: 'csv',
+      format: 'jsonl',
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
       store_node_id: target === 'store' ? storeNodeId : '',
@@ -5085,7 +5030,8 @@ export class WorkspaceTaskPage {
       String(existing.store_node_id || '') === nextStorage.store_node_id &&
       String(existing.storage_target || '') === nextStorage.storage_target &&
       String(existing.workspace_folder || '') === nextStorage.workspace_folder &&
-      String(existing.file_name || '') === nextStorage.file_name
+      String(existing.file_name || '') === nextStorage.file_name &&
+      String(existing.format || '') === nextStorage.format
     ) {
       this.notify('info', 'Destination is already set.');
       return;
@@ -5149,10 +5095,9 @@ export class WorkspaceTaskPage {
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
     const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
-    const customFileName = String(storage.file_name || '').trim();
     const filename = filePathIsFile
       ? this.basename(filePath)
-      : (customFileName || this.defaultAppendCsvFilename(owner));
+      : (this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner));
     const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
 
     let dest;
@@ -5179,9 +5124,10 @@ export class WorkspaceTaskPage {
     return parts[parts.length - 1] || '';
   }
 
-  // defaultAppendCsvFilename mirrors the backend (defaultAppendCSVFilename):
-  // the task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped
-  // and spaces turned into underscores, plus a .csv suffix.
+  // defaultAppendCsvFilename mirrors the backend (AppendJSONLFileName): the
+  // task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped and
+  // spaces turned into underscores, plus a .jsonl suffix (the canonical append
+  // format). The name is kept for its many call sites.
   defaultAppendCsvFilename(task = this.task) {
     let name = String(task?.description || '');
     if (name.length > 30) name = name.slice(0, 30);
@@ -5191,7 +5137,23 @@ export class WorkspaceTaskPage {
       else if (ch === ' ') slug += '_';
     }
     if (!slug) slug = 'task';
-    return `${slug}.csv`;
+    return `${slug}.jsonl`;
+  }
+
+  // normalizeDatasetFileName strips whatever extension a user typed (.csv,
+  // .json, …) and forces .jsonl — the dataset is JSONL, so the destination
+  // filename should reflect that. Returns '' when there's nothing usable.
+  normalizeDatasetFileName(name) {
+    let trimmed = String(name || '').trim();
+    if (!trimmed) return '';
+    trimmed = trimmed.replace(/\.(jsonl|csv|json|txt|ndjson)$/i, '');
+    let slug = '';
+    for (const ch of trimmed) {
+      if (/[A-Za-z0-9_-]/.test(ch)) slug += ch;
+      else if (ch === ' ') slug += '_';
+    }
+    if (!slug) return '';
+    return `${slug}.jsonl`;
   }
 
   // Get a trimmed sample of the current task result, used to ground the
@@ -5322,7 +5284,7 @@ export class WorkspaceTaskPage {
           schedule_name: owner?.schedule_name || this.task?.schedule_name || '',
           result_storage: {
             enabled: true,
-            format: 'csv',
+            format: 'jsonl',
             write_mode: 'append',
             file_path: String(storage.file_path || ''),
             store_node_id: String(storage.store_node_id || ''),
@@ -5415,7 +5377,7 @@ export class WorkspaceTaskPage {
     const existingStorage = owner?.result_storage || {};
     const nextStorage = {
       enabled: true,
-      format: 'csv',
+      format: 'jsonl',
       write_mode: 'append',
       file_path: String(existingStorage.file_path || ''),
       store_node_id: String(existingStorage.store_node_id || ''),
@@ -5708,6 +5670,38 @@ export class WorkspaceTaskPage {
       return;
     }
     await this.copyToClipboard(csv, 'CSV copied');
+  }
+
+  // exportResultArtifactCSV downloads the full stored dataset as a CSV. The
+  // canonical dataset is JSONL on disk; the server derives a spreadsheet CSV
+  // on demand (data columns first). Unlike "Copy CSV" — which copies the
+  // in-page preview — this is the authoritative file with every appended run.
+  async exportResultArtifactCSV() {
+    if (!this.workspaceId || !this.taskId) return;
+    const url = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/tasks/${encodeURIComponent(this.taskId)}/results/export-csv`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const message = await this.extractErrorMessage(response).catch(() => '');
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = /filename="?([^"]+)"?/i.exec(disposition);
+      const filename = (match && match[1]) || `${this.taskId}.csv`;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      this.notify('success', 'CSV exported');
+    } catch (err) {
+      this.notify('error', `Couldn't export CSV: ${err.message || err}`);
+    }
   }
 
   setResultArtifactNoteSaving(saving) {
@@ -6270,6 +6264,79 @@ export class WorkspaceTaskPage {
     await this.copyToClipboard(sectionText, 'Section copied');
   }
 
+  // renderTaskOutputShape paints the "Expected output shape" card with the
+  // task's declared schema fields, CSV contract columns, and the run-info
+  // metadata flagged for CSV inclusion. Falls back to an empty-state when
+  // no structured spec is configured (LLM returns free text).
+  // hasStructuredOutputShape reports whether the task declares a structured
+  // output — JSON schema fields or CSV contract columns. Drives both the
+  // "Expected output shape" subsection and whether the Automation & output
+  // card is shown at all when nothing else (schedule/storage) keeps it up.
+  hasStructuredOutputShape() {
+    const t = this.task || {};
+    const spec = t.output_spec || null;
+    const schemaSource = (spec && spec.schema) || t.output_schema || null;
+    const contractSource = (spec && spec.contract) || t.output_contract || null;
+    const schemaFields = Array.isArray(schemaSource?.fields) ? schemaSource.fields : [];
+    const contractColumns = Array.isArray(contractSource?.columns) ? contractSource.columns : [];
+    return schemaFields.length > 0 || contractColumns.length > 0;
+  }
+
+  renderTaskOutputShape() {
+    if (!this.elements.outputShape || !this.elements.outputShapeWrap) return;
+
+    const t = this.task || {};
+    const spec = t.output_spec || null;
+    const schemaSource = (spec && spec.schema) || t.output_schema || null;
+    const contractSource = (spec && spec.contract) || t.output_contract || null;
+
+    const schemaFields = Array.isArray(schemaSource?.fields) ? schemaSource.fields : [];
+    const contractColumns = Array.isArray(contractSource?.columns) ? contractSource.columns : [];
+
+    const hasAnyStructure = schemaFields.length > 0 || contractColumns.length > 0;
+
+    // Hide just the subsection on free-text tasks. The "Expected output shape"
+    // panel only carries meaning when the task declares a JSON schema or CSV
+    // contract; a developer-flavored empty state doesn't belong here. The
+    // surrounding Automation & output card stays governed by renderSchedule.
+    if (!hasAnyStructure) {
+      this.elements.outputShapeWrap.hidden = true;
+      this.elements.outputShape.innerHTML = '';
+      return;
+    }
+    this.elements.outputShapeWrap.hidden = false;
+
+    // One shape, schema-first. The JSON schema is the canonical record shape;
+    // fall back to the legacy CSV contract columns only for tasks that predate
+    // the schema. The old separate "CSV columns" and "Run info" tables are
+    // gone — CSV is derived from these fields at export time, so repeating them
+    // here was the duplication.
+    const shapeFields = (schemaFields.length ? schemaFields : contractColumns).map((field) => ({
+      name: String(field?.name || ''),
+      type: String(field?.type || 'string'),
+      required: Boolean(field?.required),
+      description: String(field?.description || ''),
+    }));
+
+    const rowsHtml = shapeFields.map((field) => `
+      <tr>
+        <td>${this.escapeHtml(field.name)}</td>
+        <td class="workspace-task-output-shape-col-type">${this.escapeHtml(field.type)}</td>
+        <td class="workspace-task-output-shape-col-required ${field.required ? '' : 'is-optional'}">${field.required ? 'required' : 'optional'}</td>
+        <td>${this.escapeHtml(field.description)}</td>
+      </tr>
+    `).join('');
+
+    this.elements.outputShape.innerHTML = `
+      <p class="workspace-task-output-shape-note">Each run is stored as a JSON record with these fields. Use <strong>Export CSV</strong> on the dataset for a spreadsheet — its columns are derived from these fields, plus run info (run_id, executed_at, status…).</p>
+      <table class="workspace-task-output-shape-table">
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
+  }
+
   renderOutput() {
     if (!this.elements.output || !this.elements.outputCard) return;
 
@@ -6304,13 +6371,31 @@ export class WorkspaceTaskPage {
     if (reviewPanel) {
       blocks.push(reviewPanel);
     }
-    if (artifact) {
-      blocks.push(this.renderResultArtifact(artifact));
-    }
     if (result) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
         ${this.renderMarkdownOrPre(result)}
+      `);
+    }
+    // The accumulated run-history dataset (the CSV across every run) is
+    // secondary to the latest result, so tuck it into a disclosure: collapsed
+    // when there's a result to lead with, expanded when the dataset is the only
+    // output this task produced.
+    if (artifact) {
+      const datasetRows = Array.isArray(artifact.rows) ? artifact.rows.length : 0;
+      const datasetCols = Array.isArray(artifact.columns) ? artifact.columns.length : 0;
+      const datasetMeta = [
+        datasetRows ? `${datasetRows} row${datasetRows === 1 ? '' : 's'}` : '',
+        datasetCols ? `${datasetCols} column${datasetCols === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' · ');
+      blocks.push(`
+        <details class="workspace-task-result-artifact-disclosure"${result ? '' : ' open'}>
+          <summary class="workspace-task-result-artifact-summary">
+            <span class="workspace-task-result-artifact-summary-title">${this.escapeHtml(artifact.title || 'Dataset')}</span>
+            ${datasetMeta ? `<span class="workspace-task-result-artifact-summary-meta">${this.escapeHtml(datasetMeta)}</span>` : ''}
+          </summary>
+          ${this.renderResultArtifact(artifact)}
+        </details>
       `);
     }
     // Entry point to structure a plain-text result into CSV columns. The
@@ -7916,15 +8001,16 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const executionCount = Number(this.task?.execution_count) || 0;
     const failureCount = Number(this.task?.failure_count) || 0;
-    // The card is now Automation, not just Schedule, so an output contract
-    // or configured storage destination is enough to surface it even when
-    // the task has never run on a cadence.
+    // The card is now "Automation & output", not just Schedule, so an output
+    // contract, configured storage destination, or a declared output shape is
+    // enough to surface it even when the task has never run on a cadence.
     const storageOwner = this.getTaskResultStorageTask();
     const hasContract = Array.isArray(storageOwner?.output_contract?.columns) && storageOwner.output_contract.columns.length > 0;
     const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
     const editingColumns = Array.isArray(this.resultContractDraft);
+    const hasStructuredOutput = this.hasStructuredOutputShape();
 
-    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns) {
+    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns && !hasStructuredOutput) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
       this.renderAutomationSections();
@@ -7932,6 +8018,22 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.scheduleCard.hidden = false;
+
+    // Surface the "Open output folder" action in the card header whenever the
+    // task writes to the workspace's default output folder. Store-node and
+    // explicit-path destinations are skipped because openWorkspaceOutputDir
+    // only reveals the default folder; for those the buried per-destination
+    // control in Advanced > storage remains the right entry point.
+    if (this.elements.scheduleOpenFolderBtn) {
+      const storage = storageOwner?.result_storage || null;
+      const usesDefaultOutputDir = Boolean(storage?.enabled)
+        && !String(storage.store_node_id || '').trim()
+        && String(storage.storage_target || '').trim() !== 'workspace_folder'
+        && !String(storage.file_path || '').trim();
+      this.elements.scheduleOpenFolderBtn.hidden = !usesDefaultOutputDir;
+      const labelSpan = this.elements.scheduleOpenFolderBtn.querySelector('span');
+      if (labelSpan) labelSpan.textContent = this.fileManagerActionLabel();
+    }
 
     const stats = [];
     stats.push({ label: 'Total Runs', value: String(executionCount) });
@@ -7946,7 +8048,12 @@ export class WorkspaceTaskPage {
       stats.push({ label: 'Mac Wake', value: `${this.task?.wake_lead_minutes || 5} min before` });
     }
 
-    const statsHtml = `
+    // Only show the run stats once there's schedule or run activity. A task
+    // that only surfaces this card because it declares an output shape (or a
+    // storage destination) hasn't run on a cadence, so a "Total Runs: 0 /
+    // Failures: 0" block would just be noise.
+    const showStats = hasSchedule || executionCount > 0 || failureCount > 0 || history.length > 0;
+    const statsHtml = showStats ? `
       <div class="workspace-task-schedule-stats">
         ${stats.map((s) => `
           <div class="workspace-task-schedule-stat">
@@ -7955,7 +8062,7 @@ export class WorkspaceTaskPage {
           </div>
         `).join('')}
       </div>
-    `;
+    ` : '';
 
     const bannerHtml = hasSchedule ? `
       <div class="workspace-task-schedule-banner" data-state="${scheduleEnabled ? 'enabled' : 'paused'}">
@@ -8163,79 +8270,6 @@ export class WorkspaceTaskPage {
     this.renderRunsCard();
   }
 
-  // defaultTaskTab returns which top-level tab should be active for a fresh
-  // page load given the task's current status. Failed/cancelled/timeout
-  // surface Activity (so debugging starts on the run history) and everything
-  // else opens to Overview.
-  defaultTaskTab() {
-    const status = String(this.task?.status || '').trim().toLowerCase();
-    if (status === 'failed' || status === 'cancelled' || status === 'timeout') {
-      return 'activity';
-    }
-    return 'overview';
-  }
-
-  setTaskTab(name) {
-    const valid = ['overview', 'activity', 'developer'];
-    const next = valid.includes(name) ? name : 'overview';
-    this._taskTab = next;
-
-    if (Array.isArray(this.elements.tabButtons)) {
-      this.elements.tabButtons.forEach((btn) => {
-        const isActive = btn.getAttribute('data-task-tab') === next;
-        btn.classList.toggle('is-active', isActive);
-        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
-      });
-    }
-
-    const panes = this.elements.tabPanes || {};
-    for (const key of valid) {
-      const pane = panes[key];
-      if (!pane) continue;
-      const isActive = key === next;
-      pane.hidden = !isActive;
-      pane.classList.toggle('is-active', isActive);
-    }
-
-    this.refreshTaskTabEmptyStates();
-  }
-
-  // refreshTaskTabEmptyStates shows a small "nothing yet" message inside
-  // Activity / Developer when their cards are all hidden — without it those
-  // tabs would render as empty whitespace and feel broken.
-  refreshTaskTabEmptyStates() {
-    const visible = (el) => el && !el.hidden;
-
-    // Run details (workspace-task-runs-card) moved to the Developer tab, so it
-    // no longer counts toward Activity's populated state.
-    const activityCards = [
-      document.getElementById('workspace-task-workspace-runs-card'),
-      document.getElementById('workspace-task-relationships-card'),
-      document.getElementById('workspace-task-workflow-card')
-    ];
-    const populatedActivityCount = activityCards.filter(visible).length;
-
-    if (this.elements.activityEmpty) {
-      this.elements.activityEmpty.hidden = populatedActivityCount > 0;
-    }
-
-    // Mirror the populated-subcard count onto the Activity tab button so
-    // the user can tell from the tab row whether anything's worth opening,
-    // rather than having to click in to find empty placeholders.
-    const activityCount = document.getElementById('workspace-task-tab-activity-count');
-    if (activityCount) {
-      if (populatedActivityCount > 0) {
-        activityCount.hidden = false;
-        activityCount.textContent = String(populatedActivityCount);
-      } else {
-        activityCount.hidden = true;
-        activityCount.textContent = '';
-      }
-    }
-
-    // The Developer tab always has the Task ID card, so it never needs an
-    // empty-state placeholder.
-  }
 
   renderContext() {
     if (!this.elements.context || !this.elements.contextCard) return;
@@ -8264,12 +8298,15 @@ export class WorkspaceTaskPage {
   renderBlockedState(statusInfo) {
     const blocked = statusInfo.isBlocked && this.currentBlockedTask;
 
+    // The respond UI is an inline card at the top of the flow (no slide-out).
+    // Toggle it with the blocked state; renderAssistCard fills its content.
     if (!blocked) {
-      this.toggleAssistPanel(false);
+      if (this.elements.assistCard) this.elements.assistCard.hidden = true;
       if (this.elements.blockedContextCard) this.elements.blockedContextCard.hidden = true;
       return;
     }
 
+    if (this.elements.assistCard) this.elements.assistCard.hidden = false;
     this.renderBlockedContext();
     this.renderAssistCard();
   }
@@ -8954,28 +8991,6 @@ export class WorkspaceTaskPage {
     this.renderBlockedContext();
   }
 
-  toggleAssistPanel(open) {
-    const panel = this.elements.assistPanel;
-    if (!panel) return;
-
-    clearTimeout(this._assistPanelCloseTimer);
-
-    if (open) {
-      panel.hidden = false;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          panel.classList.add('is-open');
-        });
-      });
-      document.body.style.overflow = 'hidden';
-    } else {
-      if (panel.hidden) return;
-      panel.classList.remove('is-open');
-      this._assistPanelCloseTimer = setTimeout(() => { panel.hidden = true; }, 340);
-      document.body.style.overflow = '';
-    }
-  }
-
   setAssistButtonsDisabled(disabled) {
     [
       this.elements.assistRetryBtn,
@@ -9223,7 +9238,8 @@ export class WorkspaceTaskPage {
       }
 
       this.notify('success', 'Task updated');
-      this.toggleAssistPanel(false);
+      // No explicit close: the inline respond card hides itself on the next
+      // render (renderBlockedState) once loadData shows the task is unblocked.
       if (this.elements.assistMessage) {
         this.elements.assistMessage.value = '';
       }
