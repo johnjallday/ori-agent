@@ -93,11 +93,22 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 			orihttp.NotFound(w, "agent not found")
 			return
 		}
+		// SECURITY: never expose the raw per-agent API key. Mirror APIKeyHandler
+		// by stripping the key from the serialized settings and surfacing only a
+		// has_api_key flag plus a masked preview for display.
+		sanitized := ag.Settings
+		hasAPIKey := sanitized.APIKey != ""
+		maskedAPIKey := maskAPIKey(sanitized.APIKey)
+		sanitized.APIKey = ""
 		// Wrap settings in the expected format for frontend compatibility
 		response := struct {
-			Settings types.Settings `json:"Settings"`
+			Settings     types.Settings `json:"Settings"`
+			HasAPIKey    bool           `json:"has_api_key"`
+			MaskedAPIKey string         `json:"masked_api_key,omitempty"`
 		}{
-			Settings: ag.Settings,
+			Settings:     sanitized,
+			HasAPIKey:    hasAPIKey,
+			MaskedAPIKey: maskedAPIKey,
 		}
 		orihttp.WriteJSON(w, response)
 
@@ -767,6 +778,19 @@ func maskAnthropicAPIKey(apiKey string) string {
 }
 
 func maskGeminiAPIKey(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	if len(apiKey) < 12 {
+		return "***"
+	}
+	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]
+}
+
+// maskAPIKey returns a masked preview of an arbitrary API key, revealing only a
+// short prefix and suffix so callers can confirm a key is configured without
+// exposing it. Empty input yields an empty string.
+func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
 	}

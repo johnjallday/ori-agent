@@ -11,10 +11,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
@@ -507,6 +510,64 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 
 	if _, err := llmFactory.GetProvider("codex"); err != nil {
 		t.Fatalf("Expected codex provider to remain registered, got error: %v", err)
+	}
+}
+
+func TestSettingsHandler_GetDoesNotExposeAPIKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	st, err := store.NewFileStore(filepath.Join(tmpDir, "agents.json"), types.Settings{})
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	if err := st.CreateAgent("Ori", nil); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	const secret = "sk-test-per-agent-0123456789abcdef"
+	if err := st.UpdateAgent("Ori", func(ag *agent.Agent) error {
+		ag.Settings.APIKey = secret
+		ag.Settings.Model = "gpt-5"
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateAgent() error = %v", err)
+	}
+
+	handler := NewHandler(st, nil, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	rec := httptest.NewRecorder()
+	handler.SettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The raw key must never appear anywhere in the response body.
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Fatalf("GET /api/settings leaked the raw API key: %s", rec.Body.String())
+	}
+
+	var resp struct {
+		Settings     types.Settings `json:"Settings"`
+		HasAPIKey    bool           `json:"has_api_key"`
+		MaskedAPIKey string         `json:"masked_api_key"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.Settings.APIKey != "" {
+		t.Errorf("Settings.api_key should be empty in the response, got %q", resp.Settings.APIKey)
+	}
+	if !resp.HasAPIKey {
+		t.Error("has_api_key should be true when a key is configured")
+	}
+	if !strings.Contains(resp.MaskedAPIKey, "***") {
+		t.Errorf("masked_api_key should be redacted, got %q", resp.MaskedAPIKey)
+	}
+	// Non-secret settings must still round-trip.
+	if resp.Settings.Model != "gpt-5" {
+		t.Errorf("Settings.model = %q, want gpt-5", resp.Settings.Model)
 	}
 }
 
