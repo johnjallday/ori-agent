@@ -476,6 +476,14 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 
 	appendedRows := csvRowCount(csvData)
 
+	// The dataset is JSONL; convert the CSV payload to JSONL records at the
+	// append boundary so this path writes the same .jsonl the executor does.
+	jsonlData, convErr := CSVToJSONL(csvData)
+	if convErr != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Could not parse rows to append: %v", convErr))
+		return
+	}
+
 	if storeNodeID != "" {
 		var storeNode *StoreNode
 		for i := range ws.StoreNodes {
@@ -490,16 +498,12 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		storeFilePath := filePath
 		if storeFilePath == "" {
-			storeFilePath = AppendCSVFileName(task, storageCfg)
+			storeFilePath = AppendJSONLFileName(task, storageCfg)
 		}
 		nodeCopy := *storeNode
 		nodeCopy.WriteMode = "append"
-		nodeCopy.Format = "csv"
-		payload, err := CSVWithoutHeaderForExistingStoreStrictInWorkspace(storeNode, h.store, ws.ID, storeFilePath, csvData)
-		if err != nil {
-			payload = csvWithoutHeader(csvData)
-		}
-		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, payload); err != nil {
+		nodeCopy.Format = "jsonl"
+		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, jsonlData); err != nil {
 			logger.Error("Failed to append task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
@@ -533,9 +537,9 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		relativeFilePath := filePath
 		if relativeFilePath == "" {
-			relativeFilePath = AppendCSVFileName(task, storageCfg)
+			relativeFilePath = AppendJSONLFileName(task, storageCfg)
 		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
-			relativeFilePath = filepath.Join(relativeFilePath, AppendCSVFileName(task, storageCfg))
+			relativeFilePath = filepath.Join(relativeFilePath, AppendJSONLFileName(task, storageCfg))
 		}
 		finalPath, err := BuildFinalPath(baseDir, relativeFilePath)
 		if err != nil {
@@ -552,13 +556,13 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 			}
 			baseOutputDir = filepath.Join(fallback, ws.Name)
 		}
-		filePath = filepath.Join(baseOutputDir, AppendCSVFileName(task, storageCfg))
+		filePath = filepath.Join(baseOutputDir, AppendJSONLFileName(task, storageCfg))
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, AppendCSVFileName(task, storageCfg))
+		filePath = filepath.Join(filePath, AppendJSONLFileName(task, storageCfg))
 	}
 
-	if err := AppendCSVToFile(filePath, csvData); err != nil {
-		logger.Error("Failed to append task result CSV to file", logger.Fields{
+	if err := AppendJSONLToFile(filePath, jsonlData); err != nil {
+		logger.Error("Failed to append task result to JSONL file", logger.Fields{
 			"task_id":   task.ID,
 			"file_path": filePath,
 			"err":       err,

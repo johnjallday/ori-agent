@@ -191,6 +191,32 @@ func TestBuildAppendJSONLFallsBackToResult(t *testing.T) {
 	}
 }
 
+func TestCSVToJSONL(t *testing.T) {
+	out, err := CSVToJSONL("date,value\n2026-05-09,7\n2026-05-10,5")
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 records, got %d: %q", len(lines), out)
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if first["date"] != "2026-05-09" || first["value"] != "7" {
+		t.Errorf("record = %#v", first)
+	}
+
+	empty, err := CSVToJSONL("date,value")
+	if err != nil {
+		t.Fatalf("header-only: %v", err)
+	}
+	if strings.TrimSpace(empty) != "" {
+		t.Errorf("header-only CSV should yield no records, got %q", empty)
+	}
+}
+
 func TestAppendJSONLFileName(t *testing.T) {
 	custom := AppendJSONLFileName(nil, &ResultStorageConfig{FileName: "My Runs.csv"})
 	if custom != "My_Runs.jsonl" {

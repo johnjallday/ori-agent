@@ -2068,9 +2068,16 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		return fmt.Errorf("approved CSV is empty")
 	}
 
+	// The dataset is JSONL; convert the approved CSV to JSONL records and append
+	// those so the approve-held-run path writes the same .jsonl as the executor.
+	jsonlData, err := workspace.CSVToJSONL(csvData)
+	if err != nil {
+		return err
+	}
+
 	storeFilePath := storage.FilePath
 	if strings.TrimSpace(storeFilePath) == "" {
-		storeFilePath = workspace.AppendCSVFileName(task, storage)
+		storeFilePath = workspace.AppendJSONLFileName(task, storage)
 	}
 
 	if strings.TrimSpace(storage.StoreNodeID) != "" {
@@ -2086,14 +2093,10 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		}
 		storeNodeCopy := *storeNode
 		storeNodeCopy.WriteMode = "append"
-		storeNodeCopy.Format = "csv"
-		dataToStore := csvData
-		strictData, err := workspace.CSVWithoutHeaderForExistingStoreStrictInWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, dataToStore)
-		if err != nil {
-			return err
-		}
-		dataToStore = strictData
-		if err := workspace.WriteToStoreForWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, dataToStore); err != nil {
+		storeNodeCopy.Format = "jsonl"
+		// JSONL records are self-describing; append them directly (no CSV
+		// header reconciliation).
+		if err := workspace.WriteToStoreForWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, jsonlData); err != nil {
 			return err
 		}
 		storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
@@ -2114,7 +2117,7 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		if relativeFilePath == "" {
 			relativeFilePath = storeFilePath
 		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
-			relativeFilePath = filepath.Join(relativeFilePath, workspace.AppendCSVFileName(task, storage))
+			relativeFilePath = filepath.Join(relativeFilePath, workspace.AppendJSONLFileName(task, storage))
 		}
 		finalPath, err := workspace.BuildFinalPath(baseDir, relativeFilePath)
 		if err != nil {
@@ -2135,9 +2138,9 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 		}
 		filePath = filepath.Join(baseOutputDir, storeFilePath)
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, workspace.AppendCSVFileName(task, storage))
+		filePath = filepath.Join(filePath, workspace.AppendJSONLFileName(task, storage))
 	}
-	return workspace.AppendCSVToFileStrict(filePath, csvData)
+	return workspace.AppendJSONLToFile(filePath, jsonlData)
 }
 
 // BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk

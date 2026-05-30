@@ -3,6 +3,7 @@ package workspace
 import (
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -213,6 +214,42 @@ func MarshalJSONLRecords(records []map[string]any) (string, error) {
 		buffer.WriteByte('\n')
 	}
 	return buffer.String(), nil
+}
+
+// CSVToJSONL converts a CSV payload (header row + data rows) into JSONL: one
+// JSON object per data row, keyed by the header columns. Used by the manual
+// "append now" and approve-held-run paths, which still build CSV upstream —
+// converting at the append boundary lets them write the canonical .jsonl
+// without reworking their CSV-shaped request/validation flow. Values are kept
+// as strings (the CSV export re-stringifies anyway).
+func CSVToJSONL(csvData string) (string, error) {
+	trimmed := strings.TrimSpace(csvData)
+	if trimmed == "" {
+		return "", nil
+	}
+	reader := csv.NewReader(strings.NewReader(trimmed))
+	reader.FieldsPerRecord = -1
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return "", err
+	}
+	if len(rows) < 2 {
+		return "", nil
+	}
+	header := rows[0]
+	records := make([]map[string]any, 0, len(rows)-1)
+	for _, row := range rows[1:] {
+		record := make(map[string]any, len(header))
+		for i, column := range header {
+			value := ""
+			if i < len(row) {
+				value = row[i]
+			}
+			record[strings.TrimSpace(column)] = value
+		}
+		records = append(records, record)
+	}
+	return MarshalJSONLRecords(records)
 }
 
 // AppendJSONLToFile appends one or more JSONL records to filePath, creating the

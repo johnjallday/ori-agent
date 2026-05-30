@@ -66,14 +66,12 @@ func TestHTTPHandler_AppendResultToCSV_UsesTaskStorage(t *testing.T) {
 		t.Fatalf("label=%q, want runs.csv", resp.Label)
 	}
 
-	contents, err := os.ReadFile(storedPath)
-	if err != nil {
-		t.Fatalf("read csv: %v", err)
+	records := readAppendedJSONL(t, storedPath)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 appended record, got %d", len(records))
 	}
-	got := strings.TrimSpace(string(contents))
-	want := "timestamp,value\n2026-05-20,high"
-	if got != want {
-		t.Fatalf("csv contents=%q, want %q", got, want)
+	if records[0]["timestamp"] != "2026-05-20" || records[0]["value"] != "high" {
+		t.Fatalf("record = %#v", records[0])
 	}
 
 	// Second append should not duplicate the header.
@@ -87,15 +85,37 @@ func TestHTTPHandler_AppendResultToCSV_UsesTaskStorage(t *testing.T) {
 		t.Fatalf("status2=%d body=%s", rec2.Code, rec2.Body.String())
 	}
 
-	contents2, err := os.ReadFile(storedPath)
+	records2 := readAppendedJSONL(t, storedPath)
+	if len(records2) != 2 {
+		t.Fatalf("expected 2 records after second append, got %d", len(records2))
+	}
+	if records2[1]["timestamp"] != "2026-05-21" || records2[1]["value"] != "low" {
+		t.Fatalf("second record = %#v", records2[1])
+	}
+}
+
+// readAppendedJSONL reads a .jsonl dataset file and parses each line into a
+// record. The manual-append / approve paths now write JSONL (converted from
+// the CSV they receive), so these tests assert records rather than CSV text.
+func readAppendedJSONL(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("re-read csv: %v", err)
+		t.Fatalf("read jsonl: %v", err)
 	}
-	got2 := strings.TrimSpace(string(contents2))
-	want2 := "timestamp,value\n2026-05-20,high\n2026-05-21,low"
-	if got2 != want2 {
-		t.Fatalf("csv contents after second append=%q, want %q", got2, want2)
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("line %q is not JSON: %v", line, err)
+		}
+		records = append(records, record)
 	}
+	return records
 }
 
 func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) {
@@ -152,12 +172,9 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) 
 	if resp.Label != "runs.csv" {
 		t.Fatalf("label=%q, want runs.csv", resp.Label)
 	}
-	contents, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read csv: %v", err)
-	}
-	if strings.TrimSpace(string(contents)) != "timestamp,value\n2026-05-26,high" {
-		t.Fatalf("unexpected csv contents: %q", string(contents))
+	records := readAppendedJSONL(t, wantPath)
+	if len(records) != 1 || records[0]["timestamp"] != "2026-05-26" || records[0]["value"] != "high" {
+		t.Fatalf("unexpected appended records: %#v", records)
 	}
 
 	treeReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
@@ -224,12 +241,9 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T
 	}
 
 	wantPath := filepath.Join(store.GetFilesPath(ws.ID), "exports", "runs.csv")
-	contents, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read csv: %v", err)
-	}
-	if strings.TrimSpace(string(contents)) != "timestamp,value\n2026-05-26,stored" {
-		t.Fatalf("unexpected csv contents: %q", string(contents))
+	records := readAppendedJSONL(t, wantPath)
+	if len(records) != 1 || records[0]["timestamp"] != "2026-05-26" || records[0]["value"] != "stored" {
+		t.Fatalf("unexpected appended records: %#v", records)
 	}
 
 	updated, err := store.Get(ws.ID)
@@ -281,12 +295,9 @@ func TestHTTPHandler_AppendResultToCSV_OneShotCustomPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	contents, err := os.ReadFile(targetPath)
-	if err != nil {
-		t.Fatalf("read csv: %v", err)
-	}
-	if strings.TrimSpace(string(contents)) != "name,score\nalpha,9" {
-		t.Fatalf("unexpected csv contents: %q", string(contents))
+	records := readAppendedJSONL(t, targetPath)
+	if len(records) != 1 || records[0]["name"] != "alpha" || records[0]["score"] != "9" {
+		t.Fatalf("unexpected appended records: %#v", records)
 	}
 }
 
