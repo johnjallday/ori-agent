@@ -4726,7 +4726,7 @@ export class WorkspaceTaskPage {
     const existing = owner?.result_storage || {};
     const nextStorage = {
       enabled: Boolean(checked),
-      format: 'csv',
+      format: 'jsonl',
       write_mode: checked ? 'append' : String(existing.write_mode || 'append'),
       file_path: String(existing.file_path || ''),
       store_node_id: String(existing.store_node_id || ''),
@@ -5030,7 +5030,8 @@ export class WorkspaceTaskPage {
       String(existing.store_node_id || '') === nextStorage.store_node_id &&
       String(existing.storage_target || '') === nextStorage.storage_target &&
       String(existing.workspace_folder || '') === nextStorage.workspace_folder &&
-      String(existing.file_name || '') === nextStorage.file_name
+      String(existing.file_name || '') === nextStorage.file_name &&
+      String(existing.format || '') === nextStorage.format
     ) {
       this.notify('info', 'Destination is already set.');
       return;
@@ -5283,7 +5284,7 @@ export class WorkspaceTaskPage {
           schedule_name: owner?.schedule_name || this.task?.schedule_name || '',
           result_storage: {
             enabled: true,
-            format: 'csv',
+            format: 'jsonl',
             write_mode: 'append',
             file_path: String(storage.file_path || ''),
             store_node_id: String(storage.store_node_id || ''),
@@ -5376,7 +5377,7 @@ export class WorkspaceTaskPage {
     const existingStorage = owner?.result_storage || {};
     const nextStorage = {
       enabled: true,
-      format: 'csv',
+      format: 'jsonl',
       write_mode: 'append',
       file_path: String(existingStorage.file_path || ''),
       store_node_id: String(existingStorage.store_node_id || ''),
