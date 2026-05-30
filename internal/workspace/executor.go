@@ -669,9 +669,11 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		format = "text"
 	}
 	writeMode := strings.ToLower(strings.TrimSpace(storage.WriteMode))
-	appendCSV := writeMode == "append"
-	if appendCSV {
-		format = "csv"
+	appendMode := writeMode == "append"
+	if appendMode {
+		// Append datasets are JSONL (canonical); a spreadsheet CSV is produced
+		// on demand via export rather than appended live.
+		format = "jsonl"
 	}
 	ext := "txt"
 	switch format {
@@ -681,6 +683,8 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		ext = "md"
 	case "csv":
 		ext = "csv"
+	case "jsonl":
+		ext = "jsonl"
 	}
 
 	// Generate task name slug for filename
@@ -702,20 +706,21 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	}
 
 	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
-	if appendCSV {
-		// Honors a user-set storage.FileName; otherwise derives from the
-		// task description.
-		filename = AppendCSVFileName(task, storage)
+	if appendMode {
+		// Honors a user-set storage.FileName; otherwise derives from the task
+		// description. Append datasets are JSONL.
+		filename = AppendJSONLFileName(task, storage)
 	}
 
 	// Prepare data for storage
 	dataToStore := result
-	if appendCSV {
-		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
-			dataToStore = contractCSV
-		} else {
-			dataToStore = TaskResultToCSV(task, result, timestamp, "")
+	if appendMode {
+		jsonlData, buildErr := BuildAppendJSONL(task, result, validation)
+		if buildErr != nil {
+			logger.Error("Failed to build JSONL for append", logger.Fields{"task_id": task.ID, "err": buildErr})
+			return
 		}
+		dataToStore = jsonlData
 	} else if format == "json" {
 		jsonData := map[string]any{
 			"task_id":     task.ID,
@@ -759,36 +764,14 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		if storage.FilePath != "" {
 			storeFilePath = storage.FilePath
 		}
-		if appendCSV {
+		if appendMode {
 			storeNodeCopy := *storeNode
 			storeNodeCopy.WriteMode = "append"
-			storeNodeCopy.Format = "csv"
-			payload, err := csvWithoutHeaderForExistingStoreStrictWithResolver(storeNode, workspaceStore, ws.ID, storeFilePath, dataToStore)
-			if err != nil {
-				// Lever B: reproject into the store file's existing columns and
-				// retry once before holding the run for manual review. Only
-				// reconcile fallback rows (contractCSV == ""); a designed
-				// contract's mismatch stays a hard review.
-				if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
-					if rePayload, retryErr := csvWithoutHeaderForExistingStoreStrictWithResolver(storeNode, workspaceStore, ws.ID, storeFilePath, reCSV); retryErr == nil {
-						payload = rePayload
-						err = nil
-					}
-				}
-			}
-			if err != nil {
-				if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
-					return
-				}
-				logger.Error("Failed to prepare task result CSV append for store node", logger.Fields{
-					"task_id":       task.ID,
-					"store_node_id": storeNode.ID,
-					"filename":      storeFilePath,
-					"err":           err,
-				})
-				return
-			}
-			if err := WriteToStoreForWorkspace(&storeNodeCopy, workspaceStore, ws.ID, storeFilePath, payload); err != nil {
+			storeNodeCopy.Format = "jsonl"
+			// JSONL needs no header reconciliation — each line is a
+			// self-describing record — so the records are appended directly
+			// (no CSV header strip, no reproject-on-mismatch).
+			if err := WriteToStoreForWorkspace(&storeNodeCopy, workspaceStore, ws.ID, storeFilePath, dataToStore); err != nil {
 				logger.Error("Failed to append task result to store node", logger.Fields{
 					"task_id":       task.ID,
 					"store_node_id": storeNode.ID,
@@ -894,36 +877,16 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		return
 	}
 
-	if appendCSV {
-		if err := AppendCSVToFileStrict(filePath, dataToStore); err != nil {
-			// Lever B: when the row doesn't match the destination's existing
-			// header, reproject into those columns and retry once before
-			// holding the run for manual review. Only reconcile fallback rows
-			// (contractCSV == ""); a designed contract's mismatch stays a hard
-			// review so we don't discard the user's chosen columns.
-			if reCSV, ok := reprojectResultForAppendMismatch(ctx, task, result, err, assistant, contractCSV == ""); ok {
-				if retryErr := AppendCSVToFileStrict(filePath, reCSV); retryErr == nil {
-					logger.Info("Task result reprojected to destination columns and appended", logger.Fields{
-						"task_id":   task.ID,
-						"file_path": filePath,
-					})
-					validation.StorageStatus = TaskStorageAppended
-					validation.Errors = nil
-					recordTaskStorageValidation(ws, task, workspaceStore, validation)
-					return
-				}
-			}
-			if recordCSVHeaderMismatchValidation(ws, task, workspaceStore, validation, err) {
-				return
-			}
-			logger.Error("Failed to append task result to CSV file", logger.Fields{
+	if appendMode {
+		if err := AppendJSONLToFile(filePath, dataToStore); err != nil {
+			logger.Error("Failed to append task result to JSONL file", logger.Fields{
 				"task_id":   task.ID,
 				"file_path": filePath,
 				"err":       err,
 			})
 			return
 		}
-		logger.Info("Task result appended to CSV file", logger.Fields{
+		logger.Info("Task result appended to JSONL file", logger.Fields{
 			"task_id":   task.ID,
 			"file_path": filePath,
 		})

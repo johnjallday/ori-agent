@@ -553,3 +553,62 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
+
+// OpenWorkspaceOutputDir handles POST /api/workspaces/:id/output-dir/open
+//
+// Opens the workspace's default outputs folder in the OS file manager
+// (Finder on macOS, Explorer on Windows). Creates the directory if it
+// doesn't exist yet so the user can drop files in immediately.
+func (h *HTTPHandler) OpenWorkspaceOutputDir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 1 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+
+	workspace, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	outputDir := h.store.GetOutputsPath(workspaceID)
+	if outputDir == "" {
+		baseOutputDir, derr := platform.GetDefaultOutputDir()
+		if derr != nil {
+			baseOutputDir = "outputs"
+			logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": derr})
+		}
+		outputDir = filepath.Join(baseOutputDir, workspace.Name)
+	}
+
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to create output directory: %v", err))
+		return
+	}
+
+	if err := platform.OpenFolder(outputDir); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to open output directory: %v", err))
+		return
+	}
+
+	logger.Info("Opened workspace output directory", logger.Fields{
+		"workspace_id": workspaceID,
+		"path":         outputDir,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"output_dir":   outputDir,
+		"workspace_id": workspaceID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}

@@ -295,7 +295,10 @@ func resultStorageWorkspaceFilePath(task *Task, storage *ResultStorageConfig) st
 
 	relativePath := strings.TrimSpace(storage.FilePath)
 	filename := ""
-	if strings.EqualFold(strings.TrimSpace(storage.WriteMode), "append") || strings.EqualFold(strings.TrimSpace(storage.Format), "csv") {
+	if strings.EqualFold(strings.TrimSpace(storage.WriteMode), "append") {
+		// Append datasets are JSONL; track the .jsonl file for sync.
+		filename = AppendJSONLFileName(task, storage)
+	} else if strings.EqualFold(strings.TrimSpace(storage.Format), "csv") {
 		filename = AppendCSVFileName(task, storage)
 	} else if strings.TrimSpace(storage.FileName) != "" {
 		filename = filepath.Base(filepath.Clean(storage.FileName))

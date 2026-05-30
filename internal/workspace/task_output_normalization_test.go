@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -138,16 +139,19 @@ func (f *fakeTaskOutputSpecAssistant) RepairTaskOutputSpec(_ context.Context, _ 
 	return f.repairResult, f.repairErr
 }
 
-func TestAutoStoreResult_OutputSpecBlocksCSVHeaderMismatch(t *testing.T) {
+// JSONL append has no header to reconcile, so a passing run is appended as a
+// new record regardless of what the destination file already contains — the
+// CSV header-mismatch "needs review" path no longer applies to appends.
+func TestAutoStoreResult_AppendsJSONLRecordOnPass(t *testing.T) {
 	dir := t.TempDir()
-	filePath := filepath.Join(dir, "pollen.csv")
-	if err := os.WriteFile(filePath, []byte("other,header\n1,2"), 0644); err != nil {
-		t.Fatalf("write existing csv: %v", err)
+	filePath := filepath.Join(dir, "pollen.jsonl")
+	// A pre-existing record (even with different keys) must not block the append.
+	if err := os.WriteFile(filePath, []byte(`{"other":"row"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write existing jsonl: %v", err)
 	}
 	task := structuredPollenTaskForNormalization()
 	task.ResultStorage = &ResultStorageConfig{
 		Enabled:   true,
-		Format:    "csv",
 		WriteMode: "append",
 		FilePath:  filePath,
 	}
@@ -163,11 +167,23 @@ func TestAutoStoreResult_OutputSpecBlocksCSVHeaderMismatch(t *testing.T) {
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		t.Fatalf("read csv: %v", err)
+		t.Fatalf("read jsonl: %v", err)
 	}
-	if strings.TrimSpace(string(data)) != "other,header\n1,2" {
-		t.Fatalf("csv should not be appended on mismatch, got %q", string(data))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected existing + appended line, got %d: %q", len(lines), string(data))
 	}
+	var appended map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &appended); err != nil {
+		t.Fatalf("appended line is not JSON: %v", err)
+	}
+	if appended["forecast_date"] != "2026-05-21" {
+		t.Errorf("appended record missing data field: %#v", appended)
+	}
+	if appended["run_id"] != "run-1" || appended["status"] != "success" {
+		t.Errorf("appended record missing run metadata: %#v", appended)
+	}
+
 	updated, err := store.Get(ws.ID)
 	if err != nil {
 		t.Fatalf("reload workspace: %v", err)
@@ -177,17 +193,8 @@ func TestAutoStoreResult_OutputSpecBlocksCSVHeaderMismatch(t *testing.T) {
 		t.Fatalf("get task: %v", err)
 	}
 	validation := updatedTask.ExecutionHistory[len(updatedTask.ExecutionHistory)-1].Validation
-	if validation == nil || validation.ValidationStatus != TaskValidationNeedsReview || validation.StorageStatus != TaskStorageSkippedInvalid {
-		t.Fatalf("validation=%+v, want needs_review/skipped_invalid", validation)
-	}
-	if len(validation.Errors) == 0 || validation.Errors[0].Code != "csv_header_mismatch" {
-		t.Fatalf("expected csv_header_mismatch, got %+v", validation.Errors)
-	}
-	if strings.Join(validation.Errors[0].Expected, ",") != "run_id,executed_at,status,duration_ms,forecast_date,pollen_count,top_allergens" {
-		t.Fatalf("expected header metadata, got %+v", validation.Errors[0].Expected)
-	}
-	if strings.Join(validation.Errors[0].Actual, ",") != "other,header" {
-		t.Fatalf("actual header = %+v, want other/header", validation.Errors[0].Actual)
+	if validation == nil || validation.ValidationStatus != TaskValidationPassed || validation.StorageStatus != TaskStorageAppended {
+		t.Fatalf("validation=%+v, want passed/appended", validation)
 	}
 }
 

@@ -27,6 +27,10 @@ type WorkspaceToolProvider struct {
 	fileStore      *workspace.FileStore // Optional: for syncing notes to disk
 	workspaceID    string
 
+	// taskID, when set, marks this chat as scoped to a single task and
+	// enables the current_task / task_runs tools.
+	taskID string
+
 	// Optional dependencies for management tools (Phase 2)
 	agentStore    store.Store
 	mcpRegistry   mcpServerLister
@@ -57,6 +61,12 @@ func (p *WorkspaceToolProvider) SetFileStore(fs *workspace.FileStore) {
 	p.fileStore = fs
 }
 
+// SetTaskID scopes the provider to a single task and enables the
+// current_task / task_runs tools.
+func (p *WorkspaceToolProvider) SetTaskID(taskID string) {
+	p.taskID = strings.TrimSpace(taskID)
+}
+
 // SetManagementDeps sets optional dependencies needed for management tools.
 func (p *WorkspaceToolProvider) SetManagementDeps(agentStore store.Store, mcpReg mcpServerLister, skillsMgr skillLister) {
 	p.agentStore = agentStore
@@ -77,6 +87,11 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		p.readDirectoriesTool(),
 	}
 
+	// Task-scoped tools (only when the chat is bound to a specific task)
+	if p.taskID != "" {
+		tools = append(tools, p.currentTaskTool(), p.taskRunsTool())
+	}
+
 	// Phase 2: Management tools (only when dependencies are available)
 	if p.agentStore != nil {
 		tools = append(tools, p.manageAgentsTool())
@@ -89,6 +104,179 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 
 	return tools
+}
+
+// --- current_task (read) ---
+
+func (p *WorkspaceToolProvider) currentTaskTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        "current_task",
+			Description: "Read the full record of the task this chat is scoped to. Returns description, status, assignee, latest result, error, schedule, and identifiers.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			ws, err := p.workspaceStore.Get(p.workspaceID)
+			if err != nil {
+				return "", fmt.Errorf("workspace not found: %w", err)
+			}
+			for _, t := range ws.Tasks {
+				if t.ID != p.taskID {
+					continue
+				}
+				out := map[string]any{
+					"id":             t.ID,
+					"workspace_id":   t.WorkspaceID,
+					"description":    t.Description,
+					"status":         string(t.Status),
+					"assigned_to":    t.To,
+					"priority":       t.Priority,
+					"created_at":     t.CreatedAt.Format(time.RFC3339),
+					"execution_mode": string(t.ExecutionMode),
+				}
+				if t.Details != "" {
+					out["details"] = t.Details
+				}
+				if t.Result != "" {
+					out["result"] = t.Result
+				}
+				if t.Error != "" {
+					out["error"] = t.Error
+				}
+				if t.StartedAt != nil {
+					out["started_at"] = t.StartedAt.Format(time.RFC3339)
+				}
+				if t.CompletedAt != nil {
+					out["completed_at"] = t.CompletedAt.Format(time.RFC3339)
+				}
+				if t.CurrentRunID != "" {
+					out["current_run_id"] = t.CurrentRunID
+				}
+				if t.ParentTaskID != "" {
+					out["parent_task_id"] = t.ParentTaskID
+				}
+				if t.AssignedNodeID != "" {
+					out["assigned_node_id"] = t.AssignedNodeID
+				}
+				if t.ScheduleEnabled {
+					out["schedule_enabled"] = true
+					out["execution_count"] = t.ExecutionCount
+					out["failure_count"] = t.FailureCount
+					if t.NextRun != nil {
+						out["next_run"] = t.NextRun.Format(time.RFC3339)
+					}
+					if t.LastRun != nil {
+						out["last_run"] = t.LastRun.Format(time.RFC3339)
+					}
+				}
+				if t.ResultStorage != nil {
+					out["result_storage"] = t.ResultStorage
+				}
+				return marshalToolResponse(out)
+			}
+			return marshalToolResponse(map[string]any{
+				"task_found": false,
+				"task_id":    p.taskID,
+				"message":    "Task not found in this workspace.",
+			})
+		},
+	}
+}
+
+// --- task_runs (read) ---
+
+func (p *WorkspaceToolProvider) taskRunsTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        "task_runs",
+			Description: "List recorded runs (execution history) for the active task. Returns each run's status, summary, full result/error, duration, and timestamp.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Optional. Cap the number of most-recent runs returned. Defaults to 20.",
+					},
+					"status": map[string]any{
+						"type":        "string",
+						"description": "Optional. Filter by run status: success, failed, blocked.",
+					},
+				},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			var req struct {
+				Limit  int    `json:"limit"`
+				Status string `json:"status"`
+			}
+			if strings.TrimSpace(args) != "" {
+				if err := json.Unmarshal([]byte(args), &req); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+			if req.Limit <= 0 {
+				req.Limit = 20
+			}
+
+			ws, err := p.workspaceStore.Get(p.workspaceID)
+			if err != nil {
+				return "", fmt.Errorf("workspace not found: %w", err)
+			}
+			for _, t := range ws.Tasks {
+				if t.ID != p.taskID {
+					continue
+				}
+				runs := t.ExecutionHistory
+				if req.Status != "" {
+					filtered := make([]workspace.TaskExecution, 0, len(runs))
+					for _, run := range runs {
+						if strings.EqualFold(run.Status, req.Status) {
+							filtered = append(filtered, run)
+						}
+					}
+					runs = filtered
+				}
+				if len(runs) > req.Limit {
+					runs = runs[len(runs)-req.Limit:]
+				}
+				items := make([]map[string]any, 0, len(runs))
+				for _, run := range runs {
+					item := map[string]any{
+						"executed_at": run.ExecutedAt.Format(time.RFC3339),
+						"status":      run.Status,
+						"duration_ms": run.Duration,
+					}
+					if run.RunID != "" {
+						item["run_id"] = run.RunID
+					}
+					if run.Summary != "" {
+						item["summary"] = run.Summary
+					}
+					if run.Result != "" {
+						item["result"] = run.Result
+					}
+					if run.Error != "" {
+						item["error"] = run.Error
+					}
+					items = append(items, item)
+				}
+				return marshalToolResponse(map[string]any{
+					"task_id":    p.taskID,
+					"total_runs": len(t.ExecutionHistory),
+					"returned":   len(items),
+					"runs":       items,
+				})
+			}
+			return marshalToolResponse(map[string]any{
+				"task_found": false,
+				"task_id":    p.taskID,
+				"runs":       []any{},
+			})
+		},
+	}
 }
 
 // --- workspace_notes (read) ---

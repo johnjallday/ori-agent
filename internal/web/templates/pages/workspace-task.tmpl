@@ -36,27 +36,34 @@
                 tabindex="0"
                 role="button"
                 aria-label="Edit task title">Loading task...</h1>
+              <!-- Copy link + Delete folded into a single overflow menu so the
+                   title row stays clean and the destructive Delete is one step
+                   removed from an accidental click. The button ids are kept so
+                   their existing handlers still bind. -->
               <div class="workspace-task-page-title-actions">
-                <button
-                  type="button"
-                  id="workspace-task-copy-link"
-                  class="workspace-task-page-icon-btn"
-                  aria-label="Copy link to task"
-                  title="Copy link to task">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.64L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  id="workspace-task-delete"
-                  class="workspace-task-page-icon-btn workspace-task-page-icon-btn-danger"
-                  aria-label="Delete task"
-                  title="Delete task">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-                  </svg>
-                </button>
+                <div class="workspace-task-hero-overflow" data-open="false">
+                  <button
+                    type="button"
+                    id="workspace-task-hero-overflow-toggle"
+                    class="workspace-task-page-icon-btn"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="workspace-task-hero-overflow-menu"
+                    aria-label="More task actions"
+                    title="More actions">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"/></svg>
+                  </button>
+                  <div id="workspace-task-hero-overflow-menu" class="workspace-task-hero-overflow-menu" role="menu" hidden>
+                    <button type="button" id="workspace-task-copy-link" class="workspace-task-hero-overflow-item" role="menuitem">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.64L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/></svg>
+                      <span>Copy link</span>
+                    </button>
+                    <button type="button" id="workspace-task-delete" class="workspace-task-hero-overflow-item workspace-task-hero-overflow-item-danger" role="menuitem">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
+                      <span>Delete task</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="workspace-task-page-subtitle-row">
@@ -83,27 +90,9 @@
           </div>
         </section>
 
-        <!-- Full-width Action Required banner. Previously this lived inside
-             the hero's narrow right column where the CTA buttons collided
-             with the status badge and agent picker. Promoted to a sibling
-             of the hero so the "you need to do something" state takes the
-             page's full width and reads as the primary call to action. -->
-        <aside
-          id="workspace-task-hero-priority"
-          class="workspace-task-hero-priority"
-          role="region"
-          aria-label="Action required"
-          hidden>
-          <div class="workspace-task-hero-priority-body">
-            <div class="workspace-task-hero-priority-kicker">Action Required</div>
-            <div id="workspace-task-hero-priority-copy" class="workspace-task-hero-priority-copy"></div>
-            <div id="workspace-task-hero-priority-reason" class="workspace-task-hero-priority-reason" hidden>
-              <span class="workspace-task-hero-priority-reason-label">Reason</span>
-              <span id="workspace-task-hero-priority-reason-text" class="workspace-task-hero-priority-reason-text"></span>
-            </div>
-          </div>
-          <div id="workspace-task-hero-priority-actions" class="workspace-task-hero-priority-actions"></div>
-        </aside>
+        <!-- The full-width "Action Required" banner was retired: when a task is
+             blocked the inline respond card (top of the main flow) now carries
+             that role on its own. -->
 
         <div id="workspace-task-page-alert" class="workspace-task-page-alert d-none" role="alert"></div>
 
@@ -127,16 +116,83 @@
 
         <div id="workspace-task-page-content" class="workspace-task-page-layout" hidden>
           <main class="workspace-task-page-main">
-            <div class="workspace-task-page-tabs" role="tablist" aria-label="Task sections">
-              <button type="button" class="workspace-task-page-tab is-active" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="workspace-task-tab-overview" id="workspace-task-tab-button-overview">Overview</button>
-              <button type="button" class="workspace-task-page-tab" data-task-tab="activity" role="tab" aria-selected="false" aria-controls="workspace-task-tab-activity" id="workspace-task-tab-button-activity">
-                <span>Activity</span>
-                <span id="workspace-task-tab-activity-count" class="workspace-task-page-tab-count" hidden aria-hidden="true"></span>
-              </button>
-              <button type="button" class="workspace-task-page-tab" data-task-tab="developer" role="tab" aria-selected="false" aria-controls="workspace-task-tab-developer" id="workspace-task-tab-button-developer">Developer</button>
-            </div>
+            <!-- Inline respond card (focus zone). Shown only while the task is
+                 blocked / waiting for input; renderBlockedState toggles its
+                 visibility. Replaces the old slide-out assist panel and the
+                 separate Action Required banner. Every inner element id is
+                 preserved so the existing assist handlers keep working. -->
+            <section id="workspace-task-assist-card" class="workspace-task-page-card workspace-task-assist-card-inline" hidden>
+              <div class="workspace-task-assist-panel-header">
+                <div>
+                  <div class="workspace-task-assist-kicker">Action Required</div>
+                  <h2>Unblock this task</h2>
+                </div>
+              </div>
 
-            <div id="workspace-task-tab-overview" class="workspace-task-tab-pane is-active" role="tabpanel" aria-labelledby="workspace-task-tab-button-overview">
+              <div class="workspace-task-assist-panel-body">
+                <div class="workspace-task-assist-summary-grid">
+                  <article class="workspace-task-assist-summary-card">
+                    <div class="workspace-task-assist-summary-title">What It Knows</div>
+                    <div id="workspace-task-assist-known" class="workspace-task-assist-summary-copy"></div>
+                  </article>
+                  <article class="workspace-task-assist-summary-card">
+                    <div class="workspace-task-assist-summary-title">What It Needs</div>
+                    <div id="workspace-task-assist-needs" class="workspace-task-assist-summary-copy"></div>
+                  </article>
+                  <article class="workspace-task-assist-summary-card">
+                    <div class="workspace-task-assist-summary-title">What Happens Next</div>
+                    <div id="workspace-task-assist-next" class="workspace-task-assist-summary-copy"></div>
+                  </article>
+                </div>
+
+                <div id="workspace-task-assist-question-wrap" class="workspace-task-assist-question-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Question</div>
+                  <div id="workspace-task-assist-question" class="workspace-task-page-copy-block"></div>
+                </div>
+
+                <div id="workspace-task-assist-form-wrap" class="workspace-task-assist-form-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Requested details</div>
+                  <div id="workspace-task-assist-form-fields" class="workspace-task-assist-form-fields"></div>
+                </div>
+
+                <div class="workspace-task-assist-extra">
+                  <label class="form-label" for="workspace-task-assist-message">Extra guidance for the agent</label>
+                  <textarea id="workspace-task-assist-message" class="form-control" rows="3" placeholder="Add clarification, constraints, or context before continuing..."></textarea>
+                </div>
+
+                <div class="workspace-task-assist-actions-primary">
+                  <button type="button" id="workspace-task-assist-continue" class="modern-btn modern-btn-primary workspace-task-assist-continue-btn">Continue</button>
+                </div>
+
+                <!-- Recovery actions live alongside Continue rather than behind
+                     a "More actions" disclosure. The most common stuck-task
+                     remediation (reassign or fail-out) shouldn't require an
+                     extra click to reveal. -->
+                <div class="workspace-task-assist-more-actions">
+                  <div class="workspace-task-assist-more-content">
+                    <div class="workspace-task-assist-switch">
+                      <label class="form-label" for="workspace-task-assist-agent">Reassign agent</label>
+                      <div class="workspace-task-assist-switch-row">
+                        <select id="workspace-task-assist-agent" class="form-select">
+                          <option value="">Keep current assignment</option>
+                        </select>
+                        <button type="button" id="workspace-task-assist-switch" class="modern-btn modern-btn-secondary">Switch + Retry</button>
+                      </div>
+                    </div>
+                    <div class="workspace-task-assist-secondary-actions">
+                      <button type="button" id="workspace-task-assist-retry" class="modern-btn modern-btn-secondary">Retry Task</button>
+                      <button type="button" id="workspace-task-assist-fail" class="workspace-task-page-text-button workspace-task-assist-fail">Mark as Failed</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Single flow: the 3-tab structure (Overview / Activity /
+                 Developer) was removed in the simplification pass. Cards now
+                 stack in one scroll; each self-hides when it has nothing to
+                 show, and the developer-facing cards are grouped in a collapsed
+                 disclosure at the bottom. -->
               <section class="workspace-task-page-card">
                 <div class="workspace-task-page-card-header">
                   <div>
@@ -264,19 +320,42 @@
                 </div>
               </section>
 
+              <!-- Single "Automation & output" card: how/when the task runs,
+                   where results are saved, and (for structured tasks) the shape
+                   of those results. The schedule card id is kept so renderSchedule
+                   still owns this card's visibility; renderSchedule's visibility
+                   union now also accounts for a structured output spec. -->
               <section id="workspace-task-schedule-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Automation</div>
-                    <h2>Schedule &amp; saved results</h2>
+                    <h2>Automation &amp; output</h2>
                   </div>
-                  <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
-                    <i class="bi bi-calendar2-week" aria-hidden="true"></i>
-                    <span>Edit schedule</span>
-                  </button>
+                  <div class="workspace-task-schedule-header-actions">
+                    <!-- Lifted out of Advanced > storage so a task that writes
+                         to the default output folder exposes the reveal action
+                         at the card level. Toggled by renderSchedule based on
+                         whether storage targets the default folder. -->
+                    <button type="button" id="workspace-task-schedule-open-folder" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn" hidden>
+                      <i class="bi bi-folder2-open" aria-hidden="true"></i>
+                      <span>Open output folder</span>
+                    </button>
+                    <button type="button" id="workspace-task-schedule-card-edit" class="modern-btn modern-btn-secondary workspace-task-schedule-edit-btn">
+                      <i class="bi bi-calendar2-week" aria-hidden="true"></i>
+                      <span>Edit schedule</span>
+                    </button>
+                  </div>
                 </div>
                 <div id="workspace-task-schedule" class="workspace-task-schedule-content"></div>
                 <div id="workspace-task-automation-summary" class="workspace-task-automation-summary"></div>
+
+                <!-- Expected output shape, folded in as a subsection. Hidden by
+                     default; renderTaskOutputShape reveals it only when the task
+                     declares a structured schema / CSV contract. -->
+                <div id="workspace-task-output-shape-wrap" class="workspace-task-output-shape-section" hidden>
+                  <h3 class="workspace-task-page-subheading">Expected output shape</h3>
+                  <div id="workspace-task-output-shape" class="workspace-task-output-shape"></div>
+                </div>
+
                 <details class="workspace-task-advanced">
                   <summary class="workspace-task-advanced-summary">Advanced settings</summary>
                   <div class="workspace-task-advanced-body">
@@ -285,9 +364,7 @@
                   </div>
                 </details>
               </section>
-            </div>
 
-            <div id="workspace-task-tab-activity" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-activity" hidden>
               <section id="workspace-task-workspace-runs-card" class="workspace-task-page-card" hidden>
                 <div class="workspace-task-page-card-header">
                   <div>
@@ -326,18 +403,17 @@
                 <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
               </section>
 
-              <div id="workspace-task-activity-empty" class="workspace-task-page-card workspace-task-tab-empty" hidden>
-                <p class="workspace-task-tab-empty-copy">Run history and execution trace will appear here once this task runs.</p>
-              </div>
-            </div>
+              <!-- Developer-facing cards (raw IDs, run trace, technical context)
+                   grouped and collapsed by default so they stay out of the way
+                   of the everyday task view. -->
+              <details class="workspace-task-developer-group">
+                <summary class="workspace-task-developer-summary">Developer details</summary>
 
-            <div id="workspace-task-tab-developer" class="workspace-task-tab-pane" role="tabpanel" aria-labelledby="workspace-task-tab-button-developer" hidden>
-              <section class="workspace-task-page-card">
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Developer</div>
-                    <h2>Task ID</h2>
-                  </div>
+                <section class="workspace-task-page-card">
+                  <div class="workspace-task-page-card-header">
+                    <div>
+                      <h2>Task ID</h2>
+                    </div>
                   <button
                     type="button"
                     id="workspace-task-copy-id"
@@ -386,83 +462,14 @@
                 </div>
                 <div id="workspace-task-context"></div>
               </section>
-            </div>
+              </details>
           </main>
         </div>
 
-        <!-- Slide-out assist panel (opened from the Action Required banner CTA) -->
-        <div id="workspace-task-assist-panel" class="workspace-task-assist-panel" hidden>
-          <div id="workspace-task-assist-backdrop" class="workspace-task-assist-backdrop"></div>
-          <div class="workspace-task-assist-panel-content" id="workspace-task-assist-card">
-            <div class="workspace-task-assist-panel-header">
-              <div>
-                <div class="workspace-task-page-card-kicker">Need Your Input</div>
-                <h2>Unblock this task</h2>
-              </div>
-              <button type="button" id="workspace-task-assist-close" class="workspace-task-assist-panel-close" aria-label="Close panel">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
-              </button>
-            </div>
+        <!-- The slide-out assist panel was retired; its card now renders
+             inline at the top of the main flow (see #workspace-task-assist-card
+             above). -->
 
-            <div class="workspace-task-assist-panel-body">
-              <div class="workspace-task-assist-summary-grid">
-                <article class="workspace-task-assist-summary-card">
-                  <div class="workspace-task-assist-summary-title">What It Knows</div>
-                  <div id="workspace-task-assist-known" class="workspace-task-assist-summary-copy"></div>
-                </article>
-                <article class="workspace-task-assist-summary-card">
-                  <div class="workspace-task-assist-summary-title">What It Needs</div>
-                  <div id="workspace-task-assist-needs" class="workspace-task-assist-summary-copy"></div>
-                </article>
-                <article class="workspace-task-assist-summary-card">
-                  <div class="workspace-task-assist-summary-title">What Happens Next</div>
-                  <div id="workspace-task-assist-next" class="workspace-task-assist-summary-copy"></div>
-                </article>
-              </div>
-
-              <div id="workspace-task-assist-question-wrap" class="workspace-task-assist-question-wrap d-none">
-                <div class="workspace-task-page-mini-label">Question</div>
-                <div id="workspace-task-assist-question" class="workspace-task-page-copy-block"></div>
-              </div>
-
-              <div id="workspace-task-assist-form-wrap" class="workspace-task-assist-form-wrap d-none">
-                <div class="workspace-task-page-mini-label">Requested details</div>
-                <div id="workspace-task-assist-form-fields" class="workspace-task-assist-form-fields"></div>
-              </div>
-
-              <div class="workspace-task-assist-extra">
-                <label class="form-label" for="workspace-task-assist-message">Extra guidance for the agent</label>
-                <textarea id="workspace-task-assist-message" class="form-control" rows="3" placeholder="Add clarification, constraints, or context before continuing..."></textarea>
-              </div>
-
-              <div class="workspace-task-assist-actions-primary">
-                <button type="button" id="workspace-task-assist-continue" class="modern-btn modern-btn-primary workspace-task-assist-continue-btn">Continue</button>
-              </div>
-
-              <!-- Recovery actions live alongside Continue rather than
-                   behind a "More actions" disclosure. The most common
-                   stuck-task remediation (reassign or fail-out) shouldn't
-                   require an extra click to reveal. -->
-              <div class="workspace-task-assist-more-actions">
-                <div class="workspace-task-assist-more-content">
-                  <div class="workspace-task-assist-switch">
-                    <label class="form-label" for="workspace-task-assist-agent">Reassign agent</label>
-                    <div class="workspace-task-assist-switch-row">
-                      <select id="workspace-task-assist-agent" class="form-select">
-                        <option value="">Keep current assignment</option>
-                      </select>
-                      <button type="button" id="workspace-task-assist-switch" class="modern-btn modern-btn-secondary">Switch + Retry</button>
-                    </div>
-                  </div>
-                  <div class="workspace-task-assist-secondary-actions">
-                    <button type="button" id="workspace-task-assist-retry" class="modern-btn modern-btn-secondary">Retry Task</button>
-                    <button type="button" id="workspace-task-assist-fail" class="workspace-task-page-text-button workspace-task-assist-fail">Mark as Failed</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -476,30 +483,23 @@
       min-height: calc(100vh - 72px);
     }
 
+    /* Simplification pass: the hero is a flat header now — no radial-glow
+       gradient, no decorative ::after blob, no heavy drop shadow. A single
+       surface color and a hairline border. */
     .workspace-task-page-hero {
       position: relative;
       display: grid;
       grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
       gap: 1.5rem;
-      padding: 1.6rem 1.75rem;
-      border-radius: 30px;
-      border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
-      background:
-        radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 16%, transparent), transparent 42%),
-        linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 84%, transparent), var(--bg-primary));
-      box-shadow: 0 28px 60px rgba(10, 10, 10, 0.14);
+      padding: 1.4rem 1.5rem;
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
       overflow: hidden;
     }
 
     .workspace-task-page-hero::after {
-      content: "";
-      position: absolute;
-      inset: auto -8% -40% auto;
-      width: 280px;
-      height: 280px;
-      border-radius: 50%;
-      background: radial-gradient(circle, color-mix(in srgb, var(--primary-color) 18%, transparent), transparent 68%);
-      pointer-events: none;
+      display: none;
     }
 
     .workspace-task-page-hero-copy,
@@ -530,13 +530,21 @@
       color: var(--primary-color);
     }
 
-    .workspace-task-page-card-kicker,
     .workspace-task-page-mini-label {
       color: var(--accent-gold, #d3a94f);
       text-transform: uppercase;
       letter-spacing: 0.16em;
       font-size: 0.74rem;
       font-weight: 800;
+    }
+
+    /* Card "kicker" eyebrows removed in the simplification pass: each card's
+       <h2> carries the heading on its own, so the gold all-caps label above it
+       was redundant chrome (and 12 of them scattered gold accents across the
+       page). Hidden in CSS rather than editing 12 template call sites now; the
+       markup is dropped when the sections are restructured. */
+    .workspace-task-page-card-kicker {
+      display: none;
     }
 
     .workspace-task-page-breadcrumbs {
@@ -552,8 +560,8 @@
     .workspace-task-page-title {
       margin: 0;
       font-family: "Fraunces", serif;
-      font-size: clamp(2rem, 4vw, 3.1rem);
-      line-height: 1.02;
+      font-size: clamp(1.5rem, 2.5vw, 2.1rem);
+      line-height: 1.12;
       color: var(--text-primary);
       overflow-wrap: anywhere;
       cursor: text;
@@ -580,6 +588,55 @@
       gap: 0.35rem;
       margin-top: 0.45rem;
       flex-shrink: 0;
+    }
+
+    /* Hero "more actions" overflow menu (Copy link, Delete). */
+    .workspace-task-hero-overflow {
+      position: relative;
+    }
+
+    .workspace-task-hero-overflow-menu {
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      right: 0;
+      z-index: 20;
+      min-width: 11rem;
+      padding: 0.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      background: var(--bg-primary);
+      box-shadow: 0 10px 30px rgba(10, 10, 10, 0.16);
+    }
+
+    .workspace-task-hero-overflow-item {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workspace-task-hero-overflow-item:hover {
+      background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+    }
+
+    .workspace-task-hero-overflow-item-danger {
+      color: #c23b3b;
+    }
+
+    .workspace-task-hero-overflow-item-danger:hover {
+      background: rgba(194, 59, 59, 0.1);
     }
 
     .workspace-task-page-icon-btn {
@@ -677,9 +734,9 @@
       background: transparent;
       color: var(--text-primary);
       font-family: "Fraunces", serif;
-      font-size: clamp(2rem, 4vw, 3.1rem);
+      font-size: clamp(1.5rem, 2.5vw, 2.1rem);
       font-weight: 700;
-      line-height: 1.02;
+      line-height: 1.12;
       resize: none;
       overflow: hidden;
       box-shadow: none;
@@ -933,91 +990,31 @@
       justify-content: flex-end;
     }
 
-    .workspace-task-hero-priority {
-      width: 100%;
-      display: flex;
-      gap: 1.25rem;
-      align-items: center;
-      flex-wrap: wrap;
-      padding: 1rem 1.25rem;
-      border-radius: 22px;
-      border: 1px solid rgba(194, 132, 11, 0.32);
-      background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    /* Inline respond card "action required" accent (replaces the retired
+       Action Required banner). Layered on the flat card base so a blocked
+       task's respond card reads as the priority item without reintroducing
+       heavy chrome. */
+    .workspace-task-assist-card-inline {
+      border-color: rgba(194, 132, 11, 0.45);
+      background: rgba(245, 158, 11, 0.06);
     }
 
-    .workspace-task-hero-priority-body {
-      display: grid;
-      gap: 0.55rem;
-      flex: 1 1 22rem;
-      min-width: 0;
+    [data-bs-theme="dark"] .workspace-task-assist-card-inline {
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(245, 158, 11, 0.08);
     }
 
-    .workspace-task-hero-priority-kicker {
+    .workspace-task-assist-kicker {
       color: #9a6700;
       font-size: 0.72rem;
       font-weight: 800;
       letter-spacing: 0.1em;
       text-transform: uppercase;
+      margin-bottom: 0.15rem;
     }
 
-    .workspace-task-hero-priority-copy {
-      color: var(--text-primary);
-      font-size: 0.94rem;
-      line-height: 1.55;
-    }
-
-    .workspace-task-hero-priority-reason {
-      display: flex;
-      gap: 0.5rem;
-      align-items: flex-start;
-      padding: 0.55rem 0.7rem;
-      border-radius: 12px;
-      border: 1px solid rgba(194, 132, 11, 0.32);
-      background: rgba(255, 255, 255, 0.55);
-      font-size: 0.86rem;
-      line-height: 1.45;
-      color: var(--text-primary);
-    }
-
-    [data-bs-theme="dark"] .workspace-task-hero-priority-reason {
-      border-color: rgba(245, 158, 11, 0.35);
-      background: rgba(20, 14, 4, 0.72);
-      color: var(--text-primary);
-    }
-
-    .workspace-task-hero-priority-reason-label {
-      flex: 0 0 auto;
-      font-size: 0.66rem;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #7a4f00;
-      padding-top: 0.12rem;
-    }
-
-    [data-bs-theme="dark"] .workspace-task-hero-priority-reason-label {
+    [data-bs-theme="dark"] .workspace-task-assist-kicker {
       color: #f5b441;
-    }
-
-    .workspace-task-hero-priority-reason-text {
-      flex: 1 1 auto;
-      word-break: break-word;
-    }
-
-    .workspace-task-hero-priority-actions {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 0.55rem;
-      flex: 0 1 auto;
-    }
-
-    @media (max-width: 720px) {
-      .workspace-task-hero-priority-actions {
-        justify-content: flex-start;
-        width: 100%;
-      }
     }
 
     .workspace-task-page-hero-btn {
@@ -1137,102 +1134,61 @@
       background: rgba(248, 113, 113, 0.08);
     }
 
-    .workspace-task-page-tabs {
-      display: inline-flex;
-      gap: 0.35rem;
-      padding: 0.35rem;
-      border-radius: 14px;
-      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
-      border: 1px solid var(--border-color);
+    /* Collapsible "Developer details" group (replaces the old Developer tab).
+       Borderless so the flat cards inside don't become boxes-in-a-box; the
+       summary is a quiet toggle and the cards stack below it when open. */
+    .workspace-task-developer-summary {
+      list-style: none;
+      cursor: pointer;
       width: fit-content;
-    }
-
-    .workspace-task-page-tab {
-      appearance: none;
+      padding: 0.4rem 0;
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      font-weight: 700;
       display: inline-flex;
       align-items: center;
       gap: 0.45rem;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 0.85rem;
-      font-weight: 600;
-      padding: 0.5rem 1rem;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     }
 
-    .workspace-task-page-tab:hover {
-      color: var(--text-primary);
+    .workspace-task-developer-summary::-webkit-details-marker {
+      display: none;
     }
 
-    .workspace-task-page-tab.is-active {
-      background: var(--bg-primary);
-      border-color: var(--border-color);
-      color: var(--text-primary);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    .workspace-task-developer-summary::before {
+      content: "▸";
+      font-size: 0.8em;
+      transition: transform 0.15s ease;
     }
 
-    .workspace-task-page-tab-count {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 1.3rem;
-      padding: 0 0.35rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
-      color: var(--text-secondary);
-      font-size: 0.68rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
+    .workspace-task-developer-group[open] .workspace-task-developer-summary::before {
+      transform: rotate(90deg);
     }
 
-    .workspace-task-page-tab.is-active .workspace-task-page-tab-count {
-      background: color-mix(in srgb, var(--primary-color) 22%, transparent);
-      color: var(--primary-color);
+    .workspace-task-developer-group[open] .workspace-task-developer-summary {
+      margin-bottom: 1.25rem;
     }
 
-    .workspace-task-tab-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
+    .workspace-task-developer-group > .workspace-task-page-card {
+      margin-bottom: 1.25rem;
     }
 
-    .workspace-task-tab-pane[hidden] {
-      display: none !important;
+    .workspace-task-developer-group > .workspace-task-page-card:last-of-type {
+      margin-bottom: 0;
     }
 
-    .workspace-task-tab-empty {
-      padding: 1.5rem;
-      text-align: center;
-      color: var(--text-secondary);
-    }
-
-    .workspace-task-tab-empty-copy {
-      margin: 0;
-      font-size: 0.9rem;
-    }
-
+    /* Simplification pass: flat card — single surface, hairline border, no
+       gradient fill, no gradient ::before wash, no drop shadow. */
     .workspace-task-page-card {
       position: relative;
       padding: 1.3rem 1.35rem;
-      border-radius: 28px;
-      border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
-      background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 82%, transparent), color-mix(in srgb, var(--bg-primary) 94%, transparent));
-      box-shadow: 0 18px 38px rgba(10, 10, 10, 0.08);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
       overflow: hidden;
     }
 
     .workspace-task-page-card::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(120deg, color-mix(in srgb, var(--primary-color) 8%, transparent), transparent 45%);
-      pointer-events: none;
-      opacity: 0.9;
+      display: none;
     }
 
     .workspace-task-page-card > * {
@@ -1251,14 +1207,38 @@
       margin-bottom: 1rem;
     }
 
+    .workspace-task-schedule-header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    /* Subsections inside a card (e.g. "Expected output shape" folded into the
+       Automation & output card) are separated by a hairline rule and a small
+       serif subheading rather than getting their own card. */
+    .workspace-task-output-shape-section {
+      margin-top: 1.1rem;
+      padding-top: 1.1rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .workspace-task-page-subheading {
+      margin: 0 0 0.6rem;
+      font-family: "Fraunces", serif;
+      font-size: 1.02rem;
+      color: var(--text-primary);
+    }
+
     .workspace-task-page-card-header.is-output-menu-open {
       z-index: 1080;
     }
 
     .workspace-task-page-card-header h2 {
-      margin: 0.28rem 0 0;
+      margin: 0;
       font-family: "Fraunces", serif;
-      font-size: 1.35rem;
+      font-size: 1.2rem;
       color: var(--text-primary);
     }
 
@@ -1645,6 +1625,47 @@
       color: var(--text-secondary);
       font-size: 0.74rem;
       font-weight: 700;
+    }
+
+    /* Collapsed wrapper for the run-history dataset, so the Result leads and
+       the CSV preview stays tucked away. Borderless — the artifact section
+       inside keeps its own surface, so there's no box-in-box. */
+    .workspace-task-result-artifact-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      width: fit-content;
+      padding: 0.4rem 0;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-result-artifact-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-result-artifact-summary::before {
+      content: "▸";
+      color: var(--text-secondary);
+      font-size: 0.8em;
+      transition: transform 0.15s ease;
+    }
+
+    .workspace-task-result-artifact-disclosure[open] .workspace-task-result-artifact-summary::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-task-result-artifact-disclosure[open] .workspace-task-result-artifact-summary {
+      margin-bottom: 0.75rem;
+    }
+
+    .workspace-task-result-artifact-summary-meta {
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.82rem;
     }
 
     .workspace-task-result-artifact {
@@ -2237,6 +2258,159 @@
       font-weight: 400;
       color: var(--text-secondary, #6b7280);
       word-break: break-all;
+    }
+
+    .workspace-task-automation-storage-open-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      margin-top: 0.3rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-primary);
+      color: var(--text-primary, var(--primary-color));
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-automation-storage-open-btn:hover {
+      background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
+      border-color: color-mix(in srgb, var(--primary-color) 40%, var(--border-color));
+    }
+
+    .workspace-task-automation-storage-open-btn i {
+      font-size: 0.85rem;
+    }
+
+    .workspace-task-output-shape {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+
+    .workspace-task-output-shape-note {
+      margin: 0 0 0.75rem;
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+
+    .workspace-task-output-shape-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.5rem;
+    }
+
+    .workspace-task-output-shape-stat {
+      padding: 0.55rem 0.75rem;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      border: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .workspace-task-output-shape-stat span {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary, #6b7280);
+    }
+
+    .workspace-task-output-shape-stat strong {
+      font-size: 0.92rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-shape-block {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .workspace-task-output-shape-block-header {
+      padding: 0.5rem 0.75rem;
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .workspace-task-output-shape-block-meta {
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-secondary, #6b7280);
+    }
+
+    .workspace-task-output-shape-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    .workspace-task-output-shape-table th,
+    .workspace-task-output-shape-table td {
+      text-align: left;
+      padding: 0.4rem 0.75rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+      vertical-align: top;
+    }
+
+    .workspace-task-output-shape-table th {
+      border-top: none;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary, #6b7280);
+      background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+    }
+
+    .workspace-task-output-shape-table .workspace-task-output-shape-col-type {
+      color: var(--text-secondary, #6b7280);
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.75rem;
+    }
+
+    .workspace-task-output-shape-table .workspace-task-output-shape-col-required {
+      color: var(--primary-color);
+      font-weight: 700;
+      font-size: 0.72rem;
+    }
+
+    .workspace-task-output-shape-table .workspace-task-output-shape-col-required.is-optional {
+      color: var(--text-secondary, #6b7280);
+      font-weight: 500;
+    }
+
+    .workspace-task-output-shape-metadata {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.6rem 0.75rem;
+    }
+
+    .workspace-task-output-shape-chip {
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+      font-size: 0.74rem;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-shape-chip[data-included="false"] {
+      opacity: 0.5;
+      text-decoration: line-through;
     }
 
     .workspace-task-automation-storage-select,
@@ -3008,21 +3182,22 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
+    /* A compact single-column list: each entry stacks its label above the
+       value, separated by hairline rules so the list reads as a tidy table
+       without the blank half-rows the old 2-column grid left with sparse data. */
     .workspace-task-overview-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.85rem;
+      display: flex;
+      flex-direction: column;
     }
 
     .workspace-task-overview-item {
-      padding: 0.95rem 1rem;
-      border-radius: 20px;
-      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
-      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      padding: 0.6rem 0;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
     }
 
-    .workspace-task-overview-item.full {
-      grid-column: 1 / -1;
+    .workspace-task-overview-item:first-child {
+      border-top: 0;
+      padding-top: 0;
     }
 
     .workspace-task-overview-disclosure {
@@ -3065,12 +3240,12 @@
       display: flex;
       align-items: center;
       gap: 0.4rem;
+      margin-bottom: 0.3rem;
       color: var(--text-secondary);
       font-size: 0.8rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      margin-bottom: 0.4rem;
     }
 
     .workspace-task-overview-edit-btn {
@@ -3108,8 +3283,8 @@
 
     .workspace-task-overview-value {
       color: var(--text-primary);
-      font-size: 0.98rem;
-      line-height: 1.6;
+      font-size: 0.95rem;
+      line-height: 1.55;
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -3127,7 +3302,7 @@
     .workspace-task-page-code-block {
       margin: 0;
       padding: 1rem 1.05rem;
-      border-radius: 20px;
+      border-radius: 12px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
       background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
       color: var(--text-primary);
@@ -3145,7 +3320,7 @@
 
     .workspace-task-page-prose {
       padding: 0.8rem 1.05rem;
-      border-radius: 20px;
+      border-radius: 12px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
       background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
       color: var(--text-primary);
@@ -4724,85 +4899,27 @@
       text-decoration: underline;
     }
 
-    /* Slide-out assist panel */
-    .workspace-task-assist-panel {
-      position: fixed;
-      inset: 0;
-      z-index: 1050;
-      display: flex;
-      justify-content: flex-end;
-    }
-
-    .workspace-task-assist-backdrop {
-      position: absolute;
-      inset: 0;
-      background: rgba(10, 10, 10, 0.4);
-      opacity: 0;
-      transition: opacity 0.25s ease;
-    }
-
-    .workspace-task-assist-panel.is-open .workspace-task-assist-backdrop {
-      opacity: 1;
-    }
-
-    .workspace-task-assist-panel-content {
-      position: relative;
-      width: min(480px, 92vw);
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-primary);
-      border-left: 1px solid var(--border-color);
-      box-shadow: -12px 0 40px rgba(10, 10, 10, 0.14);
-      transform: translateX(100%);
-      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-    }
-
-    .workspace-task-assist-panel.is-open .workspace-task-assist-panel-content {
-      transform: translateX(0);
-    }
-
+    /* Inline respond card header + body (the assist UI; formerly a slide-out
+       panel, now a flat card in the main flow). */
     .workspace-task-assist-panel-header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
       gap: 1rem;
-      padding: 1.25rem 1.35rem;
-      border-bottom: 1px solid var(--border-color);
-      flex-shrink: 0;
+      margin-bottom: 1rem;
     }
 
     .workspace-task-assist-panel-header h2 {
-      margin: 0.28rem 0 0;
+      margin: 0;
       font-family: "Fraunces", serif;
-      font-size: 1.25rem;
+      font-size: 1.2rem;
       color: var(--text-primary);
-    }
-
-    .workspace-task-assist-panel-close {
-      flex: 0 0 auto;
-      width: 2.2rem;
-      height: 2.2rem;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border: 1px solid var(--border-color);
-      border-radius: 999px;
-      background: transparent;
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: color 0.14s ease, border-color 0.14s ease;
-    }
-
-    .workspace-task-assist-panel-close:hover {
-      color: var(--text-primary);
-      border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
     }
 
     .workspace-task-assist-panel-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 1.25rem 1.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
     }
 
     .workspace-task-page-loading-layout {
@@ -6163,6 +6280,8 @@
   {{template "task-modal" .}}
   {{template "session-modals.tmpl" .}}
 
+  {{template "support-chat.tmpl" .}}
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/js/vendor/marked-14.1.4.min.js" integrity="sha384-lqPzN0kmFw9t2syAMwVPM4VbAyqsz/lPyYWbb2Xt6nSPM0WPNrpSWCUBgdcAdgnC"></script>
   <script src="/js/vendor/dompurify-3.1.6.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"></script>
@@ -6188,6 +6307,7 @@
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js"></script>
   <script src="/js/modules/workspace-realtime.js"></script>
+  <script src="/js/modules/workspace-hub-support-chat.js"></script>
   <script>
     if (typeof themeManager !== 'undefined' && themeManager && typeof themeManager.initialize === 'function') {
       themeManager.initialize();

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -459,8 +460,14 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	storeNodeID := strings.TrimSpace(req.StoreNodeID)
 	filePath := strings.TrimSpace(req.FilePath)
 
+	// Derive the dataset filename from the storage OWNER (the workflow's last
+	// subtask when the task has subtasks), not the URL task — that's where the
+	// executor writes and where export reads, so a description-derived filename
+	// must resolve identically across all three paths.
 	var storageCfg *ResultStorageConfig
+	storageOwner := task
 	if owner := ResolveTaskResultStorageOwner(ws, task); owner != nil {
+		storageOwner = owner
 		storageCfg = owner.ResultStorage
 	}
 
@@ -474,6 +481,14 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	}
 
 	appendedRows := csvRowCount(csvData)
+
+	// The dataset is JSONL; convert the CSV payload to JSONL records at the
+	// append boundary so this path writes the same .jsonl the executor does.
+	jsonlData, convErr := CSVToJSONL(csvData)
+	if convErr != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Could not parse rows to append: %v", convErr))
+		return
+	}
 
 	if storeNodeID != "" {
 		var storeNode *StoreNode
@@ -489,16 +504,12 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		storeFilePath := filePath
 		if storeFilePath == "" {
-			storeFilePath = AppendCSVFileName(task, storageCfg)
+			storeFilePath = AppendJSONLFileName(storageOwner, storageCfg)
 		}
 		nodeCopy := *storeNode
 		nodeCopy.WriteMode = "append"
-		nodeCopy.Format = "csv"
-		payload, err := CSVWithoutHeaderForExistingStoreStrictInWorkspace(storeNode, h.store, ws.ID, storeFilePath, csvData)
-		if err != nil {
-			payload = csvWithoutHeader(csvData)
-		}
-		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, payload); err != nil {
+		nodeCopy.Format = "jsonl"
+		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, jsonlData); err != nil {
 			logger.Error("Failed to append task result to store node", logger.Fields{
 				"task_id":       task.ID,
 				"store_node_id": storeNode.ID,
@@ -532,9 +543,9 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		relativeFilePath := filePath
 		if relativeFilePath == "" {
-			relativeFilePath = AppendCSVFileName(task, storageCfg)
+			relativeFilePath = AppendJSONLFileName(storageOwner, storageCfg)
 		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
-			relativeFilePath = filepath.Join(relativeFilePath, AppendCSVFileName(task, storageCfg))
+			relativeFilePath = filepath.Join(relativeFilePath, AppendJSONLFileName(storageOwner, storageCfg))
 		}
 		finalPath, err := BuildFinalPath(baseDir, relativeFilePath)
 		if err != nil {
@@ -551,13 +562,13 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 			}
 			baseOutputDir = filepath.Join(fallback, ws.Name)
 		}
-		filePath = filepath.Join(baseOutputDir, AppendCSVFileName(task, storageCfg))
+		filePath = filepath.Join(baseOutputDir, AppendJSONLFileName(storageOwner, storageCfg))
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, AppendCSVFileName(task, storageCfg))
+		filePath = filepath.Join(filePath, AppendJSONLFileName(storageOwner, storageCfg))
 	}
 
-	if err := AppendCSVToFile(filePath, csvData); err != nil {
-		logger.Error("Failed to append task result CSV to file", logger.Fields{
+	if err := AppendJSONLToFile(filePath, jsonlData); err != nil {
+		logger.Error("Failed to append task result to JSONL file", logger.Fields{
 			"task_id":   task.ID,
 			"file_path": filePath,
 			"err":       err,
@@ -571,6 +582,179 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		"file_path":     filePath,
 		"label":         filepath.Base(filePath),
 	})
+}
+
+// ExportResultCSV handles GET /api/workspaces/:id/tasks/:task_id/results/export-csv.
+// The canonical append dataset is JSONL; this derives a spreadsheet-friendly CSV
+// from it on demand (data columns first, run metadata after) and returns it as a
+// download. The .jsonl file on disk is never modified.
+func (h *HTTPHandler) ExportResultCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// URL: /api/workspaces/{workspace_id}/tasks/{task_id}/results/export-csv
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 5 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+	taskID := parts[2]
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	var task *Task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			task = &ws.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		orihttp.NotFound(w, "Task not found")
+		return
+	}
+
+	owner := ResolveTaskResultStorageOwner(ws, task)
+	if owner == nil {
+		owner = task
+	}
+	storage := owner.ResultStorage
+	if storage == nil || !storage.Enabled || !strings.EqualFold(strings.TrimSpace(storage.WriteMode), "append") {
+		orihttp.BadRequest(w, "Task does not have an appended dataset to export")
+		return
+	}
+
+	filePath, err := h.resolveTaskResultJSONLPath(ws, owner, storage)
+	if err != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Could not resolve dataset file: %v", err))
+		return
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			orihttp.NotFound(w, "No dataset has been written yet")
+			return
+		}
+		orihttp.InternalError(w, fmt.Sprintf("Read dataset failed: %v", err))
+		return
+	}
+
+	csvData, err := ExportCSVFromJSONL(string(content), taskExportPreferredColumns(owner))
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Export failed: %v", err))
+		return
+	}
+
+	downloadName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
+	_, _ = w.Write([]byte(csvData))
+}
+
+// resolveTaskResultJSONLPath resolves the local .jsonl file a task's append
+// dataset is written to, mirroring the destination resolution the executor and
+// manual-append handler use (store node, workspace folder, explicit path, or
+// the workspace's default output folder).
+func (h *HTTPHandler) resolveTaskResultJSONLPath(ws *Workspace, owner *Task, storage *ResultStorageConfig) (string, error) {
+	explicit := strings.TrimSpace(storage.FilePath)
+	jsonlName := AppendJSONLFileName(owner, storage)
+
+	if strings.TrimSpace(storage.StoreNodeID) != "" {
+		var storeNode *StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+		if storeNode == nil {
+			return "", fmt.Errorf("store node not found")
+		}
+		storeFilePath := explicit
+		if storeFilePath == "" {
+			storeFilePath = jsonlName
+		}
+		return BuildFinalStorePath(storeNode, h.store, ws.ID, storeFilePath)
+	}
+
+	if ResultStorageUsesWorkspaceFolder(storage) {
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storage.WorkspaceFolder)
+		if err != nil {
+			return "", err
+		}
+		relativeFilePath := explicit
+		if relativeFilePath == "" {
+			relativeFilePath = jsonlName
+		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
+			relativeFilePath = filepath.Join(relativeFilePath, jsonlName)
+		}
+		return BuildFinalPath(baseDir, relativeFilePath)
+	}
+
+	if explicit != "" {
+		if strings.HasSuffix(explicit, "/") || !strings.Contains(filepath.Base(explicit), ".") {
+			return filepath.Join(explicit, jsonlName), nil
+		}
+		return explicit, nil
+	}
+
+	baseOutputDir := h.store.GetOutputsPath(ws.ID)
+	if baseOutputDir == "" {
+		fallback, err := platform.GetDefaultOutputDir()
+		if err != nil {
+			fallback = "outputs"
+		}
+		baseOutputDir = filepath.Join(fallback, ws.Name)
+	}
+	return filepath.Join(baseOutputDir, jsonlName), nil
+}
+
+// taskExportPreferredColumns returns the task's declared output columns in
+// order, so the exported CSV leads with the data the task produces and trails
+// the run metadata.
+func taskExportPreferredColumns(task *Task) []string {
+	if task == nil {
+		return nil
+	}
+	appendName := func(cols []string, name string) []string {
+		if name = strings.TrimSpace(name); name != "" {
+			return append(cols, name)
+		}
+		return cols
+	}
+	if task.OutputSpec != nil {
+		if task.OutputSpec.Schema != nil && len(task.OutputSpec.Schema.Fields) > 0 {
+			cols := make([]string, 0, len(task.OutputSpec.Schema.Fields))
+			for _, field := range task.OutputSpec.Schema.Fields {
+				cols = appendName(cols, field.Name)
+			}
+			return cols
+		}
+		if task.OutputSpec.Contract != nil && len(task.OutputSpec.Contract.Columns) > 0 {
+			cols := make([]string, 0, len(task.OutputSpec.Contract.Columns))
+			for _, column := range task.OutputSpec.Contract.Columns {
+				cols = appendName(cols, column.Name)
+			}
+			return cols
+		}
+	}
+	if task.OutputContract != nil && len(task.OutputContract.Columns) > 0 {
+		cols := make([]string, 0, len(task.OutputContract.Columns))
+		for _, column := range task.OutputContract.Columns {
+			cols = appendName(cols, column.Name)
+		}
+		return cols
+	}
+	return nil
 }
 
 // csvRowCount counts data rows in a CSV string, excluding the header.
