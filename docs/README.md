@@ -15,7 +15,7 @@ This directory contains detailed documentation for Ori Agent.
 - [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
 
 ### Testing & Quality
-- [Smoke Tests Guide](./SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
+- [Smoke Tests Guide](./testing/SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
 - [Testing Installers](./TESTING_INSTALLERS.md) - Manual installer testing guide (VMs, Docker)
 - [Test Cheat Sheet](./testing/TEST_CHEATSHEET.md) - Quick command reference
 - [Testing Setup Summary](./testing/TESTING_SETUP_SUMMARY.md) - Overview of testing infrastructure
@@ -46,7 +46,6 @@ This directory contains detailed documentation for Ori Agent.
 docs/
 ├── README.md                           # This file
 │
-├── SMOKE_TESTS.md                      # Automated installer smoke testing
 ├── TESTING_INSTALLERS.md               # Manual installer testing guide
 ├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
 ├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
@@ -56,6 +55,7 @@ docs/
 │   └── API_REFERENCE.md                # HTTP API documentation
 │
 ├── testing/
+│   ├── SMOKE_TESTS.md                  # Automated installer smoke testing
 │   ├── TEST_CHEATSHEET.md              # Quick testing commands
 │   ├── TESTING_SETUP_SUMMARY.md        # Testing infrastructure overview
 │   └── DIRECT_TOOL_TESTING.md          # Direct tool launch feature testing guide
@@ -79,7 +79,6 @@ docs/
 Some documentation lives alongside the code it documents:
 
 - `internal/llm/README.md` - LLM provider implementation guide
-- `example_plugins/*/README.md` - Individual plugin documentation
 - `scripts/README.md` - Build and utility scripts
 
 ## Contributing

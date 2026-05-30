@@ -285,8 +285,6 @@ PORT=9000 go run ./cmd/server
 
 This project follows a feature branch workflow with squash merging.
 
-**Complete workflow documentation**: See `/GIT_WORKFLOW.md` in the project root
-
 **Quick reference for branches**:
 - `feature/` - New functionality
 - `fix/` - Bug fixes
