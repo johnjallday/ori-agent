@@ -4369,7 +4369,7 @@ export class WorkspaceTaskPage {
     let locationHint = '';
     if (storeNodeId) {
       const storeLabel = this.getStoreNodeDisplayLabel(storeNodeId);
-      label = filePath || 'runs.csv';
+      label = filePath || this.defaultAppendCsvFilename();
       locationHint = `in ${storeLabel}`;
     } else if (filePath) {
       const segments = filePath.split('/');
@@ -4873,7 +4873,7 @@ export class WorkspaceTaskPage {
         <i class="bi bi-folder2-open" aria-hidden="true"></i>
         <span>${this.escapeHtml(openFolderLabel)}</span>
       </button>`;
-    const fileName = String(storage.file_name || '').trim() || this.defaultAppendCsvFilename(owner);
+    const fileName = this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -4882,7 +4882,7 @@ export class WorkspaceTaskPage {
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
             <span>Default output folder${defaultPathHint}${openFolderBtn}</span>
-            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.csv)" value="${this.escapeHtml(fileName)}" aria-label="CSV file name" />
+            <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.jsonl)" value="${this.escapeHtml(fileName)}" aria-label="Dataset file name" />
           </label>
           <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
             <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
@@ -5010,12 +5010,13 @@ export class WorkspaceTaskPage {
     // so the filename keeps tracking the task description. A full custom path
     // carries its own filename, so file_name doesn't apply there.
     const derivedFileName = this.defaultAppendCsvFilename(owner);
-    const customFileName = (target !== 'custom' && fileNameInput && fileNameInput !== derivedFileName)
-      ? fileNameInput
+    const normalizedFileName = this.normalizeDatasetFileName(fileNameInput);
+    const customFileName = (target !== 'custom' && normalizedFileName && normalizedFileName !== derivedFileName)
+      ? normalizedFileName
       : '';
     const nextStorage = {
       enabled: true,
-      format: 'csv',
+      format: 'jsonl',
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
       store_node_id: target === 'store' ? storeNodeId : '',
@@ -5093,10 +5094,9 @@ export class WorkspaceTaskPage {
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
     const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
-    const customFileName = String(storage.file_name || '').trim();
     const filename = filePathIsFile
       ? this.basename(filePath)
-      : (customFileName || this.defaultAppendCsvFilename(owner));
+      : (this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner));
     const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
 
     let dest;
@@ -5123,9 +5123,10 @@ export class WorkspaceTaskPage {
     return parts[parts.length - 1] || '';
   }
 
-  // defaultAppendCsvFilename mirrors the backend (defaultAppendCSVFilename):
-  // the task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped
-  // and spaces turned into underscores, plus a .csv suffix.
+  // defaultAppendCsvFilename mirrors the backend (AppendJSONLFileName): the
+  // task description, capped at 30 chars, with non [A-Za-z0-9_-] dropped and
+  // spaces turned into underscores, plus a .jsonl suffix (the canonical append
+  // format). The name is kept for its many call sites.
   defaultAppendCsvFilename(task = this.task) {
     let name = String(task?.description || '');
     if (name.length > 30) name = name.slice(0, 30);
@@ -5135,7 +5136,23 @@ export class WorkspaceTaskPage {
       else if (ch === ' ') slug += '_';
     }
     if (!slug) slug = 'task';
-    return `${slug}.csv`;
+    return `${slug}.jsonl`;
+  }
+
+  // normalizeDatasetFileName strips whatever extension a user typed (.csv,
+  // .json, …) and forces .jsonl — the dataset is JSONL, so the destination
+  // filename should reflect that. Returns '' when there's nothing usable.
+  normalizeDatasetFileName(name) {
+    let trimmed = String(name || '').trim();
+    if (!trimmed) return '';
+    trimmed = trimmed.replace(/\.(jsonl|csv|json|txt|ndjson)$/i, '');
+    let slug = '';
+    for (const ch of trimmed) {
+      if (/[A-Za-z0-9_-]/.test(ch)) slug += ch;
+      else if (ch === ' ') slug += '_';
+    }
+    if (!slug) return '';
+    return `${slug}.jsonl`;
   }
 
   // Get a trimmed sample of the current task result, used to ground the
