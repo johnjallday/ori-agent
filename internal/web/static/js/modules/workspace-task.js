@@ -6300,7 +6300,6 @@ export class WorkspaceTaskPage {
 
     const schemaFields = Array.isArray(schemaSource?.fields) ? schemaSource.fields : [];
     const contractColumns = Array.isArray(contractSource?.columns) ? contractSource.columns : [];
-    const metadataFields = this.getOutputSpecMetadataFields(spec);
 
     const hasAnyStructure = schemaFields.length > 0 || contractColumns.length > 0;
 
@@ -6315,92 +6314,35 @@ export class WorkspaceTaskPage {
     }
     this.elements.outputShapeWrap.hidden = false;
 
-    const includedMetadata = metadataFields.filter((field) => field.include);
-    const summaryStats = [
-      ['Assistant fields', schemaFields.length ? `${schemaFields.length}` : 'none'],
-      ['CSV columns', contractColumns.length ? `${contractColumns.length}` : 'none'],
-      ['Run info in CSV', includedMetadata.length ? `${includedMetadata.length} of ${metadataFields.length}` : 'hidden'],
-    ];
-    const summaryHtml = `
-      <div class="workspace-task-output-shape-summary">
-        ${summaryStats.map(([label, value]) => `
-          <div class="workspace-task-output-shape-stat">
-            <span>${this.escapeHtml(label)}</span>
-            <strong>${this.escapeHtml(value)}</strong>
-          </div>
-        `).join('')}
-      </div>`;
+    // One shape, schema-first. The JSON schema is the canonical record shape;
+    // fall back to the legacy CSV contract columns only for tasks that predate
+    // the schema. The old separate "CSV columns" and "Run info" tables are
+    // gone — CSV is derived from these fields at export time, so repeating them
+    // here was the duplication.
+    const shapeFields = (schemaFields.length ? schemaFields : contractColumns).map((field) => ({
+      name: String(field?.name || ''),
+      type: String(field?.type || 'string'),
+      required: Boolean(field?.required),
+      description: String(field?.description || ''),
+    }));
 
-    const schemaBlock = schemaFields.length ? `
-      <div class="workspace-task-output-shape-block">
-        <div class="workspace-task-output-shape-block-header">
-          <span>Assistant fields (JSON shape returned by the agent)</span>
-          ${schemaSource?.name ? `<span class="workspace-task-output-shape-block-meta">${this.escapeHtml(schemaSource.name)}</span>` : ''}
-        </div>
-        <table class="workspace-task-output-shape-table">
-          <thead>
-            <tr>
-              <th>Field</th>
-              <th>Type</th>
-              <th>Required</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${schemaFields.map((field) => `
-              <tr>
-                <td>${this.escapeHtml(String(field?.name || ''))}</td>
-                <td class="workspace-task-output-shape-col-type">${this.escapeHtml(String(field?.type || 'string'))}</td>
-                <td class="workspace-task-output-shape-col-required ${field?.required ? '' : 'is-optional'}">${field?.required ? 'required' : 'optional'}</td>
-                <td>${this.escapeHtml(String(field?.description || ''))}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>` : '';
+    const rowsHtml = shapeFields.map((field) => `
+      <tr>
+        <td>${this.escapeHtml(field.name)}</td>
+        <td class="workspace-task-output-shape-col-type">${this.escapeHtml(field.type)}</td>
+        <td class="workspace-task-output-shape-col-required ${field.required ? '' : 'is-optional'}">${field.required ? 'required' : 'optional'}</td>
+        <td>${this.escapeHtml(field.description)}</td>
+      </tr>
+    `).join('');
 
-    const contractBlock = contractColumns.length ? `
-      <div class="workspace-task-output-shape-block">
-        <div class="workspace-task-output-shape-block-header">
-          <span>CSV columns (row shape stored on append)</span>
-          ${contractSource?.version ? `<span class="workspace-task-output-shape-block-meta">${this.escapeHtml(contractSource.version)}</span>` : ''}
-        </div>
-        <table class="workspace-task-output-shape-table">
-          <thead>
-            <tr>
-              <th>Column</th>
-              <th>Type</th>
-              <th>Required</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${contractColumns.map((column) => `
-              <tr>
-                <td>${this.escapeHtml(String(column?.name || ''))}</td>
-                <td class="workspace-task-output-shape-col-type">${this.escapeHtml(String(column?.type || 'string'))}</td>
-                <td class="workspace-task-output-shape-col-required ${column?.required ? '' : 'is-optional'}">${column?.required ? 'required' : 'optional'}</td>
-                <td>${this.escapeHtml(String(column?.description || ''))}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>` : '';
-
-    const metadataBlock = metadataFields.length ? `
-      <div class="workspace-task-output-shape-block">
-        <div class="workspace-task-output-shape-block-header">
-          <span>Run info appended to each row</span>
-          <span class="workspace-task-output-shape-block-meta">${this.escapeHtml(`${includedMetadata.length} of ${metadataFields.length} included`)}</span>
-        </div>
-        <div class="workspace-task-output-shape-metadata">
-          ${metadataFields.map((field) => `
-            <span class="workspace-task-output-shape-chip" data-included="${Boolean(field.include)}" title="${field.include ? 'Included in CSV row' : 'Hidden from CSV (kept on run artifact only)'}">${this.escapeHtml(field.name)}</span>
-          `).join('')}
-        </div>
-      </div>` : '';
-
-    this.elements.outputShape.innerHTML = [summaryHtml, schemaBlock, contractBlock, metadataBlock].filter(Boolean).join('');
+    this.elements.outputShape.innerHTML = `
+      <p class="workspace-task-output-shape-note">Each run is stored as a JSON record with these fields. Use <strong>Export CSV</strong> on the dataset for a spreadsheet — its columns are derived from these fields, plus run info (run_id, executed_at, status…).</p>
+      <table class="workspace-task-output-shape-table">
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
   }
 
   renderOutput() {
