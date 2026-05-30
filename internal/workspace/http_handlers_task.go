@@ -460,8 +460,14 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	storeNodeID := strings.TrimSpace(req.StoreNodeID)
 	filePath := strings.TrimSpace(req.FilePath)
 
+	// Derive the dataset filename from the storage OWNER (the workflow's last
+	// subtask when the task has subtasks), not the URL task — that's where the
+	// executor writes and where export reads, so a description-derived filename
+	// must resolve identically across all three paths.
 	var storageCfg *ResultStorageConfig
+	storageOwner := task
 	if owner := ResolveTaskResultStorageOwner(ws, task); owner != nil {
+		storageOwner = owner
 		storageCfg = owner.ResultStorage
 	}
 
@@ -498,7 +504,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		storeFilePath := filePath
 		if storeFilePath == "" {
-			storeFilePath = AppendJSONLFileName(task, storageCfg)
+			storeFilePath = AppendJSONLFileName(storageOwner, storageCfg)
 		}
 		nodeCopy := *storeNode
 		nodeCopy.WriteMode = "append"
@@ -537,9 +543,9 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		}
 		relativeFilePath := filePath
 		if relativeFilePath == "" {
-			relativeFilePath = AppendJSONLFileName(task, storageCfg)
+			relativeFilePath = AppendJSONLFileName(storageOwner, storageCfg)
 		} else if strings.HasSuffix(relativeFilePath, "/") || !strings.Contains(filepath.Base(relativeFilePath), ".") {
-			relativeFilePath = filepath.Join(relativeFilePath, AppendJSONLFileName(task, storageCfg))
+			relativeFilePath = filepath.Join(relativeFilePath, AppendJSONLFileName(storageOwner, storageCfg))
 		}
 		finalPath, err := BuildFinalPath(baseDir, relativeFilePath)
 		if err != nil {
@@ -556,9 +562,9 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 			}
 			baseOutputDir = filepath.Join(fallback, ws.Name)
 		}
-		filePath = filepath.Join(baseOutputDir, AppendJSONLFileName(task, storageCfg))
+		filePath = filepath.Join(baseOutputDir, AppendJSONLFileName(storageOwner, storageCfg))
 	} else if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
-		filePath = filepath.Join(filePath, AppendJSONLFileName(task, storageCfg))
+		filePath = filepath.Join(filePath, AppendJSONLFileName(storageOwner, storageCfg))
 	}
 
 	if err := AppendJSONLToFile(filePath, jsonlData); err != nil {
