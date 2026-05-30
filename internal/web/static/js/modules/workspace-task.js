@@ -4119,29 +4119,6 @@ export class WorkspaceTaskPage {
     return Array.from(byName.values());
   }
 
-  renderOutputSpecOverview(spec) {
-    if (!spec) return '';
-    const fields = this.getOutputSpecSchemaFields(spec);
-    const columns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
-    const metadataFields = this.getOutputSpecMetadataFields(spec);
-    const metadataIncluded = metadataFields.filter((field) => field.include).map((field) => field.name);
-    return `
-      <div class="workspace-task-output-spec-overview">
-        <div class="workspace-task-output-spec-stat">
-          <span>Assistant fields</span>
-          <strong>${this.escapeHtml(`${fields.length} field${fields.length === 1 ? '' : 's'}`)}</strong>
-        </div>
-        <div class="workspace-task-output-spec-stat">
-          <span>CSV columns</span>
-          <strong>${this.escapeHtml(`${columns.length} column${columns.length === 1 ? '' : 's'}`)}</strong>
-        </div>
-        <div class="workspace-task-output-spec-stat">
-          <span>Run info</span>
-          <strong>${this.escapeHtml(metadataIncluded.length ? metadataIncluded.join(', ') : 'hidden')}</strong>
-        </div>
-      </div>`;
-  }
-
   renderOutputSpecMetadataEditor() {
     const fields = this.getOutputSpecMetadataFields(this.resultOutputSpecDraft || this.getActiveOutputSpec());
     return `
@@ -4166,8 +4143,6 @@ export class WorkspaceTaskPage {
     const editing = Array.isArray(this.resultContractDraft);
     const columns = this.getResultContractColumns();
     if (!editing && columns.length > 0) {
-      const activeSpec = this.getActiveOutputSpec();
-      const version = String(activeSpec?.version || this.getTaskResultStorageTask()?.output_contract?.version || '').trim();
       const preview = columns
         .map((column) => String(column?.name || '').trim())
         .filter(Boolean)
@@ -4177,11 +4152,10 @@ export class WorkspaceTaskPage {
       return `
         <div class="workspace-task-result-contract" data-state="view">
           <div class="workspace-task-result-contract-summary">
-            <span class="workspace-task-page-mini-label">Each run returns${version ? ` · ${this.escapeHtml(version)}` : ''}</span>
+            <span class="workspace-task-page-mini-label">Each run returns</span>
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
-            <span class="workspace-task-result-contract-projection">Stored as CSV columns (plus run info)</span>
+            <span class="workspace-task-result-contract-projection">Saved as a JSON record per run · run info (run_id, executed_at, status…) is added automatically · export to CSV anytime</span>
           </div>
-          ${this.renderOutputSpecOverview(activeSpec)}
           <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit fields</button>
         </div>`;
     }
@@ -4816,8 +4790,8 @@ export class WorkspaceTaskPage {
       <label class="workspace-task-automation-storage-toggle">
         <input type="checkbox" data-action="toggle-csv-storage"${ctx.configured ? ' checked' : ''}${busy ? ' disabled' : ''} />
         <span>
-          <strong>Store each run of this task to CSV</strong>
-          <span class="workspace-task-automation-storage-help">Turns on Append mode so every run becomes a row in a shared CSV file.</span>
+          <strong>Save each run of this task to a dataset</strong>
+          <span class="workspace-task-automation-storage-help">Turns on Append mode so every run is saved as a record in a shared JSONL file (export to CSV anytime).</span>
         </span>
       </label>`;
     container.innerHTML = toggleHtml + (ctx.configured ? this.renderResultContractBlock() : '');
