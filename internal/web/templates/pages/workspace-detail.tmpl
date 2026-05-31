@@ -66,7 +66,8 @@
             </div>
           </div>
 
-          <!-- Workspace Entry Prompt Bar -->
+          {{if not (index .Extra "WorkspaceFloatingAssistantEnabled")}}
+          <!-- Legacy workspace entry prompt bar (rollout fallback for floating assistant consolidation) -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="home-assistant-workspace-form d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
@@ -112,6 +113,7 @@
               </button>
             </div>
           </div>
+          {{end}}
 
           <!-- Workspace Info Card -->
           <div class="modern-card p-4 mb-4">
@@ -1111,9 +1113,10 @@
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
+  {{if index .Extra "WorkspaceFloatingAssistantEnabled"}}
   {{template "support-chat.tmpl" .}}
-
-  <!-- Workspace Entry Thinking Modal -->
+  {{else}}
+  <!-- Legacy workspace entry thinking modal (rollout fallback for floating assistant consolidation) -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -1155,6 +1158,7 @@
       </div>
     </div>
   </div>
+  {{end}}
 
   <!-- Add File Modal (from workspace-hub) -->
   <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">

@@ -69,6 +69,7 @@ type HomeAssistantRouteContext struct {
 	Surface     string `json:"surface,omitempty"`
 	PagePath    string `json:"page_path,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 	Origin      string `json:"origin,omitempty"`
 }
@@ -116,6 +117,7 @@ type normalizedHomeAssistantRouteContext struct {
 	Surface     string
 	PagePath    string
 	WorkspaceID string
+	TaskID      string
 	SessionID   string
 	Origin      string
 }
@@ -818,6 +820,7 @@ func normalizeHomeAssistantRouteContext(context *HomeAssistantRouteContext) norm
 		Surface:     normalizeRouteToken(context.Surface),
 		PagePath:    normalizeRouteToken(context.PagePath),
 		WorkspaceID: strings.TrimSpace(context.WorkspaceID),
+		TaskID:      strings.TrimSpace(context.TaskID),
 		SessionID:   strings.TrimSpace(context.SessionID),
 		Origin:      normalizeRouteToken(context.Origin),
 	}
@@ -834,7 +837,7 @@ func (c normalizedHomeAssistantRouteContext) hasWorkspaceSurfaceContext() bool {
 	if strings.HasPrefix(c.PagePath, "/workspaces/") {
 		return true
 	}
-	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas"
+	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas" || c.Surface == "workspace_task"
 }
 
 func determineRouteModeAndTargetSurface(intent homeAssistantIntent, intentVariant string, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
