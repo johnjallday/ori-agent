@@ -1820,7 +1820,6 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (opts.permanent) params.set('permanent', 'true');
     if (opts.scope) params.set('scope', opts.scope);
     const query = params.toString();
-    const verb = opts.permanent ? 'deleted' : 'moved to Trash';
 
     try {
       for (const id of ids) {
@@ -1832,7 +1831,22 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
 
       if (window.Toast) {
-        window.Toast.success(ids.length > 1 ? `Workspaces ${verb}` : `Workspace ${verb}`);
+        if (opts.permanent) {
+          window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
+        } else {
+          // Trash is reversible — offer an immediate Undo that restores what was
+          // just trashed (the Trash view remains available for later restores).
+          const trashedIds = ids.slice();
+          window.Toast.show(
+            ids.length > 1 ? `${ids.length} workspaces moved to Trash` : 'Workspace moved to Trash',
+            'success',
+            {
+              title: 'Moved to Trash',
+              duration: 8000,
+              action: { label: 'Undo', onClick: () => { void undoTrash(trashedIds); } }
+            }
+          );
+        }
       }
 
       state.selectedWorkspaces = new Set();
@@ -1841,6 +1855,26 @@ console.log('[workspace-hub.js] FILE LOADED');
     } catch (err) {
       console.error('Failed to delete workspaces:', err);
       if (window.Toast) window.Toast.error(opts.permanent ? 'Failed to delete workspaces' : 'Failed to move workspaces to Trash');
+    }
+  }
+
+  // Restore workspaces straight from the "Moved to Trash" Undo toast. Mirrors the
+  // Trash view's Restore, but skips the modal so undo is one click.
+  async function undoTrash(ids) {
+    if (!ids || ids.length === 0) return;
+    try {
+      for (const id of ids) {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+        if (!response.ok && response.status !== 404) {
+          const text = await response.text();
+          throw new Error(text || 'Failed to restore workspace');
+        }
+      }
+      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces restored' : 'Workspace restored');
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to undo trash:', err);
+      if (window.Toast) window.Toast.error('Failed to restore workspace');
     }
   }
 
