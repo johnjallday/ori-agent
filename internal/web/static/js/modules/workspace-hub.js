@@ -123,6 +123,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherDeleteGroupCount: document.getElementById('launcherDeleteGroupCount'),
     launcherDeleteGroupOnlyBtn: document.getElementById('launcherDeleteGroupOnlyBtn'),
     launcherDeleteGroupAllBtn: document.getElementById('launcherDeleteGroupAllBtn'),
+    launcherTrashBtn: document.getElementById('launcherTrashBtn'),
+    launcherTrashModal: document.getElementById('launcherTrashModal'),
+    launcherTrashList: document.getElementById('launcherTrashList'),
+    launcherTrashEmptyState: document.getElementById('launcherTrashEmptyState'),
+    launcherEmptyTrashBtn: document.getElementById('launcherEmptyTrashBtn'),
     launcherTabWorkspaces: document.getElementById('launcherTabWorkspaces'),
     launcherTabSummary: document.getElementById('launcherTabSummary'),
     launcherWorkspacesPanel: document.getElementById('launcherWorkspacesPanel'),
@@ -1807,27 +1812,35 @@ console.log('[workspace-hub.js] FILE LOADED');
     return isGroupWorkspace(state.workspaceMap.get(workspaceId));
   }
 
-  async function deleteWorkspacesByIds(ids) {
+  async function deleteWorkspacesByIds(ids, opts = {}) {
     const state = window.WorkspaceHubState.getState();
     if (!ids || ids.length === 0) return;
 
+    const params = new URLSearchParams({ confirm: 'true' });
+    if (opts.permanent) params.set('permanent', 'true');
+    if (opts.scope) params.set('scope', opts.scope);
+    const query = params.toString();
+    const verb = opts.permanent ? 'deleted' : 'moved to Trash';
+
     try {
       for (const id of ids) {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true`, { method: 'DELETE' });
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?${query}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
           const text = await response.text();
           throw new Error(text || 'Failed to delete workspace');
         }
       }
 
-      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
+      if (window.Toast) {
+        window.Toast.success(ids.length > 1 ? `Workspaces ${verb}` : `Workspace ${verb}`);
+      }
 
       state.selectedWorkspaces = new Set();
       setLauncherSelectionMode(false);
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to delete workspaces:', err);
-      if (window.Toast) window.Toast.error('Failed to delete workspaces');
+      if (window.Toast) window.Toast.error(opts.permanent ? 'Failed to delete workspaces' : 'Failed to move workspaces to Trash');
     }
   }
 
@@ -1838,11 +1851,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the parent group.`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to move the group and everything inside to Trash.\nClick Cancel to trash only the group (children move to root and stay active).\n\nTrashed workspaces can be restored within 30 days.`);
       if (deleteAll) {
-        void deleteGroupAndContents(workspaceId);
-      } else {
         void deleteWorkspacesByIds([workspaceId]);
+      } else {
+        void deleteWorkspacesByIds([workspaceId], { scope: 'group-only' });
       }
       return;
     }
@@ -1859,13 +1872,6 @@ console.log('[workspace-hub.js] FILE LOADED');
     modal.show();
   }
 
-  async function deleteGroupAndContents(workspaceId) {
-    const state = window.WorkspaceHubState.getState();
-    const ids = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: true });
-    const ordered = ids.slice().reverse();
-    await deleteWorkspacesByIds(ordered);
-  }
-
   function handleDeleteGroupChoice(includeChildren) {
     const workspaceId = pendingDeleteGroupId;
     pendingDeleteGroupId = null;
@@ -1877,9 +1883,10 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (includeChildren) {
-      void deleteGroupAndContents(workspaceId);
-    } else {
+      // Default scope trashes the whole subtree together so it can be restored as a unit.
       void deleteWorkspacesByIds([workspaceId]);
+    } else {
+      void deleteWorkspacesByIds([workspaceId], { scope: 'group-only' });
     }
   }
 
@@ -1892,9 +1899,130 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     const label = getWorkspaceLabel(workspaceId);
-    if (!confirm(`Delete "${label}"?\n\nThis will permanently remove the workspace folder and all its contents (files, notes, etc.) from disk. This action cannot be undone.`)) return;
+    if (!confirm(`Move "${label}" to Trash?\n\nIts files, notes, and sessions are kept and can be restored from Trash for 30 days, after which it is permanently deleted.`)) return;
 
     void deleteWorkspacesByIds([workspaceId]);
+  }
+
+  // ---- Trash view ----
+
+  async function openTrashModal() {
+    if (!elements.launcherTrashModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+    const modal = bootstrap.Modal.getInstance(elements.launcherTrashModal) || new bootstrap.Modal(elements.launcherTrashModal);
+    await loadTrash();
+    modal.show();
+  }
+
+  async function fetchTrashItems() {
+    const response = await fetch('/api/workspaces/trash');
+    if (!response.ok) throw new Error('Failed to load trash');
+    const data = await response.json();
+    return Array.isArray(data?.workspaces) ? data.workspaces : [];
+  }
+
+  async function loadTrash() {
+    if (!elements.launcherTrashList) return;
+    try {
+      renderTrash(await fetchTrashItems());
+    } catch (err) {
+      console.error('Failed to load trash:', err);
+      if (window.Toast) window.Toast.error('Failed to load Trash');
+      renderTrash([]);
+    }
+  }
+
+  function trashDaysLeft(purgeAt) {
+    if (!purgeAt) return null;
+    const ms = new Date(purgeAt).getTime() - Date.now();
+    if (Number.isNaN(ms)) return null;
+    return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+  }
+
+  function renderTrash(items) {
+    const list = elements.launcherTrashList;
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (elements.launcherTrashEmptyState) {
+      elements.launcherTrashEmptyState.style.display = items.length === 0 ? '' : 'none';
+    }
+    if (elements.launcherEmptyTrashBtn) {
+      elements.launcherEmptyTrashBtn.disabled = items.length === 0;
+    }
+    if (items.length === 0) return;
+
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.5rem 0;border-bottom:1px solid var(--border-color);';
+
+      const daysLeft = trashDaysLeft(item.purge_at);
+      const metaParts = [];
+      if (item.kind === 'group') metaParts.push('Group');
+      if (typeof item.session_count === 'number' && item.session_count > 0) {
+        metaParts.push(`${item.session_count} session${item.session_count === 1 ? '' : 's'}`);
+      }
+      if (daysLeft !== null) {
+        metaParts.push(daysLeft === 0 ? 'purges today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`);
+      }
+
+      row.innerHTML = `
+        <div style="min-width:0;">
+          <div style="color:var(--text-primary);font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.name || 'Untitled')}</div>
+          <div style="color:var(--text-secondary);font-size:11px;">${escapeHtml(metaParts.join(' · '))}</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+          <button class="modern-btn modern-btn-secondary modern-btn-sm" type="button" data-trash-restore="${escapeHtml(item.id)}">Restore</button>
+          <button class="modern-btn modern-btn-danger modern-btn-sm" type="button" data-trash-delete="${escapeHtml(item.id)}">Delete Permanently</button>
+        </div>
+      `;
+      list.appendChild(row);
+    });
+
+    list.querySelectorAll('[data-trash-restore]').forEach((btn) => {
+      btn.addEventListener('click', () => restoreTrashedWorkspace(btn.getAttribute('data-trash-restore')));
+    });
+    list.querySelectorAll('[data-trash-delete]').forEach((btn) => {
+      btn.addEventListener('click', () => permanentlyDeleteTrashedWorkspace(btn.getAttribute('data-trash-delete')));
+    });
+  }
+
+  async function restoreTrashedWorkspace(id) {
+    if (!id) return;
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+      if (!response.ok && response.status !== 404) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to restore');
+      }
+      if (window.Toast) window.Toast.success('Workspace restored');
+      await loadTrash();
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to restore workspace:', err);
+      if (window.Toast) window.Toast.error('Failed to restore workspace');
+    }
+  }
+
+  async function permanentlyDeleteTrashedWorkspace(id) {
+    if (!id) return;
+    if (!confirm('Permanently delete this workspace?\n\nIts folder, files, notes, and sessions will be removed from disk. This cannot be undone.')) return;
+    await deleteWorkspacesByIds([id], { permanent: true });
+    await loadTrash();
+  }
+
+  async function emptyTrash() {
+    let items = [];
+    try {
+      items = await fetchTrashItems();
+    } catch (err) {
+      if (window.Toast) window.Toast.error('Failed to load Trash');
+      return;
+    }
+    if (items.length === 0) return;
+    if (!confirm(`Permanently delete all ${items.length} workspace(s) in Trash?\n\nThis cannot be undone.`)) return;
+    const ids = items.map((it) => it.id).filter(Boolean);
+    await deleteWorkspacesByIds(ids, { permanent: true });
+    await loadTrash();
   }
 
   async function deleteSelectedWorkspaces() {
@@ -1902,7 +2030,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const selected = Array.from(state.selectedWorkspaces || []);
     if (selected.length === 0) return;
 
-    if (!confirm(`Delete ${selected.length} workspace(s)?\n\nThis will permanently remove the workspace folders and all their contents (files, notes, etc.) from disk. This action cannot be undone.`)) {
+    if (!confirm(`Move ${selected.length} workspace(s) to Trash?\n\nTheir files, notes, and sessions are kept and can be restored from Trash for 30 days.`)) {
       return;
     }
 
@@ -2816,6 +2944,14 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherDeleteGroupAllBtn) {
       elements.launcherDeleteGroupAllBtn.addEventListener('click', () => handleDeleteGroupChoice(true));
+    }
+
+    if (elements.launcherTrashBtn) {
+      elements.launcherTrashBtn.addEventListener('click', () => openTrashModal());
+    }
+
+    if (elements.launcherEmptyTrashBtn) {
+      elements.launcherEmptyTrashBtn.addEventListener('click', () => emptyTrash());
     }
 
     if (elements.newSessionBtn) {
