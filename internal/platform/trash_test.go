@@ -13,17 +13,27 @@ func TestMoveToTrash_EmptyPath(t *testing.T) {
 	}
 }
 
-func TestMoveToTrash_MovesDirectoryOffDisk(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skipf("system trash only implemented for darwin, not %s", runtime.GOOS)
+func TestRestoreFromTrash_EmptyOriginal(t *testing.T) {
+	if err := RestoreFromTrash("", "token"); err == nil {
+		t.Fatal("expected error for empty original path")
+	}
+}
+
+// TestTrashRoundTrip exercises MoveToTrash + RestoreFromTrash on platforms whose
+// trash exposes a restorable path (macOS ~/.Trash, the FreeDesktop trash on
+// Linux). Windows uses the Recycle Bin (no stable path), which can't be
+// round-tripped deterministically in a unit test, so it is skipped.
+func TestTrashRoundTrip(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("path-based trash round trip not supported on %s", runtime.GOOS)
 	}
 
+	// Create the source under the home dir so the trash move (a rename into the
+	// per-user trash) stays on a single volume.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-
-	// Create the source on the same volume as ~/.Trash so os.Rename succeeds.
 	src, err := os.MkdirTemp(home, ".trash-test-*")
 	if err != nil {
 		t.Fatalf("mkdir temp: %v", err)
@@ -34,20 +44,27 @@ func TestMoveToTrash_MovesDirectoryOffDisk(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	dest, err := MoveToTrash(src)
+	token, err := MoveToTrash(src)
 	if err != nil {
 		t.Fatalf("MoveToTrash: %v", err)
 	}
-	// Clean up the trashed copy so the test doesn't litter the user's Trash.
-	defer func() { _ = os.RemoveAll(dest) }()
+	defer func() { _ = os.RemoveAll(token) }() // clean up the trashed copy
 
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Errorf("source should no longer exist after trashing, stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dest, "note.md")); err != nil {
-		t.Errorf("trashed contents should be intact at %q, got err = %v", dest, err)
+	if token == "" {
+		t.Fatal("expected a restorable token (trashed path) on this platform")
 	}
-	if filepath.Dir(dest) != filepath.Join(home, ".Trash") {
-		t.Errorf("expected item inside ~/.Trash, got %q", dest)
+	if _, err := os.Stat(filepath.Join(token, "note.md")); err != nil {
+		t.Errorf("trashed contents should be intact at %q, got err = %v", token, err)
+	}
+
+	// Restore it back to the original location.
+	if err := RestoreFromTrash(src, token); err != nil {
+		t.Fatalf("RestoreFromTrash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(src, "note.md")); err != nil {
+		t.Errorf("restored contents should be back at %q, got err = %v", src, err)
 	}
 }

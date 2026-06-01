@@ -741,15 +741,13 @@ func (s *FileStore) RestoreFromTrash(originalPath, trashedPath string) (*Workspa
 		return nil, fmt.Errorf("original path is required to restore a workspace")
 	}
 
-	if trashedPath != "" {
-		if _, err := os.Stat(trashedPath); err != nil {
-			return nil, fmt.Errorf("trashed folder is no longer available (it may have been emptied from Trash): %w", err)
-		}
-		if _, err := os.Stat(originalPath); err == nil {
-			return nil, fmt.Errorf("cannot restore: %q already exists", originalPath)
-		}
-		if err := os.Rename(trashedPath, originalPath); err != nil {
-			return nil, fmt.Errorf("failed to move folder out of trash: %w", err)
+	// If the folder is already in place (it was only unregistered, never moved
+	// off disk), skip the trash retrieval and just re-import. Otherwise bring it
+	// back from the system trash — a rename on macOS/Linux, or a Recycle Bin
+	// restore on Windows.
+	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
+		if rerr := platform.RestoreFromTrash(originalPath, trashedPath); rerr != nil {
+			return nil, rerr
 		}
 	}
 

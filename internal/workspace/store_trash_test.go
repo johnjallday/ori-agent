@@ -10,12 +10,12 @@ import (
 // a workspace's folder to the system trash and unregisters it, and
 // RestoreFromTrash brings it back with its identity intact.
 func TestFileStore_TrashAndRestore(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skipf("system trash only implemented for darwin, not %s", runtime.GOOS)
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("path-based trash round trip not supported on %s", runtime.GOOS)
 	}
 
-	// Create the store under the home dir so the trash move (a rename into
-	// ~/.Trash) stays on a single volume.
+	// Create the store under the home dir so the trash move (a rename into the
+	// per-user trash) stays on a single volume.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
