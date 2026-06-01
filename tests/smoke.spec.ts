@@ -523,13 +523,22 @@ test.describe('Workspace File Folders', () => {
       await page.waitForFunction(() =>
         Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
       );
-      const entryAgentDialog = page.getByRole('dialog', {
-        name: 'Create an entry agent for this workspace?'
+      const entryAgentTitle = page.locator('#workspace-detail-task-confirm-title', {
+        hasText: 'Create an entry agent for this workspace?'
       });
-      const notNowButton = entryAgentDialog.getByRole('button', { name: 'Not Now' });
-      if (await notNowButton.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
-        await entryAgentDialog.getByRole('button', { name: 'Not Now' }).click();
-        await expect(entryAgentDialog).toBeHidden();
+      if (await entryAgentTitle.waitFor({ state: 'visible', timeout: 1500 }).then(() => true).catch(() => false)) {
+        await page.waitForTimeout(150);
+        await page.locator('#workspace-detail-task-confirm-cancel').click();
+        await page.waitForFunction(() => {
+          const modal = document.getElementById('workspace-detail-task-confirm-modal');
+          return !modal || !modal.classList.contains('show');
+        });
+        await page.waitForFunction(() => {
+          const modal = document.getElementById('workspace-detail-task-confirm-modal');
+          const settled = !modal || window.getComputedStyle(modal).display === 'none';
+          return settled && !(window as any).workspaceDetail?.pendingTaskConfirm;
+        });
+        await page.evaluate(() => window.Toast?.dismissAll?.());
       }
 
       await page.locator('#workspace-detail-add-file').click();
@@ -596,6 +605,275 @@ test.describe('Workspace File Folders', () => {
       await expect(explorer.getByRole('button', { name: 'Open in File Manager' })).toBeVisible();
       await explorer.getByRole('button', { name: 'Open in File Manager' }).click();
       await expect.poll(() => revealPayload?.relative_path).toBe('archive');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+});
+
+test.describe('Floating Workspace Assistant', () => {
+  async function createTemporaryWorkspace(request, namePrefix: string) {
+    const workspaceResp = await request.post('/api/orchestration/workspace', {
+      data: {
+        name: `${namePrefix} ${Date.now()}`,
+        description: 'Temporary workspace for floating assistant smoke coverage'
+      }
+    });
+    expect(workspaceResp.ok()).toBeTruthy();
+    const workspaceData = await workspaceResp.json();
+    return workspaceData.workspace_id as string;
+  }
+
+  async function suppressOnboarding(page) {
+    await page.route('**/api/onboarding/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: false,
+          current_step: 3,
+          completed: true,
+          skipped: false,
+          steps_completed: ['names', 'model', 'personalization'],
+          user_name: 'Playwright',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+  }
+
+  async function dismissEntryAgentDialogIfPresent(page) {
+    const entryAgentTitle = page.locator('#workspace-detail-task-confirm-title', {
+      hasText: 'Create an entry agent for this workspace?'
+    });
+    if (await entryAgentTitle.waitFor({ state: 'visible', timeout: 1500 }).then(() => true).catch(() => false)) {
+      await page.waitForTimeout(150);
+      await page.locator('#workspace-detail-task-confirm-cancel').click();
+      await page.waitForFunction(() => {
+        const modal = document.getElementById('workspace-detail-task-confirm-modal');
+        return !modal || !modal.classList.contains('show');
+      });
+      await page.waitForFunction(() => {
+        const modal = document.getElementById('workspace-detail-task-confirm-modal');
+        const settled = !modal || window.getComputedStyle(modal).display === 'none';
+        return settled && !(window as any).workspaceDetail?.pendingTaskConfirm;
+      });
+      await page.evaluate(() => window.Toast?.dismissAll?.());
+    }
+  }
+
+  test('replaces the workspace-detail inline bar with a full floating assistant panel', async ({ page, request }) => {
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Assistant');
+
+    try {
+      await suppressOnboarding(page);
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+
+      await expect(page.locator('#homeAssistantCard.modern-card')).toHaveCount(0);
+      await expect(page.locator('#hubSupportChatLauncher')).toBeVisible();
+      await expect(page.locator('#hubSupportChatPanel')).toBeHidden();
+
+      await page.locator('#hubSupportChatLauncher').click();
+      const panel = page.locator('#hubSupportChatPanel');
+      await expect(panel).toBeVisible();
+      await expect(panel.getByRole('button', { name: 'Task', exact: true })).toBeVisible();
+      await expect(panel.getByRole('button', { name: 'Ask', exact: true })).toBeVisible();
+      await expect(panel.getByRole('button', { name: 'Note', exact: true })).toBeVisible();
+      await expect(panel.locator('#homeAssistantQuickPlan')).toBeVisible();
+      await expect(panel.locator('#homeAssistantQuickTasks')).toBeVisible();
+      await expect(panel.locator('#homeAssistantQuickNotes')).toBeVisible();
+      await expect(panel.locator('#homeAssistantQuickReview')).toBeVisible();
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('creates a workspace task from the floating assistant task mode', async ({ page, request }) => {
+    test.setTimeout(45000);
+
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Task');
+    const taskTitle = `Write floating assistant smoke task ${Date.now()}`;
+
+    try {
+      await suppressOnboarding(page);
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
+
+      await page.locator('#hubSupportChatLauncher').click();
+      await page.locator('#homeAssistantInput').fill(taskTitle);
+      await page.locator('#homeAssistantSendBtn').click();
+
+      await expect(page.locator('#workspace-detail-task-confirm-modal')).toBeVisible();
+      await page.locator('#workspace-detail-task-confirm-confirm').click();
+      await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Task Created');
+      await expect(page.locator('#homeAssistantConversation')).toContainText('Created a task');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('saves a workspace note from the floating assistant note mode', async ({ page, request }) => {
+    test.setTimeout(45000);
+
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Note');
+    const noteText = `Floating assistant note smoke ${Date.now()}`;
+
+    try {
+      await suppressOnboarding(page);
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
+
+      await page.locator('#hubSupportChatLauncher').click();
+      await page.locator('#hubSupportChatPanel').getByRole('button', { name: 'Note' }).click();
+      await page.locator('#homeAssistantInput').fill(noteText);
+      await page.locator('#homeAssistantSendBtn').click();
+
+      await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Note Created');
+      await expect(page.locator('#homeAssistantConversation')).toContainText('Created a note');
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('runs preserved quick actions from the floating assistant', async ({ page, request }) => {
+    test.setTimeout(45000);
+
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Quick Actions');
+
+    const getWorkspaceNoteCount = async () => {
+      const notesResp = await request.get(`/api/workspaces/${workspaceId}/notes`);
+      expect(notesResp.ok()).toBeTruthy();
+      const notesData = await notesResp.json();
+      return (notesData.notes || []).length;
+    };
+
+    try {
+      await suppressOnboarding(page);
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+
+      await page.locator('#hubSupportChatLauncher').click();
+      const panel = page.locator('#hubSupportChatPanel');
+      await expect(panel).toBeVisible();
+
+      await panel.locator('#homeAssistantQuickNotes').click();
+      await expect(page.locator('#noteEditorModal')).toBeVisible();
+      await expect(page.locator('#noteNameInput')).toHaveValue('Workspace Description');
+      await expect(page.locator('#noteContentInput')).toHaveValue(/## Description/);
+
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+      await page.locator('#hubSupportChatLauncher').click();
+      await page.locator('#hubSupportChatPanel').getByRole('button', { name: 'Note', exact: true }).click();
+
+      let expectedNotes = await getWorkspaceNoteCount();
+      for (const selector of ['#homeAssistantQuickPlan', '#homeAssistantQuickTasks', '#homeAssistantQuickReview']) {
+        await page.locator('#hubSupportChatPanel').locator(selector).click();
+        expectedNotes += 1;
+        await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Note Created');
+        await expect.poll(getWorkspaceNoteCount).toBe(expectedNotes);
+        await expect(page.locator('#homeAssistantSendBtn')).toBeEnabled();
+      }
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('opens full chat for the active workspace assistant session', async ({ page, request }) => {
+    test.setTimeout(45000);
+
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Open Chat');
+    let chatPayload: any = null;
+    let chatSessionId = '';
+
+    try {
+      await suppressOnboarding(page);
+      await page.route('**/api/chat', async (route) => {
+        chatPayload = route.request().postDataJSON();
+        chatSessionId = route.request().headers()['x-session-id'] || '';
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            response: 'Workspace manager inline response from smoke test.'
+          })
+        });
+      });
+
+      await page.goto(`/workspaces/${workspaceId}`);
+      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await dismissEntryAgentDialogIfPresent(page);
+      await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
+
+      await page.locator('#hubSupportChatLauncher').click();
+      const panel = page.locator('#hubSupportChatPanel');
+      await panel.getByRole('button', { name: 'Ask', exact: true }).click();
+      await page.locator('#homeAssistantInput').fill('What should happen next in this workspace?');
+      await page.locator('#homeAssistantSendBtn').click();
+
+      await expect(page.locator('#homeAssistantConversation')).toContainText('Workspace manager inline response');
+      expect(chatPayload?.route_context?.workspace_id).toBe(workspaceId);
+      expect(chatPayload?.route_context?.surface).toBe('workspace_detail');
+      expect(chatSessionId).toBeTruthy();
+
+      await page.locator('#homeAssistantActions').getByRole('button', { name: 'Open Chat' }).click();
+      await expect(page.locator('#chatPanel')).toHaveAttribute('aria-hidden', 'false');
+      const activeSessionId = await page.evaluate(() => {
+        const manager = (window as any).sessionManager;
+        return String(
+          manager?.getActiveSessionId?.() ||
+          manager?.activeSessionId ||
+          manager?.currentSessionId ||
+          ''
+        );
+      });
+      expect(activeSessionId).toBe(chatSessionId);
+    } finally {
+      if (workspaceId) {
+        await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
+      }
+    }
+  });
+
+  test('keeps home dashboard and workspace canvas inline assistant bars', async ({ page, request }) => {
+    let workspaceId = '';
+    workspaceId = await createTemporaryWorkspace(request, 'Playwright Inline Assistant Regression');
+
+    try {
+      await suppressOnboarding(page);
+      await page.goto('/');
+      await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
+      await expect(page.locator('#homeAssistantInput')).toBeVisible();
+      await expect(page.locator('#hubSupportChat')).toHaveCount(0);
+
+      await page.goto(`/workspaces/${workspaceId}/canvas`);
+      await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
+      await expect(page.locator('#homeAssistantInput')).toHaveAttribute('placeholder', /from this canvas/);
+      await expect(page.locator('#homeAssistantWorkspaceModeSwitch')).toBeVisible();
+      await expect(page.locator('#hubSupportChat')).toHaveCount(0);
     } finally {
       if (workspaceId) {
         await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);

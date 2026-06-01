@@ -52,15 +52,49 @@ func TestWatcher_WatchUnwatch(t *testing.T) {
 	}
 }
 
-func TestWatcher_UnwatchAfterFolderDeleted(t *testing.T) {
+func TestWatcher_UnwatchSharedPath(t *testing.T) {
 	w, err := NewWatcher(DefaultWatcherConfig())
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
 	defer func() { _ = w.Close() }()
 
-	// Create and watch a temp directory.
-	tmpDir, err := os.MkdirTemp("", "watcher-test-*")
+	tmpDir, err := os.MkdirTemp("", "watcher-shared-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Two sessions watching the same folder.
+	if err := w.Watch("session-1", tmpDir); err != nil {
+		t.Fatalf("failed to watch session-1: %v", err)
+	}
+	if err := w.Watch("session-2", tmpDir); err != nil {
+		t.Fatalf("failed to watch session-2: %v", err)
+	}
+
+	// Unwatching the first must not remove the shared OS-level watch, and the
+	// second Unwatch must not error on an already-removed watch.
+	if err := w.Unwatch("session-1"); err != nil {
+		t.Fatalf("unwatch session-1: %v", err)
+	}
+	if err := w.Unwatch("session-2"); err != nil {
+		t.Fatalf("unwatch session-2: %v", err)
+	}
+
+	if w.IsWatching("session-1") || w.IsWatching("session-2") {
+		t.Error("no sessions should remain watched")
+	}
+}
+
+func TestWatcher_UnwatchDeletedFolder(t *testing.T) {
+	w, err := NewWatcher(DefaultWatcherConfig())
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	tmpDir, err := os.MkdirTemp("", "watcher-deleted-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -69,20 +103,15 @@ func TestWatcher_UnwatchAfterFolderDeleted(t *testing.T) {
 		t.Fatalf("failed to watch: %v", err)
 	}
 
-	// Simulate the workspace folder being deleted out from under the watcher
-	// (fsnotify drops the watch automatically when this happens).
-	if err := os.RemoveAll(tmpDir); err != nil {
-		t.Fatalf("failed to remove temp dir: %v", err)
-	}
+	// Deleting the folder makes fsnotify auto-drop the watch; Unwatch must still
+	// succeed (the "non-existent watch" error is treated as benign).
+	_ = os.RemoveAll(tmpDir)
 
-	// Unwatch must still succeed and clear the session even though fsnotify's
-	// underlying watch is already gone (ErrNonExistentWatch).
 	if err := w.Unwatch("session-1"); err != nil {
-		t.Fatalf("unwatch after folder deletion should not error, got: %v", err)
+		t.Fatalf("unwatch after folder delete should not error: %v", err)
 	}
-
 	if w.IsWatching("session-1") {
-		t.Error("should not be watching session-1 after unwatch")
+		t.Error("session-1 should no longer be watched")
 	}
 }
 

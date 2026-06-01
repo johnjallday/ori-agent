@@ -982,7 +982,21 @@
 
   function getHomeAssistantThinkingModalInstance() {
     var els = getHomeAssistantElements();
-    if (!els.thinkingModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+    if (!els.thinkingModal) return null;
+    if (els.thinkingModal.getAttribute('data-home-assistant-surface') === 'panel') {
+      return {
+        show: function () {
+          els.thinkingModal.classList.add('show');
+          if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
+            window.hubSupportChat.open({ focus: 'input' });
+          }
+        },
+        hide: function () {
+          els.thinkingModal.classList.remove('show');
+        }
+      };
+    }
+    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
     if (homeAssistantThinkingModalInstance) return homeAssistantThinkingModalInstance;
     homeAssistantThinkingModalInstance = bootstrap.Modal.getOrCreateInstance(els.thinkingModal);
     return homeAssistantThinkingModalInstance;
@@ -997,6 +1011,11 @@
   function isHomeAssistantThinkingModalVisible() {
     var els = getHomeAssistantElements();
     return Boolean(els.thinkingModal && els.thinkingModal.classList.contains('show'));
+  }
+
+  function isHomeAssistantEmbeddedPanel() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.thinkingModal && els.thinkingModal.getAttribute('data-home-assistant-surface') === 'panel');
   }
 
   function hasVisibleHomeAssistantActions() {
@@ -1212,6 +1231,7 @@
     if (!button) return;
 
     var available = Boolean(els.thinkingModal);
+    var embeddedPanel = isHomeAssistantEmbeddedPanel();
     button.classList.toggle('d-none', !available);
     button.disabled = !available;
 
@@ -1221,6 +1241,17 @@
     }
 
     button.removeAttribute('aria-hidden');
+    if (embeddedPanel && !button.dataset.homeAssistantPanelBound) {
+      button.dataset.homeAssistantPanelBound = 'true';
+      button.removeAttribute('data-bs-toggle');
+      button.removeAttribute('data-bs-target');
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
+          window.hubSupportChat.open({ focus: 'input' });
+        }
+      });
+    }
 
     var active = Boolean(
       homeAssistantState.busy ||
@@ -1238,7 +1269,9 @@
 
     var label = button.querySelector('[data-home-assistant-launcher-label]');
     if (label) {
-      label.textContent = homeAssistantState.busy ? 'Live Activity' : 'Task Activity';
+      label.textContent = embeddedPanel
+        ? (homeAssistantState.busy ? 'Assistant Working' : 'Workspace Assistant')
+        : (homeAssistantState.busy ? 'Live Activity' : 'Task Activity');
     }
 
     syncHomeAssistantModalHeading();
@@ -1327,6 +1360,22 @@
     return 'Create Task';
   }
 
+  function getHomeAssistantSendButtonLabel(button) {
+    if (!button) return '';
+    var label = button.querySelector('.hub-support-chat-send-label');
+    return String(label ? label.textContent : button.textContent || '').trim();
+  }
+
+  function setHomeAssistantSendButtonLabel(button, text) {
+    if (!button) return;
+    var label = button.querySelector('.hub-support-chat-send-label');
+    if (label) {
+      label.textContent = text;
+      return;
+    }
+    button.textContent = text;
+  }
+
   function syncHomeAssistantWorkspacePromptControls(routeContext) {
     var normalizedContext = normalizeHomeRouteContext(routeContext);
     var els = getHomeAssistantElements();
@@ -1344,7 +1393,11 @@
     }
 
     if (els.sendBtn) {
-      els.sendBtn.textContent = isWorkspaceContext ? getWorkspacePromptModeLabel(promptMode) : 'Ask';
+      var sendText = isWorkspaceContext ? getWorkspacePromptModeLabel(promptMode) : 'Ask';
+      els.sendBtn.dataset.defaultLabel = sendText;
+      if (!homeAssistantState.busy) {
+        setHomeAssistantSendButtonLabel(els.sendBtn, sendText);
+      }
     }
   }
 
@@ -1500,6 +1553,9 @@
     setHomeAssistantMode('new_task');
     var els = getHomeAssistantElements();
     if (!els.input) return;
+    if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
+      window.hubSupportChat.open({ focus: 'input' });
+    }
     if (els.card && typeof els.card.scrollIntoView === 'function') {
       els.card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
@@ -1513,11 +1569,14 @@
     var els = getHomeAssistantElements();
     if (els.sendBtn && els.input) {
       if (!els.sendBtn.dataset.defaultLabel) {
-        els.sendBtn.dataset.defaultLabel = els.sendBtn.textContent || 'Ask';
+        els.sendBtn.dataset.defaultLabel = getHomeAssistantSendButtonLabel(els.sendBtn) || 'Ask';
       }
       els.sendBtn.disabled = homeAssistantState.busy;
       els.input.disabled = homeAssistantState.busy;
-      els.sendBtn.textContent = homeAssistantState.busy ? (busyLabel || 'Working...') : els.sendBtn.dataset.defaultLabel;
+      setHomeAssistantSendButtonLabel(
+        els.sendBtn,
+        homeAssistantState.busy ? (busyLabel || 'Working...') : els.sendBtn.dataset.defaultLabel
+      );
     }
     for (var i = 0; i < els.quickButtons.length; i++) {
       els.quickButtons[i].disabled = homeAssistantState.busy;
@@ -6472,11 +6531,23 @@
     }
   }
 
+  function extractTaskIdFromPath(pathname) {
+    var path = String(pathname || '').trim();
+    var match = path.match(/^\/workspaces\/[^/]+\/(?:task|tasks)\/([^/]+)/i);
+    if (!match || !match[1]) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (error) {
+      return match[1];
+    }
+  }
+
   function inferHomeRouteSurface(pathname) {
     var path = normalizeToken(pathname || '');
     if (!path) return 'dashboard';
     if (path.indexOf('/workspaces/') === 0) {
       if (path.indexOf('/canvas') >= 0) return 'workspace_canvas';
+      if (path.indexOf('/task/') >= 0 || path.indexOf('/tasks/') >= 0) return 'workspace_task';
       return 'workspace_detail';
     }
     if (path.indexOf('/workspaces') === 0) return 'workspace_hub';
@@ -6491,12 +6562,14 @@
       pathname = window.location.pathname;
     }
     var workspaceId = extractWorkspaceIdFromPath(pathname);
+    var taskId = extractTaskIdFromPath(pathname);
     var sessionId = getCurrentHomeSessionId();
 
     return {
       surface: inferHomeRouteSurface(pathname),
       page_path: pathname || '/',
       workspace_id: workspaceId,
+      task_id: taskId,
       session_id: sessionId,
       origin: 'ask_ori'
     };
@@ -6516,6 +6589,7 @@
       surface: String(routeContext.surface || fallback.surface || inferHomeRouteSurface(pagePath)).trim() || inferHomeRouteSurface(pagePath),
       page_path: pagePath,
       workspace_id: String(routeContext.workspace_id || '').trim(),
+      task_id: String(routeContext.task_id || fallback.task_id || extractTaskIdFromPath(pagePath)).trim(),
       session_id: String(sessionId || '').trim(),
       origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori'
     };
@@ -7854,6 +7928,15 @@
     ]);
   }
 
+  function resolveWorkspaceTaskAssistantAgent(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (normalizedContext.surface !== 'workspace_task') return '';
+    var taskPage = window.workspaceTaskPage;
+    var task = taskPage && taskPage.task && typeof taskPage.task === 'object' ? taskPage.task : null;
+    if (!task) return '';
+    return String(task.assigned_to || task.assignedTo || '').trim();
+  }
+
   async function openOrCreateWorkspaceAssistantSession(routeContext, prompt, options) {
     var manager = window.sessionManager;
     if (!manager) {
@@ -7869,7 +7952,8 @@
     var requestedSessionId = reuseExistingSession
       ? String(normalizedContext.session_id || '').trim()
       : '';
-    var entryAgentName = workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '';
+    var taskAgentName = resolveWorkspaceTaskAssistantAgent(normalizedContext);
+    var entryAgentName = taskAgentName || (workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '');
     if (entryAgentName) {
       if (reuseExistingSession) {
         var currentEntrySession = findSessionById(requestedSessionId || getCurrentHomeSessionId());
@@ -11081,6 +11165,9 @@
     }
 
     var routeContext = normalizeHomeRouteContext(options && options.routeContext);
+    if (options && options.workspacePromptMode) {
+      setHomeAssistantWorkspacePromptMode(options.workspacePromptMode);
+    }
     if (!options || options.openThinkingModal !== false) {
       openHomeAssistantThinkingModal();
     }
@@ -11090,9 +11177,33 @@
   }
 
   window.OriAskRouting = window.OriAskRouting || {};
+  window.OriAskRouting.open = function () {
+    openHomeAssistantThinkingModal();
+    focusHomeAssistantInput();
+  };
+  window.OriAskRouting.close = function () {
+    if (window.hubSupportChat && typeof window.hubSupportChat.close === 'function') {
+      window.hubSupportChat.close();
+      return;
+    }
+    var modal = getHomeAssistantThinkingModalInstance();
+    if (modal && typeof modal.hide === 'function') modal.hide();
+  };
   window.OriAskRouting.submit = submitPromptViaAskOri;
   window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
   window.OriAskRouting.refreshWorkspaceIdentity = refreshHomeAssistantWorkspaceIdentity;
+  window.OriAskRouting.setMode = setHomeAssistantWorkspacePromptMode;
+  window.OriAskRouting.getState = function () {
+    return {
+      busy: Boolean(homeAssistantState.busy),
+      workspacePromptMode: getWorkspacePromptMode(),
+      routeContext: normalizeHomeRouteContext(),
+      routingSummary: homeAssistantState.routingSummary,
+      hasPlanning: Boolean(homeAssistantState.planningState),
+      hasInlineReply: Boolean(homeAssistantState.inlineReplyState),
+      hasConversation: hasHomeAssistantConversation()
+    };
+  };
 
   function initDashboard() {
     initHomeAssistant();

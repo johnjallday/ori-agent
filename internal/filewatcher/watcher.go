@@ -127,19 +127,38 @@ func (w *Watcher) Unwatch(sessionID string) error {
 		return nil
 	}
 
-	// Remove from fsnotify. When the watched folder has already been deleted
-	// (e.g. the workspace was removed), fsnotify drops the watch automatically,
-	// so the explicit Remove returns ErrNonExistentWatch. The watch being gone
-	// is the desired end state, not a failure, so don't log it as an error.
-	if err := w.fsWatcher.Remove(path); err != nil && !errors.Is(err, fsnotify.ErrNonExistentWatch) {
-		logger.Error("Failed to remove watcher", logger.Fields{
-			"session_id": sessionID,
-			"path":       path,
-			"error":      err,
-		})
+	delete(w.sessions, sessionID)
+
+	// Multiple sessions can watch the same folder. Only remove the OS-level watch
+	// once the last session for this path is gone, otherwise the second Unwatch
+	// would try to remove an already-removed watch.
+	stillWatched := false
+	for _, p := range w.sessions {
+		if p == path {
+			stillWatched = true
+			break
+		}
 	}
 
-	delete(w.sessions, sessionID)
+	if !stillWatched {
+		if err := w.fsWatcher.Remove(path); err != nil {
+			// fsnotify auto-removes a watch when its directory is deleted, so a
+			// "non-existent watch" here is expected and harmless — the watch is
+			// already gone, which is the desired end state. Surface other errors.
+			if errors.Is(err, fsnotify.ErrNonExistentWatch) {
+				logger.Debug("Watch already removed before Unwatch", logger.Fields{
+					"session_id": sessionID,
+					"path":       path,
+				})
+			} else {
+				logger.Warn("Failed to remove watcher", logger.Fields{
+					"session_id": sessionID,
+					"path":       path,
+					"error":      err,
+				})
+			}
+		}
+	}
 
 	logger.Info("Stopped watching session folder", logger.Fields{
 		"session_id": sessionID,
