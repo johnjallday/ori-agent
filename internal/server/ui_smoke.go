@@ -97,7 +97,7 @@ func (s *Server) runUISmokeTest(workspaceID string) uiSmokeTestResponse {
 				name:             "Workspace detail page",
 				path:             "/workspaces/" + workspaceID,
 				expectedStatuses: []int{http.StatusOK},
-				requiredSnippets: []string{"homeAssistantForm", "homeAssistantWorkspaceModeSwitch", "open-diagnostics-btn"},
+				requiredSnippets: []string{"hubSupportChat", "homeAssistantForm", "homeAssistantWorkspaceModeSwitch", "open-diagnostics-btn"},
 			},
 			uiSmokeCheckSpec{
 				name:             "Workspace diagnostics page",

@@ -4191,12 +4191,20 @@ body.chat-panel-open .chat-panel-backdrop {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 1080;
+  z-index: 2147483601;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 12px;
   pointer-events: none;
+}
+
+body.has-hub-support-chat #toastContainer {
+  z-index: 2147483600 !important;
+}
+
+body.modal-open .hub-support-chat {
+  z-index: 1040;
 }
 
 .hub-support-chat-launcher,
@@ -4477,5 +4485,268 @@ body.chat-panel-open .chat-panel-backdrop {
   .hub-support-chat-panel {
     width: calc(100vw - 24px);
     height: 70vh;
+  }
+}
+
+/* Floating Workspace Assistant consolidation */
+.hub-support-chat-workspace .hub-support-chat-panel {
+  width: min(600px, calc(100vw - 56px));
+  height: min(780px, calc(100vh - 112px));
+  max-height: calc(100vh - 112px);
+  background: var(--bg-primary, #fff);
+  border-radius: 14px;
+}
+
+.hub-support-chat-workspace .hub-support-chat-header {
+  padding: 18px 22px;
+  background: linear-gradient(135deg, var(--accent-primary, #1F6B4E), #1b7a5b);
+}
+
+.hub-support-chat-workspace .hub-support-chat-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.hub-workspace-assistant {
+  border-bottom: 1px solid var(--border-color, #e2e2e2);
+  background: var(--bg-primary, #fff);
+  padding: 18px 24px 20px;
+  flex-shrink: 0;
+}
+
+.hub-workspace-assistant-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hub-workspace-assistant-meta {
+  order: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-secondary, #777);
+  font-size: 0.86rem;
+}
+
+.hub-workspace-assistant-identity {
+  color: var(--text-primary, #222);
+  font-weight: 700;
+  max-width: min(320px, 70%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-workspace-assistant-scope {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.hub-workspace-mode-switch.home-assistant-workspace-mode-switch {
+  order: 2;
+  align-self: flex-start;
+  width: min(360px, 100%);
+  min-height: 42px;
+}
+
+.hub-workspace-assistant-compose {
+  order: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.hub-support-chat-workspace .hub-support-chat-input {
+  width: 100%;
+  min-height: 82px;
+  max-height: 180px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.hub-support-chat-workspace .hub-support-chat-send {
+  width: auto;
+  min-width: 148px;
+  height: 46px;
+  align-self: flex-end;
+  border-radius: 12px;
+  gap: 8px;
+  padding: 0 18px;
+  font-weight: 700;
+}
+
+.hub-workspace-assistant-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.hub-workspace-assistant-quick .home-assistant-quick-label {
+  flex: 0 0 100%;
+  color: var(--text-secondary, #777);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hub-workspace-assistant-quick .home-assistant-quick-btn {
+  min-height: 34px;
+  padding-inline: 14px;
+  max-width: 100%;
+}
+
+.hub-support-chat-activity {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px 24px;
+  background: var(--bg-secondary, #f7f7f7);
+}
+
+.hub-support-chat-status-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color, #e2e2e2);
+  border-radius: 12px;
+  background: var(--bg-primary, #fff);
+}
+
+.hub-support-chat-activity-title {
+  color: var(--text-primary, #222);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.hub-support-chat-status {
+  margin-top: 5px;
+  color: var(--text-secondary, #777);
+  font-size: 0.84rem;
+}
+
+.hub-support-chat-actions .modern-btn {
+  font-size: 0.82rem;
+}
+
+.hub-support-chat-conversation-section.home-assistant-conversation-section {
+  margin-bottom: 0;
+  background: var(--bg-primary, #fff);
+  border-radius: 12px;
+}
+
+.hub-support-chat-conversation.home-assistant-conversation {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.hub-support-chat-launcher {
+  width: auto;
+  min-width: 56px;
+  max-width: min(260px, calc(100vw - 40px));
+  height: 56px;
+  border-radius: 999px;
+  padding: 0 18px 0 52px;
+}
+
+.hub-support-chat-launcher-icon {
+  left: 18px;
+}
+
+.hub-support-chat-launcher-label {
+  display: inline-block;
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hub-support-chat[data-state="open"] .hub-support-chat-launcher-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+.hub-support-chat[data-state="open"] .hub-support-chat-launcher {
+  width: 56px;
+  padding: 0;
+}
+
+[data-bs-theme="dark"] .hub-support-chat-workspace .hub-support-chat-panel,
+[data-bs-theme="dark"] .hub-workspace-assistant,
+[data-bs-theme="dark"] .hub-support-chat-status-row,
+[data-bs-theme="dark"] .hub-support-chat-conversation-section.home-assistant-conversation-section {
+  background: #11141b;
+}
+
+[data-bs-theme="dark"] .hub-workspace-assistant {
+  border-bottom-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-bs-theme="dark"] .hub-support-chat-workspace .hub-support-chat-input {
+  background: #181c24;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-bs-theme="dark"] .hub-support-chat-status-row,
+[data-bs-theme="dark"] .hub-support-chat-conversation-section.home-assistant-conversation-section {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+[data-bs-theme="dark"] .hub-support-chat-activity {
+  background: #1d2029;
+}
+
+@media (max-width: 640px) {
+  .hub-support-chat-workspace {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    align-items: stretch;
+  }
+
+  .hub-support-chat-workspace .hub-support-chat-panel {
+    width: 100%;
+    max-width: none;
+    height: min(82vh, 720px);
+    max-height: calc(100vh - 92px);
+    transform-origin: bottom center;
+  }
+
+  .hub-workspace-assistant {
+    padding: 14px 12px 16px;
+  }
+
+  .hub-support-chat-activity {
+    padding: 12px;
+  }
+
+  .hub-workspace-assistant-meta {
+    font-size: 0.8rem;
+  }
+
+  .hub-support-chat-workspace .hub-support-chat-input {
+    min-height: 72px;
+  }
+
+  .hub-support-chat-workspace .hub-support-chat-send {
+    width: 100%;
+    align-self: stretch;
+  }
+
+  .hub-support-chat-launcher {
+    align-self: flex-end;
   }
 }
