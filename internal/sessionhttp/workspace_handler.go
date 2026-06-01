@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
@@ -27,6 +28,11 @@ var (
 )
 
 const workspaceSharedDataPrimaryDirectoryIDKey = "primary_directory_id"
+
+// workspaceTrashSharedDataKey is the SharedData key under which trash metadata
+// ({original_path, trashed_path, deleted_at}) is stored while a workspace is
+// trashed, so its folder can be moved back on restore.
+const workspaceTrashSharedDataKey = "_trash"
 
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
 func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +82,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 			return
 		case "rename":
 			h.handleWorkspaceRename(w, r, id)
+			return
+		case "restore":
+			h.restoreWorkspace(w, r, id)
 			return
 		}
 	}
@@ -474,6 +483,24 @@ func filterConcreteWorkspaces(workspaces []session.Workspace) []session.Workspac
 	return filtered
 }
 
+// pruneTrashedWorkspaces removes workspaces that have been moved to the trash,
+// recursing into children so trashed sub-workspaces don't leak into the tree.
+func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace {
+	if len(workspaces) == 0 {
+		return workspaces
+	}
+
+	filtered := make([]session.Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.Status == session.WorkspaceStatusTrashed {
+			continue
+		}
+		ws.Children = pruneTrashedWorkspaces(ws.Children)
+		filtered = append(filtered, ws)
+	}
+	return filtered
+}
+
 func (h *Handler) requireConcreteWorkspace(ctx context.Context, workspaceID string) (*session.Workspace, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
@@ -660,6 +687,23 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
 
+	// Soft delete (default): move the folder-backed workspace to the system
+	// trash and mark it trashed so it can be restored from the hub. Groups,
+	// explicit delete_sessions=true requests, and platforms without system-trash
+	// support fall through to a permanent delete below.
+	if ws.Kind != session.WorkspaceKindGroup && !deleteSessions && h.workspaceStore != nil && platform.TrashSupported() {
+		if _, ferr := h.workspaceStore.Get(id); ferr == nil {
+			if err := h.trashWorkspace(ctx, ws); err != nil {
+				logger.Error("Failed to move workspace to trash", logger.Fields{"id": id, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to move workspace to trash")
+				return
+			}
+			logger.Info("Workspace moved to trash", logger.Fields{"id": id})
+			orihttp.WriteJSON(w, map[string]any{"success": true, "id": id, "trashed": true})
+			return
+		}
+	}
+
 	// Capture the entry agent name before deletion so it can be cleaned up.
 	entryAgentName := ""
 	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
@@ -722,6 +766,104 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	orihttp.RespondNoContent(w)
 }
 
+// trashWorkspace moves a workspace's folder to the system trash and marks the
+// SQLite record trashed, stashing the paths needed to restore it. The record and
+// its sessions are preserved so a restore is high fidelity.
+func (h *Handler) trashWorkspace(ctx context.Context, ws *session.Workspace) error {
+	originalPath, trashedPath, err := h.workspaceStore.Trash(ws.ID)
+	if err != nil {
+		return err
+	}
+
+	if ws.SharedData == nil {
+		ws.SharedData = map[string]any{}
+	}
+	ws.SharedData[workspaceTrashSharedDataKey] = map[string]any{
+		"original_path": originalPath,
+		"trashed_path":  trashedPath,
+		"deleted_at":    time.Now().UTC().Format(time.RFC3339),
+	}
+	ws.Status = session.WorkspaceStatusTrashed
+
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		// Roll the folder back out of the trash so the workspace isn't stranded.
+		if trashedPath != "" {
+			if _, rerr := h.workspaceStore.RestoreFromTrash(originalPath, trashedPath); rerr != nil {
+				logger.Error("Failed to roll back trash after update error", logger.Fields{"id": ws.ID, "error": rerr})
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// restoreWorkspace handles POST /api/workspaces/{id}/restore. It moves a trashed
+// workspace's folder back out of the system trash and reactivates the record.
+func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id string) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	ctx := r.Context()
+
+	ws, err := h.store.GetWorkspace(ctx, id)
+	if err == session.ErrWorkspaceNotFound {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return
+	}
+	if err != nil {
+		logger.Error("Failed to get workspace", logger.Fields{"id": id, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to restore workspace")
+		return
+	}
+
+	if ws.Status != session.WorkspaceStatusTrashed {
+		_ = orihttp.RespondBadRequest(w, "Workspace is not in the trash")
+		return
+	}
+	if h.workspaceStore == nil {
+		_ = orihttp.RespondInternalError(w, "Workspace folder store unavailable")
+		return
+	}
+
+	originalPath, trashedPath := workspaceTrashPaths(ws)
+	if originalPath == "" {
+		_ = orihttp.RespondBadRequest(w, "Workspace is missing trash metadata; cannot restore")
+		return
+	}
+
+	if _, err := h.workspaceStore.RestoreFromTrash(originalPath, trashedPath); err != nil {
+		logger.Error("Failed to restore workspace from trash", logger.Fields{"id": id, "error": err})
+		_ = orihttp.RespondBadRequest(w, "Failed to restore workspace: "+err.Error())
+		return
+	}
+
+	ws.Status = session.WorkspaceStatusActive
+	delete(ws.SharedData, workspaceTrashSharedDataKey)
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		logger.Error("Failed to reactivate restored workspace", logger.Fields{"id": id, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to restore workspace")
+		return
+	}
+
+	logger.Info("Workspace restored from trash", logger.Fields{"id": id})
+	orihttp.WriteJSON(w, map[string]any{"success": true, "id": id})
+}
+
+// workspaceTrashPaths extracts the original and trashed folder locations stashed
+// in a trashed workspace's SharedData.
+func workspaceTrashPaths(ws *session.Workspace) (originalPath, trashedPath string) {
+	if ws == nil || ws.SharedData == nil {
+		return "", ""
+	}
+	raw, ok := ws.SharedData[workspaceTrashSharedDataKey].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	originalPath, _ = raw["original_path"].(string)
+	trashedPath, _ = raw["trashed_path"].(string)
+	return originalPath, trashedPath
+}
+
 // listWorkspaces handles GET /api/workspaces.
 func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	tree := r.URL.Query().Get("tree") == "true"
@@ -737,6 +879,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
 		}
+		workspaces = pruneTrashedWorkspaces(workspaces)
 		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 		orihttp.WriteJSON(w, map[string]any{
@@ -758,6 +901,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaces = filterConcreteWorkspaces(workspaces)
+	workspaces = pruneTrashedWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 	orihttp.WriteJSON(w, map[string]any{

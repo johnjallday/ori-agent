@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -693,6 +694,70 @@ func (s *FileStore) Delete(id string) error {
 	s.removeFromCacheRecursive(id)
 
 	return nil
+}
+
+// Trash moves a workspace's folder to the system trash instead of permanently
+// deleting it, so the workspace can be restored later. It returns the folder's
+// original path and its new location in the trash.
+//
+// Folders that live outside the managed workspace root are never on-disk
+// deleted (the same safety rule as Delete): they are only unregistered, and
+// trashedPath is returned empty.
+func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	relPath, ok := s.idToPath[id]
+	if !ok {
+		return "", "", fmt.Errorf("workspace %s not found", id)
+	}
+
+	folderPath := s.resolveFolder(relPath)
+
+	if s.isInsideRoot(folderPath) {
+		trashedPath, err = platform.MoveToTrash(folderPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to move workspace folder to trash: %w", err)
+		}
+	} else {
+		logger.Info("Workspace folder outside root, unregistering without trashing",
+			logger.Fields{"id": id, "path": folderPath})
+	}
+
+	// Remove this workspace and all children from cache and mappings; restoring
+	// re-registers it via Import.
+	s.removeFromCacheRecursive(id)
+
+	return folderPath, trashedPath, nil
+}
+
+// RestoreFromTrash moves a previously trashed workspace folder back to its
+// original location and re-registers it, returning the restored workspace.
+//
+// trashedPath may be empty for folders that were only unregistered (outside the
+// managed root); in that case the original folder is simply re-imported.
+func (s *FileStore) RestoreFromTrash(originalPath, trashedPath string) (*Workspace, error) {
+	if originalPath == "" {
+		return nil, fmt.Errorf("original path is required to restore a workspace")
+	}
+
+	if trashedPath != "" {
+		if _, err := os.Stat(trashedPath); err != nil {
+			return nil, fmt.Errorf("trashed folder is no longer available (it may have been emptied from Trash): %w", err)
+		}
+		if _, err := os.Stat(originalPath); err == nil {
+			return nil, fmt.Errorf("cannot restore: %q already exists", originalPath)
+		}
+		if err := os.Rename(trashedPath, originalPath); err != nil {
+			return nil, fmt.Errorf("failed to move folder out of trash: %w", err)
+		}
+	}
+
+	ws, _, err := s.Import(originalPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-register restored workspace: %w", err)
+	}
+	return ws, nil
 }
 
 // isInsideRoot checks whether a path is inside the workspace root directory.

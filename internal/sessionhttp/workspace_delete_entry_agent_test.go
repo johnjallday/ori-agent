@@ -11,8 +11,11 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// TestDeleteWorkspace_DeletesEntryAgent verifies that deleting a workspace
-// also deletes its designated entry agent from the agent store.
+// TestDeleteWorkspace_DeletesEntryAgent verifies that permanently deleting a
+// workspace also deletes its designated entry agent from the agent store. The
+// default delete now moves a workspace to the trash (which preserves the entry
+// agent for restore), so delete_sessions=true is used to force a permanent
+// delete on every platform.
 func TestDeleteWorkspace_DeletesEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
@@ -56,8 +59,9 @@ func TestDeleteWorkspace_DeletesEntryAgent(t *testing.T) {
 		t.Fatalf("expected entry agent to exist before workspace deletion")
 	}
 
-	// Delete the workspace (confirm=true to skip the session-count prompt).
-	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+workspaceID+"?confirm=true", bytes.NewReader(nil))
+	// Permanently delete the workspace (confirm=true skips the session-count
+	// prompt; delete_sessions=true forces a permanent delete rather than trash).
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+workspaceID+"?confirm=true&delete_sessions=true", bytes.NewReader(nil))
 	w := httptest.NewRecorder()
 	handler.HandleWorkspaces(w, req)
 
@@ -91,7 +95,10 @@ func TestDeleteWorkspace_NoEntryAgent_StillSucceeds(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleWorkspaces(w, req)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	// Either 204 (permanent delete) or 200 (moved to trash, where supported) is
+	// a success; the point is that a workspace without an entry agent deletes
+	// cleanly.
+	if w.Code != http.StatusNoContent && w.Code != http.StatusOK {
+		t.Fatalf("expected 204 or 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
