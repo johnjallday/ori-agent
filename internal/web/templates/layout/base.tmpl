@@ -3,6 +3,9 @@
 {{template "head.tmpl" .}}
 
 <body class="bg-light">
+  <!-- Skip link for keyboard users (styled in common.css) -->
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
@@ -13,7 +16,7 @@
     {{template "sidebar.tmpl" .}}
 
     <!-- Main Content -->
-    <main class="main-content" role="main" aria-label="Dashboard">
+    <main id="main-content" class="main-content" role="main" aria-label="Dashboard">
       {{template "dashboard.tmpl" .}}
     </main>
   </div>
