@@ -348,6 +348,9 @@ type Workspace struct {
 
 	// AgentSkillAccessJSON contains serialized per-agent-instance skill access rules.
 	AgentSkillAccessJSON json.RawMessage `json:"agent_skill_access,omitempty"`
+
+	// OpportunitiesJSON contains serialized mission findings (Action Center opportunities).
+	OpportunitiesJSON json.RawMessage `json:"opportunities,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.
