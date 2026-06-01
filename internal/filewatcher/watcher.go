@@ -2,6 +2,7 @@ package filewatcher
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -126,8 +127,11 @@ func (w *Watcher) Unwatch(sessionID string) error {
 		return nil
 	}
 
-	// Remove from fsnotify
-	if err := w.fsWatcher.Remove(path); err != nil {
+	// Remove from fsnotify. When the watched folder has already been deleted
+	// (e.g. the workspace was removed), fsnotify drops the watch automatically,
+	// so the explicit Remove returns ErrNonExistentWatch. The watch being gone
+	// is the desired end state, not a failure, so don't log it as an error.
+	if err := w.fsWatcher.Remove(path); err != nil && !errors.Is(err, fsnotify.ErrNonExistentWatch) {
 		logger.Error("Failed to remove watcher", logger.Fields{
 			"session_id": sessionID,
 			"path":       path,

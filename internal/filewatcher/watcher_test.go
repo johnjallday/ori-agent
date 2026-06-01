@@ -52,6 +52,40 @@ func TestWatcher_WatchUnwatch(t *testing.T) {
 	}
 }
 
+func TestWatcher_UnwatchAfterFolderDeleted(t *testing.T) {
+	w, err := NewWatcher(DefaultWatcherConfig())
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	// Create and watch a temp directory.
+	tmpDir, err := os.MkdirTemp("", "watcher-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	if err := w.Watch("session-1", tmpDir); err != nil {
+		t.Fatalf("failed to watch: %v", err)
+	}
+
+	// Simulate the workspace folder being deleted out from under the watcher
+	// (fsnotify drops the watch automatically when this happens).
+	if err := os.RemoveAll(tmpDir); err != nil {
+		t.Fatalf("failed to remove temp dir: %v", err)
+	}
+
+	// Unwatch must still succeed and clear the session even though fsnotify's
+	// underlying watch is already gone (ErrNonExistentWatch).
+	if err := w.Unwatch("session-1"); err != nil {
+		t.Fatalf("unwatch after folder deletion should not error, got: %v", err)
+	}
+
+	if w.IsWatching("session-1") {
+		t.Error("should not be watching session-1 after unwatch")
+	}
+}
+
 func TestWatcher_WatchedSessions(t *testing.T) {
 	w, err := NewWatcher(DefaultWatcherConfig())
 	if err != nil {
