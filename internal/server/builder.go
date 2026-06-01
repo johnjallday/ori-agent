@@ -319,6 +319,17 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.workspaceOrchestrator,
 	)
 
+	// Background auto-purger for workspaces left in Trash beyond the retention
+	// window. Shares the WorkspacePurger teardown with the manual permanent-delete
+	// path. Started/stopped by the workflow facade lifecycle.
+	if b.sessionStore != nil {
+		b.server.Workflow.TrashPurger = sessionhttp.NewTrashPurger(
+			b.sessionStore,
+			b.workspaceFileStore,
+			b.st,
+		)
+	}
+
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
 		b.mcpRegistry,

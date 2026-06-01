@@ -291,7 +291,7 @@ func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 	return h.sqlite.UpdateWorkspace(ctx, workspace)
 }
 
-// DeleteWorkspace removes a workspace.
+// DeleteWorkspace permanently removes a workspace (hard delete).
 func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
 	if err := h.sqlite.DeleteWorkspace(ctx, id); err != nil {
 		return err
@@ -299,6 +299,27 @@ func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
 
 	h.clearCachedWorkspaceReference(id)
 	return nil
+}
+
+// TrashWorkspace soft-deletes a workspace. Sessions keep their workspace link
+// (so Restore preserves them), so no cached session references are cleared.
+func (h *hybridStore) TrashWorkspace(ctx context.Context, id string, includeDescendants bool) error {
+	return h.sqlite.TrashWorkspace(ctx, id, includeDescendants)
+}
+
+// RestoreWorkspace brings a trashed workspace and its trashed descendants back.
+func (h *hybridStore) RestoreWorkspace(ctx context.Context, id string) error {
+	return h.sqlite.RestoreWorkspace(ctx, id)
+}
+
+// ReparentChildrenToRoot moves the direct children of parentID to root level.
+func (h *hybridStore) ReparentChildrenToRoot(ctx context.Context, parentID string) error {
+	return h.sqlite.ReparentChildrenToRoot(ctx, parentID)
+}
+
+// ListTrashedWorkspaces returns soft-deleted workspaces, most recent first.
+func (h *hybridStore) ListTrashedWorkspaces(ctx context.Context) ([]Workspace, error) {
+	return h.sqlite.ListTrashedWorkspaces(ctx)
 }
 
 // DeleteSessionsByWorkspace deletes all sessions belonging to a workspace.
