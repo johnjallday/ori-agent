@@ -177,6 +177,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
 	data.Extra["EvolutionEnabled"] = featureflags.EvolutionEnabled()
+	data.Extra["WorkspaceFloatingAssistantEnabled"] = featureflags.WorkspaceFloatingAssistantEnabled()
 
 	defaultAgentName := resolveDefaultPageAgentName(s.Storage)
 	data.Extra["DefaultAgentName"] = defaultAgentName

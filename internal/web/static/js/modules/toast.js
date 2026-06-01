@@ -58,12 +58,19 @@ const Toast = (function() {
     const icon = getIcon(type);
     const title = options.title || type.charAt(0).toUpperCase() + type.slice(1);
 
+    // Optional action button (e.g. an "Undo" affordance). The click handler is
+    // wired up in show() once the element exists in the DOM.
+    const actionHtml = options.action && options.action.label
+      ? `<button type="button" class="toast-action">${escapeHtml(options.action.label)}</button>`
+      : '';
+
     toast.innerHTML = `
       <div class="toast-icon">${icon}</div>
       <div class="toast-content">
         <div class="toast-title">${escapeHtml(title)}</div>
         <div class="toast-message">${escapeHtml(message)}</div>
       </div>
+      ${actionHtml}
       <button type="button" class="toast-close" aria-label="Close notification">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
@@ -109,6 +116,20 @@ const Toast = (function() {
     // Setup close button
     const closeBtn = toast.querySelector('.toast-close');
     closeBtn.addEventListener('click', () => dismiss(toast));
+
+    // Setup optional action button. Invokes the handler then dismisses the toast.
+    if (options.action && typeof options.action.onClick === 'function') {
+      const actionBtn = toast.querySelector('.toast-action');
+      if (actionBtn) {
+        actionBtn.addEventListener('click', () => {
+          try {
+            options.action.onClick();
+          } finally {
+            dismiss(toast);
+          }
+        });
+      }
+    }
 
     // Setup progress bar animation
     const progress = toast.querySelector('.toast-progress');

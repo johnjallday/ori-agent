@@ -86,13 +86,28 @@ type WorkspaceStore interface {
 	// Returns ErrWorkspaceNotFound if the workspace doesn't exist.
 	UpdateWorkspace(ctx context.Context, workspace *Workspace) error
 
-	// DeleteWorkspace removes a workspace.
+	// DeleteWorkspace permanently removes a workspace (hard delete).
 	// Sessions in the workspace are moved to root (workspace_id set to empty).
 	// Subworkspaces are also moved to root (parent_id set to empty).
 	// Returns ErrWorkspaceNotFound if the workspace doesn't exist.
 	DeleteWorkspace(ctx context.Context, id string) error
 
-	// ListWorkspaces returns all workspaces as a flat list.
+	// TrashWorkspace soft-deletes a workspace (move to Trash), preserving its
+	// sessions, files, and entry agent. When includeDescendants is true the whole
+	// subtree is trashed together. Returns ErrWorkspaceNotFound if missing.
+	TrashWorkspace(ctx context.Context, id string, includeDescendants bool) error
+
+	// RestoreWorkspace brings a trashed workspace (and its trashed descendants)
+	// back to active. Returns ErrWorkspaceNotFound if the workspace is not trashed.
+	RestoreWorkspace(ctx context.Context, id string) error
+
+	// ReparentChildrenToRoot moves the direct children of parentID to root level.
+	ReparentChildrenToRoot(ctx context.Context, parentID string) error
+
+	// ListTrashedWorkspaces returns soft-deleted workspaces, most recent first.
+	ListTrashedWorkspaces(ctx context.Context) ([]Workspace, error)
+
+	// ListWorkspaces returns all active (non-trashed) workspaces as a flat list.
 	ListWorkspaces(ctx context.Context) ([]Workspace, error)
 
 	// GetWorkspaceTree returns workspaces organized as a tree structure.
