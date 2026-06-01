@@ -2675,65 +2675,6 @@ button.hub-stat[hidden] {
   gap: 0.5rem;
 }
 
-/* Recently deleted banner (persistent Undo for the latest Trash action) */
-.launcher-recently-deleted {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 0.75rem;
-  background: rgba(31, 107, 78, 0.08);
-  border: 1px solid rgba(31, 107, 78, 0.25);
-  border-radius: var(--radius-md);
-}
-
-.launcher-recently-deleted[hidden] {
-  display: none;
-}
-
-.launcher-recently-deleted-icon {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-}
-
-.launcher-recently-deleted-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.launcher-recently-deleted-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.launcher-recently-deleted-dismiss {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.launcher-recently-deleted-dismiss:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
 @media (max-width: 1200px) {
   .launcher-overview-content {
     grid-template-columns: repeat(2, minmax(0, 1fr));
