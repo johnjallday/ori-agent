@@ -70,9 +70,11 @@ func TestOriAgentExecutorRunsWorkspaceTaskAndCapturesResult(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Description: "do work",
 	})
-	executor := NewOriAgentExecutor(&stubOriAgentTaskRunner{result: "completed"})
+	runner := &stubOriAgentTaskRunner{result: "completed"}
+	executor := NewOriAgentExecutor(runner)
 	run := &Run{
-		ID: "run-1",
+		ID:           "run-1",
+		ReferenceURL: "https://example.com/spec",
 		Executor: Executor{
 			Kind: ExecutorKindOriAgent,
 			Ref:  "Ori",
@@ -92,6 +94,12 @@ func TestOriAgentExecutorRunsWorkspaceTaskAndCapturesResult(t *testing.T) {
 	if result, ok := taskResultFromArtifacts(artifacts); !ok || result != "completed" {
 		t.Fatalf("artifacts = %+v, want task result", artifacts)
 	}
+	if runner.lastTask.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("task ReferenceURL = %q, want run reference URL propagated", runner.lastTask.ReferenceURL)
+	}
+	if !hasReferenceURLInspectionArtifact(artifacts, ReferenceURLInspectionUnknown) {
+		t.Fatalf("artifacts = %+v, want reference URL inspection evidence", artifacts)
+	}
 }
 
 func TestOriAgentExecutorPreparesTaskContextWhenRunnerSupportsIt(t *testing.T) {
@@ -101,7 +109,7 @@ func TestOriAgentExecutorPreparesTaskContextWhenRunnerSupportsIt(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Description: "do work",
 	})
-	executor := NewOriAgentExecutor(&stubOriAgentTaskRunner{
+	runner := &stubOriAgentTaskRunner{
 		prepared: &workspace.TaskPreparedContext{
 			Strategy:   "task_default",
 			Summary:    "prepared",
@@ -111,9 +119,11 @@ func TestOriAgentExecutorPreparesTaskContextWhenRunnerSupportsIt(t *testing.T) {
 			},
 			AvailableTools: []string{"workspace_notes"},
 		},
-	})
+	}
+	executor := NewOriAgentExecutor(runner)
 	run := &Run{
-		ID: "run-1",
+		ID:           "run-1",
+		ReferenceURL: "https://example.com/spec",
 		Executor: Executor{
 			Kind: ExecutorKindOriAgent,
 			Ref:  "Ori",
@@ -130,18 +140,25 @@ func TestOriAgentExecutorPreparesTaskContextWhenRunnerSupportsIt(t *testing.T) {
 	if prepared == nil || prepared.Summary != "prepared" || len(prepared.Items) != 1 || prepared.Items[0].Kind != "workspace_snapshot" {
 		t.Fatalf("prepared = %+v, want converted task context", prepared)
 	}
+	if runner.lastPreparedTask.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("prepared task ReferenceURL = %q, want run reference URL propagated", runner.lastPreparedTask.ReferenceURL)
+	}
 }
 
 type stubOriAgentTaskRunner struct {
-	result   string
-	err      error
-	prepared *workspace.TaskPreparedContext
+	result           string
+	err              error
+	prepared         *workspace.TaskPreparedContext
+	lastTask         workspace.Task
+	lastPreparedTask workspace.Task
 }
 
-func (r *stubOriAgentTaskRunner) ExecuteTask(_ context.Context, _ string, _ workspace.Task) (string, error) {
+func (r *stubOriAgentTaskRunner) ExecuteTask(_ context.Context, _ string, task workspace.Task) (string, error) {
+	r.lastTask = task
 	return r.result, r.err
 }
 
-func (r *stubOriAgentTaskRunner) PrepareTaskContext(_ context.Context, _ string, _ workspace.Task) (*workspace.TaskPreparedContext, error) {
+func (r *stubOriAgentTaskRunner) PrepareTaskContext(_ context.Context, _ string, task workspace.Task) (*workspace.TaskPreparedContext, error) {
+	r.lastPreparedTask = task
 	return r.prepared, nil
 }

@@ -3,21 +3,26 @@ package workspacerun
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 type WorkspaceRootResolver func(workspaceID string) []string
+type TaskReferenceURLResolver func(ctx context.Context, workspaceID, taskID string) (string, error)
 
 type Service struct {
-	store          Store
-	profiles       *ProfileRegistry
-	executors      *ExecutorRegistry
-	environments   EnvironmentManager
-	validator      *Validator
-	resolveRoots   WorkspaceRootResolver
-	mu             sync.Mutex
-	runningCancels map[string]context.CancelFunc
+	store                   Store
+	profiles                *ProfileRegistry
+	executors               *ExecutorRegistry
+	environments            EnvironmentManager
+	validator               *Validator
+	resolveRoots            WorkspaceRootResolver
+	resolveTaskReferenceURL TaskReferenceURLResolver
+	mu                      sync.Mutex
+	runningCancels          map[string]context.CancelFunc
 }
 
 type CreateRunRequest struct {
@@ -25,6 +30,7 @@ type CreateRunRequest struct {
 	ProfileID         string             `json:"profile_id"`
 	Executor          Executor           `json:"executor"`
 	Prompt            string             `json:"prompt"`
+	ReferenceURL      string             `json:"reference_url,omitempty"`
 	Scope             Scope              `json:"scope"`
 	Policy            Policy             `json:"policy"`
 	Environment       Environment        `json:"environment"`
@@ -62,9 +68,20 @@ func NewService(store Store, profiles *ProfileRegistry, executors *ExecutorRegis
 	}
 }
 
+func (s *Service) SetTaskReferenceURLResolver(fn TaskReferenceURLResolver) {
+	if s == nil {
+		return
+	}
+	s.resolveTaskReferenceURL = fn
+}
+
 func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateRunRequest) (*Run, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("workspace run store is nil")
+	}
+	referenceURL, err := workspace.NormalizeReferenceURL(req.ReferenceURL)
+	if err != nil {
+		return nil, err
 	}
 	req.Executor.Kind = NormalizeExecutorKind(string(req.Executor.Kind))
 	if _, err := s.executors.Get(req.Executor.Kind); err != nil {
@@ -82,6 +99,23 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 			return nil, err
 		}
 	}
+	if referenceURL == "" && strings.TrimSpace(scope.TargetTaskID) != "" && s.resolveTaskReferenceURL != nil {
+		inherited, inheritErr := s.resolveTaskReferenceURL(ctx, workspaceID, scope.TargetTaskID)
+		if inheritErr != nil {
+			return nil, inheritErr
+		}
+		referenceURL, err = workspace.NormalizeReferenceURL(inherited)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if referenceURL != "" {
+		allowlistHost, hostErr := workspace.ReferenceURLAllowlistHost(referenceURL)
+		if hostErr != nil {
+			return nil, hostErr
+		}
+		scope.NetworkAllowlist = appendUniqueString(scope.NetworkAllowlist, allowlistHost)
+	}
 	run := &Run{
 		WorkspaceID:       workspaceID,
 		ParentRunID:       req.ParentRunID,
@@ -95,6 +129,7 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 		Policy:            policy,
 		Environment:       req.Environment,
 		ContextPlan:       req.ContextPlan,
+		ReferenceURL:      referenceURL,
 		Prompt:            req.Prompt,
 		Status:            RunStatusPending,
 		CreatedAt:         time.Now(),
@@ -105,6 +140,34 @@ func (s *Service) CreateRun(ctx context.Context, workspaceID string, req CreateR
 	}
 	_ = s.appendStatusTrace(ctx, run.WorkspaceID, run.ID, RunStatusPending, "Run created")
 	return s.store.GetRun(ctx, workspaceID, run.ID)
+}
+
+func appendUniqueString(values []string, value string) []string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return cloneStrings(values)
+	}
+	out := make([]string, 0, len(values)+1)
+	seen := false
+	added := map[string]bool{}
+	for _, existing := range values {
+		existing = strings.TrimSpace(existing)
+		if existing == "" {
+			continue
+		}
+		if added[existing] {
+			continue
+		}
+		if existing == trimmed {
+			seen = true
+		}
+		added[existing] = true
+		out = append(out, existing)
+	}
+	if seen {
+		return out
+	}
+	return append(out, trimmed)
 }
 
 func (s *Service) ExecuteRun(ctx context.Context, workspaceID, runID string) error {

@@ -21,6 +21,7 @@ func TestHandlerCreateAndListRuns(t *testing.T) {
 		"profile_id": "general",
 		"executor": {"kind": "ori_agent", "ref": "Researcher"},
 		"prompt": "do a general task",
+		"reference_url": "https://example.com/spec",
 		"policy": {"approval": "none"}
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/workspace-1/runs", bytes.NewReader(body))
@@ -47,6 +48,9 @@ func TestHandlerCreateAndListRuns(t *testing.T) {
 	}
 	if len(resp.Runs) != 1 || resp.Runs[0].WorkspaceID != "workspace-1" {
 		t.Fatalf("runs = %+v, want one workspace run", resp.Runs)
+	}
+	if resp.Runs[0].ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("ReferenceURL = %q, want explicit reference URL", resp.Runs[0].ReferenceURL)
 	}
 }
 
@@ -78,6 +82,28 @@ func TestHandlerTracePollingCapsPage(t *testing.T) {
 	}
 	if len(page.Events) != 2 || page.NextSince != 2 || !page.HasMore {
 		t.Fatalf("page = %+v, want capped page", page)
+	}
+}
+
+func TestHandlerCreateRunRejectsInvalidReferenceURL(t *testing.T) {
+	store := NewMemoryStore()
+	executors := NewExecutorRegistry()
+	executors.Register(ExecutorKindOriAgent, NewOriAgentExecutor())
+	handler := NewHandler(store, NewService(store, NewProfileRegistry(), executors, NewLocalEnvironmentManager(t.TempDir()), NewValidator(), nil))
+
+	body := []byte(`{
+		"profile_id": "general",
+		"executor": {"kind": "ori_agent", "ref": "Researcher"},
+		"prompt": "do work",
+		"reference_url": "javascript:alert(1)"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/workspace-1/runs", bytes.NewReader(body))
+	req.SetPathValue("workspaceID", "workspace-1")
+	w := httptest.NewRecorder()
+	handler.CreateRun(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateRun status = %d, body %s, want bad request", w.Code, w.Body.String())
 	}
 }
 

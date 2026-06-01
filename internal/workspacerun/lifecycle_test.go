@@ -74,6 +74,77 @@ func TestServiceExecuteRunPausesForFinalApprovalThenApproves(t *testing.T) {
 	}
 }
 
+func TestServiceCreateRunSnapshotsReferenceURLAndAllowlistsHost(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	executors := NewExecutorRegistry()
+	executors.Register(ExecutorKindSystemTool, &stubLifecycleExecutor{})
+	service := NewService(store, NewProfileRegistry(), executors, &stubEnvironmentManager{}, NewValidator(), nil)
+
+	referenceByTask := map[string]string{
+		"task-1": "https://example.com/spec",
+	}
+	service.SetTaskReferenceURLResolver(func(_ context.Context, _ string, taskID string) (string, error) {
+		return referenceByTask[taskID], nil
+	})
+
+	run, err := service.CreateRun(ctx, "workspace-1", CreateRunRequest{
+		ProfileID: ProfileGeneral,
+		Executor:  Executor{Kind: ExecutorKindSystemTool, Ref: "stub"},
+		Prompt:    "do work",
+		Scope: Scope{
+			TargetTaskID:     "task-1",
+			NetworkAllowlist: []string{"api.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if run.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("ReferenceURL = %q, want inherited task URL", run.ReferenceURL)
+	}
+	if !stringSliceContains(run.Scope.NetworkAllowlist, "example.com") || !stringSliceContains(run.Scope.NetworkAllowlist, "api.example.com") {
+		t.Fatalf("NetworkAllowlist = %v, want existing host and reference host", run.Scope.NetworkAllowlist)
+	}
+
+	referenceByTask["task-1"] = "https://changed.example.com/spec"
+	got, err := store.GetRun(ctx, "workspace-1", run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("persisted ReferenceURL = %q, want snapshot", got.ReferenceURL)
+	}
+}
+
+func TestServiceCreateRunExplicitReferenceURLOverridesTask(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	executors := NewExecutorRegistry()
+	executors.Register(ExecutorKindSystemTool, &stubLifecycleExecutor{})
+	service := NewService(store, NewProfileRegistry(), executors, &stubEnvironmentManager{}, NewValidator(), nil)
+	service.SetTaskReferenceURLResolver(func(context.Context, string, string) (string, error) {
+		return "https://task.example.com/spec", nil
+	})
+
+	run, err := service.CreateRun(ctx, "workspace-1", CreateRunRequest{
+		ProfileID:    ProfileGeneral,
+		Executor:     Executor{Kind: ExecutorKindSystemTool, Ref: "stub"},
+		Prompt:       "do work",
+		ReferenceURL: " https://run.example.com/spec ",
+		Scope:        Scope{TargetTaskID: "task-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if run.ReferenceURL != "https://run.example.com/spec" {
+		t.Fatalf("ReferenceURL = %q, want explicit run URL", run.ReferenceURL)
+	}
+	if !stringSliceContains(run.Scope.NetworkAllowlist, "run.example.com") {
+		t.Fatalf("NetworkAllowlist = %v, want explicit reference host", run.Scope.NetworkAllowlist)
+	}
+}
+
 func TestServiceRejectRunMarksRejectedAndTearsDown(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
@@ -345,4 +416,13 @@ func sameStatuses(got, want []RunStatus) bool {
 		}
 	}
 	return true
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

@@ -97,7 +97,8 @@ type Run struct {
 	Environment Environment `json:"environment"`
 	ContextPlan ContextPlan `json:"context_plan,omitempty"`
 
-	Prompt string `json:"prompt"`
+	ReferenceURL string `json:"reference_url,omitempty"`
+	Prompt       string `json:"prompt"`
 
 	Status     RunStatus  `json:"status"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -323,11 +324,27 @@ type CostSummary struct {
 }
 
 type Report struct {
-	Summary           string   `json:"summary"`
-	ChangedFiles      []string `json:"changed_files,omitempty"`
-	ValidationStatus  string   `json:"validation_status"`
-	FollowUps         []string `json:"follow_ups,omitempty"`
-	HumanReviewNeeded bool     `json:"human_review_needed,omitempty"`
+	Summary                string                          `json:"summary"`
+	ChangedFiles           []string                        `json:"changed_files,omitempty"`
+	ValidationStatus       string                          `json:"validation_status"`
+	FollowUps              []string                        `json:"follow_ups,omitempty"`
+	ReferenceURLInspection *ReferenceURLInspectionEvidence `json:"reference_url_inspection,omitempty"`
+	HumanReviewNeeded      bool                            `json:"human_review_needed,omitempty"`
+}
+
+type ReferenceURLInspectionStatus string
+
+const (
+	ReferenceURLInspectionInspected ReferenceURLInspectionStatus = "inspected"
+	ReferenceURLInspectionBlocked   ReferenceURLInspectionStatus = "blocked"
+	ReferenceURLInspectionUnknown   ReferenceURLInspectionStatus = "unknown"
+)
+
+type ReferenceURLInspectionEvidence struct {
+	URL    string                       `json:"url,omitempty"`
+	Status ReferenceURLInspectionStatus `json:"status"`
+	Source string                       `json:"source,omitempty"`
+	Detail string                       `json:"detail,omitempty"`
 }
 
 const (

@@ -320,6 +320,7 @@ export class WorkspaceRunPage {
     const parentRunID = String(this.run?.parent_run_id || '').trim();
     const repoPath = String(this.run?.scope?.repo_path || '').trim();
     const targetNoteID = String(this.run?.scope?.target_note_id || '').trim();
+    const referenceURL = String(this.run?.reference_url || '').trim();
 
     // Friendly essentials shown by default: timing, cost, an error if any,
     // and a link back to the task. Everything else is configuration detail.
@@ -338,6 +339,7 @@ export class WorkspaceRunPage {
       });
     }
     if (taskID) summaryItems.push({ label: 'Task', value: taskID, href: this.taskHref(taskID) });
+    if (referenceURL) summaryItems.push({ label: 'Reference URL', value: referenceURL, href: referenceURL, external: true, full: true });
     if (this.run?.error) summaryItems.push({ label: 'Error', value: this.run.error, full: true });
 
     // Developer-facing run internals, tucked into a collapsed disclosure so
@@ -358,7 +360,7 @@ export class WorkspaceRunPage {
         <div class="workspace-run-overview-label">${escapeHtml(item.label)}</div>
         <div class="workspace-run-overview-value">
           ${item.href
-            ? `<a href="${escapeHtml(item.href)}" class="workspace-run-inline-link">${escapeHtml(item.value)}</a>`
+            ? `<a href="${escapeHtml(item.href)}" class="workspace-run-inline-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${escapeHtml(item.value)}</a>`
             : escapeHtml(item.value)}
         </div>
       </article>
@@ -385,12 +387,19 @@ export class WorkspaceRunPage {
 
     const changedFiles = Array.isArray(report.changed_files) ? report.changed_files : [];
     const followUps = Array.isArray(report.follow_ups) ? report.follow_ups : [];
+    const inspection = report.reference_url_inspection || null;
     const blocks = [
       report.summary ? `<div>${escapeHtml(report.summary)}</div>` : '',
       `<div class="workspace-run-list-block">
         <div class="workspace-run-list-title">Validation</div>
         <div>${escapeHtml(report.validation_status || 'unknown')}</div>
       </div>`,
+      inspection ? `
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Reference URL Inspection</div>
+          <div>${escapeHtml(inspection.status || 'unknown')}${inspection.detail ? ` - ${escapeHtml(inspection.detail)}` : ''}</div>
+        </div>
+      ` : '',
       changedFiles.length ? `
         <div class="workspace-run-list-block">
           <div class="workspace-run-list-title">Changed Files</div>

@@ -296,6 +296,50 @@ func TestBuildTaskPrompt_IncludesTaskDetails(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPrompt_IncludesReferenceURLGuidance(t *testing.T) {
+	handler := &LLMTaskHandler{}
+
+	prompt := handler.buildTaskPrompt(context.Background(), Task{
+		ID:           "task-1",
+		From:         "jj",
+		Description:  "implement from spec",
+		ReferenceURL: "https://example.com/spec",
+		Priority:     1,
+	})
+
+	for _, want := range []string{
+		"## Reference URL",
+		"https://example.com/spec",
+		"Treat this URL as authoritative source material",
+		"Inspect it with available fetch, browser, or web tools",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q, got %q", want, prompt)
+		}
+	}
+}
+
+func TestPrepareTaskContext_IncludesReferenceURLSurface(t *testing.T) {
+	handler := &LLMTaskHandler{
+		agentStore: &resolverAgentStoreStub{
+			agents: map[string]*agent.Agent{"Ori": {}},
+		},
+	}
+
+	prepared, err := handler.PrepareTaskContext(context.Background(), "Ori", Task{
+		ID:           "task-1",
+		WorkspaceID:  "workspace-1",
+		Description:  "implement from spec",
+		ReferenceURL: "https://example.com/spec",
+	})
+	if err != nil {
+		t.Fatalf("PrepareTaskContext: %v", err)
+	}
+	if !containsPreparedContextItem(prepared.Items, "reference_url", "on_demand") {
+		t.Fatalf("Items = %+v, want reference_url on-demand context", prepared.Items)
+	}
+}
+
 func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T) {
 	handler := &LLMTaskHandler{}
 	prompt := handler.buildTaskSystemPrompt()
@@ -315,6 +359,8 @@ func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T
 		"Do not return raw Tool Results as the final answer",
 		"Do not answer those tasks from prior blocked attempts or workspace task-status summaries",
 		"Include source names or URLs and visible dates when available",
+		"When a task includes a Reference URL",
+		"state that limitation instead of fabricating URL contents",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected system prompt to contain %q, got %q", want, prompt)

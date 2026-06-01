@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 22
+const schemaVersion = 23
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -109,6 +109,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration021WorkspaceRunTaskOutput(ctx)
 	case 22:
 		return db.migration022WorkspaceFolders(ctx)
+	case 23:
+		return db.migration023WorkspaceRunReferenceURL(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1082,6 +1084,24 @@ func (db *DB) migration022WorkspaceFolders(ctx context.Context) error {
 		WHERE folders_json IS NULL OR TRIM(folders_json) = ''
 	`); err != nil {
 		return fmt.Errorf("failed to backfill workspace folders: %w", err)
+	}
+	return nil
+}
+
+// migration023WorkspaceRunReferenceURL stores the effective reference URL used
+// by a durable workspace run.
+func (db *DB) migration023WorkspaceRunReferenceURL(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_runs")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspace_runs ADD COLUMN reference_url TEXT NOT NULL DEFAULT ''
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace run reference URL column: %w", err)
 	}
 	return nil
 }

@@ -274,6 +274,20 @@ func (b *ServerBuilder) initializeHandlers() {
 		return []string{root}
 	}
 	b.workspaceRunService = workspacerun.NewService(b.workspaceRunStore, runProfiles, b.workspaceRunExecutors, runEnv, runValidator, resolveRunRoots)
+	if b.workspaceStore != nil {
+		b.workspaceRunService.SetTaskReferenceURLResolver(func(_ context.Context, workspaceID, taskID string) (string, error) {
+			ws, err := b.workspaceStore.Get(workspaceID)
+			if err != nil || ws == nil {
+				return "", err
+			}
+			for _, task := range ws.Tasks {
+				if task.ID == taskID {
+					return task.ReferenceURL, nil
+				}
+			}
+			return "", nil
+		})
+	}
 	b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
 	b.registerWorkspaceRunTaskValidationMirror()
 	logger.Info("Workspace Runs initialized", logger.Fields{

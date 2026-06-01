@@ -292,6 +292,7 @@
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Workspace: General · Guided</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">MCP: 0</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-skills-chip">Skills: 0</span>
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-reference-chip" hidden>Refs: 0</span>
                 </div>
               </div>
               <button
@@ -5697,6 +5698,44 @@
     }
 
     .workspace-detail-task-schedule-indicator.workspace-detail-task-schedule-indicator-board svg {
+      width: 9px;
+      height: 9px;
+    }
+
+    .workspace-detail-task-reference-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(34, 197, 94, 0.34);
+      background: rgba(34, 197, 94, 0.12);
+      color: #16a34a;
+      vertical-align: text-bottom;
+      line-height: 0;
+      text-decoration: none;
+    }
+
+    .workspace-detail-task-reference-indicator:hover {
+      color: #15803d;
+      background: rgba(34, 197, 94, 0.18);
+      border-color: rgba(34, 197, 94, 0.44);
+    }
+
+    .workspace-detail-task-reference-indicator svg {
+      width: 10px;
+      height: 10px;
+    }
+
+    .workspace-detail-task-reference-indicator.workspace-detail-task-reference-indicator-board {
+      width: 14px;
+      height: 14px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-reference-indicator.workspace-detail-task-reference-indicator-board svg {
       width: 9px;
       height: 9px;
     }

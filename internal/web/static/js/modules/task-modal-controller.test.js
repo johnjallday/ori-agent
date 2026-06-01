@@ -111,6 +111,64 @@ test('output contract heuristic fallback covers common recurring tasks', () => {
   assert.equal(JSON.stringify(columns.map((column) => column.name)), JSON.stringify(['date', 'location', 'pollen_count', 'category', 'source']));
 });
 
+test('modal state snapshot includes reference URL field', () => {
+  const { Controller, elements } = loadController();
+  const controller = new Controller();
+  elements.set('taskModalReferenceURL', { value: 'https://example.com/spec' });
+  elements.set('taskAutoReferenceURL', { value: 'https://example.com/auto-spec' });
+
+  const snapshot = JSON.parse(controller.getModalStateSnapshot());
+
+  assert.equal(snapshot.manual.referenceURL, 'https://example.com/spec');
+  assert.equal(snapshot.auto.referenceURL, 'https://example.com/auto-spec');
+});
+
+test('auto mode task creation includes reference URL payload', async () => {
+  const calls = [];
+  const { Controller, elements } = loadController({
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, body });
+      if (url === '/api/orchestration/tasks/auto-parse') {
+        return {
+          ok: true,
+          json: async () => ({
+            title: 'Parsed task',
+            details: 'Parsed details',
+            priority: 2
+          }),
+          text: async () => ''
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ task: { id: 'task-1', description: body.description } }),
+        text: async () => ''
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'workspace-1';
+  controller.autoMode = true;
+  controller.showProgress = () => {};
+  controller.updateProgress = () => {};
+  controller.hideProgress = () => {};
+  controller.showToast = () => {};
+  controller.finalizeSuccessfulSave = async () => {};
+  controller._safeAttachUploads = async () => {};
+  controller._reportUploadFailures = () => {};
+  elements.set('taskAutoDescription', { value: 'Create a task from this page', focus() {} });
+  elements.set('taskAutoReferenceURL', { value: 'https://example.com/spec' });
+  elements.set('taskModalReferenceURL', { value: '' });
+
+  await controller.saveAutoMode();
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, '/api/orchestration/tasks');
+  assert.equal(calls[1].body.reference_url, 'https://example.com/spec');
+  assert.equal(calls[1].body.description, 'Parsed task');
+});
+
 test('output contract manual edits emit telemetry only once per draft', () => {
   const calls = [];
   const { Controller } = loadController({

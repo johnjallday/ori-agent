@@ -2891,6 +2891,19 @@ export class WorkspaceTaskPage {
       });
     }
 
+    const referenceURL = String(this.task?.reference_url || '').trim();
+    items.push({
+      title: 'Reference URL',
+      value: referenceURL || 'Not set',
+      href: referenceURL || '',
+      external: Boolean(referenceURL),
+      full: true,
+      editable: true,
+      editField: 'reference-url',
+      editLabel: referenceURL ? 'Edit reference URL' : 'Add reference URL',
+      alwaysShowEdit: !referenceURL
+    });
+
     // Result Storage moved into the Automation card; the per-task storage
     // editor is now reachable from there. Keep the "Needs Review" hint here
     // because it's a Task Brief signal (validation outcome), not a config
@@ -2955,7 +2968,7 @@ export class WorkspaceTaskPage {
       // between the <div> tags and ${...} would render as stray blank lines and
       // a leading indent.
       const valueHtml = item.href
-        ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link">${this.escapeHtml(item.value)}</a>`
+        ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${this.escapeHtml(item.value)}</a>`
         : this.escapeHtml(item.value);
       return `
         <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
@@ -2970,6 +2983,7 @@ export class WorkspaceTaskPage {
         const field = btn.getAttribute('data-edit-field') || '';
         if (field === 'details') this.startDetailsEdit(btn);
         if (field === 'result-storage') this.openTaskStorageEditor();
+        if (field === 'reference-url') this.openReferenceURLEditor();
       });
     });
   }
@@ -3062,6 +3076,36 @@ export class WorkspaceTaskPage {
       console.error('Failed to open task storage editor:', error);
       this.notify('error', error?.message || 'Failed to open task editor.');
     }
+  }
+
+  async openReferenceURLEditor() {
+    if (!window.taskModalController || typeof window.taskModalController.openForEdit !== 'function') {
+      this.notify('error', 'Task editor is not available on this page.');
+      return;
+    }
+
+    try {
+      await window.taskModalController.openForEdit(this.task, async () => {
+        await this.loadData();
+      });
+      window.requestAnimationFrame(() => this.focusTaskModalReferenceURL());
+    } catch (error) {
+      console.error('Failed to open task reference URL editor:', error);
+      this.notify('error', error?.message || 'Failed to open task editor.');
+    }
+  }
+
+  focusTaskModalReferenceURL() {
+    const referenceInput = document.getElementById('taskModalReferenceURL');
+    referenceInput?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    window.setTimeout(() => {
+      if (referenceInput && typeof referenceInput.focus === 'function') {
+        referenceInput.focus({ preventScroll: true });
+        if (typeof referenceInput.select === 'function') {
+          referenceInput.select();
+        }
+      }
+    }, 180);
   }
 
   focusTaskModalAutoSave() {

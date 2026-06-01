@@ -47,6 +47,10 @@ func CloneRun(run *Run) *Run {
 		report := *run.Report
 		report.ChangedFiles = cloneStrings(run.Report.ChangedFiles)
 		report.FollowUps = cloneStrings(run.Report.FollowUps)
+		if run.Report.ReferenceURLInspection != nil {
+			inspection := *run.Report.ReferenceURLInspection
+			report.ReferenceURLInspection = &inspection
+		}
 		out.Report = &report
 	}
 	return &out

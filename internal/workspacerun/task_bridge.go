@@ -53,7 +53,8 @@ func (b *TaskRunBridge) ExecuteTaskRun(ctx context.Context, agentName string, ta
 			Ref:    agentName,
 			Config: &rawConfig,
 		},
-		Prompt: task.Description,
+		Prompt:       task.Description,
+		ReferenceURL: task.ReferenceURL,
 		Scope: Scope{
 			TargetTaskID: task.ID,
 		},

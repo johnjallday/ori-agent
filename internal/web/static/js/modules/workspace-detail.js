@@ -1008,6 +1008,7 @@ export class WorkspaceDetailPage {
       configPresetChip: document.getElementById('workspace-detail-config-preset-chip'),
       configConnectionsChip: document.getElementById('workspace-detail-config-connections-chip'),
       configSkillsChip: document.getElementById('workspace-detail-config-skills-chip'),
+      configReferenceChip: document.getElementById('workspace-detail-config-reference-chip'),
       childrenPanel: document.getElementById('workspace-detail-children-panel'),
       childrenCount: document.getElementById('workspace-detail-children-count'),
 
@@ -3119,6 +3120,7 @@ export class WorkspaceDetailPage {
     } finally {
       this.tasksLoading = false;
       this.renderTasks();
+      this.renderWorkspaceConfigSummary();
       this.renderWorkspaceWorkflowLinks();
       this.restoreTaskAssistPageFromRoute();
 
@@ -4024,6 +4026,31 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  renderTaskReferenceURLIndicator(task, variant = 'default') {
+    const referenceURL = String(task?.reference_url || '').trim();
+    if (!referenceURL) return '';
+
+    const variantClass =
+      variant === 'board' ? 'workspace-detail-task-reference-indicator-board' : '';
+    const classes = ['workspace-detail-task-reference-indicator', variantClass]
+      .filter(Boolean)
+      .join(' ');
+    const title = `Reference URL: ${referenceURL}`;
+    return `
+      <a href="${this.escapeHtml(referenceURL)}"
+         class="${classes}"
+         target="_blank"
+         rel="noopener noreferrer"
+         title="${this.escapeHtml(title)}"
+         aria-label="${this.escapeHtml(title)}"
+         onclick="event.stopPropagation();">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M10.59,13.41C10.21,13.79 10,14.3 10,14.83C10,15.36 10.21,15.87 10.59,16.24C11.36,17.02 12.64,17.02 13.41,16.24L16.95,12.71C17.73,11.93 17.73,10.66 16.95,9.88C16.17,9.1 14.91,9.1 14.12,9.88L13.41,10.59L12,9.17L12.71,8.46C14.27,6.9 16.8,6.9 18.36,8.46C19.92,10.02 19.92,12.55 18.36,14.12L14.83,17.66C13.27,19.22 10.74,19.22 9.17,17.66C7.61,16.1 7.61,13.57 9.17,12L9.88,11.29L11.29,12.71L10.59,13.41M13.41,10.59C13.79,10.21 14,9.7 14,9.17C14,8.64 13.79,8.13 13.41,7.76C12.64,6.98 11.36,6.98 10.59,7.76L7.05,11.29C6.27,12.07 6.27,13.34 7.05,14.12C7.83,14.9 9.09,14.9 9.88,14.12L10.59,13.41L12,14.83L11.29,15.54C9.73,17.1 7.2,17.1 5.64,15.54C4.08,13.98 4.08,11.45 5.64,9.88L9.17,6.34C10.73,4.78 13.26,4.78 14.83,6.34C16.39,7.9 16.39,10.43 14.83,12L14.12,12.71L12.71,11.29L13.41,10.59Z"/>
+        </svg>
+      </a>
+    `;
+  }
+
   renderTaskItem(task, options = {}) {
     const {
       isSubtask = false,
@@ -4074,6 +4101,7 @@ export class WorkspaceDetailPage {
     const assistTitle =
       statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
+    const referenceIndicator = this.renderTaskReferenceURLIndicator(task);
     const taskMetaParts = [];
     if (isParent) {
       const stepsLabel = `${parentSubtaskCount} step${parentSubtaskCount === 1 ? '' : 's'}`;
@@ -4086,6 +4114,9 @@ export class WorkspaceDetailPage {
     }
     if (scheduleIndicator) {
       taskMetaParts.push(scheduleIndicator);
+    }
+    if (referenceIndicator) {
+      taskMetaParts.push(referenceIndicator);
     }
     const workflowMeta = this.renderTaskWorkflowMeta(task, { isParent });
     if (workflowMeta) {
@@ -9594,6 +9625,9 @@ export class WorkspaceDetailPage {
     const preset = this.deriveWorkspaceSettingsPreset(settings);
     const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
     const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
+    const referenceCount = Array.isArray(this.tasks)
+      ? this.tasks.filter(task => String(task?.reference_url || '').trim()).length
+      : 0;
 
     if (this.elements.configPresetChip) {
       this.elements.configPresetChip.textContent = `Workspace: ${this.formatWorkspaceSettingsProfileLabel(profile)} · ${this.formatWorkspaceConfigPresetLabel(preset)}`;
@@ -9603,6 +9637,10 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.configSkillsChip) {
       this.elements.configSkillsChip.textContent = `Skills: ${skillCount}`;
+    }
+    if (this.elements.configReferenceChip) {
+      this.elements.configReferenceChip.hidden = referenceCount === 0;
+      this.elements.configReferenceChip.textContent = `Refs: ${referenceCount}`;
     }
 
     this.initializeWorkspaceConfigExpansion();
@@ -11868,6 +11906,7 @@ export class WorkspaceDetailPage {
         ? `<span class="workspace-detail-board-card-assignee">${this.escapeHtml(assignmentLabel)}</span>`
         : '<span class="workspace-detail-board-card-assignee is-muted">Unassigned</span>';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task, 'board');
+    const referenceIndicator = this.renderTaskReferenceURLIndicator(task, 'board');
     const editTitleValue = this.escapeHtml(task.description || task.name || task.id || '');
     const editDetailsValue = this.escapeHtml(task.details || '');
     const editLabelsValue = this.escapeHtml(this.formatLabelsInput(labels));
@@ -11898,6 +11937,7 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-board-card-meta workspace-detail-board-card-meta-secondary">
             <span>${getDisplayStatus(task.status)}</span>
             ${scheduleIndicator}
+            ${referenceIndicator}
           </div>
         </div>
         <div class="workspace-detail-board-card-edit" hidden>

@@ -42,13 +42,13 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		INSERT INTO workspace_runs (
 			id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
-			prompt, status, created_at, started_at, finished_at,
+			reference_url, prompt, status, created_at, started_at, finished_at,
 			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error, updated_at
 		)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, run.ID, run.WorkspaceID, run.ParentRunID, run.ProfileID, run.ProfileVersion,
 		mustJSON(run.ProfileSnapshot), mustJSON(run.Executor), mustJSON(run.Scope), mustJSON(run.Policy), mustJSON(run.Environment), mustJSON(run.ContextPlan),
-		run.Prompt, string(run.Status), run.CreatedAt, nullableTime(run.StartedAt), nullableTime(run.FinishedAt),
+		run.ReferenceURL, run.Prompt, string(run.Status), run.CreatedAt, nullableTime(run.StartedAt), nullableTime(run.FinishedAt),
 		nullableJSON(run.PreparedContext), nullableJSON(run.ValidationRequest), nullableJSON(run.ValidationResult), nullableJSON(run.TaskOutput), nullableJSON(run.Cost), nullableJSON(run.Report), nullableString(run.Error), now)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -307,7 +307,7 @@ func (s *SQLiteStore) getRun(ctx context.Context, workspaceID, runID string) (*R
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
-			prompt, status, created_at, started_at, finished_at,
+			reference_url, prompt, status, created_at, started_at, finished_at,
 			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error
 		FROM workspace_runs
 		WHERE workspace_id = ? AND id = ?
@@ -336,7 +336,7 @@ func scanRun(row scanner) (*Run, error) {
 	if err := row.Scan(
 		&run.ID, &run.WorkspaceID, &parent, &run.ProfileID, &run.ProfileVersion,
 		&profileJSON, &executorJSON, &scopeJSON, &policyJSON, &envJSON, &contextPlanJSON,
-		&run.Prompt, &status, &run.CreatedAt, &startedAt, &finishedAt,
+		&run.ReferenceURL, &run.Prompt, &status, &run.CreatedAt, &startedAt, &finishedAt,
 		&preparedContextJSON, &validationReqJSON, &validationResultJSON, &taskOutputJSON, &costJSON, &reportJSON, &errText,
 	); err != nil {
 		return nil, err
