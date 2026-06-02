@@ -32,6 +32,21 @@ function loadController(overrides = {}) {
   return { Controller: window.TaskModalController, elements };
 }
 
+function makeElement(overrides = {}) {
+  return {
+    hidden: false,
+    textContent: '',
+    dataset: {},
+    focus() {},
+    addEventListener() {},
+    append() {},
+    appendChild() {},
+    setAttribute() {},
+    removeAttribute() {},
+    ...overrides
+  };
+}
+
 test('output contract save gating rejects empty and duplicate columns', () => {
   const { Controller } = loadController();
   const controller = new Controller();
@@ -217,6 +232,120 @@ test('auto mode parse failure shows inline error and does not create task', asyn
     message: 'Auto parsing did not work. No task was created.',
     type: 'error'
   });
+});
+
+test('auto mode asks for confirmation before creating an unassigned parsed task', async () => {
+  const calls = [];
+  const toasts = [];
+  let confirmText = '';
+  const { Controller, elements } = loadController({
+    confirm: (message) => {
+      confirmText = message;
+      return false;
+    },
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, body });
+      return {
+        ok: true,
+        json: async () => ({
+          title: 'Three Vienna foods',
+          details: 'Find or suggest three things to eat in Vienna.',
+          agent_name: '',
+          priority: 3
+        }),
+        text: async () => ''
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'workspace-1';
+  controller.autoMode = true;
+  controller.showProgress = () => {};
+  controller.updateProgress = () => {};
+  controller.hideProgress = () => {};
+  controller.showToast = (message, type) => toasts.push({ message, type });
+  elements.set('taskAutoDescription', { value: '3 things to eat in Vienna Austria', focus() {} });
+  elements.set('taskAutoReferenceURL', { value: '' });
+  elements.set('taskModalReferenceURL', { value: '' });
+
+  await controller.saveAutoMode();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/orchestration/tasks/auto-parse');
+  assert.match(confirmText, /Assignment: Unassigned/);
+  assert.deepEqual(toasts.at(-1), {
+    message: 'Task creation cancelled',
+    type: 'info'
+  });
+});
+
+test('auto mode uses in-modal confirmation and shows assigned agent', async () => {
+  const calls = [];
+  let nativeConfirmCalled = false;
+  const { Controller, elements } = loadController({
+    confirm: () => {
+      nativeConfirmCalled = true;
+      return true;
+    },
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, body });
+      return {
+        ok: true,
+        json: async () => ({
+          title: 'Parsed task',
+          details: 'Parsed details',
+          agent_name: 'Ori',
+          priority: 2
+        }),
+        text: async () => ''
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'workspace-1';
+  controller.autoMode = true;
+  controller.showProgress = () => {};
+  controller.updateProgress = () => {};
+  controller.hideProgress = () => {};
+  controller.showToast = () => {};
+  controller.finalizeSuccessfulSave = async () => {};
+  controller._safeAttachUploads = async () => {};
+  controller._reportUploadFailures = () => {};
+  elements.set('taskAutoDescription', { value: 'Create a task from this page', focus() {} });
+  elements.set('taskAutoReferenceURL', { value: '' });
+  elements.set('taskModalReferenceURL', { value: '' });
+  elements.set('taskAutoConfirm', makeElement({ hidden: true }));
+  elements.set('taskAutoConfirmEyebrow', makeElement());
+  elements.set('taskAutoConfirmTitle', makeElement());
+  elements.set('taskAutoConfirmMessage', makeElement());
+  elements.set('taskAutoConfirmParsedTitle', makeElement());
+  elements.set('taskAutoConfirmAssignment', makeElement());
+  elements.set('taskAutoConfirmDetailsRow', makeElement());
+  elements.set('taskAutoConfirmDetails', makeElement());
+  elements.set('taskAutoConfirmScheduleRow', makeElement());
+  elements.set('taskAutoConfirmSchedule', makeElement());
+  elements.set('taskAutoConfirmStorageRow', makeElement());
+  elements.set('taskAutoConfirmStorage', makeElement());
+  elements.set('taskAutoConfirmSteps', makeElement());
+  elements.set('taskAutoConfirmCreate', makeElement());
+  elements.set('taskAutoConfirmCancel', makeElement());
+
+  const savePromise = controller.saveAutoMode();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(elements.get('taskAutoConfirm').hidden, false);
+  assert.equal(elements.get('taskAutoConfirmAssignment').textContent, 'Ori');
+  assert.equal(elements.get('taskAutoConfirmAssignment').dataset.state, 'assigned');
+  assert.equal(nativeConfirmCalled, false);
+
+  controller.resolveAutoParseConfirm(true);
+  await savePromise;
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, '/api/orchestration/tasks');
+  assert.equal(calls[1].body.to, 'Ori');
 });
 
 test('output contract manual edits emit telemetry only once per draft', () => {

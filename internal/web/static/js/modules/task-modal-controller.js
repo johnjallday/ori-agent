@@ -45,6 +45,7 @@ class TaskModalController {
     this.outputContractSource = 'manual';
     this.outputContractEditTelemetrySent = false;
     this.outputSpecDraft = null;
+    this.autoParseConfirmResolve = null;
   }
 
   /**
@@ -62,6 +63,9 @@ class TaskModalController {
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
     document.getElementById('taskAutoDescription')?.addEventListener('input', () => this.clearAutoParseError());
+    document.getElementById('taskAutoConfirmCreate')?.addEventListener('click', () => this.resolveAutoParseConfirm(true));
+    document.getElementById('taskAutoConfirmCancel')?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
+    document.getElementById('taskAutoConfirmClose')?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
     document.getElementById('taskModalMCPRequirementAdd')?.addEventListener('click', () => {
       void this.addRequiredMCPConnector();
     });
@@ -1060,6 +1064,7 @@ class TaskModalController {
     }
     document.body.classList.remove('task-modal-open');
     this.hideProgress();
+    this.resolveAutoParseConfirm(false, { silent: true });
     this.isSaving = false;
     this.editingTaskId = null;
     this.workspaceId = null;
@@ -1883,6 +1888,234 @@ class TaskModalController {
     }
   }
 
+  summarizeAutoParsedSchedule(scheduleData = {}) {
+    if (scheduleData.schedule_enabled !== true || !scheduleData.schedule) return '';
+    const schedule = scheduleData.schedule;
+    const name = String(scheduleData.schedule_name || '').trim();
+    if (name) return name;
+
+    if (schedule.type === 'once') {
+      return `Once at ${schedule.run_at || schedule.once_at || 'scheduled time'}`;
+    }
+    if (schedule.type === 'daily') {
+      return `Daily at ${schedule.time || 'scheduled time'}`;
+    }
+    if (schedule.type === 'weekly') {
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const day = dayNames[Number(schedule.day_of_week)] || 'selected day';
+      return `Every ${day} at ${schedule.time || 'scheduled time'}`;
+    }
+    if (schedule.type === 'interval') {
+      return `Every ${schedule.interval_minutes || '?'} minutes`;
+    }
+    return 'Scheduled';
+  }
+
+  summarizeAutoParsedStorage(resultStorageData = {}) {
+    const storage = resultStorageData.result_storage;
+    if (!storage || storage.enabled !== true) return '';
+    const columns = Array.isArray(resultStorageData.output_contract?.columns)
+      ? resultStorageData.output_contract.columns.map((column) => String(column?.name || '').trim()).filter(Boolean)
+      : [];
+    const columnSummary = columns.length > 0 ? ` Columns: ${columns.join(', ')}` : '';
+
+    if (storage.write_mode === 'append') {
+      return `Append result to ${storage.file_path || 'a CSV file'}.${columnSummary}`;
+    }
+    if (storage.file_path) return `Store result at ${storage.file_path}`;
+    if (storage.store_node_id) return `Store result in node ${storage.store_node_id}`;
+    return `Store result as ${storage.format || 'text'}`;
+  }
+
+  getAutoParseConfirmElements() {
+    return {
+      container: document.getElementById('taskAutoConfirm'),
+      eyebrow: document.getElementById('taskAutoConfirmEyebrow'),
+      title: document.getElementById('taskAutoConfirmTitle'),
+      message: document.getElementById('taskAutoConfirmMessage'),
+      parsedTitle: document.getElementById('taskAutoConfirmParsedTitle'),
+      assignment: document.getElementById('taskAutoConfirmAssignment'),
+      detailsRow: document.getElementById('taskAutoConfirmDetailsRow'),
+      details: document.getElementById('taskAutoConfirmDetails'),
+      scheduleRow: document.getElementById('taskAutoConfirmScheduleRow'),
+      schedule: document.getElementById('taskAutoConfirmSchedule'),
+      storageRow: document.getElementById('taskAutoConfirmStorageRow'),
+      storage: document.getElementById('taskAutoConfirmStorage'),
+      steps: document.getElementById('taskAutoConfirmSteps'),
+      createButton: document.getElementById('taskAutoConfirmCreate'),
+      cancelButton: document.getElementById('taskAutoConfirmCancel')
+    };
+  }
+
+  setAutoConfirmOptionalRow(row, valueEl, value) {
+    const text = String(value || '').trim();
+    if (row) row.hidden = !text;
+    if (valueEl) valueEl.textContent = text || '';
+  }
+
+  renderAutoConfirmSteps(container, workflowSteps = []) {
+    if (!container) return;
+    container.textContent = '';
+    container.hidden = workflowSteps.length === 0;
+
+    workflowSteps.forEach((step, index) => {
+      const item = document.createElement('div');
+      item.className = 'task-modal-auto-confirm-step';
+
+      const indexEl = document.createElement('div');
+      indexEl.className = 'task-modal-auto-confirm-step-index';
+      indexEl.textContent = String(index + 1);
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'task-modal-auto-confirm-step-title';
+      titleEl.textContent = String(step?.title || step?.description || `Task ${index + 1}`).trim();
+
+      const agent = String(step?.agent_name || '').trim();
+      const agentEl = document.createElement('div');
+      agentEl.className = 'task-modal-auto-confirm-step-agent';
+      agentEl.dataset.state = agent ? 'assigned' : 'unassigned';
+      agentEl.textContent = agent || 'Unassigned';
+
+      item.append(indexEl, titleEl, agentEl);
+      container.appendChild(item);
+    });
+  }
+
+  resolveAutoParseConfirm(confirmed, { silent = false } = {}) {
+    const elements = this.getAutoParseConfirmElements();
+    if (elements.container) elements.container.hidden = true;
+    if (this.autoParseConfirmResolve) {
+      const resolve = this.autoParseConfirmResolve;
+      this.autoParseConfirmResolve = null;
+      resolve(Boolean(confirmed));
+    } else if (!silent && elements.container) {
+      elements.container.hidden = true;
+    }
+  }
+
+  showAutoParseConfirmDialog(options = {}) {
+    const elements = this.getAutoParseConfirmElements();
+    if (!elements.container) return null;
+
+    if (this.autoParseConfirmResolve) {
+      this.autoParseConfirmResolve(false);
+      this.autoParseConfirmResolve = null;
+    }
+
+    const assignment = String(options.assignment || '').trim();
+    const assignmentLabel = assignment || 'Unassigned';
+    const assignmentState = options.assignmentState || (assignment ? 'assigned' : 'unassigned');
+
+    if (elements.eyebrow) elements.eyebrow.textContent = String(options.eyebrow || 'Auto Parsed Task');
+    if (elements.title) elements.title.textContent = String(options.title || 'Create this task?');
+    if (elements.message) elements.message.textContent = String(options.message || 'Review the task parsed from your request before it is created.');
+    if (elements.parsedTitle) elements.parsedTitle.textContent = String(options.parsedTitle || 'New Task');
+    if (elements.assignment) {
+      elements.assignment.textContent = assignmentLabel;
+      elements.assignment.dataset.state = assignmentState;
+    }
+    this.setAutoConfirmOptionalRow(elements.detailsRow, elements.details, options.details);
+    this.setAutoConfirmOptionalRow(elements.scheduleRow, elements.schedule, options.schedule);
+    this.setAutoConfirmOptionalRow(elements.storageRow, elements.storage, options.storage);
+    this.renderAutoConfirmSteps(elements.steps, Array.isArray(options.workflowSteps) ? options.workflowSteps : []);
+
+    if (elements.createButton) elements.createButton.textContent = String(options.confirmLabel || 'Create Task');
+    if (elements.cancelButton) elements.cancelButton.textContent = String(options.cancelLabel || 'Cancel');
+    elements.container.hidden = false;
+
+    return new Promise((resolve) => {
+      this.autoParseConfirmResolve = resolve;
+      const scheduleFocus = window.setTimeout || setTimeout;
+      scheduleFocus(() => {
+        elements.createButton?.focus?.();
+      }, 0);
+    });
+  }
+
+  confirmAutoParsedTaskCreation(parsed, workflowSteps = [], scheduleData = {}, resultStorageData = {}) {
+    const isWorkflow = workflowSteps.length > 0;
+    const assignee = String(isWorkflow ? '' : parsed?.agent_name || '').trim();
+    const title = isWorkflow ? 'Create this workflow?' : 'Create this task?';
+    const confirmLabel = isWorkflow ? 'Create Workflow' : 'Create Task';
+    const scheduleSummary = this.summarizeAutoParsedSchedule(scheduleData);
+    const storageSummary = this.summarizeAutoParsedStorage(resultStorageData);
+    const details = [];
+    const parsedTitle = String(parsed?.title || '').trim();
+    const parsedDetails = String(parsed?.details || '').trim();
+
+    if (parsedTitle) details.push(parsedTitle);
+    if (parsedDetails) details.push(parsedDetails);
+    if (isWorkflow) {
+      workflowSteps.forEach((step, index) => {
+        const stepTitle = String(step?.title || step?.description || `Task ${index + 1}`).trim();
+        const stepAssignee = String(step?.agent_name || '').trim();
+        details.push(`Step ${index + 1}: ${stepTitle}${stepAssignee ? ` | Assigned to ${stepAssignee}` : ' | Unassigned'}`);
+      });
+    } else {
+      details.push(assignee ? `Assigned to: ${assignee}` : 'Assignment: Unassigned');
+    }
+    if (scheduleSummary) details.push(`Schedule: ${scheduleSummary}`);
+    if (storageSummary) details.push(storageSummary);
+
+    const metaItems = ['Auto Parse', isWorkflow ? `${workflowSteps.length} steps` : 'Task'];
+    if (isWorkflow) {
+      const assignedStepCount = workflowSteps.filter((step) => String(step?.agent_name || '').trim()).length;
+      metaItems.push(assignedStepCount === workflowSteps.length ? 'Assigned' : 'Review assignments');
+    } else {
+      metaItems.push(assignee || 'Unassigned');
+    }
+
+    const assignedStepCount = isWorkflow
+      ? workflowSteps.filter((step) => String(step?.agent_name || '').trim()).length
+      : 0;
+    const inlineConfirm = this.showAutoParseConfirmDialog({
+      eyebrow: 'Auto Parsed Task',
+      title,
+      message: isWorkflow
+        ? 'Review the workflow parsed from your request before it is created.'
+        : 'Review the task parsed from your request before it is created.',
+      confirmLabel,
+      cancelLabel: 'Cancel',
+      parsedTitle: parsedTitle || (isWorkflow ? 'New Workflow' : 'New Task'),
+      assignment: isWorkflow ? `${assignedStepCount}/${workflowSteps.length} steps assigned` : assignee,
+      assignmentState: isWorkflow
+        ? (assignedStepCount === workflowSteps.length ? 'assigned' : 'unassigned')
+        : (assignee ? 'assigned' : 'unassigned'),
+      details: parsedDetails,
+      schedule: scheduleSummary,
+      storage: storageSummary,
+      workflowSteps
+    });
+    if (inlineConfirm) return inlineConfirm;
+
+    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+      return window.WorkspaceHubModals.showExecutionConfirm({
+        eyebrow: 'Auto Parsed Task',
+        title,
+        message: isWorkflow
+          ? 'Review the workflow parsed from your request before it is created.'
+          : 'Review the task parsed from your request before it is created.',
+        confirmLabel,
+        cancelLabel: 'Cancel',
+        metaItems,
+        details
+      });
+    }
+
+    const fallbackText = [
+      title,
+      isWorkflow ? 'Review the workflow parsed from your request before it is created.' : 'Review the task parsed from your request before it is created.',
+      ...details
+    ].filter(Boolean).join('\n\n');
+    if (typeof window.confirm === 'function') {
+      return Promise.resolve(window.confirm(fallbackText));
+    }
+    if (typeof confirm === 'function') {
+      return Promise.resolve(confirm(fallbackText));
+    }
+    return Promise.resolve(true);
+  }
+
   /**
    * Save the task (create or update)
    */
@@ -2511,7 +2744,13 @@ class TaskModalController {
 
       const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
       if (workflowSteps.length > 0) {
-        this.updateProgress('apply', {
+        this.hideProgress();
+        const confirmed = await this.confirmAutoParsedTaskCreation(parsed, workflowSteps, scheduleData, resultStorageData);
+        if (!confirmed) {
+          this.showToast('Task creation cancelled', 'info');
+          return;
+        }
+        this.showProgress('apply', {
           headline: 'Creating tasks',
           message: 'Saving the workflow to your workspace.'
         });
@@ -2615,16 +2854,24 @@ class TaskModalController {
       }
 
       // Build task data from parsed response
-      this.updateProgress('apply', {
-        headline: 'Creating task',
-        message: 'Saving the task to your workspace.'
-      });
       let to = '';
       let assignedNodeId = '';
       if (parsed.agent_name) {
         assignedNodeId = `${parsed.agent_name}-node-1`;
         to = parsed.agent_name;
       }
+
+      this.hideProgress();
+      const confirmed = await this.confirmAutoParsedTaskCreation(parsed, [], scheduleData, resultStorageData);
+      if (!confirmed) {
+        this.showToast('Task creation cancelled', 'info');
+        return;
+      }
+
+      this.showProgress('apply', {
+        headline: 'Creating task',
+        message: 'Saving the task to your workspace.'
+      });
 
       // Create the task
       const createResponse = await fetch('/api/orchestration/tasks', {
