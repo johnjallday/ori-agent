@@ -1672,31 +1672,6 @@ h3, .h3 {
     outline-offset: 2px;
 }
 
-/* Toast action button (e.g. Undo) */
-.toast-action {
-    flex-shrink: 0;
-    align-self: center;
-    padding: 5px 12px;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--primary-color);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    border-radius: var(--radius-sm);
-    transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.toast-action:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-.toast-action:focus {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-}
-
 /* Toast progress bar */
 .toast-progress {
     position: absolute;

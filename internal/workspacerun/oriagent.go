@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -54,6 +55,9 @@ func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(task.ReferenceURL) == "" {
+		task.ReferenceURL = strings.TrimSpace(run.ReferenceURL)
+	}
 	result, err := e.runner.ExecuteTask(ctx, run.Executor.Ref, task)
 	if err != nil {
 		return err
@@ -77,6 +81,9 @@ func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
 			"task_id":  task.ID,
 		}),
 	))
+	if evidence := ReferenceURLInspectionEvidenceForOutput(run, result, string(ExecutorKindOriAgent)); evidence != nil {
+		e.addArtifact(run.ID, ReferenceURLInspectionArtifact(run.ID, evidence))
+	}
 	return nil
 }
 
@@ -95,6 +102,9 @@ func (e *OriAgentExecutor) PrepareContext(ctx context.Context, run *Run) (*Prepa
 	task, err := decodeOriAgentTaskPayload(cfg.TaskPayload)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(task.ReferenceURL) == "" {
+		task.ReferenceURL = strings.TrimSpace(run.ReferenceURL)
 	}
 	prepared, err := preparer.PrepareTaskContext(ctx, run.Executor.Ref, task)
 	if err != nil {

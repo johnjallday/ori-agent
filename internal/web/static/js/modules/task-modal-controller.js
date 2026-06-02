@@ -65,6 +65,8 @@ class TaskModalController {
       void this.addRequiredMCPConnector();
     });
 
+    this.bindReferenceURLMirrorInputs();
+
     // Schedule fields toggle
     document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
       const scheduleFields = document.getElementById('taskModalScheduleFields');
@@ -263,12 +265,14 @@ class TaskModalController {
       manual: {
         description: readValue('taskModalDescription'),
         details: readValue('taskModalDetails'),
+        referenceURL: readValue('taskModalReferenceURL'),
         priority: readValue('taskModalPriority'),
         assignment: readValue('taskModalAssignment'),
         inputTaskIds: this.getSelectedInputRefs(document.getElementById('taskModalInputTasks'))
       },
       auto: {
         description: readValue('taskAutoDescription'),
+        referenceURL: readValue('taskAutoReferenceURL'),
         editDescription: readValue('taskAutoEditDescription')
       },
       schedule: {
@@ -434,6 +438,37 @@ class TaskModalController {
       event.preventDefault();
       first.focus();
     }
+  }
+
+  bindReferenceURLMirrorInputs() {
+    const manualReferenceURLInput = document.getElementById('taskModalReferenceURL');
+    const autoReferenceURLInput = document.getElementById('taskAutoReferenceURL');
+    if (!manualReferenceURLInput || !autoReferenceURLInput) return;
+
+    const mirror = (source, target) => {
+      source.addEventListener('input', () => {
+        if (target.value !== source.value) {
+          target.value = source.value;
+        }
+      });
+    };
+
+    mirror(manualReferenceURLInput, autoReferenceURLInput);
+    mirror(autoReferenceURLInput, manualReferenceURLInput);
+  }
+
+  getReferenceURLValue() {
+    const activeId = this.autoMode && !this.editingTaskId
+      ? 'taskAutoReferenceURL'
+      : 'taskModalReferenceURL';
+    const activeInput = document.getElementById(activeId);
+    if (activeInput) {
+      return activeInput.value?.trim() || '';
+    }
+    const fallbackInput = document.getElementById(activeId === 'taskAutoReferenceURL'
+      ? 'taskModalReferenceURL'
+      : 'taskAutoReferenceURL');
+    return fallbackInput?.value?.trim() || '';
   }
 
   /**
@@ -788,11 +823,16 @@ class TaskModalController {
     // Clear/prefill form
     const descriptionInput = document.getElementById('taskModalDescription');
     const detailsInput = document.getElementById('taskModalDetails');
+    const referenceURLInput = document.getElementById('taskModalReferenceURL');
+    const autoReferenceURLInput = document.getElementById('taskAutoReferenceURL');
     const priorityInput = document.getElementById('taskModalPriority');
     const assignmentInput = document.getElementById('taskModalAssignment');
+    const referenceURL = String(createOptions.prefillReferenceURL || createOptions.reference_url || '');
 
     if (descriptionInput) descriptionInput.value = String(createOptions.prefillTitle || prefillTitle || '');
     if (detailsInput) detailsInput.value = String(createOptions.prefillDetails || '');
+    if (referenceURLInput) referenceURLInput.value = referenceURL;
+    if (autoReferenceURLInput) autoReferenceURLInput.value = referenceURL;
     if (priorityInput) priorityInput.value = String(createOptions.draftPriority || '3');
 
     // Populate agent assignment dropdown
@@ -906,8 +946,12 @@ class TaskModalController {
     // Populate form fields
     const descriptionInput = document.getElementById('taskModalDescription');
     const detailsInput = document.getElementById('taskModalDetails');
+    const referenceURLInput = document.getElementById('taskModalReferenceURL');
+    const autoReferenceURLInput = document.getElementById('taskAutoReferenceURL');
     if (descriptionInput) descriptionInput.value = task.description || '';
     if (detailsInput) detailsInput.value = task.details || '';
+    if (referenceURLInput) referenceURLInput.value = task.reference_url || '';
+    if (autoReferenceURLInput) autoReferenceURLInput.value = task.reference_url || '';
 
     let loadedSubtasks = [];
     if (!isSubtask) {
@@ -1812,6 +1856,7 @@ class TaskModalController {
 
     const description = descriptionInput?.value?.trim();
     const details = detailsInput?.value?.trim() || '';
+    const referenceURL = this.getReferenceURLValue();
     const priority = parseInt(priorityInput?.value || '3', 10);
     const assignment = assignmentInput?.value || '';
 
@@ -1959,6 +2004,7 @@ class TaskModalController {
           await updateTask(this.editingTaskId, {
             description,
             details,
+            reference_url: referenceURL,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: mainInputIds,
@@ -1973,6 +2019,7 @@ class TaskModalController {
           await updateTask(this.editingTaskId, {
             description,
             details,
+            reference_url: referenceURL,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: [],
@@ -2037,6 +2084,7 @@ class TaskModalController {
           await updateTask(this.editingTaskId, {
             description,
             details,
+            reference_url: referenceURL,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: mainInputIds,
@@ -2081,6 +2129,7 @@ class TaskModalController {
             id: parentId,
             description,
             details,
+            reference_url: referenceURL,
             priority,
             to: to || '',
             assigned_node_id: assignedNodeId || ''
@@ -2109,6 +2158,7 @@ class TaskModalController {
           workspace_id: this.workspaceId,
           description,
           details,
+          reference_url: referenceURL,
           priority,
           to: to || undefined,
           assigned_node_id: assignedNodeId || undefined,
@@ -2306,6 +2356,7 @@ class TaskModalController {
   async saveAutoMode() {
     const autoDescriptionInput = document.getElementById('taskAutoDescription');
     const description = autoDescriptionInput?.value?.trim();
+    const referenceURL = this.getReferenceURLValue();
 
     if (!description) {
       this.showToast('Please describe the task you want to create', 'error');
@@ -2416,6 +2467,7 @@ class TaskModalController {
             workspace_id: this.workspaceId,
             description: parentTitle,
             details: parentDetails,
+            reference_url: referenceURL,
             priority: parentPriority
           })
         });
@@ -2523,6 +2575,7 @@ class TaskModalController {
           workspace_id: this.workspaceId,
           description: parsed.title,
           details: parsed.details || '',
+          reference_url: referenceURL,
           priority: parsed.priority || 3,
           to: to || undefined,
           assigned_node_id: assignedNodeId || undefined,

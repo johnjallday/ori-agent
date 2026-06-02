@@ -141,9 +141,8 @@ const (
 	WorkspaceStatusCompleted WorkspaceStatus = "completed"
 	WorkspaceStatusFailed    WorkspaceStatus = "failed"
 	WorkspaceStatusCancelled WorkspaceStatus = "cancelled"
-	// WorkspaceStatusTrashed marks a soft-deleted workspace. Trashed workspaces
-	// are hidden from the hub and skipped by the scheduler, but their files and
-	// sessions are preserved until permanent deletion or auto-purge.
+	// WorkspaceStatusTrashed marks a workspace whose folder has been moved to the
+	// system trash. It is hidden from listings but can be restored.
 	WorkspaceStatusTrashed WorkspaceStatus = "trashed"
 )
 
@@ -296,10 +295,6 @@ type Workspace struct {
 
 	// Status is the current state of the workspace.
 	Status WorkspaceStatus `json:"status,omitempty"`
-
-	// DeletedAt is set when the workspace is moved to Trash (soft delete).
-	// Nil for active workspaces. Used to drive the 30-day auto-purge.
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 
 	// Version is a monotonic counter bumped on every save; used to detect lost writes.
 	Version int64 `json:"version,omitempty"`

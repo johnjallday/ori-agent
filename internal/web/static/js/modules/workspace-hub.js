@@ -107,6 +107,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherWorkspaceRootResetBtn: document.getElementById('launcherWorkspaceRootResetBtn'),
     launcherWorkspaceRootCancelBtn: document.getElementById('launcherWorkspaceRootCancelBtn'),
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
+    launcherUndoBtn: document.getElementById('launcherUndoBtn'),
     launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
     launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
@@ -123,16 +124,6 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherDeleteGroupCount: document.getElementById('launcherDeleteGroupCount'),
     launcherDeleteGroupOnlyBtn: document.getElementById('launcherDeleteGroupOnlyBtn'),
     launcherDeleteGroupAllBtn: document.getElementById('launcherDeleteGroupAllBtn'),
-    launcherTrashBtn: document.getElementById('launcherTrashBtn'),
-    launcherTrashModal: document.getElementById('launcherTrashModal'),
-    launcherTrashList: document.getElementById('launcherTrashList'),
-    launcherTrashEmptyState: document.getElementById('launcherTrashEmptyState'),
-    launcherEmptyTrashBtn: document.getElementById('launcherEmptyTrashBtn'),
-    launcherRecentlyDeleted: document.getElementById('launcherRecentlyDeleted'),
-    launcherRecentlyDeletedText: document.getElementById('launcherRecentlyDeletedText'),
-    launcherRecentlyDeletedUndoBtn: document.getElementById('launcherRecentlyDeletedUndoBtn'),
-    launcherRecentlyDeletedViewBtn: document.getElementById('launcherRecentlyDeletedViewBtn'),
-    launcherRecentlyDeletedDismissBtn: document.getElementById('launcherRecentlyDeletedDismissBtn'),
     launcherTabWorkspaces: document.getElementById('launcherTabWorkspaces'),
     launcherTabSummary: document.getElementById('launcherTabSummary'),
     launcherWorkspacesPanel: document.getElementById('launcherWorkspacesPanel'),
@@ -231,11 +222,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   const { formatDate, flattenWorkspaces, collectWorkspaceDescendantIds } = window.WorkspaceHubUtils;
 
   let pendingDeleteGroupId = null;
-  // Tracks the latest Trash action so the hub can show a persistent
-  // "Recently deleted — Undo" banner. Persisted to localStorage so it survives
-  // reloads; validated against the live Trash list on load. Shape: { ids, label }.
-  const RECENTLY_DELETED_KEY = 'ori.workspaceHub.recentlyDeleted';
-  let pendingUndo = null;
+
+  // Undo support: deleting a workspace moves it to the system Trash (reversible)
+  // and pushes it onto this stack, so the toolbar Undo button can restore the most
+  // recent deletions at any time during the session.
+  const undoStack = []; // LIFO of { id, label }
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
   let launcherTaskBadgeByWorkspace = new Map();
@@ -1822,152 +1813,27 @@ console.log('[workspace-hub.js] FILE LOADED');
     return isGroupWorkspace(state.workspaceMap.get(workspaceId));
   }
 
-  async function deleteWorkspacesByIds(ids, opts = {}) {
+  async function deleteWorkspacesByIds(ids) {
     const state = window.WorkspaceHubState.getState();
     if (!ids || ids.length === 0) return;
 
-    const params = new URLSearchParams({ confirm: 'true' });
-    if (opts.permanent) params.set('permanent', 'true');
-    if (opts.scope) params.set('scope', opts.scope);
-    const query = params.toString();
-
     try {
       for (const id of ids) {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?${query}`, { method: 'DELETE' });
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
           const text = await response.text();
           throw new Error(text || 'Failed to delete workspace');
         }
       }
 
-      if (!opts.permanent) {
-        // Trash is reversible. Capture a label before reload (state still has the
-        // workspace), surface a transient Undo toast, and set the persistent
-        // "Recently deleted" banner so the undo survives the 8s toast window.
-        const trashedIds = ids.slice();
-        const label = trashedIds.length === 1
-          ? `"${getWorkspaceLabel(trashedIds[0])}"`
-          : `${trashedIds.length} workspaces`;
-        setPendingUndo(trashedIds, label);
-
-        if (window.Toast) {
-          window.Toast.show(
-            trashedIds.length > 1 ? `${trashedIds.length} workspaces moved to Trash` : 'Workspace moved to Trash',
-            'success',
-            {
-              title: 'Moved to Trash',
-              duration: 8000,
-              action: { label: 'Undo', onClick: () => { void undoTrash(trashedIds); } }
-            }
-          );
-        }
-      } else if (window.Toast) {
-        window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
-      }
+      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
 
       state.selectedWorkspaces = new Set();
       setLauncherSelectionMode(false);
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to delete workspaces:', err);
-      if (window.Toast) window.Toast.error(opts.permanent ? 'Failed to delete workspaces' : 'Failed to move workspaces to Trash');
-    }
-  }
-
-  // Restore workspaces straight from the "Moved to Trash" Undo toast or the
-  // persistent banner. Mirrors the Trash view's Restore, but skips the modal so
-  // undo is one click.
-  async function undoTrash(ids) {
-    if (!ids || ids.length === 0) return;
-    try {
-      for (const id of ids) {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/restore`, { method: 'POST' });
-        if (!response.ok && response.status !== 404) {
-          const text = await response.text();
-          throw new Error(text || 'Failed to restore workspace');
-        }
-      }
-      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces restored' : 'Workspace restored');
-      clearPendingUndo();
-      await loadWorkspaces();
-    } catch (err) {
-      console.error('Failed to undo trash:', err);
-      if (window.Toast) window.Toast.error('Failed to restore workspace');
-    }
-  }
-
-  // ---- Persistent "Recently deleted" banner ----
-
-  function setPendingUndo(ids, label) {
-    pendingUndo = { ids: ids.slice(), label };
-    try {
-      localStorage.setItem(RECENTLY_DELETED_KEY, JSON.stringify(pendingUndo));
-    } catch (_) { /* localStorage may be unavailable; banner still works in-session */ }
-    renderRecentlyDeletedBanner();
-  }
-
-  function clearPendingUndo() {
-    pendingUndo = null;
-    try {
-      localStorage.removeItem(RECENTLY_DELETED_KEY);
-    } catch (_) { /* ignore */ }
-    renderRecentlyDeletedBanner();
-  }
-
-  function loadPendingUndoFromStorage() {
-    try {
-      const raw = localStorage.getItem(RECENTLY_DELETED_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.ids) && parsed.ids.length > 0) {
-        pendingUndo = { ids: parsed.ids, label: parsed.label || `${parsed.ids.length} workspaces` };
-      }
-    } catch (_) { pendingUndo = null; }
-  }
-
-  function renderRecentlyDeletedBanner() {
-    const banner = elements.launcherRecentlyDeleted;
-    if (!banner) return;
-    if (!pendingUndo || !pendingUndo.ids || pendingUndo.ids.length === 0) {
-      banner.hidden = true;
-      return;
-    }
-    if (elements.launcherRecentlyDeletedText) {
-      elements.launcherRecentlyDeletedText.textContent = `Recently deleted ${pendingUndo.label}`;
-    }
-    banner.hidden = false;
-  }
-
-  // Reconcile the banner with the live Trash list: drop any ids that are no
-  // longer trashed (restored elsewhere or purged) so the banner never offers a
-  // stale undo. Runs on each hub load.
-  async function refreshRecentlyDeletedBanner() {
-    if (!pendingUndo || !pendingUndo.ids || pendingUndo.ids.length === 0) {
-      renderRecentlyDeletedBanner();
-      return;
-    }
-    try {
-      const trashed = await fetchTrashItems();
-      const trashedIds = new Set(trashed.map((it) => it.id));
-      const stillTrashed = pendingUndo.ids.filter((id) => trashedIds.has(id));
-      if (stillTrashed.length === 0) {
-        clearPendingUndo();
-        return;
-      }
-      if (stillTrashed.length !== pendingUndo.ids.length) {
-        // Some were already restored/purged — keep the banner for the rest.
-        pendingUndo.ids = stillTrashed;
-        if (stillTrashed.length === 1) {
-          pendingUndo.label = `"${trashed.find((it) => it.id === stillTrashed[0])?.name || 'workspace'}"`;
-        } else {
-          pendingUndo.label = `${stillTrashed.length} workspaces`;
-        }
-        try { localStorage.setItem(RECENTLY_DELETED_KEY, JSON.stringify(pendingUndo)); } catch (_) { /* ignore */ }
-      }
-      renderRecentlyDeletedBanner();
-    } catch (err) {
-      // On failure, keep whatever we have rather than hiding a valid undo.
-      renderRecentlyDeletedBanner();
+      if (window.Toast) window.Toast.error('Failed to delete workspaces');
     }
   }
 
@@ -1978,11 +1844,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to move the group and everything inside to Trash.\nClick Cancel to trash only the group (children move to root and stay active).\n\nTrashed workspaces can be restored within 30 days.`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the parent group.`);
       if (deleteAll) {
-        void deleteWorkspacesByIds([workspaceId]);
+        void deleteGroupAndContents(workspaceId);
       } else {
-        void deleteWorkspacesByIds([workspaceId], { scope: 'group-only' });
+        void deleteWorkspacesByIds([workspaceId]);
       }
       return;
     }
@@ -1999,6 +1865,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     modal.show();
   }
 
+  async function deleteGroupAndContents(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const ids = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: true });
+    const ordered = ids.slice().reverse();
+    await deleteWorkspacesByIds(ordered);
+  }
+
   function handleDeleteGroupChoice(includeChildren) {
     const workspaceId = pendingDeleteGroupId;
     pendingDeleteGroupId = null;
@@ -2010,146 +1883,115 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (includeChildren) {
-      // Default scope trashes the whole subtree together so it can be restored as a unit.
-      void deleteWorkspacesByIds([workspaceId]);
+      void deleteGroupAndContents(workspaceId);
     } else {
-      void deleteWorkspacesByIds([workspaceId], { scope: 'group-only' });
+      void deleteWorkspacesByIds([workspaceId]);
+    }
+  }
+
+  // Reflect the current undo stack on the toolbar button (enabled state, label,
+  // and the pending-count badge).
+  function updateUndoButton() {
+    const btn = elements.launcherUndoBtn;
+    if (!btn) return;
+    const count = undoStack.length;
+    btn.disabled = count === 0;
+    btn.classList.toggle('has-pending', count > 0);
+
+    let label;
+    if (count === 0) {
+      label = 'Nothing to undo';
+    } else {
+      const last = undoStack[count - 1];
+      label = `Undo delete of "${last.label}"${count > 1 ? ` (+${count - 1} more)` : ''}`;
+    }
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+
+    const badge = btn.querySelector('.launcher-undo-count');
+    if (badge) {
+      badge.textContent = count > 1 ? String(count) : '';
+      badge.hidden = count <= 1;
+    }
+  }
+
+  // Move a workspace to the trash. Deletion is reversible server-side (the folder
+  // is moved to the system Trash), so it is pushed onto the undo stack and can be
+  // restored from the toolbar Undo button at any time during the session.
+  async function softDeleteWorkspace(workspaceId) {
+    const label = getWorkspaceLabel(workspaceId) || 'Workspace';
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=true`, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(await response.text() || 'Failed to delete workspace');
+      }
+
+      // The server reports whether the workspace was moved to the Trash
+      // (restorable) or permanently deleted; only offer Undo when it's restorable.
+      let trashed = false;
+      if (response.status !== 204 && response.status !== 404) {
+        try {
+          const data = await response.json();
+          trashed = !!(data && data.trashed);
+        } catch (_) { /* no body */ }
+      }
+
+      if (trashed) {
+        undoStack.push({ id: workspaceId, label });
+        updateUndoButton();
+      }
+      await loadWorkspaces();
+      if (window.Toast) {
+        if (trashed) {
+          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', { title: 'Workspace deleted' });
+        } else {
+          window.Toast.success(`Deleted "${label}"`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete workspace:', err);
+      if (window.Toast) window.Toast.error(`Failed to delete "${label}"`);
+    }
+  }
+
+  // Restore the most recently trashed workspace by moving its folder back out of
+  // the system Trash and reactivating it.
+  async function undoLastAction() {
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+
+    const btn = elements.launcherUndoBtn;
+    if (btn) btn.disabled = true; // guard against double-clicks during the request
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(entry.id)}/restore`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Failed to restore workspace');
+      }
+      undoStack.pop();
+      updateUndoButton();
+      await loadWorkspaces();
+      if (window.Toast) window.Toast.success(`Restored "${entry.label}"`);
+    } catch (err) {
+      console.error('Failed to restore workspace:', err);
+      updateUndoButton(); // re-enable the button
+      if (window.Toast) window.Toast.error(`Couldn't restore "${entry.label}" — it may have been emptied from Trash`);
     }
   }
 
   function confirmDeleteWorkspace(workspaceId) {
     if (!workspaceId) return;
 
+    // Groups (with children) remain an explicit, confirmed operation since they
+    // can remove many workspaces' contents at once and are not moved to the trash.
     if (workspaceHasChildren(workspaceId) || workspaceIsGroup(workspaceId)) {
       openDeleteGroupModal(workspaceId);
       return;
     }
 
-    const label = getWorkspaceLabel(workspaceId);
-    if (!confirm(`Move "${label}" to Trash?\n\nIts files, notes, and sessions are kept and can be restored from Trash for 30 days, after which it is permanently deleted.`)) return;
-
-    void deleteWorkspacesByIds([workspaceId]);
-  }
-
-  // ---- Trash view ----
-
-  async function openTrashModal() {
-    if (!elements.launcherTrashModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
-    const modal = bootstrap.Modal.getInstance(elements.launcherTrashModal) || new bootstrap.Modal(elements.launcherTrashModal);
-    await loadTrash();
-    modal.show();
-  }
-
-  async function fetchTrashItems() {
-    const response = await fetch('/api/workspaces/trash');
-    if (!response.ok) throw new Error('Failed to load trash');
-    const data = await response.json();
-    return Array.isArray(data?.workspaces) ? data.workspaces : [];
-  }
-
-  async function loadTrash() {
-    if (!elements.launcherTrashList) return;
-    try {
-      renderTrash(await fetchTrashItems());
-    } catch (err) {
-      console.error('Failed to load trash:', err);
-      if (window.Toast) window.Toast.error('Failed to load Trash');
-      renderTrash([]);
-    }
-  }
-
-  function trashDaysLeft(purgeAt) {
-    if (!purgeAt) return null;
-    const ms = new Date(purgeAt).getTime() - Date.now();
-    if (Number.isNaN(ms)) return null;
-    return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
-  }
-
-  function renderTrash(items) {
-    const list = elements.launcherTrashList;
-    if (!list) return;
-    list.innerHTML = '';
-
-    if (elements.launcherTrashEmptyState) {
-      elements.launcherTrashEmptyState.style.display = items.length === 0 ? '' : 'none';
-    }
-    if (elements.launcherEmptyTrashBtn) {
-      elements.launcherEmptyTrashBtn.disabled = items.length === 0;
-    }
-    if (items.length === 0) return;
-
-    items.forEach((item) => {
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.5rem 0;border-bottom:1px solid var(--border-color);';
-
-      const daysLeft = trashDaysLeft(item.purge_at);
-      const metaParts = [];
-      if (item.kind === 'group') metaParts.push('Group');
-      if (typeof item.session_count === 'number' && item.session_count > 0) {
-        metaParts.push(`${item.session_count} session${item.session_count === 1 ? '' : 's'}`);
-      }
-      if (daysLeft !== null) {
-        metaParts.push(daysLeft === 0 ? 'purges today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`);
-      }
-
-      row.innerHTML = `
-        <div style="min-width:0;">
-          <div style="color:var(--text-primary);font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.name || 'Untitled')}</div>
-          <div style="color:var(--text-secondary);font-size:11px;">${escapeHtml(metaParts.join(' · '))}</div>
-        </div>
-        <div style="display:flex;gap:0.5rem;flex-shrink:0;">
-          <button class="modern-btn modern-btn-secondary modern-btn-sm" type="button" data-trash-restore="${escapeHtml(item.id)}">Restore</button>
-          <button class="modern-btn modern-btn-danger modern-btn-sm" type="button" data-trash-delete="${escapeHtml(item.id)}">Delete Permanently</button>
-        </div>
-      `;
-      list.appendChild(row);
-    });
-
-    list.querySelectorAll('[data-trash-restore]').forEach((btn) => {
-      btn.addEventListener('click', () => restoreTrashedWorkspace(btn.getAttribute('data-trash-restore')));
-    });
-    list.querySelectorAll('[data-trash-delete]').forEach((btn) => {
-      btn.addEventListener('click', () => permanentlyDeleteTrashedWorkspace(btn.getAttribute('data-trash-delete')));
-    });
-  }
-
-  async function restoreTrashedWorkspace(id) {
-    if (!id) return;
-    try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/restore`, { method: 'POST' });
-      if (!response.ok && response.status !== 404) {
-        const text = await response.text();
-        throw new Error(text || 'Failed to restore');
-      }
-      if (window.Toast) window.Toast.success('Workspace restored');
-      await loadTrash();
-      await loadWorkspaces();
-    } catch (err) {
-      console.error('Failed to restore workspace:', err);
-      if (window.Toast) window.Toast.error('Failed to restore workspace');
-    }
-  }
-
-  async function permanentlyDeleteTrashedWorkspace(id) {
-    if (!id) return;
-    if (!confirm('Permanently delete this workspace?\n\nIts folder, files, notes, and sessions will be removed from disk. This cannot be undone.')) return;
-    await deleteWorkspacesByIds([id], { permanent: true });
-    await loadTrash();
-  }
-
-  async function emptyTrash() {
-    let items = [];
-    try {
-      items = await fetchTrashItems();
-    } catch (err) {
-      if (window.Toast) window.Toast.error('Failed to load Trash');
-      return;
-    }
-    if (items.length === 0) return;
-    if (!confirm(`Permanently delete all ${items.length} workspace(s) in Trash?\n\nThis cannot be undone.`)) return;
-    const ids = items.map((it) => it.id).filter(Boolean);
-    await deleteWorkspacesByIds(ids, { permanent: true });
-    await loadTrash();
+    // Single workspaces are moved to the trash (reversible); the toolbar Undo
+    // button restores them, so no blocking confirm dialog is needed.
+    void softDeleteWorkspace(workspaceId);
   }
 
   async function deleteSelectedWorkspaces() {
@@ -2157,7 +1999,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const selected = Array.from(state.selectedWorkspaces || []);
     if (selected.length === 0) return;
 
-    if (!confirm(`Move ${selected.length} workspace(s) to Trash?\n\nTheir files, notes, and sessions are kept and can be restored from Trash for 30 days.`)) {
+    if (!confirm(`Delete ${selected.length} workspace(s)?\n\nThis will permanently remove the workspace folders and all their contents (files, notes, etc.) from disk. This action cannot be undone.`)) {
       return;
     }
 
@@ -2689,9 +2531,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       // Always show the launcher - workspace details are now on separate pages
       showLauncher();
-
-      // Keep the persistent "Recently deleted" banner in sync with the Trash.
-      void refreshRecentlyDeletedBanner();
     } catch (error) {
       console.error('Workspace hub failed to load workspaces:', error);
       showLauncher();
@@ -2950,6 +2789,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
     }
 
+    if (elements.launcherUndoBtn) {
+      elements.launcherUndoBtn.addEventListener('click', () => undoLastAction());
+    }
+
     if (elements.launcherWorkspaceRootEditBtn) {
       elements.launcherWorkspaceRootEditBtn.addEventListener('click', () => {
         setLauncherWorkspaceRootEditorOpen(!launcherWorkspaceRootEditorOpen, { focusInput: !launcherWorkspaceRootEditorOpen });
@@ -3074,30 +2917,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherDeleteGroupAllBtn) {
       elements.launcherDeleteGroupAllBtn.addEventListener('click', () => handleDeleteGroupChoice(true));
-    }
-
-    if (elements.launcherTrashBtn) {
-      elements.launcherTrashBtn.addEventListener('click', () => openTrashModal());
-    }
-
-    if (elements.launcherEmptyTrashBtn) {
-      elements.launcherEmptyTrashBtn.addEventListener('click', () => emptyTrash());
-    }
-
-    if (elements.launcherRecentlyDeletedUndoBtn) {
-      elements.launcherRecentlyDeletedUndoBtn.addEventListener('click', () => {
-        if (pendingUndo && pendingUndo.ids.length) void undoTrash(pendingUndo.ids.slice());
-      });
-    }
-
-    if (elements.launcherRecentlyDeletedViewBtn) {
-      elements.launcherRecentlyDeletedViewBtn.addEventListener('click', () => openTrashModal());
-    }
-
-    if (elements.launcherRecentlyDeletedDismissBtn) {
-      // Dismiss only hides the banner; the workspaces stay in Trash, recoverable
-      // from the Trash view until they are purged.
-      elements.launcherRecentlyDeletedDismissBtn.addEventListener('click', () => clearPendingUndo());
     }
 
     if (elements.newSessionBtn) {
@@ -3241,9 +3060,6 @@ console.log('[workspace-hub.js] FILE LOADED');
   setLauncherWorkspaceRootEditorOpen(false);
   initLauncherOverviewExpandedState();
   initLauncherTabState();
-  // Rehydrate the "Recently deleted" banner so an undo offered before a reload
-  // survives it; loadWorkspaces() then validates it against the live Trash.
-  loadPendingUndoFromStorage();
 
   // Keyboard shortcuts for workspace selection
   document.addEventListener('keydown', (e) => {

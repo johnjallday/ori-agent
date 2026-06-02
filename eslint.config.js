@@ -153,6 +153,7 @@ export default defineConfig([
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',
       'internal/web/static/js/modules/workspace-detail.js',
+      'internal/web/static/js/modules/workspace-detail.test.js',
       'internal/web/static/js/modules/workspace-detail-directory-explorer.js',
       'internal/web/static/js/modules/workspace-detail-file-modal.js',
       'internal/web/static/js/modules/workspace-detail-mcp.js',

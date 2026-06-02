@@ -18,6 +18,7 @@ import (
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
 	Description            string               `json:"description"`
+	ReferenceURL           string               `json:"reference_url"`
 	From                   string               `json:"from"`
 	To                     string               `json:"to"`
 	Priority               int                  `json:"priority"`
@@ -62,6 +63,11 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Task description is required")
 		return
 	}
+	referenceURL, err := NormalizeReferenceURL(req.ReferenceURL)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
 
 	// Get workspace
 	workspace, err := h.store.Get(workspaceID)
@@ -91,6 +97,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		From:                   req.From,
 		To:                     req.To,
 		Description:            req.Description,
+		ReferenceURL:           referenceURL,
 		Priority:               req.Priority,
 		Context:                make(map[string]any),
 		ParentTaskID:           req.ParentTaskID,
@@ -163,6 +170,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Description            *string              `json:"description,omitempty"`
 		Details                *string              `json:"details,omitempty"`
+		ReferenceURL           *string              `json:"reference_url,omitempty"`
 		To                     *string              `json:"to,omitempty"`
 		From                   *string              `json:"from,omitempty"`
 		InputTaskIDs           *[]string            `json:"input_task_ids,omitempty"`
@@ -192,6 +200,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Find and update task
 	found := false
+	var updatedTask *Task
 	for i, task := range workspace.Tasks {
 		if task.ID == taskID {
 			// Update only provided fields (allowing explicit empty values)
@@ -200,6 +209,14 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.Details != nil {
 				workspace.Tasks[i].Details = *req.Details
+			}
+			if req.ReferenceURL != nil {
+				referenceURL, err := NormalizeReferenceURL(*req.ReferenceURL)
+				if err != nil {
+					orihttp.BadRequest(w, err.Error())
+					return
+				}
+				workspace.Tasks[i].ReferenceURL = referenceURL
 			}
 			if req.To != nil {
 				workspace.Tasks[i].To = *req.To
@@ -263,6 +280,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			if req.TemplateRef != nil {
 				workspace.Tasks[i].TemplateRef = req.TemplateRef
 			}
+			updatedTask = &workspace.Tasks[i]
 			found = true
 			break
 		}
@@ -286,6 +304,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"message":   "Task updated successfully",
 		"task_id":   taskID,
+		"task":      updatedTask,
 		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})

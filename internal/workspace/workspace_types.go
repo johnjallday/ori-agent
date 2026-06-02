@@ -16,10 +16,6 @@ const (
 	StatusCompleted WorkspaceStatus = "completed"
 	StatusFailed    WorkspaceStatus = "failed"
 	StatusCancelled WorkspaceStatus = "cancelled"
-	// StatusTrashed marks a soft-deleted (Trashed) workspace. The scheduler and
-	// other active-only paths already skip non-active workspaces, so a trashed
-	// workspace stops running scheduled tasks while its files are preserved.
-	StatusTrashed WorkspaceStatus = "trashed"
 )
 
 // MessageType represents the type of inter-agent message
@@ -231,6 +227,7 @@ type Task struct {
 	AssignedNodeID   string               `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
 	Description      string               `json:"description"`
 	Details          string               `json:"details,omitempty"`
+	ReferenceURL     string               `json:"reference_url,omitempty"`
 	Priority         int                  `json:"priority"`
 	Context          map[string]any       `json:"context"`
 	Timeout          time.Duration        `json:"timeout"`

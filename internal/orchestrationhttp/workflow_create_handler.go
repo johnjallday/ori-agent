@@ -34,6 +34,7 @@ type workflowParentInput struct {
 	ID             string                         `json:"id"`
 	Description    string                         `json:"description"`
 	Details        string                         `json:"details"`
+	ReferenceURL   string                         `json:"reference_url"`
 	From           string                         `json:"from"`
 	To             string                         `json:"to"`
 	AssignedNodeID string                         `json:"assigned_node_id"`
@@ -150,6 +151,11 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		parentTaskID = strings.TrimSpace(req.Parent.ID)
+		referenceURL, err := workspace.NormalizeReferenceURL(req.Parent.ReferenceURL)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
 		tasks = append(tasks, workspace.Task{
 			ID:             parentTaskID,
 			WorkspaceID:    req.WorkspaceID,
@@ -158,6 +164,7 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 			AssignedNodeID: req.Parent.AssignedNodeID,
 			Description:    req.Parent.Description,
 			Details:        req.Parent.Details,
+			ReferenceURL:   referenceURL,
 			Priority:       normalizeTaskPriority(req.Parent.Priority),
 			InputTaskIDs:   req.Parent.InputTaskIDs,
 			ParentTaskID:   strings.TrimSpace(req.Parent.ParentTaskID),
