@@ -64,9 +64,10 @@ func ReferenceURLInspectionEvidenceForOutput(run *Run, output, source string) *R
 		status = ReferenceURLInspectionUnknown
 	}
 	detail := "No explicit reference URL inspection status was reported."
-	if status == ReferenceURLInspectionInspected {
+	switch status {
+	case ReferenceURLInspectionInspected:
 		detail = "Agent reported that it inspected the reference URL."
-	} else if status == ReferenceURLInspectionBlocked {
+	case ReferenceURLInspectionBlocked:
 		detail = "Agent reported that reference URL inspection was blocked."
 	}
 	return &ReferenceURLInspectionEvidence{

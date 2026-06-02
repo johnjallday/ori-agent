@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -915,52 +914,6 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		validation.StorageStatus = TaskStorageSaved
 		recordTaskStorageValidation(ws, task, workspaceStore, validation)
 	}
-}
-
-func recordCSVHeaderMismatchValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult, err error) bool {
-	var mismatch *CSVHeaderMismatchError
-	if !errors.As(err, &mismatch) {
-		return false
-	}
-	if validation == nil {
-		validation = notApplicableValidationResult()
-	}
-	validation.ValidationStatus = TaskValidationNeedsReview
-	validation.StorageStatus = TaskStorageSkippedInvalid
-	if validation.RawOutputRef == "" {
-		validation.RawOutputRef = taskOutputRawResultRefLatest
-	}
-	validation.Errors = append(validation.Errors, TaskValidationError{
-		Code:     "csv_header_mismatch",
-		Message:  mismatch.Error(),
-		Expected: append([]string(nil), mismatch.Expected...),
-		Actual:   append([]string(nil), mismatch.Actual...),
-	})
-	recordTaskStorageValidation(ws, task, workspaceStore, validation)
-	logger.Info("Task output storage telemetry", logger.Fields{
-		"action":            "storage_blocked_header_mismatch",
-		"workspace_id":      workspaceIDFromTaskStorageContext(ws),
-		"task_id":           task.ID,
-		"run_id":            latestTaskExecutionRunID(task),
-		"contract_version":  validation.ContractVersion,
-		"validation_status": validation.ValidationStatus,
-		"storage_status":    validation.StorageStatus,
-		"expected":          strings.Join(mismatch.Expected, ","),
-		"actual":            strings.Join(mismatch.Actual, ","),
-	})
-	logger.Warn("Task result held for review; CSV header mismatch", logger.Fields{
-		"task_id":  task.ID,
-		"expected": strings.Join(mismatch.Expected, ","),
-		"actual":   strings.Join(mismatch.Actual, ","),
-	})
-	return true
-}
-
-func workspaceIDFromTaskStorageContext(ws *Workspace) string {
-	if ws == nil {
-		return ""
-	}
-	return ws.ID
 }
 
 func recordTaskStorageValidation(ws *Workspace, task *Task, workspaceStore Store, validation *TaskValidationResult) {
