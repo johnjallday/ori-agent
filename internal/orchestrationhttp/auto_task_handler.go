@@ -203,6 +203,12 @@ type OutputContractTelemetryRequest struct {
 	ErrorCount       int    `json:"error_count,omitempty"`
 }
 
+type autoTaskAgentContext struct {
+	Agents            []string
+	AgentDescriptions map[string]string
+	DefaultAgentName  string
+}
+
 // Schema for structured output - generated at init time
 var autoTaskResponseSchema = llm.GenerateSchema[AutoTaskResponse]()
 var outputContractSuggestionSchema = llm.GenerateSchema[OutputContractSuggestionResponse]()
@@ -224,16 +230,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get all agents with their descriptions for intelligent matching
-	agentNames := h.agentStore.ListAgents()
-	agents := make([]string, 0, len(agentNames))
-	agentDescriptions := make(map[string]string)
-	for _, name := range agentNames {
-		agents = append(agents, name)
-		if ag, found := h.agentStore.GetAgent(name); found && ag.Metadata != nil && ag.Metadata.Description != "" {
-			agentDescriptions[name] = ag.Metadata.Description
-		}
-	}
+	agentContext := h.autoTaskAgentContext(req.WorkspaceID)
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
@@ -251,7 +248,17 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Parse the task description using LLM
-	taskConfig, err := h.parseTaskDescription(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req.Description, agents, agentDescriptions)
+	taskConfig, err := h.parseTaskDescription(
+		r.Context(),
+		result.Provider,
+		systemProvider,
+		result.Model,
+		systemReasoningEffort,
+		req.Description,
+		agentContext.Agents,
+		agentContext.AgentDescriptions,
+		agentContext.DefaultAgentName,
+	)
 	if err != nil {
 		logger.Error("Auto-task parsing failed", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to parse task description: "+err.Error())
@@ -641,6 +648,132 @@ func synthesizeSuggestionSpecFromContract(contract *workspace.TaskOutputContract
 	return spec
 }
 
+func (h *AutoTaskHandler) autoTaskAgentContext(workspaceID string) autoTaskAgentContext {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID != "" && h.workspaceStore != nil {
+		ws, err := h.workspaceStore.Get(workspaceID)
+		if err != nil {
+			logger.Warn("Failed to load workspace agents for auto-task parsing", logger.Fields{
+				"workspace_id": workspaceID,
+				"error":        err,
+			})
+		} else if ws != nil {
+			agents := workspaceAutoTaskAgentNames(ws)
+			if len(agents) > 0 {
+				defaultAgentName := canonicalAutoTaskAgentName(ws.EntryAgentName(), agents)
+				return autoTaskAgentContext{
+					Agents:            agents,
+					AgentDescriptions: h.autoTaskAgentDescriptions(agents, ws),
+					DefaultAgentName:  defaultAgentName,
+				}
+			}
+		}
+	}
+
+	agents := h.globalAutoTaskAgentNames()
+	return autoTaskAgentContext{
+		Agents:            agents,
+		AgentDescriptions: h.autoTaskAgentDescriptions(agents, nil),
+	}
+}
+
+func (h *AutoTaskHandler) globalAutoTaskAgentNames() []string {
+	if h.agentStore == nil {
+		return nil
+	}
+	return uniqueAutoTaskAgentNames(h.agentStore.ListAgents()...)
+}
+
+func workspaceAutoTaskAgentNames(ws *workspace.Workspace) []string {
+	if ws == nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(ws.AgentInstances)+len(ws.Agents)+1)
+	names = append(names, ws.EntryAgentName())
+	for _, inst := range ws.AgentInstances {
+		names = append(names, inst.Name)
+	}
+	names = append(names, ws.Agents...)
+
+	return uniqueAutoTaskAgentNames(names...)
+}
+
+func uniqueAutoTaskAgentNames(names ...string) []string {
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, name)
+	}
+	return unique
+}
+
+func (h *AutoTaskHandler) autoTaskAgentDescriptions(agents []string, ws *workspace.Workspace) map[string]string {
+	descriptions := make(map[string]string, len(agents))
+	if ws != nil {
+		for _, inst := range ws.AgentInstances {
+			name := canonicalAutoTaskAgentName(inst.Name, agents)
+			if name == "" {
+				continue
+			}
+			descriptionParts := make([]string, 0, 2)
+			if role := strings.TrimSpace(inst.Role); role != "" {
+				descriptionParts = append(descriptionParts, "Role: "+role)
+			}
+			if description := strings.TrimSpace(inst.Description); description != "" {
+				descriptionParts = append(descriptionParts, description)
+			}
+			if len(descriptionParts) > 0 {
+				descriptions[name] = strings.Join(descriptionParts, ". ")
+			}
+		}
+	}
+
+	if h.agentStore == nil {
+		return descriptions
+	}
+
+	for _, name := range agents {
+		ag, found := h.agentStore.GetAgent(name)
+		if !found || ag == nil || ag.Metadata == nil {
+			continue
+		}
+		description := strings.TrimSpace(ag.Metadata.Description)
+		if description == "" {
+			continue
+		}
+		if existing := strings.TrimSpace(descriptions[name]); existing != "" {
+			descriptions[name] = existing + ". " + description
+		} else {
+			descriptions[name] = description
+		}
+	}
+
+	return descriptions
+}
+
+func canonicalAutoTaskAgentName(name string, agents []string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	for _, agent := range agents {
+		if strings.EqualFold(agent, trimmed) {
+			return agent
+		}
+	}
+	return ""
+}
+
 // parseTaskDescription uses LLM to parse natural language into task configuration
 func (h *AutoTaskHandler) parseTaskDescription(
 	ctx context.Context,
@@ -651,6 +784,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
 	description string,
 	agents []string,
 	agentDescriptions map[string]string,
+	defaultAgentName string,
 ) (*AutoTaskResponse, error) {
 
 	// Get current time for context
@@ -672,6 +806,10 @@ func (h *AutoTaskHandler) parseTaskDescription(
 			}
 		}
 	}
+	var defaultAgentContext string
+	if defaultAgentName = strings.TrimSpace(defaultAgentName); defaultAgentName != "" {
+		defaultAgentContext = fmt.Sprintf("\nDefault workspace agent: %s\n", defaultAgentName)
+	}
 
 	systemPrompt := fmt.Sprintf(`Parse the task description and return a JSON object with EXACTLY this structure:
 
@@ -690,7 +828,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
 }
 
 Current time: %s (%s)
-%s
+%s%s
 
 Schedule parsing rules:
 - "at 6pm" or "at 18:00" -> schedule_enabled=true, schedule={"type":"once","once_at":"ISO datetime"}
@@ -703,7 +841,7 @@ Result storage: set result_storage={"enabled":true,"format":"text|json|markdown|
 
 Output contract: when result_storage.write_mode is "append", also set output_contract with source="ai_suggested" and 3-8 practical CSV columns. Use column types string, number, boolean, or date. Include columns the recurring task can realistically produce every run.
 
-Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
+Agent assignment: Match the task to one of the available agents based on their description. If a default workspace agent is provided, use that agent for ordinary workspace tasks and unmatched everyday requests unless another available agent is clearly better. Use empty string only when no default workspace agent is provided and no available agent matches.
 
 Multi-step tasks:
 - If the request has multiple distinct steps (e.g., "do X then Y"), populate "tasks" with each step.
@@ -713,7 +851,7 @@ Multi-step tasks:
 - Apply schedule fields to the first step only.
 - Apply result_storage to the final step only.
 
-IMPORTANT: Always return the exact JSON structure shown above. Never return error messages or different formats.`, currentTime, currentDay, agentList)
+IMPORTANT: Always return the exact JSON structure shown above. Never return error messages or different formats.`, currentTime, currentDay, agentList, defaultAgentContext)
 
 	userMessage := description
 
@@ -732,11 +870,11 @@ IMPORTANT: Always return the exact JSON structure shown above. Never return erro
 
 	// Try structured output for providers that support it
 	if structuredProvider, ok := provider.(llm.StructuredOutputProvider); ok {
-		return h.parseWithStructuredOutput(ctx, structuredProvider, model, reasoningEffort, systemPrompt, userMessage, agents)
+		return h.parseWithStructuredOutput(ctx, structuredProvider, model, reasoningEffort, systemPrompt, userMessage, agents, defaultAgentName)
 	}
 
 	// Fallback to regular chat for non-OpenAI providers
-	return h.parseWithRegularChat(ctx, provider, model, reasoningEffort, systemPrompt, userMessage, agents)
+	return h.parseWithRegularChat(ctx, provider, model, reasoningEffort, systemPrompt, userMessage, agents, defaultAgentName)
 }
 
 // parseWithStructuredOutput uses a provider's structured output feature
@@ -748,6 +886,7 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 	systemPrompt string,
 	userMessage string,
 	agents []string,
+	defaultAgentName string,
 ) (*AutoTaskResponse, error) {
 	logger.Info("Using structured output for auto-task parsing", logger.Fields{})
 
@@ -788,7 +927,7 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 	}
 
 	// Validate and sanitize
-	taskConfig = h.validateTaskConfig(taskConfig, agents)
+	taskConfig = h.validateTaskConfig(taskConfig, agents, defaultAgentName)
 	return &taskConfig, nil
 }
 
@@ -820,6 +959,7 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 	systemPrompt string,
 	userMessage string,
 	agents []string,
+	defaultAgentName string,
 ) (*AutoTaskResponse, error) {
 	logger.Info("Using regular chat for auto-task parsing", logger.Fields{})
 
@@ -876,12 +1016,23 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 	}
 
 	// Validate and sanitize
-	taskConfig = h.validateTaskConfig(taskConfig, agents)
+	taskConfig = h.validateTaskConfig(taskConfig, agents, defaultAgentName)
 	return &taskConfig, nil
 }
 
 // validateTaskConfig ensures the task config values are valid
-func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []string) AutoTaskResponse {
+func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []string, defaultAgentName string) AutoTaskResponse {
+	defaultAgentName = canonicalAutoTaskAgentName(defaultAgentName, agents)
+	normalizeAgentName := func(agentName string) string {
+		return canonicalAutoTaskAgentName(agentName, agents)
+	}
+	normalizeAgentNameWithDefault := func(agentName string) string {
+		if normalized := normalizeAgentName(agentName); normalized != "" {
+			return normalized
+		}
+		return defaultAgentName
+	}
+
 	// Validate multi-step tasks if provided
 	if len(config.Tasks) > 0 {
 		seen := make(map[string]bool, len(config.Tasks))
@@ -905,19 +1056,7 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 				step.Priority = 3
 			}
 
-			if step.AgentName != "" {
-				found := false
-				for _, agent := range agents {
-					if strings.EqualFold(agent, step.AgentName) {
-						step.AgentName = agent
-						found = true
-						break
-					}
-				}
-				if !found {
-					step.AgentName = ""
-				}
-			}
+			step.AgentName = normalizeAgentNameWithDefault(step.AgentName)
 		}
 	}
 
@@ -939,20 +1078,8 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 		}
 	}
 
-	// Validate agent name exists
-	if config.AgentName != "" {
-		found := false
-		for _, agent := range agents {
-			if strings.EqualFold(agent, config.AgentName) {
-				config.AgentName = agent // Use exact case
-				found = true
-				break
-			}
-		}
-		if !found {
-			config.AgentName = "" // Clear invalid agent
-		}
-	}
+	// Validate agent name exists and default ordinary workspace requests to the entry agent.
+	config.AgentName = normalizeAgentNameWithDefault(config.AgentName)
 
 	// Validate schedule configuration
 	if config.Schedule != nil {

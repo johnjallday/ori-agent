@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -62,6 +65,84 @@ func TestClassifyAutoTaskErrorRecognizesWrappedDeadline(t *testing.T) {
 	msg := classifyAutoTaskError(err)
 	if !strings.Contains(msg, "request timed out") {
 		t.Fatalf("expected timeout message, got %q", msg)
+	}
+}
+
+func TestAutoTaskAgentContextScopesToWorkspaceEntryAgent(t *testing.T) {
+	ws := &workspace.Workspace{
+		ID: "workspace-1",
+		AgentInstances: []workspace.AgentInstance{
+			{Name: "test123 Manager", EntryPoint: true, Role: "Workspace Manager"},
+		},
+		Agents: []string{"test123 Manager"},
+	}
+	handler := &AutoTaskHandler{
+		agentStore: &autoTaskAgentStore{
+			order: []string{"Ori", "test123 Manager"},
+			agents: map[string]*agent.Agent{
+				"Ori": {Metadata: &types.AgentMetadata{Description: "Global general router"}},
+				"test123 Manager": {Metadata: &types.AgentMetadata{
+					Description: "Lead the test123 workspace.",
+				}},
+			},
+		},
+		workspaceStore: &autoTaskWorkspaceStore{
+			workspaces: map[string]*workspace.Workspace{"workspace-1": ws},
+		},
+	}
+
+	ctx := handler.autoTaskAgentContext("workspace-1")
+
+	if ctx.DefaultAgentName != "test123 Manager" {
+		t.Fatalf("default agent = %q, want test123 Manager", ctx.DefaultAgentName)
+	}
+	if len(ctx.Agents) != 1 || ctx.Agents[0] != "test123 Manager" {
+		t.Fatalf("agents = %#v, want only workspace entry agent", ctx.Agents)
+	}
+	if _, exists := ctx.AgentDescriptions["Ori"]; exists {
+		t.Fatalf("global Ori leaked into workspace-scoped descriptions: %#v", ctx.AgentDescriptions)
+	}
+	if got := ctx.AgentDescriptions["test123 Manager"]; !strings.Contains(got, "Workspace Manager") || !strings.Contains(got, "Lead the test123 workspace") {
+		t.Fatalf("entry agent description missing workspace/global context: %q", got)
+	}
+}
+
+func TestValidateTaskConfigDefaultsInvalidAgentToEntryAgent(t *testing.T) {
+	handler := &AutoTaskHandler{}
+	config := AutoTaskResponse{
+		Title:     "Suggest Vienna activities",
+		AgentName: "Ori",
+		Priority:  3,
+		Tasks: []AutoTaskStep{
+			{ID: "step1", Title: "Suggest activities", AgentName: "Ori", Priority: 3},
+			{ID: "step2", Title: "Format answer", Priority: 3, DependsOn: []string{"step1"}},
+		},
+	}
+
+	got := handler.validateTaskConfig(config, []string{"test123 Manager"}, "test123 Manager")
+
+	if got.AgentName != "test123 Manager" {
+		t.Fatalf("agent_name = %q, want test123 Manager", got.AgentName)
+	}
+	for _, step := range got.Tasks {
+		if step.AgentName != "test123 Manager" {
+			t.Fatalf("step %s agent_name = %q, want test123 Manager", step.ID, step.AgentName)
+		}
+	}
+}
+
+func TestValidateTaskConfigPreservesValidWorkspaceAgent(t *testing.T) {
+	handler := &AutoTaskHandler{}
+	config := AutoTaskResponse{
+		Title:     "Research flights",
+		AgentName: "researcher",
+		Priority:  3,
+	}
+
+	got := handler.validateTaskConfig(config, []string{"test123 Manager", "Researcher"}, "test123 Manager")
+
+	if got.AgentName != "Researcher" {
+		t.Fatalf("agent_name = %q, want exact-case Researcher", got.AgentName)
 	}
 }
 
@@ -204,4 +285,93 @@ func TestHandleOutputContractTelemetryRejectsInvalidAction(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+}
+
+type autoTaskAgentStore struct {
+	order  []string
+	agents map[string]*agent.Agent
+}
+
+func (s *autoTaskAgentStore) ListAgents() []string {
+	return append([]string(nil), s.order...)
+}
+
+func (s *autoTaskAgentStore) CreateAgent(name string, cfg *store.CreateAgentConfig) error {
+	return nil
+}
+
+func (s *autoTaskAgentStore) DeleteAgent(name string) error {
+	return nil
+}
+
+func (s *autoTaskAgentStore) GetAgent(name string) (*agent.Agent, bool) {
+	ag, ok := s.agents[name]
+	return ag, ok
+}
+
+func (s *autoTaskAgentStore) SetAgent(name string, ag *agent.Agent) error {
+	return nil
+}
+
+func (s *autoTaskAgentStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	return nil
+}
+
+func (s *autoTaskAgentStore) ClearAgents() error {
+	return nil
+}
+
+func (s *autoTaskAgentStore) Save() error {
+	return nil
+}
+
+type autoTaskWorkspaceStore struct {
+	workspaces map[string]*workspace.Workspace
+}
+
+func (s *autoTaskWorkspaceStore) Save(ws *workspace.Workspace) error {
+	return nil
+}
+
+func (s *autoTaskWorkspaceStore) Get(id string) (*workspace.Workspace, error) {
+	return s.workspaces[id], nil
+}
+
+func (s *autoTaskWorkspaceStore) List() ([]string, error) {
+	return nil, nil
+}
+
+func (s *autoTaskWorkspaceStore) Delete(id string) error {
+	return nil
+}
+
+func (s *autoTaskWorkspaceStore) ListActive() ([]*workspace.Workspace, error) {
+	return nil, nil
+}
+
+func (s *autoTaskWorkspaceStore) GetFilesPath(workspaceID string) string {
+	return ""
+}
+
+func (s *autoTaskWorkspaceStore) GetOutputsPath(workspaceID string) string {
+	return ""
+}
+
+func (s *autoTaskWorkspaceStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	return nil, false, nil
+}
+
+func (s *autoTaskWorkspaceStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	return nil
+}
+
+func (s *autoTaskWorkspaceStore) Lock(wsID string) func() {
+	return func() {}
+}
+
+func (s *autoTaskWorkspaceStore) Update(wsID string, fn func(*workspace.Workspace) error) error {
+	if ws := s.workspaces[wsID]; ws != nil {
+		return fn(ws)
+	}
+	return nil
 }
