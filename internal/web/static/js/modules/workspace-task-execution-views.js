@@ -150,6 +150,39 @@ export const taskExecutionViewsMethods = {
     return Array.from(byName.values());
   },
 
+  // Gather the lowercased names of every tool this task invoked, drawing from
+  // both the persisted execution_trace (via getToolUsageSummary) and any live
+  // task events. Either source can be the only one populated depending on
+  // whether the run finished and was persisted, so we union both.
+  collectUsedToolNames() {
+    const names = new Set();
+    this.getToolUsageSummary().forEach((tool) => {
+      const name = String(tool?.name || '').trim().toLowerCase();
+      if (name) names.add(name);
+    });
+    this.getCurrentTaskEvents().forEach((event) => {
+      const data = getTaskEventData(event);
+      const name = String(data?.tool_name || '').trim().toLowerCase();
+      if (name) names.add(name);
+    });
+    return names;
+  },
+
+  isWebSearchToolName(name) {
+    const normalized = String(name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (!normalized) return false;
+    return normalized === 'web_search' ||
+      normalized === 'websearch' ||
+      normalized.includes('web_search');
+  },
+
+  usedWebSearch() {
+    for (const name of this.collectUsedToolNames()) {
+      if (this.isWebSearchToolName(name)) return true;
+    }
+    return false;
+  },
+
   isToolTraceEntry(entry) {
     const status = String(entry?.status || entry?.type || '').trim().toLowerCase();
     const title = String(entry?.title || '').trim().toLowerCase();

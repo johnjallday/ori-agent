@@ -6466,6 +6466,7 @@ export class WorkspaceTaskPage {
     }
 
     const blocks = [];
+    blocks.push(this.renderWebSearchBadge());
     const latestStorageStatus = this.renderLatestStorageStatus();
     if (latestStorageStatus) {
       blocks.push(latestStorageStatus);
@@ -6530,6 +6531,28 @@ export class WorkspaceTaskPage {
     this.enhanceResultSections();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
+  }
+
+  // A pill at the top of the Result card stating whether this task's answer was
+  // backed by a web search. usedWebSearch() inspects the tool-usage trace, so
+  // the "used" notification only shows when the web_search tool actually ran;
+  // otherwise we surface an explicit "No web search" tag so a reader never has
+  // to guess whether the result drew on live web sources.
+  renderWebSearchBadge() {
+    if (this.usedWebSearch()) {
+      return `
+        <div class="workspace-task-websearch-badge" data-state="used" role="status">
+          <i class="bi bi-globe2" aria-hidden="true"></i>
+          <span>Web search used</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="workspace-task-websearch-badge" data-state="unused" role="status">
+        <i class="bi bi-slash-circle" aria-hidden="true"></i>
+        <span>No web search</span>
+      </div>
+    `;
   }
 
   renderLatestStorageStatus() {

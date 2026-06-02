@@ -1629,6 +1629,40 @@
       font-weight: 700;
     }
 
+    /* Web-search provenance pill at the top of the Result card. Two states:
+       "used" reads as a positive notification (web sources were consulted),
+       "unused" is a muted tag so the absence of web search is stated plainly
+       rather than left ambiguous. */
+    .workspace-task-websearch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      width: fit-content;
+      margin-bottom: 0.85rem;
+      padding: 0.34rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+
+    .workspace-task-websearch-badge i {
+      font-size: 0.9rem;
+    }
+
+    .workspace-task-websearch-badge[data-state="used"] {
+      border-color: color-mix(in srgb, var(--success-color, #16a34a) 45%, var(--border-color));
+      background: color-mix(in srgb, var(--success-color, #16a34a) 12%, var(--bg-primary));
+      color: color-mix(in srgb, var(--success-color, #16a34a) 78%, var(--text-primary));
+    }
+
+    .workspace-task-websearch-badge[data-state="unused"] {
+      border-color: var(--border-color);
+      background: color-mix(in srgb, var(--text-muted, #6b7280) 8%, var(--bg-primary));
+      color: var(--text-secondary);
+    }
+
     /* Collapsed wrapper for the run-history dataset, so the Result leads and
        the CSV preview stays tucked away. Borderless — the artifact section
        inside keeps its own surface, so there's no box-in-box. */
