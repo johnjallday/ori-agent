@@ -241,6 +241,13 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.AgentSkillAccessJSON = data
 		}
 	}
+	if len(ws.Opportunities) > 0 {
+		if data, err := json.Marshal(ws.Opportunities); err != nil {
+			logger.Warn("Failed to marshal workspace opportunities", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.OpportunitiesJSON = data
+		}
+	}
 
 	return sessionWS
 }
@@ -387,6 +394,12 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	}
 	if agentWS.AgentSkillAccess == nil {
 		agentWS.AgentSkillAccess = []workspace.WorkspaceAgentSkillAccess{}
+	}
+
+	if len(ws.OpportunitiesJSON) > 0 {
+		if err := json.Unmarshal(ws.OpportunitiesJSON, &agentWS.Opportunities); err != nil {
+			logger.Warn("Failed to unmarshal workspace opportunities", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 
 	if agentWS.SharedData == nil {

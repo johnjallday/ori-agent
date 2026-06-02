@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 24
+const schemaVersion = 25
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -113,6 +113,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration023WorkspaceTrash(ctx)
 	case 24:
 		return db.migration024WorkspaceRunReferenceURL(ctx)
+	case 25:
+		return db.migration025WorkspaceOpportunities(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1125,6 +1127,26 @@ func (db *DB) migration024WorkspaceRunReferenceURL(ctx context.Context) error {
 		ALTER TABLE workspace_runs ADD COLUMN reference_url TEXT NOT NULL DEFAULT ''
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace run reference URL column: %w", err)
+	}
+	return nil
+}
+
+// migration025WorkspaceOpportunities adds the opportunities_json column so
+// mission findings (Action Center opportunities) persist in the primary store.
+// Before this, the session adapter never serialized Opportunities, so findings
+// were dropped on every read and lost on restart.
+func (db *DB) migration025WorkspaceOpportunities(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN opportunities_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace opportunities_json column: %w", err)
 	}
 	return nil
 }
