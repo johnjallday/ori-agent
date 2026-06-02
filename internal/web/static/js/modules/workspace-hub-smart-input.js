@@ -334,6 +334,15 @@
     };
   }
 
+  function createAutoParseFailureError(message) {
+    const raw = String(message || '').trim()
+      .replace(/^Failed to parse task description:\s*/i, '');
+    const detail = raw ? ` ${raw}` : '';
+    const error = new Error(`Auto parsing did not work. No task was created.${detail}`);
+    error.code = 'auto_parse_failed';
+    return error;
+  }
+
   async function confirmTaskCreation(options = {}) {
     const kind = String(options.kind || 'task').trim();
     const title = kind === 'workflow' ? 'Create this workflow?' : 'Create this task?';
@@ -375,38 +384,6 @@
   async function createTaskFromSmartInput(input) {
     const state = window.WorkspaceHubState.getState();
 
-    const fallbackCreate = async (fallbackError) => {
-      const confirmed = await confirmTaskCreation({
-        kind: 'task',
-        details: [
-          input,
-          fallbackError ? 'Assistant could not auto-parse this request, so it will create a basic task instead.' : ''
-        ]
-      });
-      if (!confirmed) {
-        return { kind: 'task', cancelled: true, fallback: false };
-      }
-
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: state.selectedId,
-          description: input,
-          details: '',
-          priority: 3
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || 'Failed to create task');
-      }
-
-      await window.WorkspaceHubTasks.loadTasks(state.selectedId);
-      return { kind: 'task', fallback: true, error: fallbackError };
-    };
-
     const parseResponse = await fetch('/api/orchestration/tasks/auto-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -418,7 +395,7 @@
 
     if (!parseResponse.ok) {
       const errText = await parseResponse.text();
-      return fallbackCreate(errText || 'Auto-parse unavailable');
+      throw createAutoParseFailureError(errText || 'Auto-parse unavailable');
     }
 
     const parsed = await parseResponse.json();
@@ -509,7 +486,7 @@
 
       if (!parentResponse.ok) {
         const errText = await parentResponse.text();
-        return fallbackCreate(errText || 'Failed to create parent task');
+        throw new Error(errText || 'Failed to create parent task');
       }
 
       const parentPayload = await parentResponse.json();
@@ -696,9 +673,6 @@
           state.smartInput = null;
           return;
         }
-        if (createResult?.fallback && window.Toast) {
-          window.Toast.warning('Auto-parse unavailable. Created a basic task instead.');
-        }
         const createdLabel = createResult?.kind === 'workflow' ? 'Workflow created.' : 'Task created.';
         setBusy(false, createdLabel);
       } else {
@@ -709,9 +683,12 @@
       clearField();
     } catch (error) {
       console.error('Smart input routing failed:', error);
-      setBusy(false, 'Something went wrong. Try again.');
+      const autoParseFailed = error?.code === 'auto_parse_failed';
+      setBusy(false, autoParseFailed ? 'Auto parsing did not work. No task was created.' : 'Something went wrong. Try again.');
       if (window.Toast) {
-        window.Toast.error(decision === 'task' ? 'Failed to create task' : 'Failed to start chat');
+        window.Toast.error(autoParseFailed
+          ? 'Auto parsing did not work. No task was created.'
+          : (decision === 'task' ? 'Failed to create task' : 'Failed to start chat'));
       }
     } finally {
       hideProgress();

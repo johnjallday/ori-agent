@@ -1,10 +1,13 @@
 package llm
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCodexProviderDefaultModels_UsesCachedModels(t *testing.T) {
@@ -159,5 +162,28 @@ func TestNormalizeCodexReasoningEffort(t *testing.T) {
 		if got := normalizeCodexReasoningEffort(tt.input); got != tt.want {
 			t.Fatalf("normalizeCodexReasoningEffort(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestRunCodexExecDeadlineWrapsContextError(t *testing.T) {
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "codex")
+	script := "#!/bin/sh\nprintf 'fake codex run\\n' >&2\nexec sleep 5\n"
+	if err := os.WriteFile(cliPath, []byte(script), 0700); err != nil {
+		t.Fatalf("write fake codex cli: %v", err)
+	}
+
+	provider := &CodexProvider{cliPath: cliPath}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := provider.runCodexExec(ctx, "gpt-test", "return json", "medium", map[string]any{
+		"type": "object",
+	})
+	if err == nil {
+		t.Fatal("expected deadline error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected error to wrap context deadline exceeded, got %v", err)
 	}
 }

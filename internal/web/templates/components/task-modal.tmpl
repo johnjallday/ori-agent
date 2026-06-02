@@ -110,9 +110,9 @@
               Describe your task in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
             </div>
           </div>
-          <div class="task-modal-field">
-            <div class="task-modal-label-row">
-              <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+	          <div class="task-modal-field">
+	            <div class="task-modal-label-row">
+	              <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
               <button
                 type="button"
                 class="btn btn-sm voice-input-btn voice-input-btn--icon"
@@ -127,13 +127,24 @@
                 </svg>
                 <span class="visually-hidden">Hold to talk</span>
               </button>
-            </div>
-            <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
-          </div>
-          <div class="task-modal-field">
-            <label for="taskAutoReferenceURL" class="task-modal-label">Reference URL <span class="task-modal-optional">(optional)</span></label>
-            <input type="url" id="taskAutoReferenceURL" class="task-modal-input" placeholder="https://example.com/spec" autocomplete="off">
-          </div>
+	            </div>
+	            <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
+	          </div>
+	          <div id="taskAutoParseError" class="task-modal-auto-parse-error" role="alert" aria-live="assertive" hidden>
+	            <div class="task-modal-auto-parse-error-icon" aria-hidden="true">
+	              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+	                <path d="M11 7H13V13H11V7M11 15H13V17H11V15M12 2L1 21H23L12 2Z"/>
+	              </svg>
+	            </div>
+	            <div class="task-modal-auto-parse-error-copy">
+	              <div class="task-modal-auto-parse-error-title">Auto parsing did not work</div>
+	              <div id="taskAutoParseErrorMessage" class="task-modal-auto-parse-error-message">No task was created. Try again or switch to Manual.</div>
+	            </div>
+	          </div>
+	          <div class="task-modal-field">
+	            <label for="taskAutoReferenceURL" class="task-modal-label">Reference URL <span class="task-modal-optional">(optional)</span></label>
+	            <input type="url" id="taskAutoReferenceURL" class="task-modal-input" placeholder="https://example.com/spec" autocomplete="off">
+	          </div>
         </div>
         <!-- Auto Edit Mode -->
         <div id="taskAutoEditSection" style="display: none;">

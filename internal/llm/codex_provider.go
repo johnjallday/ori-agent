@@ -205,6 +205,9 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 		if msg == "" {
 			msg = "codex exec failed"
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("%s: %w", msg, ctxErr)
+		}
 		return "", fmt.Errorf("%s: %w", msg, err)
 	}
 

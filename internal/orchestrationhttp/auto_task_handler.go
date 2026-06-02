@@ -17,6 +17,18 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+const (
+	defaultAutoTaskParseTimeout = 60 * time.Second
+	codexAutoTaskParseTimeout   = 120 * time.Second
+)
+
+func autoTaskParseTimeout(providerName string) time.Duration {
+	if strings.EqualFold(providerName, "codex") {
+		return codexAutoTaskParseTimeout
+	}
+	return defaultAutoTaskParseTimeout
+}
+
 // classifyAutoTaskError returns a user-friendly error message for context errors
 func classifyAutoTaskError(err error) string {
 	if err == nil {
@@ -705,14 +717,17 @@ IMPORTANT: Always return the exact JSON structure shown above. Never return erro
 
 	userMessage := description
 
-	// Create a context with timeout (60s to handle slow LLM responses)
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	timeout := autoTaskParseTimeout(providerName)
+	// Codex runs through the CLI and can spend most of the first minute on
+	// startup/schema setup before the model finishes a structured response.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	logger.Info("Auto-task parsing request", logger.Fields{
-		"model":       model,
-		"provider":    providerName,
-		"description": description,
+		"model":           model,
+		"provider":        providerName,
+		"description":     description,
+		"timeout_seconds": int(timeout / time.Second),
 	})
 
 	// Try structured output for providers that support it

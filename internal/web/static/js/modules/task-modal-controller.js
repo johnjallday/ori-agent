@@ -61,6 +61,7 @@ class TaskModalController {
 
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
+    document.getElementById('taskAutoDescription')?.addEventListener('input', () => this.clearAutoParseError());
     document.getElementById('taskModalMCPRequirementAdd')?.addEventListener('click', () => {
       void this.addRequiredMCPConnector();
     });
@@ -502,6 +503,7 @@ class TaskModalController {
     const saveButtonText = document.getElementById('taskModalSaveText');
 
     this.autoMode = (mode === 'auto');
+    this.clearAutoParseError();
 
     if (mode === 'auto') {
       if (this.llmAvailable) {
@@ -1827,6 +1829,60 @@ class TaskModalController {
     elements.container.hidden = true;
   }
 
+  formatAutoParseErrorMessage(error) {
+    const raw = String(error?.message || error || '').trim()
+      .replace(/^Failed to parse task description:\s*/i, '')
+      .replace(/^Auto-parse unavailable:\s*/i, '');
+    const normalized = raw.replace(/\s+/g, ' ').trim();
+
+    if (/request timed out|deadline exceeded/i.test(normalized)) {
+      return 'Auto parsing timed out before the assistant returned a task plan. No task was created.';
+    }
+    if (/request was canceled|context canceled/i.test(normalized)) {
+      return 'Auto parsing was canceled before the assistant returned a task plan. No task was created.';
+    }
+    if (/system model not configured/i.test(normalized)) {
+      return 'Auto mode needs a configured system model before it can create a task.';
+    }
+    if (!normalized) {
+      return 'No task was created. Try again or switch to Manual.';
+    }
+
+    const detail = normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
+    return `No task was created. ${detail}`;
+  }
+
+  showAutoParseError(error) {
+    const errorBox = document.getElementById('taskAutoParseError');
+    const messageEl = document.getElementById('taskAutoParseErrorMessage');
+    const descriptionEl = document.getElementById('taskAutoDescription');
+    const message = this.formatAutoParseErrorMessage(error);
+
+    if (messageEl) messageEl.textContent = message;
+    if (errorBox) errorBox.hidden = false;
+    if (descriptionEl) {
+      if (typeof descriptionEl.setAttribute === 'function') {
+        descriptionEl.setAttribute('aria-invalid', 'true');
+        descriptionEl.setAttribute('aria-describedby', 'taskAutoParseErrorMessage');
+      }
+    }
+  }
+
+  clearAutoParseError() {
+    const errorBox = document.getElementById('taskAutoParseError');
+    const messageEl = document.getElementById('taskAutoParseErrorMessage');
+    const descriptionEl = document.getElementById('taskAutoDescription');
+
+    if (errorBox) errorBox.hidden = true;
+    if (messageEl) messageEl.textContent = 'No task was created. Try again or switch to Manual.';
+    if (descriptionEl) {
+      if (typeof descriptionEl.removeAttribute === 'function') {
+        descriptionEl.removeAttribute('aria-invalid');
+        descriptionEl.removeAttribute('aria-describedby');
+      }
+    }
+  }
+
   /**
    * Save the task (create or update)
    */
@@ -2357,6 +2413,7 @@ class TaskModalController {
     const autoDescriptionInput = document.getElementById('taskAutoDescription');
     const description = autoDescriptionInput?.value?.trim();
     const referenceURL = this.getReferenceURLValue();
+    let parseSucceeded = false;
 
     if (!description) {
       this.showToast('Please describe the task you want to create', 'error');
@@ -2371,6 +2428,7 @@ class TaskModalController {
       return;
     }
 
+    this.clearAutoParseError();
     this.showProgress('parse', {
       headline: 'Parsing request',
       message: 'Analyzing your task description.'
@@ -2405,6 +2463,7 @@ class TaskModalController {
       }
 
       const parsed = await parseResponse.json();
+      parseSucceeded = true;
 
       this.updateProgress('prepare', {
         headline: 'Planning tasks',
@@ -2603,7 +2662,13 @@ class TaskModalController {
       await this.finalizeSuccessfulSave('task:created', { task: createdTask });
     } catch (error) {
       console.error('Failed to save task in auto mode:', error);
-      this.showToast(error.message || 'Failed to create task', 'error');
+      if (!parseSucceeded) {
+        this.showAutoParseError(error);
+        autoDescriptionInput?.focus();
+        this.showToast('Auto parsing did not work. No task was created.', 'error');
+      } else {
+        this.showToast(error.message || 'Failed to create task', 'error');
+      }
     } finally {
       this.isSaving = false;
       this.hideProgress();

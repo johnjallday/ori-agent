@@ -4304,6 +4304,52 @@ body.task-modal-open {
   margin-bottom: 0;
 }
 
+.task-modal-auto-parse-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger-color, #dc3545) 34%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger-color, #dc3545) 10%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.task-modal-auto-parse-error[hidden] {
+  display: none;
+}
+
+.task-modal-auto-parse-error-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger-color, #dc3545);
+  background: color-mix(in srgb, var(--danger-color, #dc3545) 14%, transparent);
+}
+
+.task-modal-auto-parse-error-copy {
+  min-width: 0;
+}
+
+.task-modal-auto-parse-error-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.task-modal-auto-parse-error-message {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .task-modal-subtask-top {
   display: flex;
   align-items: center;

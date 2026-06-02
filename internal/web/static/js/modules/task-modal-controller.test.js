@@ -20,7 +20,7 @@ function loadController(overrides = {}) {
   };
   const window = {};
   const context = {
-    console,
+    console: overrides.console || console,
     document,
     window,
     setTimeout,
@@ -167,6 +167,56 @@ test('auto mode task creation includes reference URL payload', async () => {
   assert.equal(calls[1].url, '/api/orchestration/tasks');
   assert.equal(calls[1].body.reference_url, 'https://example.com/spec');
   assert.equal(calls[1].body.description, 'Parsed task');
+});
+
+test('auto mode parse failure shows inline error and does not create task', async () => {
+  const calls = [];
+  const toasts = [];
+  const attributes = new Map();
+  let focused = false;
+  const { Controller, elements } = loadController({
+    console: { ...console, error: () => {} },
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, body });
+      return {
+        ok: false,
+        text: async () => 'Failed to parse task description: request timed out - the AI took too long to respond.'
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'workspace-1';
+  controller.autoMode = true;
+  controller.showProgress = () => {};
+  controller.updateProgress = () => {};
+  controller.hideProgress = () => {};
+  controller.showToast = (message, type) => toasts.push({ message, type });
+  elements.set('taskAutoDescription', {
+    value: '3 things to do in Vienna Austria',
+    focus() { focused = true; },
+    setAttribute(name, value) { attributes.set(name, value); },
+    removeAttribute(name) { attributes.delete(name); }
+  });
+  elements.set('taskAutoReferenceURL', { value: '' });
+  elements.set('taskModalReferenceURL', { value: '' });
+  const errorBox = { hidden: true };
+  const errorMessage = { textContent: '' };
+  elements.set('taskAutoParseError', errorBox);
+  elements.set('taskAutoParseErrorMessage', errorMessage);
+
+  await controller.saveAutoMode();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/orchestration/tasks/auto-parse');
+  assert.equal(errorBox.hidden, false);
+  assert.match(errorMessage.textContent, /No task was created/);
+  assert.equal(attributes.get('aria-invalid'), 'true');
+  assert.equal(focused, true);
+  assert.deepEqual(toasts.at(-1), {
+    message: 'Auto parsing did not work. No task was created.',
+    type: 'error'
+  });
 });
 
 test('output contract manual edits emit telemetry only once per draft', () => {

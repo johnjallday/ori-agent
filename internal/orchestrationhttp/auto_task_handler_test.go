@@ -1,11 +1,14 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -42,6 +45,23 @@ func TestParseOutputContractSuggestionNormalizesColumns(t *testing.T) {
 	}
 	if response.OutputSpec.Approval != nil || response.OutputSpec.Version != "" {
 		t.Fatalf("suggested spec should be an unapproved draft: %+v", response.OutputSpec)
+	}
+}
+
+func TestAutoTaskParseTimeoutUsesCodexHeadroom(t *testing.T) {
+	if got := autoTaskParseTimeout("codex"); got != 120*time.Second {
+		t.Fatalf("codex timeout = %v, want 120s", got)
+	}
+	if got := autoTaskParseTimeout("openai"); got != 60*time.Second {
+		t.Fatalf("openai timeout = %v, want 60s", got)
+	}
+}
+
+func TestClassifyAutoTaskErrorRecognizesWrappedDeadline(t *testing.T) {
+	err := fmt.Errorf("fake codex run: %w", context.DeadlineExceeded)
+	msg := classifyAutoTaskError(err)
+	if !strings.Contains(msg, "request timed out") {
+		t.Fatalf("expected timeout message, got %q", msg)
 	}
 }
 
