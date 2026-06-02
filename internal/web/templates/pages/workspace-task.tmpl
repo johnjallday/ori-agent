@@ -193,37 +193,23 @@
                  stack in one scroll; each self-hides when it has nothing to
                  show, and the developer-facing cards are grouped in a collapsed
                  disclosure at the bottom. -->
-              <section class="workspace-task-page-card">
+              <!-- Merged card: the task brief ("what this task does") leads,
+                   then the latest result follows below a hairline divider so a
+                   reader flows from intent → outcome in one panel. The result
+                   block keeps its #workspace-task-output-card id (now a div, not
+                   a section) so renderOutput's .hidden toggle hides just the
+                   result portion while the brief above stays visible. -->
+              <section class="workspace-task-page-card workspace-task-brief-card">
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Overview</div>
+                    <div class="workspace-task-page-card-kicker">Task</div>
                     <h2>What this task does</h2>
                   </div>
                 </div>
                 <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
-              </section>
 
-              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
-                    <h2>Why the task paused</h2>
-                  </div>
-                </div>
-                <div class="workspace-task-blocked-reason">
-                  <div class="workspace-task-page-mini-label">Pause reason</div>
-                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
-                </div>
-                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
-                  <div class="workspace-task-page-mini-label">Agent request</div>
-                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
-                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
-                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
-                </div>
-              </section>
-
-              <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
+                <div id="workspace-task-output-card" class="workspace-task-result-block" hidden>
+                  <div class="workspace-task-page-card-header workspace-task-result-block-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Result</div>
                     <h2>Latest result</h2>
@@ -317,6 +303,26 @@
                       <span>Create follow-up</span>
                     </button>
                   </div>
+                </div>
+                </div>
+              </section>
+
+              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
+                    <h2>Why the task paused</h2>
+                  </div>
+                </div>
+                <div class="workspace-task-blocked-reason">
+                  <div class="workspace-task-page-mini-label">Pause reason</div>
+                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
+                </div>
+                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Agent request</div>
+                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
+                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
+                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
                 </div>
               </section>
 
@@ -3332,6 +3338,97 @@
 
     .workspace-task-overview-link:hover {
       color: var(--primary-color);
+    }
+
+    /* --- Merged brief + result card -------------------------------------- */
+
+    /* The brief leads the card: larger primary-colour text with no label
+       (the card kicker/heading already name it). position: relative anchors
+       the hover-revealed edit pencil to the top-right; padding-right keeps
+       wrapped text clear of it. */
+    .workspace-task-brief-lead {
+      position: relative;
+      padding-top: 0;
+      padding-right: 1.8rem;
+      border-top: 0;
+    }
+
+    .workspace-task-brief-lead-value {
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    .workspace-task-brief-lead > .workspace-task-overview-edit-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+    }
+
+    /* Compact meta row: status, reference URL, agent, … as inline
+       "LABEL value" pairs separated by middots, replacing the tall stack of
+       bordered rows so the facts read in one glance. */
+    .workspace-task-brief-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      row-gap: 0.45rem;
+      margin-top: 0.9rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+    }
+
+    .workspace-task-brief-meta-item {
+      position: relative;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-brief-meta-item:not(:last-child)::after {
+      content: "·";
+      margin: 0 0.55rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-brief-meta-label {
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .workspace-task-brief-meta-value {
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      word-break: break-word;
+    }
+
+    .workspace-task-brief-meta-item .workspace-task-overview-edit-btn {
+      width: 1.2rem;
+      height: 1.2rem;
+    }
+
+    .workspace-task-brief-meta-item:hover .workspace-task-overview-edit-btn,
+    .workspace-task-brief-meta-item:focus-within .workspace-task-overview-edit-btn {
+      opacity: 1;
+    }
+
+    /* The result block sits inside the same card as the brief, divided by a
+       hairline rather than a card gap. [hidden] keeps it (and its divider)
+       out until there's a result, so a brief-only card has no dangling rule. */
+    .workspace-task-result-block {
+      margin-top: 1.25rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .workspace-task-result-block[hidden] {
+      display: none;
+    }
+
+    .workspace-task-result-block-header {
+      margin-bottom: 0.85rem;
     }
 
     .workspace-task-page-copy-block,
