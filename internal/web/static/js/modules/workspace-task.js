@@ -1837,16 +1837,75 @@ export class WorkspaceTaskPage {
   }
 
   // setHeroOverflowOpen toggles the hero "more actions" menu (Copy link,
-  // Delete). CSS-positioned (the hero doesn't clip it), so this only syncs the
-  // data-open / aria-expanded / hidden state.
+  // Delete). The menu is position: fixed because the hero card sets
+  // overflow: hidden, which clipped the popover when it was anchored with
+  // position: absolute. Coordinates are derived from the toggle's bounding
+  // rect on each open; scroll/resize close the menu so the position can't
+  // drift out of sync. Mirrors setOutputOverflowOpen.
   setHeroOverflowOpen(open) {
     const container = this.elements.heroOverflow;
     const toggle = this.elements.heroOverflowToggle;
     const menu = this.elements.heroOverflowMenu;
     if (!container || !toggle || !menu) return;
-    container.dataset.open = open ? 'true' : 'false';
-    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    menu.hidden = !open;
+
+    const next = Boolean(open);
+    container.dataset.open = next ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+
+    if (next) {
+      menu.hidden = false;
+      this.positionHeroOverflowMenu();
+      this.bindHeroOverflowDismissHandlers();
+    } else {
+      menu.hidden = true;
+      menu.style.top = '';
+      menu.style.left = '';
+      this.unbindHeroOverflowDismissHandlers();
+    }
+  }
+
+  positionHeroOverflowMenu() {
+    const toggle = this.elements.heroOverflowToggle;
+    const menu = this.elements.heroOverflowMenu;
+    if (!toggle || !menu) return;
+
+    const toggleRect = toggle.getBoundingClientRect();
+    const gap = 6;
+    // Measure the menu now that it's visible. Clamp to the viewport so the
+    // popover doesn't slip off-screen on narrow widths or near the edge.
+    const menuRect = menu.getBoundingClientRect();
+    const menuWidth = menuRect.width || 176;
+    const menuHeight = menuRect.height || 100;
+    const viewportPad = 8;
+
+    let left = toggleRect.right - menuWidth;
+    if (left < viewportPad) left = viewportPad;
+    const maxLeft = window.innerWidth - menuWidth - viewportPad;
+    if (left > maxLeft) left = maxLeft;
+
+    let top = toggleRect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPad) {
+      top = toggleRect.top - menuHeight - gap;
+    }
+    if (top < viewportPad) top = viewportPad;
+
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+  }
+
+  bindHeroOverflowDismissHandlers() {
+    if (this._heroOverflowDismissBound) return;
+    this._heroOverflowDismiss = () => this.setHeroOverflowOpen(false);
+    window.addEventListener('scroll', this._heroOverflowDismiss, { passive: true, capture: true });
+    window.addEventListener('resize', this._heroOverflowDismiss);
+    this._heroOverflowDismissBound = true;
+  }
+
+  unbindHeroOverflowDismissHandlers() {
+    if (!this._heroOverflowDismissBound) return;
+    window.removeEventListener('scroll', this._heroOverflowDismiss, { capture: true });
+    window.removeEventListener('resize', this._heroOverflowDismiss);
+    this._heroOverflowDismissBound = false;
   }
 
   // setOutputOverflowOpen drives the demoted-actions popover (Copy,

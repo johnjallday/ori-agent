@@ -595,10 +595,12 @@
       position: relative;
     }
 
+    /* position: fixed (coordinates set in JS) because the hero card sets
+       overflow: hidden to keep its rounded corners clean, which clipped this
+       popover when anchored with position: absolute. Mirrors the output
+       overflow menu's approach. */
     .workspace-task-hero-overflow-menu {
-      position: absolute;
-      top: calc(100% + 0.4rem);
-      right: 0;
+      position: fixed;
       z-index: 20;
       min-width: 11rem;
       padding: 0.35rem;
