@@ -3668,6 +3668,202 @@
       outline: none;
     }
 
+    /* Floating toolbar shown when text inside a result is highlighted, so a
+       reader can act on just that span. position: fixed + JS-set top/left
+       (from the selection's bounding rect) keeps it anchored to the
+       selection and clear of the card's overflow clipping. */
+    .workspace-task-selection-popover {
+      position: fixed;
+      z-index: 10070;
+      display: flex;
+      gap: 0.15rem;
+      padding: 0.28rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+      box-shadow: 0 14px 36px rgba(10, 10, 10, 0.26);
+    }
+
+    .workspace-task-selection-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.6rem;
+      border: none;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-action i {
+      font-size: 0.92rem;
+    }
+
+    .workspace-task-selection-action:hover,
+    .workspace-task-selection-action:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+      color: var(--primary-color);
+      outline: none;
+    }
+
+    /* Dialog shown when turning a selection into a subtask/follow-up or asking
+       about it. Self-contained (injected into <body>), so it carries its own
+       backdrop + centred card rather than relying on Bootstrap's modal. */
+    .workspace-task-selection-dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10080;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      background: rgba(8, 8, 10, 0.55);
+    }
+
+    .workspace-task-selection-dialog {
+      width: min(34rem, 100%);
+      max-height: calc(100vh - 2.5rem);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      padding: 1.25rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 16px;
+      background: var(--bg-primary);
+      box-shadow: 0 24px 60px rgba(8, 8, 10, 0.4);
+    }
+
+    .workspace-task-selection-dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .workspace-task-selection-dialog-head h3 {
+      margin: 0;
+      font-family: "Fraunces", serif;
+      font-size: 1.15rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-selection-dialog-close {
+      border: none;
+      background: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0.2rem;
+      line-height: 1;
+    }
+
+    .workspace-task-selection-dialog-close:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-selection-dialog-excerpt {
+      margin: 0;
+      padding: 0.65rem 0.8rem;
+      border-left: 3px solid color-mix(in srgb, var(--primary-color) 55%, transparent);
+      border-radius: 0 8px 8px 0;
+      background: color-mix(in srgb, var(--primary-color) 7%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-task-selection-dialog-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .workspace-task-selection-dialog-label {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-selection-dialog-segmented {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-selection-dialog-segment {
+      flex: 1 1 12rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-selection-dialog-segment:has(input:checked) {
+      border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-task-selection-dialog-presets {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-selection-dialog-preset {
+      padding: 0.32rem 0.7rem;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-dialog-preset:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+      color: var(--primary-color);
+    }
+
+    .workspace-task-selection-dialog-check {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-dialog-error {
+      color: var(--danger-color, #dc2626);
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-selection-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.2rem;
+    }
+
     .workspace-task-page-text-button {
       margin-top: 0.75rem;
       border: none;

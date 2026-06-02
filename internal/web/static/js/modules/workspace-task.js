@@ -11,6 +11,7 @@ import {
   rowsToCSV,
 } from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
+import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 
 const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
@@ -1157,6 +1158,7 @@ export class WorkspaceTaskPage {
       this.setOutputOverflowOpen(false);
     });
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.initResultSelectionActions();
     this.elements.outputCreateSkillBtn?.addEventListener('click', () => {
       this.openSkillDraftModal();
       this.setOutputOverflowOpen(false);
@@ -9409,4 +9411,5 @@ Object.assign(
   WorkspaceTaskPage.prototype,
   taskExecutionViewsMethods,
   taskSkillDraftMethods,
+  taskResultActionsMethods,
 );
