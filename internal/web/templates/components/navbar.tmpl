@@ -41,17 +41,16 @@
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
       <div class="ori-navbar-links">
-        <a href="/agents" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
+        <a href="/agents" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}"{{if eq .CurrentPage "agents"}} aria-current="page"{{end}}>Agents</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
-        <a href="/workspaces" class="nav-link-item {{if eq .CurrentPage "workspaces"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
+        <a href="/workspaces" class="nav-link-item {{if eq .CurrentPage "workspaces"}}active{{end}}"{{if eq .CurrentPage "workspaces"}} aria-current="page"{{end}}>Workspaces</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
-        <a href="/action-center" class="nav-link-item {{if eq .CurrentPage "action-center"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Action Center</a>
+        <a href="/action-center" class="nav-link-item {{if eq .CurrentPage "action-center"}}active{{end}}"{{if eq .CurrentPage "action-center"}} aria-current="page"{{end}}>Action Center</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a
           href="/vaults"
           id="vaultLauncherButton"
           class="nav-link-item ori-navbar-vault-launcher {{if eq .CurrentPage "vault"}}active{{end}}"
-          style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;"
           {{if ne .CurrentPage "vault"}}data-bs-toggle="modal"{{end}}
           {{if ne .CurrentPage "vault"}}data-bs-target="#vaultModal"{{end}}
           {{if ne .CurrentPage "vault"}}aria-controls="vaultModal"{{end}}
