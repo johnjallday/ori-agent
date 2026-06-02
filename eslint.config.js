@@ -183,6 +183,7 @@ export default defineConfig([
   {
     files: ['internal/web/static/js/modules/*.test.js'],
     languageOptions: {
+      sourceType: 'module',
       globals: {
         ...globals.node
       }
