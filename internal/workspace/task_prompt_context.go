@@ -67,6 +67,7 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	prompt.WriteString("The workspace snapshot below shows note ids and truncated previews (~160 chars). When a task asks to review, summarize, transform, or create tasks from a note, you must call the workspace_notes tool with the note's id to read the full content before answering instead of relying on the preview or asking the user to paste it. ")
 	prompt.WriteString("Use workspace_tasks, workspace_sessions, workspace_files, and workspace_directories the same way to read full workspace state on demand. ")
 	prompt.WriteString("For fresh public-information tasks such as today's weather, pollen, prices, scores, news, or other current facts, use web_search first when available, then read relevant source pages with web_fetch or browser as needed. Do not guess direct source URLs for location-specific facts; verify that fetched pages match the requested city, region, or ZIP before using them. If search results are empty, broaden the query, remove site-specific filters, and try multiple public sources instead of stopping. Do not return raw Tool Results as the final answer. Do not answer those tasks from prior blocked attempts or workspace task-status summaries unless the user explicitly asks for task status. Include source names or URLs and visible dates when available. ")
+	prompt.WriteString("When a task includes a Reference URL, treat it as authoritative source material. Inspect it with available fetch, browser, or web tools before making claims about its contents or implementing changes that depend on it. If you cannot inspect it because tools are unavailable, the host is unreachable, authentication is required, or access is blocked, state that limitation instead of fabricating URL contents. ")
 	prompt.WriteString("If you use tools, continue reasoning from the tool results until you can either complete the requested step or explain exactly what is still blocked. ")
 	prompt.WriteString("If a task asks for file or folder contents, directory listings, or filesystem state, you must verify the answer with filesystem tools before responding. ")
 	prompt.WriteString("Do not answer filesystem listing tasks from the workspace snapshot, prior attempt summaries, or assumptions alone. ")
@@ -128,6 +129,9 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 
 	if description := sanitizeTaskPromptText(ws.Description, taskPromptPreviewLimit); description != "" {
 		lines = append(lines, fmt.Sprintf("- Workspace Description: %q", description))
+	}
+	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
+		lines = append(lines, fmt.Sprintf("- Task Reference URL: %q", sanitizeTaskPromptText(referenceURL, taskPromptPathLimit)))
 	}
 
 	lines = append(lines,
@@ -236,6 +240,15 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 	var ws *Workspace
 	if h.workspaceStore != nil && strings.TrimSpace(task.WorkspaceID) != "" {
 		ws, _ = h.workspaceStore.Get(task.WorkspaceID)
+	}
+	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
+		prepared.Items = append(prepared.Items, TaskPreparedContextItem{
+			Kind:   "reference_url",
+			Ref:    referenceURL,
+			Name:   "Reference URL",
+			Access: "on_demand",
+			Detail: "The task includes an authoritative reference URL; inspect it with available web tools before claims or implementation that depends on its contents.",
+		})
 	}
 	if ws != nil {
 		if fileCount := countTaskPromptFiles(ws.Attachments); fileCount > 0 {
@@ -583,6 +596,13 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 		prompt.WriteString("## Task Details\n\n")
 		prompt.WriteString(details)
 		prompt.WriteString("\n\n")
+	}
+
+	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
+		prompt.WriteString("## Reference URL\n\n")
+		prompt.WriteString(referenceURL)
+		prompt.WriteString("\n\n")
+		prompt.WriteString("Treat this URL as authoritative source material for this task. Inspect it with available fetch, browser, or web tools before making claims about its contents. If you cannot inspect it, state that limitation in your final response.\n\n")
 	}
 
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {

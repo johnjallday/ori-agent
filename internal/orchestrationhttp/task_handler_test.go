@@ -1012,6 +1012,60 @@ func TestHandleCreateAndUpdateTask_OutputContract(t *testing.T) {
 	}
 }
 
+func TestHandleCreateAndUpdateTask_ReferenceURL(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "References"})
+	ws.ID = "workspace-references"
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	createBody := `{
+		"workspace_id":"workspace-references",
+		"description":"Review spec",
+		"reference_url":" https://example.com/spec "
+	}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.TasksHandler(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var createResp struct {
+		Task *workspace.Task `json:"task"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createResp.Task == nil || createResp.Task.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("created task = %+v, want normalized reference URL", createResp.Task)
+	}
+
+	updateBody := `{"reference_url":""}`
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/orchestration/tasks/"+createResp.Task.ID, strings.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	handler.TasksHandler(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updated workspace.Task
+	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.ReferenceURL != "" {
+		t.Fatalf("ReferenceURL = %q, want cleared", updated.ReferenceURL)
+	}
+}
+
 func TestHandleTaskOutputReview_ApproveAppend(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Reviews"})

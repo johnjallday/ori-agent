@@ -210,6 +210,8 @@ func writeRunError(w http.ResponseWriter, err error) {
 		orihttp.Conflict(w, "Workspace run already exists")
 	case errors.Is(err, ErrProfileNotFound), errors.Is(err, ErrExecutorNotRegistered):
 		orihttp.BadRequest(w, err.Error())
+	case strings.Contains(err.Error(), "reference_url"):
+		orihttp.BadRequest(w, err.Error())
 	default:
 		orihttp.InternalError(w, err.Error())
 	}

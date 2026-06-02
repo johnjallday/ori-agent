@@ -70,7 +70,7 @@ func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
 	result, err := adapter.ExecuteStep(ctx, cliagent.StepRequest{
 		TaskID:     run.ID,
 		StepNumber: 1,
-		Prompt:     run.Prompt,
+		Prompt:     BuildRunExecutionPrompt(run),
 		WorkingDir: workingDir,
 		Model:      cfg.Model,
 		Budget: cliagent.StepBudget{
@@ -87,6 +87,21 @@ func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
 	if result.Output != "" {
 		e.addTraceEvents(run.ID, NewTraceEvent(run.ID, TraceMessage, TraceSource("native_cli"), TraceMessageText(result.Output), TraceData(map[string]any{"backend": backend})))
 		e.addArtifact(run.ID, NewArtifact(run.ID, ArtifactLog, ArtifactInline([]byte(result.Output)), ArtifactMetadata(map[string]any{"backend": backend})))
+	}
+	if evidence := ReferenceURLInspectionEvidenceForOutput(run, result.Output, "native_cli"); evidence != nil {
+		e.addArtifact(run.ID, ReferenceURLInspectionArtifact(run.ID, evidence))
+		e.addTraceEvents(run.ID, NewTraceEvent(
+			run.ID,
+			TraceMessage,
+			TraceSource("native_cli"),
+			TraceMessageText("Reference URL inspection evidence recorded"),
+			TraceData(map[string]any{
+				"role":   referenceURLInspectionRole,
+				"url":    evidence.URL,
+				"status": string(evidence.Status),
+				"detail": evidence.Detail,
+			}),
+		))
 	}
 	if snapshot != nil {
 		if changes, cmpErr := e.diff.Compare(snapshot, workingDir); cmpErr == nil && len(changes) > 0 {

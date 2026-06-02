@@ -32,8 +32,9 @@ func TestSQLiteStoreRunArtifactTraceRoundTrip(t *testing.T) {
 			Strategy:                 "task_default",
 			IncludeWorkspaceSnapshot: true,
 		},
-		Prompt: "do work",
-		Status: RunStatusPending,
+		ReferenceURL: "https://example.com/spec",
+		Prompt:       "do work",
+		Status:       RunStatusPending,
 	}
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -83,6 +84,9 @@ func TestSQLiteStoreRunArtifactTraceRoundTrip(t *testing.T) {
 	}
 	if got.ParentRunID != "parent-1" {
 		t.Fatalf("ParentRunID = %q, want parent-1", got.ParentRunID)
+	}
+	if got.ReferenceURL != "https://example.com/spec" {
+		t.Fatalf("ReferenceURL = %q, want persisted reference URL", got.ReferenceURL)
 	}
 	if got.Cost == nil || got.Cost.TotalTokens != 5 {
 		t.Fatalf("Cost = %+v, want total tokens 5", got.Cost)

@@ -130,6 +130,10 @@
             </div>
             <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
           </div>
+          <div class="task-modal-field">
+            <label for="taskAutoReferenceURL" class="task-modal-label">Reference URL <span class="task-modal-optional">(optional)</span></label>
+            <input type="url" id="taskAutoReferenceURL" class="task-modal-input" placeholder="https://example.com/spec" autocomplete="off">
+          </div>
         </div>
         <!-- Auto Edit Mode -->
         <div id="taskAutoEditSection" style="display: none;">
@@ -214,6 +218,10 @@
           </button>
         </div>
         <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="3"></textarea>
+      </div>
+      <div class="task-modal-field">
+        <label for="taskModalReferenceURL" class="task-modal-label">Reference URL <span class="task-modal-optional">(optional)</span></label>
+        <input type="url" id="taskModalReferenceURL" class="task-modal-input" placeholder="https://example.com/spec" autocomplete="off">
       </div>
       <div style="display: flex; gap: 12px;">
         <div class="task-modal-field" style="flex: 1;">

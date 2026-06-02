@@ -7,10 +7,11 @@ func NewReport(summary string, artifacts []Artifact, validation *ValidationResul
 		status = validationStatus(validation)
 	}
 	return Report{
-		Summary:           summary,
-		ChangedFiles:      changedFiles,
-		ValidationStatus:  status,
-		HumanReviewNeeded: status != ValidationStatusPassed,
+		Summary:                summary,
+		ChangedFiles:           changedFiles,
+		ValidationStatus:       status,
+		ReferenceURLInspection: referenceURLInspectionFromArtifacts(artifacts),
+		HumanReviewNeeded:      status != ValidationStatusPassed,
 	}
 }
 
@@ -32,6 +33,40 @@ func validationStatus(result *ValidationResult) string {
 		return ValidationStatusPartial
 	}
 	return ValidationStatusPassed
+}
+
+func referenceURLInspectionFromArtifacts(artifacts []Artifact) *ReferenceURLInspectionEvidence {
+	for i := len(artifacts) - 1; i >= 0; i-- {
+		artifact := artifacts[i]
+		if artifact.Metadata == nil {
+			continue
+		}
+		role, _ := artifact.Metadata["role"].(string)
+		if role != referenceURLInspectionRole {
+			continue
+		}
+		statusText, _ := artifact.Metadata["status"].(string)
+		status := NormalizeReferenceURLInspectionStatus(statusText)
+		url, _ := artifact.Metadata["url"].(string)
+		source, _ := artifact.Metadata["source"].(string)
+		detail, _ := artifact.Metadata["detail"].(string)
+		return &ReferenceURLInspectionEvidence{
+			URL:    url,
+			Status: status,
+			Source: source,
+			Detail: detail,
+		}
+	}
+	return nil
+}
+
+func NormalizeReferenceURLInspectionStatus(value string) ReferenceURLInspectionStatus {
+	switch ReferenceURLInspectionStatus(value) {
+	case ReferenceURLInspectionInspected, ReferenceURLInspectionBlocked:
+		return ReferenceURLInspectionStatus(value)
+	default:
+		return ReferenceURLInspectionUnknown
+	}
 }
 
 func changedFilesFromArtifacts(artifacts []Artifact) []string {

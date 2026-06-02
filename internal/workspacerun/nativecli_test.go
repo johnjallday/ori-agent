@@ -38,14 +38,17 @@ func TestNativeCLIExecutorSuccessCapturesArtifactsTraceAndCost(t *testing.T) {
 	}
 	executor := NewNativeCLIExecutor(cliagent.NewRegistry(adapter))
 	run := &Run{
-		ID:     "run-1",
-		Prompt: "change a file",
+		ID:           "run-1",
+		ProfileID:    ProfileEngineering,
+		Prompt:       "change a file",
+		ReferenceURL: "https://example.com/spec",
 		Executor: Executor{
 			Kind:   ExecutorKindNativeCLI,
 			Ref:    cliagent.BackendCodex,
 			Config: testRawConfig(t, NativeCLIExecutorConfig{Model: "gpt-5.3-codex"}),
 		},
-		Scope: Scope{RepoPath: workingDir},
+		Scope:  Scope{RepoPath: workingDir, NetworkAllowlist: []string{"example.com"}},
+		Policy: Policy{Mutation: PolicyMutationAllowed, Approval: PolicyApprovalFinalOnly},
 	}
 
 	if err := executor.Execute(ctx, run); err != nil {
@@ -53,6 +56,17 @@ func TestNativeCLIExecutorSuccessCapturesArtifactsTraceAndCost(t *testing.T) {
 	}
 	if adapter.lastRequest.Model != "gpt-5.3-codex" || adapter.lastRequest.WorkingDir != workingDir {
 		t.Fatalf("request = %+v, want model and working dir", adapter.lastRequest)
+	}
+	for _, want := range []string{
+		"# Workspace Run Execution Contract",
+		"https://example.com/spec",
+		"Reference URL inspection: inspected",
+		"## User Prompt",
+		"change a file",
+	} {
+		if !strings.Contains(adapter.lastRequest.Prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, adapter.lastRequest.Prompt)
+		}
 	}
 	if run.Cost == nil || run.Cost.TotalTokens != 15 || run.Cost.USD != 0.01 {
 		t.Fatalf("Cost = %+v, want CLI usage", run.Cost)
@@ -71,6 +85,9 @@ func TestNativeCLIExecutorSuccessCapturesArtifactsTraceAndCost(t *testing.T) {
 	if !hasArtifactKind(artifacts, ArtifactDiff) {
 		t.Fatalf("artifacts = %+v, want diff/change-summary artifact", artifacts)
 	}
+	if !hasReferenceURLInspectionArtifact(artifacts, ReferenceURLInspectionUnknown) {
+		t.Fatalf("artifacts = %+v, want unknown reference URL inspection artifact", artifacts)
+	}
 
 	trace, err := executor.TraceEvents(ctx, run)
 	if err != nil {
@@ -78,6 +95,37 @@ func TestNativeCLIExecutorSuccessCapturesArtifactsTraceAndCost(t *testing.T) {
 	}
 	if !hasTraceKind(trace, TraceToolCall) || !hasTraceKind(trace, TraceMessage) {
 		t.Fatalf("trace = %+v, want CLI event and output message", trace)
+	}
+}
+
+func TestNativeCLIExecutorCapturesReportedReferenceURLInspection(t *testing.T) {
+	ctx := context.Background()
+	adapter := &stubCLIAgentAdapter{
+		backend:   cliagent.BackendClaude,
+		available: true,
+		result: &cliagent.StepResult{
+			Output: "done\nReference URL inspection: blocked - login required",
+			Status: cliagent.StepCompleted,
+		},
+	}
+	executor := NewNativeCLIExecutor(cliagent.NewRegistry(adapter))
+	run := &Run{
+		ID:           "run-1",
+		Prompt:       "review spec",
+		ReferenceURL: "https://example.com/spec",
+		Executor:     Executor{Kind: ExecutorKindNativeCLI, Ref: cliagent.BackendClaude},
+		Scope:        Scope{RepoPath: t.TempDir()},
+	}
+
+	if err := executor.Execute(ctx, run); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	artifacts, err := executor.Artifacts(ctx, run)
+	if err != nil {
+		t.Fatalf("Artifacts: %v", err)
+	}
+	if !hasReferenceURLInspectionArtifact(artifacts, ReferenceURLInspectionBlocked) {
+		t.Fatalf("artifacts = %+v, want blocked reference URL inspection artifact", artifacts)
 	}
 }
 
@@ -220,6 +268,21 @@ func changedFilesArtifactContains(artifacts []Artifact, path string) bool {
 func hasTraceKind(events []TraceEvent, kind TraceEventKind) bool {
 	for _, event := range events {
 		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasReferenceURLInspectionArtifact(artifacts []Artifact, status ReferenceURLInspectionStatus) bool {
+	for _, artifact := range artifacts {
+		if artifact.Metadata == nil {
+			continue
+		}
+		if artifact.Metadata["role"] != referenceURLInspectionRole {
+			continue
+		}
+		if artifact.Metadata["status"] == string(status) {
 			return true
 		}
 	}
