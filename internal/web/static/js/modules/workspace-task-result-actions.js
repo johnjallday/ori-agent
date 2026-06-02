@@ -51,7 +51,7 @@ export const taskResultActionsMethods = {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
 
-    const text = String(selection.toString() || '').replace(/ /g, ' ').trim();
+    const text = String(selection.toString() || '').replace(/\u00a0/g, ' ').trim();
     if (text.length < 3) return null;
 
     const container = this.elements.output;
@@ -295,7 +295,7 @@ export const taskResultActionsMethods = {
   // A self-contained dialog (no Bootstrap dependency) for turning a highlighted
   // excerpt into a child subtask or a standalone follow-up. "ask" mode reuses
   // the same form, pre-framed as a question with quick presets.
-  openSelectionTaskDialog({ text, title, mode = 'spawn' } = {}) {
+  openSelectionTaskDialog({ text, mode = 'spawn' } = {}) {
     const selection = String(text || '').trim();
     if (!selection) return;
     if (!this.task?.id) {
