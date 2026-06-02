@@ -141,6 +141,9 @@ const (
 	WorkspaceStatusCompleted WorkspaceStatus = "completed"
 	WorkspaceStatusFailed    WorkspaceStatus = "failed"
 	WorkspaceStatusCancelled WorkspaceStatus = "cancelled"
+	// WorkspaceStatusTrashed marks a workspace whose folder has been moved to the
+	// system trash. It is hidden from listings but can be restored.
+	WorkspaceStatusTrashed WorkspaceStatus = "trashed"
 )
 
 // WorkspaceKind describes whether a record is a real workspace or an

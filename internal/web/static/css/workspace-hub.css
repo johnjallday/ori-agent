@@ -2114,6 +2114,36 @@ button.hub-stat[hidden] {
   flex-wrap: wrap;
 }
 
+.launcher-undo-btn {
+  position: relative;
+}
+
+/* Draw attention while there are deletions waiting to be committed. */
+.launcher-undo-btn.has-pending {
+  border-color: var(--accent-primary, #1F6B4E);
+  color: var(--accent-primary, #1F6B4E);
+}
+
+.launcher-undo-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-primary, #1F6B4E);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.launcher-undo-count[hidden] {
+  display: none;
+}
+
 .launcher-workspace-root {
   margin-top: 1rem;
   padding: 1rem 1.05rem;

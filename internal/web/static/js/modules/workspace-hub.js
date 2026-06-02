@@ -107,6 +107,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherWorkspaceRootResetBtn: document.getElementById('launcherWorkspaceRootResetBtn'),
     launcherWorkspaceRootCancelBtn: document.getElementById('launcherWorkspaceRootCancelBtn'),
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
+    launcherUndoBtn: document.getElementById('launcherUndoBtn'),
     launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
     launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
@@ -221,6 +222,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   const { formatDate, flattenWorkspaces, collectWorkspaceDescendantIds } = window.WorkspaceHubUtils;
 
   let pendingDeleteGroupId = null;
+
+  // Undo support: deleting a workspace moves it to the system Trash (reversible)
+  // and pushes it onto this stack, so the toolbar Undo button can restore the most
+  // recent deletions at any time during the session.
+  const undoStack = []; // LIFO of { id, label }
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
   let launcherTaskBadgeByWorkspace = new Map();
@@ -1883,18 +1889,109 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
+  // Reflect the current undo stack on the toolbar button (enabled state, label,
+  // and the pending-count badge).
+  function updateUndoButton() {
+    const btn = elements.launcherUndoBtn;
+    if (!btn) return;
+    const count = undoStack.length;
+    btn.disabled = count === 0;
+    btn.classList.toggle('has-pending', count > 0);
+
+    let label;
+    if (count === 0) {
+      label = 'Nothing to undo';
+    } else {
+      const last = undoStack[count - 1];
+      label = `Undo delete of "${last.label}"${count > 1 ? ` (+${count - 1} more)` : ''}`;
+    }
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+
+    const badge = btn.querySelector('.launcher-undo-count');
+    if (badge) {
+      badge.textContent = count > 1 ? String(count) : '';
+      badge.hidden = count <= 1;
+    }
+  }
+
+  // Move a workspace to the trash. Deletion is reversible server-side (the folder
+  // is moved to the system Trash), so it is pushed onto the undo stack and can be
+  // restored from the toolbar Undo button at any time during the session.
+  async function softDeleteWorkspace(workspaceId) {
+    const label = getWorkspaceLabel(workspaceId) || 'Workspace';
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=true`, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(await response.text() || 'Failed to delete workspace');
+      }
+
+      // The server reports whether the workspace was moved to the Trash
+      // (restorable) or permanently deleted; only offer Undo when it's restorable.
+      let trashed = false;
+      if (response.status !== 204 && response.status !== 404) {
+        try {
+          const data = await response.json();
+          trashed = !!(data && data.trashed);
+        } catch (_) { /* no body */ }
+      }
+
+      if (trashed) {
+        undoStack.push({ id: workspaceId, label });
+        updateUndoButton();
+      }
+      await loadWorkspaces();
+      if (window.Toast) {
+        if (trashed) {
+          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', { title: 'Workspace deleted' });
+        } else {
+          window.Toast.success(`Deleted "${label}"`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete workspace:', err);
+      if (window.Toast) window.Toast.error(`Failed to delete "${label}"`);
+    }
+  }
+
+  // Restore the most recently trashed workspace by moving its folder back out of
+  // the system Trash and reactivating it.
+  async function undoLastAction() {
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+
+    const btn = elements.launcherUndoBtn;
+    if (btn) btn.disabled = true; // guard against double-clicks during the request
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(entry.id)}/restore`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Failed to restore workspace');
+      }
+      undoStack.pop();
+      updateUndoButton();
+      await loadWorkspaces();
+      if (window.Toast) window.Toast.success(`Restored "${entry.label}"`);
+    } catch (err) {
+      console.error('Failed to restore workspace:', err);
+      updateUndoButton(); // re-enable the button
+      if (window.Toast) window.Toast.error(`Couldn't restore "${entry.label}" — it may have been emptied from Trash`);
+    }
+  }
+
   function confirmDeleteWorkspace(workspaceId) {
     if (!workspaceId) return;
 
+    // Groups (with children) remain an explicit, confirmed operation since they
+    // can remove many workspaces' contents at once and are not moved to the trash.
     if (workspaceHasChildren(workspaceId) || workspaceIsGroup(workspaceId)) {
       openDeleteGroupModal(workspaceId);
       return;
     }
 
-    const label = getWorkspaceLabel(workspaceId);
-    if (!confirm(`Delete "${label}"?\n\nThis will permanently remove the workspace folder and all its contents (files, notes, etc.) from disk. This action cannot be undone.`)) return;
-
-    void deleteWorkspacesByIds([workspaceId]);
+    // Single workspaces are moved to the trash (reversible); the toolbar Undo
+    // button restores them, so no blocking confirm dialog is needed.
+    void softDeleteWorkspace(workspaceId);
   }
 
   async function deleteSelectedWorkspaces() {
@@ -2690,6 +2787,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherRefreshBtn) {
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
+    }
+
+    if (elements.launcherUndoBtn) {
+      elements.launcherUndoBtn.addEventListener('click', () => undoLastAction());
     }
 
     if (elements.launcherWorkspaceRootEditBtn) {
