@@ -3577,6 +3577,52 @@
       outline-offset: 2px;
     }
 
+    /* Per-item action trigger (list items / bold-led paragraphs). Mirrors the
+       section action, but sits in a reserved RIGHT gutter so it never overlaps
+       the item text, and is revealed on hover/focus. */
+    .workspace-task-result-item {
+      position: relative;
+      padding-right: 2.4rem;
+    }
+
+    .workspace-task-result-item-action {
+      position: absolute;
+      top: 0.05rem;
+      right: 0;
+      z-index: 2;
+      width: 1.75rem;
+      height: 1.75rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      color: var(--primary-color);
+      box-shadow: 0 8px 18px rgba(10, 10, 10, 0.08);
+      opacity: 0;
+      transform: translateX(0.25rem);
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-result-item:hover .workspace-task-result-item-action,
+    .workspace-task-result-item:focus-within .workspace-task-result-item-action,
+    .workspace-task-result-item-action:focus-visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .workspace-task-result-item-action:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 48%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-primary));
+    }
+
+    .workspace-task-result-item-action:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 52%, transparent);
+      outline-offset: 2px;
+    }
+
     .workspace-task-result-section-action:disabled {
       cursor: wait;
       opacity: 1;

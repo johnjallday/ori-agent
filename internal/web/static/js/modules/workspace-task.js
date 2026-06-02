@@ -6552,6 +6552,7 @@ export class WorkspaceTaskPage {
     this.bindResultArtifactActions();
     this.bindOutputReviewActions();
     this.enhanceResultSections();
+    this.enhanceResultItems();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
   }

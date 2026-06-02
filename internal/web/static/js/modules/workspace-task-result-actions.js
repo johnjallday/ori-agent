@@ -76,6 +76,56 @@ export const taskResultActionsMethods = {
     return summarizeText(firstLine, 80);
   },
 
+  // Discoverable per-item triggers: results are often lists (or bold-led
+  // paragraphs) with no Markdown headings, so the heading-based section
+  // enhancer never fires. Here we attach a hover-revealed button to each list
+  // item / bold-led paragraph that opens the same popover, anchored to the
+  // item — so a reader doesn't have to manually select to act on one item.
+  enhanceResultItems() {
+    // renderOutput rebuilds the result DOM on each call, which would orphan a
+    // popover anchored to a now-removed trigger; close it before re-enhancing.
+    this.closeResultActionPopover();
+    const prose = this.elements.output?.querySelector?.('.workspace-task-page-prose');
+    if (!prose) return;
+
+    const candidates = [];
+    prose.querySelectorAll('li').forEach((li) => candidates.push(li));
+    prose.querySelectorAll(':scope > p').forEach((p) => {
+      if (p.firstElementChild && p.firstElementChild.tagName === 'STRONG') candidates.push(p);
+    });
+
+    candidates.forEach((item) => {
+      if (item.dataset.resultItemEnhanced === 'true') return;
+      const text = String(item.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length < 8) return; // skip trivial markers / empty wrappers
+
+      item.dataset.resultItemEnhanced = 'true';
+      item.classList.add('workspace-task-result-item');
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'workspace-task-result-item-action';
+      button.title = 'Actions for this item';
+      button.setAttribute('aria-label', 'Actions for this item');
+      button.innerHTML = '<i class="bi bi-three-dots" aria-hidden="true"></i>';
+
+      // Stop the button's mouse events from reaching the result container's
+      // selection listener — otherwise its mouseup would see a collapsed
+      // selection and immediately close the popover we just opened.
+      ['mousedown', 'mouseup'].forEach((type) => {
+        button.addEventListener(type, (event) => event.stopPropagation());
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = button.getBoundingClientRect();
+        this.showResultActionPopover({ text, title: this.deriveSelectionTitle(text), rect });
+      });
+
+      item.appendChild(button);
+    });
+  },
+
   showResultActionPopover({ text, title, rect }) {
     this.closeResultActionPopover();
 
