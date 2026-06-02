@@ -107,21 +107,6 @@ func assignWorkspaceTimes(workspace *Workspace, createdAtRaw, updatedAtRaw any) 
 	return nil
 }
 
-// assignWorkspaceDeletedAt parses a nullable deleted_at column value onto the
-// workspace. A nil raw value (NULL column) leaves DeletedAt unset.
-func assignWorkspaceDeletedAt(workspace *Workspace, deletedAtRaw any) error {
-	if deletedAtRaw == nil {
-		workspace.DeletedAt = nil
-		return nil
-	}
-	deletedAt, err := parseSQLiteTime(deletedAtRaw)
-	if err != nil {
-		return fmt.Errorf("deleted_at: %w", err)
-	}
-	workspace.DeletedAt = &deletedAt
-	return nil
-}
-
 // serializeWorkspaceFields converts workspace fields to JSON for database storage.
 // This centralizes the serialization logic used by both Create and Update operations.
 func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
@@ -305,19 +290,18 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var agentSkillAccessJSON sql.NullString
 	var createdAtRaw any
 	var updatedAtRaw any
-	var deletedAtRaw any
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
-			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, version, deleted_at
+			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, version
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
-		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &workspace.Version, &deletedAtRaw)
+		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &workspace.Version)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrWorkspaceNotFound
@@ -327,9 +311,6 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	}
 	if err := assignWorkspaceTimes(workspace, createdAtRaw, updatedAtRaw); err != nil {
 		return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
-	}
-	if err := assignWorkspaceDeletedAt(workspace, deletedAtRaw); err != nil {
-		return nil, fmt.Errorf("failed to parse workspace deleted_at: %w", err)
 	}
 
 	workspace.Description = description.String
@@ -427,10 +408,7 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 	return nil
 }
 
-// DeleteWorkspace permanently removes a workspace row, moving sessions and
-// subworkspaces to root. This is the hard-delete primitive; it is used only by
-// the permanent-delete and auto-purge paths. Day-to-day deletion goes through
-// TrashWorkspace (soft delete).
+// DeleteWorkspace removes a workspace, moving sessions and subworkspaces to root.
 func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		// Check workspace exists
@@ -463,148 +441,6 @@ func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 
 		return nil
 	})
-}
-
-// TrashWorkspace soft-deletes a workspace by marking it trashed and recording
-// the deletion time. Sessions, child workspaces, files, and the entry agent are
-// left untouched so the workspace can be restored. When includeDescendants is
-// true, all descendant workspaces are trashed too (the subtree moves to Trash as
-// a unit); parent_id links are preserved so RestoreWorkspace can rebuild it.
-func (s *SQLiteStore) TrashWorkspace(ctx context.Context, id string, includeDescendants bool) error {
-	ids := []string{id}
-	if includeDescendants {
-		descendants, err := s.GetSubworkspaceIDs(ctx, id)
-		if err != nil {
-			return fmt.Errorf("failed to collect subworkspaces: %w", err)
-		}
-		ids = append(ids, descendants...)
-	}
-
-	now := time.Now().UTC()
-	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
-		// Update the primary workspace first so we can detect a missing row.
-		result, err := tx.ExecContext(ctx,
-			"UPDATE workspaces SET status = ?, deleted_at = ?, updated_at = ? WHERE id = ?",
-			WorkspaceStatusTrashed, now, now, id)
-		if err != nil {
-			return fmt.Errorf("failed to trash workspace: %w", err)
-		}
-		if err := database.CheckRowsAffectedWithError(result, "workspace", ErrWorkspaceNotFound); err != nil {
-			return err
-		}
-
-		// Trash any descendants in the same batch. Skip rows already trashed so
-		// their original deletion time (and purge clock) is preserved.
-		for _, wid := range ids[1:] {
-			if _, err := tx.ExecContext(ctx,
-				"UPDATE workspaces SET status = ?, deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-				WorkspaceStatusTrashed, now, now, wid); err != nil {
-				return fmt.Errorf("failed to trash subworkspace: %w", err)
-			}
-		}
-		return nil
-	})
-}
-
-// RestoreWorkspace brings a trashed workspace (and any of its currently-trashed
-// descendants) back to active, clearing the deletion time. parent_id links were
-// preserved on trash, so the subtree reappears intact.
-func (s *SQLiteStore) RestoreWorkspace(ctx context.Context, id string) error {
-	descendants, err := s.GetSubworkspaceIDs(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to collect subworkspaces: %w", err)
-	}
-
-	now := time.Now().UTC()
-	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx,
-			"UPDATE workspaces SET status = ?, deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
-			WorkspaceStatusActive, now, id)
-		if err != nil {
-			return fmt.Errorf("failed to restore workspace: %w", err)
-		}
-		if err := database.CheckRowsAffectedWithError(result, "workspace", ErrWorkspaceNotFound); err != nil {
-			return err
-		}
-
-		// Restore descendants that are currently trashed.
-		for _, wid := range descendants {
-			if _, err := tx.ExecContext(ctx,
-				"UPDATE workspaces SET status = ?, deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
-				WorkspaceStatusActive, now, wid); err != nil {
-				return fmt.Errorf("failed to restore subworkspace: %w", err)
-			}
-		}
-		return nil
-	})
-}
-
-// ReparentChildrenToRoot moves the direct children of parentID to the root level
-// (parent_id = NULL). Used by the "trash group only" flow to keep children active
-// while the group container itself is trashed.
-func (s *SQLiteStore) ReparentChildrenToRoot(ctx context.Context, parentID string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE workspaces SET parent_id = NULL WHERE parent_id = ?", parentID)
-	if err != nil {
-		return fmt.Errorf("failed to reparent children: %w", err)
-	}
-	return nil
-}
-
-// ListTrashedWorkspaces returns soft-deleted workspaces, most recently trashed
-// first. Used to render the Trash view and to drive the auto-purge.
-func (s *SQLiteStore) ListTrashedWorkspaces(ctx context.Context) ([]Workspace, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
-			agents, agent_instances, status, version, deleted_at
-		FROM workspaces
-		WHERE deleted_at IS NOT NULL
-		ORDER BY deleted_at DESC, name ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list trashed workspaces: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	workspaces := make([]Workspace, 0)
-	for rows.Next() {
-		var workspace Workspace
-		var parentID, color, description, kind sql.NullString
-		var agentsJSON, agentInstancesJSON, status sql.NullString
-		var createdAtRaw any
-		var updatedAtRaw any
-		var deletedAtRaw any
-
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
-			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
-			&agentsJSON, &agentInstancesJSON, &status, &workspace.Version, &deletedAtRaw); err != nil {
-			return nil, fmt.Errorf("failed to scan trashed workspace: %w", err)
-		}
-		if err := assignWorkspaceTimes(&workspace, createdAtRaw, updatedAtRaw); err != nil {
-			return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
-		}
-		if err := assignWorkspaceDeletedAt(&workspace, deletedAtRaw); err != nil {
-			return nil, fmt.Errorf("failed to parse workspace deleted_at: %w", err)
-		}
-
-		workspace.Kind = NormalizeWorkspaceKind(kind.String)
-		workspace.Description = description.String
-		workspace.ParentID = parentID.String
-		workspace.Color = color.String
-
-		if agentsJSON.Valid && agentsJSON.String != "" {
-			_ = json.Unmarshal([]byte(agentsJSON.String), &workspace.Agents)
-		}
-		if agentInstancesJSON.Valid && agentInstancesJSON.String != "" {
-			_ = json.Unmarshal([]byte(agentInstancesJSON.String), &workspace.AgentInstances)
-		}
-		if status.Valid && status.String != "" {
-			workspace.Status = WorkspaceStatus(status.String)
-		}
-
-		workspaces = append(workspaces, workspace)
-	}
-
-	return workspaces, nil
 }
 
 // DeleteSessionsByWorkspace deletes all sessions (and their messages/tool_calls) belonging to a workspace.
@@ -656,7 +492,6 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, status, version
 		FROM workspaces
-		WHERE deleted_at IS NULL
 		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
 	`)
 	if err != nil {

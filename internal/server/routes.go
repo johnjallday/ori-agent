@@ -579,13 +579,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		})
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
-		// Workspace Trash (soft delete). Registered as explicit method+path patterns
-		// so they take precedence over the "/api/workspaces/" subtree handler — the
-		// per-workspace attachment "/trash" route inside handleWorkspaceAPI would
-		// otherwise capture GET /api/workspaces/trash.
-		mux.HandleFunc("GET /api/workspaces/trash", s.Handlers.Session.HandleWorkspaces)
-		mux.HandleFunc("POST /api/workspaces/{workspaceID}/restore", s.Handlers.Session.HandleWorkspaces)
-
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)

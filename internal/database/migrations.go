@@ -1090,9 +1090,11 @@ func (db *DB) migration022WorkspaceFolders(ctx context.Context) error {
 	return nil
 }
 
-// migration023WorkspaceTrash adds a nullable deleted_at column used to soft-delete
-// (Trash) workspaces. A non-NULL value marks the workspace as trashed and records
-// when it entered the Trash, which drives the 30-day auto-purge.
+// migration023WorkspaceTrash adds a nullable deleted_at column. The #50 Trash
+// feature that used it was reverted (#54), but the additive, idempotent column
+// migration is retained so schemaVersion stays monotonic — databases that already
+// applied v23 under #50 upgrade forward cleanly instead of being rejected as
+// "newer than supported". The column is otherwise unused.
 func (db *DB) migration023WorkspaceTrash(ctx context.Context) error {
 	exists, err := db.tableExists(ctx, "workspaces")
 	if err != nil {

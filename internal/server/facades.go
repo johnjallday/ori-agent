@@ -69,7 +69,6 @@ type WorkflowSystemFacade struct {
 	NotificationService   *workspace.NotificationService
 	DirectorySync         *workspace.DirectorySyncManager
 	WorkspaceOrchestrator *workspace.Orchestrator
-	TrashPurger           *sessionhttp.TrashPurger
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -277,16 +276,10 @@ func (w *WorkflowSystemFacade) Start() {
 	if w.DirectorySync != nil {
 		w.DirectorySync.Start()
 	}
-	if w.TrashPurger != nil {
-		w.TrashPurger.Start()
-	}
 }
 
 // Shutdown gracefully shuts down all workflow system background services
 func (w *WorkflowSystemFacade) Shutdown() {
-	if w.TrashPurger != nil {
-		w.TrashPurger.Stop()
-	}
 	if w.DirectorySync != nil {
 		w.DirectorySync.Stop()
 	}
