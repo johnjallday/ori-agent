@@ -193,37 +193,23 @@
                  stack in one scroll; each self-hides when it has nothing to
                  show, and the developer-facing cards are grouped in a collapsed
                  disclosure at the bottom. -->
-              <section class="workspace-task-page-card">
+              <!-- Merged card: the task brief ("what this task does") leads,
+                   then the latest result follows below a hairline divider so a
+                   reader flows from intent → outcome in one panel. The result
+                   block keeps its #workspace-task-output-card id (now a div, not
+                   a section) so renderOutput's .hidden toggle hides just the
+                   result portion while the brief above stays visible. -->
+              <section class="workspace-task-page-card workspace-task-brief-card">
                 <div class="workspace-task-page-card-header">
                   <div>
-                    <div class="workspace-task-page-card-kicker">Overview</div>
+                    <div class="workspace-task-page-card-kicker">Task</div>
                     <h2>What this task does</h2>
                   </div>
                 </div>
                 <div id="workspace-task-overview" class="workspace-task-overview-grid"></div>
-              </section>
 
-              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
-                    <h2>Why the task paused</h2>
-                  </div>
-                </div>
-                <div class="workspace-task-blocked-reason">
-                  <div class="workspace-task-page-mini-label">Pause reason</div>
-                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
-                </div>
-                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
-                  <div class="workspace-task-page-mini-label">Agent request</div>
-                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
-                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
-                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
-                </div>
-              </section>
-
-              <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
+                <div id="workspace-task-output-card" class="workspace-task-result-block" hidden>
+                  <div class="workspace-task-page-card-header workspace-task-result-block-header">
                   <div>
                     <div class="workspace-task-page-card-kicker">Result</div>
                     <h2>Latest result</h2>
@@ -317,6 +303,26 @@
                       <span>Create follow-up</span>
                     </button>
                   </div>
+                </div>
+                </div>
+              </section>
+
+              <section id="workspace-task-blocked-context-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Blocked Context</div>
+                    <h2>Why the task paused</h2>
+                  </div>
+                </div>
+                <div class="workspace-task-blocked-reason">
+                  <div class="workspace-task-page-mini-label">Pause reason</div>
+                  <div id="workspace-task-blocked-reason" class="workspace-task-page-copy-block"></div>
+                </div>
+                <div id="workspace-task-blocked-request-wrap" class="workspace-task-blocked-request-wrap d-none">
+                  <div class="workspace-task-page-mini-label">Agent request</div>
+                  <div id="workspace-task-blocked-request-preview" class="workspace-task-page-copy-block"></div>
+                  <button type="button" id="workspace-task-blocked-request-toggle" class="workspace-task-page-text-button d-none" aria-expanded="false">View full request</button>
+                  <pre id="workspace-task-blocked-request" class="workspace-task-page-code-block d-none"></pre>
                 </div>
               </section>
 
@@ -1627,6 +1633,40 @@
       color: var(--text-secondary);
       font-size: 0.74rem;
       font-weight: 700;
+    }
+
+    /* Web-search provenance pill at the top of the Result card. Two states:
+       "used" reads as a positive notification (web sources were consulted),
+       "unused" is a muted tag so the absence of web search is stated plainly
+       rather than left ambiguous. */
+    .workspace-task-websearch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      width: fit-content;
+      margin-bottom: 0.85rem;
+      padding: 0.34rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+
+    .workspace-task-websearch-badge i {
+      font-size: 0.9rem;
+    }
+
+    .workspace-task-websearch-badge[data-state="used"] {
+      border-color: color-mix(in srgb, var(--success-color, #16a34a) 45%, var(--border-color));
+      background: color-mix(in srgb, var(--success-color, #16a34a) 12%, var(--bg-primary));
+      color: color-mix(in srgb, var(--success-color, #16a34a) 78%, var(--text-primary));
+    }
+
+    .workspace-task-websearch-badge[data-state="unused"] {
+      border-color: var(--border-color);
+      background: color-mix(in srgb, var(--text-muted, #6b7280) 8%, var(--bg-primary));
+      color: var(--text-secondary);
     }
 
     /* Collapsed wrapper for the run-history dataset, so the Result leads and
@@ -3300,6 +3340,97 @@
       color: var(--primary-color);
     }
 
+    /* --- Merged brief + result card -------------------------------------- */
+
+    /* The brief leads the card: larger primary-colour text with no label
+       (the card kicker/heading already name it). position: relative anchors
+       the hover-revealed edit pencil to the top-right; padding-right keeps
+       wrapped text clear of it. */
+    .workspace-task-brief-lead {
+      position: relative;
+      padding-top: 0;
+      padding-right: 1.8rem;
+      border-top: 0;
+    }
+
+    .workspace-task-brief-lead-value {
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    .workspace-task-brief-lead > .workspace-task-overview-edit-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+    }
+
+    /* Compact meta row: status, reference URL, agent, … as inline
+       "LABEL value" pairs separated by middots, replacing the tall stack of
+       bordered rows so the facts read in one glance. */
+    .workspace-task-brief-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      row-gap: 0.45rem;
+      margin-top: 0.9rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+    }
+
+    .workspace-task-brief-meta-item {
+      position: relative;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-brief-meta-item:not(:last-child)::after {
+      content: "·";
+      margin: 0 0.55rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-brief-meta-label {
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .workspace-task-brief-meta-value {
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      word-break: break-word;
+    }
+
+    .workspace-task-brief-meta-item .workspace-task-overview-edit-btn {
+      width: 1.2rem;
+      height: 1.2rem;
+    }
+
+    .workspace-task-brief-meta-item:hover .workspace-task-overview-edit-btn,
+    .workspace-task-brief-meta-item:focus-within .workspace-task-overview-edit-btn {
+      opacity: 1;
+    }
+
+    /* The result block sits inside the same card as the brief, divided by a
+       hairline rather than a card gap. [hidden] keeps it (and its divider)
+       out until there's a result, so a brief-only card has no dangling rule. */
+    .workspace-task-result-block {
+      margin-top: 1.25rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .workspace-task-result-block[hidden] {
+      display: none;
+    }
+
+    .workspace-task-result-block-header {
+      margin-bottom: 0.85rem;
+    }
+
     .workspace-task-page-copy-block,
     .workspace-task-page-code-block {
       margin: 0;
@@ -3446,6 +3577,52 @@
       outline-offset: 2px;
     }
 
+    /* Per-item action trigger (list items / bold-led paragraphs). Mirrors the
+       section action, but sits in a reserved RIGHT gutter so it never overlaps
+       the item text, and is revealed on hover/focus. */
+    .workspace-task-result-item {
+      position: relative;
+      padding-right: 2.4rem;
+    }
+
+    .workspace-task-result-item-action {
+      position: absolute;
+      top: 0.05rem;
+      right: 0;
+      z-index: 2;
+      width: 1.75rem;
+      height: 1.75rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      color: var(--primary-color);
+      box-shadow: 0 8px 18px rgba(10, 10, 10, 0.08);
+      opacity: 0;
+      transform: translateX(0.25rem);
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-task-result-item:hover .workspace-task-result-item-action,
+    .workspace-task-result-item:focus-within .workspace-task-result-item-action,
+    .workspace-task-result-item-action:focus-visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .workspace-task-result-item-action:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 48%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-primary));
+    }
+
+    .workspace-task-result-item-action:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 52%, transparent);
+      outline-offset: 2px;
+    }
+
     .workspace-task-result-section-action:disabled {
       cursor: wait;
       opacity: 1;
@@ -3535,6 +3712,202 @@
       background: color-mix(in srgb, var(--primary-color) 10%, transparent);
       color: var(--primary-color);
       outline: none;
+    }
+
+    /* Floating toolbar shown when text inside a result is highlighted, so a
+       reader can act on just that span. position: fixed + JS-set top/left
+       (from the selection's bounding rect) keeps it anchored to the
+       selection and clear of the card's overflow clipping. */
+    .workspace-task-selection-popover {
+      position: fixed;
+      z-index: 10070;
+      display: flex;
+      gap: 0.15rem;
+      padding: 0.28rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+      box-shadow: 0 14px 36px rgba(10, 10, 10, 0.26);
+    }
+
+    .workspace-task-selection-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.6rem;
+      border: none;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-action i {
+      font-size: 0.92rem;
+    }
+
+    .workspace-task-selection-action:hover,
+    .workspace-task-selection-action:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+      color: var(--primary-color);
+      outline: none;
+    }
+
+    /* Dialog shown when turning a selection into a subtask/follow-up or asking
+       about it. Self-contained (injected into <body>), so it carries its own
+       backdrop + centred card rather than relying on Bootstrap's modal. */
+    .workspace-task-selection-dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10080;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      background: rgba(8, 8, 10, 0.55);
+    }
+
+    .workspace-task-selection-dialog {
+      width: min(34rem, 100%);
+      max-height: calc(100vh - 2.5rem);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      padding: 1.25rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-radius: 16px;
+      background: var(--bg-primary);
+      box-shadow: 0 24px 60px rgba(8, 8, 10, 0.4);
+    }
+
+    .workspace-task-selection-dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .workspace-task-selection-dialog-head h3 {
+      margin: 0;
+      font-family: "Fraunces", serif;
+      font-size: 1.15rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-selection-dialog-close {
+      border: none;
+      background: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0.2rem;
+      line-height: 1;
+    }
+
+    .workspace-task-selection-dialog-close:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-selection-dialog-excerpt {
+      margin: 0;
+      padding: 0.65rem 0.8rem;
+      border-left: 3px solid color-mix(in srgb, var(--primary-color) 55%, transparent);
+      border-radius: 0 8px 8px 0;
+      background: color-mix(in srgb, var(--primary-color) 7%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-task-selection-dialog-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .workspace-task-selection-dialog-label {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-selection-dialog-segmented {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-selection-dialog-segment {
+      flex: 1 1 12rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-selection-dialog-segment:has(input:checked) {
+      border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: var(--primary-color);
+    }
+
+    .workspace-task-selection-dialog-presets {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-selection-dialog-preset {
+      padding: 0.32rem 0.7rem;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-dialog-preset:hover {
+      border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+      color: var(--primary-color);
+    }
+
+    .workspace-task-selection-dialog-check {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .workspace-task-selection-dialog-error {
+      color: var(--danger-color, #dc2626);
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+
+    .workspace-task-selection-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.2rem;
     }
 
     .workspace-task-page-text-button {

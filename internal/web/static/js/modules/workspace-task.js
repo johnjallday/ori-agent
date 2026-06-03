@@ -11,6 +11,7 @@ import {
   rowsToCSV,
 } from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
+import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 
 const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
@@ -1157,6 +1158,7 @@ export class WorkspaceTaskPage {
       this.setOutputOverflowOpen(false);
     });
     this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.initResultSelectionActions();
     this.elements.outputCreateSkillBtn?.addEventListener('click', () => {
       this.openSkillDraftModal();
       this.setOutputOverflowOpen(false);
@@ -2995,47 +2997,68 @@ export class WorkspaceTaskPage {
         value: detailsValue || 'No extra task details were provided.',
         full: true,
         editable: true,
+        isBrief: true,
         disclosure: isBlocked,
         disclosureHint: 'Hidden while this task is waiting for input.'
       });
     }
 
-    this.elements.overview.innerHTML = items.map((item) => {
-      if (item.disclosure) {
+    // The brief ("what this task does") leads the card so a reader starts with
+    // intent; the run metadata (status, reference URL, agent, …) collapses into
+    // a compact meta row beneath it instead of a tall stack of labelled rows.
+    const briefItem = items.find((item) => item.isBrief);
+    const metaItems = items.filter((item) => !item.isBrief);
+
+    const renderBriefLead = () => {
+      if (!briefItem) return '';
+      // Blocked tasks keep the brief behind a disclosure (it can duplicate the
+      // pause reason); just promoted into the lead slot.
+      if (briefItem.disclosure) {
         return `
-          <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
+          <div class="workspace-task-overview-item workspace-task-brief-lead full">
             <details class="workspace-task-overview-disclosure">
               <summary class="workspace-task-overview-disclosure-toggle">
-                <span class="workspace-task-overview-disclosure-heading">${this.escapeHtml(item.title)}</span>
-                <span class="workspace-task-overview-disclosure-hint">${this.escapeHtml(item.disclosureHint || '')}</span>
+                <span class="workspace-task-overview-disclosure-heading">${this.escapeHtml(briefItem.title)}</span>
+                <span class="workspace-task-overview-disclosure-hint">${this.escapeHtml(briefItem.disclosureHint || '')}</span>
               </summary>
               <div class="workspace-task-overview-disclosure-body">
-                <div class="workspace-task-overview-title">
-                  Task Details
-                  ${renderEditButton(item)}
-                </div>
-                <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
+                <div class="workspace-task-overview-value">${this.escapeHtml(briefItem.value)}</div>
               </div>
             </details>
-          </article>
+          </div>
         `;
       }
+      // No label: the card kicker ("Task") + heading ("What this task does")
+      // already name this content, so the brief speaks for itself. The edit
+      // pencil is absolutely positioned (CSS) and revealed on hover; the
+      // .workspace-task-overview-item + .workspace-task-overview-value classes
+      // are preserved so startDetailsEdit keeps working unchanged.
+      return `
+        <div class="workspace-task-overview-item workspace-task-brief-lead full">
+          ${renderEditButton(briefItem)}
+          <div class="workspace-task-overview-value workspace-task-brief-lead-value">${this.escapeHtml(briefItem.value)}</div>
+        </div>
+      `;
+    };
 
-      // Build the value HTML separately and inline it with no surrounding
-      // whitespace: the value uses white-space: pre-wrap (to preserve real line
-      // breaks in a multi-line Task Details brief), so any newlines/indentation
-      // between the <div> tags and ${...} would render as stray blank lines and
-      // a leading indent.
+    const renderMetaEntry = (item) => {
       const valueHtml = item.href
         ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${this.escapeHtml(item.value)}</a>`
         : this.escapeHtml(item.value);
       return `
-        <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
-          <div class="workspace-task-overview-title">${this.escapeHtml(item.title)}${renderEditButton(item)}</div>
-          <div class="workspace-task-overview-value">${valueHtml}</div>
-        </article>
+        <span class="workspace-task-brief-meta-item">
+          <span class="workspace-task-brief-meta-label">${this.escapeHtml(item.title)}</span>
+          <span class="workspace-task-brief-meta-value">${valueHtml}</span>
+          ${renderEditButton(item)}
+        </span>
       `;
-    }).join('');
+    };
+
+    const metaHtml = metaItems.length
+      ? `<div class="workspace-task-brief-meta">${metaItems.map(renderMetaEntry).join('')}</div>`
+      : '';
+
+    this.elements.overview.innerHTML = renderBriefLead() + metaHtml;
 
     this.elements.overview.querySelectorAll('[data-edit-field]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -6466,6 +6489,7 @@ export class WorkspaceTaskPage {
     }
 
     const blocks = [];
+    blocks.push(this.renderWebSearchBadge());
     const latestStorageStatus = this.renderLatestStorageStatus();
     if (latestStorageStatus) {
       blocks.push(latestStorageStatus);
@@ -6528,8 +6552,31 @@ export class WorkspaceTaskPage {
     this.bindResultArtifactActions();
     this.bindOutputReviewActions();
     this.enhanceResultSections();
+    this.enhanceResultItems();
     this.updateResultActionButtons(result || error, Boolean(result));
     this.renderResultNoteStatus();
+  }
+
+  // A pill at the top of the Result card stating whether this task's answer was
+  // backed by a web search. usedWebSearch() inspects the tool-usage trace, so
+  // the "used" notification only shows when the web_search tool actually ran;
+  // otherwise we surface an explicit "No web search" tag so a reader never has
+  // to guess whether the result drew on live web sources.
+  renderWebSearchBadge() {
+    if (this.usedWebSearch()) {
+      return `
+        <div class="workspace-task-websearch-badge" data-state="used" role="status">
+          <i class="bi bi-globe2" aria-hidden="true"></i>
+          <span>Web search used</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="workspace-task-websearch-badge" data-state="unused" role="status">
+        <i class="bi bi-slash-circle" aria-hidden="true"></i>
+        <span>No web search</span>
+      </div>
+    `;
   }
 
   renderLatestStorageStatus() {
@@ -9365,4 +9412,5 @@ Object.assign(
   WorkspaceTaskPage.prototype,
   taskExecutionViewsMethods,
   taskSkillDraftMethods,
+  taskResultActionsMethods,
 );
