@@ -4326,16 +4326,15 @@
 
     .workspace-detail-agent-sections {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      /* A single Tasks section per card — give it the full card width so long
+         task/step titles have room to breathe before truncating. minmax(0, 1fr)
+         keeps the track shrinkable so the title ellipsis still works. */
+      grid-template-columns: minmax(0, 1fr);
       gap: 0.55rem;
     }
 
     @media (max-width: 900px) {
       .workspace-detail-agent-info-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .workspace-detail-agent-sections {
         grid-template-columns: 1fr;
       }
     }
@@ -4346,6 +4345,11 @@
       border-radius: 8px;
       padding: 0.5rem;
       min-height: 120px;
+      /* Grid items default to min-width: auto, which lets a long nowrap task
+         title blow the 1fr track wider than the panel and force horizontal
+         scrolling. min-width: 0 lets the track shrink so the title's
+         text-overflow: ellipsis takes effect instead. */
+      min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
