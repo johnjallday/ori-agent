@@ -1,25 +1,11 @@
 <!-- Ori Dashboard - Prompt-first layout -->
 <div class="container-fluid py-5 dashboard-shell dashboard-shell-minimal">
-  {{if .Extra.IsFirstRun}}
-  <section id="homeFirstRunHero" class="modern-card p-4 p-md-5 mb-4 home-first-run-hero" aria-labelledby="homeFirstRunTitle">
-    <div class="home-first-run-hero-copy">
-      <div class="home-assistant-minimal-label">Start Here</div>
-      <h1 id="homeFirstRunTitle" class="home-first-run-title mb-0">Create your first workspace</h1>
-      <p class="home-first-run-subtitle mb-0">A workspace gives Ori the project, files, and tasks it needs to help you well.</p>
-    </div>
-    <div class="home-first-run-actions">
-      <a id="homeFirstRunStart" href="/workspaces?create=1" class="modern-btn modern-btn-primary home-first-run-cta-btn">Create Workspace</a>
-      <button id="homeFirstRunAskBtn" type="button" class="modern-btn modern-btn-secondary">Describe a Project Instead</button>
-    </div>
-  </section>
-  {{end}}
-
-  <div id="homeAssistantCard" class="modern-card p-4 p-md-5 mb-4 dashboard-home-card dashboard-home-card-minimal">
+  <div id="homeAssistantCard" class="modern-card p-4 p-md-5 mb-4 dashboard-home-card dashboard-home-card-minimal" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
     <div class="home-assistant-minimal-wrap">
-      <div class="home-assistant-minimal-label">Ask Ori</div>
-      <h1 class="home-assistant-minimal-title mb-0">{{if .Extra.IsFirstRun}}Or describe what you want help with{{else}}What should Ori do?{{end}}</h1>
+      <div class="home-assistant-minimal-label">{{if .Extra.IsFirstRun}}Welcome{{else}}Ask Ori{{end}}</div>
+      <h1 class="home-assistant-minimal-title mb-0">{{if .Extra.IsFirstRun}}What do you want to get done?{{else}}What should Ori do?{{end}}</h1>
       <p class="home-assistant-minimal-subtitle mb-0">
-        {{if .Extra.IsFirstRun}}Ori can turn a rough idea into a workspace-ready plan.{{else}}Enter a task and follow live progress in the thinking modal.{{end}}
+        {{if .Extra.IsFirstRun}}Describe a task and Ori turns it into a plan — or create a workspace to keep a project's tasks, notes, and files together.{{else}}Enter a task and Ori plans it, then runs it — showing each step as it goes.{{end}}
       </p>
       <form id="homeAssistantForm" class="home-assistant-form home-assistant-form-minimal">
         <label for="homeAssistantInput" class="visually-hidden">Ask Ori</label>
@@ -42,6 +28,16 @@
         <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on today?</button>
         {{end}}
       </div>
+      {{if .Extra.IsFirstRun}}
+      <!-- First run: one secondary path to the structured route. The Ask box
+           above is the primary action; this offers the workspace flow without a
+           second competing hero card. -->
+      <div class="home-assistant-secondary">
+        <span class="home-assistant-secondary-or">or</span>
+        <a id="homeFirstRunStart" href="/workspaces?create=1" class="home-assistant-secondary-link">Create a workspace</a>
+        <span class="home-assistant-secondary-hint">to organize a project's tasks, notes, and files</span>
+      </div>
+      {{end}}
     </div>
   </div>
 

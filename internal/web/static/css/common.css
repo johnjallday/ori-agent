@@ -1844,7 +1844,7 @@ h3, .h3 {
    ============================================ */
 
 .dashboard-shell-minimal {
-    max-width: 980px;
+    max-width: 1200px;
     margin: 0 auto;
 }
 
@@ -1855,7 +1855,7 @@ h3, .h3 {
 }
 
 .home-assistant-minimal-wrap {
-    max-width: 860px;
+    max-width: 920px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -1895,6 +1895,30 @@ h3, .h3 {
     margin-top: 0.35rem;
 }
 
+/* First-run secondary path — the structured "create a workspace" route,
+   ranked clearly below the Ask box rather than as a competing hero card. */
+.home-assistant-secondary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.1rem;
+    font-size: 0.85rem;
+    color: var(--text-muted, var(--text-secondary));
+}
+
+.home-assistant-secondary-link {
+    color: var(--primary-color);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.home-assistant-secondary-link:hover,
+.home-assistant-secondary-link:focus-visible {
+    text-decoration: underline;
+    outline: none;
+}
+
 /* =============================================================================
    Home dashboard — suggested prompt chips + adaptive dashboard sections
    ============================================================================= */
@@ -1931,7 +1955,7 @@ h3, .h3 {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
-    max-width: 1180px;
+    max-width: none;
     margin: 0 auto;
 }
 
@@ -1964,11 +1988,11 @@ h3, .h3 {
 
 .home-section-title {
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 1rem;
     font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--text-primary);
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 .home-section-link {
@@ -2041,10 +2065,33 @@ h3, .h3 {
     outline: none;
 }
 
+/* Card header: colored monogram avatar + workspace name, for quick scanning. */
+.home-workspace-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.home-workspace-card-avatar {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #fff;
+    background: hsl(var(--ws-hue, 160) 42% 42%);
+}
+
 .home-workspace-card-name {
     font-weight: 600;
     font-size: 0.95rem;
     color: var(--text-primary);
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2172,55 +2219,7 @@ h3, .h3 {
     grid-column: 2 / 3;
 }
 
-/* First-run hero (shown when the user has zero workspaces). */
-.home-first-run-hero {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 1.5rem;
-}
-
-.home-first-run-title {
-    color: var(--text-primary);
-    font-size: 2.2rem;
-    line-height: 1.08;
-    letter-spacing: 0;
-    text-wrap: balance;
-}
-
-.home-first-run-hero-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    max-width: 620px;
-}
-
-.home-first-run-subtitle {
-    max-width: 56ch;
-    color: var(--text-secondary);
-    font-size: 0.95rem;
-    line-height: 1.5;
-}
-
-.home-first-run-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-shrink: 0;
-}
-
 @media (max-width: 768px) {
-    .home-first-run-hero {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .home-first-run-actions {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .home-first-run-title,
     .home-assistant-minimal-title {
         font-size: 1.6rem;
     }

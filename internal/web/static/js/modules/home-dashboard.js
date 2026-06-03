@@ -129,6 +129,25 @@
     }
   }
 
+  // Deterministic accent hue (0–359) derived from a workspace's id/name, so
+  // each card gets a stable, recognizable color chip without persisting one.
+  function wsHue(seed) {
+    const s = String(seed || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+      h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return h % 360;
+  }
+
+  // 1–2 letter monogram from a workspace name for the card avatar.
+  function wsInitials(name) {
+    const parts = String(name || '').trim().split(/[\s._-]+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
   function renderWorkspaceCards(workspaces) {
     const cards = workspaces.map((ws) => {
       const id = escapeHtml(ws.id || '');
@@ -138,9 +157,14 @@
       // `agent_instances` isn't on the list endpoint; fall back to `agents`.
       const agentCount = Array.isArray(ws.agents) ? ws.agents.length : 0;
       const countLabel = agentCount === 1 ? '1 agent' : `${agentCount} agents`;
+      const hue = wsHue(ws.id || ws.name || '');
+      const initials = escapeHtml(wsInitials(ws.name || ''));
       return `
-        <a href="/workspaces/${id}" class="home-workspace-card" data-role="workspace-card">
-          <div class="home-workspace-card-name">${name}</div>
+        <a href="/workspaces/${id}" class="home-workspace-card" data-role="workspace-card" style="--ws-hue: ${hue};">
+          <div class="home-workspace-card-head">
+            <span class="home-workspace-card-avatar" aria-hidden="true">${initials}</span>
+            <div class="home-workspace-card-name">${name}</div>
+          </div>
           ${desc ? `<div class="home-workspace-card-desc">${desc}</div>` : ''}
           <div class="home-workspace-card-meta">
             <span class="home-workspace-card-agents">${escapeHtml(countLabel)}</span>
@@ -313,18 +337,12 @@
   // ----- First-run actions -----
 
   function wireFirstRunActions() {
+    // First run now has a single secondary CTA (Create a workspace); the Ask
+    // box itself is the "describe a project" path, so there's no separate
+    // ask button to wire anymore.
     const startBtn = document.getElementById('homeFirstRunStart');
     if (startBtn) {
       startBtn.addEventListener('click', () => fireTTFA('first-run-start'));
-    }
-
-    const askBtn = document.getElementById('homeFirstRunAskBtn');
-    const input = document.getElementById('homeAssistantInput');
-    if (askBtn && input) {
-      askBtn.addEventListener('click', () => {
-        fireTTFA('first-run-ask');
-        input.focus();
-      });
     }
   }
 

@@ -1403,7 +1403,7 @@
 
   function buildHomeAssistantPlaceholder(routeContext) {
     if (!routeContext) {
-      return document.getElementById('homeFirstRunHero') ? 'Plan a product launch…' : 'Ask Ori to do something…';
+      return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Ask Ori to do something…';
     }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
@@ -1417,7 +1417,7 @@
       if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /chat asks)';
       return 'Create a task for ' + displayName + '… (/chat asks, /note saves a note)';
     }
-    return document.getElementById('homeFirstRunHero') ? 'Plan a product launch…' : 'Ask Ori to do something…';
+    return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Ask Ori to do something…';
   }
 
   function renderHomeAssistantWorkspaceIdentity(routeContext) {
