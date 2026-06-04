@@ -2057,31 +2057,27 @@ export class WorkspaceDetailPage {
       });
     } else {
       references.forEach(reference => {
+        // Resolves to a global runnable agent definition — healthy.
         if (this.getAgentProfile(reference.name)) return;
-        const hasSnapshot = this.hasWorkspaceAgentSnapshot(reference.name);
+        // Workspace-local agents (e.g. the auto-created "<Workspace> Manager"
+        // entry agent) live as a workspace snapshot rather than in the global
+        // agent catalog. The runtime resolver loads them from that snapshot
+        // with precedence over global agents, so a snapshot-backed reference
+        // is runnable, not broken — treat it as healthy.
+        if (this.hasWorkspaceAgentSnapshot(reference.name)) return;
+        // Referenced but resolvable nowhere (no global definition and no
+        // workspace snapshot) — genuinely missing.
         issues.push({
           category: 'agent',
-          severity: hasSnapshot ? 'warning' : 'error',
-          title: hasSnapshot
-            ? reference.isEntryAgent
-              ? 'Entry agent can be restored'
-              : 'Workspace agent can be restored'
-            : reference.isEntryAgent
-              ? 'Entry agent is missing'
-              : 'Workspace agent is missing',
-          description: hasSnapshot
-            ? `"${reference.name}" has a workspace snapshot on disk and will be restored automatically the next time the workspace runs. You can also recreate the agent definition manually.`
-            : reference.isEntryAgent
-              ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
-              : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          severity: 'error',
+          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          description: reference.isEntryAgent
+            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
           actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
           agentName: reference.name,
-          meta: [
-            reference.name,
-            reference.isEntryAgent ? 'Entry agent' : 'Workspace member',
-            ...(hasSnapshot ? ['Snapshot available'] : [])
-          ]
+          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
         });
       });
     }
@@ -2449,6 +2445,9 @@ export class WorkspaceDetailPage {
 
     try {
       await Promise.all([this.loadWorkspace(), this.loadAgentCatalog(true), this.loadFiles()]);
+      // Refresh workspace-local agent snapshots too, so a re-check reflects the
+      // current set of snapshot-backed agents rather than the init-time copy.
+      await this.loadWorkspaceAgentSnapshots();
     } finally {
       this.workspaceHealthCheckRunning = false;
       this.renderWorkspaceHealth();
