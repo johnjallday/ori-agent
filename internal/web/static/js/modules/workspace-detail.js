@@ -1022,7 +1022,6 @@ export class WorkspaceDetailPage {
       refreshSessionsBtn: document.getElementById('workspace-detail-refresh-sessions'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
-      copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       copyAllNotesBtn: document.getElementById('workspace-detail-copy-all-notes'),
       selectAllNotesBtn: document.getElementById('workspace-detail-select-all-notes'),
       deleteSelectedNotesBtn: document.getElementById('workspace-detail-delete-selected-notes'),
@@ -1371,7 +1370,6 @@ export class WorkspaceDetailPage {
 
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
-    this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
     this.elements.selectAllNotesBtn?.addEventListener('click', () => this.toggleSelectAllNotes());
     this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copySelectedNotesToClipboard());
     this.elements.deleteSelectedNotesBtn?.addEventListener('click', () => this.deleteSelectedNotes());
@@ -2059,31 +2057,27 @@ export class WorkspaceDetailPage {
       });
     } else {
       references.forEach(reference => {
+        // Resolves to a global runnable agent definition — healthy.
         if (this.getAgentProfile(reference.name)) return;
-        const hasSnapshot = this.hasWorkspaceAgentSnapshot(reference.name);
+        // Workspace-local agents (e.g. the auto-created "<Workspace> Manager"
+        // entry agent) live as a workspace snapshot rather than in the global
+        // agent catalog. The runtime resolver loads them from that snapshot
+        // with precedence over global agents, so a snapshot-backed reference
+        // is runnable, not broken — treat it as healthy.
+        if (this.hasWorkspaceAgentSnapshot(reference.name)) return;
+        // Referenced but resolvable nowhere (no global definition and no
+        // workspace snapshot) — genuinely missing.
         issues.push({
           category: 'agent',
-          severity: hasSnapshot ? 'warning' : 'error',
-          title: hasSnapshot
-            ? reference.isEntryAgent
-              ? 'Entry agent can be restored'
-              : 'Workspace agent can be restored'
-            : reference.isEntryAgent
-              ? 'Entry agent is missing'
-              : 'Workspace agent is missing',
-          description: hasSnapshot
-            ? `"${reference.name}" has a workspace snapshot on disk and will be restored automatically the next time the workspace runs. You can also recreate the agent definition manually.`
-            : reference.isEntryAgent
-              ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
-              : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          severity: 'error',
+          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          description: reference.isEntryAgent
+            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
           actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
           agentName: reference.name,
-          meta: [
-            reference.name,
-            reference.isEntryAgent ? 'Entry agent' : 'Workspace member',
-            ...(hasSnapshot ? ['Snapshot available'] : [])
-          ]
+          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
         });
       });
     }
@@ -2451,6 +2445,9 @@ export class WorkspaceDetailPage {
 
     try {
       await Promise.all([this.loadWorkspace(), this.loadAgentCatalog(true), this.loadFiles()]);
+      // Refresh workspace-local agent snapshots too, so a re-check reflects the
+      // current set of snapshot-backed agents rather than the init-time copy.
+      await this.loadWorkspaceAgentSnapshots();
     } finally {
       this.workspaceHealthCheckRunning = false;
       this.renderWorkspaceHealth();
@@ -14429,16 +14426,6 @@ export class WorkspaceDetailPage {
   updateCopyNotesButtonState(isBusy = false) {
     const hasNotes = Array.isArray(this.notes) && this.notes.length > 0;
 
-    // Header "copy all" icon copies every note regardless of selection.
-    if (this.elements.copyNotesBtn) {
-      this.elements.copyNotesBtn.disabled = Boolean(isBusy) || !hasNotes;
-      this.elements.copyNotesBtn.title = isBusy
-        ? 'Copying notes...'
-        : hasNotes
-          ? 'Copy all note contents'
-          : 'No notes to copy';
-    }
-
     if (this.elements.notesActions) {
       this.elements.notesActions.hidden = !hasNotes;
     }
@@ -14461,10 +14448,12 @@ export class WorkspaceDetailPage {
     const allSelected = total > 0 && selectedCount === total;
 
     if (this.elements.selectAllNotesBtn) {
+      // Icon-only toggle: keep the stacked-checkbox SVG intact and reflect
+      // the on/off state via aria-pressed plus the tooltip/aria-label.
       const btn = this.elements.selectAllNotesBtn;
       btn.disabled = isBusy || total === 0;
-      btn.textContent = allSelected ? 'Deselect all' : 'Select all';
       btn.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+      btn.setAttribute('aria-label', allSelected ? 'Deselect all notes' : 'Select all notes');
       btn.title = total === 0
         ? 'No notes to select'
         : allSelected
@@ -14473,21 +14462,27 @@ export class WorkspaceDetailPage {
     }
 
     if (this.elements.copyAllNotesBtn) {
+      // Icon-only button: keep the copy SVG intact (don't touch textContent)
+      // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.copyAllNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      btn.textContent = selectedCount > 0 ? `Copy (${selectedCount})` : 'Copy';
-      btn.title = selectedCount === 0
-        ? 'Select notes to copy'
-        : `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`;
+      const label = selectedCount > 0
+        ? `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+        : 'Copy selected notes';
+      btn.title = selectedCount === 0 ? 'Select notes to copy' : label;
+      btn.setAttribute('aria-label', label);
     }
 
     if (this.elements.deleteSelectedNotesBtn) {
+      // Icon-only button: keep the trash SVG intact (don't touch textContent)
+      // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.deleteSelectedNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      btn.textContent = selectedCount > 0 ? `Delete (${selectedCount})` : 'Delete';
-      btn.title = selectedCount === 0
-        ? 'Select notes to delete'
-        : `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`;
+      const label = selectedCount > 0
+        ? `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+        : 'Delete selected notes';
+      btn.title = selectedCount === 0 ? 'Select notes to delete' : label;
+      btn.setAttribute('aria-label', label);
     }
 
     // Keep card highlight + checkbox state in sync without a full re-render.
@@ -14657,42 +14652,6 @@ export class WorkspaceDetailPage {
     );
 
     return sections.join('\n\n---\n\n');
-  }
-
-  async copyAllNotesToClipboard() {
-    if (!this.notes || this.notes.length === 0) {
-      this.updateCopyNotesButtonState(false);
-      if (typeof window.notifyToast === 'function') {
-        window.notifyToast('No notes to copy', 'error');
-      } else if (window.Toast) {
-        window.Toast.error('No notes to copy');
-      }
-      return;
-    }
-
-    this.updateCopyNotesButtonState(true);
-    try {
-      await this.writeClipboardText(await this.buildAllNotesText());
-      if (typeof window.notifyToast === 'function') {
-        window.notifyToast(
-          `Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`,
-          'success'
-        );
-      } else if (window.Toast) {
-        window.Toast.success(
-          `Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`
-        );
-      }
-    } catch (error) {
-      console.error('Failed to copy notes:', error);
-      if (typeof window.notifyToast === 'function') {
-        window.notifyToast('Failed to copy notes', 'error');
-      } else if (window.Toast) {
-        window.Toast.error('Failed to copy notes');
-      }
-    } finally {
-      this.updateCopyNotesButtonState(false);
-    }
   }
 
   async copyCurrentTaskResult() {

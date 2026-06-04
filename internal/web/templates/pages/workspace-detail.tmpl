@@ -974,11 +974,6 @@
                       <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
                     </svg>
                   </a>
-                  <button id="workspace-detail-copy-notes" class="workspace-detail-panel-btn" type="button" title="Copy all note contents" aria-label="Copy all note contents" disabled>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
-                    </svg>
-                  </button>
                   <button id="workspace-detail-add-note" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add note">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -988,9 +983,23 @@
               </div>
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Notes panel content">
                 <div id="workspace-detail-notes-actions" class="workspace-detail-notes-actions" hidden>
-                  <button id="workspace-detail-select-all-notes" class="workspace-detail-notes-action" type="button" aria-pressed="false" aria-label="Select all notes" disabled>Select all</button>
-                  <button id="workspace-detail-copy-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Copy selected notes" disabled>Copy</button>
-                  <button id="workspace-detail-delete-selected-notes" class="workspace-detail-notes-action workspace-detail-notes-action-danger" type="button" aria-label="Delete selected notes" disabled>Delete</button>
+                  <button id="workspace-detail-select-all-notes" class="workspace-detail-notes-action workspace-detail-notes-action-icon" type="button" aria-pressed="false" title="Select all notes" aria-label="Select all notes" disabled>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="8" y="3" width="13" height="13" rx="2"/>
+                      <rect class="sa-icon-front" x="3" y="8" width="13" height="13" rx="2"/>
+                      <path d="M6 14.5 L9 17.5 L13.5 11.5"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-copy-all-notes" class="workspace-detail-notes-action workspace-detail-notes-action-icon" type="button" title="Copy selected notes" aria-label="Copy selected notes" disabled>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-delete-selected-notes" class="workspace-detail-notes-action workspace-detail-notes-action-danger workspace-detail-notes-action-icon" type="button" title="Delete selected notes" aria-label="Delete selected notes" disabled>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                    </svg>
+                  </button>
                 </div>
                 <div id="workspace-detail-notes-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No notes yet.</div>
@@ -3332,6 +3341,31 @@
     .workspace-detail-notes-action:disabled {
       cursor: not-allowed;
       opacity: 0.55;
+    }
+
+    .workspace-detail-notes-action-icon {
+      padding: 0;
+      width: 28px;
+    }
+
+    /* "Select all" stacked-squares icon: the front square is filled with the
+       button background so it cleanly overlaps the back square instead of
+       showing crossing outlines. Keep the fill matched to each button state. */
+    .workspace-detail-notes-action-icon .sa-icon-front {
+      fill: var(--bg-secondary);
+      transition: fill 0.15s ease;
+    }
+
+    .workspace-detail-notes-action-icon:hover:not(:disabled) .sa-icon-front,
+    .workspace-detail-notes-action-icon[aria-pressed="true"]:not(:disabled) .sa-icon-front {
+      fill: var(--bg-tertiary);
+    }
+
+    /* "Select all" toggle: highlight when every note is selected. */
+    .workspace-detail-notes-action[aria-pressed="true"]:not(:disabled) {
+      background: var(--bg-tertiary);
+      color: var(--primary-color);
+      border-color: var(--primary-color);
     }
 
     .workspace-detail-notes-action-danger {
