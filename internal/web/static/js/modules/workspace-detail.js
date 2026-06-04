@@ -203,6 +203,8 @@ export class WorkspaceDetailPage {
     this.sessionsLoadFailed = false;
     this.files = [];
     this.notes = [];
+    // IDs of notes currently checked for bulk copy/delete actions.
+    this.selectedNoteIds = new Set();
     this.directories = [];
     this.schedules = [];
     this.children = [];
@@ -1023,8 +1025,8 @@ export class WorkspaceDetailPage {
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       copyAllNotesBtn: document.getElementById('workspace-detail-copy-all-notes'),
       selectAllNotesBtn: document.getElementById('workspace-detail-select-all-notes'),
+      deleteSelectedNotesBtn: document.getElementById('workspace-detail-delete-selected-notes'),
       notesActions: document.getElementById('workspace-detail-notes-actions'),
-      notesCombinedText: document.getElementById('workspace-detail-notes-combined'),
       viewAllNotesLink: document.getElementById('workspace-detail-view-all-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
@@ -1370,8 +1372,9 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
-    this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
-    this.elements.selectAllNotesBtn?.addEventListener('click', () => this.selectAllNotesText());
+    this.elements.selectAllNotesBtn?.addEventListener('click', () => this.toggleSelectAllNotes());
+    this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copySelectedNotesToClipboard());
+    this.elements.deleteSelectedNotesBtn?.addEventListener('click', () => this.deleteSelectedNotes());
 
     // "View all" -> workspace notes app. The href is set here (not in the
     // template) because the workspace ID isn't known at server-render time.
@@ -13085,7 +13088,11 @@ export class WorkspaceDetailPage {
   renderNotes() {
     if (!this.elements.notesList) return;
 
-    this.setCombinedNotesText('');
+    // Drop selections for notes that no longer exist (e.g. after a reload).
+    const existingIds = new Set(this.notes.map(note => String(note.id)));
+    this.selectedNoteIds.forEach(id => {
+      if (!existingIds.has(id)) this.selectedNoteIds.delete(id);
+    });
 
     if (this.notes.length === 0) {
       this.elements.notesList.innerHTML = '<div class="workspace-detail-empty">No notes yet.</div>';
@@ -13099,8 +13106,15 @@ export class WorkspaceDetailPage {
         const preview = note.preview || note.content || '';
         const noteUrl = `/notes/${encodeURIComponent(note.id)}`;
         const vaultReference = this.normalizeVaultReference(note.vault_reference);
+        const isSelected = this.selectedNoteIds.has(String(note.id));
         return `
-	      <div class="workspace-detail-item" data-note-id="${note.id}">
+	      <div class="workspace-detail-item workspace-detail-note-item${isSelected ? ' is-selected' : ''}" data-note-id="${note.id}">
+	        <label class="workspace-detail-note-select-label" title="Select note" onclick="event.stopPropagation()">
+	          <input type="checkbox" class="workspace-detail-note-select" data-note-id="${note.id}" ${isSelected ? 'checked' : ''}
+	                 aria-label="Select note ${this.escapeHtml(title)}"
+	                 onclick="event.stopPropagation()"
+	                 onchange="window.workspaceDetail?.toggleNoteSelection('${note.id}', this.checked)">
+	        </label>
 	        ${
             vaultReference
               ? `
@@ -14414,31 +14428,182 @@ export class WorkspaceDetailPage {
 
   updateCopyNotesButtonState(isBusy = false) {
     const hasNotes = Array.isArray(this.notes) && this.notes.length > 0;
-    const disabled = Boolean(isBusy) || !hasNotes;
-    const copyTitle = isBusy
-      ? 'Copying notes...'
-      : hasNotes
-        ? 'Copy all note contents'
-        : 'No notes to copy';
 
-    [this.elements.copyNotesBtn, this.elements.copyAllNotesBtn].forEach(button => {
-      if (!button) return;
-      button.disabled = disabled;
-      button.title = copyTitle;
-    });
-
-    if (this.elements.selectAllNotesBtn) {
-      this.elements.selectAllNotesBtn.disabled = disabled;
-      this.elements.selectAllNotesBtn.title = isBusy
-        ? 'Loading notes...'
+    // Header "copy all" icon copies every note regardless of selection.
+    if (this.elements.copyNotesBtn) {
+      this.elements.copyNotesBtn.disabled = Boolean(isBusy) || !hasNotes;
+      this.elements.copyNotesBtn.title = isBusy
+        ? 'Copying notes...'
         : hasNotes
-          ? 'Select all note contents'
-          : 'No notes to select';
+          ? 'Copy all note contents'
+          : 'No notes to copy';
     }
 
     if (this.elements.notesActions) {
       this.elements.notesActions.hidden = !hasNotes;
     }
+
+    this.updateNotesSelectionUI(Boolean(isBusy));
+  }
+
+  /**
+   * Sync the selection-aware controls (Select all toggle, Copy (N),
+   * Delete (N)) and the per-card highlight/checkbox state to the current
+   * `selectedNoteIds` set.
+   */
+  updateNotesSelectionUI(isBusy = false) {
+    const notes = Array.isArray(this.notes) ? this.notes : [];
+    const total = notes.length;
+    const selectedCount = notes.reduce(
+      (count, note) => (this.selectedNoteIds.has(String(note.id)) ? count + 1 : count),
+      0
+    );
+    const allSelected = total > 0 && selectedCount === total;
+
+    if (this.elements.selectAllNotesBtn) {
+      const btn = this.elements.selectAllNotesBtn;
+      btn.disabled = isBusy || total === 0;
+      btn.textContent = allSelected ? 'Deselect all' : 'Select all';
+      btn.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+      btn.title = total === 0
+        ? 'No notes to select'
+        : allSelected
+          ? 'Clear selection'
+          : 'Select every note';
+    }
+
+    if (this.elements.copyAllNotesBtn) {
+      const btn = this.elements.copyAllNotesBtn;
+      btn.disabled = isBusy || selectedCount === 0;
+      btn.textContent = selectedCount > 0 ? `Copy (${selectedCount})` : 'Copy';
+      btn.title = selectedCount === 0
+        ? 'Select notes to copy'
+        : `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`;
+    }
+
+    if (this.elements.deleteSelectedNotesBtn) {
+      const btn = this.elements.deleteSelectedNotesBtn;
+      btn.disabled = isBusy || selectedCount === 0;
+      btn.textContent = selectedCount > 0 ? `Delete (${selectedCount})` : 'Delete';
+      btn.title = selectedCount === 0
+        ? 'Select notes to delete'
+        : `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`;
+    }
+
+    // Keep card highlight + checkbox state in sync without a full re-render.
+    if (this.elements.notesList) {
+      this.elements.notesList
+        .querySelectorAll('.workspace-detail-note-item[data-note-id]')
+        .forEach(item => {
+          const id = String(item.getAttribute('data-note-id'));
+          const selected = this.selectedNoteIds.has(id);
+          item.classList.toggle('is-selected', selected);
+          const checkbox = item.querySelector('.workspace-detail-note-select');
+          if (checkbox) checkbox.checked = selected;
+        });
+    }
+  }
+
+  toggleNoteSelection(noteId, checked) {
+    const id = String(noteId || '').trim();
+    if (!id) return;
+    if (checked) {
+      this.selectedNoteIds.add(id);
+    } else {
+      this.selectedNoteIds.delete(id);
+    }
+    this.updateNotesSelectionUI();
+  }
+
+  toggleSelectAllNotes() {
+    const notes = Array.isArray(this.notes) ? this.notes : [];
+    if (notes.length === 0) return;
+    const allSelected = notes.every(note => this.selectedNoteIds.has(String(note.id)));
+    if (allSelected) {
+      this.selectedNoteIds.clear();
+    } else {
+      notes.forEach(note => this.selectedNoteIds.add(String(note.id)));
+    }
+    this.updateNotesSelectionUI();
+  }
+
+  getSelectedNotes() {
+    const notes = Array.isArray(this.notes) ? this.notes : [];
+    return notes.filter(note => this.selectedNoteIds.has(String(note.id)));
+  }
+
+  async copySelectedNotesToClipboard() {
+    const selected = this.getSelectedNotes();
+    if (selected.length === 0) {
+      if (window.Toast) window.Toast.error('No notes selected');
+      return;
+    }
+
+    this.updateCopyNotesButtonState(true);
+    try {
+      await this.writeClipboardText(await this.buildAllNotesText(selected));
+      const message = `Copied ${selected.length} note${selected.length === 1 ? '' : 's'} to clipboard`;
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast(message, 'success');
+      } else if (window.Toast) {
+        window.Toast.success(message);
+      }
+    } catch (error) {
+      console.error('Failed to copy notes:', error);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('Failed to copy notes', 'error');
+      } else if (window.Toast) {
+        window.Toast.error('Failed to copy notes');
+      }
+    } finally {
+      this.updateCopyNotesButtonState(false);
+    }
+  }
+
+  async deleteSelectedNotes() {
+    const selected = this.getSelectedNotes();
+    if (selected.length === 0) {
+      if (window.Toast) window.Toast.error('No notes selected');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${selected.length} note${selected.length === 1 ? '' : 's'}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    this.updateCopyNotesButtonState(true);
+    let failures = 0;
+    for (const note of selected) {
+      try {
+        const response = await fetch(`/api/notes/${encodeURIComponent(note.id)}`, {
+          method: 'DELETE'
+        });
+        if (response.ok) {
+          this.selectedNoteIds.delete(String(note.id));
+        } else {
+          failures++;
+        }
+      } catch (error) {
+        console.error('Failed to delete note:', error);
+        failures++;
+      }
+    }
+
+    const deleted = selected.length - failures;
+    if (deleted > 0) {
+      const message = `Deleted ${deleted} note${deleted === 1 ? '' : 's'}`;
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast(message, 'success');
+      } else if (window.Toast) {
+        window.Toast.success(message);
+      }
+    }
+    if (failures > 0 && window.Toast) {
+      window.Toast.error(`Failed to delete ${failures} note${failures === 1 ? '' : 's'}`);
+    }
+
+    await this.loadNotes();
   }
 
   async writeClipboardText(text) {
@@ -14462,9 +14627,10 @@ export class WorkspaceDetailPage {
     if (!copied) throw new Error('Copy command failed');
   }
 
-  async buildAllNotesText() {
+  async buildAllNotesText(noteList = this.notes) {
+    const list = Array.isArray(noteList) ? noteList : [];
     const sections = await Promise.all(
-      this.notes.map(async (note, index) => {
+      list.map(async (note, index) => {
         const noteId = String(note?.id || '').trim();
         const title =
           String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
@@ -14491,40 +14657,6 @@ export class WorkspaceDetailPage {
     );
 
     return sections.join('\n\n---\n\n');
-  }
-
-  setCombinedNotesText(text) {
-    const field = this.elements.notesCombinedText;
-    if (!field) return;
-
-    field.value = text || '';
-    field.hidden = !text;
-  }
-
-  async selectAllNotesText() {
-    if (!this.notes || this.notes.length === 0) {
-      this.updateCopyNotesButtonState(false);
-      if (window.Toast) window.Toast.error('No notes to select');
-      return;
-    }
-
-    this.updateCopyNotesButtonState(true);
-    try {
-      const text = await this.buildAllNotesText();
-      this.setCombinedNotesText(text);
-      const field = this.elements.notesCombinedText;
-      if (field) {
-        field.focus();
-        field.select();
-        field.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
-      if (window.Toast) window.Toast.success('All note contents selected');
-    } catch (error) {
-      console.error('Failed to select notes:', error);
-      if (window.Toast) window.Toast.error('Failed to select notes');
-    } finally {
-      this.updateCopyNotesButtonState(false);
-    }
   }
 
   async copyAllNotesToClipboard() {

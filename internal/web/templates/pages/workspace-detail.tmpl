@@ -988,10 +988,10 @@
               </div>
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Notes panel content">
                 <div id="workspace-detail-notes-actions" class="workspace-detail-notes-actions" hidden>
-                  <button id="workspace-detail-copy-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Copy all note contents" disabled>Copy all</button>
-                  <button id="workspace-detail-select-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Select all note contents" disabled>Select all</button>
+                  <button id="workspace-detail-select-all-notes" class="workspace-detail-notes-action" type="button" aria-pressed="false" aria-label="Select all notes" disabled>Select all</button>
+                  <button id="workspace-detail-copy-all-notes" class="workspace-detail-notes-action" type="button" aria-label="Copy selected notes" disabled>Copy</button>
+                  <button id="workspace-detail-delete-selected-notes" class="workspace-detail-notes-action workspace-detail-notes-action-danger" type="button" aria-label="Delete selected notes" disabled>Delete</button>
                 </div>
-                <textarea id="workspace-detail-notes-combined" class="workspace-detail-notes-combined" readonly hidden aria-label="All note contents"></textarea>
                 <div id="workspace-detail-notes-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No notes yet.</div>
                 </div>
@@ -3334,20 +3334,48 @@
       opacity: 0.55;
     }
 
-    .workspace-detail-notes-combined {
-      width: 100%;
-      min-height: 180px;
-      margin-top: 0.5rem;
-      padding: 0.65rem 0.75rem;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 0.76rem;
-      line-height: 1.45;
-      resize: vertical;
-      white-space: pre-wrap;
+    .workspace-detail-notes-action-danger {
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+
+    .workspace-detail-notes-action-danger:hover:not(:disabled) {
+      background: rgba(248, 113, 113, 0.14);
+      border-color: #f87171;
+      color: #fca5a5;
+    }
+
+    /* Multi-select checkbox shown on each note card. Lives in the item's
+       left gutter (the item reserves padding-left for it). The compound
+       .workspace-detail-item.workspace-detail-note-item selector keeps these
+       rules ahead of the base .workspace-detail-item padding/background, which
+       is declared later in the stylesheet. */
+    .workspace-detail-item.workspace-detail-note-item {
+      padding-left: 2.2rem;
+    }
+
+    .workspace-detail-note-select-label {
+      position: absolute;
+      left: 0.6rem;
+      top: 0.58rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+      cursor: pointer;
+    }
+
+    .workspace-detail-note-select {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      cursor: pointer;
+      accent-color: var(--primary-color);
+    }
+
+    .workspace-detail-item.workspace-detail-note-item.is-selected {
+      border-color: var(--primary-color);
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.10);
     }
 
     .workspace-detail-agent-grid {
@@ -4326,16 +4354,15 @@
 
     .workspace-detail-agent-sections {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      /* A single Tasks section per card — give it the full card width so long
+         task/step titles have room to breathe before truncating. minmax(0, 1fr)
+         keeps the track shrinkable so the title ellipsis still works. */
+      grid-template-columns: minmax(0, 1fr);
       gap: 0.55rem;
     }
 
     @media (max-width: 900px) {
       .workspace-detail-agent-info-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .workspace-detail-agent-sections {
         grid-template-columns: 1fr;
       }
     }
@@ -4346,6 +4373,11 @@
       border-radius: 8px;
       padding: 0.5rem;
       min-height: 120px;
+      /* Grid items default to min-width: auto, which lets a long nowrap task
+         title blow the 1fr track wider than the panel and force horizontal
+         scrolling. min-width: 0 lets the track shrink so the title's
+         text-overflow: ellipsis takes effect instead. */
+      min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 0.4rem;

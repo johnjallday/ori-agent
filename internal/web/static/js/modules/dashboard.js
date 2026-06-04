@@ -1232,15 +1232,24 @@
 
     var available = Boolean(els.thinkingModal);
     var embeddedPanel = isHomeAssistantEmbeddedPanel();
-    button.classList.toggle('d-none', !available);
-    button.disabled = !available;
+    // The navbar launcher is redundant on embedded-panel (workspace) pages,
+    // where the floating Workspace Assistant button already opens the chat;
+    // hide it there so it doesn't widen the nav bar. It remains the
+    // "Task Activity" launcher on other pages.
+    var visible = available && !embeddedPanel;
+    button.classList.toggle('d-none', !visible);
+    button.disabled = !visible;
 
     if (!available) {
       button.setAttribute('aria-hidden', 'true');
       return;
     }
 
-    button.removeAttribute('aria-hidden');
+    if (visible) {
+      button.removeAttribute('aria-hidden');
+    } else {
+      button.setAttribute('aria-hidden', 'true');
+    }
     if (embeddedPanel && !button.dataset.homeAssistantPanelBound) {
       button.dataset.homeAssistantPanelBound = 'true';
       button.removeAttribute('data-bs-toggle');
