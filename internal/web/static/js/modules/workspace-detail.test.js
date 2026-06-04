@@ -62,6 +62,9 @@ test('snapshot-backed workspace manager is healthy, not a warning', () => {
   page.agentIndex = new Map();
   page.workspaceAgentSnapshots = new Set(['testjdas manager']);
   page.files = [];
+  // summarizeWorkspaceHealth() (asserted below) reports `checking` until both
+  // load flags flip true; set them so it can resolve to `healthy`.
+  // collectWorkspaceHealthIssues() itself ignores these flags.
   page.agentCatalogLoaded = true;
   page.filesLoaded = true;
 
@@ -84,6 +87,8 @@ test('referenced agent with no global definition and no snapshot is a missing er
   page.agentIndex = new Map();
   page.workspaceAgentSnapshots = new Set(); // no snapshot available
   page.files = [];
+  // No agentCatalogLoaded/filesLoaded here: this case only exercises
+  // collectWorkspaceHealthIssues(), which doesn't read those flags.
 
   const issues = page.collectWorkspaceHealthIssues();
   assert.equal(issues.length, 1);

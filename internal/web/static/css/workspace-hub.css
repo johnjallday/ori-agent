@@ -1,3 +1,23 @@
+/* ============================================================
+   Top-layer z-index tokens
+   ------------------------------------------------------------
+   The floating Workspace Assistant FAB sits above all in-page
+   chrome. The highest CSS-declared layer is the keyboard-nav
+   overlay (20050), so the FAB lives just above it with room to
+   grow — instead of racing toward MAX_INT32.
+
+   --z-hub-toast pins the toast container one step above the FAB
+   (see body.has-hub-support-chat #toastContainer below) so
+   success/error messages are never hidden behind the launcher.
+   Note: toast.js sets the container's default z-index inline so
+   toasts clear modals globally; this token only overrides that
+   when the FAB is present.
+   ============================================================ */
+:root {
+  --z-hub-support-chat: 20100;
+  --z-hub-toast: 20110;
+}
+
 .home-hub .main-content {
   padding-top: 0.75rem;
 }
@@ -4162,7 +4182,7 @@ body.chat-panel-open .chat-panel-backdrop {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 2147483601;
+  z-index: var(--z-hub-support-chat);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -4171,10 +4191,10 @@ body.chat-panel-open .chat-panel-backdrop {
 }
 
 /* Keep transient toasts above the floating Workspace Assistant FAB
-   (.hub-support-chat sits at 2147483601) so success/error messages are
-   never hidden behind the launcher. */
+   (.hub-support-chat) so success/error messages are never hidden behind
+   the launcher. See the top-layer z-index tokens at the top of this file. */
 body.has-hub-support-chat #toastContainer {
-  z-index: 2147483602 !important;
+  z-index: var(--z-hub-toast) !important;
 }
 
 body.modal-open .hub-support-chat {
