@@ -14,10 +14,14 @@ import (
 )
 
 func commandSessionModeLabel(resolution executionAgentResolution) string {
-	if resolution.isAssistantMode() {
+	switch {
+	case resolution.isAssistantMode():
 		return "Assistant"
+	case resolution.isWorkspaceEntryDefault():
+		return "Workspace entry agent"
+	default:
+		return "Pinned specialist"
 	}
-	return "Pinned specialist"
 }
 
 func commandExecutionAgentLabel(resolution executionAgentResolution) string {

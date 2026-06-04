@@ -1088,11 +1088,14 @@ const sessionManager = {
     this.chatAutoMode = (mode === 'auto');
 
     if (mode === 'auto') {
+      // Inside a workspace, "auto" means the workspace entry agent — not the
+      // generic system assistant — so label it as a plain chat.
+      const inWorkspace = Boolean(document.getElementById('chatWorkspaceSelect')?.value);
       if (this.chatLlmAvailable) {
         if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.remove('d-none');
         if (llmWarning) llmWarning.classList.add('d-none');
-        if (createBtnText) createBtnText.textContent = 'Start Assistant';
+        if (createBtnText) createBtnText.textContent = inWorkspace ? 'Start Chat' : 'Start Assistant';
       } else {
         // LLM not available - show warning with action button
         if (manualSection) manualSection.classList.add('d-none');
@@ -1137,7 +1140,7 @@ const sessionManager = {
     if (!autoModeText) return;
 
     if (workspaceId) {
-      autoModeText.textContent = 'Assistant stays in this workspace and uses workspace context by default. Switch to Direct agent chat only when you want a specific agent profile.';
+      autoModeText.textContent = "You'll chat with this workspace's entry agent, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
       return;
     }
 
@@ -1377,7 +1380,7 @@ const sessionManager = {
       if (!agentName) {
         if (window.Toast) {
           Toast.warning(workspaceId
-            ? 'No direct-chat agent is available in this workspace. Add an agent or use Assistant.'
+            ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's entry agent."
             : 'No direct-chat agent is available. Add an agent or use Assistant.');
         }
         return;
