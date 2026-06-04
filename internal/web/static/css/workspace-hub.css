@@ -4170,8 +4170,11 @@ body.chat-panel-open .chat-panel-backdrop {
   pointer-events: none;
 }
 
+/* Keep transient toasts above the floating Workspace Assistant FAB
+   (.hub-support-chat sits at 2147483601) so success/error messages are
+   never hidden behind the launcher. */
 body.has-hub-support-chat #toastContainer {
-  z-index: 2147483600 !important;
+  z-index: 2147483602 !important;
 }
 
 body.modal-open .hub-support-chat {
