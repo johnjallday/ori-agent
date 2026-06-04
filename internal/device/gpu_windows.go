@@ -94,8 +94,37 @@ type memoryStatusEx struct {
 }
 
 // detectHardwareInfoPlatform detects machine and chip information on Windows
-// Returns nil as detailed hardware info detection is not yet implemented for Windows
+// using wmic. MachineName comes from the computer system model and ChipType
+// from the processor name. Returns nil when neither can be determined.
 func detectHardwareInfoPlatform() *HardwareInfo {
-	// TODO: Implement Windows hardware detection using wmic or WMI
-	return nil
+	info := &HardwareInfo{
+		MachineName: wmicValue("computersystem", "Model"),
+		ChipType:    wmicValue("cpu", "Name"),
+	}
+	if info.MachineName == "" && info.ChipType == "" {
+		return nil
+	}
+	return info
+}
+
+// wmicValue runs `wmic <alias> get <property>` and returns the first non-empty
+// value line. Returns an empty string on error.
+func wmicValue(alias, property string) string {
+	cmd := exec.Command("wmic", alias, "get", property)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	// First line is the property header; subsequent lines hold values.
+	for _, line := range lines[1:] {
+		if value := strings.TrimSpace(line); value != "" {
+			return value
+		}
+	}
+	return ""
 }

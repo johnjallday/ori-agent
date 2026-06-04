@@ -241,6 +241,13 @@ func normalizeCodexReasoningEffort(effort string) string {
 	}
 }
 
+// LoadCodexCachedModels returns the visible Codex models from the local CLI
+// model cache. It returns nil when the cache is absent or unreadable, allowing
+// callers to fall back to a curated default list.
+func LoadCodexCachedModels() []string {
+	return loadCodexCachedModels()
+}
+
 func loadCodexCachedModels() []string {
 	cachePath := filepath.Join(codexHomeDir(), "models_cache.json")
 	data, err := os.ReadFile(cachePath)

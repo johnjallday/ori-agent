@@ -23,7 +23,9 @@ func TestCompleteAgentWorkflow(t *testing.T) {
 
 	// Step 2: Verify agent exists
 	t.Log("Step 2: Verifying agent exists...")
-	// TODO: Add API call to list agents and verify
+	if !ctx.AgentExists("workflow-test-agent") {
+		t.Fatalf("Created agent %q not found in agent list", "workflow-test-agent")
+	}
 
 	// Step 3: Send simple chat message (no tools)
 	t.Log("Step 3: Sending simple chat message...")

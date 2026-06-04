@@ -136,9 +136,65 @@ func detectTotalRAMPlatform() int64 {
 	return 0
 }
 
-// detectHardwareInfoPlatform detects machine and chip information on Linux
-// Returns nil as detailed hardware info detection is not yet implemented for Linux
+// detectHardwareInfoPlatform detects machine and chip information on Linux.
+// MachineName is read from the DMI product name exposed by the kernel and
+// ChipType from the CPU model in /proc/cpuinfo. Returns nil when neither can
+// be determined.
 func detectHardwareInfoPlatform() *HardwareInfo {
-	// TODO: Implement Linux hardware detection using /proc/cpuinfo, dmidecode, or lscpu
-	return nil
+	info := &HardwareInfo{
+		MachineName: readDMIProductName(),
+		ChipType:    readCPUModelName(),
+	}
+	if info.MachineName == "" && info.ChipType == "" {
+		return nil
+	}
+	return info
+}
+
+// readDMIProductName reads the system product name from the kernel DMI
+// subsystem (e.g. "XPS 15 9520"). Returns an empty string when the value is
+// unavailable or is a common OEM placeholder.
+func readDMIProductName() string {
+	data, err := os.ReadFile("/sys/class/dmi/id/product_name")
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(string(data))
+	switch strings.ToLower(name) {
+	case "", "to be filled by o.e.m.", "system product name", "default string":
+		return ""
+	}
+	return name
+}
+
+// readCPUModelName extracts the CPU model from /proc/cpuinfo. On x86 this is the
+// "model name" field; on ARM it falls back to the "Hardware" or "Model" field.
+func readCPUModelName() string {
+	file, err := os.Open("/proc/cpuinfo")
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+
+	var fallback string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		key, value, ok := strings.Cut(scanner.Text(), ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "model name":
+			return value
+		case "hardware", "model":
+			if fallback == "" {
+				fallback = value
+			}
+		}
+	}
+	return fallback
 }

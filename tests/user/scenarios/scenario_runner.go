@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -183,23 +185,53 @@ func (r *Runner) runByCategory() {
 	fmt.Println(colorCyan + "\n📂 Select category:" + colorReset)
 	fmt.Println()
 
-	categories := make(map[string]int)
+	counts := make(map[string]int)
 	for _, s := range r.data.Scenarios {
 		if r.isApplicable(&s) {
-			categories[s.Category]++
+			counts[s.Category]++
 		}
 	}
 
-	i := 1
-	for cat, count := range categories {
-		fmt.Printf("  %d. %s (%d scenarios)\n", i, cat, count)
-		i++
+	if len(counts) == 0 {
+		fmt.Println(colorYellow + "No scenarios applicable for this platform" + colorReset)
+		return
 	}
 
-	_ = r.prompt("\nSelect category number")
-	// TODO: Parse choice and run category scenarios
+	// Sort categories for a stable, reproducible numbering.
+	categories := make([]string, 0, len(counts))
+	for cat := range counts {
+		categories = append(categories, cat)
+	}
+	sort.Strings(categories)
 
-	fmt.Println(colorYellow + "Category selection coming soon..." + colorReset)
+	for i, cat := range categories {
+		fmt.Printf("  %d. %s (%d scenarios)\n", i+1, cat, counts[cat])
+	}
+
+	choice := r.prompt("\nSelect category number")
+	idx, err := strconv.Atoi(choice)
+	if err != nil || idx < 1 || idx > len(categories) {
+		fmt.Println(colorRed + "Invalid category number." + colorReset)
+		return
+	}
+
+	selected := categories[idx-1]
+	fmt.Printf("%s\n🧪 Running '%s' scenarios...%s\n\n", colorCyan, selected, colorReset)
+
+	count := 0
+	for _, s := range r.data.Scenarios {
+		scenario := s
+		if !r.isApplicable(&scenario) || scenario.Category != selected {
+			continue
+		}
+		count++
+		fmt.Printf("%s[%d/%d]%s Running: %s\n", colorBlue, count, counts[selected], colorReset, scenario.Name)
+		result := r.runScenario(&scenario)
+		r.results = append(r.results, result)
+		fmt.Println()
+	}
+
+	r.printSummary()
 }
 
 func (r *Runner) runSingleScenario() {
@@ -207,15 +239,27 @@ func (r *Runner) runSingleScenario() {
 	fmt.Println()
 
 	applicable := r.getApplicableScenarios()
+	if len(applicable) == 0 {
+		fmt.Println(colorYellow + "No scenarios applicable for this platform" + colorReset)
+		return
+	}
+
 	for i, s := range applicable {
 		diffIcon := r.getDifficultyIcon(s.Difficulty)
 		fmt.Printf("  %d. %s %s (%s)\n", i+1, diffIcon, s.Name, s.EstimatedTime)
 	}
 
-	_ = r.prompt("\nSelect scenario number")
-	// TODO: Parse choice and run scenario
+	choice := r.prompt("\nSelect scenario number")
+	idx, err := strconv.Atoi(choice)
+	if err != nil || idx < 1 || idx > len(applicable) {
+		fmt.Println(colorRed + "Invalid scenario number." + colorReset)
+		return
+	}
 
-	fmt.Println(colorYellow + "Single scenario selection coming soon..." + colorReset)
+	scenario := applicable[idx-1]
+	result := r.runScenario(&scenario)
+	r.results = append(r.results, result)
+	r.printSummary()
 }
 
 func (r *Runner) listScenarios() {

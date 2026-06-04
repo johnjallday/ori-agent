@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/johnjallday/ori-agent/internal/llm"
 )
 
 // CodexCLIAdapter implements CLIAgentAdapter for the Codex CLI.
@@ -44,9 +46,12 @@ func (a *CodexCLIAdapter) Capabilities() CLIAgentCapabilities {
 	}
 }
 
-// AvailableModels returns available Codex models.
+// AvailableModels returns available Codex models, preferring the local Codex
+// CLI model cache and falling back to a curated default when the cache is empty.
 func (a *CodexCLIAdapter) AvailableModels() []string {
-	// TODO: integrate with loadCodexCachedModels from llm package
+	if models := llm.LoadCodexCachedModels(); len(models) > 0 {
+		return models
+	}
 	return []string{"gpt-5.3-codex"}
 }
 

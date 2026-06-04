@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,6 +179,43 @@ func (tc *TestContext) CreateAgent(name, model string) *Agent {
 		ctx:    tc,
 		config: result,
 	}
+}
+
+// ListAgents returns the names of all agents currently registered on the server.
+func (tc *TestContext) ListAgents() []string {
+	tc.T.Helper()
+
+	resp, err := tc.Client.Get(tc.ServerURL + "/api/agents")
+	if err != nil {
+		tc.T.Fatalf("Failed to list agents: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		tc.T.Fatalf("Failed to list agents (status %d): %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Agents []struct {
+			Name string `json:"name"`
+		} `json:"agents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		tc.T.Fatalf("Failed to decode agents response: %v", err)
+	}
+
+	names := make([]string, 0, len(result.Agents))
+	for _, a := range result.Agents {
+		names = append(names, a.Name)
+	}
+	return names
+}
+
+// AgentExists reports whether an agent with the given name is registered.
+func (tc *TestContext) AgentExists(name string) bool {
+	tc.T.Helper()
+	return slices.Contains(tc.ListAgents(), name)
 }
 
 // LoadPlugin loads a plugin and returns its metadata
