@@ -14449,10 +14449,12 @@ export class WorkspaceDetailPage {
     const allSelected = total > 0 && selectedCount === total;
 
     if (this.elements.selectAllNotesBtn) {
+      // Icon-only toggle: keep the stacked-checkbox SVG intact and reflect
+      // the on/off state via aria-pressed plus the tooltip/aria-label.
       const btn = this.elements.selectAllNotesBtn;
       btn.disabled = isBusy || total === 0;
-      btn.textContent = allSelected ? 'Deselect all' : 'Select all';
       btn.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+      btn.setAttribute('aria-label', allSelected ? 'Deselect all notes' : 'Select all notes');
       btn.title = total === 0
         ? 'No notes to select'
         : allSelected
