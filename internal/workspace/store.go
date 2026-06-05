@@ -1260,6 +1260,12 @@ func (s *FileStore) migrateIfNeeded(ws *Workspace, _ string) bool {
 		needsPersist = true
 	}
 
+	// Backfill assignment provenance on tasks that predate it. This stamps
+	// legacy_unknown without touching existing assignees (Task.To).
+	if backfillTaskAssignmentProvenance(ws) {
+		needsPersist = true
+	}
+
 	return needsPersist
 }
 
