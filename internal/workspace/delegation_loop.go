@@ -193,12 +193,15 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		}
 
 		if adapt.Resolved {
+			finalResult := combineLoopResult(adapt.DirectResult, failed.ResultCombinationMode, order, results)
 			l.emit(EventDelegationCompleted, workspaceID, failed.ID, coordinator, map[string]any{
-				"iterations": iter, "subtasks": subtaskCount,
+				"iterations":   iter,
+				"subtasks":     subtaskCount,
+				"output_valid": delegationResultHonorsSpec(failed, finalResult),
 			})
 			return DelegationLoopResult{
 				Resolved:     true,
-				Result:       combineLoopResult(adapt.DirectResult, failed.ResultCombinationMode, order, results),
+				Result:       finalResult,
 				Iterations:   iter,
 				SubtaskCount: subtaskCount,
 			}, nil
@@ -292,6 +295,15 @@ func (l *DelegationLoop) needsInputBlock(adapt CoordinatorAdaptResult, failed Ta
 // reinterpreted them, honoring the parent's output spec); only when it resolves
 // without an answer do we fall back to combining subtask outputs by the parent's
 // ResultCombinationMode.
+// delegationResultHonorsSpec reports whether the synthesized result satisfies the
+// parent's output spec/contract (true when there is no spec to honor). It reuses
+// the trigger's validator so "honoring the output spec" (FR32) is observable on
+// the delegation.completed event without failing the loop on a fallback combine.
+func delegationResultHonorsSpec(parent Task, result string) bool {
+	_, invalid := classifyOutputValidation(parent, result)
+	return !invalid
+}
+
 func combineLoopResult(direct string, mode TaskResultCombinationMode, order []string, results map[string]string) string {
 	if d := strings.TrimSpace(direct); d != "" {
 		return d
