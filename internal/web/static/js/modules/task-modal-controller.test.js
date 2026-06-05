@@ -184,6 +184,58 @@ test('auto mode task creation includes reference URL payload', async () => {
   assert.equal(calls[1].body.description, 'Parsed task');
 });
 
+test('auto mode forwards coordinator assignment provenance to created task', async () => {
+  const calls = [];
+  const { Controller, elements } = loadController({
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, body });
+      if (url === '/api/orchestration/tasks/auto-parse') {
+        return {
+          ok: true,
+          json: async () => ({
+            title: 'Parsed task',
+            details: '',
+            priority: 3,
+            agent_name: 'Manager',
+            assignment_mode: 'static_plan',
+            assigned_by: 'Manager',
+            assignment_reason: 'coordinator plan'
+          }),
+          text: async () => ''
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ task: { id: 'task-1', description: body.description } }),
+        text: async () => ''
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'workspace-1';
+  controller.autoMode = true;
+  controller.showProgress = () => {};
+  controller.updateProgress = () => {};
+  controller.hideProgress = () => {};
+  controller.showToast = () => {};
+  controller.confirmAutoParsedTaskCreation = async () => true;
+  controller.finalizeSuccessfulSave = async () => {};
+  controller._safeAttachUploads = async () => {};
+  controller._reportUploadFailures = () => {};
+  elements.set('taskAutoDescription', { value: 'do something', focus() {} });
+  elements.set('taskAutoReferenceURL', { value: '' });
+  elements.set('taskModalReferenceURL', { value: '' });
+
+  await controller.saveAutoMode();
+
+  assert.equal(calls[1].url, '/api/orchestration/tasks');
+  assert.equal(calls[1].body.to, 'Manager');
+  assert.equal(calls[1].body.assignment_mode, 'static_plan');
+  assert.equal(calls[1].body.assigned_by, 'Manager');
+  assert.equal(calls[1].body.assignment_reason, 'coordinator plan');
+});
+
 test('auto mode parse failure shows inline error and does not create task', async () => {
   const calls = [];
   const toasts = [];

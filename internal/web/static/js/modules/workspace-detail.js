@@ -4051,6 +4051,27 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  // renderTaskAssignmentModeBadge surfaces coordinator-driven assignment so the
+  // user can tell a statically-planned or delegated task from an ordinary manual
+  // one. Manual and legacy (unlabeled) tasks get no badge to avoid clutter.
+  renderTaskAssignmentModeBadge(task) {
+    const mode = String(task?.assignment_mode || '').trim();
+    const labels = {
+      static_plan: 'Coordinator plan',
+      dynamic_delegation: 'Delegated'
+    };
+    const label = labels[mode];
+    if (!label) return '';
+    const reason = String(task?.assignment_reason || '').trim();
+    const assignedBy = String(task?.assigned_by || '').trim();
+    const title = reason
+      ? `${label}: ${reason}`
+      : assignedBy
+        ? `${label} (by ${assignedBy})`
+        : label;
+    return `<span class="workspace-detail-assignment-mode" data-mode="${this.escapeHtml(mode)}" title="${this.escapeHtml(title)}">${this.escapeHtml(label)}</span>`;
+  }
+
   renderTaskItem(task, options = {}) {
     const {
       isSubtask = false,
@@ -4111,6 +4132,10 @@ export class WorkspaceDetailPage {
       taskMetaParts.push(
         `<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`
       );
+    }
+    const assignmentModeBadge = this.renderTaskAssignmentModeBadge(task);
+    if (assignmentModeBadge) {
+      taskMetaParts.push(assignmentModeBadge);
     }
     if (scheduleIndicator) {
       taskMetaParts.push(scheduleIndicator);
