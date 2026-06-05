@@ -36,8 +36,9 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	sessionStore := b.sessionStore
 	workspaceStore := b.workspaceStore
 	fileStore := b.workspaceFileStore
-	return func(workspaceID string) []toolapi.Tool {
+	return func(workspaceID, agentName string) []toolapi.Tool {
 		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
+		provider.SetExecutingAgent(agentName)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
 		}
@@ -289,10 +290,21 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	var loopExecutor workspace.TaskHandler
 	if b.runBackedTaskHandler != nil {
+		loopExecutor = b.runBackedTaskHandler
 		b.workspaceOrchestrator.SetTaskHandler(b.runBackedTaskHandler)
 	} else if b.taskHandler != nil {
+		loopExecutor = b.taskHandler
 		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
+	}
+	// Adaptive delegation loop (opt-in via ORI_DELEGATION_LOOP). Off by default so
+	// task-failure behavior is unchanged unless explicitly enabled.
+	if loopExecutor != nil && os.Getenv("ORI_DELEGATION_LOOP") == "true" {
+		adapter := workspace.NewCoordinatorAdapter(b.workspaceStore, loopExecutor)
+		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, workspace.DefaultDelegationCaps())
+		b.workspaceOrchestrator.SetDelegationLoop(loop)
+		logger.Info("Adaptive delegation loop enabled (ORI_DELEGATION_LOOP)", logger.Fields{})
 	}
 	if verbose {
 		logger.Info("Workspace orchestrator initialized", logger.Fields{})

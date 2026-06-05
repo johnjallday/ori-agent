@@ -21,6 +21,10 @@ type Orchestrator struct {
 	llmProvider    LLMProvider  // For intelligent task breakdown
 	eventBus       *EventBus    // For real-time updates
 	taskHandler    taskExecutor // For single-task LLM execution (delegated)
+
+	// delegationLoop, when set, drives adaptive delegation on task failure
+	// (opt-in). Nil means the orchestrator records failures as before.
+	delegationLoop *DelegationLoop
 }
 
 // LLMProvider interface for calling AI models
@@ -54,6 +58,12 @@ func NewOrchestrator(workspaceStore Store, agentStore store.Store, llmProvider L
 // Must be called before ExecuteTask, otherwise ExecuteTask returns an error.
 func (o *Orchestrator) SetTaskHandler(h taskExecutor) {
 	o.taskHandler = h
+}
+
+// SetDelegationLoop wires the adaptive delegation loop. When set, ExecuteTask
+// asks the coordinator to adapt on a triggering failure before recording it.
+func (o *Orchestrator) SetDelegationLoop(loop *DelegationLoop) {
+	o.delegationLoop = loop
 }
 
 // ExecuteMission starts autonomous execution of a mission
@@ -399,6 +409,28 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		result = taskRun.Result
 		if taskRun.RunID != "" {
 			task.CurrentRunID = taskRun.RunID
+		}
+	}
+
+	// Adaptive delegation (opt-in): when a loop is wired and the outcome warrants
+	// it, let the coordinator adapt before this is recorded as a failure. With no
+	// loop configured, behavior is unchanged.
+	if o.delegationLoop != nil {
+		if trigger := ClassifyDelegationTrigger(task, result, err); trigger.Trigger {
+			loopRes, loopErr := o.delegationLoop.Run(ctx, workspaceID, task, trigger)
+			switch {
+			case loopErr == nil && loopRes.Resolved:
+				logger.Info("[Orchestrator] Delegation loop resolved task", logger.Fields{
+					"task_id": task.ID, "iterations": loopRes.Iterations, "subtasks": loopRes.SubtaskCount,
+				})
+				result = loopRes.Result
+				err = nil
+			case loopErr != nil:
+				logger.Warn("[Orchestrator] Delegation loop did not resolve task", logger.Fields{
+					"task_id": task.ID, "error": loopErr.Error(),
+				})
+				err = loopErr
+			}
 		}
 	}
 
