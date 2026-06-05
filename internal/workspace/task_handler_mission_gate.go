@@ -36,6 +36,42 @@ func (h *LLMTaskHandler) evaluateMissionGate(task Task, toolName string) error {
 		toolName, dec.Reason, dec.Classification, dec.Policy)
 }
 
+// delegatedSubtaskAutonomyPolicy returns the workspace autonomy policy that
+// applies to a delegated subtask, or "" when the task isn't a delegated subtask
+// or the workspace has no policy configured (then the gate does not apply, so
+// delegation in non-policy workspaces behaves like ordinary task execution).
+func (h *LLMTaskHandler) delegatedSubtaskAutonomyPolicy(task Task) AutonomyPolicy {
+	if task.AssignmentMode != TaskAssignmentModeDynamicDelegation || h.workspaceStore == nil {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.AutonomyPolicy
+}
+
+// evaluateExecutionAutonomyGate applies the autonomy gate to a tool call. Mission
+// runs use the policy from the mission context; delegated subtasks use the
+// workspace policy (FR27c). Other tasks are not gated. Returns nil to proceed
+// and a non-nil error to block the call.
+func (h *LLMTaskHandler) evaluateExecutionAutonomyGate(task Task, toolName string) error {
+	if IsMissionTask(task.Context) {
+		return h.evaluateMissionGate(task, toolName)
+	}
+	policy := h.delegatedSubtaskAutonomyPolicy(task)
+	if policy == "" {
+		return nil
+	}
+	classification := h.resolveMissionToolSideEffect(task.WorkspaceID, toolName)
+	dec := EvaluateMissionToolCallDecision(policy, classification, toolName)
+	if dec.Allowed {
+		return nil
+	}
+	return fmt.Errorf("delegation autonomy gate blocked tool %q: %s (classification=%q, policy=%q)",
+		toolName, dec.Reason, dec.Classification, dec.Policy)
+}
+
 // resolveMissionToolSideEffect classifies a tool for the autonomy gate.
 // Precedence: per-tool override → binding default → name heuristic → empty.
 //
