@@ -1,0 +1,226 @@
+package workspace
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"strings"
+	"time"
+)
+
+// DelegationCaps bounds the adaptive delegation loop so it can never run away.
+// The default values are a conservative starting point; final tuning is tracked
+// as an open question in the PRD.
+type DelegationCaps struct {
+	MaxIterations int           // coordinator adapt iterations per failed task
+	MaxSubtasks   int           // total delegated subtasks per failed task
+	Timeout       time.Duration // wall-clock budget for the whole loop
+}
+
+// DefaultDelegationCaps returns conservative defaults for the delegation loop.
+func DefaultDelegationCaps() DelegationCaps {
+	return DelegationCaps{MaxIterations: 3, MaxSubtasks: 8, Timeout: 10 * time.Minute}
+}
+
+func (c DelegationCaps) normalized() DelegationCaps {
+	d := DefaultDelegationCaps()
+	if c.MaxIterations <= 0 {
+		c.MaxIterations = d.MaxIterations
+	}
+	if c.MaxSubtasks <= 0 {
+		c.MaxSubtasks = d.MaxSubtasks
+	}
+	if c.Timeout <= 0 {
+		c.Timeout = d.Timeout
+	}
+	return c
+}
+
+// CoordinatorAdaptRequest is the input to one coordinator reasoning step.
+type CoordinatorAdaptRequest struct {
+	WorkspaceID  string
+	Coordinator  string
+	FailedTask   Task
+	Trigger      DelegationTrigger
+	Iteration    int
+	PriorResults map[string]string // delegated subtask id -> result text
+}
+
+// CoordinatorAdaptResult is the output of one coordinator reasoning step.
+type CoordinatorAdaptResult struct {
+	DelegatedTaskIDs []string // subtasks the coordinator created this step
+	DirectResult     string   // set when the coordinator did the work itself
+	Resolved         bool     // coordinator considers the failed task resolved
+}
+
+// CoordinatorAdapter is the LLM-reasoning seam of the delegation loop: it runs
+// the coordinator (entry agent) with the delegate_task tool and reports what it
+// did. It is injected so the loop's control flow is testable without an LLM.
+type CoordinatorAdapter interface {
+	Adapt(ctx context.Context, req CoordinatorAdaptRequest) (CoordinatorAdaptResult, error)
+}
+
+// DelegationLoop drives "adapt on failure": it asks the coordinator to adapt,
+// executes any delegated subtasks, and repeats until the coordinator resolves
+// the task or a cap is hit. Single-level is enforced upstream (only the
+// coordinator holds delegate_task), so the subtasks executed here are leaves.
+type DelegationLoop struct {
+	store    Store
+	executor taskExecutor
+	adapter  CoordinatorAdapter
+	caps     DelegationCaps
+}
+
+// NewDelegationLoop builds a loop. caps is normalized so zero values fall back to
+// DefaultDelegationCaps.
+func NewDelegationLoop(store Store, executor taskExecutor, adapter CoordinatorAdapter, caps DelegationCaps) *DelegationLoop {
+	return &DelegationLoop{store: store, executor: executor, adapter: adapter, caps: caps.normalized()}
+}
+
+// DelegationLoopResult reports the loop outcome on success.
+type DelegationLoopResult struct {
+	Resolved     bool
+	Result       string
+	Iterations   int
+	SubtaskCount int
+}
+
+// Run executes the adaptive loop for a failed/blocked task. When a cap is hit it
+// returns a *TaskBlockedError so the failure surfaces to the user (or, later, a
+// pause-to-ask) rather than looping forever.
+func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Task, trigger DelegationTrigger) (DelegationLoopResult, error) {
+	if l == nil || l.adapter == nil {
+		return DelegationLoopResult{}, fmt.Errorf("delegation loop: no coordinator adapter configured")
+	}
+	if l.executor == nil {
+		return DelegationLoopResult{}, fmt.Errorf("delegation loop: no task executor configured")
+	}
+
+	coordinator, err := l.resolveCoordinator(workspaceID)
+	if err != nil {
+		return DelegationLoopResult{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, l.caps.Timeout)
+	defer cancel()
+
+	results := map[string]string{}
+	var order []string
+	subtaskCount := 0
+
+	for iter := 1; iter <= l.caps.MaxIterations; iter++ {
+		if ctx.Err() != nil {
+			return DelegationLoopResult{Iterations: iter - 1, SubtaskCount: subtaskCount},
+				l.capHit("delegation timed out", failed, trigger)
+		}
+
+		adapt, aerr := l.adapter.Adapt(ctx, CoordinatorAdaptRequest{
+			WorkspaceID:  workspaceID,
+			Coordinator:  coordinator,
+			FailedTask:   failed,
+			Trigger:      trigger,
+			Iteration:    iter,
+			PriorResults: cloneStringMap(results),
+		})
+		if aerr != nil {
+			return DelegationLoopResult{Iterations: iter, SubtaskCount: subtaskCount}, aerr
+		}
+
+		for _, id := range adapt.DelegatedTaskIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			subtaskCount++
+			if subtaskCount > l.caps.MaxSubtasks {
+				return DelegationLoopResult{Iterations: iter, SubtaskCount: subtaskCount - 1},
+					l.capHit("exceeded the maximum number of delegated subtasks", failed, trigger)
+			}
+			order = append(order, id)
+			if res, eerr := l.executeSubtask(ctx, workspaceID, id); eerr != nil {
+				results[id] = "error: " + eerr.Error()
+			} else {
+				results[id] = res
+			}
+		}
+
+		if adapt.Resolved {
+			return DelegationLoopResult{
+				Resolved:     true,
+				Result:       combineLoopResult(adapt.DirectResult, order, results),
+				Iterations:   iter,
+				SubtaskCount: subtaskCount,
+			}, nil
+		}
+	}
+
+	return DelegationLoopResult{Iterations: l.caps.MaxIterations, SubtaskCount: subtaskCount},
+		l.capHit("exceeded the maximum number of delegation iterations", failed, trigger)
+}
+
+func (l *DelegationLoop) resolveCoordinator(workspaceID string) (string, error) {
+	ws, err := l.store.Get(workspaceID)
+	if err != nil {
+		return "", fmt.Errorf("delegation loop: workspace not found: %w", err)
+	}
+	name, source := ws.ResolveCoordinator()
+	if source == CoordinatorSourceMissing {
+		return "", ErrCoordinatorMissing
+	}
+	return name, nil
+}
+
+func (l *DelegationLoop) executeSubtask(ctx context.Context, workspaceID, taskID string) (string, error) {
+	ws, err := l.store.Get(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			return l.executor.ExecuteTask(ctx, ws.Tasks[i].To, ws.Tasks[i])
+		}
+	}
+	return "", fmt.Errorf("delegated subtask %s not found", taskID)
+}
+
+// capHit builds the terminal blocked error when the loop is stopped by a cap.
+// Phase 5 layers pause-to-ask on top of this same signal.
+func (l *DelegationLoop) capHit(reason string, failed Task, trigger DelegationTrigger) error {
+	question := fmt.Sprintf(
+		"The coordinator could not resolve %q after adapting (%s). Review and retry, adjust the task, or assign it manually.",
+		strings.TrimSpace(failed.Description), strings.TrimSpace(trigger.Reason),
+	)
+	return &TaskBlockedError{
+		ReasonCode:       "delegation_cap_exceeded",
+		Reason:           reason,
+		Question:         question,
+		SuggestedActions: []string{"switch_agent_retry", "mark_failed"},
+	}
+}
+
+func combineLoopResult(direct string, order []string, results map[string]string) string {
+	if strings.TrimSpace(direct) != "" {
+		return strings.TrimSpace(direct)
+	}
+	var b strings.Builder
+	for _, id := range order {
+		res := strings.TrimSpace(results[id])
+		if res == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(res)
+	}
+	return b.String()
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	maps.Copy(out, in)
+	return out
+}
