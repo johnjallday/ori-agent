@@ -303,6 +303,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	if loopExecutor != nil && os.Getenv("ORI_DELEGATION_LOOP") == "true" {
 		adapter := workspace.NewCoordinatorAdapter(b.workspaceStore, loopExecutor)
 		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, workspace.DefaultDelegationCaps())
+		loop.SetEventBus(b.eventBus)
 		b.workspaceOrchestrator.SetDelegationLoop(loop)
 		logger.Info("Adaptive delegation loop enabled (ORI_DELEGATION_LOOP)", logger.Fields{})
 	}

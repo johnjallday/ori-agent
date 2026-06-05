@@ -72,16 +72,43 @@ type CoordinatorAdapter interface {
 // the task or a cap is hit. Single-level is enforced upstream (only the
 // coordinator holds delegate_task), so the subtasks executed here are leaves.
 type DelegationLoop struct {
-	store    Store
-	executor taskExecutor
-	adapter  CoordinatorAdapter
-	caps     DelegationCaps
+	store     Store
+	executor  taskExecutor
+	adapter   CoordinatorAdapter
+	caps      DelegationCaps
+	eventBus  *EventBus
+	telemetry DelegationTelemetry
+}
+
+// DelegationTelemetry records per-delegation telemetry. utilitytelemetry.Tracker
+// satisfies it; it is optional and injected so the workspace package does not
+// depend on the telemetry package.
+type DelegationTelemetry interface {
+	RecordDelegationEvent(mode, reason, target string)
 }
 
 // NewDelegationLoop builds a loop. caps is normalized so zero values fall back to
 // DefaultDelegationCaps.
 func NewDelegationLoop(store Store, executor taskExecutor, adapter CoordinatorAdapter, caps DelegationCaps) *DelegationLoop {
 	return &DelegationLoop{store: store, executor: executor, adapter: adapter, caps: caps.normalized()}
+}
+
+// SetEventBus wires delegation lifecycle events (delegation.*).
+func (l *DelegationLoop) SetEventBus(bus *EventBus) { l.eventBus = bus }
+
+// SetTelemetry wires per-delegation telemetry recording.
+func (l *DelegationLoop) SetTelemetry(t DelegationTelemetry) { l.telemetry = t }
+
+func (l *DelegationLoop) emit(eventType EventType, workspaceID, parentTaskID, coordinator string, data map[string]any) {
+	if l.eventBus == nil {
+		return
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["parent_task_id"] = parentTaskID
+	data["coordinator"] = coordinator
+	l.eventBus.Publish(NewTaskEvent(eventType, workspaceID, parentTaskID, coordinator, data))
 }
 
 // DelegationLoopResult reports the loop outcome on success.
@@ -108,6 +135,11 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		return DelegationLoopResult{}, err
 	}
 
+	l.emit(EventDelegationStarted, workspaceID, failed.ID, coordinator, map[string]any{
+		"trigger_code":   trigger.Code,
+		"trigger_reason": trigger.Reason,
+	})
+
 	ctx, cancel := context.WithTimeout(ctx, l.caps.Timeout)
 	defer cancel()
 
@@ -117,6 +149,7 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 
 	for iter := 1; iter <= l.caps.MaxIterations; iter++ {
 		if ctx.Err() != nil {
+			l.emit(EventDelegationCapHit, workspaceID, failed.ID, coordinator, map[string]any{"cap": "timeout"})
 			return DelegationLoopResult{Iterations: iter - 1, SubtaskCount: subtaskCount},
 				l.capHit("delegation timed out", failed, trigger)
 		}
@@ -130,6 +163,7 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 			PriorResults: cloneStringMap(results),
 		})
 		if aerr != nil {
+			l.emit(EventDelegationFailed, workspaceID, failed.ID, coordinator, map[string]any{"error": aerr.Error()})
 			return DelegationLoopResult{Iterations: iter, SubtaskCount: subtaskCount}, aerr
 		}
 
@@ -159,6 +193,9 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		}
 
 		if adapt.Resolved {
+			l.emit(EventDelegationCompleted, workspaceID, failed.ID, coordinator, map[string]any{
+				"iterations": iter, "subtasks": subtaskCount,
+			})
 			return DelegationLoopResult{
 				Resolved:     true,
 				Result:       combineLoopResult(adapt.DirectResult, failed.ResultCombinationMode, order, results),
@@ -168,6 +205,7 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		}
 	}
 
+	l.emit(EventDelegationCapHit, workspaceID, failed.ID, coordinator, map[string]any{"cap": "max_iterations"})
 	return DelegationLoopResult{Iterations: l.caps.MaxIterations, SubtaskCount: subtaskCount},
 		l.capHit("exceeded the maximum number of delegation iterations", failed, trigger)
 }
@@ -191,6 +229,10 @@ func (l *DelegationLoop) executeSubtask(ctx context.Context, workspaceID, taskID
 	}
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
+			if l.telemetry != nil {
+				l.telemetry.RecordDelegationEvent(
+					string(TaskAssignmentModeDynamicDelegation), "delegated subtask", ws.Tasks[i].To)
+			}
 			return l.executor.ExecuteTask(ctx, ws.Tasks[i].To, ws.Tasks[i])
 		}
 	}
