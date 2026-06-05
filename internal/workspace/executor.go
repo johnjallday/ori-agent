@@ -1016,8 +1016,24 @@ func (te *TaskExecutor) CancelTask(taskID string) error {
 		return fmt.Errorf("task %s is not currently running", taskID)
 	}
 
-	exec.Cancel()
+	if exec.Cancel != nil {
+		exec.Cancel()
+	}
 	logger.Debug("🚫 Task cancelled", logger.Fields{"task_id": taskID})
+
+	// Propagate cancellation to in-flight delegated subtasks so none are
+	// orphaned when their parent is stopped (single-level: subtasks are leaves).
+	for childID, child := range te.runningTasks {
+		if childID == taskID || child == nil || child.Cancel == nil {
+			continue
+		}
+		if child.Task.ParentTaskID == taskID {
+			child.Cancel()
+			logger.Debug("🚫 Cancelled in-flight subtask of parent", logger.Fields{
+				"task_id": childID, "parent_task_id": taskID,
+			})
+		}
+	}
 
 	return nil
 }

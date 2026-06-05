@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
@@ -160,7 +161,7 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		if adapt.Resolved {
 			return DelegationLoopResult{
 				Resolved:     true,
-				Result:       combineLoopResult(adapt.DirectResult, order, results),
+				Result:       combineLoopResult(adapt.DirectResult, failed.ResultCombinationMode, order, results),
 				Iterations:   iter,
 				SubtaskCount: subtaskCount,
 			}, nil
@@ -233,22 +234,46 @@ func (l *DelegationLoop) needsInputBlock(adapt CoordinatorAdaptResult, failed Ta
 	}
 }
 
-func combineLoopResult(direct string, order []string, results map[string]string) string {
-	if strings.TrimSpace(direct) != "" {
-		return strings.TrimSpace(direct)
+// combineLoopResult produces the parent task's final result. The coordinator's
+// own answer is the primary synthesis (it saw the subtask results and
+// reinterpreted them, honoring the parent's output spec); only when it resolves
+// without an answer do we fall back to combining subtask outputs by the parent's
+// ResultCombinationMode.
+func combineLoopResult(direct string, mode TaskResultCombinationMode, order []string, results map[string]string) string {
+	if d := strings.TrimSpace(direct); d != "" {
+		return d
 	}
-	var b strings.Builder
-	for _, id := range order {
-		res := strings.TrimSpace(results[id])
-		if res == "" {
-			continue
+	switch mode {
+	case TaskResultCombinationLastResult:
+		for i := len(order) - 1; i >= 0; i-- {
+			if r := strings.TrimSpace(results[order[i]]); r != "" {
+				return r
+			}
 		}
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
+		return ""
+	case TaskResultCombinationJSONMap:
+		m := make(map[string]string, len(order))
+		for _, id := range order {
+			m[id] = results[id]
 		}
-		b.WriteString(res)
+		if b, err := json.Marshal(m); err == nil {
+			return string(b)
+		}
+		fallthrough
+	default: // concat; structured_outputs relies on the coordinator's DirectResult
+		var b strings.Builder
+		for _, id := range order {
+			res := strings.TrimSpace(results[id])
+			if res == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(res)
+		}
+		return b.String()
 	}
-	return b.String()
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
