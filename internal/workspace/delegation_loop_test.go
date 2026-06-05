@@ -100,6 +100,37 @@ func TestDelegationLoopIterationCapBlocks(t *testing.T) {
 	}
 }
 
+func TestDelegationLoopNeedsInputReturnsBlock(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(loopWorkspace()); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loop := NewDelegationLoop(store, &fakeExecutor{},
+		&fakeAdapter{steps: []CoordinatorAdaptResult{
+			{NeedsInput: true, Question: "Which data source should I use?", SuggestedActions: []string{"a", "b"}},
+		}},
+		DelegationCaps{})
+
+	_, err := loop.Run(context.Background(), "ws", Task{Description: "do x"}, DelegationTrigger{Trigger: true})
+	blocked, ok := AsTaskBlockedError(err)
+	if !ok || blocked.ReasonCode != "delegation_needs_input" || blocked.Question != "Which data source should I use?" {
+		t.Fatalf("expected needs-input block, got %v", err)
+	}
+}
+
+func TestShouldPauseForDelegationBlock(t *testing.T) {
+	if !shouldPauseForDelegationBlock(Task{Description: "interactive"}) {
+		t.Fatal("a regular task should pause-to-ask (interactive)")
+	}
+	if shouldPauseForDelegationBlock(Task{ScheduleEnabled: true}) {
+		t.Fatal("a scheduled task must not pause (unattended)")
+	}
+	mission := Task{Context: map[string]any{MissionTaskContextOriginKey: MissionTaskContextOriginValue}}
+	if shouldPauseForDelegationBlock(mission) {
+		t.Fatal("a mission task must not pause (unattended)")
+	}
+}
+
 func TestDelegationLoopSubtaskCapBlocks(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := loopWorkspace(

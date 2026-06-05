@@ -426,6 +426,13 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 				result = loopRes.Result
 				err = nil
 			case loopErr != nil:
+				// A loop block becomes a pause-to-ask when interactive, or a
+				// failure when unattended (missions/scheduled never hang).
+				if blocked, ok := AsTaskBlockedError(loopErr); ok && shouldPauseForDelegationBlock(task) {
+					logger.Info("[Orchestrator] Delegation loop paused task for input", logger.Fields{"task_id": task.ID})
+					o.pauseTaskForDelegation(workspace, task, blocked)
+					return nil
+				}
 				logger.Warn("[Orchestrator] Delegation loop did not resolve task", logger.Fields{
 					"task_id": task.ID, "error": loopErr.Error(),
 				})
@@ -530,6 +537,45 @@ func assignMissionTask(ws *Workspace, task *Task, coordinator string) {
 	task.AssignmentMode = TaskAssignmentModeStaticPlan
 	task.AssignedBy = assignedBy
 	task.AssignmentReason = "mission plan"
+}
+
+// shouldPauseForDelegationBlock reports whether a delegation block should
+// pause-to-ask (interactive) instead of failing. Unattended runs (missions and
+// scheduled tasks) must never hang waiting for input, so they fail instead.
+func shouldPauseForDelegationBlock(task Task) bool {
+	if IsMissionTask(task.Context) {
+		return false
+	}
+	if task.ScheduleEnabled {
+		return false
+	}
+	return true
+}
+
+// pauseTaskForDelegation suspends a task pending user input, reusing the same
+// blocked primitives as the task executor: waiting_for_choice + a task.blocked
+// event carrying the coordinator's question.
+func (o *Orchestrator) pauseTaskForDelegation(ws *Workspace, task Task, blocked *TaskBlockedError) {
+	if mutErr := MutateTaskAndSave(o.workspaceStore, ws, task.ID, func(t *Task) error {
+		if err := t.SetStatus(TaskStatusWaitingForChoice); err != nil {
+			return err
+		}
+		t.Error = ""
+		t.Result = ""
+		t.CompletedAt = nil
+		applyExecutorTaskBlockedContext(t, blocked)
+		return nil
+	}); mutErr != nil {
+		logger.Error("[Orchestrator] failed to pause task for delegation", logger.Fields{
+			"task_id": task.ID, "error": mutErr,
+		})
+		return
+	}
+	o.publishEvent(string(EventTaskBlocked), ws.ID, map[string]any{
+		"task_id":     task.ID,
+		"description": task.Description,
+		"error":       blocked.Error(),
+	})
 }
 
 // formatAgentCapabilities formats agent list with capabilities.

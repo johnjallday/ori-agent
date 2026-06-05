@@ -51,6 +51,12 @@ type CoordinatorAdaptResult struct {
 	DelegatedTaskIDs []string // subtasks the coordinator created this step
 	DirectResult     string   // set when the coordinator did the work itself
 	Resolved         bool     // coordinator considers the failed task resolved
+
+	// NeedsInput requests a pause-to-ask: the coordinator is unsure how to
+	// proceed (low confidence / no viable specialist) and wants the user.
+	NeedsInput       bool
+	Question         string
+	SuggestedActions []string
 }
 
 // CoordinatorAdapter is the LLM-reasoning seam of the delegation loop: it runs
@@ -126,6 +132,13 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 			return DelegationLoopResult{Iterations: iter, SubtaskCount: subtaskCount}, aerr
 		}
 
+		// The coordinator asked for input. Surface a blocked error; the caller
+		// turns it into a pause-to-ask when interactive, or a failure when not.
+		if adapt.NeedsInput {
+			return DelegationLoopResult{Iterations: iter, SubtaskCount: subtaskCount},
+				l.needsInputBlock(adapt, failed)
+		}
+
 		for _, id := range adapt.DelegatedTaskIDs {
 			id = strings.TrimSpace(id)
 			if id == "" {
@@ -195,6 +208,28 @@ func (l *DelegationLoop) capHit(reason string, failed Task, trigger DelegationTr
 		Reason:           reason,
 		Question:         question,
 		SuggestedActions: []string{"switch_agent_retry", "mark_failed"},
+	}
+}
+
+// needsInputBlock builds the blocked error for a coordinator pause request,
+// reusing the coordinator's question/actions when provided.
+func (l *DelegationLoop) needsInputBlock(adapt CoordinatorAdaptResult, failed Task) error {
+	question := strings.TrimSpace(adapt.Question)
+	if question == "" {
+		question = fmt.Sprintf(
+			"The coordinator needs your input to continue %q. Provide guidance, or assign the task manually.",
+			strings.TrimSpace(failed.Description),
+		)
+	}
+	actions := adapt.SuggestedActions
+	if len(actions) == 0 {
+		actions = []string{"switch_agent_retry", "mark_failed"}
+	}
+	return &TaskBlockedError{
+		ReasonCode:       "delegation_needs_input",
+		Reason:           "the coordinator needs input to proceed",
+		Question:         question,
+		SuggestedActions: actions,
 	}
 }
 
