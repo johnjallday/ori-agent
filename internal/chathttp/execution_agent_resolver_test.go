@@ -269,6 +269,32 @@ func TestResolveExecutionAgentName_WorkspaceNeverFallsBackToAssistant(t *testing
 	}
 }
 
+func TestResolveExecutionAgentName_WorkspaceWithNoEntryAgentConfigured(t *testing.T) {
+	// The workspace exists but has no entry agent assigned at all
+	// (EntryAgentName() == ""). It must stay unresolved (so the caller surfaces
+	// the workspace error) and never fall back to the global assistant.
+	agentStore := &preflightStore{
+		agents: map[string]*agent.Agent{
+			assistantExecutionAgentName: {},
+		},
+		names: []string{assistantExecutionAgentName},
+	}
+	wsLookup := &workspaceEntryLookupStub{
+		workspaces: map[string]*workspace.Workspace{
+			"ws-1": {}, // empty workspace: no agents, no entry agent
+		},
+	}
+
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1")
+
+	if resolution.isResolved() {
+		t.Fatalf("expected unresolved for workspace with no entry agent, got %q", resolution.Name)
+	}
+	if resolution.Source != executionAgentSourceUnavailable {
+		t.Fatalf("expected source %q, got %q", executionAgentSourceUnavailable, resolution.Source)
+	}
+}
+
 func TestResolveExecutionAgentName_WorkspaceResolvesEntryAgentFromSnapshot(t *testing.T) {
 	// The entry agent is absent from the global registry but the workspace has
 	// an on-disk snapshot. The chat runtime resolves workspace agents

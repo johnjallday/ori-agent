@@ -91,7 +91,9 @@ func resolveWorkspaceEntryAgentName(
 		return ""
 	}
 
-	ws, err := workspaceLookup.Get(strings.TrimSpace(workspaceID))
+	workspaceID = strings.TrimSpace(workspaceID)
+
+	ws, err := workspaceLookup.Get(workspaceID)
 	if err != nil || ws == nil {
 		return ""
 	}
@@ -109,7 +111,7 @@ func resolveWorkspaceEntryAgentName(
 	if agentExists(agentStore, entry) {
 		return entry
 	}
-	if _, ok, err := workspaceLookup.GetWorkspaceAgent(strings.TrimSpace(workspaceID), entry); err == nil && ok {
+	if _, ok, err := workspaceLookup.GetWorkspaceAgent(workspaceID, entry); err == nil && ok {
 		return entry
 	}
 
