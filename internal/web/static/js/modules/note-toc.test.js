@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 import {
   parseHeadings,
+  parseOutlineEntries,
   buildOutline,
   sliceHeadingRange,
   moveHeadingRange,
@@ -97,6 +98,77 @@ test('buildOutline: handles deep nesting and pops correctly', () => {
 
 test('buildOutline: empty input returns []', () => {
   assert.deepEqual(buildOutline(''), []);
+});
+
+// =============================================================================
+// parseOutlineEntries — bold lines & bold-led list items enrich the outline
+// =============================================================================
+
+test('parseOutlineEntries: bold-only line becomes a section under the heading', () => {
+  const got = parseOutlineEntries('# Course\n\n**For Two**\n\nbody\n');
+  assert.deepEqual(got.map((e) => [e.kind, e.level, e.text]), [
+    ['heading', 1, 'Course'],
+    ['section', 2, 'For Two'],
+  ]);
+});
+
+test('parseOutlineEntries: bold-led list items nest under the section', () => {
+  const got = parseOutlineEntries('# Course\n**For Two**\n1. **Welcome Bite**\n2. **Cold Course**\n');
+  assert.deepEqual(got.map((e) => [e.kind, e.level, e.text]), [
+    ['heading', 1, 'Course'],
+    ['section', 2, 'For Two'],
+    ['item', 3, '1. Welcome Bite'],
+    ['item', 3, '2. Cold Course'],
+  ]);
+});
+
+test('parseOutlineEntries: unordered bold-led items drop the bullet marker', () => {
+  const got = parseOutlineEntries('# H\n- **Alpha**\n* **Beta**\n');
+  assert.deepEqual(got.map((e) => e.text), ['H', 'Alpha', 'Beta']);
+});
+
+test('parseOutlineEntries: plain (non-bold) list items are ignored', () => {
+  const got = parseOutlineEntries('# List\n- milk\n- eggs\n1. first\n');
+  assert.deepEqual(got.map((e) => e.kind), ['heading']);
+});
+
+test('parseOutlineEntries: a sentence containing bold is not a section', () => {
+  assert.deepEqual(parseOutlineEntries('Some **bold** word in a sentence.\n'), []);
+});
+
+test('parseOutlineEntries: sibling bold sections stay at the same level', () => {
+  const got = parseOutlineEntries('# H\n**A**\n**B**\n');
+  assert.deepEqual(got.map((e) => e.level), [1, 2, 2]);
+});
+
+test('parseOutlineEntries: sections before any heading sit at level 1', () => {
+  const got = parseOutlineEntries('**Top**\n1. **One**\n');
+  assert.deepEqual(got.map((e) => [e.kind, e.level]), [['section', 1], ['item', 2]]);
+});
+
+test('parseOutlineEntries: ignores bold inside fenced code blocks', () => {
+  const got = parseOutlineEntries('# H\n```\n**not a section**\n- **nope**\n```\n**real**\n');
+  assert.deepEqual(got.map((e) => e.text), ['H', 'real']);
+});
+
+test('parseOutlineEntries: position points at the start of the entry line', () => {
+  const src = '# H\n**Sec**\n';
+  const got = parseOutlineEntries(src);
+  assert.equal(got[1].position, src.indexOf('**Sec**'));
+});
+
+test('buildOutline: nests bold sections and items beneath the heading', () => {
+  const src = '# Course\n**For Two**\n1. **Welcome Bite**\n2. **Cold Course**\n**Prep**\n';
+  const tree = buildOutline(src);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].text, 'Course');
+  assert.equal(tree[0].children.length, 2); // 'For Two' + 'Prep' are siblings
+  assert.equal(tree[0].children[0].text, 'For Two');
+  assert.equal(tree[0].children[0].kind, 'section');
+  assert.equal(tree[0].children[0].children.length, 2); // the two course items
+  assert.equal(tree[0].children[0].children[0].text, '1. Welcome Bite');
+  assert.equal(tree[0].children[0].children[0].kind, 'item');
+  assert.equal(tree[0].children[1].text, 'Prep');
 });
 
 // =============================================================================

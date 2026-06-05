@@ -1656,7 +1656,8 @@ export class NoteTocController {
     const content = rail.querySelector('[data-role="content"]');
     if (!empty || !content) return;
 
-    const outline = window.NoteTOC.buildOutline(this.host.getContent?.() || '');
+    const source = this.host.getContent?.() || '';
+    const outline = window.NoteTOC.buildOutline(source);
     const flat = [];
     const flatten = (nodes) => {
       for (const n of nodes) {
@@ -1665,6 +1666,10 @@ export class NoteTocController {
       }
     };
     flatten(outline);
+
+    // Line indexes the scroll-spy observer should watch — every outline entry,
+    // not just real headings, so bold/list entries highlight as you scroll.
+    this._entryLineIndexes = new Set(flat.map((h) => lineIndexAtPosition(source, h.position)));
 
     // Rail stays visible whenever the editor is in preview mode — the Notes
     // tab needs to be reachable even when the outline is empty.
@@ -1682,10 +1687,12 @@ export class NoteTocController {
     const list = document.createElement('ul');
     list.className = 'note-toc-list';
     for (const h of flat) {
+      const kind = h.kind || 'heading';
       const li = document.createElement('li');
       li.className = 'note-toc-item';
       li.dataset.level = String(h.level);
       li.dataset.position = String(h.position);
+      li.dataset.kind = kind;
 
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -1693,12 +1700,17 @@ export class NoteTocController {
       btn.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
       btn.textContent = h.text;
       btn.title = h.text;
-      btn.draggable = true;
       btn.addEventListener('click', () => scrollToHeadingPosition(this.host.getContent?.() || '', h.position, this.previewPaneId));
-      btn.addEventListener('dragstart', (e) => this._onDragStart(e, h.position));
-      btn.addEventListener('dragend', () => this._onDragEnd());
-      btn.addEventListener('dragover', (e) => this._onDragOver(e, h.position));
-      btn.addEventListener('drop', (e) => this._onDrop(e, h.position));
+
+      // Only real ATX headings are reorderable — moveHeadingRange operates on
+      // heading blocks, so bold/list outline entries are navigation-only.
+      if (kind === 'heading') {
+        btn.draggable = true;
+        btn.addEventListener('dragstart', (e) => this._onDragStart(e, h.position));
+        btn.addEventListener('dragend', () => this._onDragEnd());
+        btn.addEventListener('dragover', (e) => this._onDragOver(e, h.position));
+        btn.addEventListener('drop', (e) => this._onDrop(e, h.position));
+      }
 
       li.appendChild(btn);
       list.appendChild(li);
@@ -1713,7 +1725,13 @@ export class NoteTocController {
     if (typeof IntersectionObserver === 'undefined' || typeof document === 'undefined') return;
     const previewPane = document.getElementById(this.previewPaneId);
     if (!previewPane) return;
-    const headingEls = previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]');
+    // Observe the rendered line for every outline entry (headings + bold/list
+    // entries). Fall back to heading-class matching if the entry set is empty.
+    const indexes = this._entryLineIndexes;
+    const headingEls = indexes && indexes.size
+      ? Array.from(previewPane.querySelectorAll('.note-live-line-rendered[data-line-index]'))
+          .filter((el) => indexes.has(Number(el.dataset.lineIndex)))
+      : Array.from(previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]'));
     if (!headingEls.length) return;
 
     const visible = new Map();
