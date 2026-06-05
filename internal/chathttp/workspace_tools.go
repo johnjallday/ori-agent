@@ -31,6 +31,10 @@ type WorkspaceToolProvider struct {
 	// enables the current_task / task_runs tools.
 	taskID string
 
+	// executingAgent is the name of the agent driving this provider. It gates
+	// coordinator-only tools (delegate_task) to the workspace coordinator.
+	executingAgent string
+
 	// Optional dependencies for management tools (Phase 2)
 	agentStore    store.Store
 	mcpRegistry   mcpServerLister
@@ -67,6 +71,12 @@ func (p *WorkspaceToolProvider) SetTaskID(taskID string) {
 	p.taskID = strings.TrimSpace(taskID)
 }
 
+// SetExecutingAgent records which agent is driving this provider, used to gate
+// the coordinator-only delegate_task tool.
+func (p *WorkspaceToolProvider) SetExecutingAgent(name string) {
+	p.executingAgent = strings.TrimSpace(name)
+}
+
 // SetManagementDeps sets optional dependencies needed for management tools.
 func (p *WorkspaceToolProvider) SetManagementDeps(agentStore store.Store, mcpReg mcpServerLister, skillsMgr skillLister) {
 	p.agentStore = agentStore
@@ -101,6 +111,13 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 	if p.skillsManager != nil {
 		tools = append(tools, p.manageSkillsTool())
+	}
+
+	// Coordinator-only: the entry agent can delegate work to specialists.
+	// Exposing this solely to the coordinator structurally enforces single-level
+	// delegation (specialists never receive the tool, so they cannot re-delegate).
+	if p.delegationEnabled() {
+		tools = append(tools, p.delegateTaskTool())
 	}
 
 	return tools
