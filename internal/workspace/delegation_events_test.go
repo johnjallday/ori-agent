@@ -48,6 +48,9 @@ func TestDelegationLoopEmitsLifecycleEvents(t *testing.T) {
 	if !seen[EventDelegationStarted] || !seen[EventDelegationCompleted] {
 		t.Fatalf("expected started+completed events, got %v", seen)
 	}
+	if !seen[EventTaskAssigned] {
+		t.Fatalf("expected a task.assigned event for the delegated subtask, got %v", seen)
+	}
 	if len(tel.calls) != 1 || tel.calls[0] != "dynamic_delegation|Writer" {
 		t.Fatalf("expected one delegation telemetry record for Writer, got %v", tel.calls)
 	}

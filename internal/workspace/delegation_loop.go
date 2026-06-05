@@ -229,11 +229,22 @@ func (l *DelegationLoop) executeSubtask(ctx context.Context, workspaceID, taskID
 	}
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
+			sub := ws.Tasks[i]
 			if l.telemetry != nil {
 				l.telemetry.RecordDelegationEvent(
-					string(TaskAssignmentModeDynamicDelegation), "delegated subtask", ws.Tasks[i].To)
+					string(TaskAssignmentModeDynamicDelegation), "delegated subtask", sub.To)
 			}
-			return l.executor.ExecuteTask(ctx, ws.Tasks[i].To, ws.Tasks[i])
+			if l.eventBus != nil {
+				l.eventBus.Publish(NewTaskEvent(EventTaskAssigned, workspaceID, sub.ID, sub.To, map[string]any{
+					"delegated_task_id": sub.ID,
+					"target_agent":      sub.To,
+					"assigned_by":       sub.AssignedBy,
+					"assignment_mode":   string(sub.AssignmentMode),
+					"assignment_reason": sub.AssignmentReason,
+					"parent_task_id":    sub.ParentTaskID,
+				}))
+			}
+			return l.executor.ExecuteTask(ctx, sub.To, sub)
 		}
 	}
 	return "", fmt.Errorf("delegated subtask %s not found", taskID)

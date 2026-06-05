@@ -304,6 +304,11 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		adapter := workspace.NewCoordinatorAdapter(b.workspaceStore, loopExecutor)
 		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, workspace.DefaultDelegationCaps())
 		loop.SetEventBus(b.eventBus)
+		if b.chatHandler != nil {
+			if tracker := b.chatHandler.UtilityTelemetry(); tracker != nil {
+				loop.SetTelemetry(tracker)
+			}
+		}
 		b.workspaceOrchestrator.SetDelegationLoop(loop)
 		logger.Info("Adaptive delegation loop enabled (ORI_DELEGATION_LOOP)", logger.Fields{})
 	}
