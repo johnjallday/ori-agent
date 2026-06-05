@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -38,27 +37,25 @@ func newHomeWorkspaceResolverForTest(t *testing.T, agentStore store.Store, works
 	return NewHomeAssistantWorkspaceResolver(wsStore, agentStore)
 }
 
-type homeWorkspaceResolverNoteReaderStub struct {
-	notesByWorkspace map[string][]session.WorkspaceNoteListItem
-	notes            map[string]*session.WorkspaceNote
-}
-
 type homeWorkspaceResolverFeedbackReaderStub struct {
 	preferredWorkspaceID string
 	ok                   bool
 	recentCorrections    []HomeAssistantWorkspaceCorrection
 }
 
-func (s *homeWorkspaceResolverNoteReaderStub) ListNotesByWorkspace(_ context.Context, workspaceID string) ([]session.WorkspaceNoteListItem, error) {
-	return append([]session.WorkspaceNoteListItem(nil), s.notesByWorkspace[workspaceID]...), nil
-}
-
-func (s *homeWorkspaceResolverNoteReaderStub) GetNote(_ context.Context, id string) (*session.WorkspaceNote, error) {
-	if note := s.notes[id]; note != nil {
-		clone := *note
-		return &clone, nil
+// setWorkspaceBootstrapField mutates a workspace's workspace_bootstrap shared
+// data so tests can exercise the per-field scoring that used to be fed by the
+// (now-removed) canonical "Workspace Description" note.
+func setWorkspaceBootstrapField(ws *workspace.Workspace, key, value string) {
+	bootstrap, _ := ws.SharedData["workspace_bootstrap"].(map[string]any)
+	if bootstrap == nil {
+		bootstrap = map[string]any{}
+		if ws.SharedData == nil {
+			ws.SharedData = map[string]any{}
+		}
+		ws.SharedData["workspace_bootstrap"] = bootstrap
 	}
-	return nil, nil
+	bootstrap[key] = value
 }
 
 func (s *homeWorkspaceResolverFeedbackReaderStub) PreferredWorkspaceForPrompt(_ context.Context, _ string) (string, bool, error) {
@@ -217,29 +214,18 @@ func TestHomeAssistantWorkspaceResolver_UsesProjectPathAndDirectoryReferences(t 
 	}
 }
 
-func TestHomeAssistantWorkspaceResolver_IntentNoteBreaksMetadataTie(t *testing.T) {
+func TestHomeAssistantWorkspaceResolver_BootstrapContextBreaksMetadataTie(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	addHomeRouteTestAgent(t, st, "Project Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
 
-	resolver := newHomeWorkspaceResolverForTest(
-		t,
-		st,
-		newHomeWorkspaceResolverTestWorkspace("ws-alpha", "Launch Alpha", "Ship launch tasks", "Project Manager"),
-		newHomeWorkspaceResolverTestWorkspace("ws-beta", "Launch Beta", "Ship launch tasks", "Project Manager"),
-	)
-	resolver.SetNoteReader(&homeWorkspaceResolverNoteReaderStub{
-		notesByWorkspace: map[string][]session.WorkspaceNoteListItem{
-			"ws-alpha": {{ID: "note-alpha", WorkspaceID: "ws-alpha", Name: "Workspace Description"}},
-		},
-		notes: map[string]*session.WorkspaceNote{
-			"note-alpha": {
-				ID:          "note-alpha",
-				WorkspaceID: "ws-alpha",
-				Name:        "Workspace Description",
-				Content:     "# Workspace Description\n\n## Key Files or Context\nBrand guide rollout and creative review notes\n",
-			},
-		},
-	})
+	// Two workspaces identical on name/description; only the bootstrap context
+	// of ws-alpha mentions the brand guide. This used to live in the canonical
+	// "Workspace Description" note; it now comes straight from SharedData.
+	alpha := newHomeWorkspaceResolverTestWorkspace("ws-alpha", "Launch Alpha", "Ship launch tasks", "Project Manager")
+	setWorkspaceBootstrapField(alpha, "context", "Brand guide rollout and creative review notes")
+	beta := newHomeWorkspaceResolverTestWorkspace("ws-beta", "Launch Beta", "Ship launch tasks", "Project Manager")
+
+	resolver := newHomeWorkspaceResolverForTest(t, st, alpha, beta)
 
 	got := resolver.Resolve("review the launch brand guide", normalizedHomeAssistantRouteContext{})
 	if got.State != homeAssistantWorkspaceStateConfident {
@@ -248,8 +234,8 @@ func TestHomeAssistantWorkspaceResolver_IntentNoteBreaksMetadataTie(t *testing.T
 	if got.SelectedWorkspaceID != "ws-alpha" {
 		t.Fatalf("expected ws-alpha, got %q", got.SelectedWorkspaceID)
 	}
-	if !containsReason(got.Reasons, "matched workspace intent note") {
-		t.Fatalf("expected note-based reason, got %v", got.Reasons)
+	if !containsReason(got.Reasons, "matched workspace context") {
+		t.Fatalf("expected bootstrap-context reason, got %v", got.Reasons)
 	}
 }
 

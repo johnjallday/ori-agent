@@ -638,11 +638,6 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
 		}
 	}
-	if req.Description != nil || req.WorkspaceBootstrap != nil {
-		if err := h.syncWorkspaceDescriptionNote(r.Context(), workspace); err != nil {
-			logger.Warn("Failed to sync canonical workspace description note", logger.Fields{"id": id, "error": err})
-		}
-	}
 
 	logger.Info("Workspace updated", logger.Fields{"id": id})
 

@@ -2520,7 +2520,7 @@ export class WorkspaceDetailPage {
     if (this.elements.intentContextInput) this.elements.intentContextInput.value = intent.context;
     if (this.elements.intentSummary) {
       this.elements.intentSummary.textContent = intent.description
-        ? 'Saving this intent keeps the canonical Workspace Description note aligned with the workspace header and setup metadata.'
+        ? 'Saving this intent updates the workspace description and setup metadata Ori uses for planning, routing, and setup review.'
         : 'Add a workspace description first so Ori has a stable source of truth for planning and setup review.';
     }
   }

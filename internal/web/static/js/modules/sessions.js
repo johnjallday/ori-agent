@@ -2937,24 +2937,6 @@ const sessionManager = {
     };
   },
 
-  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
-    if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
-      return null;
-    }
-
-    const systemsSection = workspaceBootstrap.systemsList.length > 0
-      ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
-      : '_Not specified._';
-    const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
-    const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
-    const contextSection = workspaceBootstrap.context || '_Not specified._';
-
-    return {
-      name: 'Workspace Description',
-      content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
-    };
-  },
-
   extractFolderNameFromPath(pathValue) {
     const trimmed = String(pathValue || '').trim().replace(/[\\/]+$/, '');
     if (!trimmed) return '';
@@ -3427,8 +3409,6 @@ const sessionManager = {
           console.warn('Failed to parse Assistant seed task:', error);
         }
       }
-      const bootstrapWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'New Workspace';
-      const workspaceBriefNote = this.buildWorkspaceBootstrapSeedNote(workspaceBootstrap, bootstrapWorkspaceName);
       let bootstrapApplyResult = {
         invitedAgents: 0,
         boundMCPs: 0,
@@ -3441,10 +3421,6 @@ const sessionManager = {
         tasksCreated: 0,
         errors: []
       };
-      const workspaceDescriptionResult = {
-        notesCreated: 0,
-        errors: []
-      };
 
       if (createdWorkspaceId && askOriSeedNote) {
         try {
@@ -3452,14 +3428,6 @@ const sessionManager = {
           askOriSeedResult.notesCreated += 1;
         } catch (error) {
           askOriSeedResult.errors.push(error);
-        }
-      }
-      if (createdWorkspaceId && workspaceBriefNote && !askOriSeedNote) {
-        try {
-          await this.createWorkspaceSeedNote(createdWorkspaceId, workspaceBriefNote);
-          workspaceDescriptionResult.notesCreated += 1;
-        } catch (error) {
-          workspaceDescriptionResult.errors.push(error);
         }
       }
       if (createdWorkspaceId && askOriSeedTask) {
@@ -3484,8 +3452,7 @@ const sessionManager = {
         bootstrapApplyResult.boundMCPs > 0 ||
         bootstrapApplyResult.attachedSkills > 0 ||
         askOriSeedResult.tasksCreated > 0 ||
-        askOriSeedResult.notesCreated > 0 ||
-        workspaceDescriptionResult.notesCreated > 0
+        askOriSeedResult.notesCreated > 0
       ) {
         const summaryParts = [];
         if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
@@ -3493,11 +3460,9 @@ const sessionManager = {
         if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
-        if (workspaceDescriptionResult.notesCreated > 0) summaryParts.push('workspace description');
         const summaryText = summaryParts.join(', ');
         if (
           askOriSeedResult.errors.length > 0 ||
-          workspaceDescriptionResult.errors.length > 0 ||
           bootstrapApplyResult.failures.length > 0
         ) {
           const firstFailure = bootstrapApplyResult.failures[0];

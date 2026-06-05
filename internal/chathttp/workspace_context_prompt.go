@@ -155,6 +155,18 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 	if description := sanitizeWorkspaceSnapshotText(ws.Description, workspaceSnapshotPreviewLimit); description != "" {
 		lines = append(lines, fmt.Sprintf("- Description: %q", description))
 	}
+	// The rest of the workspace intent (systems/capabilities/context) lives in
+	// the workspace_bootstrap shared data — injected directly now that the
+	// canonical "Workspace Description" note no longer carries it.
+	for _, field := range []struct{ label, key string }{
+		{"Systems", "systems"},
+		{"Capabilities", "capabilities"},
+		{"Context", "context"},
+	} {
+		if value := sanitizeWorkspaceSnapshotText(workspaceBootstrapSnapshotField(ws, field.key), workspaceSnapshotPreviewLimit); value != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %q", field.label, value))
+		}
+	}
 
 	lines = append(lines,
 		fmt.Sprintf("- Status: %q", sanitizeWorkspaceSnapshotText(string(ws.Status), workspaceSnapshotTextLimit)),
@@ -387,6 +399,19 @@ func buildTaskSnapshotPrompt(
 type workspaceAgentSummary struct {
 	Count int
 	Label string
+}
+
+// workspaceBootstrapSnapshotField reads a string field from the workspace's
+// workspace_bootstrap shared data (the intent the user enters at setup time).
+func workspaceBootstrapSnapshotField(ws *workspace.Workspace, key string) string {
+	if ws == nil || len(ws.SharedData) == 0 {
+		return ""
+	}
+	bootstrap, ok := ws.SharedData["workspace_bootstrap"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return workspaceBootstrapFieldText(bootstrap, key)
 }
 
 func buildWorkspaceAgentSummary(ws *workspace.Workspace) workspaceAgentSummary {

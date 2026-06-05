@@ -66,40 +66,6 @@ function resetWorkspaceBootstrapFields() {
   if (contextInput) contextInput.value = '';
 }
 
-function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
-  if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
-    return null;
-  }
-
-  const systemsSection = workspaceBootstrap.systemsList.length > 0
-    ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
-    : '_Not specified._';
-  const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
-  const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
-  const contextSection = workspaceBootstrap.context || '_Not specified._';
-
-  return {
-    name: 'Workspace Description',
-    content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
-  };
-}
-
-async function createWorkspaceBootstrapNote(workspaceId, noteConfig) {
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: noteConfig.name || 'Workspace Description',
-      content: noteConfig.content || ''
-    })
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || 'Failed to create workspace description note');
-  }
-}
-
 function clearDuplicateWarning() {
   const warning = document.getElementById('folderImportDuplicateWarning');
   const text = document.getElementById('folderImportDuplicateText');
@@ -599,17 +565,6 @@ async function createWorkspace() {
       typeof window.WorkspaceBootstrapReview.applyPlan === 'function'
     ) {
       bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(workspaceId);
-    }
-    const workspaceBriefNote = buildWorkspaceBootstrapSeedNote(
-      workspaceBootstrap,
-      name || extractFolderNameFromPath(importPath) || (result.folder && result.folder.name) || 'New Workspace'
-    );
-    if (workspaceId && workspaceBriefNote) {
-      try {
-        await createWorkspaceBootstrapNote(workspaceId, workspaceBriefNote);
-      } catch (error) {
-        console.warn('Failed to create workspace description note:', error);
-      }
     }
 
     // Seed starter tasks from the picked template. Errors are non-fatal —
