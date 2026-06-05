@@ -1077,8 +1077,10 @@ const sessionManager = {
     }
   },
 
-  // Handle chat mode toggle change
-  handleChatModeChange(mode) {
+  // Handle chat mode toggle change. workspaceId, when provided by the caller,
+  // is the source of truth for workspace context (modal setup runs before the
+  // workspace <select> is populated); omit it to fall back to the live select.
+  handleChatModeChange(mode, workspaceId) {
     const manualSection = document.getElementById('chatManualSection');
     const autoSection = document.getElementById('chatAutoSection');
     const llmWarning = document.getElementById('chatLlmNotAvailableWarning');
@@ -1088,11 +1090,17 @@ const sessionManager = {
     this.chatAutoMode = (mode === 'auto');
 
     if (mode === 'auto') {
+      // Inside a workspace, "auto" means the workspace entry agent — not the
+      // generic system assistant — so label it as a plain chat. Prefer the
+      // explicit workspaceId; fall back to the live select for user toggles.
+      const inWorkspace = workspaceId !== undefined
+        ? Boolean(String(workspaceId).trim())
+        : Boolean(document.getElementById('chatWorkspaceSelect')?.value);
       if (this.chatLlmAvailable) {
         if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.remove('d-none');
         if (llmWarning) llmWarning.classList.add('d-none');
-        if (createBtnText) createBtnText.textContent = 'Start Assistant';
+        if (createBtnText) createBtnText.textContent = inWorkspace ? 'Start Chat' : 'Start Assistant';
       } else {
         // LLM not available - show warning with action button
         if (manualSection) manualSection.classList.add('d-none');
@@ -1137,7 +1145,7 @@ const sessionManager = {
     if (!autoModeText) return;
 
     if (workspaceId) {
-      autoModeText.textContent = 'Assistant stays in this workspace and uses workspace context by default. Switch to Direct agent chat only when you want a specific agent profile.';
+      autoModeText.textContent = "You'll chat with this workspace's entry agent, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
       return;
     }
 
@@ -1160,16 +1168,17 @@ const sessionManager = {
       await this.checkChatLlmAvailability();
 
       // Default to Auto mode if System Model is configured, otherwise Manual
+      // (no workspace pre-selected here, so pass '' explicitly).
       if (this.chatSystemModelConfigured && this.chatLlmAvailable) {
         this.chatAutoMode = true;
         const autoRadio = document.getElementById('chatConfigModeAuto');
         if (autoRadio) autoRadio.checked = true;
-        this.handleChatModeChange('auto');
+        this.handleChatModeChange('auto', '');
       } else {
         this.chatAutoMode = false;
         const manualRadio = document.getElementById('chatConfigModeManual');
         if (manualRadio) manualRadio.checked = true;
-        this.handleChatModeChange('manual');
+        this.handleChatModeChange('manual', '');
       }
 
       // Clear initial message textareas
@@ -1232,17 +1241,19 @@ const sessionManager = {
       // Check LLM availability to determine default mode
       await this.checkChatLlmAvailability();
 
-      // Default to Auto mode if System Model is configured, otherwise Manual
+      // Default to Auto mode if System Model is configured, otherwise Manual.
+      // Pass workspaceId explicitly: this runs before the workspace <select>
+      // is populated, so a DOM read here would be stale.
       if (this.chatSystemModelConfigured && this.chatLlmAvailable) {
         this.chatAutoMode = true;
         const autoRadio = document.getElementById('chatConfigModeAuto');
         if (autoRadio) autoRadio.checked = true;
-        this.handleChatModeChange('auto');
+        this.handleChatModeChange('auto', workspaceId);
       } else {
         this.chatAutoMode = false;
         const manualRadio = document.getElementById('chatConfigModeManual');
         if (manualRadio) manualRadio.checked = true;
-        this.handleChatModeChange('manual');
+        this.handleChatModeChange('manual', workspaceId);
       }
 
       // Clear initial message textareas
@@ -1377,7 +1388,7 @@ const sessionManager = {
       if (!agentName) {
         if (window.Toast) {
           Toast.warning(workspaceId
-            ? 'No direct-chat agent is available in this workspace. Add an agent or use Assistant.'
+            ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's entry agent."
             : 'No direct-chat agent is available. Add an agent or use Assistant.');
         }
         return;

@@ -73,6 +73,26 @@ func TestHandleAgentsList_MarksAssistantWithoutCurrentMarker(t *testing.T) {
 	}
 }
 
+func TestCommandSessionModeLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		res  executionAgentResolution
+		want string
+	}{
+		{"assistant default", executionAgentResolution{Name: assistantExecutionAgentName, Source: executionAgentSourceAssistantDefault}, "Assistant"},
+		{"workspace entry default", executionAgentResolution{Name: "Workspace Manager", Source: executionAgentSourceWorkspaceEntry}, "Workspace entry agent"},
+		{"pinned via session binding", executionAgentResolution{Name: "Specialist", Source: executionAgentSourceSessionBinding}, "Pinned specialist"},
+		{"pinned via request override", executionAgentResolution{Name: "Specialist", Source: executionAgentSourceRequestOverride}, "Pinned specialist"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := commandSessionModeLabel(tc.res); got != tc.want {
+				t.Fatalf("commandSessionModeLabel(%s) = %q, want %q", tc.res.Source, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHandleAgentStatus_UsesAssistantTerminology(t *testing.T) {
 	ch := newCommandHandlerForAgentTests()
 

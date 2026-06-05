@@ -14216,12 +14216,17 @@ export class WorkspaceDetailPage {
    */
   async createSimpleSession(openChat = true) {
     try {
+      // Inside a workspace the chat runs as the workspace's entry agent (the
+      // backend binds it when agent_name is omitted). Title the session after
+      // the entry agent so the UI reflects who you're talking to instead of a
+      // generic "Assistant".
+      const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           folder_id: this.workspaceId,
-          title: 'Assistant'
+          title: entryAgentName || 'Workspace chat'
         })
       });
 
@@ -14230,7 +14235,7 @@ export class WorkspaceDetailPage {
       const payload = await response.json();
       const session = payload?.session || payload;
       if (!session?.id) throw new Error('Invalid session response');
-      if (window.Toast) window.Toast.success('Assistant session created');
+      if (window.Toast) window.Toast.success('Chat session created');
       await this.loadSessions();
 
       // Open the session
