@@ -319,12 +319,27 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	orihttp.BadRequest(w, "id, workspace_id, or agent parameter required")
 }
 
+// resolveCreateTaskProvenance picks the assignment provenance for a created task.
+// The orchestration create endpoint serves both manual creates and coordinator-
+// planned (auto-parse) creates, so it honors explicit, valid provenance from the
+// request and otherwise defaults to manual.
+func resolveCreateTaskProvenance(mode, assignedBy, reason string) (workspace.TaskAssignmentMode, string, string) {
+	m := workspace.TaskAssignmentMode(strings.TrimSpace(mode))
+	if workspace.IsValidTaskAssignmentMode(m) && m != workspace.TaskAssignmentModeLegacyUnknown {
+		return m, strings.TrimSpace(assignedBy), strings.TrimSpace(reason)
+	}
+	return workspace.TaskAssignmentModeManual, workspace.TaskAssignedByManual, strings.TrimSpace(reason)
+}
+
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		WorkspaceID            string                         `json:"workspace_id"`
 		From                   string                         `json:"from"`
 		To                     string                         `json:"to"`
 		AssignedNodeID         string                         `json:"assigned_node_id"`
+		AssignmentMode         string                         `json:"assignment_mode"`
+		AssignedBy             string                         `json:"assigned_by"`
+		AssignmentReason       string                         `json:"assignment_reason"`
 		Description            string                         `json:"description"`
 		Details                string                         `json:"details"`
 		ReferenceURL           string                         `json:"reference_url"`
@@ -450,6 +465,12 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 			logger.Info("Auto-added agent to workspace", logger.Fields{"agent": task.To, "workspace_id": ws.ID})
 		}
 	}
+
+	// Record assignment provenance. This endpoint serves both manual creates and
+	// coordinator-planned (auto-parse) creates, so honor explicit, valid
+	// provenance from the request and default to manual otherwise.
+	task.AssignmentMode, task.AssignedBy, task.AssignmentReason = resolveCreateTaskProvenance(
+		req.AssignmentMode, req.AssignedBy, req.AssignmentReason)
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
