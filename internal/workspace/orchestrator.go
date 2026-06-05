@@ -87,19 +87,25 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 	}
 	tasks = sortedTasks
 
+	// Resolve the coordinator once so every mission task records static-plan
+	// provenance attributed to it (the mission orchestrator is a coordinator-
+	// driven planning path).
+	coordinator, _ := workspace.ResolveCoordinator()
+
 	// Step 2: Add tasks to the workspace
-	for _, task := range tasks {
-		task.WorkspaceID = workspaceID
-		if err := workspace.AddTask(task); err != nil {
-			logger.Error("[Orchestrator] Warning: failed to add task", logger.Fields{"task_id": task.ID, "err": err})
+	for i := range tasks {
+		tasks[i].WorkspaceID = workspaceID
+		assignMissionTask(workspace, &tasks[i], coordinator)
+		if err := workspace.AddTask(tasks[i]); err != nil {
+			logger.Error("[Orchestrator] Warning: failed to add task", logger.Fields{"task_id": tasks[i].ID, "err": err})
 		}
 
 		// Publish task creation event
 		o.publishEvent("task_created", workspaceID, map[string]any{
-			"task_id":     task.ID,
-			"description": task.Description,
-			"assigned_to": task.To,
-			"priority":    task.Priority,
+			"task_id":     tasks[i].ID,
+			"description": tasks[i].Description,
+			"assigned_to": tasks[i].To,
+			"priority":    tasks[i].Priority,
 		})
 	}
 
@@ -456,6 +462,42 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	})
 
 	return nil
+}
+
+// assignMissionTask stamps static-plan provenance on a mission task, attributing
+// it to the workspace coordinator. If the planned assignee is not a workspace
+// member (e.g. an LLM-invented name), it falls back to the coordinator when one
+// is known so the task stays runnable; otherwise it records provenance without
+// changing the assignee. Routing through ApplyTaskAssignment keeps Task.To and
+// the provenance fields in lockstep.
+func assignMissionTask(ws *Workspace, task *Task, coordinator string) {
+	if ws == nil || task == nil {
+		return
+	}
+	assignedBy := coordinator
+	if assignedBy == "" {
+		assignedBy = "orchestrator"
+	}
+	a := TaskAssignment{
+		AgentName:  task.To,
+		Mode:       TaskAssignmentModeStaticPlan,
+		AssignedBy: assignedBy,
+		Reason:     "mission plan",
+	}
+	if err := ws.ApplyTaskAssignment(task, a); err == nil {
+		return
+	}
+	if coordinator != "" {
+		a.AgentName = coordinator
+		a.Reason = "mission plan (reassigned to coordinator; planned assignee not in workspace)"
+		if err := ws.ApplyTaskAssignment(task, a); err == nil {
+			return
+		}
+	}
+	// Last resort: record provenance without changing the (non-member) assignee.
+	task.AssignmentMode = TaskAssignmentModeStaticPlan
+	task.AssignedBy = assignedBy
+	task.AssignmentReason = "mission plan"
 }
 
 // formatAgentCapabilities formats agent list with capabilities.

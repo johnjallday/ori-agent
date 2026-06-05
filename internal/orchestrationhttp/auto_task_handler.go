@@ -660,7 +660,14 @@ func (h *AutoTaskHandler) autoTaskAgentContext(workspaceID string) autoTaskAgent
 		} else if ws != nil {
 			agents := workspaceAutoTaskAgentNames(ws)
 			if len(agents) > 0 {
-				defaultAgentName := canonicalAutoTaskAgentName(ws.EntryAgentName(), agents)
+				// Default ordinary requests to the workspace coordinator. Use the
+				// coordinator resolver (not EntryAgentName, which falls back to the
+				// first agent) so a multi-agent workspace with no explicit entry
+				// agent yields no default rather than silently picking one.
+				defaultAgentName := ""
+				if coordinator, source := ws.ResolveCoordinator(); source != workspace.CoordinatorSourceMissing {
+					defaultAgentName = canonicalAutoTaskAgentName(coordinator, agents)
+				}
 				return autoTaskAgentContext{
 					Agents:            agents,
 					AgentDescriptions: h.autoTaskAgentDescriptions(agents, ws),
