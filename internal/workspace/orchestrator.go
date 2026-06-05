@@ -460,6 +460,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 			}
 			t.CompletedAt = &completed
 			t.Error = err.Error()
+			o.recordExecutionTrace(t, workspaceID, completed)
 			return nil
 		}); updateErr != nil {
 			logger.Error("[Orchestrator] Warning: failed to record task failure", logger.Fields{"task_id": task.ID, "error": updateErr})
@@ -490,6 +491,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		t.CompletedAt = &completed
 		t.Result = result
 		ApplyTaskResultMetadata(t, result)
+		o.recordExecutionTrace(t, workspaceID, completed)
 		return nil
 	}); err != nil {
 		logger.Error("[Orchestrator] Warning: failed to record task completion", logger.Fields{"task_id": task.ID, "error": err})
@@ -552,10 +554,25 @@ func shouldPauseForDelegationBlock(task Task) bool {
 	return true
 }
 
+// recordExecutionTrace persists task events (tool calls, delegation.*, blocked)
+// into the task's execution trace from the event bus history, so the task-detail
+// UI can render them after the fact (matches the task executor's behavior).
+func (o *Orchestrator) recordExecutionTrace(t *Task, workspaceID string, completed time.Time) {
+	if o.eventBus == nil || t == nil {
+		return
+	}
+	startedAt := completed
+	if t.StartedAt != nil && !t.StartedAt.IsZero() {
+		startedAt = *t.StartedAt
+	}
+	RecordTaskExecutionTraceFromEventBus(t, o.eventBus, workspaceID, t.ID, startedAt, completed)
+}
+
 // pauseTaskForDelegation suspends a task pending user input, reusing the same
 // blocked primitives as the task executor: waiting_for_choice + a task.blocked
 // event carrying the coordinator's question.
 func (o *Orchestrator) pauseTaskForDelegation(ws *Workspace, task Task, blocked *TaskBlockedError) {
+	completed := time.Now()
 	if mutErr := MutateTaskAndSave(o.workspaceStore, ws, task.ID, func(t *Task) error {
 		if err := t.SetStatus(TaskStatusWaitingForChoice); err != nil {
 			return err
@@ -564,6 +581,7 @@ func (o *Orchestrator) pauseTaskForDelegation(ws *Workspace, task Task, blocked 
 		t.Result = ""
 		t.CompletedAt = nil
 		applyExecutorTaskBlockedContext(t, blocked)
+		o.recordExecutionTrace(t, ws.ID, completed)
 		return nil
 	}); mutErr != nil {
 		logger.Error("[Orchestrator] failed to pause task for delegation", logger.Fields{
