@@ -5,6 +5,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
@@ -44,6 +45,31 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 		}
 		return provider.Tools()
 	}
+}
+
+// delegationCapsFromEnv returns the delegation loop caps, allowing operators to
+// tune the safe defaults (3 iterations / 8 subtasks / 10m) without code changes:
+//
+//	ORI_DELEGATION_MAX_ITERATIONS, ORI_DELEGATION_MAX_SUBTASKS (positive ints)
+//	ORI_DELEGATION_TIMEOUT (Go duration, e.g. "15m")
+func delegationCapsFromEnv() workspace.DelegationCaps {
+	caps := workspace.DefaultDelegationCaps()
+	if v := os.Getenv("ORI_DELEGATION_MAX_ITERATIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			caps.MaxIterations = n
+		}
+	}
+	if v := os.Getenv("ORI_DELEGATION_MAX_SUBTASKS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			caps.MaxSubtasks = n
+		}
+	}
+	if v := os.Getenv("ORI_DELEGATION_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			caps.Timeout = d
+		}
+	}
+	return caps
 }
 
 // initializeWorkspaceStore creates the workspace storage system.
@@ -302,7 +328,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	// task-failure behavior is unchanged unless explicitly enabled.
 	if loopExecutor != nil && os.Getenv("ORI_DELEGATION_LOOP") == "true" {
 		adapter := workspace.NewCoordinatorAdapter(b.workspaceStore, loopExecutor)
-		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, workspace.DefaultDelegationCaps())
+		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, delegationCapsFromEnv())
 		loop.SetEventBus(b.eventBus)
 		if b.chatHandler != nil {
 			if tracker := b.chatHandler.UtilityTelemetry(); tracker != nil {
