@@ -226,6 +226,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   // Undo support: deleting a workspace moves it to the system Trash (reversible)
   // and pushes it onto this stack, so the toolbar Undo button can restore the most
   // recent deletions at any time during the session.
+  const WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS = 60000;
   const undoStack = []; // LIFO of { id, label }
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
@@ -1959,7 +1960,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       await loadWorkspaces();
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', { title: 'Workspace deleted' });
+          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', {
+            title: 'Workspace deleted',
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+          });
         } else {
           window.Toast.success(`Deleted "${label}"`);
         }
