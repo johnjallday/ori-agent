@@ -39,12 +39,13 @@ func (c DelegationCaps) normalized() DelegationCaps {
 
 // CoordinatorAdaptRequest is the input to one coordinator reasoning step.
 type CoordinatorAdaptRequest struct {
-	WorkspaceID  string
-	Coordinator  string
-	FailedTask   Task
-	Trigger      DelegationTrigger
-	Iteration    int
-	PriorResults map[string]string // delegated subtask id -> result text
+	WorkspaceID   string
+	Coordinator   string
+	FailedTask    Task
+	Trigger       DelegationTrigger
+	Iteration     int               // 1-based attempt number within the loop
+	MaxIterations int               // attempt budget, so the coordinator knows how many remain
+	PriorResults  map[string]string // delegated subtask id -> result text
 }
 
 // CoordinatorAdaptResult is the output of one coordinator reasoning step.
@@ -155,12 +156,13 @@ func (l *DelegationLoop) Run(ctx context.Context, workspaceID string, failed Tas
 		}
 
 		adapt, aerr := l.adapter.Adapt(ctx, CoordinatorAdaptRequest{
-			WorkspaceID:  workspaceID,
-			Coordinator:  coordinator,
-			FailedTask:   failed,
-			Trigger:      trigger,
-			Iteration:    iter,
-			PriorResults: cloneStringMap(results),
+			WorkspaceID:   workspaceID,
+			Coordinator:   coordinator,
+			FailedTask:    failed,
+			Trigger:       trigger,
+			Iteration:     iter,
+			MaxIterations: l.caps.MaxIterations,
+			PriorResults:  cloneStringMap(results),
 		})
 		if aerr != nil {
 			l.emit(EventDelegationFailed, workspaceID, failed.ID, coordinator, map[string]any{"error": aerr.Error()})

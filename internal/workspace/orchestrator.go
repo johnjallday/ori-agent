@@ -536,6 +536,14 @@ func assignMissionTask(ws *Workspace, task *Task, coordinator string) {
 		}
 	}
 	// Last resort: record provenance without changing the (non-member) assignee.
+	// Task.To still points at an agent that is not a workspace member, so the
+	// executor will fail to resolve it at run time. Warn here so that failure is
+	// traceable to a planned assignee that never joined the workspace.
+	logger.Warn("[Orchestrator] Mission task assignee is not a workspace member and no coordinator fallback is available; task will fail at execution", logger.Fields{
+		"task_id":          task.ID,
+		"planned_assignee": task.To,
+		"workspace_id":     ws.ID,
+	})
 	task.AssignmentMode = TaskAssignmentModeStaticPlan
 	task.AssignedBy = assignedBy
 	task.AssignmentReason = "mission plan"

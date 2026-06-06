@@ -99,6 +99,9 @@ func (a *llmCoordinatorAdapter) newTaskIDsInOrder(workspaceID string, before map
 func buildCoordinatorAdaptPrompt(req CoordinatorAdaptRequest) string {
 	var b strings.Builder
 	b.WriteString("A task you are coordinating did not succeed and needs adaptation.\n\n")
+	if req.Iteration > 0 && req.MaxIterations > 0 {
+		fmt.Fprintf(&b, "Attempt %d of %d. Avoid repeating a delegation decision that has already failed in an earlier attempt.\n", req.Iteration, req.MaxIterations)
+	}
 	fmt.Fprintf(&b, "Failed task: %s\n", strings.TrimSpace(req.FailedTask.Description))
 	if d := strings.TrimSpace(req.FailedTask.Details); d != "" {
 		fmt.Fprintf(&b, "Details: %s\n", d)

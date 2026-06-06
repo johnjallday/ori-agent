@@ -36,7 +36,11 @@ func ClassifyDelegationTrigger(task Task, result string, execErr error) Delegati
 	if execErr != nil {
 		return DelegationTrigger{Trigger: true, Code: DelegationTriggerFailed, Reason: execErr.Error()}
 	}
-	if strings.TrimSpace(result) == "" {
+	// An empty result only counts as a failure when the task actually requires
+	// output. Side-effect tasks (send email, write file) legitimately complete
+	// without producing a result and must not enter the loop. This mirrors the
+	// requirement check used by the invalid-output path below.
+	if strings.TrimSpace(result) == "" && taskRequiresOutput(task) {
 		return DelegationTrigger{
 			Trigger: true,
 			Code:    DelegationTriggerEmptyOutput,
@@ -47,6 +51,13 @@ func ClassifyDelegationTrigger(task Task, result string, execErr error) Delegati
 		return DelegationTrigger{Trigger: true, Code: DelegationTriggerInvalidOutput, Reason: reason}
 	}
 	return DelegationTrigger{}
+}
+
+// taskRequiresOutput reports whether the task declares an output requirement
+// (an output spec or contract). Tasks without one are side-effect tasks that may
+// legitimately complete with an empty result.
+func taskRequiresOutput(task Task) bool {
+	return task.OutputSpec != nil || task.OutputContract != nil
 }
 
 // classifyOutputValidation returns a reason and true when the task declares an

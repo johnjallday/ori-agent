@@ -21,10 +21,20 @@ func TestClassifyDelegationTrigger(t *testing.T) {
 		}
 	})
 
-	t.Run("empty result triggers", func(t *testing.T) {
-		got := ClassifyDelegationTrigger(Task{}, "   \n ", nil)
+	t.Run("empty result triggers when output is required", func(t *testing.T) {
+		task := Task{OutputSpec: &TaskOutputSpec{}}
+		got := ClassifyDelegationTrigger(task, "   \n ", nil)
 		if !got.Trigger || got.Code != DelegationTriggerEmptyOutput {
 			t.Fatalf("got %+v, want empty-output trigger", got)
+		}
+	})
+
+	t.Run("empty result does not trigger without an output requirement", func(t *testing.T) {
+		// A side-effect task (send email, write file) legitimately completes with
+		// no result. Without an output spec/contract there is nothing to violate.
+		got := ClassifyDelegationTrigger(Task{Description: "send email"}, "   \n ", nil)
+		if got.Trigger {
+			t.Fatalf("got %+v, want no trigger on empty result with no output requirement", got)
 		}
 	})
 
