@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,8 @@ type TaskExecutor struct {
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
 }
+
+var errSkipOrphanCleanup = errors.New("skip orphan cleanup")
 
 // TaskHandler defines the interface for executing tasks
 type TaskHandler interface {
@@ -94,16 +97,28 @@ func (te *TaskExecutor) Start() {
 // deployments could (a) clobber a concurrent mutation between the Get and
 // the Save, and (b) let two boot-time cleanups race each other.
 func (te *TaskExecutor) cleanupOrphanedTasks() {
-	workspaceIDs, err := te.workspaceStore.List()
+	workspaces, err := te.workspaceStore.ListActive()
 	if err != nil {
 		logger.Error("Failed to list workspaces for orphaned task cleanup", logger.Fields{"error": err})
 		return
 	}
 
 	totalReset := 0
-	for _, wsID := range workspaceIDs {
+	for _, ws := range workspaces {
+		if ws == nil {
+			continue
+		}
+
+		current, err := te.workspaceStore.Get(ws.ID)
+		if err != nil || !hasInProgressTasks(current) {
+			continue
+		}
+
 		resetCount := 0
-		if err := te.workspaceStore.Update(wsID, func(fresh *Workspace) error {
+		if err := te.workspaceStore.Update(ws.ID, func(fresh *Workspace) error {
+			if fresh.Status != StatusActive {
+				return errSkipOrphanCleanup
+			}
 			for i := range fresh.Tasks {
 				task := &fresh.Tasks[i]
 				if task.Status != TaskStatusInProgress {
@@ -116,20 +131,38 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 				task.StartedAt = nil
 				resetCount++
 			}
+			if resetCount == 0 {
+				return errSkipOrphanCleanup
+			}
 			return nil
 		}); err != nil {
-			logger.Error("Failed to clean orphaned tasks in workspace", logger.Fields{"workspace_id": wsID, "err": err})
+			if errors.Is(err, errSkipOrphanCleanup) {
+				continue
+			}
+			logger.Error("Failed to clean orphaned tasks in workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 			continue
 		}
 		if resetCount > 0 {
 			totalReset += resetCount
-			logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": wsID})
+			logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": ws.ID})
 		}
 	}
 
 	if totalReset > 0 {
 		logger.Info("Cleaned up orphaned task(s) across all workspaces", logger.Fields{"task_id": totalReset})
 	}
+}
+
+func hasInProgressTasks(ws *Workspace) bool {
+	if ws == nil || ws.Status != StatusActive {
+		return false
+	}
+	for i := range ws.Tasks {
+		if ws.Tasks[i].Status == TaskStatusInProgress {
+			return true
+		}
+	}
+	return false
 }
 
 // Stop gracefully stops the task executor

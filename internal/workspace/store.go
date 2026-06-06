@@ -745,10 +745,20 @@ func (s *FileStore) RestoreFromTrash(originalPath, trashedPath string) (*Workspa
 	// off disk), skip the trash retrieval and just re-import. Otherwise bring it
 	// back from the system trash — a rename on macOS/Linux, or a Recycle Bin
 	// restore on Windows.
-	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
+	if _, err := os.Stat(originalPath); err == nil {
+		if trashedPath != "" {
+			if _, trashErr := os.Stat(trashedPath); trashErr == nil {
+				return nil, fmt.Errorf("cannot restore workspace: original path already exists at %q while trashed copy still exists at %q", originalPath, trashedPath)
+			} else if !os.IsNotExist(trashErr) {
+				return nil, fmt.Errorf("cannot verify trashed workspace at %q: %w", trashedPath, trashErr)
+			}
+		}
+	} else if os.IsNotExist(err) {
 		if rerr := platform.RestoreFromTrash(originalPath, trashedPath); rerr != nil {
 			return nil, rerr
 		}
+	} else {
+		return nil, fmt.Errorf("cannot access original workspace path %q: %w", originalPath, err)
 	}
 
 	ws, _, err := s.Import(originalPath)

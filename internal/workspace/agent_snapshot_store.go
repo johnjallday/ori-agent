@@ -123,6 +123,9 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 		if err != nil || ws == nil {
 			continue
 		}
+		if ws.Status == StatusTrashed {
+			continue
+		}
 		before := referencedAgentSnapshotCount(workspaces, ws)
 		snapshotter.SnapshotReferencedAgents(ws)
 		after := referencedAgentSnapshotCount(workspaces, ws)
@@ -178,6 +181,9 @@ func restoreWorkspaceAgentsFiltered(workspaces Store, agents store.Store, allowl
 		if err != nil || ws == nil {
 			continue
 		}
+		if ws.Status == StatusTrashed {
+			continue
+		}
 		registered, err := RestoreWorkspaceAgents(workspaces, ws, agents)
 		if err != nil {
 			logger.Warn("workspace agent restore: restore failed", logger.Fields{
@@ -230,6 +236,9 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 	for _, id := range ids {
 		ws, err := workspaces.Get(id)
 		if err != nil || ws == nil {
+			continue
+		}
+		if ws.Status == StatusTrashed {
 			continue
 		}
 		referenced := referencedAgentNames(ws)

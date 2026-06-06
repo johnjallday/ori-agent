@@ -182,7 +182,7 @@ func (m *DirectorySyncManager) handleWatchEvent(evt filewatcher.WatchEvent) {
 }
 
 func (m *DirectorySyncManager) syncWatchedDirectories() {
-	workspaceIDs, err := m.store.List()
+	workspaces, err := m.store.ListActive()
 	if err != nil {
 		logger.Warn("Directory sync: failed to list workspaces", logger.Fields{"error": err})
 		return
@@ -190,9 +190,12 @@ func (m *DirectorySyncManager) syncWatchedDirectories() {
 
 	desired := make(map[string]directoryWatchTarget)
 
-	for _, workspaceID := range workspaceIDs {
-		ws, err := m.store.Get(workspaceID)
-		if err != nil {
+	for _, listed := range workspaces {
+		if listed == nil {
+			continue
+		}
+		ws, err := m.store.Get(listed.ID)
+		if err != nil || ws == nil || ws.Status != StatusActive {
 			continue
 		}
 		for _, dir := range ws.DirectoryReferences {

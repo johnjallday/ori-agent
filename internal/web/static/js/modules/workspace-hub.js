@@ -1455,7 +1455,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         e.preventDefault();
         e.stopPropagation();
         const id = btn.getAttribute('data-workspace-delete');
-        confirmDeleteWorkspace(id);
+        void confirmDeleteWorkspace(id);
       });
     });
 
@@ -1872,6 +1872,22 @@ console.log('[workspace-hub.js] FILE LOADED');
     await deleteWorkspacesByIds(ordered);
   }
 
+  function showWorkspaceDeleteConfirm(options) {
+    const title = String(options?.title || 'Confirm Delete').trim();
+    const message = String(options?.message || 'Are you sure you want to delete this workspace?').trim();
+
+    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showDeleteConfirm === 'function') {
+      return window.WorkspaceHubModals.showDeleteConfirm({
+        title,
+        message,
+        variant: options?.variant,
+        confirmLabel: options?.confirmLabel
+      });
+    }
+
+    return Promise.resolve(window.confirm([title, message].filter(Boolean).join('\n\n')));
+  }
+
   function handleDeleteGroupChoice(includeChildren) {
     const workspaceId = pendingDeleteGroupId;
     pendingDeleteGroupId = null;
@@ -1979,7 +1995,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
-  function confirmDeleteWorkspace(workspaceId) {
+  async function confirmDeleteWorkspace(workspaceId) {
     if (!workspaceId) return;
 
     // Groups (with children) remain an explicit, confirmed operation since they
@@ -1989,8 +2005,15 @@ console.log('[workspace-hub.js] FILE LOADED');
       return;
     }
 
-    // Single workspaces are moved to the trash (reversible); the toolbar Undo
-    // button restores them, so no blocking confirm dialog is needed.
+    const label = getWorkspaceLabel(workspaceId) || 'Workspace';
+    const confirmed = await showWorkspaceDeleteConfirm({
+      title: `Move "${label}" to Trash?`,
+      message: 'This will move the workspace folder to the system Trash and hide it from Ori. You can restore it from Undo while this app session is open, or from Trash until it is emptied.',
+      variant: 'trash',
+      confirmLabel: 'Move to Trash'
+    });
+    if (!confirmed) return;
+
     void softDeleteWorkspace(workspaceId);
   }
 
@@ -1999,9 +2022,29 @@ console.log('[workspace-hub.js] FILE LOADED');
     const selected = Array.from(state.selectedWorkspaces || []);
     if (selected.length === 0) return;
 
-    if (!confirm(`Delete ${selected.length} workspace(s)?\n\nThis will permanently remove the workspace folders and all their contents (files, notes, etc.) from disk. This action cannot be undone.`)) {
+    if (selected.length === 1) {
+      await confirmDeleteWorkspace(selected[0]);
       return;
     }
+
+    const selectedGroups = selected.filter((id) => workspaceIsGroup(id)).length;
+    const selectedWorkspaces = selected.length - selectedGroups;
+    const details = [];
+    if (selectedWorkspaces > 0) {
+      details.push(`${selectedWorkspaces} workspace${selectedWorkspaces === 1 ? '' : 's'} will be moved to the system Trash when possible.`);
+    }
+    if (selectedGroups > 0) {
+      details.push(`${selectedGroups} group${selectedGroups === 1 ? '' : 's'} will be removed from the launcher. Child workspaces are only deleted if they are also selected.`);
+    }
+    details.push('Continue?');
+
+    const confirmed = await showWorkspaceDeleteConfirm({
+      title: `Delete ${selected.length} selected items?`,
+      message: details.join(' '),
+      variant: selectedGroups > 0 ? 'delete' : 'trash',
+      confirmLabel: selectedGroups > 0 ? 'Delete Selected' : 'Move to Trash'
+    });
+    if (!confirmed) return;
 
     await deleteWorkspacesByIds(selected);
   }

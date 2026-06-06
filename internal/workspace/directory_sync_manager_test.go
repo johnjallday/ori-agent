@@ -140,3 +140,38 @@ func TestDirectorySyncManagerEmitsWorkspaceUpdatedEvent(t *testing.T) {
 		t.Fatal("timed out waiting for directory sync event")
 	}
 }
+
+func TestDirectorySyncManagerSkipsTrashedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	ws := &Workspace{
+		ID:     "ws-trashed-sync",
+		Name:   "Trashed Sync",
+		Status: StatusTrashed,
+		DirectoryReferences: []DirectoryReference{
+			{
+				ID:          "dir-trashed",
+				WorkspaceID: "ws-trashed-sync",
+				Name:        "Trashed",
+				Path:        dir,
+			},
+		},
+	}
+
+	store := &directorySyncTestStore{
+		workspaces: map[string]*Workspace{
+			ws.ID: ws,
+		},
+	}
+
+	manager, err := NewDirectorySyncManager(store, DefaultEventBus(), DefaultDirectorySyncConfig())
+	if err != nil {
+		t.Fatalf("failed to create directory sync manager: %v", err)
+	}
+	defer func() { _ = manager.watcher.Close() }()
+
+	manager.syncWatchedDirectories()
+
+	if len(manager.watched) != 0 {
+		t.Fatalf("expected no watched directories for trashed workspace, got %d", len(manager.watched))
+	}
+}

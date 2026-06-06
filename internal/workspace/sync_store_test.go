@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
 )
 
 func TestSyncStore_SaveSyncsToDisk(t *testing.T) {
@@ -113,6 +115,80 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 	}
 	if len(diskWS.SkillBindings) != 1 {
 		t.Errorf("Disk workspace should have 1 skill binding, got %d", len(diskWS.SkillBindings))
+	}
+}
+
+func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:         "ws-trashed-test",
+		Name:       "Trashed Test",
+		Status:     StatusTrashed,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		SharedData: map[string]any{"_trash": map[string]any{"original_path": filepath.Join(dir, "trashed-test")}},
+	}
+
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Primary store should have trashed workspace: %v", err)
+	}
+	if got.Status != StatusTrashed {
+		t.Fatalf("Primary status = %q, want %q", got.Status, StatusTrashed)
+	}
+	if _, err := fileSync.GetFolderPath(ws.ID); err == nil {
+		t.Fatal("FileStore should not register a trashed workspace during sync")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trashed-test")); !os.IsNotExist(err) {
+		t.Fatalf("trashed workspace folder should not be recreated, stat err = %v", err)
+	}
+}
+
+func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:        "ws-trashed-agent",
+		Name:      "Trashed Agent",
+		Status:    StatusTrashed,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := primary.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := primary.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {
+		t.Fatalf("primary agent snapshot should not be written for trashed workspace, ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trashed-agent")); !os.IsNotExist(err) {
+		t.Fatalf("trashed workspace folder should not be recreated by agent snapshot, stat err = %v", err)
 	}
 }
 

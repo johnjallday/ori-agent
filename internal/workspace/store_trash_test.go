@@ -2,7 +2,9 @@ package workspace
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +82,30 @@ func TestFileStore_TrashAndRestore(t *testing.T) {
 	}
 	if _, err := st.GetFolderPath(ws.ID); err != nil {
 		t.Errorf("workspace should be re-registered after restore: %v", err)
+	}
+}
+
+func TestFileStore_RestoreFromTrashErrorsWhenOriginalAndTrashBothExist(t *testing.T) {
+	st, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	originalPath := filepath.Join(t.TempDir(), "restore-conflict")
+	trashedPath := filepath.Join(t.TempDir(), "restore-conflict")
+	if err := os.MkdirAll(originalPath, 0755); err != nil {
+		t.Fatalf("mkdir original: %v", err)
+	}
+	if err := os.MkdirAll(trashedPath, 0755); err != nil {
+		t.Fatalf("mkdir trashed: %v", err)
+	}
+
+	_, err = st.RestoreFromTrash(originalPath, trashedPath)
+	if err == nil {
+		t.Fatal("expected restore conflict error")
+	}
+	if !strings.Contains(err.Error(), "original path already exists") {
+		t.Fatalf("restore error = %q, want original path conflict", err.Error())
 	}
 }

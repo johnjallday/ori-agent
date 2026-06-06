@@ -105,24 +105,40 @@
    */
   function showDeleteConfirm(options) {
     const elements = window.WorkspaceHubState.getElements();
+    const title = options.title || 'Confirm Delete';
+    const message = options.message || 'Are you sure you want to delete the selected items?';
+    const confirmLabel = options.confirmLabel || (options.variant === 'trash' ? 'Move to Trash' : 'Delete');
 
     return new Promise((resolve) => {
+      if (!elements.deleteConfirmModal || !window.bootstrap) {
+        resolve(window.confirm([title, message].filter(Boolean).join('\n\n')));
+        return;
+      }
+
+      if (deleteConfirmResolve) {
+        deleteConfirmResolve(false);
+        deleteConfirmResolve = null;
+      }
+
       deleteConfirmResolve = resolve;
 
       if (elements.deleteConfirmTitle) {
-        elements.deleteConfirmTitle.textContent = options.title || 'Confirm Delete';
+        elements.deleteConfirmTitle.textContent = title;
       }
       if (elements.deleteConfirmBody) {
-        elements.deleteConfirmBody.textContent = options.message || 'Are you sure you want to delete the selected items?';
+        elements.deleteConfirmBody.textContent = message;
       }
       if (elements.deleteConfirmBtn) {
-        elements.deleteConfirmBtn.textContent = options.variant === 'trash' ? 'Move to Trash' : 'Delete';
+        elements.deleteConfirmBtn.textContent = confirmLabel;
       }
 
-      if (elements.deleteConfirmModal && window.bootstrap) {
-        const modal = new bootstrap.Modal(elements.deleteConfirmModal);
-        modal.show();
-      }
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(elements.deleteConfirmModal)
+        : (bootstrap.Modal.getInstance(elements.deleteConfirmModal) || new bootstrap.Modal(elements.deleteConfirmModal));
+      modal.show();
+      window.setTimeout(() => {
+        elements.deleteConfirmBtn?.focus();
+      }, 120);
     });
   }
 

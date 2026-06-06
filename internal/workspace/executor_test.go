@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -102,6 +104,46 @@ func TestCleanupOrphanedTasks_ResetsInProgress(t *testing.T) {
 		if task.Status == TaskStatusPending && task.StartedAt != nil {
 			t.Errorf("task %s should have nil StartedAt after reset", task.ID)
 		}
+	}
+}
+
+func TestCleanupOrphanedTasks_SkipsTrashedWorkspaceWithoutRecreatingFolder(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	now := time.Now()
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "orphan", To: "agent-a", Status: TaskStatusInProgress, StartedAt: &now},
+	})
+	ws.ID = "ws-trashed-cleanup"
+	ws.Name = "Trashed Cleanup"
+	ws.Status = StatusTrashed
+
+	if err := primary.Save(ws); err != nil {
+		t.Fatalf("seed primary: %v", err)
+	}
+
+	te := NewTaskExecutor(store, &fakeTaskHandler{}, ExecutorConfig{
+		PollInterval:  time.Hour,
+		MaxConcurrent: 5,
+	})
+	te.cleanupOrphanedTasks()
+
+	got, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get primary: %v", err)
+	}
+	if got.Tasks[0].Status != TaskStatusInProgress {
+		t.Fatalf("trashed workspace task status = %q, want %q", got.Tasks[0].Status, TaskStatusInProgress)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trashed-cleanup")); !os.IsNotExist(err) {
+		t.Fatalf("trashed workspace folder should not be recreated, stat err = %v", err)
 	}
 }
 

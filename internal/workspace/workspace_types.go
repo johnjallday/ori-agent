@@ -16,6 +16,7 @@ const (
 	StatusCompleted WorkspaceStatus = "completed"
 	StatusFailed    WorkspaceStatus = "failed"
 	StatusCancelled WorkspaceStatus = "cancelled"
+	StatusTrashed   WorkspaceStatus = "trashed"
 )
 
 // MessageType represents the type of inter-agent message

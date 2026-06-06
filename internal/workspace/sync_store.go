@@ -35,7 +35,7 @@ func (s *SyncStore) FileStore() *FileStore {
 // we still persist to the primary so the authoritative record is updated;
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
-	if s.fileSync != nil {
+	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed {
 		if err := s.fileSync.Save(ws); err != nil {
 			logger.Warn("Failed to sync workspace to disk", logger.Fields{
 				"workspace_id": ws.ID,
@@ -124,6 +124,9 @@ func (s *SyncStore) Update(wsID string, fn func(*Workspace) error) error {
 
 // SaveWorkspaceAgent writes the snapshot to the primary store and to disk.
 func (s *SyncStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	if ws, err := s.primary.Get(workspaceID); err == nil && ws != nil && ws.Status == StatusTrashed {
+		return nil
+	}
 	if err := s.primary.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
 		return err
 	}
