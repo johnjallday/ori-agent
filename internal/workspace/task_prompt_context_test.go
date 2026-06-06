@@ -164,7 +164,7 @@ func TestPrepareTaskContext_DescribesInjectedSummarizedAndOnDemandSurfaces(t *te
 			sessionCount: 1,
 		},
 	}
-	handler.workspaceToolsFn = func(string) []toolapi.Tool {
+	handler.workspaceToolsFn = func(string, string) []toolapi.Tool {
 		return []toolapi.Tool{taskHandlerToolStub{name: "workspace_notes"}}
 	}
 

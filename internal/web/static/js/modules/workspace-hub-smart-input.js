@@ -400,6 +400,15 @@
 
     const parsed = await parseResponse.json();
 
+    // Forward coordinator assignment provenance (set by the auto-parse backend)
+    // so persisted tasks are labeled as a coordinator static plan.
+    const assignmentProvenance = {};
+    if (parsed.assignment_mode) {
+      assignmentProvenance.assignment_mode = parsed.assignment_mode;
+      if (parsed.assigned_by) assignmentProvenance.assigned_by = parsed.assigned_by;
+      if (parsed.assignment_reason) assignmentProvenance.assignment_reason = parsed.assignment_reason;
+    }
+
     let scheduleData = { schedule_enabled: false };
     if (parsed.schedule_enabled && parsed.schedule) {
       const schedule = { ...parsed.schedule };
@@ -480,7 +489,8 @@
           workspace_id: state.selectedId,
           description: parentTitle,
           details: parentDetails,
-          priority: parentPriority
+          priority: parentPriority,
+          ...assignmentProvenance
         })
       });
 
@@ -536,6 +546,7 @@
             input_task_ids: inputTaskIds,
             parent_task_id: parentTaskId,
             subtask_index: i + 1,
+            ...assignmentProvenance,
             ...stepScheduleData,
             ...stepResultStorageData
           })
@@ -591,6 +602,7 @@
         priority: parsed.priority || 3,
         to: to || undefined,
         assigned_node_id: assignedNodeId || undefined,
+        ...assignmentProvenance,
         ...scheduleData,
         ...resultStorageData
       })

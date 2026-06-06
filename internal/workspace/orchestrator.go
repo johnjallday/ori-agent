@@ -21,6 +21,10 @@ type Orchestrator struct {
 	llmProvider    LLMProvider  // For intelligent task breakdown
 	eventBus       *EventBus    // For real-time updates
 	taskHandler    taskExecutor // For single-task LLM execution (delegated)
+
+	// delegationLoop, when set, drives adaptive delegation on task failure
+	// (opt-in). Nil means the orchestrator records failures as before.
+	delegationLoop *DelegationLoop
 }
 
 // LLMProvider interface for calling AI models
@@ -56,6 +60,12 @@ func (o *Orchestrator) SetTaskHandler(h taskExecutor) {
 	o.taskHandler = h
 }
 
+// SetDelegationLoop wires the adaptive delegation loop. When set, ExecuteTask
+// asks the coordinator to adapt on a triggering failure before recording it.
+func (o *Orchestrator) SetDelegationLoop(loop *DelegationLoop) {
+	o.delegationLoop = loop
+}
+
 // ExecuteMission starts autonomous execution of a mission
 func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, mission string) error {
 	workspace, err := o.workspaceStore.Get(workspaceID)
@@ -87,19 +97,25 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 	}
 	tasks = sortedTasks
 
+	// Resolve the coordinator once so every mission task records static-plan
+	// provenance attributed to it (the mission orchestrator is a coordinator-
+	// driven planning path).
+	coordinator, _ := workspace.ResolveCoordinator()
+
 	// Step 2: Add tasks to the workspace
-	for _, task := range tasks {
-		task.WorkspaceID = workspaceID
-		if err := workspace.AddTask(task); err != nil {
-			logger.Error("[Orchestrator] Warning: failed to add task", logger.Fields{"task_id": task.ID, "err": err})
+	for i := range tasks {
+		tasks[i].WorkspaceID = workspaceID
+		assignMissionTask(workspace, &tasks[i], coordinator)
+		if err := workspace.AddTask(tasks[i]); err != nil {
+			logger.Error("[Orchestrator] Warning: failed to add task", logger.Fields{"task_id": tasks[i].ID, "err": err})
 		}
 
 		// Publish task creation event
 		o.publishEvent("task_created", workspaceID, map[string]any{
-			"task_id":     task.ID,
-			"description": task.Description,
-			"assigned_to": task.To,
-			"priority":    task.Priority,
+			"task_id":     tasks[i].ID,
+			"description": tasks[i].Description,
+			"assigned_to": tasks[i].To,
+			"priority":    tasks[i].Priority,
 		})
 	}
 
@@ -396,6 +412,35 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		}
 	}
 
+	// Adaptive delegation (opt-in): when a loop is wired and the outcome warrants
+	// it, let the coordinator adapt before this is recorded as a failure. With no
+	// loop configured, behavior is unchanged.
+	if o.delegationLoop != nil {
+		if trigger := ClassifyDelegationTrigger(task, result, err); trigger.Trigger {
+			loopRes, loopErr := o.delegationLoop.Run(ctx, workspaceID, task, trigger)
+			switch {
+			case loopErr == nil && loopRes.Resolved:
+				logger.Info("[Orchestrator] Delegation loop resolved task", logger.Fields{
+					"task_id": task.ID, "iterations": loopRes.Iterations, "subtasks": loopRes.SubtaskCount,
+				})
+				result = loopRes.Result
+				err = nil
+			case loopErr != nil:
+				// A loop block becomes a pause-to-ask when interactive, or a
+				// failure when unattended (missions/scheduled never hang).
+				if blocked, ok := AsTaskBlockedError(loopErr); ok && shouldPauseForDelegationBlock(task) {
+					logger.Info("[Orchestrator] Delegation loop paused task for input", logger.Fields{"task_id": task.ID})
+					o.pauseTaskForDelegation(workspace, task, blocked)
+					return nil
+				}
+				logger.Warn("[Orchestrator] Delegation loop did not resolve task", logger.Fields{
+					"task_id": task.ID, "error": loopErr.Error(),
+				})
+				err = loopErr
+			}
+		}
+	}
+
 	completed := time.Now()
 	if err != nil {
 		// Task failed
@@ -415,6 +460,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 			}
 			t.CompletedAt = &completed
 			t.Error = err.Error()
+			o.recordExecutionTrace(t, workspaceID, completed)
 			return nil
 		}); updateErr != nil {
 			logger.Error("[Orchestrator] Warning: failed to record task failure", logger.Fields{"task_id": task.ID, "error": updateErr})
@@ -445,6 +491,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 		t.CompletedAt = &completed
 		t.Result = result
 		ApplyTaskResultMetadata(t, result)
+		o.recordExecutionTrace(t, workspaceID, completed)
 		return nil
 	}); err != nil {
 		logger.Error("[Orchestrator] Warning: failed to record task completion", logger.Fields{"task_id": task.ID, "error": err})
@@ -456,6 +503,105 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	})
 
 	return nil
+}
+
+// assignMissionTask stamps static-plan provenance on a mission task, attributing
+// it to the workspace coordinator. If the planned assignee is not a workspace
+// member (e.g. an LLM-invented name), it falls back to the coordinator when one
+// is known so the task stays runnable; otherwise it records provenance without
+// changing the assignee. Routing through ApplyTaskAssignment keeps Task.To and
+// the provenance fields in lockstep.
+func assignMissionTask(ws *Workspace, task *Task, coordinator string) {
+	if ws == nil || task == nil {
+		return
+	}
+	assignedBy := coordinator
+	if assignedBy == "" {
+		assignedBy = "orchestrator"
+	}
+	a := TaskAssignment{
+		AgentName:  task.To,
+		Mode:       TaskAssignmentModeStaticPlan,
+		AssignedBy: assignedBy,
+		Reason:     "mission plan",
+	}
+	if err := ws.ApplyTaskAssignment(task, a); err == nil {
+		return
+	}
+	if coordinator != "" {
+		a.AgentName = coordinator
+		a.Reason = "mission plan (reassigned to coordinator; planned assignee not in workspace)"
+		if err := ws.ApplyTaskAssignment(task, a); err == nil {
+			return
+		}
+	}
+	// Last resort: record provenance without changing the (non-member) assignee.
+	// Task.To still points at an agent that is not a workspace member, so the
+	// executor will fail to resolve it at run time. Warn here so that failure is
+	// traceable to a planned assignee that never joined the workspace.
+	logger.Warn("[Orchestrator] Mission task assignee is not a workspace member and no coordinator fallback is available; task will fail at execution", logger.Fields{
+		"task_id":          task.ID,
+		"planned_assignee": task.To,
+		"workspace_id":     ws.ID,
+	})
+	task.AssignmentMode = TaskAssignmentModeStaticPlan
+	task.AssignedBy = assignedBy
+	task.AssignmentReason = "mission plan"
+}
+
+// shouldPauseForDelegationBlock reports whether a delegation block should
+// pause-to-ask (interactive) instead of failing. Unattended runs (missions and
+// scheduled tasks) must never hang waiting for input, so they fail instead.
+func shouldPauseForDelegationBlock(task Task) bool {
+	if IsMissionTask(task.Context) {
+		return false
+	}
+	if task.ScheduleEnabled {
+		return false
+	}
+	return true
+}
+
+// recordExecutionTrace persists task events (tool calls, delegation.*, blocked)
+// into the task's execution trace from the event bus history, so the task-detail
+// UI can render them after the fact (matches the task executor's behavior).
+func (o *Orchestrator) recordExecutionTrace(t *Task, workspaceID string, completed time.Time) {
+	if o.eventBus == nil || t == nil {
+		return
+	}
+	startedAt := completed
+	if t.StartedAt != nil && !t.StartedAt.IsZero() {
+		startedAt = *t.StartedAt
+	}
+	RecordTaskExecutionTraceFromEventBus(t, o.eventBus, workspaceID, t.ID, startedAt, completed)
+}
+
+// pauseTaskForDelegation suspends a task pending user input, reusing the same
+// blocked primitives as the task executor: waiting_for_choice + a task.blocked
+// event carrying the coordinator's question.
+func (o *Orchestrator) pauseTaskForDelegation(ws *Workspace, task Task, blocked *TaskBlockedError) {
+	completed := time.Now()
+	if mutErr := MutateTaskAndSave(o.workspaceStore, ws, task.ID, func(t *Task) error {
+		if err := t.SetStatus(TaskStatusWaitingForChoice); err != nil {
+			return err
+		}
+		t.Error = ""
+		t.Result = ""
+		t.CompletedAt = nil
+		applyExecutorTaskBlockedContext(t, blocked)
+		o.recordExecutionTrace(t, ws.ID, completed)
+		return nil
+	}); mutErr != nil {
+		logger.Error("[Orchestrator] failed to pause task for delegation", logger.Fields{
+			"task_id": task.ID, "error": mutErr,
+		})
+		return
+	}
+	o.publishEvent(string(EventTaskBlocked), ws.ID, map[string]any{
+		"task_id":     task.ID,
+		"description": task.Description,
+		"error":       blocked.Error(),
+	})
 }
 
 // formatAgentCapabilities formats agent list with capabilities.

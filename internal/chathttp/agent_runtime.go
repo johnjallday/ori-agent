@@ -44,7 +44,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		}
 		baseAgent = cloneAgentForChat(baseAgent)
 		result := &resolvedChatAgent{Agent: baseAgent}
-		h.attachWorkspaceTools(result, routeCtx)
+		h.attachWorkspaceTools(result, agentName, routeCtx)
 		return result, nil
 	}
 
@@ -57,7 +57,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
 		}
-		h.attachWorkspaceTools(result, routeCtx)
+		h.attachWorkspaceTools(result, agentName, routeCtx)
 		return result, nil
 	}
 
@@ -75,14 +75,14 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	baseAgent = cloneAgentForChat(baseAgent)
 
 	result := &resolvedChatAgent{Agent: baseAgent}
-	h.attachWorkspaceTools(result, routeCtx)
+	h.attachWorkspaceTools(result, agentName, routeCtx)
 	return result, nil
 }
 
 // attachWorkspaceTools adds workspace-scoped tools to a resolved agent when
 // the necessary stores are available. This must be called on every code path
 // that returns a resolvedChatAgent for a workspace surface.
-func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, routeCtx normalizedChatRouteContext) {
+func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, routeCtx normalizedChatRouteContext) {
 	workspaceID := strings.TrimSpace(routeCtx.WorkspaceID)
 	if h.sessionStore == nil || h.workspaceStore == nil || workspaceID == "" {
 		logger.Debug("attachWorkspaceTools: skipping", logger.Fields{
@@ -93,6 +93,9 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, routeCtx normalize
 		return
 	}
 	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
+	if name := strings.TrimSpace(agentName); name != "" {
+		wtp.SetExecutingAgent(name)
+	}
 	if h.fileStore != nil {
 		wtp.SetFileStore(h.fileStore)
 	}

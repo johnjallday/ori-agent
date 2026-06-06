@@ -2554,6 +2554,23 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   font-weight: 500;
 }
 
+/* Bold-line "sections" and bold-led list "items" are surfaced alongside real
+   headings so notes structured with bold/lists still get a useful outline.
+   They're rendered progressively lighter/smaller to keep the hierarchy clear
+   (heading → section → item). */
+.note-toc-item[data-kind="section"] .note-toc-entry {
+  font-size: 11.5px;
+}
+
+.note-toc-item[data-kind="item"] .note-toc-entry {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.note-toc-item[data-kind="item"] .note-toc-entry:hover {
+  color: var(--text-primary);
+}
+
 .note-editor-center {
   position: relative;
   min-width: 0; /* allow grid track to shrink below content size */

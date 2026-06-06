@@ -48,6 +48,12 @@ type DelegationRequest struct {
 	Context     map[string]any `json:"context"`
 	Timeout     time.Duration  `json:"timeout"`
 
+	// Coordinator delegation fields. ParentTaskID links the delegated subtask to
+	// the task that triggered delegation; Reason is the human-readable assignment
+	// rationale recorded as provenance.
+	ParentTaskID string `json:"parent_task_id,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+
 	// CLI agent adapter fields (used when delegating to external CLI agents)
 	WorkingDir    string  `json:"working_dir,omitempty"`     // Scoped working directory for CLI agent
 	TokenBudget   int     `json:"token_budget,omitempty"`    // Max tokens for CLI agent task

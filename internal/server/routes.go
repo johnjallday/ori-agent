@@ -167,9 +167,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		homeAssistantRouteHandler.SetIntakeTraceStore(traceStore)
 		homeAssistantWorkspaceResolver.SetFeedbackReader(traceStore)
 	}
-	if s.Storage.SessionStore != nil {
-		homeAssistantWorkspaceResolver.SetNoteReader(s.Storage.SessionStore)
-	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(

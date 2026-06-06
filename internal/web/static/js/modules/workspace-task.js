@@ -1383,7 +1383,7 @@ export class WorkspaceTaskPage {
 
   handleRealtimeEvent(event) {
     const eventType = String(event?.type || '').trim();
-    if (!eventType.startsWith('task.')) {
+    if (!eventType.startsWith('task.') && !eventType.startsWith('delegation.')) {
       return;
     }
 
@@ -1482,6 +1482,20 @@ export class WorkspaceTaskPage {
         return 'Started';
       case 'task.resumed':
         return 'Resumed';
+      case 'task.assigned': {
+        const mode = String(data.assignment_mode || '').trim();
+        const agent = String(data.target_agent || data.agent || '').trim();
+        if (mode === 'dynamic_delegation' && agent) return `Delegated to ${agent}`;
+        return null;
+      }
+      case 'delegation.started':
+        return 'Coordinator adapting';
+      case 'delegation.completed':
+        return 'Delegation resolved';
+      case 'delegation.failed':
+        return 'Delegation failed';
+      case 'delegation.cap_hit':
+        return 'Delegation reached its limit';
       default:
         return null;
     }

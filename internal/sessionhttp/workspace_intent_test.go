@@ -16,7 +16,7 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func TestUpdateWorkspaceSyncsCanonicalDescriptionNote(t *testing.T) {
+func TestUpdateWorkspacePersistsDescriptionAndBootstrap(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -29,28 +29,21 @@ func TestUpdateWorkspaceSyncsCanonicalDescriptionNote(t *testing.T) {
 	handler.SetWorkspaceStore(fileStore)
 
 	workspaceID := createTestWorkspace(t, handler, "Launch Ops")
-	folderPath, err := fileStore.GetFolderPath(workspaceID)
-	if err != nil {
-		t.Fatalf("GetFolderPath: %v", err)
-	}
 
+	// A pre-existing user note must be left untouched. The removed sync used to
+	// rename intent-style notes ("Workspace Brief") into a canonical
+	// "Workspace Description" note and overwrite their content.
 	now := time.Now()
-	legacyNote := &session.WorkspaceNote{
-		ID:          "legacy-workspace-brief",
+	userNote := &session.WorkspaceNote{
+		ID:          "user-note-1",
 		WorkspaceID: workspaceID,
 		Name:        "Workspace Brief",
 		Content:     "# Workspace Brief\n\n## Primary Goal\nOld launch brief\n",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := handler.store.CreateNote(context.Background(), legacyNote); err != nil {
+	if err := handler.store.CreateNote(context.Background(), userNote); err != nil {
 		t.Fatalf("CreateNote: %v", err)
-	}
-	handler.syncNoteToFile(legacyNote)
-
-	oldNotePath := filepath.Join(folderPath, agentworkspace.NotesDir, agentworkspace.NoteFilename("Workspace Brief", legacyNote.ID))
-	if _, err := os.Stat(oldNotePath); err != nil {
-		t.Fatalf("expected legacy note file before update: %v", err)
 	}
 
 	body := `{"description":"Ship launch assets","workspace_bootstrap":{"systems":"Keynote, Google Drive","capabilities":"Slide production","context":"Brand guide lives in /Launch/Brand"}}`
@@ -63,6 +56,7 @@ func TestUpdateWorkspaceSyncsCanonicalDescriptionNote(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// The description and bootstrap (the source of truth the harness reads) persist.
 	ws, err := handler.store.GetWorkspace(context.Background(), workspaceID)
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
@@ -79,44 +73,35 @@ func TestUpdateWorkspaceSyncsCanonicalDescriptionNote(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap map, got %T", bootstrapRaw)
 	}
-	if got := bootstrapMap["goal"]; got != "Ship launch assets" {
-		t.Fatalf("workspace_bootstrap.goal = %#v, want %q", got, "Ship launch assets")
-	}
-	if got := bootstrapMap["systems"]; got != "Keynote, Google Drive" {
-		t.Fatalf("workspace_bootstrap.systems = %#v, want %q", got, "Keynote, Google Drive")
-	}
-	if got := bootstrapMap["capabilities"]; got != "Slide production" {
-		t.Fatalf("workspace_bootstrap.capabilities = %#v, want %q", got, "Slide production")
-	}
-	if got := bootstrapMap["context"]; got != "Brand guide lives in /Launch/Brand" {
-		t.Fatalf("workspace_bootstrap.context = %#v, want %q", got, "Brand guide lives in /Launch/Brand")
-	}
-
-	updatedNote, err := handler.store.GetNote(context.Background(), legacyNote.ID)
-	if err != nil {
-		t.Fatalf("GetNote: %v", err)
-	}
-	if got := updatedNote.Name; got != workspaceDescriptionNoteName {
-		t.Fatalf("note name = %q, want %q", got, workspaceDescriptionNoteName)
-	}
-	for _, fragment := range []string{
-		"# Workspace Description",
-		"## Description\nShip launch assets",
-		"## Apps and Systems\nKeynote, Google Drive",
-		"## Key Files or Context\nBrand guide lives in /Launch/Brand",
-		"## Special Capabilities or Workflows\nSlide production",
+	for key, want := range map[string]string{
+		"goal":         "Ship launch assets",
+		"systems":      "Keynote, Google Drive",
+		"capabilities": "Slide production",
+		"context":      "Brand guide lives in /Launch/Brand",
 	} {
-		if !strings.Contains(updatedNote.Content, fragment) {
-			t.Fatalf("expected note content to include %q, got %q", fragment, updatedNote.Content)
+		if got := bootstrapMap[key]; got != want {
+			t.Fatalf("workspace_bootstrap.%s = %#v, want %q", key, got, want)
 		}
 	}
 
-	newNotePath := filepath.Join(folderPath, agentworkspace.NotesDir, agentworkspace.NoteFilename(workspaceDescriptionNoteName, legacyNote.ID))
-	if _, err := os.Stat(newNotePath); err != nil {
-		t.Fatalf("expected canonical note file after update: %v", err)
+	// No canonical "Workspace Description" note is created, and the pre-existing
+	// user note keeps its name and content.
+	notes, err := handler.store.ListNotesByWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("ListNotesByWorkspace: %v", err)
 	}
-	if _, err := os.Stat(oldNotePath); !os.IsNotExist(err) {
-		t.Fatalf("expected legacy note file to be removed, stat err=%v", err)
+	if len(notes) != 1 {
+		t.Fatalf("expected exactly 1 note (the pre-existing user note), got %d: %+v", len(notes), notes)
+	}
+	if got := notes[0].Name; got != "Workspace Brief" {
+		t.Fatalf("user note name = %q, want %q (sync must not rename it)", got, "Workspace Brief")
+	}
+	updatedNote, err := handler.store.GetNote(context.Background(), userNote.ID)
+	if err != nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	if !strings.Contains(updatedNote.Content, "Old launch brief") {
+		t.Fatalf("user note content changed unexpectedly: %q", updatedNote.Content)
 	}
 }
 

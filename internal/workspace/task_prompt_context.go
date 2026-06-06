@@ -130,6 +130,19 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 	if description := sanitizeTaskPromptText(ws.Description, taskPromptPreviewLimit); description != "" {
 		lines = append(lines, fmt.Sprintf("- Workspace Description: %q", description))
 	}
+	// Surface the rest of the workspace intent (systems/capabilities/context).
+	// These live in the workspace_bootstrap shared data and used to reach the
+	// model only via the canonical "Workspace Description" note; injecting them
+	// directly keeps the full intent available without that note.
+	for _, field := range []struct{ label, key string }{
+		{"Workspace Systems", "systems"},
+		{"Workspace Capabilities", "capabilities"},
+		{"Workspace Context", "context"},
+	} {
+		if value := sanitizeTaskPromptText(workspaceBootstrapField(ws.SharedData, field.key), taskPromptPreviewLimit); value != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %q", field.label, value))
+		}
+	}
 	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
 		lines = append(lines, fmt.Sprintf("- Task Reference URL: %q", sanitizeTaskPromptText(referenceURL, taskPromptPathLimit)))
 	}
@@ -565,6 +578,28 @@ func limitTaskPromptSessions(sessions []TaskPromptSessionSummary, limit int) []T
 		return sessions
 	}
 	return sessions[:limit]
+}
+
+// workspaceBootstrapField reads a string field (goal/systems/capabilities/
+// context) from the workspace_bootstrap shared-data map. This is the workspace
+// intent the user enters at creation/setup time.
+func workspaceBootstrapField(sharedData map[string]any, key string) string {
+	if len(sharedData) == 0 {
+		return ""
+	}
+	raw, ok := sharedData["workspace_bootstrap"]
+	if !ok || raw == nil {
+		return ""
+	}
+	bootstrap, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	value, ok := bootstrap[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func sanitizeTaskPromptText(value string, maxLen int) string {

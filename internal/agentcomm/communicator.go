@@ -2,7 +2,7 @@ package agentcomm
 
 import (
 	"fmt"
-
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -105,16 +105,33 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, err
 	// Create task using workspace.Task
 	now := time.Now()
 	task := workspace.Task{
-		ID:          "", // Will be set by workspace.AddTask
-		WorkspaceID: req.WorkspaceID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Context:     req.Context,
-		Timeout:     req.Timeout,
-		Status:      workspace.TaskStatusAssigned,
-		CreatedAt:   now,
+		ID:           "", // Will be set by workspace.AddTask
+		WorkspaceID:  req.WorkspaceID,
+		From:         req.From,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		Context:      req.Context,
+		Timeout:      req.Timeout,
+		ParentTaskID: strings.TrimSpace(req.ParentTaskID),
+		Status:       workspace.TaskStatusAssigned,
+		CreatedAt:    now,
+	}
+
+	// Stamp the assignee and dynamic-delegation provenance through the shared
+	// assignment service (validates membership, never auto-adds). In the
+	// single-level model the delegating agent is the coordinator, so it is
+	// recorded as assigned_by.
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "delegated by coordinator"
+	}
+	if err := ws.ApplyTaskAssignment(&task, workspace.TaskAssignment{
+		AgentName:  req.To,
+		Mode:       workspace.TaskAssignmentModeDynamicDelegation,
+		AssignedBy: req.From,
+		Reason:     reason,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to assign delegated task: %w", err)
 	}
 
 	// Add task to workspace (this persists it)

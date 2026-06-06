@@ -5,6 +5,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
@@ -36,13 +37,39 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	sessionStore := b.sessionStore
 	workspaceStore := b.workspaceStore
 	fileStore := b.workspaceFileStore
-	return func(workspaceID string) []toolapi.Tool {
+	return func(workspaceID, agentName string) []toolapi.Tool {
 		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
+		provider.SetExecutingAgent(agentName)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
 		}
 		return provider.Tools()
 	}
+}
+
+// delegationCapsFromEnv returns the delegation loop caps, allowing operators to
+// tune the safe defaults (3 iterations / 8 subtasks / 10m) without code changes:
+//
+//	ORI_DELEGATION_MAX_ITERATIONS, ORI_DELEGATION_MAX_SUBTASKS (positive ints)
+//	ORI_DELEGATION_TIMEOUT (Go duration, e.g. "15m")
+func delegationCapsFromEnv() workspace.DelegationCaps {
+	caps := workspace.DefaultDelegationCaps()
+	if v := os.Getenv("ORI_DELEGATION_MAX_ITERATIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			caps.MaxIterations = n
+		}
+	}
+	if v := os.Getenv("ORI_DELEGATION_MAX_SUBTASKS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			caps.MaxSubtasks = n
+		}
+	}
+	if v := os.Getenv("ORI_DELEGATION_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			caps.Timeout = d
+		}
+	}
+	return caps
 }
 
 // initializeWorkspaceStore creates the workspace storage system.
@@ -289,10 +316,27 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
 	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	var loopExecutor workspace.TaskHandler
 	if b.runBackedTaskHandler != nil {
+		loopExecutor = b.runBackedTaskHandler
 		b.workspaceOrchestrator.SetTaskHandler(b.runBackedTaskHandler)
 	} else if b.taskHandler != nil {
+		loopExecutor = b.taskHandler
 		b.workspaceOrchestrator.SetTaskHandler(b.taskHandler)
+	}
+	// Adaptive delegation loop (opt-in via ORI_DELEGATION_LOOP). Off by default so
+	// task-failure behavior is unchanged unless explicitly enabled.
+	if loopExecutor != nil && os.Getenv("ORI_DELEGATION_LOOP") == "true" {
+		adapter := workspace.NewCoordinatorAdapter(b.workspaceStore, loopExecutor)
+		loop := workspace.NewDelegationLoop(b.workspaceStore, loopExecutor, adapter, delegationCapsFromEnv())
+		loop.SetEventBus(b.eventBus)
+		if b.chatHandler != nil {
+			if tracker := b.chatHandler.UtilityTelemetry(); tracker != nil {
+				loop.SetTelemetry(tracker)
+			}
+		}
+		b.workspaceOrchestrator.SetDelegationLoop(loop)
+		logger.Info("Adaptive delegation loop enabled (ORI_DELEGATION_LOOP)", logger.Fields{})
 	}
 	if verbose {
 		logger.Info("Workspace orchestrator initialized", logger.Fields{})

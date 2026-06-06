@@ -220,11 +220,16 @@ type AgentMessage struct {
 
 // Task represents a delegated task within a workspace
 type Task struct {
-	ID               string               `json:"id"`
-	WorkspaceID      string               `json:"workspace_id"`
-	From             string               `json:"from"`
-	To               string               `json:"to"`
-	AssignedNodeID   string               `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspace_id"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	AssignedNodeID string `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	// Assignment provenance — who chose this task's assignee and why. See
+	// task_assignment.go for the mode values and the coordinator resolver.
+	AssignedBy       string               `json:"assigned_by,omitempty"`       // Coordinator agent name, or "manual" for a user override
+	AssignmentMode   TaskAssignmentMode   `json:"assignment_mode,omitempty"`   // How the assignee was chosen
+	AssignmentReason string               `json:"assignment_reason,omitempty"` // Short human-readable rationale
 	Description      string               `json:"description"`
 	Details          string               `json:"details,omitempty"`
 	ReferenceURL     string               `json:"reference_url,omitempty"`

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -95,7 +96,6 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		ID:                     uuid.New().String(),
 		WorkspaceID:            workspaceID,
 		From:                   req.From,
-		To:                     req.To,
 		Description:            req.Description,
 		ReferenceURL:           referenceURL,
 		Priority:               req.Priority,
@@ -117,6 +117,22 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if task.OutputSpec != nil {
 		task.OutputSchema = task.OutputSpec.Schema
 		task.OutputContract = task.OutputSpec.Contract
+	}
+
+	// The workspace task HTTP API is the manual (user-driven) path, so stamp
+	// manual assignment provenance. Membership is validated by the shared
+	// assignment service — assigning to a non-member workspace agent is rejected.
+	if err := workspace.ApplyTaskAssignment(&task, TaskAssignment{
+		AgentName:  req.To,
+		Mode:       TaskAssignmentModeManual,
+		AssignedBy: TaskAssignedByManual,
+	}); err != nil {
+		if errors.Is(err, ErrAssigneeNotInWorkspace) {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to assign task: %v", err))
+		return
 	}
 
 	// Add task to workspace
@@ -218,14 +234,33 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				}
 				workspace.Tasks[i].ReferenceURL = referenceURL
 			}
-			if req.To != nil {
-				workspace.Tasks[i].To = *req.To
-			}
 			if req.From != nil {
 				workspace.Tasks[i].From = *req.From
 			}
-			if req.AssignedNodeID != nil {
-				workspace.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+			// Reassignment through the HTTP API is a manual override: stamp manual
+			// provenance and validate membership through the shared service.
+			if req.To != nil || req.AssignedNodeID != nil {
+				newTo := workspace.Tasks[i].To
+				if req.To != nil {
+					newTo = *req.To
+				}
+				newNode := workspace.Tasks[i].AssignedNodeID
+				if req.AssignedNodeID != nil {
+					newNode = *req.AssignedNodeID
+				}
+				if err := workspace.ApplyTaskAssignment(&workspace.Tasks[i], TaskAssignment{
+					AgentName:  newTo,
+					NodeID:     newNode,
+					Mode:       TaskAssignmentModeManual,
+					AssignedBy: TaskAssignedByManual,
+				}); err != nil {
+					if errors.Is(err, ErrAssigneeNotInWorkspace) {
+						orihttp.BadRequest(w, err.Error())
+						return
+					}
+					orihttp.InternalError(w, fmt.Sprintf("Failed to reassign task: %v", err))
+					return
+				}
 			}
 			if req.InputTaskIDs != nil {
 				workspace.Tasks[i].InputTaskIDs = *req.InputTaskIDs

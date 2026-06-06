@@ -107,6 +107,34 @@ func TestAutoTaskAgentContextScopesToWorkspaceEntryAgent(t *testing.T) {
 	}
 }
 
+func TestAutoTaskAgentContextNoDefaultWhenCoordinatorMissing(t *testing.T) {
+	// Multi-agent workspace with no explicit entry agent: the coordinator
+	// resolver reports "missing", so there must be no default agent — auto-parse
+	// must not silently fall back to the first agent.
+	ws := &workspace.Workspace{
+		ID: "workspace-2",
+		AgentInstances: []workspace.AgentInstance{
+			{Name: "Writer"},
+			{Name: "Researcher"},
+		},
+		Agents: []string{"Writer", "Researcher"},
+	}
+	handler := &AutoTaskHandler{
+		workspaceStore: &autoTaskWorkspaceStore{
+			workspaces: map[string]*workspace.Workspace{"workspace-2": ws},
+		},
+	}
+
+	ctx := handler.autoTaskAgentContext("workspace-2")
+
+	if ctx.DefaultAgentName != "" {
+		t.Fatalf("default agent = %q, want empty (no explicit entry agent in a multi-agent workspace)", ctx.DefaultAgentName)
+	}
+	if len(ctx.Agents) != 2 {
+		t.Fatalf("agents = %#v, want both workspace agents", ctx.Agents)
+	}
+}
+
 func TestValidateTaskConfigDefaultsInvalidAgentToEntryAgent(t *testing.T) {
 	handler := &AutoTaskHandler{}
 	config := AutoTaskResponse{

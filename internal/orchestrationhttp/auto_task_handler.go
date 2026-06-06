@@ -104,6 +104,17 @@ type AutoTaskResponse struct {
 	Reasoning       string                `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
 }
 
+// autoTaskHTTPResponse augments the parsed task config (the LLM structured
+// output) with coordinator assignment provenance for the preview UI. These
+// provenance fields are system-set and intentionally NOT part of the LLM output
+// schema (AutoTaskResponse), so they live only on this HTTP-only wrapper.
+type autoTaskHTTPResponse struct {
+	*AutoTaskResponse
+	AssignedBy       string `json:"assigned_by,omitempty"`
+	AssignmentMode   string `json:"assignment_mode,omitempty"`
+	AssignmentReason string `json:"assignment_reason,omitempty"`
+}
+
 // AutoTaskStep represents a single step in a multi-task workflow.
 type AutoTaskStep struct {
 	ID        string   `json:"id" jsonschema_description:"Short unique ID for this step (e.g., weather_fetch)"`
@@ -265,7 +276,16 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	orihttp.WriteJSON(w, taskConfig)
+	// Augment the response with coordinator provenance so the preview can show
+	// that auto-parsed tasks are a coordinator static plan (the provenance the
+	// frontend echoes back when persisting each task).
+	resp := &autoTaskHTTPResponse{AutoTaskResponse: taskConfig}
+	if coordinator := strings.TrimSpace(agentContext.DefaultAgentName); coordinator != "" {
+		resp.AssignedBy = coordinator
+		resp.AssignmentMode = string(workspace.TaskAssignmentModeStaticPlan)
+		resp.AssignmentReason = strings.TrimSpace(taskConfig.Reasoning)
+	}
+	orihttp.WriteJSON(w, resp)
 }
 
 // HandleOutputContractSuggestion handles POST /api/orchestration/tasks/output-contract/suggest.
@@ -660,7 +680,14 @@ func (h *AutoTaskHandler) autoTaskAgentContext(workspaceID string) autoTaskAgent
 		} else if ws != nil {
 			agents := workspaceAutoTaskAgentNames(ws)
 			if len(agents) > 0 {
-				defaultAgentName := canonicalAutoTaskAgentName(ws.EntryAgentName(), agents)
+				// Default ordinary requests to the workspace coordinator. Use the
+				// coordinator resolver (not EntryAgentName, which falls back to the
+				// first agent) so a multi-agent workspace with no explicit entry
+				// agent yields no default rather than silently picking one.
+				defaultAgentName := ""
+				if coordinator, source := ws.ResolveCoordinator(); source != workspace.CoordinatorSourceMissing {
+					defaultAgentName = canonicalAutoTaskAgentName(coordinator, agents)
+				}
 				return autoTaskAgentContext{
 					Agents:            agents,
 					AgentDescriptions: h.autoTaskAgentDescriptions(agents, ws),

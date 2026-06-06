@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -20,7 +19,6 @@ const (
 
 	homeAssistantWorkspaceMinScore        = 4
 	homeAssistantWorkspaceAmbiguousMargin = 2
-	homeAssistantWorkspaceNoteRerankLimit = 3
 
 	homeAssistantWorkspaceCorrectionHistoryLimit          = 50
 	homeAssistantWorkspaceFuzzyCorrectionMinPromptTokens  = 3
@@ -47,11 +45,6 @@ type HomeAssistantWorkspaceCandidate struct {
 	Reasons []string `json:"reasons,omitempty"`
 }
 
-type homeAssistantWorkspaceNoteReader interface {
-	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]session.WorkspaceNoteListItem, error)
-	GetNote(ctx context.Context, id string) (*session.WorkspaceNote, error)
-}
-
 type homeAssistantWorkspaceRuntimeResolver interface {
 	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 }
@@ -64,7 +57,6 @@ type homeAssistantWorkspaceFeedbackReader interface {
 type HomeAssistantWorkspaceResolver struct {
 	WorkspaceStore  workspace.Store
 	AgentStore      store.Store
-	NoteReader      homeAssistantWorkspaceNoteReader
 	RuntimeResolver homeAssistantWorkspaceRuntimeResolver
 	FeedbackReader  homeAssistantWorkspaceFeedbackReader
 }
@@ -74,13 +66,6 @@ func NewHomeAssistantWorkspaceResolver(workspaceStore workspace.Store, agentStor
 		WorkspaceStore: workspaceStore,
 		AgentStore:     agentStore,
 	}
-}
-
-func (r *HomeAssistantWorkspaceResolver) SetNoteReader(reader homeAssistantWorkspaceNoteReader) {
-	if r == nil {
-		return
-	}
-	r.NoteReader = reader
 }
 
 func (r *HomeAssistantWorkspaceResolver) SetRuntimeResolver(resolver homeAssistantWorkspaceRuntimeResolver) {
@@ -134,8 +119,6 @@ func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext nor
 	}
 
 	sortHomeAssistantWorkspaceScores(candidates)
-	r.enrichTopCandidatesWithIntentNotes(prompt, candidates)
-	sortHomeAssistantWorkspaceScores(candidates)
 
 	visible := buildHomeAssistantWorkspaceCandidates(candidates)
 	top := candidates[0]
@@ -187,42 +170,6 @@ func scoreHomeAssistantWorkspace(prompt string, ws *workspace.Workspace) homeAss
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace context", workspaceSharedString(ws, "context"), promptTokens, 2, 2)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace directories", workspaceDirectoryReferenceText(ws), promptTokens, 2, 2)
 	return score
-}
-
-func (r *HomeAssistantWorkspaceResolver) enrichTopCandidatesWithIntentNotes(prompt string, candidates []homeAssistantWorkspaceScore) {
-	if r == nil || r.NoteReader == nil || len(candidates) == 0 {
-		return
-	}
-
-	limit := min(homeAssistantWorkspaceNoteRerankLimit, len(candidates))
-	normalizedPrompt := normalizeRouteToken(prompt)
-	promptTokens := collectHomeAssistantWorkspacePromptTokens(prompt)
-	for i := 0; i < limit; i++ {
-		ws := candidates[i].Workspace
-		if ws == nil {
-			continue
-		}
-		content := r.loadWorkspaceIntentNoteContent(ws.ID)
-		addWorkspaceFieldScore(&candidates[i], normalizedPrompt, "workspace intent note", content, promptTokens, 2, 2)
-	}
-}
-
-func (r *HomeAssistantWorkspaceResolver) loadWorkspaceIntentNoteContent(workspaceID string) string {
-	notes, err := r.NoteReader.ListNotesByWorkspace(context.Background(), workspaceID)
-	if err != nil {
-		return ""
-	}
-	for _, note := range notes {
-		if !isWorkspaceIntentNoteName(note.Name) {
-			continue
-		}
-		full, err := r.NoteReader.GetNote(context.Background(), note.ID)
-		if err == nil && full != nil {
-			return full.Content
-		}
-		return note.Preview
-	}
-	return ""
 }
 
 func (r *HomeAssistantWorkspaceResolver) resolveSelectedWorkspace(ws *workspace.Workspace, reasons []string) *HomeAssistantWorkspaceResolution {
@@ -538,11 +485,6 @@ func appendWorkspaceReason(reasons []string, reason string) []string {
 		return reasons
 	}
 	return append(reasons, reason)
-}
-
-func isWorkspaceIntentNoteName(name string) bool {
-	normalized := strings.NewReplacer(" ", "", "_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
-	return normalized == "workspacedescription" || normalized == "workspacebrief"
 }
 
 func sortHomeAssistantWorkspaceScores(scores []homeAssistantWorkspaceScore) {

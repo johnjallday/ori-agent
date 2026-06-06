@@ -36,6 +36,12 @@ const (
 	EventTaskResumed    EventType = "task.resumed"     // Task resumed after user input
 	EventTaskOutput     EventType = "task.output"      // Task output contract/storage lifecycle event
 
+	// Delegation loop events (adaptive delegation; see DelegationLoop)
+	EventDelegationStarted   EventType = "delegation.started"
+	EventDelegationCompleted EventType = "delegation.completed"
+	EventDelegationFailed    EventType = "delegation.failed"
+	EventDelegationCapHit    EventType = "delegation.cap_hit"
+
 	// Scheduled task events
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully
 	EventScheduledTaskFailed    EventType = "scheduled_task.failed"    // Scheduled task execution failed

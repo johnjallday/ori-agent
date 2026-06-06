@@ -422,8 +422,8 @@
                       </div>
                       <div class="col-12">
                         <div class="workspace-detail-settings-summary-card">
-                          <div class="workspace-detail-settings-summary-title">Canonical Workspace Description Note</div>
-                          <div id="workspace-detail-intent-summary" class="workspace-detail-settings-summary-copy">Saving intent keeps the canonical workspace description note in sync.</div>
+                          <div class="workspace-detail-settings-summary-title">Workspace Intent</div>
+                          <div id="workspace-detail-intent-summary" class="workspace-detail-settings-summary-copy">Saving intent updates the workspace description and setup metadata Ori uses for planning and routing.</div>
                         </div>
                       </div>
                     </div>
@@ -5577,6 +5577,28 @@
       background: rgba(56, 189, 248, 0.14);
       color: #7dd3fc;
       border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .workspace-detail-assignment-mode {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0.1rem 0.42rem;
+      border-radius: 999px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1.25;
+      background: rgba(16, 185, 129, 0.16);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .workspace-detail-assignment-mode[data-mode="dynamic_delegation"] {
+      background: rgba(244, 114, 182, 0.16);
+      color: #f9a8d4;
+      border-color: rgba(244, 114, 182, 0.35);
     }
 
     .workspace-detail-workflow-steps {

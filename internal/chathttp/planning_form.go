@@ -480,10 +480,10 @@ func travelPlanningNoteScore(name string) int {
 		return 0
 	}
 	switch {
-	case normalized == "workspacedescription":
-		return 425
-	case normalized == "workspacebrief":
-		return 400
+	// The canonical "Workspace Description"/"Workspace Brief" note is no longer
+	// scored here — its goal/context/capabilities now come from the workspace
+	// bootstrap directly (see workspaceBootstrapPlanningText). Only genuine
+	// user-authored trip/travel notes are scored below.
 	case strings.Contains(normalized, "tripintake"):
 		return 350
 	case strings.Contains(normalized, "travelintake"):

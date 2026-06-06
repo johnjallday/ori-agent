@@ -201,7 +201,7 @@ func TestNormalizeModelForProvider_ClaudeAliases(t *testing.T) {
 
 func TestConvertAgentToolsToLLMTools_IncludesWorkspaceTools(t *testing.T) {
 	handler := newTestTaskHandler("openai")
-	handler.SetWorkspaceToolFactory(func(workspaceID string) []toolapi.Tool {
+	handler.SetWorkspaceToolFactory(func(workspaceID, _ string) []toolapi.Tool {
 		if workspaceID != "workspace-1" {
 			t.Fatalf("expected workspace-1, got %q", workspaceID)
 		}
