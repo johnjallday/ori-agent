@@ -114,7 +114,6 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
     launcherRescanBtn: document.getElementById('launcherRescanBtn'),
     launcherUndoBtn: document.getElementById('launcherUndoBtn'),
-    launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
     launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
     launcherCancelSelectionBtn: document.getElementById('launcherCancelSelectionBtn'),
@@ -692,8 +691,8 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (nextTab === 'summary') {
       const state = window.WorkspaceHubState.getState();
-      if (state.launcherSelectionMode) {
-        setLauncherSelectionMode(false);
+      if (hasLauncherSelection()) {
+        clearLauncherSelection();
       }
       if (elements.launcherOverviewDetails && elements.launcherOverviewDetails.hidden) {
         setLauncherOverviewExpanded(true);
@@ -1307,7 +1306,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     elements.launcherEmpty.style.display = 'none';
 
-    const selectionMode = !!state.launcherSelectionMode;
     const selectedSet = state.selectedWorkspaces || new Set();
 
     const flattenedMap = new Map((flattened || []).map((ws) => [ws.id, ws]));
@@ -1336,12 +1334,12 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       const checked = selectedSet.has(row.id);
-      const checkbox = selectionMode ? `
+      const checkbox = `
           <label class="launcher-card-checkbox" aria-label="Select workspace ${escapeHtml(row.name || row.id)}">
             <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${checked ? 'checked' : ''} />
             <span class="launcher-card-checkmark" aria-hidden="true"></span>
           </label>
-      ` : '';
+      `;
 
       const deleteButton = `
         <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="${deleteTitle}" aria-label="${deleteTitle}">
@@ -1352,7 +1350,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       return `
-        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="workspace" data-select-mode="${selectionMode ? '1' : '0'}" data-folder-linked="${folderDisplay.linked ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')} with ${escapeHtml(folderDisplay.ariaLabel)}">
+        <div class="launcher-card-item has-selection-checkbox" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="workspace" data-folder-linked="${folderDisplay.linked ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')} with ${escapeHtml(folderDisplay.ariaLabel)}">
           ${checkbox}
           ${deleteButton}
           <div class="launcher-card-title-row">
@@ -1392,7 +1390,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       const groupHeader = `
-        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" data-select-mode="${selectionMode ? '1' : '0'}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group ${escapeHtml(row.name || 'Group')}" aria-expanded="${isCollapsed ? 'false' : 'true'}">
+        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group ${escapeHtml(row.name || 'Group')}" aria-expanded="${isCollapsed ? 'false' : 'true'}">
           <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -1455,7 +1453,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     elements.launcherEmpty.style.display = 'none';
 
-    const selectionMode = !!state.launcherSelectionMode;
     const selectedSet = state.selectedWorkspaces || new Set();
     const flattenedMap = new Map((flattened || []).map((ws) => [ws.id, ws]));
 
@@ -1488,14 +1485,12 @@ console.log('[workspace-hub.js] FILE LOADED');
       const safeNextSiblingId = escapeHtml(nextSibling && nextSibling.id ? nextSibling.id : '');
       const safeName = escapeHtml(rowName);
       const deleteTitle = isGroup ? 'Delete group' : 'Delete workspace';
-      const checkbox = selectionMode
-        ? (!isGroup ? `
+      const checkbox = !isGroup ? `
           <label class="launcher-tree-checkbox" aria-label="Select workspace ${safeName}">
             <input type="checkbox" data-workspace-checkbox="${safeId}" ${selectedSet.has(row.id) ? 'checked' : ''} />
             <span class="launcher-card-checkmark" aria-hidden="true"></span>
           </label>
-        ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>')
-        : '';
+        ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>';
       const caret = isGroup ? `
         <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
           <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1523,7 +1518,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       return `
         <div class="launcher-tree-node${isGroup ? ' is-group' : ' is-workspace'}${isCollapsed ? ' is-collapsed' : ''}">
-          <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-select-mode="${selectionMode ? '1' : '0'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? (isCollapsed ? 'Expand' : 'Collapse') : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
+          <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? (isCollapsed ? 'Expand' : 'Collapse') : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
             ${checkbox}
             ${caret}
             ${renderTreeIcon(isGroup ? 'group' : 'workspace')}
@@ -1559,35 +1554,6 @@ console.log('[workspace-hub.js] FILE LOADED');
       card.addEventListener('click', (e) => {
         const workspaceId = card.dataset.workspaceId;
         const workspaceKind = normalizeWorkspaceKind(card.dataset.workspaceKind);
-        const isSelectMode = card.dataset.selectMode === '1';
-
-        // Cmd/Ctrl+click for quick multi-select (even outside selection mode)
-        if (e.metaKey || e.ctrlKey) {
-          if (workspaceKind === 'group') {
-            e.preventDefault();
-            toggleGroupCollapsed(workspaceId);
-            return;
-          }
-          e.preventDefault();
-          // Auto-enable selection mode if not already enabled
-          if (!window.WorkspaceHubState.getState().launcherSelectionMode) {
-            setLauncherSelectionMode(true);
-          }
-          toggleLauncherWorkspaceSelection(workspaceId);
-          return;
-        }
-
-        if (isSelectMode) {
-          if (workspaceKind === 'group') {
-            e.preventDefault();
-            toggleGroupCollapsed(workspaceId);
-            return;
-          }
-          e.preventDefault();
-          toggleLauncherWorkspaceSelection(workspaceId);
-          return;
-        }
-
         if (workspaceKind === 'group') {
           e.preventDefault();
           toggleGroupCollapsed(workspaceId);
@@ -1612,6 +1578,10 @@ console.log('[workspace-hub.js] FILE LOADED');
         const id = e.target.getAttribute('data-workspace-checkbox');
         toggleLauncherWorkspaceSelection(id, { force: e.target.checked });
       });
+    });
+
+    elements.launcherGrid.querySelectorAll('.launcher-card-checkbox, .launcher-tree-checkbox').forEach((checkboxShell) => {
+      checkboxShell.addEventListener('click', (e) => e.stopPropagation());
     });
 
     elements.launcherGrid.querySelectorAll('[data-group-toggle]').forEach((btn) => {
@@ -1908,9 +1878,8 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     items.forEach(item => {
       item.addEventListener('dragstart', (e) => {
-        // Only allow dragging if NOT in selection mode
-        const state = window.WorkspaceHubState.getState();
-        if (state.launcherSelectionMode) {
+        // Keep checkbox selection and drag reordering as separate interactions.
+        if (hasLauncherSelection()) {
           e.preventDefault();
           return;
         }
@@ -2068,25 +2037,20 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
-  function setLauncherSelectionMode(enabled) {
+  function hasLauncherSelection() {
     const state = window.WorkspaceHubState.getState();
-    state.launcherSelectionMode = !!enabled;
-    if (!state.launcherSelectionMode) {
-      state.selectedWorkspaces = new Set();
-    }
+    return !!(state.selectedWorkspaces && state.selectedWorkspaces.size > 0);
+  }
 
-    hubEl.dataset.launcherSelect = state.launcherSelectionMode ? 'true' : 'false';
+  function clearLauncherSelection({ render = true } = {}) {
+    const state = window.WorkspaceHubState.getState();
+    state.selectedWorkspaces = new Set();
+    updateLauncherSelectionUI();
 
-    if (elements.launcherSelectionBar) {
-      elements.launcherSelectionBar.hidden = !state.launcherSelectionMode;
+    if (render) {
+      const flattened = flattenWorkspaces(state.workspaces || []);
+      renderLauncherActiveView(flattened);
     }
-    if (elements.launcherSelectModeBtn) {
-      elements.launcherSelectModeBtn.classList.toggle('is-active', state.launcherSelectionMode);
-    }
-
-    // Re-render launcher to show/hide checkboxes
-    const flattened = flattenWorkspaces(state.workspaces || []);
-    renderLauncherActiveView(flattened);
   }
 
   function toggleLauncherWorkspaceSelection(workspaceId, { force } = {}) {
@@ -2125,6 +2089,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
     if (elements.launcherDeleteSelectedBtn) {
       elements.launcherDeleteSelectedBtn.disabled = selectedCount === 0;
+    }
+    if (elements.launcherSelectionBar) {
+      elements.launcherSelectionBar.hidden = selectedCount === 0;
     }
   }
 
@@ -2254,7 +2221,6 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function deleteWorkspacesByIds(ids) {
-    const state = window.WorkspaceHubState.getState();
     if (!ids || ids.length === 0) return;
 
     try {
@@ -2268,8 +2234,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
 
-      state.selectedWorkspaces = new Set();
-      setLauncherSelectionMode(false);
+      clearLauncherSelection({ render: false });
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to delete workspaces:', err);
@@ -2566,7 +2531,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
 
       // Reset selection + refresh
-      setLauncherSelectionMode(false);
+      clearLauncherSelection({ render: false });
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to create group:', err);
@@ -2905,9 +2870,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     const workspace = state.workspaceMap.get(workspaceId);
     if (!workspace) return;
 
-    // Leaving launcher selection mode
-    if (state.launcherSelectionMode) {
-      setLauncherSelectionMode(false);
+    // Leaving the launcher clears any pending checkbox selection.
+    if (hasLauncherSelection()) {
+      clearLauncherSelection({ render: false });
     }
 
     window.WorkspaceHubState.stopRealtime();
@@ -2964,8 +2929,8 @@ console.log('[workspace-hub.js] FILE LOADED');
   function showLauncher() {
     const state = window.WorkspaceHubState.getState();
 
-    if (state.launcherSelectionMode) {
-      setLauncherSelectionMode(false);
+    if (hasLauncherSelection()) {
+      clearLauncherSelection({ render: false });
     }
 
     window.WorkspaceHubState.stopRealtime();
@@ -3405,15 +3370,8 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherViewTreeBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_TREE));
     }
 
-    if (elements.launcherSelectModeBtn) {
-      elements.launcherSelectModeBtn.addEventListener('click', () => {
-        const state = window.WorkspaceHubState.getState();
-        setLauncherSelectionMode(!state.launcherSelectionMode);
-      });
-    }
-
     if (elements.launcherCancelSelectionBtn) {
-      elements.launcherCancelSelectionBtn.addEventListener('click', () => setLauncherSelectionMode(false));
+      elements.launcherCancelSelectionBtn.addEventListener('click', () => clearLauncherSelection());
     }
 
     if (elements.launcherGroupSelectedBtn && elements.launcherGroupModal) {
@@ -3585,12 +3543,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   initLauncherTabState();
   initLauncherViewState();
 
-  // Keyboard shortcuts for workspace selection
+  // Keyboard shortcuts for checked launcher workspaces.
   document.addEventListener('keydown', (e) => {
     // Cmd/Ctrl+G to group selected workspaces
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
-      const state = window.WorkspaceHubState.getState();
-      if (state.launcherSelectionMode && state.selectedWorkspaces && state.selectedWorkspaces.size > 0) {
+      if (hasLauncherSelection()) {
         e.preventDefault();
         // Open group modal
         if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
@@ -3602,12 +3559,11 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
     }
 
-    // Escape to exit selection mode
+    // Escape clears checked launcher workspaces.
     if (e.key === 'Escape') {
-      const state = window.WorkspaceHubState.getState();
-      if (state.launcherSelectionMode) {
+      if (hasLauncherSelection()) {
         e.preventDefault();
-        setLauncherSelectionMode(false);
+        clearLauncherSelection();
       }
     }
   });
@@ -3621,15 +3577,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     focusLauncherTreeRow,
     getVisibleLauncherTreeRows,
     normalizeLauncherView,
+    bindLauncherInteractions,
+    renderLauncherCards,
     renderLauncherTree,
     setLauncherViewPreference,
     setLauncherViewMode,
     shouldIgnoreLauncherTreeKeyboardEvent
   };
-
-  if (!hubEl.dataset.launcherSelect) {
-    hubEl.dataset.launcherSelect = 'false';
-  }
 
   loadWorkspaces();
 })();

@@ -128,7 +128,6 @@ function loadWorkspaceHub(overrides = {}) {
   const state = {
     launcherCollapsedGroups: new Set(),
     launcherJustExpandedGroups: new Set(),
-    launcherSelectionMode: false,
     selectedWorkspaces: new Set(),
     workspaceMap: new Map(),
     workspaces: [],
@@ -238,7 +237,8 @@ function loadWorkspaceHub(overrides = {}) {
     launcherViewCards,
     launcherViewTree,
     state,
-    storage
+    storage,
+    window
   };
 }
 
@@ -252,7 +252,7 @@ test('launcher view preference defaults to cards and persists valid values', () 
   assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'tree');
 });
 
-test('launcher tree renders minimal hierarchy and workspace-only selection checkboxes', () => {
+test('launcher tree renders minimal hierarchy with always-available workspace checkboxes', () => {
   const workspaces = [
     {
       id: 'group-1',
@@ -268,7 +268,6 @@ test('launcher tree renders minimal hierarchy and workspace-only selection check
   const { helpers, launcherEmpty, launcherGrid, state } = loadWorkspaceHub({
     state: {
       launcherCollapsedGroups: new Set(['group-2']),
-      launcherSelectionMode: true,
       selectedWorkspaces: new Set(['workspace-1']),
       workspaces
     }
@@ -281,11 +280,84 @@ test('launcher tree renders minimal hierarchy and workspace-only selection check
   assert.match(launcherGrid.innerHTML, /role="treeitem"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-id="group-1"/);
   assert.match(launcherGrid.innerHTML, /aria-expanded="true"/);
+  assert.match(launcherGrid.innerHTML, /class="launcher-tree-checkbox"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1" checked/);
   assert.match(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
   assert.match(launcherGrid.innerHTML, /Drop workspaces here/);
   assert.doesNotMatch(launcherGrid.innerHTML, /No description yet/);
   assert.equal(state.workspaces, workspaces);
+});
+
+test('launcher cards render always-available workspace checkboxes without select-mode attributes', () => {
+  const workspaces = [
+    { id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work' },
+    { id: 'workspace-2', kind: 'workspace', name: 'UI' }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherEmpty, launcherGrid } = loadWorkspaceHub({
+    state: {
+      selectedWorkspaces: new Set(['workspace-2']),
+      workspaces
+    }
+  });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.equal(launcherEmpty.style.display, 'none');
+  assert.match(launcherGrid.innerHTML, /launcher-card-item has-selection-checkbox/);
+  assert.match(launcherGrid.innerHTML, /class="launcher-card-checkbox"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-2" checked/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
+});
+
+test('launcher checkbox click handlers select without triggering workspace navigation', () => {
+  const listenerElement = (overrides = {}) => {
+    const listeners = new Map();
+    return {
+      addEventListener: (type, handler) => listeners.set(type, handler),
+      dispatch: (type, event = {}) => listeners.get(type)?.(event),
+      listeners,
+      ...overrides
+    };
+  };
+  const workspaceRow = listenerElement({
+    dataset: { workspaceId: 'workspace-1', workspaceKind: 'workspace' }
+  });
+  const checkbox = listenerElement({
+    checked: true,
+    getAttribute: (name) => (name === 'data-workspace-checkbox' ? 'workspace-1' : null)
+  });
+  const checkboxShell = listenerElement();
+  const { helpers, launcherGrid, state, window } = loadWorkspaceHub();
+
+  launcherGrid.querySelector = () => null;
+  launcherGrid.querySelectorAll = (selector) => {
+    if (selector === '[data-workspace-id]') return [workspaceRow];
+    if (selector === '[data-workspace-checkbox]') return [checkbox];
+    if (selector === '.launcher-card-checkbox, .launcher-tree-checkbox') return [checkboxShell];
+    return [];
+  };
+
+  helpers.bindLauncherInteractions();
+
+  const shellClick = {
+    stopped: false,
+    stopPropagation() {
+      this.stopped = true;
+    }
+  };
+  checkboxShell.dispatch('click', shellClick);
+  assert.equal(shellClick.stopped, true);
+  assert.equal(window.location.href, '');
+
+  checkbox.dispatch('change', { target: checkbox });
+  assert.equal(state.selectedWorkspaces.has('workspace-1'), true);
+  assert.equal(window.location.href, '');
+
+  workspaceRow.dispatch('click', {});
+  assert.equal(window.location.href, '/workspaces/workspace-1');
 });
 
 test('launcher tree keyboard helpers move focus and ignore embedded controls', () => {

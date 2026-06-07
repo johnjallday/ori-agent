@@ -2841,10 +2841,6 @@ button.hub-stat[hidden] {
   background: rgba(31, 107, 78, 0.09);
 }
 
-.launcher-tree-row[data-select-mode="1"] {
-  background: rgba(31, 107, 78, 0.035);
-}
-
 .launcher-tree-row.is-revealed {
   box-shadow: 0 0 0 2px rgba(31, 107, 78, 0.32);
 }
@@ -3170,12 +3166,8 @@ button.hub-stat[hidden] {
   outline-offset: 2px;
 }
 
-.launcher-card-item[data-select-mode="1"] {
+.launcher-card-item.has-selection-checkbox {
   padding-left: 2.4rem;
-}
-
-.launcher-group-header[data-select-mode="1"] {
-  padding-left: 1rem;
 }
 
 .launcher-card-checkbox {

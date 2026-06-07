@@ -21,7 +21,6 @@
     workspaces: [],
     workspaceMap: new Map(),
     selectedId: null,
-    launcherSelectionMode: false,
     selectedWorkspaces: new Set(),
     launcherCollapsedGroups: new Set(),
     launcherJustExpandedGroups: new Set(),
