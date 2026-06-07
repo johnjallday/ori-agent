@@ -3208,18 +3208,21 @@ button.hub-stat[hidden] {
   position: relative;
 }
 
-.launcher-card-checkbox input:focus + .launcher-card-checkmark {
+.launcher-card-checkbox input:focus + .launcher-card-checkmark,
+.launcher-tree-checkbox input:focus + .launcher-card-checkmark {
   outline: none;
   border-color: var(--accent-primary, #1F6B4E);
   box-shadow: 0 0 0 2px rgba(31, 107, 78, 0.25);
 }
 
-.launcher-card-checkbox input:checked + .launcher-card-checkmark {
+.launcher-card-checkbox input:checked + .launcher-card-checkmark,
+.launcher-tree-checkbox input:checked + .launcher-card-checkmark {
   background: rgba(31, 107, 78, 0.18);
   border-color: rgba(31, 107, 78, 0.6);
 }
 
-.launcher-card-checkbox input:checked + .launcher-card-checkmark::after {
+.launcher-card-checkbox input:checked + .launcher-card-checkmark::after,
+.launcher-tree-checkbox input:checked + .launcher-card-checkmark::after {
   content: '';
   position: absolute;
   left: 5px;
