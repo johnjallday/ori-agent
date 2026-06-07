@@ -137,6 +137,65 @@ func TestMoveWorkspaceFolder_RejectsDepthOverflow(t *testing.T) {
 	}
 }
 
+// TestCopyThenRemove_MovesTree exercises the cross-device fallback path of
+// moveDir directly (os.Rename can't be made to return EXDEV in a temp dir).
+func TestCopyThenRemove_MovesTree(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatalf("write b: %v", err)
+	}
+
+	dst := filepath.Join(tmp, "dst")
+	if err := copyThenRemove(src, dst); err != nil {
+		t.Fatalf("copyThenRemove: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(dst, "sub", "b.txt")); err != nil || string(got) != "b" {
+		t.Fatalf("expected copied nested file, got %q err=%v", got, err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("expected source removed after move, stat err=%v", err)
+	}
+}
+
+// TestCopyThenRemove_RollsBackKeepingSource verifies that a failed cross-device
+// copy leaves the source fully intact (no data loss) and cleans up the partial
+// destination.
+func TestCopyThenRemove_RollsBackKeepingSource(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("keep-me"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Put a regular file where the destination's parent would need to be a
+	// directory, so the copy's MkdirAll fails.
+	blocker := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	dst := filepath.Join(blocker, "child")
+
+	if err := copyThenRemove(src, dst); err == nil {
+		t.Fatalf("expected copy failure when destination parent is a file")
+	}
+
+	// Source must remain fully intact.
+	if got, err := os.ReadFile(filepath.Join(src, "a.txt")); err != nil || string(got) != "keep-me" {
+		t.Fatalf("expected source intact after rollback, got %q err=%v", got, err)
+	}
+}
+
 func TestMoveWorkspaceFolder_RejectsSlugCollision(t *testing.T) {
 	dir := t.TempDir()
 	st, err := NewFileStore(dir)

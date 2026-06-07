@@ -233,14 +233,22 @@ func moveDir(src, dst string) error {
 	} else if !isCrossDeviceErr(err) {
 		return err
 	}
+	// Cross-device move: rename can't span filesystems, so fall back to a
+	// copy-then-delete.
+	return copyThenRemove(src, dst)
+}
 
+// copyThenRemove implements moveDir's cross-device fallback: copy the tree to
+// dst, then remove the source. On a failed copy the partial destination is
+// cleaned up so the source stays the single intact copy. If the copy succeeds
+// but the source can't be removed, no data is lost (the destination is
+// complete) — the error is surfaced so the stale source can be cleaned up.
+func copyThenRemove(src, dst string) error {
 	if err := copyDir(src, dst); err != nil {
 		_ = os.RemoveAll(dst) // roll back partial copy; source is untouched
 		return err
 	}
 	if err := os.RemoveAll(src); err != nil {
-		// Destination is a complete copy, so no data is lost; the stale source
-		// is recoverable. Surface the error so the caller can log it.
 		return fmt.Errorf("copied workspace to new location but failed to remove old folder %q: %w", src, err)
 	}
 	return nil
