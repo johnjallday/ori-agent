@@ -43,7 +43,7 @@ func createTestGroup(t *testing.T, handler *Handler, name string) string {
 	return folder["id"].(string)
 }
 
-func TestCreateGroupDoesNotCreateFolderOnDisk(t *testing.T) {
+func TestCreateGroupCreatesFolderOnDisk(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -64,9 +64,301 @@ func TestCreateGroupDoesNotCreateFolderOnDisk(t *testing.T) {
 		t.Fatalf("expected group kind, got %q", ws.Kind)
 	}
 
+	// Groups are now real, portable folders: the group folder, its
+	// workspace.json, and an empty sub-workspaces/ directory must exist on disk
+	// so the grouping survives being copied/synced to another machine.
 	groupPath := filepath.Join(baseDir, "bk-nerds")
-	if _, err := os.Stat(groupPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no filesystem folder for group, stat err=%v", err)
+	if info, err := os.Stat(groupPath); err != nil || !info.IsDir() {
+		t.Fatalf("expected group folder at %s, err=%v", groupPath, err)
+	}
+	if _, err := os.Stat(filepath.Join(groupPath, agentworkspace.WorkspaceConfigFile)); err != nil {
+		t.Fatalf("expected group workspace.json on disk: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(groupPath, agentworkspace.SubWorkspacesDir)); err != nil || !info.IsDir() {
+		t.Fatalf("expected group sub-workspaces/ directory on disk, err=%v", err)
+	}
+}
+
+func mustHandlerFolderPath(t *testing.T, fs *agentworkspace.FileStore, id string) string {
+	t.Helper()
+	p, err := fs.GetFolderPath(id)
+	if err != nil {
+		t.Fatalf("GetFolderPath %s: %v", id, err)
+	}
+	return p
+}
+
+func patchWorkspaceParent(t *testing.T, handler *Handler, id, parentID string, wantCode int) {
+	t.Helper()
+	body := `{"parent_id":"` + parentID + `"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+id, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != wantCode {
+		t.Fatalf("PATCH parent_id: got %d, want %d: %s", w.Code, wantCode, w.Body.String())
+	}
+}
+
+func TestGroupingMovesWorkspaceFolderOnDisk(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fileStore)
+
+	groupID := createTestGroup(t, handler, "Client Work")
+	childID := createTestWorkspace(t, handler, "Brooklyn Nerds")
+
+	// The child starts at the workspaces root.
+	if got := mustHandlerFolderPath(t, fileStore, childID); filepath.Dir(got) != baseDir {
+		t.Fatalf("expected child at root, got %s", got)
+	}
+
+	// Moving the child into the group physically relocates its folder into the
+	// group's sub-workspaces/ directory.
+	patchWorkspaceParent(t, handler, childID, groupID, http.StatusOK)
+
+	wantPath := filepath.Join(baseDir, "client-work", agentworkspace.SubWorkspacesDir, "brooklyn-nerds")
+	gotPath := mustHandlerFolderPath(t, fileStore, childID)
+	if filepath.Clean(gotPath) != filepath.Clean(wantPath) {
+		t.Fatalf("child path = %q, want %q", gotPath, wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(gotPath, agentworkspace.WorkspaceConfigFile)); err != nil {
+		t.Fatalf("expected workspace.json at new location: %v", err)
+	}
+
+	ws, err := handler.store.GetWorkspace(context.Background(), childID)
+	if err != nil {
+		t.Fatalf("failed to reload child: %v", err)
+	}
+	if ws.ParentID != groupID {
+		t.Fatalf("child parent_id = %q, want %q", ws.ParentID, groupID)
+	}
+}
+
+func TestRewriteWorkspaceProjectPath(t *testing.T) {
+	const oldPath = "/workspaces/old-slug"
+	const newPath = "/workspaces/group/sub-workspaces/old-slug"
+
+	cases := []struct {
+		name        string
+		in          string
+		wantPath    string
+		wantChanged bool
+	}{
+		{"absolute inside the moved folder is rewritten", oldPath + "/code", newPath + "/code", true},
+		{"external absolute path is left alone", "/elsewhere/repo", "/elsewhere/repo", false},
+		{"relative path (projects root) is left alone", "code/app", "code/app", false},
+		{"empty stays empty", "", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ws := &session.Workspace{ProjectPath: c.in}
+			changed := rewriteWorkspaceProjectPath(ws, oldPath, newPath)
+			if changed != c.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, c.wantChanged)
+			}
+			if ws.ProjectPath != c.wantPath {
+				t.Fatalf("project_path = %q, want %q", ws.ProjectPath, c.wantPath)
+			}
+		})
+	}
+}
+
+func deleteWorkspaceReq(t *testing.T, handler *Handler, id, query string, wantCode int) {
+	t.Helper()
+	url := "/api/workspaces/" + id
+	if query != "" {
+		url += "?" + query
+	}
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != wantCode {
+		t.Fatalf("DELETE %s: got %d, want %d: %s", url, w.Code, wantCode, w.Body.String())
+	}
+}
+
+func setupGroupWithChild(t *testing.T, handler *Handler) (baseDir, groupID, childID string, fs *agentworkspace.FileStore) {
+	t.Helper()
+	baseDir = t.TempDir()
+	var err error
+	fs, err = agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fs)
+
+	groupID = createTestGroup(t, handler, "Client Work")
+	childID = createTestWorkspace(t, handler, "Brooklyn Nerds")
+	patchWorkspaceParent(t, handler, childID, groupID, http.StatusOK)
+	return baseDir, groupID, childID, fs
+}
+
+func TestDeleteGroupWithContents(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir, groupID, childID, _ := setupGroupWithChild(t, handler)
+
+	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=contents", http.StatusNoContent)
+
+	ctx := context.Background()
+	if _, err := handler.store.GetWorkspace(ctx, groupID); err != session.ErrWorkspaceNotFound {
+		t.Fatalf("expected group deleted, got err=%v", err)
+	}
+	if _, err := handler.store.GetWorkspace(ctx, childID); err != session.ErrWorkspaceNotFound {
+		t.Fatalf("expected member deleted with contents, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); !os.IsNotExist(err) {
+		t.Fatalf("expected group folder removed from disk, stat err=%v", err)
+	}
+}
+
+func TestDeleteGroupOnlyUnnestsMembers(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir, groupID, childID, fs := setupGroupWithChild(t, handler)
+
+	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=group_only", http.StatusNoContent)
+
+	ctx := context.Background()
+	if _, err := handler.store.GetWorkspace(ctx, groupID); err != session.ErrWorkspaceNotFound {
+		t.Fatalf("expected group deleted, got err=%v", err)
+	}
+	child, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("expected member to survive un-nest, got err=%v", err)
+	}
+	if child.ParentID != "" {
+		t.Fatalf("expected member un-nested to root, parent_id=%q", child.ParentID)
+	}
+	if got := mustHandlerFolderPath(t, fs, childID); filepath.Dir(got) != baseDir {
+		t.Fatalf("expected member folder back at root, got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); !os.IsNotExist(err) {
+		t.Fatalf("expected empty group folder removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteGroupOnlyBlockedByActiveWork(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	_, groupID, childID, _ := setupGroupWithChild(t, handler)
+
+	ctx := context.Background()
+	ws, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	ws.TasksJSON = []byte(`[{"id":"t1","status":"in_progress"}]`)
+	if err := handler.store.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("set active task: %v", err)
+	}
+
+	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=group_only", http.StatusConflict)
+
+	// Both must still exist.
+	if _, err := handler.store.GetWorkspace(ctx, groupID); err != nil {
+		t.Fatalf("group should remain after blocked delete: %v", err)
+	}
+	if _, err := handler.store.GetWorkspace(ctx, childID); err != nil {
+		t.Fatalf("member should remain after blocked delete: %v", err)
+	}
+}
+
+func TestRescanReparentsFromDisk(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fileStore)
+
+	groupID := createTestGroup(t, handler, "Client Work")
+	childID := createTestWorkspace(t, handler, "Brooklyn Nerds")
+
+	// Simulate an out-of-band folder move (e.g. git pull / cloud sync / manual
+	// reorg): physically relocate the child into the group on disk without
+	// telling the running app.
+	oldPath := filepath.Join(baseDir, "brooklyn-nerds")
+	newPath := filepath.Join(baseDir, "client-work", agentworkspace.SubWorkspacesDir, "brooklyn-nerds")
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("simulate disk move: %v", err)
+	}
+
+	// Before rescan the session store still thinks the child is at the root.
+	ctx := context.Background()
+	if ws, _ := handler.store.GetWorkspace(ctx, childID); ws.ParentID != "" {
+		t.Fatalf("precondition: expected child parent empty, got %q", ws.ParentID)
+	}
+
+	// Rescan reconciles structure from disk: physical location wins.
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/rescan", nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("rescan: got %d: %s", w.Code, w.Body.String())
+	}
+
+	ws, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("reload child: %v", err)
+	}
+	if ws.ParentID != groupID {
+		t.Fatalf("after rescan child parent_id = %q, want %q", ws.ParentID, groupID)
+	}
+}
+
+func TestGroupingHardBlockedByActiveWork(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fileStore)
+
+	groupID := createTestGroup(t, handler, "Client Work")
+	childID := createTestWorkspace(t, handler, "Busy Workspace")
+
+	// Give the child an in-progress task.
+	ctx := context.Background()
+	ws, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("failed to load child: %v", err)
+	}
+	ws.TasksJSON = []byte(`[{"id":"t1","status":"in_progress"}]`)
+	if err := handler.store.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("failed to set active task: %v", err)
+	}
+
+	// The move is hard-blocked while work is in flight.
+	patchWorkspaceParent(t, handler, childID, groupID, http.StatusConflict)
+
+	// The folder must not have moved and the parent must be unchanged.
+	if got := mustHandlerFolderPath(t, fileStore, childID); filepath.Dir(got) != baseDir {
+		t.Fatalf("child should remain at root, got %s", got)
+	}
+	reloaded, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("failed to reload child: %v", err)
+	}
+	if reloaded.ParentID != "" {
+		t.Fatalf("child parent_id = %q, want empty (move blocked)", reloaded.ParentID)
 	}
 }
 
