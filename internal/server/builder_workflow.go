@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -125,6 +126,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		b.workspaceFileStore = fileStore
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
+			// Disk is the source of truth for grouping: reconcile the session
+			// store's structure with the on-disk layout once at startup so
+			// groups that arrived via git/cloud sync show up without a manual
+			// rescan. Non-fatal.
+			if err := b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
+				logger.Warn("Startup workspace reconcile from disk failed", logger.Fields{"error": err.Error()})
+			}
 		}
 		if b.chatHandler != nil {
 			b.chatHandler.SetFileStore(fileStore)

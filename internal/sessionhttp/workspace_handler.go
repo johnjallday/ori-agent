@@ -59,6 +59,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "sync":
 		h.handleWorkspaceSync(w, r)
 		return
+	case "rescan":
+		h.handleWorkspaceRescan(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
@@ -282,8 +285,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create workspace folder on disk if folder-based store is available
-	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
+	// Create workspace folder on disk if folder-based store is available.
+	// Groups now get a folder too (so the grouping is portable on disk), but
+	// without the executable scaffolding that real workspaces receive.
+	if h.workspaceStore != nil {
 		folderWS := &agentworkspace.Workspace{
 			ID:             ws.ID,
 			Name:           ws.Name,
@@ -328,6 +333,17 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
+		} else if ws.Kind == session.WorkspaceKindGroup {
+			// Groups are organizational containers: create the folder plus an
+			// empty sub-workspaces/ directory, but skip the directory reference
+			// and workspace-files MCP binding that executable workspaces get.
+			// Group membership is expressed by physical nesting of members.
+			if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+				if mkErr := os.MkdirAll(filepath.Join(folderPath, agentworkspace.SubWorkspacesDir), 0o750); mkErr != nil {
+					logger.Warn("Failed to create group sub-workspaces directory", logger.Fields{"id": ws.ID, "error": mkErr})
+				}
+				logger.Info("Group folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
+			}
 		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
 			now := time.Now()
 
@@ -468,6 +484,131 @@ func handleWorkspaceParentError(w http.ResponseWriter, err error) {
 	}
 }
 
+// handleWorkspaceMoveError maps a FileStore folder-move failure onto an HTTP
+// response.
+func handleWorkspaceMoveError(w http.ResponseWriter, err error) {
+	var slugConflict *agentworkspace.FolderSlugConflictError
+	switch {
+	case errors.As(err, &slugConflict):
+		_ = orihttp.RespondConflict(w, "A workspace with the same folder name already exists in the destination group. Rename one of them and try again.")
+	case errors.Is(err, agentworkspace.ErrMaxNestingDepthExceeded),
+		errors.Is(err, agentworkspace.ErrMoveCreatesCycle),
+		errors.Is(err, agentworkspace.ErrSelfParent):
+		_ = orihttp.RespondBadRequest(w, err.Error())
+	default:
+		_ = orihttp.RespondInternalError(w, "Failed to move workspace")
+	}
+}
+
+// workspaceHasActiveWork reports whether a workspace has durable in-flight work
+// (a task in progress or awaiting a choice). Moving such a workspace is
+// hard-blocked so a running task's working directory is not pulled out from
+// under it. Completed/historical tasks do not count.
+func workspaceHasActiveWork(ws *session.Workspace) bool {
+	if ws == nil || len(ws.TasksJSON) == 0 {
+		return false
+	}
+	var tasks []agentworkspace.Task
+	if err := json.Unmarshal(ws.TasksJSON, &tasks); err != nil {
+		// Unparseable task data: be conservative and treat as active so a
+		// destructive move is not performed on uncertain state.
+		logger.Warn("Active-work check: failed to parse tasks", logger.Fields{"id": ws.ID, "error": err})
+		return true
+	}
+	for _, task := range tasks {
+		switch task.Status {
+		case agentworkspace.TaskStatusInProgress, agentworkspace.TaskStatusWaitingForChoice:
+			return true
+		}
+	}
+	return false
+}
+
+// firstActiveWorkBlocker returns the name of the first workspace — the target or
+// any workspace nested within it — that has active work, or "" if none. Used to
+// hard-block a move while work is in flight (req 12).
+func (h *Handler) firstActiveWorkBlocker(ctx context.Context, id string) (string, error) {
+	ids := []string{id}
+	descendants, err := h.store.GetSubworkspaceIDs(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	ids = append(ids, descendants...)
+
+	for _, wid := range ids {
+		ws, err := h.store.GetWorkspace(ctx, wid)
+		if err != nil {
+			if errors.Is(err, session.ErrWorkspaceNotFound) {
+				continue
+			}
+			return "", err
+		}
+		if workspaceHasActiveWork(ws) {
+			return ws.Name, nil
+		}
+	}
+	return "", nil
+}
+
+// applyMoveReferenceUpdates fixes path-keyed references (directory references,
+// MCP roots) and project_path for every non-group workspace whose folder moved.
+// The moved node itself is updated in place on self so the caller's pending
+// UpdateWorkspace persists it; descendants are reloaded and saved individually.
+// Groups carry no such references and are skipped.
+func (h *Handler) applyMoveReferenceUpdates(ctx context.Context, self *session.Workspace, moved []agentworkspace.MovedWorkspace) {
+	for _, m := range moved {
+		if self != nil && m.ID == self.ID {
+			if self.IsGroup() {
+				continue
+			}
+			if err := updateManagedWorkspaceReferences(self, m.OldPath, m.NewPath); err != nil {
+				logger.Warn("Move: failed to update references", logger.Fields{"id": m.ID, "error": err})
+			}
+			rewriteWorkspaceProjectPath(self, m.OldPath, m.NewPath)
+			continue
+		}
+		descWS, err := h.store.GetWorkspace(ctx, m.ID)
+		if err != nil {
+			logger.Warn("Move: failed to load descendant for reference update", logger.Fields{"id": m.ID, "error": err})
+			continue
+		}
+		if descWS.IsGroup() {
+			continue
+		}
+		refErr := updateManagedWorkspaceReferences(descWS, m.OldPath, m.NewPath)
+		if refErr != nil {
+			logger.Warn("Move: failed to update descendant references", logger.Fields{"id": m.ID, "error": refErr})
+		}
+		pathChanged := rewriteWorkspaceProjectPath(descWS, m.OldPath, m.NewPath)
+		if refErr == nil || pathChanged {
+			if err := h.store.UpdateWorkspace(ctx, descWS); err != nil {
+				logger.Warn("Move: failed to persist descendant references", logger.Fields{"id": m.ID, "error": err})
+			}
+		}
+	}
+}
+
+// rewriteWorkspaceProjectPath adjusts a workspace's project_path after its folder
+// moved from oldPath to newPath. Only an absolute project_path that pointed
+// *inside* the old workspace folder is rewritten to the new location; relative
+// paths (resolved against a projects root that did not move) and external
+// absolute paths are left unchanged. Returns true if the value changed.
+func rewriteWorkspaceProjectPath(ws *session.Workspace, oldPath, newPath string) bool {
+	if ws == nil {
+		return false
+	}
+	p := strings.TrimSpace(ws.ProjectPath)
+	if p == "" || !filepath.IsAbs(p) {
+		return false
+	}
+	rel, err := filepath.Rel(oldPath, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	ws.ProjectPath = filepath.Join(newPath, rel)
+	return true
+}
+
 func filterConcreteWorkspaces(workspaces []session.Workspace) []session.Workspace {
 	if len(workspaces) == 0 {
 		return workspaces
@@ -596,30 +737,62 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		setWorkspacePrimaryDirectoryID(workspace, *req.PrimaryDirectoryID)
 	}
 	if req.ParentID != nil {
-		// Check for circular reference
-		if *req.ParentID == workspace.ID {
-			_ = orihttp.RespondBadRequest(w, "Workspace cannot be its own parent")
-			return
-		}
-		if *req.ParentID != "" {
-			descendants, err := h.store.GetSubworkspaceIDs(r.Context(), workspace.ID)
-			if err != nil {
-				logger.Error("Failed to load workspace descendants", logger.Fields{"id": id, "error": err})
-				_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+		newParentID := strings.TrimSpace(*req.ParentID)
+		if newParentID != workspace.ParentID {
+			// Self-parent guard.
+			if newParentID == workspace.ID {
+				_ = orihttp.RespondBadRequest(w, "Workspace cannot be its own parent")
 				return
 			}
-			for _, descendantID := range descendants {
-				if descendantID == *req.ParentID {
-					_ = orihttp.RespondBadRequest(w, "Workspace cannot be moved under its descendant")
+			// Cycle guard: cannot move under one of our own descendants.
+			if newParentID != "" {
+				descendants, err := h.store.GetSubworkspaceIDs(r.Context(), workspace.ID)
+				if err != nil {
+					logger.Error("Failed to load workspace descendants", logger.Fields{"id": id, "error": err})
+					_ = orihttp.RespondInternalError(w, "Failed to update workspace")
 					return
 				}
+				for _, descendantID := range descendants {
+					if descendantID == newParentID {
+						_ = orihttp.RespondBadRequest(w, "Workspace cannot be moved under its descendant")
+						return
+					}
+				}
 			}
+			// Destination must be a group; an empty parent moves to the root (ungroup).
+			if err := h.requireGroupParent(r.Context(), newParentID); err != nil {
+				handleWorkspaceParentError(w, err)
+				return
+			}
+			// Eligibility: only managed workspaces can be grouped. A workspace
+			// linked to an external folder can't be physically nested (req 23).
+			if newParentID != "" && isFolderImportedWorkspace(*workspace) {
+				_ = orihttp.RespondBadRequest(w, "This workspace is linked to an external folder and can't be grouped. Rebind it into the managed workspaces root first.")
+				return
+			}
+			// Active-work hard block: never move a workspace (or, for a group,
+			// any workspace nested inside it) while it has in-flight work (req 12).
+			if blocker, err := h.firstActiveWorkBlocker(r.Context(), workspace.ID); err != nil {
+				logger.Error("Failed to check workspace active work", logger.Fields{"id": id, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+				return
+			} else if blocker != "" {
+				_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running task in %q before grouping this workspace.", blocker))
+				return
+			}
+			// Physically move the folder tree when a folder store is available;
+			// disk location is the source of truth for grouping. Falls back to a
+			// metadata-only parent change when no folder store is configured.
+			if h.workspaceStore != nil {
+				moved, err := h.workspaceStore.MoveWorkspaceFolder(workspace.ID, newParentID)
+				if err != nil {
+					handleWorkspaceMoveError(w, err)
+					return
+				}
+				h.applyMoveReferenceUpdates(r.Context(), workspace, moved)
+			}
+			workspace.ParentID = newParentID
 		}
-		if err := h.requireGroupParent(r.Context(), *req.ParentID); err != nil {
-			handleWorkspaceParentError(w, err)
-			return
-		}
-		workspace.ParentID = *req.ParentID
 	}
 	if req.OrderIndex != nil {
 		workspace.OrderIndex = *req.OrderIndex
@@ -682,9 +855,17 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
 
+	// Groups physically contain their members, so deletion has its own two-mode
+	// flow (delete contents vs un-nest members to the root, then remove the
+	// empty group). Handle it separately from regular workspaces.
+	if ws.Kind == session.WorkspaceKindGroup {
+		h.deleteGroup(w, r, ws, deleteSessions)
+		return
+	}
+
 	// Soft delete (default): move the folder-backed workspace to the system
-	// trash and mark it trashed so it can be restored from the hub. Groups,
-	// explicit delete_sessions=true requests, and platforms without system-trash
+	// trash and mark it trashed so it can be restored from the hub. Explicit
+	// delete_sessions=true requests, and platforms without system-trash
 	// support fall through to a permanent delete below.
 	if ws.Kind != session.WorkspaceKindGroup && !deleteSessions && h.workspaceStore != nil && platform.TrashSupported() {
 		if _, ferr := h.workspaceStore.Get(id); ferr == nil {
@@ -759,6 +940,172 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	logger.Info("Workspace deleted", logger.Fields{"id": id, "delete_sessions": deleteSessions})
 
 	orihttp.RespondNoContent(w)
+}
+
+// deleteGroup handles deletion of a group workspace, which (unlike a regular
+// workspace) physically contains its members. Modes (delete_mode query param):
+//   - "contents": remove the entire group folder tree (all members and nested
+//     groups) from disk and the session store.
+//   - "group_only" (default): move each direct child out to the workspaces root
+//     (un-nest) via the move op, then remove the now-empty group folder.
+//
+// Groups are permanently deleted (not soft-trashed) in this version.
+func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request, ws *session.Workspace, deleteSessions bool) {
+	ctx := r.Context()
+	mode := strings.TrimSpace(r.URL.Query().Get("delete_mode"))
+	if mode == "" {
+		// Safe default: never destroy member data implicitly.
+		mode = "group_only"
+	}
+
+	switch mode {
+	case "contents":
+		h.deleteGroupWithContents(w, ctx, ws, deleteSessions)
+	case "group_only":
+		h.deleteGroupOnly(w, ctx, ws)
+	default:
+		_ = orihttp.RespondBadRequest(w, "delete_mode must be 'contents' or 'group_only'")
+	}
+}
+
+// deleteGroupWithContents removes the group and every workspace nested inside it
+// from disk and the session store.
+func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Context, ws *session.Workspace, deleteSessions bool) {
+	descendants, err := h.store.GetSubworkspaceIDs(ctx, ws.ID)
+	if err != nil {
+		logger.Error("Failed to load group descendants", logger.Fields{"id": ws.ID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to delete group")
+		return
+	}
+
+	// Remove every member (sessions, entry agent, SQLite row). The group's own
+	// folder removal below also clears the on-disk tree in one shot.
+	for _, memberID := range descendants {
+		entryAgent := ""
+		if member, mErr := h.store.GetWorkspace(ctx, memberID); mErr == nil && !member.IsGroup() && h.workspaceStore != nil {
+			if fws, ferr := h.workspaceStore.Get(memberID); ferr == nil && fws != nil {
+				entryAgent = strings.TrimSpace(fws.EntryAgentName())
+			}
+		}
+		if deleteSessions {
+			_ = h.store.DeleteSessionsByWorkspace(ctx, memberID)
+		} else {
+			_ = h.store.UnlinkSessionsFromWorkspace(ctx, memberID)
+		}
+		if err := h.store.DeleteWorkspace(ctx, memberID); err != nil {
+			logger.Warn("Failed to delete group member", logger.Fields{"id": memberID, "error": err})
+		}
+		h.cleanupEntryAgent(entryAgent, memberID)
+	}
+
+	// Handle the group's own (rare) sessions, then its SQLite row.
+	if deleteSessions {
+		_ = h.store.DeleteSessionsByWorkspace(ctx, ws.ID)
+	} else {
+		_ = h.store.UnlinkSessionsFromWorkspace(ctx, ws.ID)
+	}
+	if err := h.store.DeleteWorkspace(ctx, ws.ID); err != nil {
+		logger.Error("Failed to delete group", logger.Fields{"id": ws.ID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to delete group")
+		return
+	}
+
+	// Remove the whole folder tree from disk + cache in one call.
+	if h.workspaceStore != nil {
+		if err := h.workspaceStore.Delete(ws.ID); err != nil {
+			logger.Warn("Failed to delete group folder tree", logger.Fields{"id": ws.ID, "error": err})
+		}
+	}
+
+	logger.Info("Group deleted with contents", logger.Fields{"id": ws.ID, "members": len(descendants)})
+	orihttp.RespondNoContent(w)
+}
+
+// deleteGroupOnly moves the group's direct children out to the workspaces root,
+// then removes the now-empty group. Hard-blocked if any workspace in the group
+// has active work.
+func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws *session.Workspace) {
+	// Active-work hard block across the whole subtree (req 25): un-nesting moves
+	// folders, which must not happen while work is in flight.
+	if blocker, err := h.firstActiveWorkBlocker(ctx, ws.ID); err != nil {
+		logger.Error("Failed to check group active work", logger.Fields{"id": ws.ID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to delete group")
+		return
+	} else if blocker != "" {
+		_ = orihttp.RespondConflict(w, fmt.Sprintf("Stop the running task in %q before deleting this group.", blocker))
+		return
+	}
+
+	// Move each direct child out to the root before removing the group.
+	for _, childID := range h.directChildIDs(ctx, ws.ID) {
+		if h.workspaceStore != nil {
+			moved, err := h.workspaceStore.MoveWorkspaceFolder(childID, "")
+			if err != nil {
+				logger.Error("Failed to un-nest group member", logger.Fields{"id": childID, "error": err})
+				handleWorkspaceMoveError(w, err)
+				return
+			}
+			child, cErr := h.store.GetWorkspace(ctx, childID)
+			if cErr == nil {
+				child.ParentID = ""
+				h.applyMoveReferenceUpdates(ctx, child, moved)
+				if err := h.store.UpdateWorkspace(ctx, child); err != nil {
+					logger.Warn("Failed to persist un-nested member", logger.Fields{"id": childID, "error": err})
+				}
+			}
+		} else if child, cErr := h.store.GetWorkspace(ctx, childID); cErr == nil {
+			child.ParentID = ""
+			if err := h.store.UpdateWorkspace(ctx, child); err != nil {
+				logger.Warn("Failed to persist un-nested member", logger.Fields{"id": childID, "error": err})
+			}
+		}
+	}
+
+	// Remove the now-empty group (SQLite row + folder).
+	if err := h.store.DeleteWorkspace(ctx, ws.ID); err != nil {
+		logger.Error("Failed to delete group", logger.Fields{"id": ws.ID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to delete group")
+		return
+	}
+	if h.workspaceStore != nil {
+		if err := h.workspaceStore.Delete(ws.ID); err != nil {
+			logger.Warn("Failed to delete group folder", logger.Fields{"id": ws.ID, "error": err})
+		}
+	}
+
+	logger.Info("Group deleted (members un-nested to root)", logger.Fields{"id": ws.ID})
+	orihttp.RespondNoContent(w)
+}
+
+// directChildIDs returns the IDs of workspaces whose immediate parent is
+// parentID (not deeper descendants).
+func (h *Handler) directChildIDs(ctx context.Context, parentID string) []string {
+	ids, err := h.store.GetSubworkspaceIDs(ctx, parentID)
+	if err != nil {
+		logger.Warn("Failed to load group children", logger.Fields{"id": parentID, "error": err})
+		return nil
+	}
+	direct := make([]string, 0, len(ids))
+	for _, cid := range ids {
+		if cw, err := h.store.GetWorkspace(ctx, cid); err == nil && cw.ParentID == parentID {
+			direct = append(direct, cid)
+		}
+	}
+	return direct
+}
+
+// cleanupEntryAgent deletes a workspace's entry agent from the global agent
+// store, if present. Non-fatal.
+func (h *Handler) cleanupEntryAgent(name, workspaceID string) {
+	name = strings.TrimSpace(name)
+	if name == "" || h.agentStore == nil {
+		return
+	}
+	if _, exists := h.agentStore.GetAgent(name); exists {
+		if err := h.agentStore.DeleteAgent(name); err != nil {
+			logger.Warn("Failed to delete workspace entry agent", logger.Fields{"workspace_id": workspaceID, "agent": name, "error": err})
+		}
+	}
 }
 
 // trashWorkspace moves a workspace's folder to the system trash and marks the
@@ -2827,6 +3174,118 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 		"recreated": recreated,
 		"warnings":  warnings,
 	})
+}
+
+// handleWorkspaceRescan re-reads the workspace folder tree from disk and
+// reconciles the session store's structure (existence, kind, derived parent,
+// order) to match — disk is the source of truth for grouping. It imports
+// workspaces newly present on disk and re-parents existing ones whose folder
+// moved (e.g. via git pull or a cloud-sync client). It never deletes
+// session-only data such as chat history; workspaces missing from disk are left
+// for the existing orphaned-workspace flow (sync-status / cleanup).
+func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	if h.workspaceStore == nil {
+		_ = orihttp.RespondBadRequest(w, "workspace folder store is unavailable")
+		return
+	}
+
+	imported, reparented, warnings, err := h.reconcileWorkspacesFromDisk(r.Context())
+	if err != nil {
+		logger.Error("Rescan: failed to reconcile workspaces from disk", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to rescan workspaces")
+		return
+	}
+
+	logger.Info("Workspaces rescanned from disk", logger.Fields{"imported": imported, "reparented": reparented})
+	orihttp.WriteJSON(w, map[string]any{
+		"success":    true,
+		"imported":   imported,
+		"reparented": reparented,
+		"warnings":   warnings,
+	})
+}
+
+// reconcileWorkspacesFromDisk reloads the folder store from disk and updates the
+// session store so its structure matches the on-disk layout. Returns counts of
+// newly-imported and re-parented workspaces plus any non-fatal warnings. Safe to
+// call on startup and on demand.
+func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (imported int, reparented int, warnings []string, err error) {
+	if h.workspaceStore == nil {
+		return 0, 0, nil, nil
+	}
+
+	// Refresh the file-store cache + index from disk; physical layout wins.
+	if err := h.workspaceStore.Reload(); err != nil {
+		return 0, 0, nil, err
+	}
+
+	warnings = make([]string, 0)
+	for id, diskWS := range h.workspaceStore.CachedWorkspaces() {
+		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
+		if getErr == session.ErrWorkspaceNotFound {
+			converted := session.ConvertAgentWorkspace(diskWS)
+			if converted == nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to convert %s", diskWS.Name))
+				continue
+			}
+			if createErr := h.store.CreateWorkspace(ctx, converted); createErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
+				continue
+			}
+			imported++
+			continue
+		}
+		if getErr != nil {
+			warnings = append(warnings, fmt.Sprintf("Failed to load %s", id))
+			continue
+		}
+
+		// Disk wins for structure: reconcile parent_id / kind / order_index.
+		parentChanged := sessionWS.ParentID != diskWS.ParentID
+		changed := parentChanged
+		sessionWS.ParentID = diskWS.ParentID
+		if diskKind := session.NormalizeWorkspaceKind(diskWS.Kind); sessionWS.Kind != diskKind {
+			sessionWS.Kind = diskKind
+			changed = true
+		}
+		if sessionWS.OrderIndex != diskWS.OrderIndex {
+			sessionWS.OrderIndex = diskWS.OrderIndex
+			changed = true
+		}
+		if changed {
+			if updateErr := h.store.UpdateWorkspace(ctx, sessionWS); updateErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to update %s", sessionWS.Name))
+				continue
+			}
+			if parentChanged {
+				reparented++
+			}
+		}
+	}
+
+	return imported, reparented, warnings, nil
+}
+
+// ReconcileWorkspacesFromDisk reconciles the session store's workspace structure
+// with the on-disk folder layout. Intended for a one-time run at startup so
+// groupings that arrived via git/cloud sync are reflected without a manual
+// rescan. No-op when no folder store is configured.
+func (h *Handler) ReconcileWorkspacesFromDisk(ctx context.Context) error {
+	if h == nil || h.workspaceStore == nil {
+		return nil
+	}
+	imported, reparented, _, err := h.reconcileWorkspacesFromDisk(ctx)
+	if err != nil {
+		return err
+	}
+	if imported > 0 || reparented > 0 {
+		logger.Info("Startup workspace reconcile from disk", logger.Fields{"imported": imported, "reparented": reparented})
+	}
+	return nil
 }
 
 func workspaceFolderExists(path string) (bool, error) {

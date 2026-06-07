@@ -107,6 +107,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherWorkspaceRootResetBtn: document.getElementById('launcherWorkspaceRootResetBtn'),
     launcherWorkspaceRootCancelBtn: document.getElementById('launcherWorkspaceRootCancelBtn'),
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
+    launcherRescanBtn: document.getElementById('launcherRescanBtn'),
     launcherUndoBtn: document.getElementById('launcherUndoBtn'),
     launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
@@ -1664,7 +1665,11 @@ console.log('[workspace-hub.js] FILE LOADED');
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to reorder workspace:', err);
-      if (window.Toast) window.Toast.error('Failed to reorder workspace: ' + err.message);
+      // err.message carries the server's reason (e.g. active-work hard block or
+      // an ineligible/linked workspace), so surface it directly.
+      if (window.Toast) window.Toast.error(err.message || 'Failed to move workspace');
+      // Re-sync the UI with the server, since the optimistic move was rejected.
+      await loadWorkspaces();
     }
   }
 
@@ -1798,8 +1803,60 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const failed = responses.find((res) => !res.ok);
     if (failed) {
-      const text = await failed.text();
-      throw new Error(text || 'Failed to reorder workspaces');
+      const msg = await extractErrorMessage(failed, 'Failed to move workspace');
+      throw new Error(msg);
+    }
+  }
+
+  // Extract a human-readable message from a failed API response. The API returns
+  // { code, message } JSON; fall back to raw text, then to the provided default.
+  async function extractErrorMessage(response, fallback = '') {
+    try {
+      const text = await response.text();
+      if (!text) return fallback;
+      try {
+        const parsed = JSON.parse(text);
+        return parsed && parsed.message ? parsed.message : text;
+      } catch (_) {
+        return text;
+      }
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  // Rescan the workspaces root from disk and reconcile the launcher. Picks up
+  // groups/workspaces that arrived via git pull or a cloud-sync client, since
+  // physical folder location is the source of truth for grouping.
+  async function rescanWorkspacesFromDisk() {
+    const btn = elements.launcherRescanBtn;
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/api/workspaces/rescan', { method: 'POST' });
+      if (!res.ok) {
+        const msg = await extractErrorMessage(res, 'Failed to rescan workspaces');
+        if (window.Toast) window.Toast.error(msg);
+        return;
+      }
+      const result = await res.json().catch(() => ({}));
+      const imported = Number(result?.imported || 0);
+      const reparented = Number(result?.reparented || 0);
+      await loadWorkspaces();
+      if (window.Toast) {
+        if (imported === 0 && reparented === 0) {
+          window.Toast.success('Workspaces are up to date with disk');
+        } else {
+          const parts = [];
+          if (imported > 0) parts.push(`${imported} imported`);
+          if (reparented > 0) parts.push(`${reparented} re-grouped`);
+          window.Toast.success(`Rescanned from disk: ${parts.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to rescan workspaces:', err);
+      if (window.Toast) window.Toast.error('Failed to rescan workspaces');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -1845,11 +1902,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the parent group.`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
       if (deleteAll) {
         void deleteGroupAndContents(workspaceId);
       } else {
-        void deleteWorkspacesByIds([workspaceId]);
+        void deleteGroupViaServer(workspaceId, 'group_only');
       }
       return;
     }
@@ -1867,10 +1924,35 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function deleteGroupAndContents(workspaceId) {
-    const state = window.WorkspaceHubState.getState();
-    const ids = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: true });
-    const ordered = ids.slice().reverse();
-    await deleteWorkspacesByIds(ordered);
+    await deleteGroupViaServer(workspaceId, 'contents');
+  }
+
+  // Delete a group through the server's two-mode flow:
+  //   - 'contents'   removes the group and everything nested inside it.
+  //   - 'group_only' un-nests the members back to the root, then removes the
+  //     empty group (server hard-blocks if any member has active work).
+  async function deleteGroupViaServer(workspaceId, mode) {
+    const label = getWorkspaceLabel(workspaceId) || 'Group';
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=true&delete_mode=${encodeURIComponent(mode)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) {
+        const msg = await extractErrorMessage(res, `Failed to delete "${label}"`);
+        if (window.Toast) window.Toast.error(msg);
+        return;
+      }
+      if (window.Toast) {
+        window.Toast.success(mode === 'contents'
+          ? `Deleted "${label}" and its contents`
+          : `Deleted group "${label}"`);
+      }
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to delete group:', err);
+      if (window.Toast) window.Toast.error(`Failed to delete "${label}"`);
+    }
   }
 
   function showWorkspaceDeleteConfirm(options) {
@@ -1902,7 +1984,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (includeChildren) {
       void deleteGroupAndContents(workspaceId);
     } else {
-      void deleteWorkspacesByIds([workspaceId]);
+      void deleteGroupViaServer(workspaceId, 'group_only');
     }
   }
 
@@ -2072,8 +2154,8 @@ console.log('[workspace-hub.js] FILE LOADED');
         body: JSON.stringify({ name, description, kind: 'group' })
       });
       if (!createRes.ok) {
-        const text = await createRes.text();
-        throw new Error(text || 'Failed to create group');
+        const msg = await extractErrorMessage(createRes, 'Failed to create group');
+        throw new Error(msg);
       }
       const created = await createRes.json();
       const groupId = created?.folder?.id;
@@ -2087,11 +2169,11 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       const failed = moveResults.find((r) => !r.ok);
       if (failed) {
-        const text = await failed.text();
-        throw new Error(text || 'Failed to move one or more workspaces');
+        const msg = await extractErrorMessage(failed, 'Failed to move one or more workspaces into the group');
+        throw new Error(msg);
       }
 
-      if (window.Toast) window.Toast.success('Group created. No workspace folder was created.');
+      if (window.Toast) window.Toast.success(`Group "${name}" created`);
 
       // Close modal
       if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
@@ -2106,7 +2188,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to create group:', err);
-      if (window.Toast) window.Toast.error('Failed to create group');
+      if (window.Toast) window.Toast.error(err.message || 'Failed to create group');
     }
   }
 
@@ -2834,6 +2916,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherRefreshBtn) {
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
+    }
+
+    if (elements.launcherRescanBtn) {
+      elements.launcherRescanBtn.addEventListener('click', () => rescanWorkspacesFromDisk());
     }
 
     if (elements.launcherUndoBtn) {

@@ -1295,11 +1295,35 @@ func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
 
 // loadCache scans workspace directories and loads all workspaces into memory.
 func (s *FileStore) loadCache() error {
-	return s.loadWorkspacesFromDir(s.basePath, 0)
+	return s.loadWorkspacesFromDir(s.basePath, 0, "")
 }
 
-// loadWorkspacesFromDir recursively loads workspaces from a directory.
-func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
+// Reload rebuilds the in-memory cache and index from disk. Physical folder
+// location is the source of truth for grouping, so this is how the store picks
+// up structural changes made outside the running process (e.g. folders that
+// arrived via git pull, a cloud-sync client, or manual reorganization).
+func (s *FileStore) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache = make(map[string]*Workspace)
+	s.idToPath = make(map[string]string)
+	if err := s.loadCache(); err != nil {
+		return err
+	}
+	if s.index != nil {
+		if err := s.index.Rebuild(); err != nil {
+			logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
+		}
+	}
+	return nil
+}
+
+// loadWorkspacesFromDir recursively loads workspaces from a directory. parentID
+// is the ID of the workspace whose sub-workspaces/ directory is being scanned
+// (empty at the root); it becomes the authoritative parent of every workspace
+// found directly in dir.
+func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string) error {
 	if depth > MaxNestingDepth {
 		return nil // Stop recursing beyond max depth
 	}
@@ -1353,6 +1377,12 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 			ws.FolderSlug = entry.Name()
 		}
 
+		// Physical folder location is the source of truth for grouping: derive
+		// the parent from where this folder physically lives, overriding any
+		// stale parent_id in workspace.json (e.g. after the folder was moved on
+		// disk or synced from another machine).
+		ws.ParentID = parentID
+
 		// Run migrations
 		if s.migrateIfNeeded(ws, configPath) {
 			s.persistMigration(ws, configPath)
@@ -1367,9 +1397,10 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 		s.cache[ws.ID] = ws
 		s.idToPath[ws.ID] = relPath
 
-		// Recurse into sub-workspaces directory
+		// Recurse into sub-workspaces directory; the current workspace becomes
+		// the authoritative parent of anything nested beneath it.
 		subDir := filepath.Join(folderPath, SubWorkspacesDir)
-		if err := s.loadWorkspacesFromDir(subDir, depth+1); err != nil {
+		if err := s.loadWorkspacesFromDir(subDir, depth+1, ws.ID); err != nil {
 			logger.Warn("Failed to load sub-workspaces", logger.Fields{
 				"dir":   subDir,
 				"error": err.Error(),
