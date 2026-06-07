@@ -3160,23 +3160,32 @@ const sessionManager = {
     }
     if (parentSelect) {
       const optionsHtml = ['<option value="">No group</option>'];
-      const flattened = [];
+      const groups = [];
       const walk = (nodes, depth) => {
         (nodes || []).forEach((node) => {
           if (!node || !node.id) return;
           if (String(node.kind || '').trim() === 'group') {
-            flattened.push({ id: node.id, name: node.name || node.id, depth });
+            groups.push({ id: node.id, name: node.name || node.id, depth });
           }
           walk(node.children || [], depth + 1);
         });
       };
       walk(this.folders || [], 0);
-      flattened.forEach((folder) => {
+      groups.forEach((folder) => {
         const indent = folder.depth > 0 ? `${'--'.repeat(folder.depth)} ` : '';
         optionsHtml.push(`<option value="${this.escapeHtml(folder.id)}">${this.escapeHtml(indent + folder.name)}</option>`);
       });
       parentSelect.innerHTML = optionsHtml.join('');
       parentSelect.value = '';
+      parentSelect.disabled = groups.length === 0;
+      parentSelect.setAttribute('aria-disabled', groups.length > 0 ? 'false' : 'true');
+
+      const parentHelp = document.getElementById('folderParentHelp');
+      if (parentHelp) {
+        parentHelp.textContent = groups.length > 0
+          ? 'Optional. Choose an organization-only group for this workspace.'
+          : 'No groups yet. Select workspaces in the launcher and click Group to create one.';
+      }
     }
     document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
     const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')
