@@ -339,7 +339,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			// and workspace-files MCP binding that executable workspaces get.
 			// Group membership is expressed by physical nesting of members.
 			if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
-				if mkErr := os.MkdirAll(filepath.Join(folderPath, agentworkspace.SubWorkspacesDir), 0o755); mkErr != nil {
+				if mkErr := os.MkdirAll(filepath.Join(folderPath, agentworkspace.SubWorkspacesDir), 0o750); mkErr != nil {
 					logger.Warn("Failed to create group sub-workspaces directory", logger.Fields{"id": ws.ID, "error": mkErr})
 				}
 				logger.Info("Group folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})

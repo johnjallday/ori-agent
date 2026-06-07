@@ -109,7 +109,7 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 
 	// Ensure the destination parent directory (e.g. an empty group's
 	// sub-workspaces/) exists before the move.
-	if err := os.MkdirAll(destParentDir, 0o755); err != nil {
+	if err := os.MkdirAll(destParentDir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
