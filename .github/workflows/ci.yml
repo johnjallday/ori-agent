@@ -57,6 +57,9 @@ jobs:
       - name: Run frontend lint
         run: npm run lint
 
+      - name: Run frontend module tests
+        run: npm run test:modules
+
   test-unit:
     name: Unit Tests
     runs-on: ${{ matrix.os }}
