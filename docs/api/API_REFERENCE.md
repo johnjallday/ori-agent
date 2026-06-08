@@ -196,6 +196,90 @@ Classify a home page assistant prompt and find the best matching existing agent.
 }
 ```
 
+### Ask Home Assistant (Inline Harness)
+
+Answer an app-introspection or app-navigation prompt inline. The server builds a
+cross-workspace **home snapshot** (workspaces, windowed task activity, recent
+sessions, open Action Center opportunities, usage), runs the system model with
+read-only `home_*` tools, and returns a written answer plus grounded next-step
+actions. Used by the home page "Ask Ori" panel when
+`/api/home-assistant/route` classifies the prompt as `app_introspection` or
+`app_navigation` (route mode `home_inline`).
+
+**Endpoint:** `POST /api/home-assistant/ask`
+
+**Request Body:**
+```json
+{
+  "prompt": "Summarize this week's task activity",
+  "intent": "app_introspection",
+  "date_window": "this_week",
+  "context": { "surface": "home", "page_path": "/" }
+}
+```
+
+**Parameters:**
+- `prompt` (required): Natural language question about the user's own Ori data, or a navigation request.
+- `intent` (optional): `app_introspection` or `app_navigation`. Defaults to `app_introspection`.
+- `date_window` (optional): `today`, `this_week`, or `this_month`. When omitted, the server picks a default from prompt phrasing (recap/summary asks → `this_week`; status asks → `today`).
+- `context` (optional): Same shape as `/api/home-assistant/route` (`surface`, `page_path`, `workspace_id`, …).
+- `confirmed_action` (optional): Present only when re-submitting a confirmed mutation (see confirmation flow below).
+
+**Response:**
+```json
+{
+  "response": "This week you have 2 active workspaces and 5 tasks: 3 completed, 2 in progress…",
+  "intent": "app_introspection",
+  "snapshot_meta": {
+    "window": "this_week",
+    "window_label": "this week (Jun 1 – Jun 8)",
+    "workspace_count": 2,
+    "task_count": 5,
+    "session_count": 4,
+    "opportunity_count": 1,
+    "degraded": [],
+    "truncated": []
+  },
+  "actions": [
+    { "id": "open-ws-ws-1", "type": "open_workspace", "label": "Open Launch Plan", "href": "/workspaces/ws-1", "workspace_id": "ws-1" },
+    { "id": "nav-action-center", "type": "navigate", "label": "Review 1 opportunity", "href": "/action-center" }
+  ]
+}
+```
+
+**Response fields:**
+- `response`: The assistant's written answer. Always present and renderable, even on degraded data or when the model is unavailable.
+- `intent`: The intent the harness answered as.
+- `snapshot_meta`: Section counts plus `degraded` (sections whose data source was unavailable) and `truncated` (sections capped — more is available via the tools).
+- `actions`: Validated next-step action descriptors (see schema below). Navigation/`open_*` actions are read-only; `create_*` / `start_task` carry `requires_confirmation`.
+- `requires_confirmation` / `confirmation`: Present when the prompt is an explicit mutation request awaiting confirmation.
+
+**Action schema:**
+- `id`: Stable action id.
+- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `ask_followup`.
+- `label`: Button label.
+- `href` (optional): Destination for navigation/`open_*` actions.
+- `workspace_id` / `task_id` / `session_id` (optional): Resolved target ids.
+- `requires_confirmation` (optional): `true` for state-changing actions.
+- `confirmation_summary` / `arguments` (optional): Confirmation copy and payload.
+
+**Confirmation flow (mutations):**
+An explicit mutation request (e.g. `"create a workspace called Q3 Planning"`) returns a confirmation instead of acting:
+```json
+{
+  "response": "Create a new workspace named \"Q3 Planning\"?",
+  "intent": "app_introspection",
+  "requires_confirmation": true,
+  "confirmation": {
+    "action_id": "create-workspace",
+    "action_type": "create_workspace",
+    "summary": "Create a new workspace named \"Q3 Planning\"?",
+    "arguments": { "name": "Q3 Planning" }
+  }
+}
+```
+The client confirms by re-calling the endpoint with `confirmed_action` set to a `HomeAction` of that type and arguments. The server executes only known mutation types after confirmation; the model is never given write tools.
+
 ## Settings API
 
 ### Get Agent Settings

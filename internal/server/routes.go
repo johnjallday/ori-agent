@@ -182,6 +182,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/home-assistant/trace", homeAssistantRouteHandler.TraceHandler)
 	mux.HandleFunc("/api/home-assistant/trace/summary", homeAssistantRouteHandler.TraceSummaryHandler)
 
+	// Home harness inline endpoint: answers app-introspection / app-navigation
+	// prompts using the cross-workspace home snapshot and read-only home tools.
+	mux.HandleFunc("/api/home-assistant/ask", s.newHomeAssistantAskHandler().AskHandler)
+
 	// =============================================================================
 	// Settings and Configuration Endpoints
 	// =============================================================================
