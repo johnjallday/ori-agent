@@ -161,7 +161,11 @@ func (w *Workspace) ListDirectoryFiles(dirID string) ([]FileInfo, error) {
 // and name read from it. Filesystem-only; the caller decides whether the id is
 // registered. Any read/parse error is treated as "not a workspace folder".
 func readWorkspaceFolderMeta(absPath string) (id, name string, ok bool) {
-	data, err := os.ReadFile(filepath.Join(absPath, WorkspaceConfigFile))
+	// absPath is enumerated by walking the linked directory itself (filepath.Walk
+	// + filepath.Rel keep every entry inside that directory), and only the fixed
+	// workspace.json filename is appended — so this cannot read outside the
+	// linked folder the user explicitly attached.
+	data, err := os.ReadFile(filepath.Join(absPath, WorkspaceConfigFile)) // #nosec G304 G703
 	if err != nil {
 		return "", "", false
 	}
