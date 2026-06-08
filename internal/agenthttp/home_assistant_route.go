@@ -134,6 +134,11 @@ const (
 	homeAssistantHandoffAssistant  = "assistant"
 	homeAssistantHandoffSpecialist = "specialist"
 	homeAssistantHandoffTool       = "tool"
+
+	// homeAssistantRouteModeInline signals the frontend to answer the prompt
+	// inline via the home harness (POST /api/home-assistant/ask) instead of
+	// routing to an agent or workspace.
+	homeAssistantRouteModeInline = "home_inline"
 )
 
 var (
@@ -207,6 +212,28 @@ var (
 		SuggestedName:    "Task Assistant",
 		MinScore:         3,
 	}
+	// homeAssistantAppIntrospectionIntent matches questions about the user's own
+	// Ori data (activity/summary/recap over tasks, sessions, workspaces, usage).
+	// Answered inline by the home harness.
+	homeAssistantAppIntrospectionIntent = homeAssistantIntent{
+		Key:            "app_introspection",
+		Label:          "app activity",
+		PreferredTypes: []string{"general"},
+		DefaultType:    "general",
+		SuggestedName:  systemAssistantAgentName,
+		MinScore:       3,
+	}
+	// homeAssistantAppNavigationIntent matches "where/how do I…/open <feature>"
+	// requests about app features and locations. Answered inline + grounded in the
+	// navigation catalog.
+	homeAssistantAppNavigationIntent = homeAssistantIntent{
+		Key:            "app_navigation",
+		Label:          "app navigation",
+		PreferredTypes: []string{"general"},
+		DefaultType:    "general",
+		SuggestedName:  systemAssistantAgentName,
+		MinScore:       3,
+	}
 	homeAssistantSpecificIntents = []homeAssistantIntent{
 		homeAssistantUtilityIntent,
 		homeAssistantTravelIntent,
@@ -270,7 +297,7 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssi
 	}
 
 	routeContext := normalizeHomeAssistantRouteContext(context)
-	intent := detectHomeAssistantIntent(prompt)
+	intent := h.classifyHomeIntent(prompt)
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
 	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
@@ -372,6 +399,99 @@ func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
 	}
 
 	return selectedIntent
+}
+
+// classifyHomeIntent layers the app_introspection / app_navigation intents on top
+// of detectHomeAssistantIntent. It only overrides the generic fallback and the
+// app_launch case, so specific intents (utility/calendar/email/travel/
+// workspace_create) keep their precedence (FR #4). app_navigation beats
+// app_launch when the "open …" target is a known app feature or a real workspace
+// ("open Action Center" / "open the Q3 Planning workspace"), while "open Safari"
+// stays app_launch.
+func (h *HomeAssistantRouteHandler) classifyHomeIntent(prompt string) homeAssistantIntent {
+	base := detectHomeAssistantIntent(prompt)
+	switch base.Key {
+	case homeAssistantDefaultIntent.Key:
+		if h.isAppNavigationPrompt(prompt) {
+			return homeAssistantAppNavigationIntent
+		}
+		if isAppIntrospectionPrompt(prompt) {
+			return homeAssistantAppIntrospectionIntent
+		}
+	case homeAssistantAppLaunchIntent.Key:
+		if h.isAppNavigationPrompt(prompt) {
+			return homeAssistantAppNavigationIntent
+		}
+	}
+	return base
+}
+
+func (h *HomeAssistantRouteHandler) workspaceStoreOrNil() workspace.Store {
+	if h == nil || h.WorkspaceResolver == nil {
+		return nil
+	}
+	return h.WorkspaceResolver.WorkspaceStore
+}
+
+// isAppNavigationPrompt reports whether the prompt is asking to find/open an app
+// destination: it needs a navigation cue plus a real target (a catalog feature or
+// an existing workspace name). Requiring a real target keeps introspection asks
+// like "summarize my mcp usage" out of navigation.
+func (h *HomeAssistantRouteHandler) isAppNavigationPrompt(prompt string) bool {
+	if !hasNavigationCue(prompt) {
+		return false
+	}
+	if promptMatchesNavCatalog(prompt) {
+		return true
+	}
+	return promptMentionsWorkspaceByName(h.workspaceStoreOrNil(), prompt)
+}
+
+func hasNavigationCue(prompt string) bool {
+	p := normalizeRouteToken(prompt)
+	for _, cue := range []string{
+		"where", "how do i", "how can i", "how to", "take me to", "go to",
+		"navigate", "open", "show me", "which page", "what page", "find the",
+		"get to", "bring up",
+	} {
+		if strings.Contains(p, cue) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAppIntrospectionPrompt reports whether the prompt asks about the user's own
+// Ori data/activity.
+func isAppIntrospectionPrompt(prompt string) bool {
+	p := normalizeRouteToken(prompt)
+	if p == "" {
+		return false
+	}
+	for _, phrase := range []string{
+		"task activity", "my tasks", "my workspaces", "my sessions", "my activity",
+		"what did i work on", "what have i been working", "what's pending", "whats pending",
+		"how many tasks", "recap", "across my workspaces", "all my workspaces", "my recent",
+	} {
+		if strings.Contains(p, phrase) {
+			return true
+		}
+	}
+	hasVerb := containsAnyToken(p, []string{"summarize", "summary", "overview", "recap", "report", "review", "status"})
+	hasNoun := containsAnyToken(p, []string{
+		"task", "tasks", "workspace", "workspaces", "session", "sessions",
+		"activity", "opportunity", "opportunities", "usage", "cost", "spending",
+	})
+	return hasVerb && hasNoun
+}
+
+func containsAnyToken(normalizedPrompt string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(normalizedPrompt, n) {
+			return true
+		}
+	}
+	return false
 }
 
 func detectHomeAssistantIntentVariant(prompt string, intent homeAssistantIntent, context normalizedHomeAssistantRouteContext) string {
@@ -841,6 +961,9 @@ func (c normalizedHomeAssistantRouteContext) hasWorkspaceSurfaceContext() bool {
 }
 
 func determineRouteModeAndTargetSurface(intent homeAssistantIntent, intentVariant string, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
+	if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {
+		return homeAssistantRouteModeInline, "current"
+	}
 	if intent.Key == homeAssistantUtilityIntent.Key {
 		return "utility_direct", "current"
 	}
@@ -877,6 +1000,8 @@ func determineRoutingPolicy(
 	}
 
 	switch intent.Key {
+	case homeAssistantAppIntrospectionIntent.Key, homeAssistantAppNavigationIntent.Key:
+		return homeAssistantPolicyAssistantOnly
 	case homeAssistantUtilityIntent.Key, homeAssistantWorkspaceCreateIntent.Key:
 		return homeAssistantPolicyAssistantOnly
 	case homeAssistantEmailIntent.Key, homeAssistantAppLaunchIntent.Key:

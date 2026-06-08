@@ -77,6 +77,26 @@
       defaultType: 'general',
       suggestedName: 'Task Assistant',
       tags: ['tasks', 'assistant']
+    },
+    app_introspection: {
+      key: 'app_introspection',
+      label: 'app activity',
+      keywords: [],
+      preferredPlugins: [],
+      preferredTypes: ['general'],
+      defaultType: 'general',
+      suggestedName: 'Ori',
+      tags: ['activity', 'introspection']
+    },
+    app_navigation: {
+      key: 'app_navigation',
+      label: 'app navigation',
+      keywords: [],
+      preferredPlugins: [],
+      preferredTypes: ['general'],
+      defaultType: 'general',
+      suggestedName: 'Ori',
+      tags: ['navigation']
     }
   };
 
@@ -4012,7 +4032,27 @@
       return HOME_INTENTS.app_launch;
     }
 
+    var appIntent = detectHomeAppIntentLocal(text);
+    if (appIntent) return appIntent;
+
     return selected;
+  }
+
+  // detectHomeAppIntentLocal mirrors the backend app_introspection / app_navigation
+  // heuristics for optimistic UI and the route-unavailable fallback. The backend
+  // route response remains authoritative when present.
+  function detectHomeAppIntentLocal(text) {
+    if (!text) return null;
+    var navCue = /(\bwhere\b|how do i|how to|take me to|go to|navigate|\bopen\b|show me|which page|what page)/.test(text);
+    var navTarget = /(action center|workspaces?|agents?|vaults?|settings|mcp|connectors?|usage|dashboard)/.test(text);
+    if (navCue && navTarget) return HOME_INTENTS.app_navigation;
+    if (/(task activity|my tasks|my workspaces|my sessions|my activity|how many tasks|recap|what did i work on)/.test(text)) {
+      return HOME_INTENTS.app_introspection;
+    }
+    var hasVerb = /(summarize|summary|overview|recap|report|review|status)/.test(text);
+    var hasNoun = /(task|tasks|workspace|workspaces|session|sessions|activity|opportunit|usage|cost|spending)/.test(text);
+    if (hasVerb && hasNoun) return HOME_INTENTS.app_introspection;
+    return null;
   }
 
   function normalizeMCPServerName(name) {
@@ -8538,6 +8578,165 @@
     }
   }
 
+  // Home harness inline path: answer app_introspection / app_navigation prompts
+  // by calling /api/home-assistant/ask, which builds the cross-workspace snapshot
+  // and runs the model server-side. The frontend only renders the answer and the
+  // validated next-step actions.
+  async function runHomeAssistantInline(prompt, routeContext, intent, options) {
+    var text = String(prompt || '').trim();
+    if (!text) return;
+    options = options || {};
+    var confirmedAction = options.confirmedAction || null;
+    var summaryLabel = intent === 'app_navigation' ? 'Navigation' : 'Activity';
+
+    setHomeAssistantBusy(true, confirmedAction ? 'Applying...' : 'Thinking...');
+    renderHomeAssistantActions([]);
+    setHomeAssistantRoutingSummary(
+      summaryLabel,
+      confirmedAction ? 'Applying your confirmed action...' : 'Reviewing your workspaces, tasks, and activity...'
+    );
+
+    try {
+      var payload = {
+        prompt: text,
+        intent: intent,
+        context: normalizeHomeRouteContext(routeContext)
+      };
+      if (confirmedAction) {
+        payload.confirmed_action = confirmedAction;
+      }
+
+      var data = await API.post('/api/home-assistant/ask', payload);
+      var responseText = String(data && data.response || '').trim();
+      if (responseText) {
+        appendHomeAssistantMessage('assistant', responseText);
+      }
+
+      if (data && data.requires_confirmation && data.confirmation) {
+        confirmHomeAction(data.confirmation, routeContext, intent);
+        return;
+      }
+
+      setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
+      var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
+      buttons.push({ label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } });
+      renderHomeAssistantActions(buttons);
+    } catch (error) {
+      dashLog.debug('Home inline ask failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not answer that right now. Please retry.');
+      setHomeAssistantRoutingSummary(summaryLabel + ' Failed', 'Could not complete the request.');
+      renderHomeAssistantActions([
+        { label: 'Retry', variant: 'primary', onClick: function () { runHomeAssistantInline(text, routeContext, intent, options); } },
+        { label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  function isMutatingHomeActionType(type) {
+    return type === 'create_workspace' || type === 'create_task' || type === 'start_task';
+  }
+
+  // buildHomeActionButtons maps the backend action schema to renderHomeAssistant-
+  // Actions buttons, dropping any action whose target can't be validated (6.6).
+  function buildHomeActionButtons(actions, routeContext, intent) {
+    var buttons = [];
+    if (!Array.isArray(actions)) return buttons;
+    for (var i = 0; i < actions.length; i++) {
+      var button = mapHomeActionToButton(actions[i], routeContext, intent);
+      if (button) buttons.push(button);
+    }
+    return buttons;
+  }
+
+  function mapHomeActionToButton(action, routeContext, intent) {
+    if (!action) return null;
+    var label = String(action.label || '').trim();
+    var type = String(action.type || '').trim();
+    if (!label || !type) return null;
+
+    var navigableTypes = { navigate: 1, open_workspace: 1, open_task: 1, open_session: 1 };
+    if (navigableTypes[type]) {
+      var href = String(action.href || '').trim();
+      if (!href) return null; // can't resolve a destination -> drop
+      return {
+        label: label,
+        variant: type === 'navigate' ? 'secondary' : 'primary',
+        onClick: function () { window.location.href = href; }
+      };
+    }
+
+    if (action.requires_confirmation || isMutatingHomeActionType(type)) {
+      var confirmation = {
+        action_id: String(action.id || type),
+        action_type: type,
+        summary: String(action.confirmation_summary || ('Confirm: ' + label)),
+        arguments: action.arguments || {}
+      };
+      return {
+        label: label,
+        variant: 'primary',
+        onClick: function () { confirmHomeAction(confirmation, routeContext, intent); }
+      };
+    }
+
+    if (type === 'ask_followup') {
+      return { label: label, variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } };
+    }
+    return null;
+  }
+
+  // confirmHomeAction shows an explicit confirm/cancel step before executing a
+  // state-changing action; on confirm it re-calls /ask with confirmed_action.
+  function confirmHomeAction(confirmation, routeContext, intent) {
+    appendHomeAssistantMessage('assistant', String(confirmation.summary || 'Confirm this change?'));
+    setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
+    var args = confirmation.arguments || {};
+    renderHomeAssistantActions([
+      {
+        label: 'Confirm',
+        variant: 'primary',
+        onClick: function () {
+          var confirmedAction = {
+            id: confirmation.action_id,
+            type: confirmation.action_type,
+            arguments: args,
+            workspace_id: String(args.workspace_id || ''),
+            task_id: String(args.task_id || '')
+          };
+          runHomeAssistantInline(homeAssistantState.pendingPrompt, routeContext, intent, { confirmedAction: confirmedAction });
+        }
+      },
+      {
+        label: 'Cancel',
+        variant: 'secondary',
+        onClick: function () {
+          appendHomeAssistantMessage('assistant', 'Okay, I will not make that change.');
+          setHomeAssistantRoutingSummary('Cancelled', 'No changes made.');
+          renderHomeAssistantActions([{ label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } }]);
+        }
+      }
+    ]);
+  }
+
+  function formatHomeAskSummary(data) {
+    var meta = data && data.snapshot_meta;
+    if (!meta) return 'Answered from your app data.';
+    var parts = [];
+    if (typeof meta.workspace_count === 'number') {
+      parts.push(meta.workspace_count + ' workspace' + (meta.workspace_count === 1 ? '' : 's'));
+    }
+    if (typeof meta.task_count === 'number') {
+      parts.push(meta.task_count + ' task' + (meta.task_count === 1 ? '' : 's') + ' ' + String(meta.window_label || 'recently'));
+    }
+    var base = parts.length ? ('From ' + parts.join(', ')) : 'Answered from your app data';
+    if (meta.degraded && meta.degraded.length) {
+      base += ' (some data unavailable)';
+    }
+    return base + '.';
+  }
+
   async function createWorkspaceChatSessionWithMessage(workspaceId, message) {
     var initialMessage = String(message || '').trim();
     var baseContext = buildHomeRouteContext();
@@ -10778,6 +10977,16 @@
         } else if (routeData.requires_creation === true) {
           useFallbackRouting = false;
         }
+      }
+
+      // Home harness inline path (hybrid): answer app activity / navigation asks
+      // here instead of routing to an agent. Backend route is authoritative; the
+      // local detector covers the route-unavailable fallback.
+      if (!inWorkspaceContext &&
+          (homeAssistantState.pendingIntent.key === 'app_introspection' ||
+           homeAssistantState.pendingIntent.key === 'app_navigation')) {
+        await runHomeAssistantInline(text, routeContext, homeAssistantState.pendingIntent.key);
+        return;
       }
 
       if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
