@@ -1389,8 +1389,17 @@ console.log('[workspace-hub.js] FILE LOADED');
         </button>
       `;
 
+      const groupChecked = selectedSet.has(row.id);
+      const groupCheckbox = `
+        <label class="launcher-card-checkbox" aria-label="Select group ${escapeHtml(row.name || 'Group')}">
+          <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${groupChecked ? 'checked' : ''} />
+          <span class="launcher-card-checkmark" aria-hidden="true"></span>
+        </label>
+      `;
+
       const groupHeader = `
-        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
+        <div class="launcher-card-item launcher-group-header has-selection-checkbox" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
+          ${groupCheckbox}
           <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -1473,12 +1482,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     const safeNextSiblingId = escapeHtml(nextSibling && nextSibling.id ? nextSibling.id : '');
     const safeName = escapeHtml(rowName);
     const deleteTitle = isGroup ? 'Delete group' : 'Delete workspace';
-    const checkbox = !isGroup ? `
-        <label class="launcher-tree-checkbox" aria-label="Select workspace ${safeName}">
+    const selectLabel = isGroup ? 'Select group' : 'Select workspace';
+    const checkbox = `
+        <label class="launcher-tree-checkbox" aria-label="${selectLabel} ${safeName}">
           <input type="checkbox" data-workspace-checkbox="${safeId}" ${selectedSet.has(row.id) ? 'checked' : ''} />
           <span class="launcher-card-checkmark" aria-hidden="true"></span>
         </label>
-      ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>';
+      `;
     const caret = isGroup ? `
       <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
         <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">

@@ -282,7 +282,10 @@ test('launcher tree renders minimal hierarchy with always-available workspace ch
   assert.match(launcherGrid.innerHTML, /aria-expanded="true"/);
   assert.match(launcherGrid.innerHTML, /class="launcher-tree-checkbox"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1" checked/);
-  assert.match(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
+  // Groups are now selectable too: their rows render a real checkbox, not a placeholder.
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-2"/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
   assert.match(launcherGrid.innerHTML, /Drop workspaces here/);
   assert.doesNotMatch(launcherGrid.innerHTML, /No description yet/);
@@ -291,7 +294,12 @@ test('launcher tree renders minimal hierarchy with always-available workspace ch
 
 test('launcher cards render always-available workspace checkboxes without select-mode attributes', () => {
   const workspaces = [
-    { id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work' },
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work', parent_id: 'group-1' }]
+    },
     { id: 'workspace-2', kind: 'workspace', name: 'UI' }
   ];
   const flattened = flattenWorkspaces(workspaces);
@@ -309,6 +317,9 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.match(launcherGrid.innerHTML, /class="launcher-card-checkbox"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-2" checked/);
+  // Group headers are selectable too: the header card gets a checkbox.
+  assert.match(launcherGrid.innerHTML, /launcher-card-item launcher-group-header has-selection-checkbox/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
 });
 
