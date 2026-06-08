@@ -749,6 +749,12 @@ type FileInfo struct {
 	ModTime      time.Time  `json:"mod_time"`                // Last modification time
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`    // Soft-delete timestamp when the item is trashed
 	Status       string     `json:"status,omitempty"`        // e.g. "missing" when an attachment's file is absent on disk
+	// Workspace reference: set when this directory entry is itself a registered
+	// workspace folder (it contains a workspace.json with a known id). Lets
+	// linked folders surface nested workspaces as openable references.
+	IsWorkspace   bool   `json:"is_workspace,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace

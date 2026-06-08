@@ -156,6 +156,56 @@ func (w *Workspace) ListDirectoryFiles(dirID string) ([]FileInfo, error) {
 	return files, nil
 }
 
+// readWorkspaceFolderMeta reports whether absPath is a workspace folder — i.e.
+// it directly contains a workspace.json — and, if so, returns the workspace id
+// and name read from it. Filesystem-only; the caller decides whether the id is
+// registered. Any read/parse error is treated as "not a workspace folder".
+func readWorkspaceFolderMeta(absPath string) (id, name string, ok bool) {
+	data, err := os.ReadFile(filepath.Join(absPath, WorkspaceConfigFile))
+	if err != nil {
+		return "", "", false
+	}
+	ws, err := FromJSON(data)
+	if err != nil || ws == nil || ws.ID == "" {
+		return "", "", false
+	}
+	return ws.ID, ws.Name, true
+}
+
+// annotateWorkspaceEntries marks directory entries that are themselves
+// registered workspace folders so the linked-folder explorer can surface them
+// as openable workspace references. basePath is the linked directory root;
+// entries' RelativePath values are relative to it. Only directories whose
+// workspace.json id is registered in store are annotated; everything else is
+// left as an ordinary folder. Detection never fails the listing.
+func annotateWorkspaceEntries(store Store, basePath string, files []FileInfo) {
+	if store == nil {
+		return
+	}
+	for i := range files {
+		if !files[i].IsDir {
+			continue
+		}
+		id, folderName, ok := readWorkspaceFolderMeta(filepath.Join(basePath, files[i].RelativePath))
+		if !ok {
+			continue
+		}
+		registered, err := store.Get(id)
+		if err != nil || registered == nil {
+			// Has a workspace.json but isn't registered in this app — treat it
+			// as an ordinary folder (registered-only).
+			continue
+		}
+		files[i].IsWorkspace = true
+		files[i].WorkspaceID = id
+		// Prefer the authoritative registered name; fall back to the folder's.
+		files[i].WorkspaceName = registered.Name
+		if files[i].WorkspaceName == "" {
+			files[i].WorkspaceName = folderName
+		}
+	}
+}
+
 // ReadDirectoryFile reads the content of a file in a directory reference
 func (w *Workspace) ReadDirectoryFile(dirID string, relativePath string) ([]byte, error) {
 	dir, err := w.GetDirectoryReference(dirID)

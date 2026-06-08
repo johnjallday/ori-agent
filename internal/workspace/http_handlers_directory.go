@@ -346,6 +346,12 @@ func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Surface nested registered workspaces in this linked folder as openable
+	// references (workspace-aware linked folders).
+	if dir, dErr := workspace.GetDirectoryReference(dirID); dErr == nil {
+		annotateWorkspaceEntries(h.store, dir.Path, files)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"files":        files,

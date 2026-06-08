@@ -7596,6 +7596,32 @@
       text-align: right;
     }
 
+    .workspace-directory-tree-badge {
+      flex-shrink: 0;
+      font-size: 0.55rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.05rem 0.3rem;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.18);
+      color: var(--text-secondary);
+    }
+
+    .workspace-directory-open-ws {
+      flex-shrink: 0;
+      font-size: 0.62rem;
+      white-space: nowrap;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      text-decoration: none;
+      color: var(--text-secondary);
+      border: 1px solid rgba(255, 166, 110, 0.45);
+    }
+
+    .workspace-directory-open-ws:hover {
+      background: rgba(255, 166, 110, 0.15);
+    }
+
     .workspace-directory-tree-node.is-selected > .workspace-directory-tree-row .workspace-directory-tree-main {
       background: linear-gradient(90deg, rgba(255, 166, 110, 0.24), rgba(56, 189, 248, 0.16));
       border: 1px solid rgba(255, 166, 110, 0.45);
