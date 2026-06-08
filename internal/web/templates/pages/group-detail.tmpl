@@ -83,7 +83,31 @@
 
           <!-- Members -->
           <section class="modern-card p-3 group-detail-section" aria-labelledby="group-members-heading">
-            <h2 class="group-detail-section-title" id="group-members-heading">Members</h2>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h2 class="group-detail-section-title mb-0" id="group-members-heading">Members</h2>
+              <div class="d-flex gap-2">
+                <button id="group-add-member-btn" type="button" class="modern-btn modern-btn-secondary" hidden>Add existing</button>
+                <button id="group-create-member-btn" type="button" class="modern-btn modern-btn-primary" hidden>Create new</button>
+              </div>
+            </div>
+            <div id="group-members-error" class="text-danger small mb-2" role="alert" hidden></div>
+            <div id="group-add-member-picker" class="group-add-picker mb-2" hidden></div>
+
+            <form id="group-create-member-form" class="group-add-picker mb-2" hidden>
+              <div class="mb-2">
+                <label class="form-label" for="group-create-name">New workspace name</label>
+                <input type="text" class="form-control form-control-sm" id="group-create-name" maxlength="200" required>
+              </div>
+              <div class="mb-2">
+                <label class="form-label" for="group-create-description">Description</label>
+                <input type="text" class="form-control form-control-sm" id="group-create-description" maxlength="500">
+              </div>
+              <div class="d-flex gap-2">
+                <button type="submit" id="group-create-submit" class="modern-btn modern-btn-primary">Create</button>
+                <button type="button" id="group-create-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+              </div>
+            </form>
+
             <div id="group-members-list"></div>
           </section>
 

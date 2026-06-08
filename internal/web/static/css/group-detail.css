@@ -81,3 +81,125 @@
   border-color: var(--text-primary, #111);
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
 }
+
+.group-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.group-member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.group-member-open {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.group-member-kind {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #6c757d);
+  flex: 0 0 auto;
+}
+
+.group-member-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-member-desc,
+.group-member-meta {
+  color: var(--text-secondary, #6c757d);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 0 0 auto;
+}
+
+.group-member-move,
+.group-member-remove {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text-secondary, #6c757d);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.group-member-move[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.group-add-picker {
+  padding: 0.5rem;
+  border: 1px dashed var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+
+.group-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.group-task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.625rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.group-task-row:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+}
+
+.group-task-desc {
+  font-weight: 500;
+}
+
+.group-task-meta {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #6c757d);
+}
+
+.group-detail-subtitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #6c757d);
+  margin-bottom: 0.5rem;
+}
