@@ -389,68 +389,27 @@ function openCreateWorkspaceModal(options = {}) {
   modal.show();
 }
 
-function collectWorkspaceGroupOptions(nodes) {
-  const groups = [];
-
-  (function walk(items, depth) {
-    (items || []).forEach((node) => {
-      if (!node || !node.id) return;
-      if (String(node.kind || '').trim() === 'group') {
-        groups.push({ id: node.id, name: node.name || node.id, depth });
-      }
-      if (Array.isArray(node.children) && node.children.length > 0) {
-        walk(node.children, depth + 1);
-      }
-    });
-  })(nodes, 0);
-
-  return groups;
-}
-
-function renderWorkspaceParentOptions(groups) {
-  const options = ['<option value="">No group</option>'];
-
-  groups.forEach((group) => {
-    const indent = group.depth > 0 ? `${'--'.repeat(group.depth)} ` : '';
-    options.push(`<option value="${escapeHtml(group.id)}">${escapeHtml(indent + group.name)}</option>`);
-  });
-
-  return options.join('');
-}
-
-function setWorkspaceParentSelectState(select, groupCount) {
-  const help = document.getElementById('folderParentHelp');
-  const hasGroups = groupCount > 0;
-
-  select.disabled = !hasGroups;
-  select.setAttribute('aria-disabled', hasGroups ? 'false' : 'true');
-
-  if (help) {
-    help.textContent = hasGroups
-      ? 'Optional. Choose an organization-only group for this workspace.'
-      : 'No groups yet. Select workspaces in the launcher and click Group to create one.';
-  }
-}
-
 async function populateWorkspaceParentSelect() {
   const select = document.getElementById('folderParentSelect');
   if (!select) return;
+
+  const groupOptions = window.WorkspaceGroupOptions;
 
   try {
     const response = await fetch('/api/workspaces?tree=true');
     if (!response.ok) throw new Error('Failed to load workspaces');
     const data = await response.json();
     const tree = data.folders || [];
-    const groups = collectWorkspaceGroupOptions(tree);
+    const groups = groupOptions.collectWorkspaceGroupOptions(tree);
 
-    select.innerHTML = renderWorkspaceParentOptions(groups);
+    select.innerHTML = groupOptions.renderWorkspaceParentOptions(groups);
     select.value = '';
-    setWorkspaceParentSelectState(select, groups.length);
+    groupOptions.setWorkspaceParentSelectState(select, groups.length);
   } catch (err) {
     console.error('Failed to populate parent select:', err);
     select.innerHTML = '<option value="">No group</option>';
     select.value = '';
-    setWorkspaceParentSelectState(select, 0);
+    groupOptions.setWorkspaceParentSelectState(select, 0);
   }
 }
 
@@ -779,8 +738,8 @@ window.toggleAgent = toggleAgent;
 window.setAvailableAgents = setAvailableAgents;
 window.WorkspaceCreate = window.WorkspaceCreate || {};
 window.WorkspaceCreate.__test = {
-  collectWorkspaceGroupOptions,
-  renderWorkspaceParentOptions
+  collectWorkspaceGroupOptions: window.WorkspaceGroupOptions.collectWorkspaceGroupOptions,
+  renderWorkspaceParentOptions: window.WorkspaceGroupOptions.renderWorkspaceParentOptions
 };
 
 // Initialize on DOM ready

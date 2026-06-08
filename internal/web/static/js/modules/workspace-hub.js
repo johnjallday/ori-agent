@@ -1438,6 +1438,86 @@ console.log('[workspace-hub.js] FILE LOADED');
     bindLauncherInteractions();
   }
 
+  // Tree-row icons never change between renders, so cache them once instead of
+  // rebuilding the markup on every node.
+  const LAUNCHER_TREE_GROUP_ICON = `
+    <svg class="launcher-tree-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+    </svg>
+  `;
+  const LAUNCHER_TREE_WORKSPACE_ICON = `
+    <svg class="launcher-tree-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13Z"/>
+    </svg>
+  `;
+
+  function renderLauncherTreeIcon(kind) {
+    return kind === 'group' ? LAUNCHER_TREE_GROUP_ICON : LAUNCHER_TREE_WORKSPACE_ICON;
+  }
+
+  // Render a single tree node (and its descendants). Hoisted to module scope so
+  // it isn't re-allocated on every renderLauncherTree call; per-render data is
+  // threaded through `ctx` ({ state, selectedSet, flattenedMap }).
+  function renderLauncherTreeNode(workspace, depth, siblings, siblingIndex, ctx) {
+    if (!workspace || !workspace.id) return '';
+
+    const { state, selectedSet, flattenedMap } = ctx;
+    const row = flattenedMap.get(workspace.id) || workspace;
+    const isGroup = isGroupWorkspace(row) || (Array.isArray(workspace.children) && workspace.children.length > 0);
+    const isCollapsed = isGroup && state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
+    const children = Array.isArray(workspace.children) ? workspace.children : [];
+    const nextSibling = Array.isArray(siblings) ? siblings[siblingIndex + 1] : null;
+    const rowName = row.name || (isGroup ? 'Group' : 'Untitled Workspace');
+    const safeId = escapeHtml(row.id);
+    const safeParentId = escapeHtml(row.parent_id || '');
+    const safeNextSiblingId = escapeHtml(nextSibling && nextSibling.id ? nextSibling.id : '');
+    const safeName = escapeHtml(rowName);
+    const deleteTitle = isGroup ? 'Delete group' : 'Delete workspace';
+    const checkbox = !isGroup ? `
+        <label class="launcher-tree-checkbox" aria-label="Select workspace ${safeName}">
+          <input type="checkbox" data-workspace-checkbox="${safeId}" ${selectedSet.has(row.id) ? 'checked' : ''} />
+          <span class="launcher-card-checkmark" aria-hidden="true"></span>
+        </label>
+      ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>';
+    const caret = isGroup ? `
+      <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
+        <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M7,10L12,15L17,10H7Z"/>
+        </svg>
+      </button>
+    ` : '<span class="launcher-tree-caret-placeholder" aria-hidden="true"></span>';
+    const deleteButton = `
+      <button class="launcher-tree-delete launcher-card-delete" type="button" draggable="false" data-workspace-delete="${safeId}" title="${deleteTitle}" aria-label="${deleteTitle}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+        </svg>
+      </button>
+    `;
+
+    const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
+    const emptyHint = isGroup && children.length === 0
+      ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
+      : '';
+    const childrenWrapper = isGroup ? `
+      <div class="launcher-tree-children${children.length === 0 ? ' is-empty' : ''}" role="group" ${isCollapsed ? 'hidden' : ''} data-group-children="${safeId}">
+        ${childHtml || emptyHint}
+      </div>
+    ` : '';
+
+    return `
+      <div class="launcher-tree-node${isGroup ? ' is-group' : ' is-workspace'}${isCollapsed ? ' is-collapsed' : ''}">
+        <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? (isCollapsed ? 'Expand' : 'Collapse') : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
+          ${checkbox}
+          ${caret}
+          ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
+          <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
+          ${deleteButton}
+        </div>
+        ${childrenWrapper}
+      </div>
+    `;
+  }
+
   function renderLauncherTree(flattened) {
     if (!elements.launcherGrid || !elements.launcherEmpty) return;
 
@@ -1453,86 +1533,15 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     elements.launcherEmpty.style.display = 'none';
 
-    const selectedSet = state.selectedWorkspaces || new Set();
-    const flattenedMap = new Map((flattened || []).map((ws) => [ws.id, ws]));
-
-    function renderTreeIcon(kind) {
-      if (kind === 'group') {
-        return `
-          <svg class="launcher-tree-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-          </svg>
-        `;
-      }
-      return `
-        <svg class="launcher-tree-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13Z"/>
-        </svg>
-      `;
-    }
-
-    function renderTreeNode(workspace, depth, siblings, siblingIndex) {
-      if (!workspace || !workspace.id) return '';
-
-      const row = flattenedMap.get(workspace.id) || workspace;
-      const isGroup = isGroupWorkspace(row) || (Array.isArray(workspace.children) && workspace.children.length > 0);
-      const isCollapsed = isGroup && state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
-      const children = Array.isArray(workspace.children) ? workspace.children : [];
-      const nextSibling = Array.isArray(siblings) ? siblings[siblingIndex + 1] : null;
-      const rowName = row.name || (isGroup ? 'Group' : 'Untitled Workspace');
-      const safeId = escapeHtml(row.id);
-      const safeParentId = escapeHtml(row.parent_id || '');
-      const safeNextSiblingId = escapeHtml(nextSibling && nextSibling.id ? nextSibling.id : '');
-      const safeName = escapeHtml(rowName);
-      const deleteTitle = isGroup ? 'Delete group' : 'Delete workspace';
-      const checkbox = !isGroup ? `
-          <label class="launcher-tree-checkbox" aria-label="Select workspace ${safeName}">
-            <input type="checkbox" data-workspace-checkbox="${safeId}" ${selectedSet.has(row.id) ? 'checked' : ''} />
-            <span class="launcher-card-checkmark" aria-hidden="true"></span>
-          </label>
-        ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>';
-      const caret = isGroup ? `
-        <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
-          <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M7,10L12,15L17,10H7Z"/>
-          </svg>
-        </button>
-      ` : '<span class="launcher-tree-caret-placeholder" aria-hidden="true"></span>';
-      const deleteButton = `
-        <button class="launcher-tree-delete launcher-card-delete" type="button" draggable="false" data-workspace-delete="${safeId}" title="${deleteTitle}" aria-label="${deleteTitle}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-          </svg>
-        </button>
-      `;
-
-      const childHtml = children.map((child, index) => renderTreeNode(child, depth + 1, children, index)).join('');
-      const emptyHint = isGroup && children.length === 0
-        ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
-        : '';
-      const childrenWrapper = isGroup ? `
-        <div class="launcher-tree-children${children.length === 0 ? ' is-empty' : ''}" role="group" ${isCollapsed ? 'hidden' : ''} data-group-children="${safeId}">
-          ${childHtml || emptyHint}
-        </div>
-      ` : '';
-
-      return `
-        <div class="launcher-tree-node${isGroup ? ' is-group' : ' is-workspace'}${isCollapsed ? ' is-collapsed' : ''}">
-          <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? (isCollapsed ? 'Expand' : 'Collapse') : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
-            ${checkbox}
-            ${caret}
-            ${renderTreeIcon(isGroup ? 'group' : 'workspace')}
-            <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
-            ${deleteButton}
-          </div>
-          ${childrenWrapper}
-        </div>
-      `;
-    }
+    const ctx = {
+      state,
+      selectedSet: state.selectedWorkspaces || new Set(),
+      flattenedMap: new Map((flattened || []).map((ws) => [ws.id, ws]))
+    };
 
     elements.launcherGrid.innerHTML = `
       <div class="launcher-tree" role="tree" aria-label="Workspaces">
-        ${tree.map((workspace, index) => renderTreeNode(workspace, 0, tree, index)).join('')}
+        ${tree.map((workspace, index) => renderLauncherTreeNode(workspace, 0, tree, index, ctx)).join('')}
       </div>
     `;
     bindLauncherInteractions();
@@ -1644,9 +1653,19 @@ console.log('[workspace-hub.js] FILE LOADED');
     row.focus();
   }
 
+  // Escape a value for safe use inside a double-quoted attribute selector.
+  // Prefers CSS.escape; the fallback escapes the double-quote so an id that
+  // happens to contain one can't break out of the [attr="..."] selector.
+  function escapeAttrSelectorValue(value) {
+    const str = String(value);
+    return (window.CSS && typeof window.CSS.escape === 'function')
+      ? window.CSS.escape(str)
+      : str.replace(/"/g, '\\"');
+  }
+
   function focusLauncherTreeRowById(workspaceId) {
     if (!elements.launcherGrid || !workspaceId) return;
-    const safeId = (window.CSS && window.CSS.escape) ? window.CSS.escape(workspaceId) : workspaceId;
+    const safeId = escapeAttrSelectorValue(workspaceId);
     const row = elements.launcherGrid.querySelector(`.launcher-tree-row[data-workspace-id="${safeId}"]`);
     focusLauncherTreeRow(row);
   }
@@ -1807,7 +1826,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     state.launcherJustExpandedGroups = new Set();
 
     ids.forEach((id) => {
-      const safeId = (window.CSS && window.CSS.escape) ? window.CSS.escape(id) : id;
+      const safeId = escapeAttrSelectorValue(id);
       const header = elements.launcherGrid.querySelector(`[data-workspace-id="${safeId}"]`);
       const grid = elements.launcherGrid.querySelector(`[data-group-children="${safeId}"]`);
       if (header) header.classList.add('is-revealed');

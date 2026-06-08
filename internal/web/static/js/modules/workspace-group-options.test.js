@@ -12,39 +12,21 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function loadWorkspaceCreate() {
-  const source = readFileSync(new URL('./workspace-create.js', import.meta.url), 'utf8');
-  const window = {
-    addEventListener: () => {},
-    availableAgents: [],
-    selectedAgents: new Set()
-  };
+function loadGroupOptions(documentOverrides = {}) {
+  const window = {};
   const document = {
-    addEventListener: () => {},
     getElementById: () => null,
-    querySelector: () => null,
-    querySelectorAll: () => []
+    ...documentOverrides
   };
-  const context = {
-    bootstrap: {},
-    console,
-    document,
-    escapeHtml,
-    requestAnimationFrame: () => {},
-    window
-  };
+  const context = { console, document, escapeHtml, window };
 
-  // workspace-create.js delegates to the shared WorkspaceGroupOptions module,
-  // so load it into the same context first.
-  const sharedSource = readFileSync(new URL('./workspace-group-options.js', import.meta.url), 'utf8');
-  vm.runInNewContext(sharedSource, context, { filename: 'workspace-group-options.js' });
-
-  vm.runInNewContext(source, context, { filename: 'workspace-create.js' });
-  return window.WorkspaceCreate.__test;
+  const source = readFileSync(new URL('./workspace-group-options.js', import.meta.url), 'utf8');
+  vm.runInNewContext(source, context, { filename: 'workspace-group-options.js' });
+  return window.WorkspaceGroupOptions;
 }
 
-test('workspace create group options include only organization groups with depth', () => {
-  const helpers = loadWorkspaceCreate();
+test('collectWorkspaceGroupOptions returns only groups with nesting depth', () => {
+  const helpers = loadGroupOptions();
   const groups = helpers.collectWorkspaceGroupOptions([
     {
       id: 'group-1',
@@ -71,8 +53,8 @@ test('workspace create group options include only organization groups with depth
   ]);
 });
 
-test('workspace create group options render safe select options', () => {
-  const helpers = loadWorkspaceCreate();
+test('renderWorkspaceParentOptions escapes names and indents nested groups', () => {
+  const helpers = loadGroupOptions();
   const html = helpers.renderWorkspaceParentOptions([
     { id: 'group-1', name: 'Clients', depth: 0 },
     { id: 'group-2', name: 'Nested & Saved', depth: 1 }
@@ -81,4 +63,26 @@ test('workspace create group options render safe select options', () => {
   assert.match(html, /<option value="">No group<\/option>/);
   assert.match(html, /<option value="group-1">Clients<\/option>/);
   assert.match(html, /<option value="group-2">-- Nested &amp; Saved<\/option>/);
+});
+
+test('setWorkspaceParentSelectState toggles disabled without aria-disabled', () => {
+  const helpAttrs = {};
+  const helpEl = { set textContent(value) { helpAttrs.text = value; } };
+  const helpers = loadGroupOptions({ getElementById: (id) => (id === 'folderParentHelp' ? helpEl : null) });
+
+  const attrs = {};
+  const select = {
+    disabled: false,
+    setAttribute: (name, value) => { attrs[name] = value; }
+  };
+
+  helpers.setWorkspaceParentSelectState(select, 0);
+  assert.equal(select.disabled, true);
+  assert.equal(attrs['aria-disabled'], undefined);
+  assert.match(helpAttrs.text, /No groups yet/);
+
+  helpers.setWorkspaceParentSelectState(select, 2);
+  assert.equal(select.disabled, false);
+  assert.equal(attrs['aria-disabled'], undefined);
+  assert.match(helpAttrs.text, /Choose an organization-only group/);
 });
