@@ -1,0 +1,83 @@
+/* Group Details Page
+   Styles for /workspaces/{id} when the workspace is a group. Reuses the shared
+   .modern-card / Bootstrap utilities; this file holds only group-specific bits. */
+
+.group-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.group-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.group-detail-color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--accent, #6c757d);
+  flex: 0 0 auto;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.group-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary, #6c757d);
+  font-size: 0.875rem;
+}
+
+.group-detail-section {
+  margin-bottom: 1.5rem;
+}
+
+.group-detail-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.group-detail-empty {
+  color: var(--text-secondary, #6c757d);
+  font-size: 0.9rem;
+  padding: 0.75rem 0;
+}
+
+.group-detail-hint {
+  color: var(--text-secondary, #6c757d);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+#group-not-found {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.group-color-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.65rem;
+  line-height: 1;
+  color: var(--text-secondary, #6c757d);
+  background: var(--surface, #fff);
+}
+
+.group-color-btn.is-none {
+  border: 1px dashed var(--border, #ccc);
+}
+
+.group-color-btn.is-selected {
+  border-color: var(--text-primary, #111);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
+}

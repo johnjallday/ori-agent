@@ -360,6 +360,55 @@ test('launcher checkbox click handlers select without triggering workspace navig
   assert.equal(window.location.href, '/workspaces/workspace-1');
 });
 
+test('launcher group row opens details on click while the caret toggles collapse', () => {
+  const listenerElement = (overrides = {}) => {
+    const listeners = new Map();
+    return {
+      addEventListener: (type, handler) => listeners.set(type, handler),
+      dispatch: (type, event = {}) => listeners.get(type)?.(event),
+      listeners,
+      ...overrides
+    };
+  };
+
+  const groupRow = listenerElement({
+    dataset: { workspaceId: 'group-1', workspaceKind: 'group' }
+  });
+  const caretBtn = listenerElement({
+    getAttribute: (name) => (name === 'data-group-toggle' ? 'group-1' : null)
+  });
+
+  const { helpers, launcherGrid, state, window } = loadWorkspaceHub({
+    state: { workspaces: [{ id: 'group-1', kind: 'group', name: 'Clients', children: [] }] }
+  });
+
+  launcherGrid.querySelector = () => null;
+  launcherGrid.querySelectorAll = (selector) => {
+    if (selector === '[data-workspace-id]') return [groupRow];
+    if (selector === '[data-group-toggle]') return [caretBtn];
+    return [];
+  };
+
+  helpers.bindLauncherInteractions();
+
+  // Clicking the group's name/body opens its details page.
+  groupRow.dispatch('click', {});
+  assert.equal(window.location.href, '/workspaces/group-1');
+
+  // The caret toggles collapse, stops propagation, and must not navigate.
+  window.location.href = '';
+  const caretClick = {
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; }
+  };
+  caretBtn.dispatch('click', caretClick);
+  assert.equal(caretClick.stopped, true);
+  assert.equal(window.location.href, '');
+  assert.equal(state.launcherCollapsedGroups.has('group-1'), true);
+});
+
 test('launcher tree keyboard helpers move focus and ignore embedded controls', () => {
   const { helpers, launcherGrid, state } = loadWorkspaceHub({
     state: {

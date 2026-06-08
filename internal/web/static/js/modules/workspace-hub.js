@@ -1390,7 +1390,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       const groupHeader = `
-        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group ${escapeHtml(row.name || 'Group')}" aria-expanded="${isCollapsed ? 'false' : 'true'}">
+        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
           <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -1506,7 +1506,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     return `
       <div class="launcher-tree-node${isGroup ? ' is-group' : ' is-workspace'}${isCollapsed ? ' is-collapsed' : ''}">
-        <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? (isCollapsed ? 'Expand' : 'Collapse') : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
+        <div class="launcher-tree-row" role="treeitem" tabindex="0" draggable="true" data-workspace-id="${safeId}" data-workspace-kind="${isGroup ? 'group' : 'workspace'}" data-parent-id="${safeParentId}" data-next-sibling-id="${safeNextSiblingId}" ${isGroup ? `aria-expanded="${isCollapsed ? 'false' : 'true'}"` : ''} aria-label="${isGroup ? 'Open group' : 'Open workspace'} ${safeName}" style="--launcher-tree-depth: ${depth}">
           ${checkbox}
           ${caret}
           ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
@@ -1560,16 +1560,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (!elements.launcherGrid) return;
 
     elements.launcherGrid.querySelectorAll('[data-workspace-id]').forEach((card) => {
-      card.addEventListener('click', (e) => {
-        const workspaceId = card.dataset.workspaceId;
-        const workspaceKind = normalizeWorkspaceKind(card.dataset.workspaceKind);
-        if (workspaceKind === 'group') {
-          e.preventDefault();
-          toggleGroupCollapsed(workspaceId);
-          return;
-        }
-
-        navigateToWorkspace(workspaceId);
+      // Clicking a row opens its detail page — a workspace opens its workspace
+      // detail, a group opens its group details page (both live at
+      // /workspaces/{id}; the server branches on kind). The caret
+      // (data-group-toggle), checkboxes, and delete button each stopPropagation
+      // so they keep their own behavior and never trigger navigation.
+      card.addEventListener('click', () => {
+        navigateToWorkspace(card.dataset.workspaceId);
       });
 
       card.addEventListener('keydown', (e) => {

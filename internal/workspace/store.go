@@ -951,6 +951,27 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 		})
 	}
 
+	// Renaming the folder physically moved every nested member with it (e.g. a
+	// group folder containing members under sub-workspaces/), so rewrite each
+	// descendant's path prefix from the old folder root to the new one. This
+	// mirrors MoveWorkspaceFolder; without it, members of a renamed group keep
+	// stale path mappings and become orphaned.
+	for descID := range s.collectDescendantsLocked(id) {
+		oldDescRel, ok := s.idToPath[descID]
+		if !ok {
+			continue
+		}
+		rel, err := filepath.Rel(oldRelPath, oldDescRel)
+		if err != nil {
+			continue
+		}
+		newDescRel := filepath.Join(newRelPath, rel)
+		s.idToPath[descID] = newDescRel
+		if dws, ok := s.cache[descID]; ok {
+			s.registerIndexLocked(dws, newDescRel)
+		}
+	}
+
 	return nil
 }
 
