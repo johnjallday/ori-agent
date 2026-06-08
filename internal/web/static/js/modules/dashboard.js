@@ -4052,8 +4052,13 @@
   function scoreCapabilityRequirement(promptText, requirement, intentKey) {
     if (!requirement) return 0;
     var score = scoreMCPRequirement(promptText, requirement);
+    // Only boost a requirement that already has lexical evidence in the prompt.
+    // Without the score > 0 guard, every general_task prompt scores 4 on the
+    // first general_task requirement (github_ops) even with zero phrase overlap,
+    // misrouting generic asks like "summarize this week's task activity" into a
+    // GitHub/MCP setup flow.
     var preferredIntents = Array.isArray(requirement.intents) ? requirement.intents : [];
-    if (intentKey && preferredIntents.indexOf(intentKey) >= 0) {
+    if (score > 0 && intentKey && preferredIntents.indexOf(intentKey) >= 0) {
       score += 4;
     }
     return score;
