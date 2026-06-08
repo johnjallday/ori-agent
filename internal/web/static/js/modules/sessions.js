@@ -3159,24 +3159,11 @@ const sessionManager = {
       if (contextInput) contextInput.value = '';
     }
     if (parentSelect) {
-      const optionsHtml = ['<option value="">No group</option>'];
-      const flattened = [];
-      const walk = (nodes, depth) => {
-        (nodes || []).forEach((node) => {
-          if (!node || !node.id) return;
-          if (String(node.kind || '').trim() === 'group') {
-            flattened.push({ id: node.id, name: node.name || node.id, depth });
-          }
-          walk(node.children || [], depth + 1);
-        });
-      };
-      walk(this.folders || [], 0);
-      flattened.forEach((folder) => {
-        const indent = folder.depth > 0 ? `${'--'.repeat(folder.depth)} ` : '';
-        optionsHtml.push(`<option value="${this.escapeHtml(folder.id)}">${this.escapeHtml(indent + folder.name)}</option>`);
-      });
-      parentSelect.innerHTML = optionsHtml.join('');
+      const groupOptions = window.WorkspaceGroupOptions;
+      const groups = groupOptions.collectWorkspaceGroupOptions(this.folders || []);
+      parentSelect.innerHTML = groupOptions.renderWorkspaceParentOptions(groups);
       parentSelect.value = '';
+      groupOptions.setWorkspaceParentSelectState(parentSelect, groups.length);
     }
     document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
     const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')

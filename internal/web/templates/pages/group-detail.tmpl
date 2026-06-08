@@ -1,0 +1,150 @@
+{{define "group-detail"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+<link href="/css/group-detail.css" rel="stylesheet">
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div class="container-fluid py-4">
+
+        <!-- Not-found state (group missing, trashed, or not a group) -->
+        <div id="group-not-found" class="modern-card" hidden>
+          <h2 class="h5 mb-2">Group not found</h2>
+          <p class="text-secondary mb-3">This group may have been deleted or moved.</p>
+          <a href="/workspaces" class="modern-btn modern-btn-primary">Back to Workspaces</a>
+        </div>
+
+        <div id="group-detail-view">
+          <!-- Header Card -->
+          <div class="modern-card p-3 mb-3">
+            <div class="group-detail-header">
+              <div class="d-flex align-items-center gap-3">
+                <a href="/workspaces" class="modern-btn modern-btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+                  </svg>
+                  Workspaces
+                </a>
+
+                <nav aria-label="breadcrumb">
+                  <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
+                    <li class="breadcrumb-item"><a href="/workspaces" style="color: var(--text-secondary); text-decoration: none;">Workspaces</a></li>
+                    <li class="breadcrumb-item" id="group-parent-crumb" hidden><a id="group-parent-link" href="#" style="color: var(--text-secondary); text-decoration: none;">Parent group</a></li>
+                    <li class="breadcrumb-item active" aria-current="page" id="group-breadcrumb-name">Loading...</li>
+                  </ol>
+                </nav>
+              </div>
+
+              <div class="d-flex align-items-center gap-2">
+                <button id="group-edit-btn" type="button" class="modern-btn modern-btn-secondary" hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                  </svg>
+                  Edit
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div class="group-detail-title-row">
+                <span class="group-detail-color-swatch" id="group-color-swatch" aria-hidden="true"></span>
+                <h1 class="h4 mb-0" id="group-title">Loading...</h1>
+                <span class="group-detail-meta" id="group-member-count">—</span>
+              </div>
+              <p class="text-secondary mb-0 mt-2" id="group-description"></p>
+
+              <form id="group-edit-form" class="mt-3" hidden>
+                <div class="mb-2">
+                  <label class="form-label" for="group-edit-name">Name</label>
+                  <input type="text" class="form-control" id="group-edit-name" maxlength="200" required>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label" for="group-edit-description">Description</label>
+                  <textarea class="form-control" id="group-edit-description" rows="2"></textarea>
+                </div>
+                <div class="mb-2">
+                  <span class="form-label d-block">Color</span>
+                  <div id="group-edit-colors" class="d-flex gap-2 flex-wrap" role="group" aria-label="Group color"></div>
+                </div>
+                <div id="group-edit-error" class="text-danger small mb-2" role="alert" hidden></div>
+                <div class="d-flex gap-2">
+                  <button type="submit" id="group-edit-save" class="modern-btn modern-btn-primary">Save</button>
+                  <button type="button" id="group-edit-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Members -->
+          <section class="modern-card p-3 group-detail-section" aria-labelledby="group-members-heading">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h2 class="group-detail-section-title mb-0" id="group-members-heading">Members</h2>
+              <div class="d-flex gap-2">
+                <button id="group-add-member-btn" type="button" class="modern-btn modern-btn-secondary" hidden>Add existing</button>
+                <button id="group-create-member-btn" type="button" class="modern-btn modern-btn-primary" hidden>Create new</button>
+              </div>
+            </div>
+            <div id="group-members-error" class="text-danger small mb-2" role="alert" hidden></div>
+            <div id="group-add-member-picker" class="group-add-picker mb-2" hidden></div>
+
+            <form id="group-create-member-form" class="group-add-picker mb-2" hidden>
+              <div class="mb-2">
+                <label class="form-label" for="group-create-name">New workspace name</label>
+                <input type="text" class="form-control form-control-sm" id="group-create-name" maxlength="200" required>
+              </div>
+              <div class="mb-2">
+                <label class="form-label" for="group-create-description">Description</label>
+                <input type="text" class="form-control form-control-sm" id="group-create-description" maxlength="500">
+              </div>
+              <div class="d-flex gap-2">
+                <button type="submit" id="group-create-submit" class="modern-btn modern-btn-primary">Create</button>
+                <button type="button" id="group-create-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+              </div>
+            </form>
+
+            <div id="group-members-list"></div>
+          </section>
+
+          <!-- Tasks roll-up -->
+          <section class="modern-card p-3 group-detail-section" aria-labelledby="group-tasks-heading">
+            <h2 class="group-detail-section-title" id="group-tasks-heading">Tasks</h2>
+            <div id="group-tasks-list"></div>
+          </section>
+
+          <!-- Notes & Files roll-up -->
+          <section class="modern-card p-3 group-detail-section" aria-labelledby="group-notes-files-heading">
+            <h2 class="group-detail-section-title" id="group-notes-files-heading">Notes &amp; Files</h2>
+            <div id="group-notes-files-list"></div>
+          </section>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script type="module">
+    import { GroupDetailPage } from '/js/modules/group-detail.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const groupId = "{{.Extra.WorkspaceID}}";
+      if (!groupId) {
+        return;
+      }
+      const page = new GroupDetailPage(groupId);
+      try {
+        await page.init();
+      } catch (error) {
+        console.error('Failed to initialize group details page:', error);
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

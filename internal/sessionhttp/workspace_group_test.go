@@ -79,6 +79,62 @@ func TestCreateGroupCreatesFolderOnDisk(t *testing.T) {
 	}
 }
 
+func renameWorkspaceViaAPI(t *testing.T, handler *Handler, id, name string, wantCode int) {
+	t.Helper()
+	body := `{"name":"` + name + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+id+"/rename", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != wantCode {
+		t.Fatalf("rename %s: got %d, want %d: %s", id, w.Code, wantCode, w.Body.String())
+	}
+}
+
+// TestRenameGroupRenamesFolderOnDisk verifies the rename handler now renames a
+// group's backing folder (previously skipped for groups) and updates the DB
+// display name, with the file store resolving the group to its new path.
+func TestRenameGroupRenamesFolderOnDisk(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fileStore)
+
+	groupID := createTestGroup(t, handler, "BK Nerds")
+	oldPath := filepath.Join(baseDir, "bk-nerds")
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("expected group folder at %s: %v", oldPath, err)
+	}
+
+	renameWorkspaceViaAPI(t, handler, groupID, "BK Wizards", http.StatusOK)
+
+	// DB display name updated.
+	ws, err := handler.store.GetWorkspace(context.Background(), groupID)
+	if err != nil {
+		t.Fatalf("load renamed group: %v", err)
+	}
+	if ws.Name != "BK Wizards" {
+		t.Fatalf("group name = %q, want %q", ws.Name, "BK Wizards")
+	}
+
+	// Folder renamed on disk: new slug exists, old slug gone.
+	newPath := filepath.Join(baseDir, "bk-wizards")
+	if info, err := os.Stat(newPath); err != nil || !info.IsDir() {
+		t.Fatalf("expected renamed group folder at %s, err=%v", newPath, err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("expected old group folder %s to be gone, err=%v", oldPath, err)
+	}
+	if got := mustHandlerFolderPath(t, fileStore, groupID); filepath.Clean(got) != filepath.Clean(newPath) {
+		t.Fatalf("group folder path = %q, want %q", got, newPath)
+	}
+}
+
 func mustHandlerFolderPath(t *testing.T, fs *agentworkspace.FileStore, id string) string {
 	t.Helper()
 	p, err := fs.GetFolderPath(id)

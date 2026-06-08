@@ -1396,8 +1396,17 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Rename the folder if folder-based store is available
-	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
+	// Rename the backing folder when this workspace is tracked by the folder
+	// store. This now includes groups (a group is a folder that may physically
+	// contain members); RenameWithSlug rewrites nested members' paths. DB-only
+	// workspaces have no folder to rename and are skipped.
+	folderTracked := false
+	if h.workspaceStore != nil {
+		if existing, getErr := h.workspaceStore.Get(id); getErr == nil && existing != nil {
+			folderTracked = true
+		}
+	}
+	if folderTracked {
 		if err := h.workspaceStore.RenameWithSlug(id, req.Name, targetSlug); err != nil {
 			ws.Name = oldName
 			ws.FolderSlug = oldFolderSlug

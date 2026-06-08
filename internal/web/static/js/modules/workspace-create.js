@@ -393,36 +393,23 @@ async function populateWorkspaceParentSelect() {
   const select = document.getElementById('folderParentSelect');
   if (!select) return;
 
+  const groupOptions = window.WorkspaceGroupOptions;
+
   try {
     const response = await fetch('/api/workspaces?tree=true');
     if (!response.ok) throw new Error('Failed to load workspaces');
     const data = await response.json();
     const tree = data.folders || [];
+    const groups = groupOptions.collectWorkspaceGroupOptions(tree);
 
-    const flattened = [];
-    (function walk(nodes, depth) {
-      (nodes || []).forEach((node) => {
-        if (!node || !node.id) return;
-        flattened.push({ id: node.id, name: node.name || node.id, depth });
-        if (node.children && node.children.length > 0) {
-          walk(node.children, depth + 1);
-        }
-      });
-    })(tree, 0);
-
-    const options = ['<option value="">No group</option>'];
-    flattened.forEach((ws) => {
-      if (String(ws.kind || '').trim() !== 'group') return;
-      const indent = ws.depth > 0 ? `${'--'.repeat(ws.depth)} ` : '';
-      options.push(`<option value="${escapeHtml(ws.id)}">${escapeHtml(indent + ws.name)}</option>`);
-    });
-
-    select.innerHTML = options.join('');
+    select.innerHTML = groupOptions.renderWorkspaceParentOptions(groups);
     select.value = '';
+    groupOptions.setWorkspaceParentSelectState(select, groups.length);
   } catch (err) {
     console.error('Failed to populate parent select:', err);
     select.innerHTML = '<option value="">No group</option>';
     select.value = '';
+    groupOptions.setWorkspaceParentSelectState(select, 0);
   }
 }
 
@@ -749,6 +736,11 @@ function initializeWorkspaceCreationListeners() {
 window.openCreateWorkspaceModal = openCreateWorkspaceModal;
 window.toggleAgent = toggleAgent;
 window.setAvailableAgents = setAvailableAgents;
+window.WorkspaceCreate = window.WorkspaceCreate || {};
+window.WorkspaceCreate.__test = {
+  collectWorkspaceGroupOptions: window.WorkspaceGroupOptions.collectWorkspaceGroupOptions,
+  renderWorkspaceParentOptions: window.WorkspaceGroupOptions.renderWorkspaceParentOptions
+};
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', initializeWorkspaceCreationListeners);

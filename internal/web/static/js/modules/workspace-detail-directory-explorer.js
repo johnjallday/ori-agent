@@ -28,6 +28,20 @@ function formatDate(dateString) {
   return date.toLocaleDateString();
 }
 
+// describeDirectoryEntry decides how a directory tree node should be presented:
+// when the server flagged it as a registered workspace folder, it becomes an
+// openable workspace reference (label = registered name, link to /workspaces/id).
+// Pure + exported for unit testing.
+export function describeDirectoryEntry(node) {
+  const isWorkspace = !!(node && node.isWorkspace && node.workspaceId);
+  const fallback = (node && (node.name || node.path)) || 'Untitled';
+  return {
+    isWorkspace,
+    openHref: isWorkspace ? `/workspaces/${encodeURIComponent(node.workspaceId)}` : '',
+    label: isWorkspace && node.workspaceName ? node.workspaceName : fallback,
+  };
+}
+
 export class WorkspaceDirectoryExplorer {
   constructor(host) {
     this.host = host;
@@ -400,7 +414,10 @@ export class WorkspaceDirectoryExplorer {
             isDir: Boolean(item?.is_dir),
             size: Number(item?.size) || 0,
             modTime: item?.mod_time || '',
-            status: item?.status || ''
+            status: item?.status || '',
+            isWorkspace: Boolean(item?.is_workspace),
+            workspaceId: item?.workspace_id || '',
+            workspaceName: item?.workspace_name || ''
           };
         })
         .filter(Boolean);
@@ -526,6 +543,11 @@ export class WorkspaceDirectoryExplorer {
         dirNode.folderId = entry.folderId || dirNode.folderId;
         dirNode.source = entry.source || dirNode.source;
         dirNode.url = entry.url || dirNode.url;
+        if (entry.isWorkspace) {
+          dirNode.isWorkspace = true;
+          dirNode.workspaceId = entry.workspaceId || dirNode.workspaceId;
+          dirNode.workspaceName = entry.workspaceName || dirNode.workspaceName;
+        }
         return;
       }
 
@@ -766,6 +788,7 @@ export class WorkspaceDirectoryExplorer {
   renderTreeNode(node, depth, forceExpanded) {
     const encodedPath = this.encodeDataPath(node.path);
     const isDirectory = node.type === 'dir';
+    const workspaceRef = describeDirectoryEntry(node);
     const isExpanded =
       isDirectory && (forceExpanded || this.expandedPaths.has(node.path));
     const isSelected = isDirectory
@@ -810,8 +833,17 @@ export class WorkspaceDirectoryExplorer {
       ? ` draggable="true" data-attachment-id="${this.encodeDataPath(node.attachmentId)}"`
       : '';
 
+    const openWorkspaceLink = workspaceRef.isWorkspace
+      ? `
+          <a class="workspace-directory-open-ws"
+             href="${workspaceRef.openHref}"
+             data-action="open-workspace"
+             aria-label="Open workspace ${this.host.escapeHtml(workspaceRef.label)}">Open workspace</a>
+        `
+      : '';
+
     return `
-      <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''} ${isMissing ? 'is-missing' : ''}">
+      <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''} ${isMissing ? 'is-missing' : ''} ${workspaceRef.isWorkspace ? 'is-workspace' : ''}">
         <div class="workspace-directory-tree-row" style="--tree-depth:${depth};">
           ${toggleButton}
           <button type="button"
@@ -820,9 +852,11 @@ export class WorkspaceDirectoryExplorer {
                   data-path="${encodedPath}"
                   data-type="${isDirectory ? 'dir' : 'file'}"${dragAttrs}>
             <span class="workspace-directory-tree-icon">${icon}</span>
-            <span class="workspace-directory-tree-label">${this.host.escapeHtml(node.name || node.path || 'Untitled')}</span>
+            <span class="workspace-directory-tree-label">${this.host.escapeHtml(workspaceRef.label)}</span>
+            ${workspaceRef.isWorkspace ? '<span class="workspace-directory-tree-badge">Workspace</span>' : ''}
             <span class="workspace-directory-tree-meta">${this.host.escapeHtml(metaText)}</span>
           </button>
+          ${openWorkspaceLink}
         </div>
         ${childrenHtml}
       </div>

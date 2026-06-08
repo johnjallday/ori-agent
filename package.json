@@ -12,6 +12,7 @@
     "lint:fix": "eslint internal/web/static/js/ --fix",
     "format": "prettier --write 'internal/web/static/**/*.{js,css,html}'",
     "format:check": "prettier --check 'internal/web/static/**/*.{js,css,html}'",
+    "test:modules": "node --test internal/web/static/js/modules/*.test.js",
     "test": "playwright test",
     "test:smoke": "playwright test tests/smoke.spec.ts",
     "test:headed": "playwright test --headed",
