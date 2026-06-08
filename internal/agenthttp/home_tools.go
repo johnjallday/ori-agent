@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,7 +150,9 @@ func homeToolLimit(args map[string]any) int {
 		case int:
 			limit = n
 		case string:
-			fmt.Sscanf(n, "%d", &limit)
+			if parsed, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+				limit = parsed
+			}
 		}
 	}
 	if limit <= 0 {
