@@ -2275,7 +2275,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (moved to the system Trash — Undo to restore while this app session is open).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
       if (deleteAll) {
         void deleteGroupAndContents(workspaceId);
       } else {
@@ -2301,7 +2301,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   // Delete a group through the server's two-mode flow:
-  //   - 'contents'   removes the group and everything nested inside it.
+  //   - 'contents'   removes the group and everything nested inside it. On
+  //     trash-capable platforms this is a reversible soft delete: the server
+  //     moves the whole folder tree to the system Trash and answers
+  //     { trashed: true }, so the group is pushed onto the undo stack and can be
+  //     restored from the toolbar Undo button.
   //   - 'group_only' un-nests the members back to the root, then removes the
   //     empty group (server hard-blocks if any member has active work).
   async function deleteGroupViaServer(workspaceId, mode) {
@@ -2316,12 +2320,36 @@ console.log('[workspace-hub.js] FILE LOADED');
         if (window.Toast) window.Toast.error(msg);
         return;
       }
-      if (window.Toast) {
-        window.Toast.success(mode === 'contents'
-          ? `Deleted "${label}" and its contents`
-          : `Deleted group "${label}"`);
+
+      // The server reports whether the group was moved to the Trash (restorable)
+      // or permanently deleted; only offer Undo when it's restorable.
+      let trashed = false;
+      if (res.status !== 204) {
+        try {
+          const data = await res.json();
+          trashed = !!(data && data.trashed);
+        } catch (_) { /* no body */ }
       }
+
+      if (trashed) {
+        undoStack.push({ id: workspaceId, label });
+        updateUndoButton();
+      }
+
       await loadWorkspaces();
+
+      if (window.Toast) {
+        if (trashed) {
+          window.Toast.show(`Moved "${label}" and its contents to Trash — Undo to restore`, 'info', {
+            title: 'Group deleted',
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+          });
+        } else {
+          window.Toast.success(mode === 'contents'
+            ? `Deleted "${label}" and its contents`
+            : `Deleted group "${label}"`);
+        }
+      }
     } catch (err) {
       console.error('Failed to delete group:', err);
       if (window.Toast) window.Toast.error(`Failed to delete "${label}"`);

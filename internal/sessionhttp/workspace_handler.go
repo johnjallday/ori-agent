@@ -945,11 +945,11 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 // deleteGroup handles deletion of a group workspace, which (unlike a regular
 // workspace) physically contains its members. Modes (delete_mode query param):
 //   - "contents": remove the entire group folder tree (all members and nested
-//     groups) from disk and the session store.
+//     groups). On platforms with system-trash support this is a reversible soft
+//     delete (the folder tree moves to the Trash and can be restored from Undo);
+//     with delete_sessions=true or no trash support it is a permanent delete.
 //   - "group_only" (default): move each direct child out to the workspaces root
 //     (un-nest) via the move op, then remove the now-empty group folder.
-//
-// Groups are permanently deleted (not soft-trashed) in this version.
 func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request, ws *session.Workspace, deleteSessions bool) {
 	ctx := r.Context()
 	mode := strings.TrimSpace(r.URL.Query().Get("delete_mode"))
@@ -968,14 +968,36 @@ func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request, ws *sessio
 	}
 }
 
-// deleteGroupWithContents removes the group and every workspace nested inside it
-// from disk and the session store.
+// deleteGroupWithContents removes the group and every workspace nested inside it.
+// When the platform supports a system trash (and the caller didn't ask to also
+// delete sessions), the whole folder tree is moved to the Trash in one shot and
+// the group + descendants are marked trashed so the entire group can be restored
+// from Undo. Otherwise it falls through to a permanent delete from disk and the
+// session store.
 func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Context, ws *session.Workspace, deleteSessions bool) {
 	descendants, err := h.store.GetSubworkspaceIDs(ctx, ws.ID)
 	if err != nil {
 		logger.Error("Failed to load group descendants", logger.Fields{"id": ws.ID, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to delete group")
 		return
+	}
+
+	// Soft delete (default): move the group's entire folder tree to the system
+	// Trash and mark the group + every descendant trashed, preserving their rows
+	// and sessions so the whole group can be restored from Undo. Explicit
+	// delete_sessions=true requests and platforms without trash support fall
+	// through to the permanent delete below.
+	if !deleteSessions && h.workspaceStore != nil && platform.TrashSupported() {
+		if _, ferr := h.workspaceStore.Get(ws.ID); ferr == nil {
+			if err := h.trashGroupWithContents(ctx, ws, descendants); err != nil {
+				logger.Error("Failed to move group to trash", logger.Fields{"id": ws.ID, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to move group to trash")
+				return
+			}
+			logger.Info("Group moved to trash with contents", logger.Fields{"id": ws.ID, "members": len(descendants)})
+			orihttp.WriteJSON(w, map[string]any{"success": true, "id": ws.ID, "trashed": true})
+			return
+		}
 	}
 
 	// Remove every member (sessions, entry agent, SQLite row). The group's own
@@ -1139,6 +1161,55 @@ func (h *Handler) trashWorkspace(ctx context.Context, ws *session.Workspace) err
 	return nil
 }
 
+// trashGroupWithContents moves a group's entire folder tree to the system trash
+// in a single operation and marks the group and every descendant workspace
+// trashed (rows and sessions preserved) so the whole group can be restored from
+// Undo. Trash metadata is stashed only on the group: its folder tree physically
+// contains the members, so restoring the group brings them back with it.
+func (h *Handler) trashGroupWithContents(ctx context.Context, ws *session.Workspace, descendants []string) error {
+	originalPath, trashedPath, err := h.workspaceStore.Trash(ws.ID)
+	if err != nil {
+		return err
+	}
+
+	if ws.SharedData == nil {
+		ws.SharedData = map[string]any{}
+	}
+	ws.SharedData[workspaceTrashSharedDataKey] = map[string]any{
+		"original_path": originalPath,
+		"trashed_path":  trashedPath,
+		"deleted_at":    time.Now().UTC().Format(time.RFC3339),
+	}
+	ws.Status = session.WorkspaceStatusTrashed
+
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		// Roll the whole tree back out of the trash so the group isn't stranded.
+		if trashedPath != "" {
+			if _, rerr := h.workspaceStore.RestoreFromTrash(originalPath, trashedPath); rerr != nil {
+				logger.Error("Failed to roll back group trash after update error", logger.Fields{"id": ws.ID, "error": rerr})
+			}
+		}
+		return err
+	}
+
+	// Mark every descendant trashed too. Their folders moved with the group, so
+	// they only need a status flip; the group's restore metadata covers bringing
+	// the whole tree back. Failures here are non-fatal — a trashed group is
+	// pruned from the launcher wholesale, hiding its subtree regardless.
+	for _, memberID := range descendants {
+		member, mErr := h.store.GetWorkspace(ctx, memberID)
+		if mErr != nil {
+			logger.Warn("Failed to load group member for trashing", logger.Fields{"id": memberID, "error": mErr})
+			continue
+		}
+		member.Status = session.WorkspaceStatusTrashed
+		if err := h.store.UpdateWorkspace(ctx, member); err != nil {
+			logger.Warn("Failed to mark group member trashed", logger.Fields{"id": memberID, "error": err})
+		}
+	}
+	return nil
+}
+
 // restoreWorkspace handles POST /api/workspaces/{id}/restore. It moves a trashed
 // workspace's folder back out of the system trash and reactivates the record.
 func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id string) {
@@ -1185,6 +1256,28 @@ func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id st
 		logger.Error("Failed to reactivate restored workspace", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to restore workspace")
 		return
+	}
+
+	// Restoring a group's folder tree brings its nested members' folders back
+	// with it, so flip every descendant row from trashed to active to make the
+	// whole group reappear. Member rows kept their parent_id while trashed, so
+	// the subtree query still resolves them.
+	if ws.Kind == session.WorkspaceKindGroup {
+		descendants, derr := h.store.GetSubworkspaceIDs(ctx, ws.ID)
+		if derr != nil {
+			logger.Warn("Failed to load group descendants for restore", logger.Fields{"id": id, "error": derr})
+		}
+		for _, memberID := range descendants {
+			member, mErr := h.store.GetWorkspace(ctx, memberID)
+			if mErr != nil || member.Status != session.WorkspaceStatusTrashed {
+				continue
+			}
+			member.Status = session.WorkspaceStatusActive
+			delete(member.SharedData, workspaceTrashSharedDataKey)
+			if err := h.store.UpdateWorkspace(ctx, member); err != nil {
+				logger.Warn("Failed to reactivate restored group member", logger.Fields{"id": memberID, "error": err})
+			}
+		}
 	}
 
 	logger.Info("Workspace restored from trash", logger.Fields{"id": id})
