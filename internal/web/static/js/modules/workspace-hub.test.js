@@ -459,6 +459,40 @@ test('selecting a group cascades to its subtree and reconciles tri-state', () =>
   assert.deepEqual([...helpers.getTopLevelSelectedIds()], []);
 });
 
+test('select-all toggles the whole tree and reports the all-selected state', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'ws-a', kind: 'workspace', name: 'A', parent_id: 'group-1' }]
+    },
+    { id: 'ws-c', kind: 'workspace', name: 'C' }
+  ];
+  const { helpers, state } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces),
+      selectedWorkspaces: new Set()
+    }
+  });
+
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), false);
+
+  helpers.toggleSelectAllLauncherWorkspaces();
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-c'), true);
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), true);
+  // Top-level dedupes the group's child away.
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1', 'ws-c']);
+
+  // Toggling again clears everything.
+  helpers.toggleSelectAllLauncherWorkspaces();
+  assert.equal(state.selectedWorkspaces.size, 0);
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), false);
+});
+
 test('launcher group row opens details on click while the caret toggles collapse', () => {
   const listenerElement = (overrides = {}) => {
     const listeners = new Map();

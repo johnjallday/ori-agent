@@ -117,6 +117,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
     launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
     launcherCancelSelectionBtn: document.getElementById('launcherCancelSelectionBtn'),
+    launcherSelectAllBtn: document.getElementById('launcherSelectAllBtn'),
     launcherSelectionCount: document.getElementById('launcherSelectionCount'),
     launcherGroupModal: document.getElementById('launcherGroupModal'),
     launcherGroupNameInput: document.getElementById('launcherGroupNameInput'),
@@ -1550,7 +1551,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     };
 
     elements.launcherGrid.innerHTML = `
-      <div class="launcher-tree" role="tree" aria-label="Workspaces">
+      <div class="launcher-tree" role="tree" aria-label="Workspaces" aria-multiselectable="true">
         ${tree.map((workspace, index) => renderLauncherTreeNode(workspace, 0, tree, index, ctx)).join('')}
       </div>
     `;
@@ -1581,9 +1582,24 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       card.addEventListener('keydown', (e) => {
         if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
-        if (e.key === 'Enter' || e.key === ' ') {
+        const id = card.dataset.workspaceId;
+        if (e.key === 'Enter') {
+          // Enter opens the workspace/group.
           e.preventDefault();
           card.click();
+        } else if (e.key === ' ') {
+          // Space toggles selection of the focused row (cascade-aware).
+          e.preventDefault();
+          toggleLauncherWorkspaceSelection(id);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          // Delete removes the current selection, or the focused row if nothing
+          // is selected.
+          e.preventDefault();
+          if (hasLauncherSelection()) {
+            void deleteSelectedWorkspaces();
+          } else {
+            void confirmDeleteWorkspace(id);
+          }
         }
       });
     });
@@ -1601,8 +1617,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     });
 
     // Group checkboxes render an indeterminate dash when only part of their
-    // subtree is selected; that flag can't be set from the rendered HTML.
-    applyLauncherIndeterminate();
+    // subtree is selected, and selected rows get an is-selected highlight;
+    // neither can be set from the rendered HTML.
+    applyLauncherSelectionVisuals();
 
     elements.launcherGrid.querySelectorAll('[data-group-toggle]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -2145,9 +2162,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     return descendants.some((id) => set.has(id));
   }
 
-  // Mirror the selection set onto the rendered checkboxes in place (checked +
-  // indeterminate), avoiding a full re-render on every toggle.
-  function syncLauncherSelectionDom() {
+  // Paint the selection set onto the rendered rows in place: the indeterminate
+  // tri-state flag (which can't be expressed in HTML) and an `is-selected` row
+  // highlight, plus the `checked` flag when setChecked is true. Avoids a full
+  // re-render on every toggle.
+  function paintLauncherSelectionDom({ setChecked } = {}) {
     if (!elements.launcherGrid) return;
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
@@ -2155,23 +2174,62 @@ console.log('[workspace-hub.js] FILE LOADED');
       const id = input.getAttribute('data-workspace-checkbox');
       if (!id) return;
       const full = set.has(id);
-      input.checked = full;
+      if (setChecked) input.checked = full;
       input.indeterminate = !full && groupHasSelectedDescendant(id);
+      if (typeof input.closest === 'function') {
+        const row = input.closest('[data-workspace-id]');
+        if (row && row.classList && typeof row.classList.toggle === 'function') {
+          row.classList.toggle('is-selected', full);
+          if (typeof row.setAttribute === 'function') {
+            row.setAttribute('aria-selected', full ? 'true' : 'false');
+          }
+        }
+      }
     });
   }
 
-  // Apply only the indeterminate (tri-state) flag, which can't be expressed in
-  // the rendered HTML. The `checked` attribute is already correct from render,
-  // so this is the post-render companion to syncLauncherSelectionDom.
-  function applyLauncherIndeterminate() {
-    if (!elements.launcherGrid) return;
+  // After a toggle the checkbox state is driven from the set; after a render the
+  // rendered `checked` attribute is already correct so we only repaint the flags
+  // HTML can't carry (indeterminate + row highlight).
+  function syncLauncherSelectionDom() {
+    paintLauncherSelectionDom({ setChecked: true });
+  }
+
+  function applyLauncherSelectionVisuals() {
+    paintLauncherSelectionDom({ setChecked: false });
+  }
+
+  // Every workspace and group id in the tree, used to select / deselect all.
+  function getAllLauncherWorkspaceIds() {
+    const state = window.WorkspaceHubState.getState();
+    const ids = [];
+    (function walk(nodes) {
+      (nodes || []).forEach((node) => {
+        if (!node || !node.id) return;
+        ids.push(node.id);
+        if (node.children) walk(node.children);
+      });
+    })(state.workspaces || []);
+    return ids;
+  }
+
+  function areAllLauncherWorkspacesSelected() {
+    const all = getAllLauncherWorkspaceIds();
+    if (all.length === 0) return false;
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
-    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach((input) => {
-      const id = input.getAttribute('data-workspace-checkbox');
-      if (!id) return;
-      input.indeterminate = !set.has(id) && groupHasSelectedDescendant(id);
-    });
+    return all.every((id) => set.has(id));
+  }
+
+  // Select every workspace (and group), or clear when everything is already
+  // selected. `force` pins the direction (used by the keyboard shortcut).
+  function toggleSelectAllLauncherWorkspaces({ force } = {}) {
+    const state = window.WorkspaceHubState.getState();
+    const shouldSelectAll = typeof force === 'boolean' ? force : !areAllLauncherWorkspacesSelected();
+    state.selectedWorkspaces = shouldSelectAll ? new Set(getAllLauncherWorkspaceIds()) : new Set();
+    reconcileGroupSelections();
+    updateLauncherSelectionUI();
+    syncLauncherSelectionDom();
   }
 
   function hasSelectedAncestor(workspaceId) {
@@ -2199,6 +2257,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherSelectionCount) {
       elements.launcherSelectionCount.textContent = `${selectedCount} selected`;
+    }
+
+    if (elements.launcherSelectAllBtn) {
+      elements.launcherSelectAllBtn.textContent = areAllLauncherWorkspacesSelected() ? 'Deselect all' : 'Select all';
     }
 
     if (elements.launcherGroupSelectedBtn) {
@@ -2372,9 +2434,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       if (window.Toast) {
         if (undoAdds.length > 0) {
-          window.Toast.show(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash — Undo to restore`, 'info', {
+          window.Toast.show(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash`, 'info', {
             title: ids.length === 1 ? 'Deleted' : 'Items deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
           });
         } else {
           window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
@@ -2461,9 +2524,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(`Moved "${label}" and its contents to Trash — Undo to restore`, 'info', {
+          window.Toast.show(`Moved "${label}" and its contents to Trash`, 'info', {
             title: 'Group deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
           });
         } else {
           window.Toast.success(mode === 'contents'
@@ -2564,9 +2628,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       await loadWorkspaces();
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', {
+          window.Toast.show(`Moved "${label}" to Trash`, 'info', {
             title: 'Workspace deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
           });
         } else {
           window.Toast.success(`Deleted "${label}"`);
@@ -3553,6 +3618,30 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherCancelSelectionBtn.addEventListener('click', () => clearLauncherSelection());
     }
 
+    if (elements.launcherSelectAllBtn) {
+      elements.launcherSelectAllBtn.addEventListener('click', () => toggleSelectAllLauncherWorkspaces());
+    }
+
+    // Launcher-scoped keyboard shortcuts (only while the Workspaces tab is the
+    // active panel and the user isn't typing in a field): Cmd/Ctrl+A selects
+    // all, Escape clears the current selection.
+    if (elements.launcherWorkspacesPanel) {
+      elements.launcherWorkspacesPanel.addEventListener('keydown', (e) => {
+        if (elements.launcherWorkspacesPanel.hidden) return;
+        if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
+
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          toggleSelectAllLauncherWorkspaces({ force: true });
+          return;
+        }
+        if (e.key === 'Escape' && hasLauncherSelection()) {
+          e.preventDefault();
+          clearLauncherSelection();
+        }
+      });
+    }
+
     if (elements.launcherGroupSelectedBtn && elements.launcherGroupModal) {
       elements.launcherGroupSelectedBtn.addEventListener('click', () => {
         if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
@@ -3765,7 +3854,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     toggleLauncherWorkspaceSelection,
     reconcileGroupSelections,
     groupHasSelectedDescendant,
-    getTopLevelSelectedIds
+    getTopLevelSelectedIds,
+    toggleSelectAllLauncherWorkspaces,
+    areAllLauncherWorkspacesSelected
   };
 
   loadWorkspaces();

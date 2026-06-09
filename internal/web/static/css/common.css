@@ -1645,6 +1645,32 @@ h3, .h3 {
     word-wrap: break-word;
 }
 
+/* Toast inline action button (e.g. Undo) */
+.toast-action {
+    flex-shrink: 0;
+    align-self: center;
+    padding: 4px 12px;
+    border: 1px solid var(--primary-color, #1F6B4E);
+    background: transparent;
+    color: var(--primary-color, #1F6B4E);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
+}
+
+.toast-action:hover {
+    background: var(--primary-color, #1F6B4E);
+    color: #fff;
+}
+
+.toast-action:focus-visible {
+    outline: 2px solid var(--primary-color, #1F6B4E);
+    outline-offset: 2px;
+}
+
 /* Toast close button */
 .toast-close {
     flex-shrink: 0;
