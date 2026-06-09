@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -257,13 +258,18 @@ func setupGroupWithChild(t *testing.T, handler *Handler) (baseDir, groupID, chil
 	return baseDir, groupID, childID, fs
 }
 
+// TestDeleteGroupWithContents covers the permanent-delete path. delete_sessions=true
+// forces it (the default contents delete is now a reversible move to the system
+// Trash, which is covered by TestDeleteGroupWithContentsTrashable). Using the
+// permanent path here also keeps the test off the real system Trash, since the
+// temp workspace root may live on a different volume.
 func TestDeleteGroupWithContents(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
 	baseDir, groupID, childID, _ := setupGroupWithChild(t, handler)
 
-	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=contents", http.StatusNoContent)
+	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=contents&delete_sessions=true", http.StatusNoContent)
 
 	ctx := context.Background()
 	if _, err := handler.store.GetWorkspace(ctx, groupID); err != session.ErrWorkspaceNotFound {
@@ -274,6 +280,108 @@ func TestDeleteGroupWithContents(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); !os.IsNotExist(err) {
 		t.Fatalf("expected group folder removed from disk, stat err=%v", err)
+	}
+}
+
+// TestDeleteGroupWithContentsTrashable covers the reversible soft-delete path:
+// the whole group folder tree moves to the system Trash, the group and its
+// members are marked trashed (rows preserved), and a restore brings the entire
+// subtree back to active. Rooted under $HOME so the trash move (a rename into the
+// per-user trash) stays on a single volume, mirroring store_trash_test.go.
+func TestDeleteGroupWithContentsTrashable(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("path-based trash round trip not supported on %s", runtime.GOOS)
+	}
+
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("home dir: %v", err)
+	}
+	baseDir, err := os.MkdirTemp(home, ".ws-group-trash-test-*")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(baseDir) }()
+
+	fs, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fs)
+
+	groupID := createTestGroup(t, handler, "Client Work")
+	childID := createTestWorkspace(t, handler, "Brooklyn Nerds")
+	patchWorkspaceParent(t, handler, childID, groupID, http.StatusOK)
+
+	ctx := context.Background()
+
+	// Soft delete: the contents delete (without delete_sessions) trashes the tree.
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+groupID+"?confirm=true&delete_mode=contents", nil)
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete contents: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if trashed, _ := resp["trashed"].(bool); !trashed {
+		t.Fatalf("expected trashed=true in response, got %v", resp)
+	}
+
+	// Ensure the trashed folder is cleaned up even if restore fails below.
+	grp, err := handler.store.GetWorkspace(ctx, groupID)
+	if err != nil {
+		t.Fatalf("group row should survive trashing, got err=%v", err)
+	}
+	if _, trashedPath := workspaceTrashPaths(grp); trashedPath != "" {
+		defer func() { _ = os.RemoveAll(trashedPath) }()
+	}
+
+	// Group and member rows are preserved but marked trashed; folder is gone.
+	if grp.Status != session.WorkspaceStatusTrashed {
+		t.Fatalf("group status = %q, want trashed", grp.Status)
+	}
+	child, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("member row should survive trashing, got err=%v", err)
+	}
+	if child.Status != session.WorkspaceStatusTrashed {
+		t.Fatalf("member status = %q, want trashed", child.Status)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); !os.IsNotExist(err) {
+		t.Fatalf("expected group folder moved out of root, stat err=%v", err)
+	}
+
+	// Restore: the whole subtree comes back as active.
+	restoreW := httptest.NewRecorder()
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+groupID+"/restore", nil)
+	handler.HandleWorkspaces(restoreW, restoreReq)
+	if restoreW.Code != http.StatusOK {
+		t.Fatalf("restore: got %d, want 200: %s", restoreW.Code, restoreW.Body.String())
+	}
+
+	grp, err = handler.store.GetWorkspace(ctx, groupID)
+	if err != nil {
+		t.Fatalf("group after restore, got err=%v", err)
+	}
+	if grp.Status != session.WorkspaceStatusActive {
+		t.Fatalf("group status after restore = %q, want active", grp.Status)
+	}
+	child, err = handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("member after restore, got err=%v", err)
+	}
+	if child.Status != session.WorkspaceStatusActive {
+		t.Fatalf("member status after restore = %q, want active", child.Status)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); err != nil {
+		t.Fatalf("expected group folder restored to root, stat err=%v", err)
 	}
 }
 

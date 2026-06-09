@@ -117,6 +117,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
     launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
     launcherCancelSelectionBtn: document.getElementById('launcherCancelSelectionBtn'),
+    launcherSelectAllBtn: document.getElementById('launcherSelectAllBtn'),
     launcherSelectionCount: document.getElementById('launcherSelectionCount'),
     launcherGroupModal: document.getElementById('launcherGroupModal'),
     launcherGroupNameInput: document.getElementById('launcherGroupNameInput'),
@@ -1389,8 +1390,17 @@ console.log('[workspace-hub.js] FILE LOADED');
         </button>
       `;
 
+      const groupChecked = selectedSet.has(row.id);
+      const groupCheckbox = `
+        <label class="launcher-card-checkbox" aria-label="Select group ${escapeHtml(row.name || 'Group')}">
+          <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${groupChecked ? 'checked' : ''} />
+          <span class="launcher-card-checkmark" aria-hidden="true"></span>
+        </label>
+      `;
+
       const groupHeader = `
-        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
+        <div class="launcher-card-item launcher-group-header has-selection-checkbox" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
+          ${groupCheckbox}
           <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -1473,12 +1483,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     const safeNextSiblingId = escapeHtml(nextSibling && nextSibling.id ? nextSibling.id : '');
     const safeName = escapeHtml(rowName);
     const deleteTitle = isGroup ? 'Delete group' : 'Delete workspace';
-    const checkbox = !isGroup ? `
-        <label class="launcher-tree-checkbox" aria-label="Select workspace ${safeName}">
+    const selectLabel = isGroup ? 'Select group' : 'Select workspace';
+    const checkbox = `
+        <label class="launcher-tree-checkbox" aria-label="${selectLabel} ${safeName}">
           <input type="checkbox" data-workspace-checkbox="${safeId}" ${selectedSet.has(row.id) ? 'checked' : ''} />
           <span class="launcher-card-checkmark" aria-hidden="true"></span>
         </label>
-      ` : '<span class="launcher-tree-checkbox-placeholder" aria-hidden="true"></span>';
+      `;
     const caret = isGroup ? `
       <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
         <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1540,7 +1551,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     };
 
     elements.launcherGrid.innerHTML = `
-      <div class="launcher-tree" role="tree" aria-label="Workspaces">
+      <div class="launcher-tree" role="tree" aria-label="Workspaces" aria-multiselectable="true">
         ${tree.map((workspace, index) => renderLauncherTreeNode(workspace, 0, tree, index, ctx)).join('')}
       </div>
     `;
@@ -1571,9 +1582,24 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       card.addEventListener('keydown', (e) => {
         if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
-        if (e.key === 'Enter' || e.key === ' ') {
+        const id = card.dataset.workspaceId;
+        if (e.key === 'Enter') {
+          // Enter opens the workspace/group.
           e.preventDefault();
           card.click();
+        } else if (e.key === ' ') {
+          // Space toggles selection of the focused row (cascade-aware).
+          e.preventDefault();
+          toggleLauncherWorkspaceSelection(id);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          // Delete removes the current selection, or the focused row if nothing
+          // is selected.
+          e.preventDefault();
+          if (hasLauncherSelection()) {
+            void deleteSelectedWorkspaces();
+          } else {
+            void confirmDeleteWorkspace(id);
+          }
         }
       });
     });
@@ -1589,6 +1615,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     elements.launcherGrid.querySelectorAll('.launcher-card-checkbox, .launcher-tree-checkbox').forEach((checkboxShell) => {
       checkboxShell.addEventListener('click', (e) => e.stopPropagation());
     });
+
+    // Group checkboxes render an indeterminate dash when only part of their
+    // subtree is selected, and selected rows get an is-selected highlight;
+    // neither can be set from the rendered HTML.
+    applyLauncherSelectionVisuals();
 
     elements.launcherGrid.querySelectorAll('[data-group-toggle]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -2075,29 +2106,161 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const next = new Set(state.selectedWorkspaces);
     const shouldSelect = typeof force === 'boolean' ? force : !next.has(workspaceId);
-    if (shouldSelect) next.add(workspaceId);
-    else next.delete(workspaceId);
+
+    // Cascade: toggling a group toggles its whole subtree, so a checked group
+    // means "this branch and everything in it." Leaves have no descendants.
+    const ids = [workspaceId, ...collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false })];
+    ids.forEach((id) => {
+      if (shouldSelect) next.add(id);
+      else next.delete(id);
+    });
 
     state.selectedWorkspaces = next;
 
-    // Visual update
-    const card = elements.launcherGrid.querySelector(`[data-workspace-id="${workspaceId}"]`);
-    if (card) {
-      const checkbox = card.querySelector('input[type="checkbox"]');
-      if (checkbox) {
-        checkbox.checked = shouldSelect;
+    // A group is "selected" only when its entire subtree is; reconcile ancestor
+    // groups so a partially-filled branch drops out of the set and renders as an
+    // indeterminate dash instead.
+    reconcileGroupSelections();
+    updateLauncherSelectionUI();
+    syncLauncherSelectionDom();
+  }
+
+  // A group counts as selected only when every descendant is selected. Walk the
+  // tree post-order (children before parents) so nested groups settle correctly
+  // and the result is independent of which checkbox was clicked.
+  function reconcileGroupSelections() {
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces;
+    if (!set) return;
+    const tree = Array.isArray(state.workspaces) ? state.workspaces : [];
+
+    function visit(node) {
+      if (!node || !node.id) return false;
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length === 0) {
+        // Leaf, or an empty group: its own membership is the ground truth.
+        return set.has(node.id);
       }
+      let allSelected = true;
+      children.forEach((child) => {
+        if (!visit(child)) allSelected = false;
+      });
+      if (allSelected) set.add(node.id);
+      else set.delete(node.id);
+      return allSelected;
     }
 
+    tree.forEach(visit);
+  }
+
+  // True when a group isn't fully selected but at least one descendant is, i.e.
+  // its checkbox should render as an indeterminate dash.
+  function groupHasSelectedDescendant(groupId) {
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces || new Set();
+    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], groupId, { includeRoot: false });
+    return descendants.some((id) => set.has(id));
+  }
+
+  // Paint the selection set onto the rendered rows in place: the indeterminate
+  // tri-state flag (which can't be expressed in HTML) and an `is-selected` row
+  // highlight, plus the `checked` flag when setChecked is true. Avoids a full
+  // re-render on every toggle.
+  function paintLauncherSelectionDom({ setChecked } = {}) {
+    if (!elements.launcherGrid) return;
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces || new Set();
+    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach((input) => {
+      const id = input.getAttribute('data-workspace-checkbox');
+      if (!id) return;
+      const full = set.has(id);
+      if (setChecked) input.checked = full;
+      input.indeterminate = !full && groupHasSelectedDescendant(id);
+      if (typeof input.closest === 'function') {
+        const row = input.closest('[data-workspace-id]');
+        if (row && row.classList && typeof row.classList.toggle === 'function') {
+          row.classList.toggle('is-selected', full);
+          if (typeof row.setAttribute === 'function') {
+            row.setAttribute('aria-selected', full ? 'true' : 'false');
+          }
+        }
+      }
+    });
+  }
+
+  // After a toggle the checkbox state is driven from the set; after a render the
+  // rendered `checked` attribute is already correct so we only repaint the flags
+  // HTML can't carry (indeterminate + row highlight).
+  function syncLauncherSelectionDom() {
+    paintLauncherSelectionDom({ setChecked: true });
+  }
+
+  function applyLauncherSelectionVisuals() {
+    paintLauncherSelectionDom({ setChecked: false });
+  }
+
+  // Every workspace and group id in the tree, used to select / deselect all.
+  function getAllLauncherWorkspaceIds() {
+    const state = window.WorkspaceHubState.getState();
+    const ids = [];
+    (function walk(nodes) {
+      (nodes || []).forEach((node) => {
+        if (!node || !node.id) return;
+        ids.push(node.id);
+        if (node.children) walk(node.children);
+      });
+    })(state.workspaces || []);
+    return ids;
+  }
+
+  function areAllLauncherWorkspacesSelected() {
+    const all = getAllLauncherWorkspaceIds();
+    if (all.length === 0) return false;
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces || new Set();
+    return all.every((id) => set.has(id));
+  }
+
+  // Select every workspace (and group), or clear when everything is already
+  // selected. `force` pins the direction (used by the keyboard shortcut).
+  function toggleSelectAllLauncherWorkspaces({ force } = {}) {
+    const state = window.WorkspaceHubState.getState();
+    const shouldSelectAll = typeof force === 'boolean' ? force : !areAllLauncherWorkspacesSelected();
+    state.selectedWorkspaces = shouldSelectAll ? new Set(getAllLauncherWorkspaceIds()) : new Set();
+    reconcileGroupSelections();
     updateLauncherSelectionUI();
+    syncLauncherSelectionDom();
+  }
+
+  function hasSelectedAncestor(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces || new Set();
+    let parentId = getWorkspaceParentId(workspaceId);
+    while (parentId) {
+      if (set.has(parentId)) return true;
+      parentId = getWorkspaceParentId(parentId);
+    }
+    return false;
+  }
+
+  // Selected ids whose ancestors are not also selected. Bulk actions operate on
+  // these so a checked group is treated as one branch (its selected descendants
+  // are deduped under it) instead of acted on member-by-member.
+  function getTopLevelSelectedIds() {
+    const state = window.WorkspaceHubState.getState();
+    const set = state.selectedWorkspaces || new Set();
+    return Array.from(set).filter((id) => !hasSelectedAncestor(id));
   }
 
   function updateLauncherSelectionUI() {
-    const state = window.WorkspaceHubState.getState();
-    const selectedCount = state.selectedWorkspaces ? state.selectedWorkspaces.size : 0;
+    const selectedCount = getTopLevelSelectedIds().length;
 
     if (elements.launcherSelectionCount) {
       elements.launcherSelectionCount.textContent = `${selectedCount} selected`;
+    }
+
+    if (elements.launcherSelectAllBtn) {
+      elements.launcherSelectAllBtn.textContent = areAllLauncherWorkspacesSelected() ? 'Deselect all' : 'Select all';
     }
 
     if (elements.launcherGroupSelectedBtn) {
@@ -2239,16 +2402,47 @@ console.log('[workspace-hub.js] FILE LOADED');
   async function deleteWorkspacesByIds(ids) {
     if (!ids || ids.length === 0) return;
 
+    const undoAdds = [];
     try {
       for (const id of ids) {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true`, { method: 'DELETE' });
+        const isGroup = workspaceIsGroup(id);
+        const label = getWorkspaceLabel(id) || (isGroup ? 'Group' : 'Workspace');
+        // A selected group is deleted with its contents (the whole branch); a
+        // plain workspace is moved to the Trash. Both report { trashed } when the
+        // delete is reversible, so it can be pushed onto the undo stack.
+        const url = isGroup
+          ? `/api/workspaces/${encodeURIComponent(id)}?confirm=true&delete_mode=contents`
+          : `/api/workspaces/${encodeURIComponent(id)}?confirm=true`;
+        const response = await fetch(url, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
           const text = await response.text();
           throw new Error(text || 'Failed to delete workspace');
         }
+
+        let trashed = false;
+        if (response.status !== 204 && response.status !== 404) {
+          try {
+            const data = await response.json();
+            trashed = !!(data && data.trashed);
+          } catch (_) { /* no body */ }
+        }
+        if (trashed) undoAdds.push({ id, label });
       }
 
-      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
+      undoAdds.forEach((entry) => undoStack.push(entry));
+      if (undoAdds.length > 0) updateUndoButton();
+
+      if (window.Toast) {
+        if (undoAdds.length > 0) {
+          window.Toast.show(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash`, 'info', {
+            title: ids.length === 1 ? 'Deleted' : 'Items deleted',
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
+          });
+        } else {
+          window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
+        }
+      }
 
       clearLauncherSelection({ render: false });
       await loadWorkspaces();
@@ -2265,7 +2459,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (moved to the system Trash — Undo to restore while this app session is open).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
       if (deleteAll) {
         void deleteGroupAndContents(workspaceId);
       } else {
@@ -2291,7 +2485,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   // Delete a group through the server's two-mode flow:
-  //   - 'contents'   removes the group and everything nested inside it.
+  //   - 'contents'   removes the group and everything nested inside it. On
+  //     trash-capable platforms this is a reversible soft delete: the server
+  //     moves the whole folder tree to the system Trash and answers
+  //     { trashed: true }, so the group is pushed onto the undo stack and can be
+  //     restored from the toolbar Undo button.
   //   - 'group_only' un-nests the members back to the root, then removes the
   //     empty group (server hard-blocks if any member has active work).
   async function deleteGroupViaServer(workspaceId, mode) {
@@ -2306,12 +2504,37 @@ console.log('[workspace-hub.js] FILE LOADED');
         if (window.Toast) window.Toast.error(msg);
         return;
       }
-      if (window.Toast) {
-        window.Toast.success(mode === 'contents'
-          ? `Deleted "${label}" and its contents`
-          : `Deleted group "${label}"`);
+
+      // The server reports whether the group was moved to the Trash (restorable)
+      // or permanently deleted; only offer Undo when it's restorable.
+      let trashed = false;
+      if (res.status !== 204) {
+        try {
+          const data = await res.json();
+          trashed = !!(data && data.trashed);
+        } catch (_) { /* no body */ }
       }
+
+      if (trashed) {
+        undoStack.push({ id: workspaceId, label });
+        updateUndoButton();
+      }
+
       await loadWorkspaces();
+
+      if (window.Toast) {
+        if (trashed) {
+          window.Toast.show(`Moved "${label}" and its contents to Trash`, 'info', {
+            title: 'Group deleted',
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
+          });
+        } else {
+          window.Toast.success(mode === 'contents'
+            ? `Deleted "${label}" and its contents`
+            : `Deleted group "${label}"`);
+        }
+      }
     } catch (err) {
       console.error('Failed to delete group:', err);
       if (window.Toast) window.Toast.error(`Failed to delete "${label}"`);
@@ -2405,9 +2628,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       await loadWorkspaces();
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(`Moved "${label}" to Trash — Undo to restore`, 'info', {
+          window.Toast.show(`Moved "${label}" to Trash`, 'info', {
             title: 'Workspace deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS
+            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
           });
         } else {
           window.Toast.success(`Deleted "${label}"`);
@@ -2448,7 +2672,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (!workspaceId) return;
 
     // Groups (with children) remain an explicit, confirmed operation since they
-    // can remove many workspaces' contents at once and are not moved to the trash.
+    // can affect many workspaces at once; the modal lets the user choose between
+    // un-nesting the members or deleting the whole branch (reversibly, to Trash).
     if (workspaceHasChildren(workspaceId) || workspaceIsGroup(workspaceId)) {
       openDeleteGroupModal(workspaceId);
       return;
@@ -2467,8 +2692,9 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function deleteSelectedWorkspaces() {
-    const state = window.WorkspaceHubState.getState();
-    const selected = Array.from(state.selectedWorkspaces || []);
+    // Top-level ids only: a checked group is deleted as one branch, so its
+    // selected descendants are deduped under it instead of deleted separately.
+    const selected = getTopLevelSelectedIds();
     if (selected.length === 0) return;
 
     if (selected.length === 1) {
@@ -2480,18 +2706,18 @@ console.log('[workspace-hub.js] FILE LOADED');
     const selectedWorkspaces = selected.length - selectedGroups;
     const details = [];
     if (selectedWorkspaces > 0) {
-      details.push(`${selectedWorkspaces} workspace${selectedWorkspaces === 1 ? '' : 's'} will be moved to the system Trash when possible.`);
+      details.push(`${selectedWorkspaces} workspace${selectedWorkspaces === 1 ? '' : 's'} will be moved to the system Trash.`);
     }
     if (selectedGroups > 0) {
-      details.push(`${selectedGroups} group${selectedGroups === 1 ? '' : 's'} will be removed from the launcher. Child workspaces are only deleted if they are also selected.`);
+      details.push(`${selectedGroups} group${selectedGroups === 1 ? '' : 's'} and ${selectedGroups === 1 ? 'its' : 'their'} contents will be moved to the system Trash.`);
     }
-    details.push('Continue?');
+    details.push('You can Undo to restore. Continue?');
 
     const confirmed = await showWorkspaceDeleteConfirm({
-      title: `Delete ${selected.length} selected items?`,
+      title: `Delete ${selected.length} selected item${selected.length === 1 ? '' : 's'}?`,
       message: details.join(' '),
-      variant: selectedGroups > 0 ? 'delete' : 'trash',
-      confirmLabel: selectedGroups > 0 ? 'Delete Selected' : 'Move to Trash'
+      variant: 'trash',
+      confirmLabel: 'Move to Trash'
     });
     if (!confirmed) return;
 
@@ -2499,8 +2725,10 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function createGroupFromSelection() {
-    const state = window.WorkspaceHubState.getState();
-    const selected = Array.from(state.selectedWorkspaces || []);
+    // Top-level ids only: moving a checked group into the new group carries its
+    // members with it, so we must not also move the members (that would flatten
+    // them out of their group).
+    const selected = getTopLevelSelectedIds();
     if (selected.length === 0) return;
 
     const name = (elements.launcherGroupNameInput?.value || '').trim();
@@ -3390,6 +3618,30 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherCancelSelectionBtn.addEventListener('click', () => clearLauncherSelection());
     }
 
+    if (elements.launcherSelectAllBtn) {
+      elements.launcherSelectAllBtn.addEventListener('click', () => toggleSelectAllLauncherWorkspaces());
+    }
+
+    // Launcher-scoped keyboard shortcuts (only while the Workspaces tab is the
+    // active panel and the user isn't typing in a field): Cmd/Ctrl+A selects
+    // all, Escape clears the current selection.
+    if (elements.launcherWorkspacesPanel) {
+      elements.launcherWorkspacesPanel.addEventListener('keydown', (e) => {
+        if (elements.launcherWorkspacesPanel.hidden) return;
+        if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
+
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          toggleSelectAllLauncherWorkspaces({ force: true });
+          return;
+        }
+        if (e.key === 'Escape' && hasLauncherSelection()) {
+          e.preventDefault();
+          clearLauncherSelection();
+        }
+      });
+    }
+
     if (elements.launcherGroupSelectedBtn && elements.launcherGroupModal) {
       elements.launcherGroupSelectedBtn.addEventListener('click', () => {
         if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
@@ -3598,7 +3850,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     renderLauncherTree,
     setLauncherViewPreference,
     setLauncherViewMode,
-    shouldIgnoreLauncherTreeKeyboardEvent
+    shouldIgnoreLauncherTreeKeyboardEvent,
+    toggleLauncherWorkspaceSelection,
+    reconcileGroupSelections,
+    groupHasSelectedDescendant,
+    getTopLevelSelectedIds,
+    toggleSelectAllLauncherWorkspaces,
+    areAllLauncherWorkspacesSelected
   };
 
   loadWorkspaces();

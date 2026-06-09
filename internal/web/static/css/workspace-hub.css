@@ -2701,8 +2701,8 @@ button.hub-stat[hidden] {
 
 .launcher-selection-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
   background: rgba(31, 107, 78, 0.08);
@@ -2720,9 +2720,47 @@ button.hub-stat[hidden] {
   color: var(--text-primary);
 }
 
+.launcher-select-all-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-primary, #1F6B4E);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.launcher-select-all-btn:hover {
+  color: var(--text-primary);
+}
+
+.launcher-select-all-btn:focus-visible {
+  outline: 2px solid var(--accent-primary, #1F6B4E);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .launcher-selection-actions {
   display: flex;
   gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* Selected-row highlight (set via JS in addition to the checkbox state). */
+.launcher-card-item.is-selected {
+  border-color: rgba(31, 107, 78, 0.6);
+  box-shadow: 0 0 0 1px rgba(31, 107, 78, 0.45), 0 6px 16px rgba(31, 107, 78, 0.12);
+}
+
+.launcher-tree-row.is-selected {
+  background: rgba(31, 107, 78, 0.12);
+  border-color: rgba(31, 107, 78, 0.32);
+}
+
+.launcher-group-header.is-selected {
+  background: rgba(31, 107, 78, 0.16);
 }
 
 @media (max-width: 1200px) {
@@ -3224,6 +3262,27 @@ button.hub-stat[hidden] {
   border: solid #1F6B4E;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
+}
+
+/* Indeterminate: a group with only part of its subtree selected shows a dash
+   instead of a check. (Set via JS — :indeterminate can't be expressed in HTML.) */
+.launcher-card-checkbox input:indeterminate + .launcher-card-checkmark,
+.launcher-tree-checkbox input:indeterminate + .launcher-card-checkmark {
+  background: rgba(31, 107, 78, 0.18);
+  border-color: rgba(31, 107, 78, 0.6);
+}
+
+.launcher-card-checkbox input:indeterminate + .launcher-card-checkmark::after,
+.launcher-tree-checkbox input:indeterminate + .launcher-card-checkmark::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  height: 2px;
+  border-radius: 1px;
+  background: #1F6B4E;
+  transform: translateY(-50%);
 }
 
 .launcher-card-delete {

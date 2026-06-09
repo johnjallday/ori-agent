@@ -64,6 +64,44 @@ function flattenWorkspaces(workspaces, depth = 0, parentId = '') {
   return flattened;
 }
 
+// Faithful port of WorkspaceHubUtils.collectWorkspaceDescendantIds so cascade /
+// tri-state selection logic can be exercised against a real subtree.
+function collectWorkspaceDescendantIds(workspaces, rootId, { includeRoot = false } = {}) {
+  const ids = [];
+  if (!rootId) return ids;
+  function walk(nodes, inSubtree) {
+    (nodes || []).forEach((node) => {
+      if (!node || !node.id) return;
+      const isRoot = node.id === rootId;
+      const nextInSubtree = inSubtree || isRoot;
+      if (nextInSubtree) {
+        if (isRoot) {
+          if (includeRoot) ids.push(node.id);
+        } else {
+          ids.push(node.id);
+        }
+      }
+      if (node.children && node.children.length > 0) walk(node.children, nextInSubtree);
+    });
+  }
+  walk(workspaces, false);
+  return ids;
+}
+
+// Build the id -> node map the hub keeps in state.workspaceMap, used by
+// parent/ancestor lookups in the selection helpers.
+function buildWorkspaceMap(tree) {
+  const map = new Map();
+  (function walk(nodes) {
+    (nodes || []).forEach((node) => {
+      if (!node || !node.id) return;
+      map.set(node.id, node);
+      if (node.children) walk(node.children);
+    });
+  })(tree);
+  return map;
+}
+
 function createKeyboardRow({ id, kind = 'workspace', expanded = null, hidden = false, parentRow = null } = {}) {
   const listeners = new Map();
   const row = {
@@ -182,7 +220,7 @@ function loadWorkspaceHub(overrides = {}) {
       resetTaskFilters: () => {}
     },
     WorkspaceHubUtils: {
-      collectWorkspaceDescendantIds: () => [],
+      collectWorkspaceDescendantIds,
       flattenWorkspaces,
       formatDate: (value) => String(value || '')
     },
@@ -282,7 +320,10 @@ test('launcher tree renders minimal hierarchy with always-available workspace ch
   assert.match(launcherGrid.innerHTML, /aria-expanded="true"/);
   assert.match(launcherGrid.innerHTML, /class="launcher-tree-checkbox"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1" checked/);
-  assert.match(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
+  // Groups are now selectable too: their rows render a real checkbox, not a placeholder.
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-2"/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
   assert.match(launcherGrid.innerHTML, /Drop workspaces here/);
   assert.doesNotMatch(launcherGrid.innerHTML, /No description yet/);
@@ -291,7 +332,12 @@ test('launcher tree renders minimal hierarchy with always-available workspace ch
 
 test('launcher cards render always-available workspace checkboxes without select-mode attributes', () => {
   const workspaces = [
-    { id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work' },
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work', parent_id: 'group-1' }]
+    },
     { id: 'workspace-2', kind: 'workspace', name: 'UI' }
   ];
   const flattened = flattenWorkspaces(workspaces);
@@ -309,6 +355,9 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.match(launcherGrid.innerHTML, /class="launcher-card-checkbox"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-2" checked/);
+  // Group headers are selectable too: the header card gets a checkbox.
+  assert.match(launcherGrid.innerHTML, /launcher-card-item launcher-group-header has-selection-checkbox/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
 });
 
@@ -358,6 +407,90 @@ test('launcher checkbox click handlers select without triggering workspace navig
 
   workspaceRow.dispatch('click', {});
   assert.equal(window.location.href, '/workspaces/workspace-1');
+});
+
+test('selecting a group cascades to its subtree and reconciles tri-state', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [
+        { id: 'ws-a', kind: 'workspace', name: 'A', parent_id: 'group-1' },
+        { id: 'ws-b', kind: 'workspace', name: 'B', parent_id: 'group-1' }
+      ]
+    },
+    { id: 'ws-c', kind: 'workspace', name: 'C' }
+  ];
+  const { helpers, state } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces),
+      selectedWorkspaces: new Set()
+    }
+  });
+
+  // Checking a group selects the whole branch; top-level dedupes to the group.
+  helpers.toggleLauncherWorkspaceSelection('group-1', { force: true });
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-b'), true);
+  assert.equal(helpers.groupHasSelectedDescendant('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1']);
+
+  // Unchecking a child drops the group out of the set (renders indeterminate).
+  helpers.toggleLauncherWorkspaceSelection('ws-a', { force: false });
+  assert.equal(state.selectedWorkspaces.has('group-1'), false);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), false);
+  assert.equal(state.selectedWorkspaces.has('ws-b'), true);
+  assert.equal(helpers.groupHasSelectedDescendant('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['ws-b']);
+
+  // Re-checking the last missing child fills the branch, so the group is whole
+  // again and reconciles back to selected.
+  helpers.toggleLauncherWorkspaceSelection('ws-b', { force: true });
+  helpers.toggleLauncherWorkspaceSelection('ws-a', { force: true });
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1']);
+
+  // Unchecking the group clears the whole branch.
+  helpers.toggleLauncherWorkspaceSelection('group-1', { force: false });
+  assert.equal(state.selectedWorkspaces.size, 0);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()], []);
+});
+
+test('select-all toggles the whole tree and reports the all-selected state', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'ws-a', kind: 'workspace', name: 'A', parent_id: 'group-1' }]
+    },
+    { id: 'ws-c', kind: 'workspace', name: 'C' }
+  ];
+  const { helpers, state } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces),
+      selectedWorkspaces: new Set()
+    }
+  });
+
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), false);
+
+  helpers.toggleSelectAllLauncherWorkspaces();
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-c'), true);
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), true);
+  // Top-level dedupes the group's child away.
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1', 'ws-c']);
+
+  // Toggling again clears everything.
+  helpers.toggleSelectAllLauncherWorkspaces();
+  assert.equal(state.selectedWorkspaces.size, 0);
+  assert.equal(helpers.areAllLauncherWorkspacesSelected(), false);
 });
 
 test('launcher group row opens details on click while the caret toggles collapse', () => {

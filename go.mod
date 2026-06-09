@@ -5,14 +5,14 @@ go 1.25.11
 require (
 	fyne.io/fyne/v2 v2.7.4
 	github.com/BurntSushi/toml v1.6.0
-	github.com/anthropics/anthropic-sdk-go v1.46.0
+	github.com/anthropics/anthropic-sdk-go v1.48.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getlantern/systray v1.2.2
 	github.com/google/uuid v1.6.0
-	github.com/invopop/jsonschema v0.13.0
+	github.com/invopop/jsonschema v0.14.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/openai/openai-go/v3 v3.38.0
+	github.com/openai/openai-go/v3 v3.39.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/crypto v0.52.0
@@ -21,7 +21,7 @@ require (
 	golang.org/x/sys v0.45.0
 	golang.org/x/text v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.51.0
+	modernc.org/sqlite v1.52.0
 )
 
 require (
@@ -59,13 +59,13 @@ require (
 	github.com/leaanthony/gosod v1.0.4 // indirect
 	github.com/leaanthony/slicer v1.6.0 // indirect
 	github.com/leaanthony/u v1.1.1 // indirect
-	github.com/mailru/easyjson v0.9.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.6.1 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -85,13 +85,13 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.23 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	modernc.org/libc v1.72.5 // indirect
