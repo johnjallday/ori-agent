@@ -1186,7 +1186,11 @@ func (h *Handler) trashGroupWithContents(ctx context.Context, ws *session.Worksp
 		// Roll the whole tree back out of the trash so the group isn't stranded.
 		if trashedPath != "" {
 			if _, rerr := h.workspaceStore.RestoreFromTrash(originalPath, trashedPath); rerr != nil {
+				// Both the update and its rollback failed: the folder tree is in
+				// the Trash but the DB record isn't marked trashed. Surface both so
+				// the caller knows the on-disk and DB states have diverged.
 				logger.Error("Failed to roll back group trash after update error", logger.Fields{"id": ws.ID, "error": rerr})
+				return fmt.Errorf("update failed: %w; rollback also failed: %v", err, rerr)
 			}
 		}
 		return err
