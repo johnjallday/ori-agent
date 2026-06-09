@@ -64,6 +64,44 @@ function flattenWorkspaces(workspaces, depth = 0, parentId = '') {
   return flattened;
 }
 
+// Faithful port of WorkspaceHubUtils.collectWorkspaceDescendantIds so cascade /
+// tri-state selection logic can be exercised against a real subtree.
+function collectWorkspaceDescendantIds(workspaces, rootId, { includeRoot = false } = {}) {
+  const ids = [];
+  if (!rootId) return ids;
+  function walk(nodes, inSubtree) {
+    (nodes || []).forEach((node) => {
+      if (!node || !node.id) return;
+      const isRoot = node.id === rootId;
+      const nextInSubtree = inSubtree || isRoot;
+      if (nextInSubtree) {
+        if (isRoot) {
+          if (includeRoot) ids.push(node.id);
+        } else {
+          ids.push(node.id);
+        }
+      }
+      if (node.children && node.children.length > 0) walk(node.children, nextInSubtree);
+    });
+  }
+  walk(workspaces, false);
+  return ids;
+}
+
+// Build the id -> node map the hub keeps in state.workspaceMap, used by
+// parent/ancestor lookups in the selection helpers.
+function buildWorkspaceMap(tree) {
+  const map = new Map();
+  (function walk(nodes) {
+    (nodes || []).forEach((node) => {
+      if (!node || !node.id) return;
+      map.set(node.id, node);
+      if (node.children) walk(node.children);
+    });
+  })(tree);
+  return map;
+}
+
 function createKeyboardRow({ id, kind = 'workspace', expanded = null, hidden = false, parentRow = null } = {}) {
   const listeners = new Map();
   const row = {
@@ -182,7 +220,7 @@ function loadWorkspaceHub(overrides = {}) {
       resetTaskFilters: () => {}
     },
     WorkspaceHubUtils: {
-      collectWorkspaceDescendantIds: () => [],
+      collectWorkspaceDescendantIds,
       flattenWorkspaces,
       formatDate: (value) => String(value || '')
     },
@@ -369,6 +407,56 @@ test('launcher checkbox click handlers select without triggering workspace navig
 
   workspaceRow.dispatch('click', {});
   assert.equal(window.location.href, '/workspaces/workspace-1');
+});
+
+test('selecting a group cascades to its subtree and reconciles tri-state', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [
+        { id: 'ws-a', kind: 'workspace', name: 'A', parent_id: 'group-1' },
+        { id: 'ws-b', kind: 'workspace', name: 'B', parent_id: 'group-1' }
+      ]
+    },
+    { id: 'ws-c', kind: 'workspace', name: 'C' }
+  ];
+  const { helpers, state } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces),
+      selectedWorkspaces: new Set()
+    }
+  });
+
+  // Checking a group selects the whole branch; top-level dedupes to the group.
+  helpers.toggleLauncherWorkspaceSelection('group-1', { force: true });
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), true);
+  assert.equal(state.selectedWorkspaces.has('ws-b'), true);
+  assert.equal(helpers.groupHasSelectedDescendant('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1']);
+
+  // Unchecking a child drops the group out of the set (renders indeterminate).
+  helpers.toggleLauncherWorkspaceSelection('ws-a', { force: false });
+  assert.equal(state.selectedWorkspaces.has('group-1'), false);
+  assert.equal(state.selectedWorkspaces.has('ws-a'), false);
+  assert.equal(state.selectedWorkspaces.has('ws-b'), true);
+  assert.equal(helpers.groupHasSelectedDescendant('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['ws-b']);
+
+  // Re-checking the last missing child fills the branch, so the group is whole
+  // again and reconciles back to selected.
+  helpers.toggleLauncherWorkspaceSelection('ws-b', { force: true });
+  helpers.toggleLauncherWorkspaceSelection('ws-a', { force: true });
+  assert.equal(state.selectedWorkspaces.has('group-1'), true);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()].sort(), ['group-1']);
+
+  // Unchecking the group clears the whole branch.
+  helpers.toggleLauncherWorkspaceSelection('group-1', { force: false });
+  assert.equal(state.selectedWorkspaces.size, 0);
+  assert.deepEqual([...helpers.getTopLevelSelectedIds()], []);
 });
 
 test('launcher group row opens details on click while the caret toggles collapse', () => {

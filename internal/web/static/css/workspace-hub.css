@@ -3226,6 +3226,27 @@ button.hub-stat[hidden] {
   transform: rotate(45deg);
 }
 
+/* Indeterminate: a group with only part of its subtree selected shows a dash
+   instead of a check. (Set via JS — :indeterminate can't be expressed in HTML.) */
+.launcher-card-checkbox input:indeterminate + .launcher-card-checkmark,
+.launcher-tree-checkbox input:indeterminate + .launcher-card-checkmark {
+  background: rgba(31, 107, 78, 0.18);
+  border-color: rgba(31, 107, 78, 0.6);
+}
+
+.launcher-card-checkbox input:indeterminate + .launcher-card-checkmark::after,
+.launcher-tree-checkbox input:indeterminate + .launcher-card-checkmark::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  height: 2px;
+  border-radius: 1px;
+  background: #1F6B4E;
+  transform: translateY(-50%);
+}
+
 .launcher-card-delete {
   position: absolute;
   top: 0.65rem;
