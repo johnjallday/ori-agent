@@ -80,6 +80,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "board":
 			h.handleWorkspaceBoard(w, r, id)
 			return
+		case "project":
+			h.handleWorkspaceProject(w, r, id)
+			return
 		case "rename":
 			h.handleWorkspaceRename(w, r, id)
 			return

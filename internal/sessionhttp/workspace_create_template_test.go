@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,27 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if !info.Resolved || info.RelativePath != "song-x" {
 		t.Fatalf("project path not resolved via folder store: %+v", info)
 	}
+	diskWS, err := handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get: %v", err)
+	}
+	if diskWS.ProjectPath != "song-x" {
+		t.Fatalf("disk project_path = %q, want song-x", diskWS.ProjectPath)
+	}
+	if len(diskWS.DirectoryReferences) != 2 {
+		t.Fatalf("expected project directory reference, got %#v", diskWS.DirectoryReferences)
+	}
+	projectRefPath := filepath.Join(baseDir, "song-x", "song-x")
+	projectRef, ok := findAgentWorkspaceDirectoryReference(diskWS.DirectoryReferences, projectRefPath)
+	if !ok {
+		t.Fatalf("project directory reference for %q missing in %#v", projectRefPath, diskWS.DirectoryReferences)
+	}
+	if diskWS.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] != projectRef.ID {
+		t.Fatalf("primary directory = %v, want %q", diskWS.SharedData[workspaceSharedDataPrimaryDirectoryIDKey], projectRef.ID)
+	}
+	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
+		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
+	}
 
 	// Session reads hydrate project_path from workspace.json (it has no
 	// SQLite column), so a bare session row must come back with the path.
@@ -121,6 +143,115 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("project.created event not published")
 	}
+}
+
+func TestCreateProjectForExistingWorkspace(t *testing.T) {
+	handler, baseDir, _, events, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Album"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected workspace create 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder, ok := resp["folder"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected folder in response")
+	}
+	wsID, _ := folder["id"].(string)
+	if wsID == "" {
+		t.Fatal("missing workspace id")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/project", bytes.NewBufferString(`{"template_id":"demo-template","project_name":"First Song"}`))
+	req.Header.Set("Content-Type", "application/json")
+	projectW := httptest.NewRecorder()
+	handler.HandleWorkspaces(projectW, req)
+	if projectW.Code != http.StatusCreated {
+		t.Fatalf("expected project create 201, got %d: %s", projectW.Code, projectW.Body.String())
+	}
+
+	var projectResp map[string]any
+	if err := json.Unmarshal(projectW.Body.Bytes(), &projectResp); err != nil {
+		t.Fatalf("decode project response: %v", err)
+	}
+	if projectResp["project_path"] != "first-song" {
+		t.Fatalf("project_path = %v, want first-song", projectResp["project_path"])
+	}
+
+	diskWS, err := handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get: %v", err)
+	}
+	if diskWS.ProjectPath != "first-song" {
+		t.Fatalf("disk project_path = %q, want first-song", diskWS.ProjectPath)
+	}
+	if len(diskWS.DirectoryReferences) != 2 {
+		t.Fatalf("expected one project directory reference, got %#v", diskWS.DirectoryReferences)
+	}
+	projectAbs := filepath.Join(baseDir, "album", "first-song")
+	projectRef, ok := findAgentWorkspaceDirectoryReference(diskWS.DirectoryReferences, projectAbs)
+	if !ok {
+		t.Fatalf("project directory reference for %q missing in %#v", projectAbs, diskWS.DirectoryReferences)
+	}
+	if diskWS.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] != projectRef.ID {
+		t.Fatalf("primary directory = %v, want %q", diskWS.SharedData[workspaceSharedDataPrimaryDirectoryIDKey], projectRef.ID)
+	}
+	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
+		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
+	}
+
+	sessionWS, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("session GetWorkspace: %v", err)
+	}
+	refs, err := decodeDirectoryReferences(sessionWS.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode directory refs: %v", err)
+	}
+	if _, ok := findSessionWorkspaceDirectoryReference(refs, projectAbs); !ok {
+		t.Fatalf("session directory refs = %#v, want %q", refs, projectAbs)
+	}
+	hydrated := handler.hydrateWorkspaceMetadataFromFileStore(&session.Workspace{ID: wsID})
+	if hydrated == nil || hydrated.ProjectPath != "first-song" {
+		t.Fatalf("hydrated project_path = %+v, want first-song", hydrated)
+	}
+
+	select {
+	case event := <-events:
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "first-song" {
+			t.Fatalf("unexpected project.created payload: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected project.created event")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/project", bytes.NewBufferString(`{"template_id":"demo-template","project_name":"Second Song"}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondW := httptest.NewRecorder()
+	handler.HandleWorkspaces(secondW, secondReq)
+	if secondW.Code != http.StatusConflict {
+		t.Fatalf("expected second create 409, got %d: %s", secondW.Code, secondW.Body.String())
+	}
+}
+
+func findAgentWorkspaceDirectoryReference(refs []agentworkspace.DirectoryReference, path string) (agentworkspace.DirectoryReference, bool) {
+	want := cleanWorkspaceSyncPath(path)
+	for _, ref := range refs {
+		if cleanWorkspaceSyncPath(ref.Path) == want {
+			return ref, true
+		}
+	}
+	return agentworkspace.DirectoryReference{}, false
+}
+
+func findSessionWorkspaceDirectoryReference(refs []workspaceDirectoryReference, path string) (workspaceDirectoryReference, bool) {
+	want := cleanWorkspaceSyncPath(path)
+	for _, ref := range refs {
+		if cleanWorkspaceSyncPath(ref.Path) == want {
+			return ref, true
+		}
+	}
+	return workspaceDirectoryReference{}, false
 }
 
 func TestCreateWorkspaceWithTemplatePathEscapeHatch(t *testing.T) {

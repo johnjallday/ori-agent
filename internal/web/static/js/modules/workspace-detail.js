@@ -272,6 +272,9 @@ export class WorkspaceDetailPage {
     this.pendingTaskConfirmSelection = { stepThrough: false };
     this.pendingAssistSpecialistResumeChecked = false;
     this.activeAgentModelEdit = null;
+    this.projectTemplates = [];
+    this.projectTemplatesRoot = '';
+    this.projectTemplateSubmitting = false;
 
     // DOM elements
     this.elements = {};
@@ -368,7 +371,9 @@ export class WorkspaceDetailPage {
     const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
     const taskCount = Array.isArray(this.tasks) ? this.tasks.length : 0;
     const noteCount = Array.isArray(this.notes) ? this.notes.length : 0;
-    const directoryCount = Array.isArray(this.directories) ? this.directories.length : 0;
+    const directoryCount =
+      (Array.isArray(this.directories) ? this.directories.length : 0) +
+      (this.workspaceHasProject() ? 1 : 0);
     const fileCount = Array.isArray(this.files) ? this.files.length : 0;
 
     this.setHomeAssistantQuickPrompt(
@@ -1031,6 +1036,7 @@ export class WorkspaceDetailPage {
       deleteSelectedNotesBtn: document.getElementById('workspace-detail-delete-selected-notes'),
       notesActions: document.getElementById('workspace-detail-notes-actions'),
       viewAllNotesLink: document.getElementById('workspace-detail-view-all-notes'),
+      createProjectBtn: document.getElementById('workspace-detail-create-project'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
       refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
@@ -1110,6 +1116,27 @@ export class WorkspaceDetailPage {
       ),
       taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
+
+      // Project template modal
+      projectTemplateModal: document.getElementById('workspace-detail-project-template-modal'),
+      projectTemplateForm: document.getElementById('workspace-detail-project-template-form'),
+      projectTemplateSelect: document.getElementById('workspace-detail-project-template-select'),
+      projectTemplateDescription: document.getElementById(
+        'workspace-detail-project-template-description'
+      ),
+      projectTemplateRoot: document.getElementById('workspace-detail-project-template-root'),
+      projectTemplateRefreshBtn: document.getElementById(
+        'workspace-detail-project-template-refresh'
+      ),
+      projectTemplatePathInput: document.getElementById('workspace-detail-project-template-path'),
+      projectTemplateBrowseBtn: document.getElementById(
+        'workspace-detail-project-template-browse'
+      ),
+      projectNameInput: document.getElementById('workspace-detail-project-name'),
+      projectTemplateSubmitBtn: document.getElementById(
+        'workspace-detail-project-template-submit'
+      ),
+      projectTemplateError: document.getElementById('workspace-detail-project-template-error'),
 
       // Assist modal
       workspaceDetailView: document.getElementById('workspace-detail-view'),
@@ -1430,8 +1457,35 @@ export class WorkspaceDetailPage {
     }, true);
 
     // Directory buttons
-    this.elements.addDirectoryBtn?.addEventListener('click', () =>
-      this.showAddDirectoryModal(this.elements.addDirectoryBtn)
+    this.elements.createProjectBtn?.addEventListener('click', event => {
+      event.stopPropagation();
+      this.showProjectTemplateModal(this.elements.createProjectBtn);
+    });
+    this.elements.addDirectoryBtn?.addEventListener('click', event => {
+      event.stopPropagation();
+      this.showAddDirectoryModal(this.elements.addDirectoryBtn);
+    });
+    this.elements.projectTemplateForm?.addEventListener('submit', event => {
+      event.preventDefault();
+      this.createWorkspaceProject();
+    });
+    this.elements.projectTemplateSelect?.addEventListener('change', () => {
+      if (this.elements.projectTemplateSelect?.value && this.elements.projectTemplatePathInput) {
+        this.elements.projectTemplatePathInput.value = '';
+      }
+      this.updateProjectTemplateModalState();
+    });
+    this.elements.projectTemplatePathInput?.addEventListener('input', () => {
+      if (this.elements.projectTemplatePathInput?.value.trim() && this.elements.projectTemplateSelect) {
+        this.elements.projectTemplateSelect.value = '';
+      }
+      this.updateProjectTemplateModalState();
+    });
+    this.elements.projectTemplateBrowseBtn?.addEventListener('click', () =>
+      this.browseProjectTemplateFolder()
+    );
+    this.elements.projectTemplateRefreshBtn?.addEventListener('click', () =>
+      this.populateProjectTemplateOptions({ force: true })
     );
     this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
@@ -1918,6 +1972,7 @@ export class WorkspaceDetailPage {
         });
       }
       await this.renderWorkspaceInfo();
+      this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSettings();
       this.renderWorkspaceSkillBindings();
@@ -13189,6 +13244,301 @@ export class WorkspaceDetailPage {
     }).catch(err => console.warn('Failed to activate workspace:', err));
   }
 
+  getWorkspaceProjectPath() {
+    return String(this.workspace?.project_path || '').trim();
+  }
+
+  workspaceHasProject() {
+    return this.getWorkspaceProjectPath() !== '';
+  }
+
+  getProjectDirectoryId() {
+    return String(this.workspace?.shared_data?.project_directory_id || '').trim();
+  }
+
+  isProjectDirectory(dir) {
+    const projectDirectoryId = this.getProjectDirectoryId();
+    return Boolean(projectDirectoryId && dir?.id === projectDirectoryId);
+  }
+
+  isGroupWorkspace() {
+    return String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+  }
+
+  syncProjectActionState() {
+    const button = this.elements.createProjectBtn;
+    if (!button) return;
+
+    const disabled = this.isGroupWorkspace() || this.workspaceHasProject();
+    button.disabled = disabled;
+    button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    if (this.isGroupWorkspace()) {
+      button.title = 'Groups cannot hold projects';
+    } else if (this.workspaceHasProject()) {
+      button.title = 'This workspace already has a project';
+    } else {
+      button.title = 'Create project from template';
+    }
+  }
+
+  getProjectTemplateModalInstance() {
+    if (
+      !this.elements.projectTemplateModal ||
+      typeof bootstrap === 'undefined' ||
+      !bootstrap.Modal
+    ) {
+      return null;
+    }
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.projectTemplateModal)
+      : new bootstrap.Modal(this.elements.projectTemplateModal);
+  }
+
+  clearProjectTemplateError() {
+    const errorEl = this.elements.projectTemplateError;
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.hidden = true;
+  }
+
+  setProjectTemplateError(message) {
+    const text = String(message || '').trim();
+    const errorEl = this.elements.projectTemplateError;
+    if (!errorEl) {
+      if (text && window.Toast) window.Toast.error(text);
+      return;
+    }
+    errorEl.textContent = text;
+    errorEl.hidden = !text;
+  }
+
+  resetProjectTemplateForm() {
+    if (this.elements.projectTemplateSelect) {
+      this.elements.projectTemplateSelect.value = '';
+    }
+    if (this.elements.projectTemplatePathInput) {
+      this.elements.projectTemplatePathInput.value = '';
+    }
+    if (this.elements.projectNameInput) {
+      this.elements.projectNameInput.value = '';
+      this.elements.projectNameInput.placeholder = this.workspace?.name || 'Uses workspace name';
+    }
+    this.clearProjectTemplateError();
+    this.updateProjectTemplateModalState();
+  }
+
+  async showProjectTemplateModal() {
+    if (this.isGroupWorkspace()) {
+      if (window.Toast) window.Toast.error('Groups cannot hold projects');
+      return;
+    }
+    if (this.workspaceHasProject()) {
+      if (window.Toast) window.Toast.info('This workspace already has a project');
+      return;
+    }
+
+    const modal = this.getProjectTemplateModalInstance();
+    if (!modal) {
+      if (window.Toast) window.Toast.error('Project template dialog is unavailable');
+      return;
+    }
+
+    this.resetProjectTemplateForm();
+    modal.show();
+    await this.populateProjectTemplateOptions();
+  }
+
+  async populateProjectTemplateOptions({ force = false } = {}) {
+    const select = this.elements.projectTemplateSelect;
+    if (!select) return;
+
+    if (this.projectTemplates.length > 0 && !force) {
+      this.renderProjectTemplateOptions();
+      return;
+    }
+
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading templates...</option>';
+    this.clearProjectTemplateError();
+
+    try {
+      const response = await fetch('/api/project-templates');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load project templates');
+      }
+
+      this.projectTemplates = Array.isArray(payload.templates) ? payload.templates : [];
+      this.projectTemplatesRoot = String(payload.templates_root || '').trim();
+      this.renderProjectTemplateOptions();
+    } catch (error) {
+      console.error('Failed to load project templates:', error);
+      this.projectTemplates = [];
+      this.renderProjectTemplateOptions();
+      this.setProjectTemplateError(error.message || 'Failed to load project templates');
+    }
+  }
+
+  renderProjectTemplateOptions() {
+    const select = this.elements.projectTemplateSelect;
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Choose a template</option>';
+    for (const template of this.projectTemplates) {
+      if (!template || !template.id) continue;
+      const option = document.createElement('option');
+      option.value = template.id;
+      option.textContent = template.name || template.id;
+      option.dataset.description = template.description || '';
+      select.appendChild(option);
+    }
+    select.disabled = false;
+
+    if (this.elements.projectTemplateRoot) {
+      if (this.projectTemplatesRoot) {
+        this.elements.projectTemplateRoot.textContent = `Library: ${this.projectTemplatesRoot}`;
+        this.elements.projectTemplateRoot.hidden = false;
+      } else {
+        this.elements.projectTemplateRoot.textContent = '';
+        this.elements.projectTemplateRoot.hidden = true;
+      }
+    }
+
+    this.updateProjectTemplateModalState();
+  }
+
+  updateProjectTemplateModalState() {
+    const select = this.elements.projectTemplateSelect;
+    const description = this.elements.projectTemplateDescription;
+    if (!description) return;
+
+    const selected = select?.selectedOptions?.[0];
+    const text = selected?.dataset?.description || '';
+    description.textContent = text;
+    description.hidden = !text;
+  }
+
+  async browseProjectTemplateFolder() {
+    const input = this.elements.projectTemplatePathInput;
+    const button = this.elements.projectTemplateBrowseBtn;
+    if (!input) return;
+
+    const originalText = button?.textContent || 'Choose';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Choosing...';
+    }
+
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Select a Template Folder' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to open folder picker');
+      }
+      if (result.selected && result.path) {
+        input.value = result.path;
+        if (this.elements.projectTemplateSelect) {
+          this.elements.projectTemplateSelect.value = '';
+        }
+        this.updateProjectTemplateModalState();
+      }
+    } catch (error) {
+      console.error('Failed to browse project template folder:', error);
+      this.setProjectTemplateError(error.message || 'Failed to open folder picker');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+  }
+
+  setProjectTemplateSubmitting(isSubmitting) {
+    this.projectTemplateSubmitting = Boolean(isSubmitting);
+    const submit = this.elements.projectTemplateSubmitBtn;
+    if (!submit) return;
+    if (this.projectTemplateSubmitting) {
+      submit.disabled = true;
+      submit.dataset.originalText = submit.textContent || 'Create Project';
+      submit.textContent = 'Creating...';
+    } else {
+      submit.disabled = false;
+      submit.textContent = submit.dataset.originalText || 'Create Project';
+    }
+  }
+
+  async createWorkspaceProject() {
+    if (this.projectTemplateSubmitting) return;
+    if (this.isGroupWorkspace()) {
+      this.setProjectTemplateError('Groups cannot hold projects');
+      return;
+    }
+    if (this.workspaceHasProject()) {
+      this.setProjectTemplateError('This workspace already has a project');
+      return;
+    }
+
+    const templateId = this.elements.projectTemplateSelect?.value?.trim() || '';
+    const templatePath = this.elements.projectTemplatePathInput?.value?.trim() || '';
+    const projectName = this.elements.projectNameInput?.value?.trim() || '';
+
+    if (templateId && templatePath) {
+      this.setProjectTemplateError('Choose a library template or a folder, not both');
+      return;
+    }
+    if (!templateId && !templatePath) {
+      this.setProjectTemplateError('Choose a template first');
+      return;
+    }
+
+    const payload = {};
+    if (templateId) {
+      payload.template_id = templateId;
+    } else {
+      payload.template_path = templatePath;
+    }
+    if (projectName) {
+      payload.project_name = projectName;
+    }
+
+    this.setProjectTemplateSubmitting(true);
+    this.clearProjectTemplateError();
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/project`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Failed to create project');
+      }
+
+      if (result.workspace && typeof result.workspace === 'object') {
+        this.workspace = { ...(this.workspace || {}), ...result.workspace };
+      }
+
+      const modal = this.getProjectTemplateModalInstance();
+      modal?.hide();
+      if (window.Toast) {
+        window.Toast.success('Project created');
+      }
+      await this.loadWorkspace();
+      await this.loadDirectories();
+      await this.loadFiles();
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      this.setProjectTemplateError(error.message || 'Failed to create project');
+    } finally {
+      this.setProjectTemplateSubmitting(false);
+      this.syncProjectActionState();
+    }
+  }
+
   /**
    * Load directories for the workspace
    */
@@ -13227,6 +13577,12 @@ export class WorkspaceDetailPage {
           : [];
         this.workspace.primary_directory_id =
           typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
+        this.workspace.project_path =
+          typeof workspace.project_path === 'string' ? workspace.project_path : this.workspace.project_path || '';
+        this.workspace.shared_data =
+          workspace.shared_data && typeof workspace.shared_data === 'object'
+            ? workspace.shared_data
+            : this.workspace.shared_data || {};
       }
 
       const refs = Array.isArray(workspace.directory_references)
@@ -13273,6 +13629,7 @@ export class WorkspaceDetailPage {
       });
 
       this.renderDirectories();
+      this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
@@ -13281,6 +13638,7 @@ export class WorkspaceDetailPage {
       console.error('Failed to load directories:', error);
       this.directories = [];
       this.renderDirectories();
+      this.syncProjectActionState();
       this.refreshHomeAssistantQuickPrompts();
     }
   }
@@ -13290,6 +13648,11 @@ export class WorkspaceDetailPage {
    */
   renderDirectories() {
     if (!this.elements.directoriesList) return;
+
+    if ((!this.directories || this.directories.length === 0) && this.workspaceHasProject()) {
+      this.elements.directoriesList.innerHTML = this.getProjectPathOnlyMarkup();
+      return;
+    }
 
     if (!this.directories || this.directories.length === 0) {
       this.elements.directoriesList.innerHTML = this.getUnlinkedProjectEmptyStateMarkup();
@@ -13301,28 +13664,45 @@ export class WorkspaceDetailPage {
       .map(dir => {
         const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
         const path = dir.path || '';
-        const sourceLabel = dir.source === 'reference' ? 'Linked folder' : 'Legacy attachment';
+        const isTemplateProject = this.isProjectDirectory(dir);
+        const sourceLabel = isTemplateProject
+          ? 'Template project'
+          : dir.source === 'reference'
+            ? 'Linked folder'
+            : 'Legacy attachment';
         const source = dir.source === 'attachment' ? 'attachment' : 'reference';
         const isPrimary = dir.id === primaryDirectoryId;
-        const roleLabel = isPrimary ? 'Project Folder' : 'Reference';
-        const roleClass = isPrimary ? 'is-primary' : 'is-reference';
+        const roleLabel = isTemplateProject || isPrimary ? 'Project Folder' : 'Reference';
+        const roleClass = isTemplateProject || isPrimary ? 'is-primary' : 'is-reference';
         return `
-        <div class="workspace-detail-item" data-directory-id="${dir.id}">
+        <div class="workspace-detail-item${isTemplateProject ? ' workspace-detail-project-directory' : ''}" data-directory-id="${dir.id}">
+          ${
+            !isTemplateProject
+              ? `
           <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="Change linked folder" aria-label="Change linked folder for ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M4,7H18.17L15.59,4.41L17,3L22,8L17,13L15.59,11.59L18.17,9H4V7M20,17H5.83L8.41,19.59L7,21L2,16L7,11L8.41,12.41L5.83,15H20V17Z"/>
             </svg>
           </button>
+          `
+              : ''
+          }
           <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')" title="Explore directory" aria-label="Explore directory ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M15,12H16.5L15,13.5L16.42,14.92L20.34,11L16.42,7.08L15,8.5L16.5,10H15V12M19,19H5V5H13V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V13H19V19Z"/>
             </svg>
           </button>
+          ${
+            !isTemplateProject
+              ? `
           <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteDirectory('${dir.id}', '${source}')" title="Remove directory" aria-label="Remove directory ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
             </svg>
           </button>
+          `
+              : ''
+          }
           <div class="workspace-detail-item-content"
                role="button"
                tabindex="0"
@@ -13340,7 +13720,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-item-submeta">
               <span class="workspace-detail-directory-source">${this.escapeHtml(sourceLabel)}</span>
               ${
-                !isPrimary
+                !isPrimary && !isTemplateProject
                   ? `
                 <button
                   type="button"
@@ -13378,7 +13758,36 @@ export class WorkspaceDetailPage {
     return this.directories[0]?.id || '';
   }
 
+  getProjectPathOnlyMarkup() {
+    const projectPath = this.getWorkspaceProjectPath();
+    const name = projectPath.split(/[\\/]/).filter(Boolean).pop() || 'Project Folder';
+    return `
+      <div class="workspace-detail-item workspace-detail-project-path-only">
+        <div class="workspace-detail-item-content">
+          <div class="workspace-detail-item-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="workspace-detail-item-title-icon">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            <span class="workspace-detail-item-title-text">${this.escapeHtml(name)}</span>
+            <span class="workspace-detail-directory-role is-primary">Project Folder</span>
+          </div>
+          <div class="workspace-detail-item-meta">${this.escapeHtml(projectPath)}</div>
+          <div class="workspace-detail-item-submeta">
+            <span class="workspace-detail-directory-source">Template project</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   getUnlinkedProjectEmptyStateMarkup() {
+    const createProjectAction = this.isGroupWorkspace()
+      ? ''
+      : `
+        <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showProjectTemplateModal(this)">
+          Create Project
+        </button>
+      `;
     return `
       <div class="workspace-detail-link-empty">
         <div class="workspace-detail-link-empty-icon" aria-hidden="true">
@@ -13389,9 +13798,12 @@ export class WorkspaceDetailPage {
         <div class="workspace-detail-link-empty-eyebrow">Unlinked Workspace</div>
         <div class="workspace-detail-link-empty-title">No project folder linked yet.</div>
         <p class="workspace-detail-link-empty-copy">Attach the local project folder so this workspace can browse files in context.</p>
-        <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
-          Link Project
-        </button>
+        <div class="workspace-detail-empty-actions">
+          ${createProjectAction}
+          <button type="button" class="workspace-detail-empty-action workspace-detail-empty-action-secondary" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
+            Link Folder
+          </button>
+        </div>
       </div>
     `;
   }
@@ -13856,6 +14268,7 @@ export class WorkspaceDetailPage {
       case 'directory_removed':
       case 'attachment_created':
       case 'attachment_deleted':
+      case 'project.created':
         this.loadDirectories();
         this.loadFiles();
         break;

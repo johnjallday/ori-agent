@@ -132,6 +132,18 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 	if err != nil || folderWS.ProjectPath != "song-x" {
 		t.Fatalf("workspace.json project_path = %q err=%v", folderWS.ProjectPath, err)
 	}
+	if len(folderWS.DirectoryReferences) != 1 {
+		t.Fatalf("expected project directory reference, got %#v", folderWS.DirectoryReferences)
+	}
+	if filepath.Clean(folderWS.DirectoryReferences[0].Path) != filepath.Clean(filepath.Join(folderPath, "song-x")) {
+		t.Fatalf("project directory reference path = %q", folderWS.DirectoryReferences[0].Path)
+	}
+	if folderWS.SharedData["primary_directory_id"] != folderWS.DirectoryReferences[0].ID {
+		t.Fatalf("primary directory = %v, want %q", folderWS.SharedData["primary_directory_id"], folderWS.DirectoryReferences[0].ID)
+	}
+	if folderWS.SharedData["project_directory_id"] != folderWS.DirectoryReferences[0].ID {
+		t.Fatalf("project directory = %v, want %q", folderWS.SharedData["project_directory_id"], folderWS.DirectoryReferences[0].ID)
+	}
 
 	select {
 	case event := <-events:
