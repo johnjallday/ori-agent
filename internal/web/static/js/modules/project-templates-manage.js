@@ -236,6 +236,32 @@ function ptmOpenModal(options) {
   }
   void ptmRefresh();
   new bootstrap.Modal(modalElement).show();
+
+  // This modal regularly opens on top of another one (the Create Workspace
+  // modal, the workspace project dialog). Bootstrap gives every modal the
+  // same z-index, so lift this one — and its backdrop — above the stack.
+  requestAnimationFrame(() => {
+    const openModals = document.querySelectorAll('.modal.show');
+    if (openModals.length <= 1) return;
+    const lift = 1055 + openModals.length * 10;
+    modalElement.style.zIndex = String(lift);
+    const backdrops = document.querySelectorAll('.modal-backdrop');
+    const lastBackdrop = backdrops[backdrops.length - 1];
+    if (lastBackdrop) lastBackdrop.style.zIndex = String(lift - 5);
+  });
+}
+
+function ptmRestoreStackingOnClose() {
+  const modalElement = document.getElementById('projectTemplatesManageModal');
+  if (!modalElement) return;
+  modalElement.addEventListener('hidden.bs.modal', () => {
+    modalElement.style.zIndex = '';
+    // Bootstrap drops body.modal-open when any modal hides; restore it while
+    // an underlying modal (e.g. Create Workspace) is still showing.
+    if (document.querySelector('.modal.show')) {
+      document.body.classList.add('modal-open');
+    }
+  });
 }
 
 // --- Settings page section (present only on /settings) ---
@@ -274,7 +300,184 @@ async function ptmSettingsSave(value) {
   }
 }
 
+// --- Create-workspace "Project (optional)" card ---
+// The markup ships in create-workspace-modal.tmpl, which appears on several
+// pages driven by different modules (sessions.js on the live hub/home,
+// workspace-create.js on the legacy hub). The card binds its own behavior
+// here so it works wherever the markup exists; host modules only merge
+// getPayloadFields() into their create payload.
+
+function ptcElements() {
+  return {
+    card: document.getElementById('projectTemplateCard'),
+    select: document.getElementById('projectTemplateSelect'),
+    description: document.getElementById('projectTemplateDescription'),
+    emptyHint: document.getElementById('projectTemplateEmptyHint'),
+    pathInput: document.getElementById('projectTemplatePathInput'),
+    nameRow: document.getElementById('projectNameRow'),
+    nameInput: document.getElementById('projectNameInput'),
+    browseBtn: document.getElementById('projectTemplateBrowseBtn'),
+    manageLink: document.getElementById('projectTemplateManageLink'),
+    importToggle: document.getElementById('folderImportToggle')
+  };
+}
+
+function ptcGetPayloadFields() {
+  const els = ptcElements();
+  const fields = {};
+  const templateId = els.select?.value?.trim() || '';
+  const templatePath = els.pathInput?.value?.trim() || '';
+  if (templateId) {
+    fields.template_id = templateId;
+  } else if (templatePath) {
+    fields.template_path = templatePath;
+  }
+  const projectName = els.nameInput?.value?.trim() || '';
+  if ((fields.template_id || fields.template_path) && projectName) {
+    fields.project_name = projectName;
+  }
+  return fields;
+}
+
+function ptcUpdateUI() {
+  const els = ptcElements();
+  if (els.description) {
+    const selected = els.select?.selectedOptions?.[0];
+    const text = selected?.dataset?.description || '';
+    els.description.textContent = text;
+    els.description.hidden = !text;
+  }
+  if (els.nameRow) {
+    const active = Boolean(els.select?.value?.trim() || els.pathInput?.value?.trim());
+    els.nameRow.hidden = !active;
+  }
+}
+
+function ptcReset() {
+  const els = ptcElements();
+  if (els.select) els.select.value = '';
+  if (els.pathInput) els.pathInput.value = '';
+  if (els.nameInput) els.nameInput.value = '';
+  ptcUpdateUI();
+}
+
+function ptcSyncImportVisibility() {
+  const els = ptcElements();
+  if (!els.card) return;
+  // Project templates scaffold a new project; they don't apply when
+  // importing an existing folder as the workspace.
+  const importMode = Boolean(els.importToggle?.checked);
+  els.card.hidden = importMode;
+}
+
+async function ptcPopulate() {
+  const els = ptcElements();
+  if (!els.select) return;
+
+  els.select.innerHTML = '<option value="" selected>None</option>';
+  if (els.emptyHint) els.emptyHint.hidden = true;
+
+  try {
+    const data = await ptmFetchJSON('/api/project-templates');
+    const templates = Array.isArray(data.templates) ? data.templates : [];
+    for (const template of templates) {
+      if (!template || !template.id) continue;
+      const option = document.createElement('option');
+      option.value = template.id;
+      option.textContent = template.name || template.id;
+      option.dataset.description = template.description || '';
+      els.select.appendChild(option);
+    }
+    if (templates.length === 0 && els.emptyHint) {
+      els.emptyHint.textContent = data.templates_root
+        ? `No templates yet. Drop a template folder into ${data.templates_root} to add one, or use any folder below.`
+        : 'No templates yet. Use any folder below as a template.';
+      els.emptyHint.hidden = false;
+    }
+  } catch (error) {
+    console.error('Failed to load project templates:', error);
+    if (els.emptyHint) {
+      els.emptyHint.textContent = 'Could not load the template library. You can still use any folder below as a template.';
+      els.emptyHint.hidden = false;
+    }
+  }
+  ptcUpdateUI();
+}
+
+async function ptcBrowse() {
+  const els = ptcElements();
+  if (!els.pathInput) return;
+  if (els.browseBtn) els.browseBtn.disabled = true;
+  try {
+    const picked = await ptmFetchJSON('/api/folder-picker/select-path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Select a Template Folder' })
+    });
+    if (picked.selected && picked.path) {
+      els.pathInput.value = picked.path;
+      if (els.select) els.select.value = '';
+      ptcUpdateUI();
+    }
+  } catch (error) {
+    ptmToast(error.message || 'Failed to open folder picker', 'error');
+  } finally {
+    if (els.browseBtn) els.browseBtn.disabled = false;
+  }
+}
+
+function ptcInit() {
+  const els = ptcElements();
+  if (!els.card) return;
+
+  if (els.select) {
+    els.select.addEventListener('change', () => {
+      // Library pick and ad-hoc folder are mutually exclusive.
+      if (els.select.value && els.pathInput) els.pathInput.value = '';
+      ptcUpdateUI();
+    });
+  }
+  if (els.pathInput) {
+    els.pathInput.addEventListener('input', () => {
+      if (els.pathInput.value.trim() && els.select) els.select.value = '';
+      ptcUpdateUI();
+    });
+  }
+  if (els.browseBtn) {
+    els.browseBtn.addEventListener('click', () => void ptcBrowse());
+  }
+  if (els.manageLink) {
+    els.manageLink.addEventListener('click', () => {
+      ptmOpenModal({ onChanged: () => void ptcPopulate() });
+    });
+  }
+  if (els.importToggle) {
+    els.importToggle.addEventListener('change', ptcSyncImportVisibility);
+  }
+
+  // Reset and (re)load the library every time the create modal opens,
+  // whichever module opened it. Runs after the host module's own show
+  // handler, so import-mode state is already settled.
+  const createModal = document.getElementById('addFolderModal');
+  if (createModal) {
+    createModal.addEventListener('show.bs.modal', () => {
+      ptcReset();
+      ptcSyncImportVisibility();
+      void ptcPopulate();
+    });
+  }
+  ptcSyncImportVisibility();
+}
+
+window.ProjectTemplateCard = {
+  populate: ptcPopulate,
+  reset: ptcReset,
+  getPayloadFields: ptcGetPayloadFields
+};
+
 function ptmInitListeners() {
+  ptcInit();
+  ptmRestoreStackingOnClose();
   const openRootBtn = document.getElementById('ptmOpenRootBtn');
   if (openRootBtn) openRootBtn.addEventListener('click', () => void ptmReveal(''));
   const importBtn = document.getElementById('ptmImportBtn');

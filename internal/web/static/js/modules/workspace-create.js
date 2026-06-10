@@ -156,7 +156,8 @@ function setImportMode(enabled) {
   }
 
   // Project templates scaffold a *new* project; they don't apply when
-  // importing an existing folder as the workspace.
+  // importing an existing folder as the workspace. (ProjectTemplateCard also
+  // syncs this on toggle changes and modal open.)
   const projectCard = document.getElementById('projectTemplateCard');
   if (projectCard) {
     projectCard.hidden = workspaceCreateState.importMode;
@@ -291,128 +292,10 @@ async function browseImportFolderPath() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Project templates (distinct from the workspace "Starting point" cards above:
-// these scaffold a project *folder* inside the workspace from a template on
-// disk — see /api/project-templates).
-// ---------------------------------------------------------------------------
-
-const projectTemplateState = {
-  templatesRoot: ''
-};
-
-function getProjectTemplateSelection() {
-  const select = document.getElementById('projectTemplateSelect');
-  const pathInput = document.getElementById('projectTemplatePathInput');
-  const nameInput = document.getElementById('projectNameInput');
-
-  const templateId = select?.value?.trim() || '';
-  const templatePath = pathInput?.value?.trim() || '';
-  return {
-    templateId,
-    templatePath,
-    projectName: nameInput?.value?.trim() || '',
-    active: Boolean(templateId || templatePath)
-  };
-}
-
-function updateProjectTemplateUI() {
-  const select = document.getElementById('projectTemplateSelect');
-  const description = document.getElementById('projectTemplateDescription');
-  const nameRow = document.getElementById('projectNameRow');
-  const selection = getProjectTemplateSelection();
-
-  if (description) {
-    const selected = select?.selectedOptions?.[0];
-    const text = selected?.dataset?.description || '';
-    description.textContent = text;
-    description.hidden = !text;
-  }
-  if (nameRow) {
-    nameRow.hidden = !selection.active;
-  }
-}
-
-function resetProjectTemplateFields() {
-  const select = document.getElementById('projectTemplateSelect');
-  const pathInput = document.getElementById('projectTemplatePathInput');
-  const nameInput = document.getElementById('projectNameInput');
-  if (select) select.value = '';
-  if (pathInput) pathInput.value = '';
-  if (nameInput) nameInput.value = '';
-  updateProjectTemplateUI();
-}
-
-async function populateProjectTemplateSelect() {
-  const select = document.getElementById('projectTemplateSelect');
-  const emptyHint = document.getElementById('projectTemplateEmptyHint');
-  if (!select) return;
-
-  select.innerHTML = '<option value="" selected>None</option>';
-  if (emptyHint) emptyHint.hidden = true;
-
-  try {
-    const response = await fetch('/api/project-templates');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    const templates = Array.isArray(data.templates) ? data.templates : [];
-    projectTemplateState.templatesRoot = data.templates_root || '';
-
-    for (const template of templates) {
-      if (!template || !template.id) continue;
-      const option = document.createElement('option');
-      option.value = template.id;
-      option.textContent = template.name || template.id;
-      option.dataset.description = template.description || '';
-      select.appendChild(option);
-    }
-
-    if (templates.length === 0 && emptyHint) {
-      emptyHint.textContent = projectTemplateState.templatesRoot
-        ? `No templates yet. Drop a template folder into ${projectTemplateState.templatesRoot} to add one, or use any folder below.`
-        : 'No templates yet. Use any folder below as a template.';
-      emptyHint.hidden = false;
-    }
-  } catch (error) {
-    console.error('Failed to load project templates:', error);
-    if (emptyHint) {
-      emptyHint.textContent = 'Could not load the template library. You can still use any folder below as a template.';
-      emptyHint.hidden = false;
-    }
-  }
-  updateProjectTemplateUI();
-}
-
-async function browseProjectTemplatePath() {
-  const pathInput = document.getElementById('projectTemplatePathInput');
-  const browseButton = document.getElementById('projectTemplateBrowseBtn');
-  if (!pathInput) return;
-
-  if (browseButton) browseButton.disabled = true;
-  try {
-    const response = await fetch('/api/folder-picker/select-path', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Select a Template Folder' })
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.success) {
-      showError(result.error || 'Failed to open folder picker');
-      return;
-    }
-    if (result.selected && result.path) {
-      pathInput.value = result.path;
-      const select = document.getElementById('projectTemplateSelect');
-      if (select) select.value = '';
-      updateProjectTemplateUI();
-    }
-  } catch (error) {
-    console.error('Failed to browse template folder:', error);
-    showError('Failed to open folder picker');
-  } finally {
-    if (browseButton) browseButton.disabled = false;
-  }
-}
+// Project-template card behavior (population, pickers, manage link) lives in
+// project-templates-manage.js (ProjectTemplateCard) so every page that ships
+// the create-workspace markup gets it; this module only merges the card's
+// payload fields into the create request.
 
 /**
  * Opens the workspace creation modal and populates available agents
@@ -469,8 +352,6 @@ function openCreateWorkspaceModal(options = {}) {
   if (importToggle) importToggle.checked = false;
   if (importPathInput) importPathInput.value = '';
   clearDuplicateWarning();
-  resetProjectTemplateFields();
-  void populateProjectTemplateSelect();
   if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
     window.WorkspaceBootstrapReview.reset();
   }
@@ -623,16 +504,8 @@ async function createWorkspace() {
       payload.path = importPath;
       payload.allow_duplicate = workspaceCreateState.allowDuplicateImport;
       payload.entry_point = workspaceCreateState.entryPoint || 'create_modal';
-    } else {
-      const projectSelection = getProjectTemplateSelection();
-      if (projectSelection.templateId) {
-        payload.template_id = projectSelection.templateId;
-      } else if (projectSelection.templatePath) {
-        payload.template_path = projectSelection.templatePath;
-      }
-      if (projectSelection.active && projectSelection.projectName) {
-        payload.project_name = projectSelection.projectName;
-      }
+    } else if (window.ProjectTemplateCard) {
+      Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
     }
 
     const requestPayload = { ...payload };
@@ -727,7 +600,7 @@ async function createWorkspace() {
     if (importPathInput) importPathInput.value = '';
     setImportMode(false);
     clearDuplicateWarning();
-    resetProjectTemplateFields();
+    if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
     window.selectedAgents.clear();
     resetImportState();
 
@@ -889,45 +762,6 @@ function initializeWorkspaceCreationListeners() {
     });
   }
 
-  const projectTemplateSelect = document.getElementById('projectTemplateSelect');
-  if (projectTemplateSelect) {
-    projectTemplateSelect.addEventListener('change', () => {
-      // Library pick and ad-hoc folder are mutually exclusive.
-      if (projectTemplateSelect.value) {
-        const pathInput = document.getElementById('projectTemplatePathInput');
-        if (pathInput) pathInput.value = '';
-      }
-      updateProjectTemplateUI();
-    });
-  }
-
-  const projectTemplatePathInput = document.getElementById('projectTemplatePathInput');
-  if (projectTemplatePathInput) {
-    projectTemplatePathInput.addEventListener('input', () => {
-      if (projectTemplatePathInput.value.trim() && projectTemplateSelect) {
-        projectTemplateSelect.value = '';
-      }
-      updateProjectTemplateUI();
-    });
-  }
-
-  const projectTemplateBrowseBtn = document.getElementById('projectTemplateBrowseBtn');
-  if (projectTemplateBrowseBtn) {
-    projectTemplateBrowseBtn.addEventListener('click', () => {
-      void browseProjectTemplatePath();
-    });
-  }
-
-  const projectTemplateManageLink = document.getElementById('projectTemplateManageLink');
-  if (projectTemplateManageLink) {
-    projectTemplateManageLink.addEventListener('click', () => {
-      if (window.ProjectTemplatesManage && typeof window.ProjectTemplatesManage.open === 'function') {
-        window.ProjectTemplatesManage.open({
-          onChanged: () => void populateProjectTemplateSelect()
-        });
-      }
-    });
-  }
 }
 
 // Export functions for global access
