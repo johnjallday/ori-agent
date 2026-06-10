@@ -84,5 +84,5 @@ test('setWorkspaceParentSelectState toggles disabled without aria-disabled', () 
   helpers.setWorkspaceParentSelectState(select, 2);
   assert.equal(select.disabled, false);
   assert.equal(attrs['aria-disabled'], undefined);
-  assert.match(helpAttrs.text, /Choose an organization-only group/);
+  assert.match(helpAttrs.text, /Choose a group/);
 });

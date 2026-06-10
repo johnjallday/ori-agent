@@ -732,7 +732,8 @@ class TaskModalController {
 
         workspaces.forEach(ws => {
           const selected = ws.id === this.workspaceId ? 'selected' : '';
-          options += `<option value="${ws.id}" ${selected}>${ws.name || 'Unnamed Workspace'}</option>`;
+          const groupLabel = String(ws.kind || '').toLowerCase() === 'group' ? ' (group)' : '';
+          options += `<option value="${ws.id}" ${selected}>${ws.name || 'Unnamed Workspace'}${groupLabel}</option>`;
         });
       }
     } catch (err) {

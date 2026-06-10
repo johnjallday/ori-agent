@@ -854,16 +854,21 @@ func (s *FileStore) GetOutputsPath(workspaceID string) string {
 
 // Rename changes a workspace's folder name. The workspace ID is preserved.
 func (s *FileStore) Rename(id, newName string) error {
-	return s.RenameWithSlug(id, newName, "")
+	_, err := s.RenameWithSlug(id, newName, "")
+	return err
 }
 
-func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
+// RenameWithSlug renames a workspace's display name and folder slug. Like
+// MoveWorkspaceFolder, it returns the old/new absolute paths of every affected
+// workspace (the renamed node and, when its folder physically moved, every
+// nested member) so callers can fix up path-keyed references.
+func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWorkspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	oldRelPath, ok := s.idToPath[id]
 	if !ok {
-		return fmt.Errorf("workspace %s not found", id)
+		return nil, fmt.Errorf("workspace %s not found", id)
 	}
 
 	newSlug := ""
@@ -881,15 +886,15 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 		if ws, ok := s.cache[id]; ok {
 			ws.Name = newName
 			ws.FolderSlug = newSlug
-			return s.persistWorkspaceLocked(ws)
+			return nil, s.persistWorkspaceLocked(ws)
 		}
-		return nil
+		return nil, nil
 	}
 
 	// Check if new folder name already exists
 	newFolderPath := filepath.Join(parentDir, newSlug)
 	if _, err := os.Stat(newFolderPath); err == nil {
-		return &FolderSlugConflictError{
+		return nil, &FolderSlugConflictError{
 			Slug:          newSlug,
 			SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, newSlug),
 			ParentDir:     parentDir,
@@ -898,7 +903,7 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 
 	// Rename the folder on disk
 	if err := os.Rename(oldFolderPath, newFolderPath); err != nil {
-		return fmt.Errorf("failed to rename workspace folder: %w", err)
+		return nil, fmt.Errorf("failed to rename workspace folder: %w", err)
 	}
 
 	// Compute new path (keep absolute if original was absolute)
@@ -920,11 +925,11 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 		configPath := filepath.Join(newFolderPath, WorkspaceConfigFile)
 		data, err := os.ReadFile(configPath)
 		if err != nil {
-			return fmt.Errorf("failed to read workspace after rename: %w", err)
+			return nil, fmt.Errorf("failed to read workspace after rename: %w", err)
 		}
 		ws, err = FromJSON(data)
 		if err != nil {
-			return fmt.Errorf("failed to deserialize workspace after rename: %w", err)
+			return nil, fmt.Errorf("failed to deserialize workspace after rename: %w", err)
 		}
 	}
 
@@ -937,7 +942,7 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 
 	// Persist updated workspace.json in new location
 	if err := s.persistWorkspaceLocked(ws); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Update global index
@@ -950,6 +955,8 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 			UpdatedAt:  ws.UpdatedAt,
 		})
 	}
+
+	moved := []MovedWorkspace{{ID: id, OldPath: oldFolderPath, NewPath: newFolderPath}}
 
 	// Renaming the folder physically moved every nested member with it (e.g. a
 	// group folder containing members under sub-workspaces/), so rewrite each
@@ -970,9 +977,14 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 		if dws, ok := s.cache[descID]; ok {
 			s.registerIndexLocked(dws, newDescRel)
 		}
+		moved = append(moved, MovedWorkspace{
+			ID:      descID,
+			OldPath: filepath.Join(oldFolderPath, rel),
+			NewPath: s.resolveFolder(newDescRel),
+		})
 	}
 
-	return nil
+	return moved, nil
 }
 
 // Import registers an external workspace folder. If the folder is already under

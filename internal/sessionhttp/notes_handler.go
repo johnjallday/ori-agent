@@ -116,12 +116,10 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
-	if _, err := h.requireConcreteWorkspace(r.Context(), req.WorkspaceID); err != nil {
+	if _, err := h.requireWorkspace(r.Context(), req.WorkspaceID); err != nil {
 		switch {
 		case errors.Is(err, session.ErrWorkspaceNotFound):
 			_ = orihttp.RespondNotFound(w, "Workspace not found")
-		case errors.Is(err, errWorkspaceDisallowsDirectUse):
-			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
 			_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
 		}
@@ -178,12 +176,10 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 	if req.Name == "" {
 		req.Name = "Untitled Note"
 	}
-	if _, err := h.requireConcreteWorkspace(r.Context(), workspaceID); err != nil {
+	if _, err := h.requireWorkspace(r.Context(), workspaceID); err != nil {
 		switch {
 		case errors.Is(err, session.ErrWorkspaceNotFound):
 			_ = orihttp.RespondNotFound(w, "Workspace not found")
-		case errors.Is(err, errWorkspaceDisallowsDirectUse):
-			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
 			_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
 		}

@@ -20,6 +20,7 @@ http://localhost:8765/api
 - [Vault API](#vault-api)
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
+- [Workspace Groups](#workspace-groups)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Custom Workflows API](#custom-workflows-api)
 - [Examples](#examples)
@@ -810,6 +811,42 @@ if (result) {
   console.log(result.response);
 }
 ```
+
+## Workspace Groups
+
+A **group** is a workspace whose `kind` is `"group"`. Groups are full workspaces that can additionally contain member workspaces (physical folder nesting under `sub-workspaces/`). They support everything a concrete workspace supports — chat sessions, notes, tasks, agents, MCP/skill bindings, settings, and `project_path` — with one structural rule: **only groups can be parents** (`parent_id` must reference a group).
+
+**Creating a group:**
+
+```http
+POST /api/workspaces
+Content-Type: application/json
+
+{
+  "name": "Client Work",
+  "kind": "group",
+  "description": "Shared client initiative",
+  "entry_agent_name": "Client Manager"   // optional; must be an existing agent
+}
+```
+
+When `entry_agent_name` is omitted, the server auto-creates a `"<Group Name> Manager"` agent (type `general`, role `orchestrator`, workspace-manager system prompt) and sets it as the group's entry agent, so new groups are chat-ready immediately. Name collisions get a numeric suffix (`"<Name> Manager 2"`).
+
+Group folders are provisioned with `sub-workspaces/` (members), plus their own `files/` and `notes/` directories. The auto-provisioned `workspace-files` filesystem MCP binding is **scoped to `files/` and `notes/` only** — member sub-workspaces are never exposed to the group's agents. Groups created before this behavior existed are upgraded automatically by an idempotent backfill at server startup.
+
+**Listing:** the flat `GET /api/workspaces` list includes groups (check `kind` to distinguish them); `GET /api/workspaces?tree=true` returns the nested tree.
+
+**Deleting a group** uses a two-mode flow:
+
+```http
+DELETE /api/workspaces/:id?confirm=true&delete_mode=group_only   (default)
+DELETE /api/workspaces/:id?confirm=true&delete_mode=contents
+```
+
+- `group_only` — un-nests direct members back to the workspaces root (they stay active), then moves the group folder — with its own sessions, notes, and files — to the system Trash. Responds `{ "success": true, "id": "...", "trashed": true }`; restore with `POST /api/workspaces/:id/restore`. With `delete_sessions=true` (or on platforms without Trash support) the group is removed permanently instead.
+- `contents` — moves the whole folder tree (group + members) to the Trash and marks every row trashed; restore reactivates the entire subtree. `delete_sessions=true` forces a permanent delete of everything including sessions.
+
+Both modes hard-block with `409 Conflict` while any workspace in the group has active task work.
 
 ## Scheduler Nodes API
 

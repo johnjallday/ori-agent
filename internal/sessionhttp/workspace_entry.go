@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -150,6 +153,63 @@ func canonicalWorkspaceEntryNodeID(agentName string) string {
 		name = "agent"
 	}
 	return fmt.Sprintf("%s-node-1", name)
+}
+
+// defaultGroupEntryAgentName returns the manager-agent name seeded for a
+// group, matching the detail page's entry-agent defaults ("<Name> Manager").
+func defaultGroupEntryAgentName(workspaceName string) string {
+	name := strings.TrimSpace(workspaceName)
+	if name == "" {
+		return "Group Manager"
+	}
+	if strings.HasSuffix(strings.ToLower(name), " manager") {
+		return name
+	}
+	return name + " Manager"
+}
+
+// autoCreateGroupEntryAgent creates the default "<Name> Manager" agent for a
+// newly created group and returns its name, so groups are chat-ready the
+// moment they exist. A fresh agent is always created — name collisions get a
+// numeric suffix rather than adopting an unrelated existing agent, because a
+// workspace's entry agent is deleted along with the workspace. Failures are
+// non-fatal and return "": the detail page then falls back to its standard
+// missing-entry-agent prompt.
+func (h *Handler) autoCreateGroupEntryAgent(ws *session.Workspace) string {
+	if h == nil || h.agentStore == nil || ws == nil {
+		return ""
+	}
+
+	base := defaultGroupEntryAgentName(ws.Name)
+	name := base
+	for i := 2; ; i++ {
+		if _, exists := h.agentStore.GetAgent(name); !exists {
+			break
+		}
+		if i > 50 {
+			logger.Warn("Could not find a free group entry agent name", logger.Fields{"base": base})
+			return ""
+		}
+		name = fmt.Sprintf("%s %d", base, i)
+	}
+
+	systemPrompt := fmt.Sprintf(
+		"You are the workspace manager for %q. Act as the default front door for the workspace: "+
+			"clarify user intent, answer directly when the request only needs shared context, and "+
+			"break work into tasks for specialists when needed.",
+		strings.TrimSpace(ws.Name),
+	)
+	if err := h.agentStore.CreateAgent(name, &store.CreateAgentConfig{
+		Type:         agent.TypeGeneral,
+		Role:         types.RoleOrchestrator,
+		SystemPrompt: systemPrompt,
+	}); err != nil {
+		logger.Warn("Failed to auto-create group entry agent", logger.Fields{"agent": name, "error": err})
+		return ""
+	}
+
+	logger.Info("Auto-created group entry agent", logger.Fields{"agent": name, "workspace": ws.Name})
+	return name
 }
 
 func toWorkspaceAgentInstances(items []session.AgentInstance) []agentworkspace.AgentInstance {

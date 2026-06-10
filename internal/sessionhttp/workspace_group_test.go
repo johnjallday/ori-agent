@@ -11,7 +11,9 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -391,7 +393,9 @@ func TestDeleteGroupOnlyUnnestsMembers(t *testing.T) {
 
 	baseDir, groupID, childID, fs := setupGroupWithChild(t, handler)
 
-	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=group_only", http.StatusNoContent)
+	// delete_sessions=true forces the permanent path (the default is an
+	// undoable trash move, covered by TestDeleteGroupOnlyTrashable).
+	deleteWorkspaceReq(t, handler, groupID, "confirm=true&delete_mode=group_only&delete_sessions=true", http.StatusNoContent)
 
 	ctx := context.Background()
 	if _, err := handler.store.GetWorkspace(ctx, groupID); err != session.ErrWorkspaceNotFound {
@@ -409,6 +413,135 @@ func TestDeleteGroupOnlyUnnestsMembers(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); !os.IsNotExist(err) {
 		t.Fatalf("expected empty group folder removed, stat err=%v", err)
+	}
+}
+
+// TestDeleteGroupOnlyTrashable covers the reversible group_only path: members
+// are un-nested to the root and stay active, while the group itself (with its
+// own sessions and content) moves to the system Trash and can be restored.
+// Rooted under $HOME so the trash move stays on a single volume.
+func TestDeleteGroupOnlyTrashable(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("path-based trash round trip not supported on %s", runtime.GOOS)
+	}
+
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("home dir: %v", err)
+	}
+	baseDir, err := os.MkdirTemp(home, ".ws-group-only-trash-test-*")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(baseDir) }()
+
+	fs, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("failed to create workspace file store: %v", err)
+	}
+	handler.SetWorkspaceStore(fs)
+
+	groupID := createTestGroup(t, handler, "Client Work")
+	childID := createTestWorkspace(t, handler, "Brooklyn Nerds")
+	patchWorkspaceParent(t, handler, childID, groupID, http.StatusOK)
+
+	ctx := context.Background()
+
+	// The group holds its own session, which must survive trash + restore.
+	sessionReq := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(`{"title":"Group Session","folder_id":"`+groupID+`"}`))
+	sessionReq.Header.Set("Content-Type", "application/json")
+	sessionW := httptest.NewRecorder()
+	handler.HandleSessions(sessionW, sessionReq)
+	if sessionW.Code != http.StatusCreated {
+		t.Fatalf("create group session: got %d: %s", sessionW.Code, sessionW.Body.String())
+	}
+	var sessionResp struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(sessionW.Body.Bytes(), &sessionResp); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+groupID+"?confirm=true&delete_mode=group_only", nil)
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete group_only: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if trashed, _ := resp["trashed"].(bool); !trashed {
+		t.Fatalf("expected trashed=true in response, got %v", resp)
+	}
+
+	grp, err := handler.store.GetWorkspace(ctx, groupID)
+	if err != nil {
+		t.Fatalf("group row should survive trashing, got err=%v", err)
+	}
+	if _, trashedPath := workspaceTrashPaths(grp); trashedPath != "" {
+		defer func() { _ = os.RemoveAll(trashedPath) }()
+	}
+	if grp.Status != session.WorkspaceStatusTrashed {
+		t.Fatalf("group status = %q, want trashed", grp.Status)
+	}
+
+	// Member is un-nested, active, and physically back at the root.
+	child, err := handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("member should survive group_only delete: %v", err)
+	}
+	if child.Status != session.WorkspaceStatusActive {
+		t.Fatalf("member status = %q, want active", child.Status)
+	}
+	if child.ParentID != "" {
+		t.Fatalf("expected member un-nested to root, parent_id=%q", child.ParentID)
+	}
+	if got := mustHandlerFolderPath(t, fs, childID); filepath.Dir(got) != baseDir {
+		t.Fatalf("expected member folder back at root, got %s", got)
+	}
+
+	// Restore brings back just the group, with its session intact.
+	restoreW := httptest.NewRecorder()
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+groupID+"/restore", nil)
+	handler.HandleWorkspaces(restoreW, restoreReq)
+	if restoreW.Code != http.StatusOK {
+		t.Fatalf("restore: got %d, want 200: %s", restoreW.Code, restoreW.Body.String())
+	}
+
+	grp, err = handler.store.GetWorkspace(ctx, groupID)
+	if err != nil {
+		t.Fatalf("group after restore: %v", err)
+	}
+	if grp.Status != session.WorkspaceStatusActive {
+		t.Fatalf("group status after restore = %q, want active", grp.Status)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "client-work")); err != nil {
+		t.Fatalf("expected group folder restored to root, stat err=%v", err)
+	}
+
+	restoredSession, err := handler.store.GetSession(ctx, sessionResp.Session.ID)
+	if err != nil {
+		t.Fatalf("group session after restore: %v", err)
+	}
+	if restoredSession.FolderID != groupID {
+		t.Fatalf("session folder_id after restore = %q, want %q", restoredSession.FolderID, groupID)
+	}
+
+	// The restored member must NOT have been re-nested or reactivated twice;
+	// it stayed active at the root the whole time.
+	child, err = handler.store.GetWorkspace(ctx, childID)
+	if err != nil {
+		t.Fatalf("member after restore: %v", err)
+	}
+	if child.ParentID != "" {
+		t.Fatalf("member parent_id after restore = %q, want empty", child.ParentID)
 	}
 }
 
@@ -526,7 +659,7 @@ func TestGroupingHardBlockedByActiveWork(t *testing.T) {
 	}
 }
 
-func TestListWorkspacesFlatExcludesGroups(t *testing.T) {
+func TestListWorkspacesFlatIncludesGroups(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -556,13 +689,21 @@ func TestListWorkspacesFlatExcludesGroups(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected workspaces list in flat response")
 	}
-	if len(flatWorkspaces) != 1 {
-		t.Fatalf("expected 1 concrete workspace in flat list, got %d", len(flatWorkspaces))
+	if len(flatWorkspaces) != 2 {
+		t.Fatalf("expected group and workspace in flat list, got %d entries", len(flatWorkspaces))
 	}
 
-	flatWorkspace := flatWorkspaces[0].(map[string]any)
-	if got := flatWorkspace["id"]; got != childID {
-		t.Fatalf("expected flat list to contain child workspace %q, got %v", childID, got)
+	kindsByID := make(map[string]string, len(flatWorkspaces))
+	for _, entry := range flatWorkspaces {
+		ws := entry.(map[string]any)
+		kind, _ := ws["kind"].(string)
+		kindsByID[ws["id"].(string)] = kind
+	}
+	if got := kindsByID[groupID]; got != "group" {
+		t.Fatalf("expected flat list to include group %q with kind group, got %q", groupID, got)
+	}
+	if _, ok := kindsByID[childID]; !ok {
+		t.Fatalf("expected flat list to contain child workspace %q", childID)
 	}
 
 	treeReq := httptest.NewRequest(http.MethodGet, "/api/workspaces?tree=true", nil)
@@ -606,7 +747,7 @@ func TestCreateWorkspaceRejectsNonGroupParent(t *testing.T) {
 	}
 }
 
-func TestCreateSessionRejectsGroupAssignment(t *testing.T) {
+func TestCreateSessionAllowsGroupAssignment(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -617,7 +758,122 @@ func TestCreateSessionRejectsGroupAssignment(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleSessions(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for group session assignment, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for group session assignment, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Session struct {
+			ID       string `json:"id"`
+			FolderID string `json:"folder_id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode session response: %v", err)
+	}
+	if resp.Session.FolderID != groupID {
+		t.Fatalf("expected session folder_id %q, got %q", groupID, resp.Session.FolderID)
+	}
+}
+
+// TestGroupNotesAndSettings verifies that groups support direct work that was
+// previously gated: creating/listing notes and reading/updating settings.
+func TestGroupNotesAndSettings(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	newTestFileStore(t, handler)
+
+	groupID := createTestGroup(t, handler, "Notes Group")
+
+	noteReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+groupID+"/notes", bytes.NewBufferString(`{"name":"Plan","content":"# plan"}`))
+	noteReq.Header.Set("Content-Type", "application/json")
+	noteW := httptest.NewRecorder()
+	handler.HandleWorkspaces(noteW, noteReq)
+	if noteW.Code != http.StatusCreated {
+		t.Fatalf("create note on group: got %d, want 201: %s", noteW.Code, noteW.Body.String())
+	}
+
+	listW := httptest.NewRecorder()
+	handler.HandleWorkspaces(listW, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+groupID+"/notes", nil))
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list group notes: got %d, want 200: %s", listW.Code, listW.Body.String())
+	}
+	if !bytes.Contains(listW.Body.Bytes(), []byte("Plan")) {
+		t.Fatalf("expected listed notes to contain the created note, got %s", listW.Body.String())
+	}
+
+	getW := httptest.NewRecorder()
+	handler.HandleWorkspaces(getW, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+groupID+"/settings", nil))
+	if getW.Code != http.StatusOK {
+		t.Fatalf("get group settings: got %d, want 200: %s", getW.Code, getW.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+groupID+"/settings", bytes.NewBufferString(`{}`))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchW := httptest.NewRecorder()
+	handler.HandleWorkspaces(patchW, patchReq)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("update group settings: got %d, want 200: %s", patchW.Code, patchW.Body.String())
+	}
+}
+
+// TestCreateGroupWithEntryAgent verifies the New Group modal flow: a group
+// created with entry_agent_name resolves that agent as the default session
+// agent, and a group created without one gets a "<Name> Manager" entry agent
+// auto-created (with numeric suffixes on name collisions).
+func TestCreateGroupWithEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	newTestFileStore(t, handler)
+	ctx := context.Background()
+
+	if err := handler.agentStore.CreateAgent("Existing Manager", &agentstore.CreateAgentConfig{
+		Type: agent.TypeGeneral,
+	}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// Explicit entry agent: used as-is, no auto-creation.
+	body := `{"name":"Managed Group","kind":"group","entry_agent_name":"Existing Manager"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create group with entry agent: got %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	groupID := resp["folder"].(map[string]any)["id"].(string)
+
+	if got := handler.defaultSessionAgentNameForWorkspace(ctx, groupID); got != "Existing Manager" {
+		t.Fatalf("default session agent for group = %q, want %q", got, "Existing Manager")
+	}
+	if _, exists := handler.agentStore.GetAgent("Managed Group Manager"); exists {
+		t.Fatalf("explicit entry agent must suppress auto-creation")
+	}
+
+	// Omitted entry agent: a "<Name> Manager" agent is auto-created and set.
+	plainID := createTestGroup(t, handler, "Plain Group")
+	if got := handler.defaultSessionAgentNameForWorkspace(ctx, plainID); got != "Plain Group Manager" {
+		t.Fatalf("default session agent for plain group = %q, want %q", got, "Plain Group Manager")
+	}
+	if _, exists := handler.agentStore.GetAgent("Plain Group Manager"); !exists {
+		t.Fatalf("expected auto-created agent %q in the agent store", "Plain Group Manager")
+	}
+
+	// Name collision: the auto-created agent gets a numeric suffix instead of
+	// adopting the existing agent (entry agents are deleted with their group).
+	if err := handler.agentStore.CreateAgent("Collide Group Manager", &agentstore.CreateAgentConfig{
+		Type: agent.TypeGeneral,
+	}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	collideID := createTestGroup(t, handler, "Collide Group")
+	if got := handler.defaultSessionAgentNameForWorkspace(ctx, collideID); got != "Collide Group Manager 2" {
+		t.Fatalf("default session agent for colliding group = %q, want %q", got, "Collide Group Manager 2")
 	}
 }

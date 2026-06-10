@@ -133,6 +133,12 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			if err := b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
 				logger.Warn("Startup workspace reconcile from disk failed", logger.Fields{"error": err.Error()})
 			}
+			// Upgrade groups created before they supported direct work with
+			// the scoped scaffolding (files/, notes/, directory reference,
+			// workspace-files MCP binding). Idempotent; non-fatal.
+			if err := b.sessionHandler.BackfillGroupScaffolding(context.Background()); err != nil {
+				logger.Warn("Startup group scaffolding backfill failed", logger.Fields{"error": err.Error()})
+			}
 		}
 		if b.chatHandler != nil {
 			b.chatHandler.SetFileStore(fileStore)

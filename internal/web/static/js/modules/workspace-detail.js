@@ -10,6 +10,7 @@ import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explore
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
+import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 
 /**
  * Format a date for display
@@ -209,6 +210,8 @@ export class WorkspaceDetailPage {
     this.schedules = [];
     this.children = [];
     this.directoryExplorer = new WorkspaceDirectoryExplorer(this);
+    // Group-only Members panel + header identity; no-op for concrete workspaces.
+    this.membersPanel = new WorkspaceMembersPanel(workspaceId);
 
     // Board state
     this.currentView = 'list'; // 'list' or 'board'
@@ -322,7 +325,8 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
-      { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
+      { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' },
+      { id: 'workspace-detail-members-panel', label: 'Members panel content' }
     ];
 
     panelConfig.forEach(({ id, label }) => {
@@ -1920,6 +1924,7 @@ export class WorkspaceDetailPage {
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
+      await this.membersPanel.syncWorkspace(this.workspace);
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
@@ -3038,9 +3043,13 @@ export class WorkspaceDetailPage {
    * Render children workspaces
    */
   renderChildren() {
+    // Groups manage members through the dedicated Members panel; the
+    // read-only child cards would duplicate it.
+    const isGroup = String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+
     // Show/hide the children panel based on whether there are children
     if (this.elements.childrenPanel) {
-      if (this.children.length > 0) {
+      if (this.children.length > 0 && !isGroup) {
         this.elements.childrenPanel.style.display = '';
       } else {
         this.elements.childrenPanel.style.display = 'none';

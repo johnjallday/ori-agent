@@ -122,6 +122,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherGroupModal: document.getElementById('launcherGroupModal'),
     launcherGroupNameInput: document.getElementById('launcherGroupNameInput'),
     launcherGroupDescriptionInput: document.getElementById('launcherGroupDescriptionInput'),
+    launcherGroupEntryAgentSelect: document.getElementById('launcherGroupEntryAgentSelect'),
     launcherCreateGroupBtn: document.getElementById('launcherCreateGroupBtn'),
     launcherSelectionBar: document.getElementById('launcherSelectionBar'),
     launcherRootDropZone: document.getElementById('launcherRootDropZone'),
@@ -1380,7 +1381,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         .map((child) => escapeHtml(child && (child.name || child.id) || 'Untitled Workspace'))
         .join(' · ');
       const previewSuffix = childCount > 3 ? ` +${childCount - 3} more` : '';
-      const groupDescription = row.description || 'Organization-only group';
+      const groupDescription = row.description || 'Group workspace';
 
       const toggleBtn = `
         <button class="launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${escapeHtml(row.id)}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -1411,7 +1412,7 @@ console.log('[workspace-hub.js] FILE LOADED');
             <div class="launcher-card-title">${escapeHtml(row.name || 'Group')}</div>
             <span class="launcher-group-kind-pill">Group</span>
           </div>
-          <div class="launcher-card-path">Contains ${childCount} workspace${childCount === 1 ? '' : 's'}</div>
+          <div class="launcher-card-path">Contains ${childCount} workspace${childCount === 1 ? '' : 's'} &middot; ${row.session_count || 0} session${(row.session_count || 0) === 1 ? '' : 's'}</div>
           <div class="launcher-card-description">${escapeHtml(groupDescription)}</div>
           <div class="launcher-group-preview">${previewNames ? `${previewNames}${escapeHtml(previewSuffix)}` : 'Drop workspaces here to organize related work.'}</div>
         </div>
@@ -2490,8 +2491,10 @@ console.log('[workspace-hub.js] FILE LOADED');
   //     moves the whole folder tree to the system Trash and answers
   //     { trashed: true }, so the group is pushed onto the undo stack and can be
   //     restored from the toolbar Undo button.
-  //   - 'group_only' un-nests the members back to the root, then removes the
-  //     empty group (server hard-blocks if any member has active work).
+  //   - 'group_only' un-nests the members back to the root (they stay active),
+  //     then moves the now member-less group — including its own sessions,
+  //     notes, and files — to the Trash, also answering { trashed: true }
+  //     (server hard-blocks if any member has active work).
   async function deleteGroupViaServer(workspaceId, mode) {
     const label = getWorkspaceLabel(workspaceId) || 'Group';
     try {
@@ -2524,7 +2527,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(`Moved "${label}" and its contents to Trash`, 'info', {
+          window.Toast.show(mode === 'contents'
+            ? `Moved "${label}" and its contents to Trash`
+            : `Members moved out; "${label}" moved to Trash`, 'info', {
             title: 'Group deleted',
             duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
             action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
@@ -2724,6 +2729,43 @@ console.log('[workspace-hub.js] FILE LOADED');
     await deleteWorkspacesByIds(selected);
   }
 
+  // Populate the entry-agent dropdown in the Create Group modal from the
+  // global agent catalog. The default option leaves the field empty, which
+  // makes the server auto-create a "<Group Name> Manager" entry agent.
+  async function populateGroupEntryAgentOptions() {
+    const select = elements.launcherGroupEntryAgentSelect;
+    if (!select) return;
+    select.innerHTML = '<option value="" selected>Auto-create group manager</option>';
+    try {
+      const res = await fetch('/api/agents');
+      if (!res.ok) return;
+      const data = await res.json();
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      agents.forEach((agent) => {
+        const name = String(typeof agent === 'string' ? agent : agent?.name || '').trim();
+        if (!name) return;
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+    } catch (err) {
+      console.warn('Failed to load agents for group modal:', err);
+    }
+  }
+
+  // Reset and open the Create Group modal (used by the toolbar button and the
+  // Cmd/Ctrl+G shortcut).
+  function openCreateGroupModal() {
+    if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+    const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
+    if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
+    if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
+    if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
+    void populateGroupEntryAgentOptions();
+    modal.show();
+  }
+
   async function createGroupFromSelection() {
     // Top-level ids only: moving a checked group into the new group carries its
     // members with it, so we must not also move the members (that would flatten
@@ -2733,16 +2775,20 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const name = (elements.launcherGroupNameInput?.value || '').trim();
     const description = (elements.launcherGroupDescriptionInput?.value || '').trim();
+    const entryAgentName = (elements.launcherGroupEntryAgentSelect?.value || '').trim();
     if (!name) {
       if (window.Toast) window.Toast.error('Group name is required');
       return;
     }
 
+    const payload = { name, description, kind: 'group' };
+    if (entryAgentName) payload.entry_agent_name = entryAgentName;
+
     try {
       const createRes = await fetch('/api/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description, kind: 'group' })
+        body: JSON.stringify(payload)
       });
       if (!createRes.ok) {
         const msg = await extractErrorMessage(createRes, 'Failed to create group');
@@ -2773,6 +2819,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
       if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
       if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
+      if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
 
       // Reset selection + refresh
       clearLauncherSelection({ render: false });
@@ -3643,13 +3690,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherGroupSelectedBtn && elements.launcherGroupModal) {
-      elements.launcherGroupSelectedBtn.addEventListener('click', () => {
-        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
-        const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
-        if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
-        if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
-        modal.show();
-      });
+      elements.launcherGroupSelectedBtn.addEventListener('click', () => openCreateGroupModal());
     }
 
     if (elements.launcherCreateGroupBtn) {
@@ -3817,13 +3858,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
       if (hasLauncherSelection()) {
         e.preventDefault();
-        // Open group modal
-        if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-          const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
-          if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
-          if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
-          modal.show();
-        }
+        openCreateGroupModal();
       }
     }
 

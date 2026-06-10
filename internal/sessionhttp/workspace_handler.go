@@ -22,10 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
-var (
-	errParentWorkspaceMustBeGroup  = errors.New("parent workspace must be a group")
-	errWorkspaceDisallowsDirectUse = errors.New("groups cannot hold sessions, notes, or direct work")
-)
+var errParentWorkspaceMustBeGroup = errors.New("parent workspace must be a group")
 
 const workspaceSharedDataPrimaryDirectoryIDKey = "primary_directory_id"
 
@@ -218,22 +215,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
-	if kind == session.WorkspaceKindGroup {
-		switch {
-		case strings.TrimSpace(req.ProjectPath) != "":
-			_ = orihttp.RespondBadRequest(w, "groups cannot have a project path")
-			return
-		case strings.TrimSpace(req.Location) != "":
-			_ = orihttp.RespondBadRequest(w, "groups cannot have a folder location")
-			return
-		case strings.TrimSpace(req.EntryAgentName) != "":
-			_ = orihttp.RespondBadRequest(w, "groups cannot have an entry agent")
-			return
-		case req.WorkspaceBootstrap != nil:
-			_ = orihttp.RespondBadRequest(w, "groups cannot have workspace bootstrap settings")
-			return
-		}
-	}
 	if err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
 		handleWorkspaceParentError(w, err)
 		return
@@ -265,8 +246,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If an existing entry agent was specified, validate and set it.
-	// Otherwise the workspace is created without an entry agent;
-	// the UI will prompt the user to create one with their choice of model/provider.
+	// Groups without one get a "<Name> Manager" agent auto-created so they are
+	// chat-ready immediately. Concrete workspaces are created without an entry
+	// agent; the UI prompts the user to create one with their choice of
+	// model/provider.
 	if req.EntryAgentName != "" {
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
@@ -277,6 +260,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		if entryAgentName != "" {
 			setWorkspaceEntryAgent(ws, entryAgentName)
 		}
+	} else if kind == session.WorkspaceKindGroup {
+		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
+			setWorkspaceEntryAgent(ws, agentName)
+		}
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
@@ -286,8 +273,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create workspace folder on disk if folder-based store is available.
-	// Groups now get a folder too (so the grouping is portable on disk), but
-	// without the executable scaffolding that real workspaces receive.
+	// Groups get the same executable scaffolding as real workspaces, scoped to
+	// their own content directories so member sub-workspaces stay hidden.
 	if h.workspaceStore != nil {
 		folderWS := &agentworkspace.Workspace{
 			ID:             ws.ID,
@@ -333,80 +320,22 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
-		} else if ws.Kind == session.WorkspaceKindGroup {
-			// Groups are organizational containers: create the folder plus an
-			// empty sub-workspaces/ directory, but skip the directory reference
-			// and workspace-files MCP binding that executable workspaces get.
-			// Group membership is expressed by physical nesting of members.
-			if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
-				if mkErr := os.MkdirAll(filepath.Join(folderPath, agentworkspace.SubWorkspacesDir), 0o750); mkErr != nil {
-					logger.Warn("Failed to create group sub-workspaces directory", logger.Fields{"id": ws.ID, "error": mkErr})
+		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			if ws.Kind == session.WorkspaceKindGroup {
+				// Groups physically nest members under sub-workspaces/, so
+				// their linked folder and MCP roots are scoped to the group's
+				// own files/ and notes/ — never the folder root — keeping
+				// member content hidden from group agents.
+				if dirs, mkErr := ensureGroupContentDirs(folderPath); mkErr != nil {
+					logger.Warn("Failed to create group content directories", logger.Fields{"id": ws.ID, "error": mkErr})
+				} else {
+					h.provisionWorkspaceScaffolding(r.Context(), ws, folderWS, dirs.files, dirs.mcpRoots())
 				}
 				logger.Info("Group folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
+			} else {
+				h.provisionWorkspaceScaffolding(r.Context(), ws, folderWS, folderPath, []string{folderPath})
+				logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 			}
-		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
-			now := time.Now()
-
-			// Add the workspace folder as the initial directory reference
-			dirRef := workspaceDirectoryReference{
-				ID:          uuid.New().String(),
-				WorkspaceID: ws.ID,
-				Name:        ws.FolderSlug,
-				Path:        folderPath,
-				X:           400,
-				Y:           300,
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
-				ws.DirectoryReferencesJSON = data
-			}
-			setWorkspacePrimaryDirectoryID(ws, dirRef.ID)
-
-			// Auto-provision a filesystem MCP binding scoped to the workspace folder
-			mcpBinding := agentworkspace.WorkspaceMCPBinding{
-				ID:         uuid.New().String(),
-				ServerName: "filesystem",
-				Alias:      "workspace-files",
-				Enabled:    true,
-				Config: map[string]any{
-					"roots": []string{folderPath},
-				},
-				CreatedAt: now,
-				UpdatedAt: now,
-			}
-			if data, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
-				ws.MCPBindingsJSON = data
-			}
-
-			ws.UpdatedAt = now
-			if err := h.store.UpdateWorkspace(r.Context(), ws); err != nil {
-				logger.Warn("Failed to set initial workspace config", logger.Fields{"id": ws.ID, "error": err})
-			}
-
-			// Resync workspace.json to include directory reference and MCP binding
-			folderWS.SharedData = ws.SharedData
-			folderWS.Agents = append([]string{}, ws.Agents...)
-			folderWS.AgentInstances = toWorkspaceAgentInstances(ws.AgentInstances)
-			folderWS.DirectoryReferences = []agentworkspace.DirectoryReference{
-				{
-					ID:          dirRef.ID,
-					WorkspaceID: dirRef.WorkspaceID,
-					Name:        dirRef.Name,
-					Path:        dirRef.Path,
-					X:           dirRef.X,
-					Y:           dirRef.Y,
-					CreatedAt:   dirRef.CreatedAt,
-					UpdatedAt:   dirRef.UpdatedAt,
-				},
-			}
-			folderWS.MCPBindings = []agentworkspace.WorkspaceMCPBinding{mcpBinding}
-			folderWS.UpdatedAt = now
-			if err := h.workspaceStore.Save(folderWS); err != nil {
-				logger.Warn("Failed to resync workspace.json after creation", logger.Fields{"id": ws.ID, "error": err})
-			}
-
-			logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 		}
 	}
 
@@ -551,16 +480,13 @@ func (h *Handler) firstActiveWorkBlocker(ctx context.Context, id string) (string
 }
 
 // applyMoveReferenceUpdates fixes path-keyed references (directory references,
-// MCP roots) and project_path for every non-group workspace whose folder moved.
+// MCP roots) and project_path for every workspace whose folder moved, groups
+// included (groups carry scoped references to their own files/ and notes/).
 // The moved node itself is updated in place on self so the caller's pending
 // UpdateWorkspace persists it; descendants are reloaded and saved individually.
-// Groups carry no such references and are skipped.
 func (h *Handler) applyMoveReferenceUpdates(ctx context.Context, self *session.Workspace, moved []agentworkspace.MovedWorkspace) {
 	for _, m := range moved {
 		if self != nil && m.ID == self.ID {
-			if self.IsGroup() {
-				continue
-			}
 			if err := updateManagedWorkspaceReferences(self, m.OldPath, m.NewPath); err != nil {
 				logger.Warn("Move: failed to update references", logger.Fields{"id": m.ID, "error": err})
 			}
@@ -570,9 +496,6 @@ func (h *Handler) applyMoveReferenceUpdates(ctx context.Context, self *session.W
 		descWS, err := h.store.GetWorkspace(ctx, m.ID)
 		if err != nil {
 			logger.Warn("Move: failed to load descendant for reference update", logger.Fields{"id": m.ID, "error": err})
-			continue
-		}
-		if descWS.IsGroup() {
 			continue
 		}
 		refErr := updateManagedWorkspaceReferences(descWS, m.OldPath, m.NewPath)
@@ -609,21 +532,6 @@ func rewriteWorkspaceProjectPath(ws *session.Workspace, oldPath, newPath string)
 	return true
 }
 
-func filterConcreteWorkspaces(workspaces []session.Workspace) []session.Workspace {
-	if len(workspaces) == 0 {
-		return workspaces
-	}
-
-	filtered := make([]session.Workspace, 0, len(workspaces))
-	for _, ws := range workspaces {
-		if ws.IsGroup() {
-			continue
-		}
-		filtered = append(filtered, ws)
-	}
-	return filtered
-}
-
 // pruneTrashedWorkspaces removes workspaces that have been moved to the trash,
 // recursing into children so trashed sub-workspaces don't leak into the tree.
 func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace {
@@ -642,20 +550,16 @@ func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace 
 	return filtered
 }
 
-func (h *Handler) requireConcreteWorkspace(ctx context.Context, workspaceID string) (*session.Workspace, error) {
+// requireWorkspace validates that workspaceID, when provided, refers to an
+// existing workspace of any kind (groups hold sessions, notes, and direct work
+// just like concrete workspaces).
+func (h *Handler) requireWorkspace(ctx context.Context, workspaceID string) (*session.Workspace, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return nil, nil
 	}
 
-	ws, err := h.store.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	if ws.IsGroup() {
-		return nil, errWorkspaceDisallowsDirectUse
-	}
-	return ws, nil
+	return h.store.GetWorkspace(ctx, workspaceID)
 }
 
 // getWorkspace handles GET /api/workspaces/{id}.
@@ -727,10 +631,6 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		}
 	}
 	if req.ProjectPath != nil {
-		if workspace.IsGroup() && strings.TrimSpace(*req.ProjectPath) != "" {
-			_ = orihttp.RespondBadRequest(w, "groups cannot have a project path")
-			return
-		}
 		workspace.ProjectPath = *req.ProjectPath
 	}
 	if req.PrimaryDirectoryID != nil {
@@ -962,7 +862,7 @@ func (h *Handler) deleteGroup(w http.ResponseWriter, r *http.Request, ws *sessio
 	case "contents":
 		h.deleteGroupWithContents(w, ctx, ws, deleteSessions)
 	case "group_only":
-		h.deleteGroupOnly(w, ctx, ws)
+		h.deleteGroupOnly(w, ctx, ws, deleteSessions)
 	default:
 		_ = orihttp.RespondBadRequest(w, "delete_mode must be 'contents' or 'group_only'")
 	}
@@ -1020,7 +920,13 @@ func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Con
 		h.cleanupEntryAgent(entryAgent, memberID)
 	}
 
-	// Handle the group's own (rare) sessions, then its SQLite row.
+	// Handle the group's own sessions and entry agent, then its SQLite row.
+	groupEntryAgent := ""
+	if h.workspaceStore != nil {
+		if fws, ferr := h.workspaceStore.Get(ws.ID); ferr == nil && fws != nil {
+			groupEntryAgent = strings.TrimSpace(fws.EntryAgentName())
+		}
+	}
 	if deleteSessions {
 		_ = h.store.DeleteSessionsByWorkspace(ctx, ws.ID)
 	} else {
@@ -1038,15 +944,19 @@ func (h *Handler) deleteGroupWithContents(w http.ResponseWriter, ctx context.Con
 			logger.Warn("Failed to delete group folder tree", logger.Fields{"id": ws.ID, "error": err})
 		}
 	}
+	h.cleanupEntryAgent(groupEntryAgent, ws.ID)
 
 	logger.Info("Group deleted with contents", logger.Fields{"id": ws.ID, "members": len(descendants)})
 	orihttp.RespondNoContent(w)
 }
 
-// deleteGroupOnly moves the group's direct children out to the workspaces root,
-// then removes the now-empty group. Hard-blocked if any workspace in the group
-// has active work.
-func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws *session.Workspace) {
+// deleteGroupOnly moves the group's direct children out to the workspaces
+// root, then soft-deletes the now member-less group like a regular workspace
+// (system trash + trashed row) so its own sessions, notes, and files stay
+// restorable. Explicit delete_sessions=true requests and platforms without
+// trash support remove it permanently instead. Hard-blocked if any workspace
+// in the group has active work.
+func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws *session.Workspace, deleteSessions bool) {
 	// Active-work hard block across the whole subtree (req 25): un-nesting moves
 	// folders, which must not happen while work is in flight.
 	if blocker, err := h.firstActiveWorkBlocker(ctx, ws.ID); err != nil {
@@ -1083,7 +993,37 @@ func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws
 		}
 	}
 
-	// Remove the now-empty group (SQLite row + folder).
+	// Soft delete (default): with members un-nested, the group folder now holds
+	// only group-owned content (sessions, notes, files), so trash it like a
+	// regular workspace and mark the row trashed — the deletion stays undoable.
+	// Explicit delete_sessions=true requests and platforms without trash
+	// support fall through to the permanent delete.
+	if !deleteSessions && h.workspaceStore != nil && platform.TrashSupported() {
+		if _, ferr := h.workspaceStore.Get(ws.ID); ferr == nil {
+			if err := h.trashWorkspace(ctx, ws); err != nil {
+				logger.Error("Failed to move group to trash", logger.Fields{"id": ws.ID, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to move group to trash")
+				return
+			}
+			logger.Info("Group moved to trash (members un-nested to root)", logger.Fields{"id": ws.ID})
+			orihttp.WriteJSON(w, map[string]any{"success": true, "id": ws.ID, "trashed": true})
+			return
+		}
+	}
+
+	// Permanent removal: delete or unlink the group's own sessions, clean up
+	// its entry agent, then drop the SQLite row + folder.
+	groupEntryAgent := ""
+	if h.workspaceStore != nil {
+		if fws, ferr := h.workspaceStore.Get(ws.ID); ferr == nil && fws != nil {
+			groupEntryAgent = strings.TrimSpace(fws.EntryAgentName())
+		}
+	}
+	if deleteSessions {
+		_ = h.store.DeleteSessionsByWorkspace(ctx, ws.ID)
+	} else {
+		_ = h.store.UnlinkSessionsFromWorkspace(ctx, ws.ID)
+	}
 	if err := h.store.DeleteWorkspace(ctx, ws.ID); err != nil {
 		logger.Error("Failed to delete group", logger.Fields{"id": ws.ID, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to delete group")
@@ -1094,6 +1034,7 @@ func (h *Handler) deleteGroupOnly(w http.ResponseWriter, ctx context.Context, ws
 			logger.Warn("Failed to delete group folder", logger.Fields{"id": ws.ID, "error": err})
 		}
 	}
+	h.cleanupEntryAgent(groupEntryAgent, ws.ID)
 
 	logger.Info("Group deleted (members un-nested to root)", logger.Fields{"id": ws.ID})
 	orihttp.RespondNoContent(w)
@@ -1339,7 +1280,6 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaces = filterConcreteWorkspaces(workspaces)
 	workspaces = pruneTrashedWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
@@ -1375,7 +1315,7 @@ func (h *Handler) hydrateWorkspaceMetadataFromFileStore(workspace *session.Works
 }
 
 func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
-	if h == nil || h.workspaceStore == nil || workspace == nil || workspace.IsGroup() {
+	if h == nil || h.workspaceStore == nil || workspace == nil {
 		return
 	}
 
@@ -1504,7 +1444,8 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if folderTracked {
-		if err := h.workspaceStore.RenameWithSlug(id, req.Name, targetSlug); err != nil {
+		moved, err := h.workspaceStore.RenameWithSlug(id, req.Name, targetSlug)
+		if err != nil {
 			ws.Name = oldName
 			ws.FolderSlug = oldFolderSlug
 			ws.UpdatedAt = time.Now()
@@ -1523,6 +1464,19 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 			logger.Error("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
 			_ = orihttp.RespondInternalError(w, "Failed to rename workspace folder")
 			return
+		}
+
+		// The folder (and any nested members) changed paths: rewrite
+		// path-keyed references (directory references, MCP roots,
+		// project_path) and persist them.
+		if len(moved) > 0 {
+			h.applyMoveReferenceUpdates(ctx, ws, moved)
+			if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+				logger.Warn("Failed to persist renamed workspace references", logger.Fields{"id": id, "error": err})
+			}
+			if err := h.syncWorkspacePortableStateToFileStore(ws); err != nil {
+				logger.Warn("Failed to sync workspace.json after rename", logger.Fields{"id": id, "error": err})
+			}
 		}
 	}
 
@@ -2086,19 +2040,37 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 	normalizedOld := cleanWorkspaceSyncPath(oldPath)
 	folderSlug := strings.TrimSpace(ws.FolderSlug)
 	newBaseName := filepath.Base(normalizedNew)
+	isGroup := session.NormalizeWorkspaceKind(ws.Kind) == session.WorkspaceKindGroup
+	defaultRefPath := defaultWorkspaceReferencePath(isGroup, normalizedNew)
+	defaultRoots := defaultWorkspaceMCPRoots(isGroup, normalizedNew)
 	matchedReference := false
 
 	for i := range ws.DirectoryReferences {
 		refPath := cleanWorkspaceSyncPath(ws.DirectoryReferences[i].Path)
-		if (normalizedOld != "" && refPath == normalizedOld) ||
-			refPath == normalizedNew ||
-			(folderSlug != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), folderSlug)) ||
+		if refPath == "" {
+			continue
+		}
+		if rewritten, ok := rewriteWorkspaceContentPath(refPath, normalizedOld, normalizedNew); ok {
+			ws.DirectoryReferences[i].WorkspaceID = ws.ID
+			if strings.TrimSpace(ws.DirectoryReferences[i].Name) == "" {
+				ws.DirectoryReferences[i].Name = workspaceReferenceName(ws, normalizedNew)
+			}
+			ws.DirectoryReferences[i].Path = rewritten
+			ws.DirectoryReferences[i].UpdatedAt = now
+			matchedReference = true
+			continue
+		}
+		if _, ok := rewriteWorkspaceContentPath(refPath, normalizedNew, normalizedNew); ok {
+			matchedReference = true
+			continue
+		}
+		if (folderSlug != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), folderSlug)) ||
 			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), newBaseName)) {
 			ws.DirectoryReferences[i].WorkspaceID = ws.ID
 			if strings.TrimSpace(ws.DirectoryReferences[i].Name) == "" {
 				ws.DirectoryReferences[i].Name = workspaceReferenceName(ws, normalizedNew)
 			}
-			ws.DirectoryReferences[i].Path = normalizedNew
+			ws.DirectoryReferences[i].Path = defaultRefPath
 			ws.DirectoryReferences[i].UpdatedAt = now
 			matchedReference = true
 		}
@@ -2109,7 +2081,7 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 			ID:          uuid.New().String(),
 			WorkspaceID: ws.ID,
 			Name:        workspaceReferenceName(ws, normalizedNew),
-			Path:        normalizedNew,
+			Path:        defaultRefPath,
 			X:           400,
 			Y:           300,
 			CreatedAt:   now,
@@ -2120,12 +2092,12 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 
 	matchedBinding := false
 	for i := range ws.MCPBindings {
-		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), "workspace-files") ||
+		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), workspaceFilesMCPAlias) ||
 			workspaceBindingHasRoot(ws.MCPBindings[i].Config, normalizedOld) {
 			if ws.MCPBindings[i].Config == nil {
 				ws.MCPBindings[i].Config = make(map[string]any)
 			}
-			ws.MCPBindings[i].Config["roots"] = []string{normalizedNew}
+			ws.MCPBindings[i].Config["roots"] = rewriteWorkspaceBindingRoots(ws.MCPBindings[i].Config["roots"], normalizedOld, normalizedNew, defaultRoots)
 			ws.MCPBindings[i].UpdatedAt = now
 			ws.MCPBindings[i].Enabled = true
 			matchedBinding = true
@@ -2133,17 +2105,7 @@ func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPa
 	}
 
 	if !matchedBinding {
-		ws.MCPBindings = append(ws.MCPBindings, agentworkspace.WorkspaceMCPBinding{
-			ID:         uuid.New().String(),
-			ServerName: "filesystem",
-			Alias:      "workspace-files",
-			Enabled:    true,
-			Config: map[string]any{
-				"roots": []string{normalizedNew},
-			},
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
+		ws.MCPBindings = append(ws.MCPBindings, newWorkspaceFilesMCPBinding(defaultRoots, now))
 	}
 }
 
@@ -3132,10 +3094,6 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				warnings = append(warnings, fmt.Sprintf("Failed to load workspace %s", item.ID))
 				continue
 			}
-			if sessionWS.IsGroup() {
-				warnings = append(warnings, fmt.Sprintf("Workspace %s is a group and cannot be rebound", sessionWS.Name))
-				continue
-			}
 			if isFolderImportedWorkspace(*sessionWS) {
 				warnings = append(warnings, fmt.Sprintf("Workspace %s is a folder import and cannot be rebound", sessionWS.Name))
 				continue
@@ -3179,10 +3137,6 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				logger.Warn("Sync recreate: failed to load workspace", logger.Fields{"id": id, "error": err})
 				warnings = append(warnings, fmt.Sprintf("Failed to load workspace %s", id))
-				continue
-			}
-			if sessionWS.IsGroup() {
-				warnings = append(warnings, fmt.Sprintf("Workspace %s is a group and cannot be recreated", sessionWS.Name))
 				continue
 			}
 			if isFolderImportedWorkspace(*sessionWS) {
@@ -3448,7 +3402,7 @@ func cleanWorkspaceSyncPath(path string) string {
 }
 
 func (h *Handler) syncManagedWorkspacePath(ws session.Workspace) (string, bool) {
-	if h == nil || h.workspaceStore == nil || ws.IsGroup() || isFolderImportedWorkspace(ws) {
+	if h == nil || h.workspaceStore == nil || isFolderImportedWorkspace(ws) {
 		return "", false
 	}
 
@@ -3489,6 +3443,13 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 	folderSlug := strings.TrimSpace(workspace.FolderSlug)
 	newBaseName := filepath.Base(normalizedNew)
 
+	// Groups keep their linked folder and MCP roots scoped to their own
+	// content directories; rewriting onto the folder root would expose member
+	// sub-workspaces.
+	isGroup := workspace.IsGroup()
+	defaultRefPath := defaultWorkspaceReferencePath(isGroup, normalizedNew)
+	defaultRoots := defaultWorkspaceMCPRoots(isGroup, normalizedNew)
+
 	refs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decode directory references: %w", err)
@@ -3500,15 +3461,32 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 		if refPath == "" {
 			continue
 		}
-		if refPath == normalizedOld ||
-			refPath == normalizedNew ||
-			(folderSlug != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), folderSlug)) ||
+		// References at or inside the moved folder keep their relative
+		// location (a group's files/ stays files/).
+		if rewritten, ok := rewriteWorkspaceContentPath(refPath, normalizedOld, normalizedNew); ok {
+			refs[i].WorkspaceID = workspace.ID
+			if strings.TrimSpace(refs[i].Name) == "" {
+				refs[i].Name = sessionWorkspaceReferenceName(workspace, normalizedNew)
+			}
+			refs[i].Path = rewritten
+			refs[i].UpdatedAt = now
+			matchedReference = true
+			continue
+		}
+		if _, ok := rewriteWorkspaceContentPath(refPath, normalizedNew, normalizedNew); ok {
+			// Already pointing into the new location.
+			matchedReference = true
+			continue
+		}
+		// Name-keyed rebind for stale references whose path matches neither
+		// location.
+		if (folderSlug != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), folderSlug)) ||
 			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), newBaseName)) {
 			refs[i].WorkspaceID = workspace.ID
 			if strings.TrimSpace(refs[i].Name) == "" {
 				refs[i].Name = sessionWorkspaceReferenceName(workspace, normalizedNew)
 			}
-			refs[i].Path = normalizedNew
+			refs[i].Path = defaultRefPath
 			refs[i].UpdatedAt = now
 			matchedReference = true
 		}
@@ -3518,7 +3496,7 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 			ID:          uuid.New().String(),
 			WorkspaceID: workspace.ID,
 			Name:        sessionWorkspaceReferenceName(workspace, normalizedNew),
-			Path:        normalizedNew,
+			Path:        defaultRefPath,
 			X:           400,
 			Y:           300,
 			CreatedAt:   now,
@@ -3540,28 +3518,18 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 
 	matchedBinding := false
 	for i := range bindings {
-		if strings.EqualFold(strings.TrimSpace(bindings[i].Alias), "workspace-files") || workspaceBindingHasRoot(bindings[i].Config, normalizedOld) {
+		if strings.EqualFold(strings.TrimSpace(bindings[i].Alias), workspaceFilesMCPAlias) || workspaceBindingHasRoot(bindings[i].Config, normalizedOld) {
 			if bindings[i].Config == nil {
 				bindings[i].Config = make(map[string]any)
 			}
-			bindings[i].Config["roots"] = []string{normalizedNew}
+			bindings[i].Config["roots"] = rewriteWorkspaceBindingRoots(bindings[i].Config["roots"], normalizedOld, normalizedNew, defaultRoots)
 			bindings[i].UpdatedAt = now
 			bindings[i].Enabled = true
 			matchedBinding = true
 		}
 	}
 	if !matchedBinding {
-		bindings = append(bindings, agentworkspace.WorkspaceMCPBinding{
-			ID:         uuid.New().String(),
-			ServerName: "filesystem",
-			Alias:      "workspace-files",
-			Enabled:    true,
-			Config: map[string]any{
-				"roots": []string{normalizedNew},
-			},
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
+		bindings = append(bindings, newWorkspaceFilesMCPBinding(defaultRoots, now))
 	}
 
 	bindingData, err := json.Marshal(bindings)

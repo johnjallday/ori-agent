@@ -1,13 +1,17 @@
 /**
- * Group Details Page
+ * Workspace Members Panel (groups only)
  *
- * Renders the dedicated details view for a group workspace at /workspaces/{id}.
- * The page is client-rendered: it derives the group ID from the URL, loads the
- * workspace tree, and renders the group header plus (in later tasks) member,
- * task, and notes/files sections. Shows a not-found state when the id is missing,
- * trashed, or not a group.
+ * Ported from the retired group-detail page: when the workspace loaded on
+ * /workspaces/{id} is a group, this module shows the Members bento panel
+ * (member list with open/add/create/remove/reorder) plus lazy roll-ups of the
+ * direct members' open tasks, notes, and files. It also decorates the page
+ * header with the group badge, color swatch (click to change color), and
+ * member count. For concrete workspaces everything stays hidden.
  *
- * @module group-detail
+ * Roll-ups are lazy: the per-member requests fire only on the first expansion
+ * of the panel, never during initial page load.
+ *
+ * @module workspace-detail-members
  */
 
 // --- Pure helpers (exported for unit testing) ----------------------------------
@@ -84,11 +88,12 @@ export function formatMemberCount(count) {
   return `${count} member${count === 1 ? '' : 's'}`;
 }
 
-// Color choices for group metadata editing ('' = no color).
+// Color choices for group color editing ('' = no color).
 export const GROUP_COLOR_PRESETS = ['', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280'];
 
-// Decide which save calls an edit needs: the name uses the rename endpoint,
-// description/color use PATCH. Returns flags so callers only hit changed paths.
+// Decide which save calls a metadata edit needs: the name uses the rename
+// endpoint, description/color use PATCH. Returns flags so callers only hit
+// changed paths.
 export function metadataChanges(group, next) {
   const cur = group || {};
   return {
@@ -171,248 +176,129 @@ export function extractFileItems(attachments) {
   }));
 }
 
-// --- Page controller -----------------------------------------------------------
+// --- Panel controller -----------------------------------------------------------
 
-export class GroupDetailPage {
-  constructor(groupId) {
-    this.groupId = groupId;
-    this.group = null;
+export class WorkspaceMembersPanel {
+  constructor(workspaceId) {
+    this.workspaceId = workspaceId;
+    this.group = null; // tree node for this workspace (groups only)
     this.tree = [];
     this.els = {};
-    this.selectedColor = '';
+    this.active = false;
+    this.rollupsLoaded = false;
+    this.rollupObserver = null;
     this.allTasks = [];
     this.taskLoadFailures = 0;
     this.taskFilters = { status: 'default', member: 'all', dateRange: 'any' };
-  }
-
-  async init() {
-    this.cacheElements();
-    this.bindEditForm();
-    this.bindMemberControls();
-    await this.load();
+    this.colorPopoverOpen = false;
   }
 
   cacheElements() {
     this.els = {
-      view: document.getElementById('group-detail-view'),
-      notFound: document.getElementById('group-not-found'),
-      title: document.getElementById('group-title'),
-      breadcrumbName: document.getElementById('group-breadcrumb-name'),
-      parentCrumb: document.getElementById('group-parent-crumb'),
-      parentLink: document.getElementById('group-parent-link'),
-      colorSwatch: document.getElementById('group-color-swatch'),
-      memberCount: document.getElementById('group-member-count'),
-      description: document.getElementById('group-description'),
-      membersList: document.getElementById('group-members-list'),
-      membersError: document.getElementById('group-members-error'),
-      addMemberBtn: document.getElementById('group-add-member-btn'),
-      createMemberBtn: document.getElementById('group-create-member-btn'),
-      addPicker: document.getElementById('group-add-member-picker'),
-      createForm: document.getElementById('group-create-member-form'),
-      createName: document.getElementById('group-create-name'),
-      createDescription: document.getElementById('group-create-description'),
-      createCancel: document.getElementById('group-create-cancel'),
-      tasksList: document.getElementById('group-tasks-list'),
-      notesFilesList: document.getElementById('group-notes-files-list'),
-      editBtn: document.getElementById('group-edit-btn'),
-      editForm: document.getElementById('group-edit-form'),
-      editName: document.getElementById('group-edit-name'),
-      editDescription: document.getElementById('group-edit-description'),
-      editColors: document.getElementById('group-edit-colors'),
-      editError: document.getElementById('group-edit-error'),
-      editSave: document.getElementById('group-edit-save'),
-      editCancel: document.getElementById('group-edit-cancel'),
+      bento: document.querySelector('.workspace-detail-bento'),
+      panel: document.getElementById('workspace-detail-members-panel'),
+      list: document.getElementById('workspace-detail-members-list'),
+      error: document.getElementById('workspace-detail-members-error'),
+      addBtn: document.getElementById('workspace-detail-add-member-btn'),
+      createBtn: document.getElementById('workspace-detail-create-member-btn'),
+      picker: document.getElementById('workspace-detail-member-picker'),
+      createForm: document.getElementById('workspace-detail-member-create-form'),
+      createName: document.getElementById('workspace-detail-member-create-name'),
+      createDescription: document.getElementById('workspace-detail-member-create-description'),
+      createCancel: document.getElementById('workspace-detail-member-create-cancel'),
+      rollups: document.getElementById('workspace-detail-members-rollups'),
+      // Header identity
+      badge: document.getElementById('workspace-group-badge'),
+      swatch: document.getElementById('workspace-group-color'),
+      memberStat: document.getElementById('workspace-member-stat'),
+      memberCount: document.getElementById('workspace-member-count'),
     };
   }
 
-  async load() {
+  /**
+   * Called by the page after the workspace loads. Activates the panel and
+   * group header identity when the workspace is a group; hides them otherwise.
+   */
+  async syncWorkspace(workspace) {
+    this.cacheElements();
+    if (!isGroupNode(workspace)) {
+      this.deactivate();
+      return false;
+    }
+
+    this.bindControlsOnce();
+    await this.reload();
+    if (!this.group) {
+      // Tree did not confirm the group (e.g. trashed); keep everything hidden.
+      this.deactivate();
+      return false;
+    }
+
+    this.activate();
+    return true;
+  }
+
+  activate() {
+    this.active = true;
+    if (this.els.panel) this.els.panel.hidden = false;
+    if (this.els.bento) this.els.bento.classList.add('has-members-panel');
+    if (this.els.badge) this.els.badge.hidden = false;
+    if (this.els.memberStat) this.els.memberStat.hidden = false;
+    this.applyHeaderIdentity();
+    this.armLazyRollups();
+  }
+
+  deactivate() {
+    this.active = false;
+    if (this.els.panel) this.els.panel.hidden = true;
+    if (this.els.bento) this.els.bento.classList.remove('has-members-panel');
+    if (this.els.badge) this.els.badge.hidden = true;
+    if (this.els.memberStat) this.els.memberStat.hidden = true;
+    if (this.els.swatch) this.els.swatch.hidden = true;
+  }
+
+  // Reload the workspace tree and re-render the member list (+ rollups when
+  // they were already loaded).
+  async reload() {
     try {
       const res = await fetch('/api/workspaces?tree=true');
       if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
       const data = await res.json();
       this.tree = data.workspaces || data.folders || [];
-
-      const node = findWorkspaceNode(this.tree, this.groupId);
-      if (!isGroupNode(node)) {
-        this.showNotFound();
+      this.group = findWorkspaceNode(this.tree, this.workspaceId);
+      if (!isGroupNode(this.group)) {
+        this.group = null;
         return;
       }
-
-      this.group = node;
-      document.title = `${node.name || 'Group'} - Ori Agent`;
-      this.renderHeader();
       this.renderMembers();
-      this.renderSectionPlaceholders();
-      void this.loadTasks();
-      void this.loadNotesFiles();
+      this.applyHeaderIdentity();
+      if (this.rollupsLoaded) {
+        void this.loadRollups();
+      }
     } catch (err) {
-      console.error('Failed to load group:', err);
-      this.showNotFound();
+      console.error('Failed to load group members:', err);
+      this.showError('Failed to load members.');
     }
   }
 
-  showNotFound() {
-    if (this.els.view) this.els.view.hidden = true;
-    if (this.els.notFound) this.els.notFound.hidden = false;
-  }
-
-  renderHeader() {
-    const g = this.group;
-    const members = directMembers(g);
-    const name = g.name || 'Untitled Group';
-
-    if (this.els.title) this.els.title.textContent = name;
-    if (this.els.breadcrumbName) this.els.breadcrumbName.textContent = name;
-    if (this.els.memberCount) this.els.memberCount.textContent = formatMemberCount(members.length);
-    if (this.els.description) {
-      this.els.description.textContent = g.description || 'No description';
-    }
-    if (this.els.colorSwatch) {
-      this.els.colorSwatch.style.setProperty('--accent', g.color || '#6c757d');
-    }
-
-    // Parent-group breadcrumb (only when nested).
-    if (this.els.parentCrumb && this.els.parentLink) {
-      if (g.parent_id) {
-        const parent = findWorkspaceNode(this.tree, g.parent_id);
-        this.els.parentLink.href = `/workspaces/${encodeURIComponent(g.parent_id)}`;
-        this.els.parentLink.textContent = (parent && parent.name) ? parent.name : 'Parent group';
-        this.els.parentCrumb.hidden = false;
-      } else {
-        this.els.parentCrumb.hidden = true;
-      }
-    }
-
-    if (this.els.editBtn) this.els.editBtn.hidden = false;
-  }
-
-  // --- Metadata editing (name via rename endpoint; description/color via PATCH)
-
-  bindEditForm() {
-    const { editBtn, editForm, editCancel } = this.els;
-    if (editBtn) editBtn.addEventListener('click', () => this.openEditForm());
-    if (editCancel) editCancel.addEventListener('click', () => this.closeEditForm());
-    if (editForm) {
-      editForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        void this.saveMetadata();
-      });
-    }
-  }
-
-  openEditForm() {
-    if (!this.group || !this.els.editForm) return;
-    this.selectedColor = this.group.color || '';
-    if (this.els.editName) this.els.editName.value = this.group.name || '';
-    if (this.els.editDescription) this.els.editDescription.value = this.group.description || '';
-    this.renderColorSwatches();
-    this.hideEditError();
-    this.els.editForm.hidden = false;
-    if (this.els.editName) this.els.editName.focus();
-  }
-
-  closeEditForm() {
-    if (this.els.editForm) this.els.editForm.hidden = true;
-    this.hideEditError();
-  }
-
-  renderColorSwatches() {
-    const container = this.els.editColors;
-    if (!container) return;
-    container.innerHTML = '';
-    GROUP_COLOR_PRESETS.forEach((color) => {
-      const isSelected = color === this.selectedColor;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `group-color-btn${isSelected ? ' is-selected' : ''}${color ? '' : ' is-none'}`;
-      btn.setAttribute('aria-label', color ? `Color ${color}` : 'No color');
-      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-      if (color) {
-        btn.style.background = color;
-      } else {
-        btn.textContent = 'None';
-      }
-      btn.addEventListener('click', () => {
-        this.selectedColor = color;
-        this.renderColorSwatches();
-      });
-      container.appendChild(btn);
-    });
-  }
-
-  showEditError(message) {
-    if (!this.els.editError) return;
-    this.els.editError.textContent = message;
-    this.els.editError.hidden = false;
-  }
-
-  hideEditError() {
-    if (this.els.editError) this.els.editError.hidden = true;
-  }
-
-  setEditBusy(busy) {
-    if (this.els.editSave) {
-      this.els.editSave.disabled = busy;
-      this.els.editSave.textContent = busy ? 'Saving...' : 'Save';
-    }
-  }
-
-  async saveMetadata() {
+  applyHeaderIdentity() {
     if (!this.group) return;
-
-    const name = (this.els.editName?.value || '').trim();
-    const description = this.els.editDescription?.value || '';
-    const color = this.selectedColor || '';
-
-    if (!name) {
-      this.showEditError('Name is required.');
-      this.els.editName?.focus();
-      return;
-    }
-
-    const { nameChanged, metaChanged } = metadataChanges(this.group, { name, description, color });
-    if (!nameChanged && !metaChanged) {
-      this.closeEditForm();
-      return;
-    }
-
-    this.setEditBusy(true);
-    try {
-      if (nameChanged) {
-        await this.putJson(`/api/workspaces/${encodeURIComponent(this.groupId)}/rename`, 'POST', { name }, 'Failed to rename group');
-      }
-      if (metaChanged) {
-        await this.putJson(`/api/workspaces/${encodeURIComponent(this.groupId)}`, 'PATCH', { description, color }, 'Failed to update group');
-      }
-      this.closeEditForm();
-      await this.load();
-    } catch (err) {
-      console.error('Failed to save group metadata:', err);
-      this.showEditError(err.message || 'Failed to save changes.');
-    } finally {
-      this.setEditBusy(false);
+    const members = directMembers(this.group);
+    if (this.els.memberCount) this.els.memberCount.textContent = String(members.length);
+    if (this.els.swatch) {
+      this.els.swatch.hidden = false;
+      this.els.swatch.style.setProperty('--accent', this.group.color || '#6c757d');
+      this.els.swatch.title = 'Change group color';
     }
   }
 
-  async putJson(url, method, body, failMessage) {
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(text || failMessage);
-    }
-    return res;
-  }
+  bindControlsOnce() {
+    if (this.controlsBound) return;
+    this.controlsBound = true;
 
-  // --- Members (list, open, add, remove, reorder) ------------------------------
-
-  bindMemberControls() {
-    const { addMemberBtn, createMemberBtn, createForm, createCancel } = this.els;
-    if (addMemberBtn) addMemberBtn.addEventListener('click', () => this.openAddPicker());
-    if (createMemberBtn) createMemberBtn.addEventListener('click', () => this.openCreateMember());
+    const { addBtn, createBtn, createForm, createCancel, swatch } = this.els;
+    if (addBtn) addBtn.addEventListener('click', () => this.openAddPicker());
+    if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember());
     if (createCancel) createCancel.addEventListener('click', () => this.closeCreateMember());
     if (createForm) {
       createForm.addEventListener('submit', (event) => {
@@ -420,15 +306,56 @@ export class GroupDetailPage {
         void this.createMember();
       });
     }
+    if (swatch) swatch.addEventListener('click', () => this.toggleColorPopover());
   }
 
-  renderMembers() {
-    const container = this.els.membersList;
-    if (!container) return;
+  // --- Lazy roll-ups ------------------------------------------------------------
 
-    if (this.els.addMemberBtn) this.els.addMemberBtn.hidden = false;
-    if (this.els.createMemberBtn) this.els.createMemberBtn.hidden = false;
-    this.hideMembersError();
+  // Fire the per-member roll-up requests only when the panel is first
+  // expanded (initPanelExpansion flips aria-expanded to "true").
+  armLazyRollups() {
+    if (this.rollupObserver || !this.els.panel) return;
+    if (this.els.rollups) {
+      this.els.rollups.innerHTML = '<div class="group-detail-empty">Expand the panel to load member tasks, notes, and files.</div>';
+    }
+    this.rollupObserver = new MutationObserver(() => {
+      if (this.els.panel.getAttribute('aria-expanded') === 'true' && !this.rollupsLoaded) {
+        this.rollupsLoaded = true;
+        void this.loadRollups();
+      }
+    });
+    this.rollupObserver.observe(this.els.panel, { attributes: true, attributeFilter: ['aria-expanded'] });
+  }
+
+  async loadRollups() {
+    if (!this.els.rollups || !this.group) return;
+    this.els.rollups.innerHTML = '<div class="group-detail-empty">Loading member tasks, notes &amp; files…</div>';
+    await Promise.all([this.loadTasks(), this.loadNotesFiles()]);
+    this.renderRollups();
+  }
+
+  renderRollups() {
+    const container = this.els.rollups;
+    if (!container) return;
+    const hasSubgroups = directMembers(this.group).some(isGroupNode);
+
+    container.innerHTML = `
+      ${hasSubgroups ? '<div class="group-detail-hint">Items from member sub-groups are not included.</div>' : ''}
+      <h3 class="group-detail-subtitle mt-2">Member tasks</h3>
+      <div id="workspace-detail-members-tasks"></div>
+      <h3 class="group-detail-subtitle mt-3">Member notes &amp; files</h3>
+      <div id="workspace-detail-members-notesfiles"></div>
+    `;
+    this.renderTasks();
+    this.renderNotesFiles();
+  }
+
+  // --- Members (list, open, add, remove, reorder) ------------------------------
+
+  renderMembers() {
+    const container = this.els.list;
+    if (!container) return;
+    this.hideError();
 
     const members = directMembers(this.group);
     if (members.length === 0) {
@@ -468,7 +395,7 @@ export class GroupDetailPage {
   }
 
   bindMemberActions() {
-    const container = this.els.membersList;
+    const container = this.els.list;
     if (!container) return;
     container.querySelectorAll('[data-member-id]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -490,13 +417,13 @@ export class GroupDetailPage {
     if (!memberId) return;
     // Removal moves the member to this group's parent (root if top-level); it
     // never deletes the workspace/group.
-    const newParent = this.group.parent_id || '';
+    const newParent = (this.group && this.group.parent_id) || '';
     try {
-      await this.putJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: newParent }, 'Failed to remove member');
-      await this.load();
+      await this.sendJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: newParent }, 'Failed to remove member');
+      await this.reload();
     } catch (err) {
       console.error('Failed to remove member:', err);
-      this.showMembersError(err.message || 'Failed to remove member.');
+      this.showError(err.message || 'Failed to remove member.');
     }
   }
 
@@ -510,20 +437,21 @@ export class GroupDetailPage {
     try {
       // Persist a sequential order_index for the new order.
       for (let k = 0; k < members.length; k += 1) {
-        await this.putJson(`/api/workspaces/${encodeURIComponent(members[k].id)}`, 'PATCH', { order_index: k + 1 }, 'Failed to reorder members');
+        await this.sendJson(`/api/workspaces/${encodeURIComponent(members[k].id)}`, 'PATCH', { order_index: k + 1 }, 'Failed to reorder members');
       }
-      await this.load();
+      await this.reload();
     } catch (err) {
       console.error('Failed to reorder members:', err);
-      this.showMembersError(err.message || 'Failed to reorder members.');
+      this.showError(err.message || 'Failed to reorder members.');
       // Reload so the UI matches the persisted state after a partial failure.
-      await this.load();
+      await this.reload();
     }
   }
 
   openAddPicker() {
-    const picker = this.els.addPicker;
+    const picker = this.els.picker;
     if (!picker) return;
+    this.closeCreateMember();
     const targets = eligibleAddTargets(this.tree, this.group);
     if (targets.length === 0) {
       picker.innerHTML = '<div class="group-detail-empty">No eligible workspaces to add.</div>';
@@ -535,16 +463,16 @@ export class GroupDetailPage {
       .join('');
     picker.innerHTML = `
       <div class="d-flex gap-2 align-items-center">
-        <select id="group-add-select" class="form-select form-select-sm" aria-label="Workspace to add">${options}</select>
-        <button id="group-add-confirm" type="button" class="modern-btn modern-btn-primary">Add</button>
-        <button id="group-add-cancel" type="button" class="modern-btn modern-btn-secondary">Cancel</button>
+        <select id="workspace-detail-member-add-select" class="form-select form-select-sm" aria-label="Workspace to add">${options}</select>
+        <button id="workspace-detail-member-add-confirm" type="button" class="modern-btn modern-btn-primary">Add</button>
+        <button id="workspace-detail-member-add-cancel" type="button" class="modern-btn modern-btn-secondary">Cancel</button>
       </div>`;
     picker.hidden = false;
-    picker.querySelector('#group-add-confirm').addEventListener('click', () => {
-      const sel = picker.querySelector('#group-add-select');
+    picker.querySelector('#workspace-detail-member-add-confirm').addEventListener('click', () => {
+      const sel = picker.querySelector('#workspace-detail-member-add-select');
       void this.addMember(sel && sel.value);
     });
-    picker.querySelector('#group-add-cancel').addEventListener('click', () => {
+    picker.querySelector('#workspace-detail-member-add-cancel').addEventListener('click', () => {
       picker.hidden = true;
     });
   }
@@ -552,24 +480,22 @@ export class GroupDetailPage {
   async addMember(memberId) {
     if (!memberId) return;
     try {
-      await this.putJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: this.groupId }, 'Failed to add member');
-      if (this.els.addPicker) this.els.addPicker.hidden = true;
-      await this.load();
+      await this.sendJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: this.workspaceId }, 'Failed to add member');
+      if (this.els.picker) this.els.picker.hidden = true;
+      await this.reload();
     } catch (err) {
       console.error('Failed to add member:', err);
-      this.showMembersError(err.message || 'Failed to add member.');
+      this.showError(err.message || 'Failed to add member.');
     }
   }
 
-  // Create a new workspace directly into this group. Uses a self-contained
-  // inline form that POSTs to the same /api/workspaces endpoint with parent_id
-  // set to this group, so the new workspace lands as a direct member.
+  // Create a new workspace directly into this group (parent_id = this group).
   openCreateMember() {
-    if (this.els.addPicker) this.els.addPicker.hidden = true;
+    if (this.els.picker) this.els.picker.hidden = true;
     if (!this.els.createForm) return;
     if (this.els.createName) this.els.createName.value = '';
     if (this.els.createDescription) this.els.createDescription.value = '';
-    this.hideMembersError();
+    this.hideError();
     this.els.createForm.hidden = false;
     if (this.els.createName) this.els.createName.focus();
   }
@@ -582,39 +508,71 @@ export class GroupDetailPage {
     const name = (this.els.createName?.value || '').trim();
     const description = this.els.createDescription?.value || '';
     if (!name) {
-      this.showMembersError('Workspace name is required.');
+      this.showError('Workspace name is required.');
       this.els.createName?.focus();
       return;
     }
     try {
-      await this.putJson('/api/workspaces', 'POST', { name, description, parent_id: this.groupId }, 'Failed to create workspace');
+      await this.sendJson('/api/workspaces', 'POST', { name, description, parent_id: this.workspaceId }, 'Failed to create workspace');
       this.closeCreateMember();
-      await this.load();
+      await this.reload();
     } catch (err) {
       console.error('Failed to create workspace:', err);
-      this.showMembersError(err.message || 'Failed to create workspace.');
+      this.showError(err.message || 'Failed to create workspace.');
     }
   }
 
-  showMembersError(message) {
-    if (!this.els.membersError) return;
-    this.els.membersError.textContent = message;
-    this.els.membersError.hidden = false;
+  // --- Group color (header swatch popover) --------------------------------------
+
+  toggleColorPopover() {
+    if (!this.active || !this.els.swatch) return;
+    const existing = document.getElementById('workspace-group-color-popover');
+    if (existing) {
+      existing.remove();
+      this.colorPopoverOpen = false;
+      return;
+    }
+    const popover = document.createElement('div');
+    popover.id = 'workspace-group-color-popover';
+    popover.className = 'workspace-group-color-popover';
+    popover.setAttribute('role', 'group');
+    popover.setAttribute('aria-label', 'Group color');
+    GROUP_COLOR_PRESETS.forEach((color) => {
+      const isSelected = color === (this.group?.color || '');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `group-color-btn${isSelected ? ' is-selected' : ''}${color ? '' : ' is-none'}`;
+      btn.setAttribute('aria-label', color ? `Color ${color}` : 'No color');
+      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      if (color) {
+        btn.style.background = color;
+      } else {
+        btn.textContent = 'None';
+      }
+      btn.addEventListener('click', () => void this.saveColor(color));
+      popover.appendChild(btn);
+    });
+    this.els.swatch.insertAdjacentElement('afterend', popover);
+    this.colorPopoverOpen = true;
   }
 
-  hideMembersError() {
-    if (this.els.membersError) this.els.membersError.hidden = true;
-  }
-
-  renderSectionPlaceholders() {
-    if (this.els.tasksList) this.els.tasksList.innerHTML = '<div class="group-detail-empty">Loading tasks…</div>';
-    if (this.els.notesFilesList) this.els.notesFilesList.innerHTML = '<div class="group-detail-empty">Loading notes &amp; files…</div>';
+  async saveColor(color) {
+    try {
+      await this.sendJson(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`, 'PATCH', { color }, 'Failed to update group color');
+      const popover = document.getElementById('workspace-group-color-popover');
+      if (popover) popover.remove();
+      this.colorPopoverOpen = false;
+      await this.reload();
+    } catch (err) {
+      console.error('Failed to update group color:', err);
+      this.showError(err.message || 'Failed to update group color.');
+    }
   }
 
   // --- Notes & files roll-up (direct concrete members only) --------------------
 
   async loadNotesFiles() {
-    if (!this.els.notesFilesList || !this.group) return;
+    if (!this.group) return;
     const members = directMembers(this.group).filter((m) => !isGroupNode(m));
 
     const noteResults = await Promise.allSettled(members.map(async (member) => {
@@ -638,13 +596,16 @@ export class GroupDetailPage {
     noteResults.forEach((r) => (r.status === 'fulfilled' ? notes.push(...r.value) : (failures += 1)));
     fileResults.forEach((r) => (r.status === 'fulfilled' ? files.push(...r.value) : (failures += 1)));
 
-    this.renderNotesFiles(notes, files, failures);
+    this.memberNotes = notes;
+    this.memberFiles = files;
+    this.notesFilesFailures = failures;
   }
 
-  renderNotesFiles(notes, files, failures) {
-    const container = this.els.notesFilesList;
+  renderNotesFiles() {
+    const container = document.getElementById('workspace-detail-members-notesfiles');
     if (!container) return;
-    const hasSubgroups = directMembers(this.group).some(isGroupNode);
+    const notes = this.memberNotes || [];
+    const files = this.memberFiles || [];
 
     const notesHtml = notes.length === 0
       ? '<div class="group-detail-empty">No notes.</div>'
@@ -654,11 +615,10 @@ export class GroupDetailPage {
       : `<div class="group-task-list" role="list">${files.map((file) => this.fileRowHtml(file)).join('')}</div>`;
 
     container.innerHTML = `
-      ${failures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ notes or files could not be loaded.</div>' : ''}
-      ${hasSubgroups ? '<div class="group-detail-hint">Notes and files from member sub-groups are not included.</div>' : ''}
-      <h3 class="group-detail-subtitle">Notes</h3>
+      ${this.notesFilesFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ notes or files could not be loaded.</div>' : ''}
+      <h4 class="group-detail-subtitle">Notes</h4>
       ${notesHtml}
-      <h3 class="group-detail-subtitle mt-3">Files</h3>
+      <h4 class="group-detail-subtitle mt-3">Files</h4>
       ${filesHtml}
     `;
   }
@@ -685,9 +645,9 @@ export class GroupDetailPage {
   // --- Tasks roll-up (default open + scheduled; status/created-date/member filters)
 
   async loadTasks() {
-    if (!this.els.tasksList || !this.group) return;
+    if (!this.group) return;
 
-    // Direct concrete workspace members only; sub-group tasks are excluded in v1.
+    // Direct concrete workspace members only; sub-group tasks are excluded.
     const members = directMembers(this.group).filter((m) => !isGroupNode(m));
     const results = await Promise.allSettled(members.map(async (member) => {
       const res = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`);
@@ -708,20 +668,17 @@ export class GroupDetailPage {
     });
     this.allTasks = all;
     this.taskLoadFailures = failures;
-    this.renderTasks();
   }
 
   renderTasks() {
-    const container = this.els.tasksList;
+    const container = document.getElementById('workspace-detail-members-tasks');
     if (!container) return;
 
     const filtered = sortTasksForRollup(this.allTasks.filter((task) => taskMatchesFilters(task, this.taskFilters)));
-    const hasSubgroups = directMembers(this.group).some(isGroupNode);
 
     container.innerHTML = `
       ${this.taskFiltersHtml()}
       ${this.taskLoadFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ tasks could not be loaded.</div>' : ''}
-      ${hasSubgroups ? '<div class="group-detail-hint">Tasks from member sub-groups are not included.</div>' : ''}
       ${filtered.length === 0
         ? '<div class="group-detail-empty">No tasks match the current filters.</div>'
         : `<div class="group-task-list" role="list">${filtered.map((task) => this.taskRowHtml(task)).join('')}</div>`}
@@ -747,14 +704,14 @@ export class GroupDetailPage {
 
     return `
       <div class="group-task-filters d-flex gap-2 flex-wrap mb-2">
-        <select id="group-task-status" class="form-select form-select-sm" aria-label="Filter tasks by status">${statusOptions}</select>
-        <select id="group-task-member" class="form-select form-select-sm" aria-label="Filter tasks by member workspace">${memberOptions}</select>
-        <select id="group-task-date" class="form-select form-select-sm" aria-label="Filter tasks by created date">${dateOptions}</select>
+        <select id="workspace-detail-members-task-status" class="form-select form-select-sm" aria-label="Filter tasks by status">${statusOptions}</select>
+        <select id="workspace-detail-members-task-member" class="form-select form-select-sm" aria-label="Filter tasks by member workspace">${memberOptions}</select>
+        <select id="workspace-detail-members-task-date" class="form-select form-select-sm" aria-label="Filter tasks by created date">${dateOptions}</select>
       </div>`;
   }
 
   bindTaskFilters() {
-    const container = this.els.tasksList;
+    const container = document.getElementById('workspace-detail-members-tasks');
     if (!container) return;
     const bind = (id, key) => {
       const el = container.querySelector(`#${id}`);
@@ -765,9 +722,9 @@ export class GroupDetailPage {
         });
       }
     };
-    bind('group-task-status', 'status');
-    bind('group-task-member', 'member');
-    bind('group-task-date', 'dateRange');
+    bind('workspace-detail-members-task-status', 'status');
+    bind('workspace-detail-members-task-member', 'member');
+    bind('workspace-detail-members-task-date', 'dateRange');
   }
 
   taskRowHtml(task) {
@@ -782,5 +739,30 @@ export class GroupDetailPage {
         <span class="group-task-desc">${escapeHtml(desc)}</span>
         <span class="group-task-meta">${escapeHtml(wsName)} · ${escapeHtml(status)}${scheduled}</span>
       </a>`;
+  }
+
+  // --- Misc -----------------------------------------------------------------
+
+  async sendJson(url, method, body, failMessage) {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || failMessage);
+    }
+    return res;
+  }
+
+  showError(message) {
+    if (!this.els.error) return;
+    this.els.error.textContent = message;
+    this.els.error.hidden = false;
+  }
+
+  hideError() {
+    if (this.els.error) this.els.error.hidden = true;
   }
 }

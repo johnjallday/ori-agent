@@ -129,12 +129,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		req.Title = "New Session"
 	}
-	if _, err := h.requireConcreteWorkspace(r.Context(), req.FolderID); err != nil {
+	if _, err := h.requireWorkspace(r.Context(), req.FolderID); err != nil {
 		switch {
 		case errors.Is(err, session.ErrWorkspaceNotFound):
 			_ = orihttp.RespondNotFound(w, "Workspace not found")
-		case errors.Is(err, errWorkspaceDisallowsDirectUse):
-			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
 			_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
 		}
@@ -210,12 +208,10 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 		sess.Title = *req.Title
 	}
 	if req.FolderID != nil {
-		if _, err := h.requireConcreteWorkspace(r.Context(), *req.FolderID); err != nil {
+		if _, err := h.requireWorkspace(r.Context(), *req.FolderID); err != nil {
 			switch {
 			case errors.Is(err, session.ErrWorkspaceNotFound):
 				_ = orihttp.RespondNotFound(w, "Workspace not found")
-			case errors.Is(err, errWorkspaceDisallowsDirectUse):
-				_ = orihttp.RespondBadRequest(w, err.Error())
 			default:
 				_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
 			}

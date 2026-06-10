@@ -15,31 +15,33 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
-// TestRenderGroupDetailPage confirms the group-detail page is registered and
-// renders with the server-injected group ID and its scaffold markers.
-func TestRenderGroupDetailPage(t *testing.T) {
+// TestRenderWorkspaceDetailGroupScaffold confirms the workspace-detail page
+// (which groups now share) carries the group-only scaffold: the Members panel
+// and the header identity elements, all hidden until the page detects a group.
+func TestRenderWorkspaceDetailGroupScaffold(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
 	data := TemplateData{
-		Title: "Group - Ori Agent",
+		Title: "Workspace - Ori Agent",
 		Extra: map[string]any{"WorkspaceID": "grp-123"},
 	}
-	html, err := r.RenderTemplate("group-detail", data)
+	html, err := r.RenderTemplate("workspace-detail", data)
 	if err != nil {
-		t.Fatalf("RenderTemplate(group-detail) failed: %v", err)
+		t.Fatalf("RenderTemplate(workspace-detail) failed: %v", err)
 	}
 
 	for _, want := range []string{
-		`id="group-detail-view"`,
-		`id="group-not-found"`,
-		"/js/modules/group-detail.js",
-		"grp-123",
+		`id="workspace-detail-members-panel"`,
+		`id="workspace-detail-members-list"`,
+		`id="workspace-group-badge"`,
+		`id="workspace-group-color"`,
+		`id="workspace-member-stat"`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Errorf("rendered group-detail page missing %q", want)
+			t.Errorf("rendered workspace-detail page missing %q", want)
 		}
 	}
 }

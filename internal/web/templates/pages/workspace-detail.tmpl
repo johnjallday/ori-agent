@@ -120,6 +120,8 @@
             <div class="d-flex justify-content-between align-items-start">
               <div>
                 <div class="workspace-editable-field" id="workspace-name-container">
+                  <span id="workspace-group-color" class="workspace-group-color-swatch" role="button" tabindex="0" aria-label="Change group color" hidden></span>
+                  <span id="workspace-group-badge" class="workspace-group-pill" hidden>Group</span>
                   <h1 id="workspace-name" class="mb-2" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">Loading...</h1>
                   <button class="workspace-edit-btn" data-field="name" type="button" title="Edit name">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -148,6 +150,10 @@
                 <div class="text-center">
                   <div id="workspace-session-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);" aria-busy="true" aria-label="Sessions (loading)">—</div>
                   <div style="font-size: 0.75rem; color: var(--text-secondary);">Sessions</div>
+                </div>
+                <div class="text-center" id="workspace-member-stat" hidden>
+                  <div id="workspace-member-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);" aria-label="Members">—</div>
+                  <div style="font-size: 0.75rem; color: var(--text-secondary);">Members</div>
                 </div>
               </div>
             </div>
@@ -1103,6 +1109,57 @@
                 <div id="workspace-detail-schedules-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No schedules yet.</div>
                 </div>
+              </div>
+            </div>
+
+            <!-- Members Panel (groups only; hidden for concrete workspaces) -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-members is-expandable" id="workspace-detail-members-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Members panel" hidden>
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16,13C15.71,13 15.38,13 15.03,13.05C16.19,13.89 17,15 17,16.5V19H23V16.5C23,14.17 18.33,13 16,13M8,13C5.67,13 1,14.17 1,16.5V19H15V16.5C15,14.17 10.33,13 8,13M8,11A3,3 0 0,0 11,8A3,3 0 0,0 8,5A3,3 0 0,0 5,8A3,3 0 0,0 8,11M16,11A3,3 0 0,0 19,8A3,3 0 0,0 16,5A3,3 0 0,0 13,8A3,3 0 0,0 16,11Z"/>
+                  </svg>
+                  Members
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-add-member-btn" class="workspace-detail-panel-btn" type="button" title="Add existing workspace to this group">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M6,10V7H4V10H1V12H4V15H6V12H9V10M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-create-member-btn" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Create new workspace in this group">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Members panel content">
+                <div id="workspace-detail-members-error" class="text-danger small mb-2" role="alert" hidden></div>
+                <div id="workspace-detail-member-picker" class="group-add-picker mb-2" hidden></div>
+                <form id="workspace-detail-member-create-form" class="mb-2" hidden>
+                  <div class="mb-2">
+                    <label class="form-label" for="workspace-detail-member-create-name">Name</label>
+                    <input type="text" class="form-control form-control-sm" id="workspace-detail-member-create-name" maxlength="200" required>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label" for="workspace-detail-member-create-description">Description</label>
+                    <textarea class="form-control form-control-sm" id="workspace-detail-member-create-description" rows="2"></textarea>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <button type="submit" class="modern-btn modern-btn-primary">Create</button>
+                    <button type="button" id="workspace-detail-member-create-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+                  </div>
+                </form>
+                <div id="workspace-detail-members-list" class="workspace-detail-list">
+                  <div class="workspace-detail-loading">Loading members...</div>
+                </div>
+                <div id="workspace-detail-members-rollups" class="mt-3"></div>
               </div>
             </div>
           </div>
@@ -3206,6 +3263,228 @@
       .workspace-detail-bento .workspace-detail-panel-body {
         max-height: 200px;
       }
+    }
+
+    /* Members panel (groups only): takes the top of the files column; files
+       compresses below it. Hidden (display:none) for concrete workspaces. */
+    .workspace-detail-panel-members[hidden] {
+      display: none;
+    }
+
+    .workspace-detail-bento.has-members-panel .workspace-detail-panel-members {
+      grid-column: 3;
+      grid-row: 1 / 4;
+    }
+
+    .workspace-detail-bento.has-members-panel .workspace-detail-panel-files {
+      grid-row: 4 / 7;
+    }
+
+    @media (max-width: 1200px) {
+      .workspace-detail-bento.has-members-panel .workspace-detail-panel-members {
+        grid-column: 1 / -1;
+        grid-row: auto;
+      }
+
+      .workspace-detail-bento.has-members-panel .workspace-detail-panel-files {
+        grid-column: 1 / -1;
+        grid-row: 6;
+      }
+    }
+
+    /* Group header identity (badge, color swatch + popover) */
+    .workspace-group-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
+      flex: 0 0 auto;
+    }
+
+    .workspace-group-color-swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      background: var(--accent, #6c757d);
+      flex: 0 0 auto;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      cursor: pointer;
+    }
+
+    .workspace-group-color-popover {
+      display: flex;
+      gap: 0.375rem;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 0.375rem;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--card-bg, #fff);
+      z-index: 10;
+    }
+
+    .group-color-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 2px solid transparent;
+      padding: 0;
+      cursor: pointer;
+      font-size: 0.65rem;
+      line-height: 1;
+      color: var(--text-secondary, #6c757d);
+      background: var(--surface, #fff);
+    }
+
+    .group-color-btn.is-none {
+      border: 1px dashed var(--border-color, #ccc);
+    }
+
+    .group-color-btn.is-selected {
+      border-color: var(--text-primary, #111);
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
+    }
+
+    /* Member list + roll-up rows (ported from the retired group page) */
+    .group-detail-empty {
+      color: var(--text-secondary, #6c757d);
+      font-size: 0.9rem;
+      padding: 0.75rem 0;
+    }
+
+    .group-detail-hint {
+      color: var(--text-secondary, #6c757d);
+      font-size: 0.8rem;
+      margin-top: 0.25rem;
+    }
+
+    .group-detail-subtitle {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--text-secondary, #6c757d);
+      margin-bottom: 0.5rem;
+    }
+
+    .group-member-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .group-member-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      border: 1px solid var(--border-color, #e5e7eb);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+    }
+
+    .group-member-open {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      flex: 1 1 auto;
+      min-width: 0;
+      background: none;
+      border: none;
+      padding: 0;
+      text-align: left;
+      cursor: pointer;
+      color: inherit;
+    }
+
+    .group-member-kind {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--text-secondary, #6c757d);
+      flex: 0 0 auto;
+    }
+
+    .group-member-name {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .group-member-desc,
+    .group-member-meta {
+      color: var(--text-secondary, #6c757d);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .group-member-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+      flex: 0 0 auto;
+    }
+
+    .group-member-move,
+    .group-member-remove {
+      border: 1px solid var(--border-color, #e5e7eb);
+      border-radius: 6px;
+      background: var(--surface, #fff);
+      color: var(--text-secondary, #6c757d);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 0.2rem 0.45rem;
+    }
+
+    .group-member-move[disabled] {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .group-add-picker {
+      padding: 0.5rem;
+      border: 1px dashed var(--border-color, #e5e7eb);
+      border-radius: 8px;
+    }
+
+    .group-task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+    }
+
+    .group-task-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      padding: 0.45rem 0.625rem;
+      border: 1px solid var(--border-color, #e5e7eb);
+      border-radius: 6px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .group-task-row:hover {
+      background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+    }
+
+    .group-task-desc {
+      font-weight: 500;
+    }
+
+    .group-task-meta {
+      font-size: 0.78rem;
+      color: var(--text-secondary, #6c757d);
     }
 
     /* Base Panel Styles */

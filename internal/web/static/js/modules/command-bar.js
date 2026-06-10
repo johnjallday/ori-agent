@@ -126,8 +126,11 @@ class CommandBar {
         if (response.ok) {
           const data = await response.json();
           const workspaces = data.workspaces || data.folders || (Array.isArray(data) ? data : []);
-          if (workspaces.length > 0) {
-            this.currentWorkspaceId = workspaces[0].id;
+          // Prefer a concrete workspace as the implicit command context; only
+          // fall back to a group when nothing else exists.
+          const preferred = workspaces.find(ws => String(ws.kind || '').toLowerCase() !== 'group') || workspaces[0];
+          if (preferred) {
+            this.currentWorkspaceId = preferred.id;
             sessionStorage.setItem('currentWorkspaceId', this.currentWorkspaceId);
           }
         }

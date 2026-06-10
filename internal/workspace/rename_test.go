@@ -25,8 +25,18 @@ func TestRenameWithSlug_RenamesGroupFolderAndRewritesMembers(t *testing.T) {
 	assertWorkspaceAt(t, st, "alpha", filepath.Join(dir, "group", SubWorkspacesDir, "alpha"))
 
 	// Rename the group: its folder slug changes from "group" to "renamed-group".
-	if err := st.RenameWithSlug("group-1", "Renamed Group", ""); err != nil {
+	moved, err := st.RenameWithSlug("group-1", "Renamed Group", "")
+	if err != nil {
 		t.Fatalf("RenameWithSlug: %v", err)
+	}
+	// Both the group and its nested member must be reported so callers can fix
+	// path-keyed references.
+	movedIDs := make(map[string]bool, len(moved))
+	for _, m := range moved {
+		movedIDs[m.ID] = true
+	}
+	if !movedIDs["group-1"] || !movedIDs["alpha"] {
+		t.Fatalf("expected moved list to include group-1 and alpha, got %#v", moved)
 	}
 
 	// The group folder moved, and the nested member moved with it (path rewritten).
@@ -55,7 +65,7 @@ func TestRenameWithSlug_DisplayNameOnlyKeepsMembers(t *testing.T) {
 	}
 
 	// Keep the same slug ("group") while changing the display name.
-	if err := st.RenameWithSlug("group-1", "Group", "group"); err != nil {
+	if _, err := st.RenameWithSlug("group-1", "Group", "group"); err != nil {
 		t.Fatalf("RenameWithSlug: %v", err)
 	}
 
