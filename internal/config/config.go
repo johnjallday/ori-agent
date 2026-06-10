@@ -376,6 +376,17 @@ func VaultRootSource(configured string) string {
 	return "default"
 }
 
+// TemplatesRootSource reports where the effective templates root comes from.
+func TemplatesRootSource(configured string) string {
+	if strings.TrimSpace(configured) != "" {
+		return "settings"
+	}
+	if strings.TrimSpace(os.Getenv("ORI_TEMPLATES_DIR")) != "" {
+		return "environment"
+	}
+	return "default"
+}
+
 // Save writes current configuration to file
 func (m *Manager) Save() error {
 	m.mu.RLock()

@@ -1207,7 +1207,10 @@
           <div class="workspace-detail-project-modal-field">
             <div class="d-flex align-items-center justify-content-between gap-2">
               <label for="workspace-detail-project-template-select" class="form-label">Library Template</label>
-              <button type="button" id="workspace-detail-project-template-refresh" class="workspace-detail-project-modal-link">Refresh</button>
+              <span class="d-flex gap-2">
+                <button type="button" id="workspace-detail-project-template-manage" class="workspace-detail-project-modal-link">Manage</button>
+                <button type="button" id="workspace-detail-project-template-refresh" class="workspace-detail-project-modal-link">Refresh</button>
+              </span>
             </div>
             <select id="workspace-detail-project-template-select" class="form-select">
               <option value="">Loading templates...</option>
@@ -8447,6 +8450,7 @@
   <script src="/js/modules/workspace-hub-notes.js"></script>
   <script src="/js/modules/workspace-hub-files.js"></script>
   <script src="/js/modules/workspace-mission.js"></script>
+  <script src="/js/modules/project-templates-manage.js"></script>
   <script src="/js/modules/workspace-hub-support-chat.js"></script>
 
   <!-- Workspace Detail Page -->

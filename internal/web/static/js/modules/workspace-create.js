@@ -917,6 +917,17 @@ function initializeWorkspaceCreationListeners() {
       void browseProjectTemplatePath();
     });
   }
+
+  const projectTemplateManageLink = document.getElementById('projectTemplateManageLink');
+  if (projectTemplateManageLink) {
+    projectTemplateManageLink.addEventListener('click', () => {
+      if (window.ProjectTemplatesManage && typeof window.ProjectTemplatesManage.open === 'function') {
+        window.ProjectTemplatesManage.open({
+          onChanged: () => void populateProjectTemplateSelect()
+        });
+      }
+    });
+  }
 }
 
 // Export functions for global access

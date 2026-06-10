@@ -849,6 +849,28 @@ The project folder is created inside the workspace folder as a sibling of `files
 
 **Chat tools** — workspace chats expose `workspace_project_templates` (list) and `workspace_create_project` (`template_id`, optional `name`), which instantiate into the *current* workspace through the same engine. The create tool refuses when the workspace is a group or already has a project.
 
+**Add a project to an existing workspace:**
+
+```http
+POST /api/workspaces/:id/project
+{ "template_id": "reaper-song", "project_name": "Midnight" }   // or "template_path"
+```
+
+Responds `201` with `project_path` and the refreshed workspace; `409` when the workspace already has a project, `400` for groups/invalid templates. The created project is also registered as the workspace's primary linked directory.
+
+**Managing the library:**
+
+```http
+POST   /api/project-templates/import          { "path": "/any/folder", "name": "Display Name" }
+PUT    /api/project-templates/:id             { "name": "...", "description": "..." }   // template.json metadata
+DELETE /api/project-templates/:id             → { "success": true, "trashed": true|false }
+POST   /api/project-templates/reveal          { "id": "..." }   // empty id opens the library root (local-first)
+```
+
+Import copies the folder **verbatim** (no token substitution — `{{name}}` in file names is preserved for instantiation time; symlinks skipped). Delete prefers the system Trash; deleted starter templates are re-materialized on the next server start. Metadata updates preserve unknown `template.json` fields.
+
+**Settings:** `GET`/`POST /api/settings/templates-root` mirrors the workspace/vault root endpoints (`templates_root`, `effective_templates_root`, `default_templates_root`, `source`). Changing the root materializes the library (including absent starters) in the new location.
+
 ## Workspace Groups
 
 A **group** is a workspace whose `kind` is `"group"`. Groups are full workspaces that can additionally contain member workspaces (physical folder nesting under `sub-workspaces/`). They support everything a concrete workspace supports — chat sessions, notes, tasks, agents, MCP/skill bindings, settings, and `project_path` — with one structural rule: **only groups can be parents** (`parent_id` must reference a group).

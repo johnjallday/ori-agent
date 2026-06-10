@@ -193,6 +193,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/session", s.Handlers.Settings.SessionSettingsHandler)
 	mux.HandleFunc("/api/settings/workspace-root", s.Handlers.Settings.WorkspaceRootSettingsHandler)
 	mux.HandleFunc("/api/settings/vault-root", s.Handlers.Settings.VaultRootSettingsHandler)
+	mux.HandleFunc("/api/settings/templates-root", s.Handlers.Settings.TemplatesRootSettingsHandler)
 	mux.HandleFunc("/api/api-key", s.Handlers.Settings.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.Handlers.Settings.ProvidersHandler)
 	mux.HandleFunc("/api/settings/system-model", s.Handlers.Settings.SystemModelHandler)
@@ -586,6 +587,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 		// Project template library (used by the workspace creation flow)
 		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
+		mux.HandleFunc("POST /api/project-templates/import", s.handleProjectTemplateImport)
+		mux.HandleFunc("POST /api/project-templates/reveal", s.handleProjectTemplateReveal)
+		mux.HandleFunc("PUT /api/project-templates/{templateID}", s.handleProjectTemplateUpdate)
+		mux.HandleFunc("DELETE /api/project-templates/{templateID}", s.handleProjectTemplateDelete)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)

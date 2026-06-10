@@ -60,6 +60,14 @@ This placement matters: the workspace's auto-provisioned filesystem MCP is roote
 
 Because `project_path` is relative and stored in `workspace.json` (its canonical store — there is no SQLite column; reads hydrate from disk), the project travels with the workspace through renames, moves, grouping, and machine migrations.
 
+## Managing the library
+
+The filesystem is the primary management surface — but the app provides a thin veneer over it:
+
+- **Manage modal** (reachable from the create-workspace modal's Project card, the workspace page's project dialog, and Settings → Project Templates): list installed templates, **Import Folder…** (verbatim copy into the library), **Edit** display name/description (writes `template.json`, preserving any extra fields), **Delete** (system Trash when supported), and **Reveal** in the file manager.
+- **Settings → Project Templates**: configure `templates_root` (Browse/Save/Clear, mirroring the workspace and vault directory settings), open the library folder, and launch the manage modal. Changing the directory materializes the library there, including any absent starter templates.
+- Deleting a starter template lasts until the next server start, which re-adds absent starters; edit a starter instead of deleting it if you want it gone-but-different.
+
 ## Rules and guarantees
 
 - One project per workspace (v1). The chat tool and API refuse when `project_path` is already set.

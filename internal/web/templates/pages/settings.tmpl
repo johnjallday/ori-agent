@@ -145,6 +145,14 @@
               </span>
               <span class="settings-nav-item-text">Vault Directory</span>
             </a>
+            <a href="#project-templates" class="settings-nav-item" data-section="project-templates">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V7H5V5H19M5,19V9H19V19H5M7,11H17V13H7V11M7,15H14V17H7V15Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Project Templates</span>
+            </a>
             <a href="#session-management" class="settings-nav-item" data-section="session-management">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -1049,6 +1057,65 @@
             </div>
           </section>
 
+          <!-- Project Templates Section -->
+          <section id="project-templates" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V7H5V5H19M5,19V9H19V19H5M7,11H17V13H7V11M7,15H14V17H7V15Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Project Templates</h2>
+            </div>
+
+            <p class="settings-section-description">
+              Project templates are folder skeletons used to scaffold a project inside a new workspace (for example a REAPER song). A template is just a folder in the library directory — drop one in, or manage the library here.
+            </p>
+
+            <div id="templatesRootStatus" class="settings-status mb-4">
+              <div id="templatesRootStatusIndicator">
+                <span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span>
+              </div>
+              <div class="settings-status-content">
+                <div id="templatesRootStatusText" class="settings-status-text">Loading templates directory...</div>
+                <div id="templatesRootStatusDetails" class="settings-status-details"></div>
+              </div>
+            </div>
+
+            <div class="settings-field">
+              <label class="settings-label" for="templatesRootInput">Templates directory</label>
+              <div class="input-group">
+                <input id="templatesRootInput"
+                       type="text"
+                       class="form-control settings-input"
+                       placeholder="Defaults to templates/ next to the app data"
+                       aria-describedby="templatesRootHelp">
+                <button id="browseTemplatesRootBtn" class="btn btn-outline-secondary" type="button">
+                  Browse
+                </button>
+              </div>
+              <span id="templatesRootHelp" class="settings-help">Every folder inside this directory is offered as a project template. Clear the custom directory to fall back to the environment variable or built-in default. Starter templates are added when missing.</span>
+            </div>
+
+            <div class="settings-actions">
+              <button id="saveTemplatesRootBtn" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                </svg>
+                Save Templates Directory
+              </button>
+              <button id="resetTemplatesRootBtn" class="modern-btn modern-btn-secondary">
+                Clear Custom Directory
+              </button>
+              <button id="openTemplatesRootBtn" class="modern-btn modern-btn-secondary">
+                Open Folder
+              </button>
+              <button id="manageTemplatesBtn" class="modern-btn modern-btn-secondary">
+                Manage Templates
+              </button>
+            </div>
+          </section>
+
           <!-- Session Management Section -->
           <section id="session-management" class="settings-section modern-card p-4">
             <div class="settings-section-header">
@@ -1580,6 +1647,8 @@
   {{template "modals.tmpl" .}}
 
   <!-- Scripts -->
+  {{template "components/project-templates-manage.tmpl" .}}
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <!-- DX Utilities -->
   <script src="/js/utils/logger.js"></script>
@@ -1691,6 +1760,7 @@
   <script src="/js/modules/settings-controller.js"></script>
   <script src="/js/modules/settings-navigation.js"></script>
   <script src="/js/modules/settings-page.js"></script>
+  <script src="/js/modules/project-templates-manage.js"></script>
   <script src="/js/modules/location-settings.js"></script>
   <script src="/js/modules/user-profile.js"></script>
   <script src="/js/modules/device-capabilities.js"></script>
