@@ -311,6 +311,7 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 		ID:    "root-workspace",
 		Name:  "Root",
 		Color: "#ff0000",
+		Tags:  []string{"music", "reaper"},
 		SharedData: map[string]any{
 			"kanban_board": KanbanBoardConfig{
 				Version: 1,
@@ -350,6 +351,9 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	if got.Name != "Root" {
 		t.Errorf("Expected name 'Root', got %s", got.Name)
 	}
+	if len(got.Tags) != 2 || got.Tags[0] != "music" || got.Tags[1] != "reaper" {
+		t.Fatalf("expected workspace tags to persist, got %#v", got.Tags)
+	}
 	board, ok := GetWorkspaceKanbanBoardConfig(got)
 	if !ok {
 		t.Fatalf("Expected kanban board config to persist")
@@ -369,6 +373,9 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	if len(workspaces) != 2 {
 		t.Errorf("Expected 2 workspaces, got %d", len(workspaces))
 	}
+	if len(workspaces[0].Tags) != 2 || workspaces[0].Tags[0] != "music" || workspaces[0].Tags[1] != "reaper" {
+		t.Fatalf("expected listed workspace tags to persist, got %#v", workspaces[0].Tags)
+	}
 
 	// Get workspace tree
 	tree, err := store.GetWorkspaceTree(ctx)
@@ -380,6 +387,22 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 	if len(tree[0].Children) != 1 {
 		t.Errorf("Expected 1 child workspace, got %d", len(tree[0].Children))
+	}
+	if len(tree[0].Tags) != 2 || tree[0].Tags[0] != "music" || tree[0].Tags[1] != "reaper" {
+		t.Fatalf("expected tree workspace tags to persist, got %#v", tree[0].Tags)
+	}
+
+	got.Tags = []string{"writing"}
+	got.UpdatedAt = time.Now()
+	if err := store.UpdateWorkspace(ctx, got); err != nil {
+		t.Fatalf("Failed to update workspace tags: %v", err)
+	}
+	updated, err := store.GetWorkspace(ctx, "root-workspace")
+	if err != nil {
+		t.Fatalf("Failed to get updated workspace: %v", err)
+	}
+	if len(updated.Tags) != 1 || updated.Tags[0] != "writing" {
+		t.Fatalf("expected updated workspace tags to persist, got %#v", updated.Tags)
 	}
 
 	// Get subworkspace IDs

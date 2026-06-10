@@ -45,6 +45,7 @@ func (p *WorkspaceToolProvider) projectTemplatesTool() toolapi.Tool {
 					"id":          tpl.ID,
 					"name":        tpl.Name,
 					"description": tpl.Description,
+					"tags":        tpl.Tags,
 				})
 			}
 			message := fmt.Sprintf("%d project template(s) available.", len(items))
@@ -148,6 +149,7 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 			// write must succeed — otherwise roll the project folder back.
 			now := time.Now()
 			folderWS.ProjectPath = relPath
+			folderWS.Tags = workspace.MergeWorkspaceTags(folderWS.Tags, tpl.Tags)
 			if folderWS.SharedData == nil {
 				folderWS.SharedData = make(map[string]any)
 			}
@@ -160,6 +162,7 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 
 			// Best-effort metadata sync; reads hydrate project_path from disk.
 			ws.ProjectPath = relPath
+			ws.Tags = workspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
 			if ws.SharedData == nil {
 				ws.SharedData = make(map[string]any)
 			}
@@ -192,6 +195,7 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 			return marshalToolResponse(map[string]any{
 				"project_path": relPath,
 				"template_id":  tpl.ID,
+				"tags":         ws.Tags,
 				"message":      fmt.Sprintf("Project created at %q inside the workspace folder (template %q). It is recorded as the workspace's project_path and is readable through the workspace filesystem tools.", relPath, tpl.ID),
 			})
 		},

@@ -31,6 +31,20 @@ func (h *Handler) syncWorkspacePortableStateToFileStore(workspace *session.Works
 	return h.workspaceStore.Save(existing)
 }
 
+func (h *Handler) syncWorkspaceTagsToFileStore(workspace *session.Workspace) error {
+	if h == nil || h.workspaceStore == nil || workspace == nil {
+		return nil
+	}
+
+	existing, err := h.workspaceStore.Get(workspace.ID)
+	if err != nil || existing == nil {
+		return nil
+	}
+	existing.Tags = append([]string(nil), workspace.Tags...)
+	existing.UpdatedAt = workspace.UpdatedAt
+	return h.workspaceStore.Save(existing)
+}
+
 func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	if target == nil || source == nil {
 		return
@@ -40,6 +54,7 @@ func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	target.Kind = source.Kind
 	target.Description = source.Description
 	target.ProjectPath = source.ProjectPath
+	target.Tags = append([]string(nil), source.Tags...)
 	target.Agents = append([]string(nil), source.Agents...)
 	target.AgentInstances = append([]agentworkspace.AgentInstance(nil), source.AgentInstances...)
 	target.SharedData = source.SharedData

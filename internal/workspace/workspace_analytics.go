@@ -13,6 +13,7 @@ func (w *Workspace) GetSummary() map[string]any {
 		"id":            w.ID,
 		"name":          w.Name,
 		"description":   w.Description,
+		"tags":          append([]string(nil), w.Tags...),
 		"agents":        w.Agents,
 		"agent_count":   len(w.Agents),
 		"message_count": len(w.Messages),

@@ -20,6 +20,7 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	ws.ID = "workspace-1"
 	ws.CreatedAt = now
 	ws.UpdatedAt = now
+	ws.Tags = []string{"music", "reaper"}
 	ws.SkillBindings = []workspace.WorkspaceSkillBinding{
 		{
 			ID:        "binding-1",
@@ -80,5 +81,10 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	}
 	if _, ok := effective["summary"].([]any); !ok {
 		t.Fatalf("expected summary array in effective behavior, got %#v", effective["summary"])
+	}
+
+	tags, ok := response["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "music" || tags[1] != "reaper" {
+		t.Fatalf("expected workspace tags in response, got %#v", response["tags"])
 	}
 }

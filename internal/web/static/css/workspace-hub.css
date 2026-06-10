@@ -58,6 +58,14 @@
   line-height: 1.4;
 }
 
+.hub-workspace-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  max-width: min(520px, 100%);
+}
+
 /* Inline editable elements */
 .workspace-hub-header .hub-title-text.is-editable,
 .workspace-hub-header .hub-workspace-description.is-editable {
@@ -1420,6 +1428,76 @@ button.hub-stat[hidden] {
 .hub-task-filter-chip--danger.is-active .hub-task-filter-chip-count {
   background: rgba(194, 59, 59, 0.22);
   color: #9c2a2a;
+}
+
+.launcher-tag-filterbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+}
+
+.launcher-tag-filterbar-main {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.launcher-tag-filterbar-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.launcher-tag-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.launcher-tag-filter-chip,
+.launcher-tag-filter-clear {
+  min-height: 1.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.launcher-tag-filter-chip {
+  max-width: 12rem;
+  padding: 0.22rem 0.65rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher-tag-filter-chip:hover,
+.launcher-tag-filter-clear:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.launcher-tag-filter-chip.is-active {
+  border-color: color-mix(in srgb, var(--primary-color) 58%, var(--border-color));
+  background: color-mix(in srgb, var(--primary-color) 15%, var(--bg-primary));
+  color: var(--primary-color);
+}
+
+.launcher-tag-filter-clear {
+  flex-shrink: 0;
+  padding: 0.22rem 0.7rem;
 }
 
 .hub-empty--filtered {
@@ -3380,6 +3458,67 @@ button.hub-stat[hidden] {
   letter-spacing: 0.02em;
 }
 
+.launcher-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-height: 1.45rem;
+}
+
+.workspace-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 10rem;
+  min-height: 1.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 107, 78, 0.22);
+  background: rgba(31, 107, 78, 0.08);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.workspace-tag-chip-label,
+.workspace-tag-chip-remove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.workspace-tag-chip-label {
+  min-width: 0;
+  padding: 0.16rem 0.48rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tag-chip-remove {
+  align-self: stretch;
+  width: 1.35rem;
+  border-left: 1px solid rgba(31, 107, 78, 0.18);
+  cursor: pointer;
+}
+
+.workspace-tag-chip-label:hover,
+.workspace-tag-chip-remove:hover {
+  background: rgba(31, 107, 78, 0.12);
+  color: var(--text-primary);
+}
+
+.workspace-tag-chip-more {
+  padding: 0.16rem 0.48rem;
+  color: var(--text-muted);
+}
+
+.hub-workspace-tag-chip {
+  padding: 0.16rem 0.5rem;
+  max-width: 11rem;
+}
+
 .launcher-card-folder-state {
   display: inline-flex;
   align-items: center;
@@ -3959,6 +4098,11 @@ body.chat-panel-open .chat-panel-backdrop {
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
+  }
+
+  .launcher-tag-filterbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .hub-workspace-select-row {

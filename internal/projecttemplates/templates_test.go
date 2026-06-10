@@ -32,8 +32,8 @@ func TestListLibraryDiscoversPlainFolders(t *testing.T) {
 	// Plain folder with no manifest must appear under its folder name
 	// (PRD success metric 3: authoring = dropping a folder in).
 	writeFile(t, filepath.Join(dir, "my-layout", "seed.txt"), "x")
-	// Manifest overrides display name and adds a description.
-	writeFile(t, filepath.Join(dir, "fancy", ManifestFileName), `{"name":"Fancy Pack","description":"desc here","unknown_field":true}`)
+	// Manifest overrides display name and adds metadata.
+	writeFile(t, filepath.Join(dir, "fancy", ManifestFileName), `{"name":"Fancy Pack","description":"desc here","tags":[" Music ","music","REAPER"],"unknown_field":true}`)
 	// Non-directories and hidden folders are not templates.
 	writeFile(t, filepath.Join(dir, "stray.txt"), "x")
 	if err := os.MkdirAll(filepath.Join(dir, ".hidden"), 0o750); err != nil {
@@ -49,6 +49,9 @@ func TestListLibraryDiscoversPlainFolders(t *testing.T) {
 	}
 	if templates[0].ID != "fancy" || templates[0].Name != "Fancy Pack" || templates[0].Description != "desc here" {
 		t.Errorf("manifest template wrong: %+v", templates[0])
+	}
+	if len(templates[0].Tags) != 2 || templates[0].Tags[0] != "music" || templates[0].Tags[1] != "reaper" {
+		t.Errorf("manifest tags wrong: %+v", templates[0].Tags)
 	}
 	if templates[1].ID != "my-layout" || templates[1].Name != "my-layout" || templates[1].Description != "" {
 		t.Errorf("plain template wrong: %+v", templates[1])

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // ManifestFileName is the optional per-template metadata file. It carries
@@ -20,9 +22,10 @@ const ManifestFileName = "template.json"
 
 // Template describes one instantiable folder skeleton.
 type Template struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
 }
@@ -30,8 +33,9 @@ type Template struct {
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
 // by design: the manifest must stay metadata-only.
 type manifest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -61,6 +65,7 @@ func newTemplate(path string) Template {
 		t.Name = t.ID
 	}
 	t.Description = strings.TrimSpace(m.Description)
+	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
 	return t
 }
 

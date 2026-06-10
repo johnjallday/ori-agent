@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 25
+const schemaVersion = 26
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -115,6 +115,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration024WorkspaceRunReferenceURL(ctx)
 	case 25:
 		return db.migration025WorkspaceOpportunities(ctx)
+	case 26:
+		return db.migration026WorkspaceTags(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -129,6 +131,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			name TEXT NOT NULL,
 			kind TEXT DEFAULT 'workspace',
 			description TEXT DEFAULT '',
+			tags TEXT DEFAULT '[]',
 			parent_id TEXT,
 			color TEXT,
 			session_count INTEGER DEFAULT 0,
@@ -1147,6 +1150,24 @@ func (db *DB) migration025WorkspaceOpportunities(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN opportunities_json TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace opportunities_json column: %w", err)
+	}
+	return nil
+}
+
+// migration026WorkspaceTags stores workspace organization tags in SQLite for
+// workspaces that are not backed by a portable workspace.json file.
+func (db *DB) migration026WorkspaceTags(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN tags TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace tags column: %w", err)
 	}
 	return nil
 }

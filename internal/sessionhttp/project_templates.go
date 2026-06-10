@@ -81,6 +81,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	// one that must succeed — otherwise roll the project folder back.
 	now := time.Now()
 	folderWS.ProjectPath = relPath
+	folderWS.Tags = agentworkspace.MergeWorkspaceTags(folderWS.Tags, tpl.Tags)
 	setFileStoreWorkspacePrimaryDirectoryID(folderWS, projectDirID)
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
@@ -90,6 +91,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	}
 
 	ws.ProjectPath = relPath
+	ws.Tags = agentworkspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
 	if projectDirID != "" {
 		setWorkspacePrimaryDirectoryID(ws, projectDirID)
 		if ws.SharedData == nil {

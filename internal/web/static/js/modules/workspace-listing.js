@@ -465,6 +465,10 @@ function renderWorkspaceCard(workspace) {
   const tasksCount = workspace.task_count || 0;
   const sessionsCount = workspace.session_count || 0;
   const notesCount = workspace.note_count || 0;
+  const tags = Array.isArray(workspace.tags) ? workspace.tags.filter((tag) => String(tag || '').trim()) : [];
+  const tagsMarkup = tags.length > 0
+    ? `<div class="workspace-card-tags">${tags.map((tag) => `<span class="workspace-card-tag" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`).join('')}</div>`
+    : '';
 
   return `
         <div class="col-12 col-sm-6 col-lg-4">
@@ -490,6 +494,7 @@ function renderWorkspaceCard(workspace) {
                 </div>
 
                 <p class="workspace-card-description">${description}</p>
+                ${tagsMarkup}
 
                 <div class="workspace-card-metrics">
                     <div class="workspace-card-metric">
@@ -657,6 +662,10 @@ window.viewWorkspace = viewWorkspace;
 window.deleteWorkspace = deleteWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
 window.switchView = switchView;
+window.WorkspaceListing = window.WorkspaceListing || {};
+window.WorkspaceListing.__test = {
+  renderWorkspaceCard
+};
 // Note: escapeHtml is provided by dom-utils.js which should be loaded before this script
 
 // Initialize on DOM ready

@@ -245,6 +245,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		FolderSlug:  agentworkspace.Slugify(req.Name),
 		ProjectPath: req.ProjectPath,
 	}
+	if wantsProject {
+		if tpl, tplErr := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath); tplErr == nil {
+			ws.Tags = agentworkspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
+		}
+	}
 	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
 		ws.FolderSlug = agentworkspace.Slugify(requestedSlug)
 	}
@@ -305,6 +310,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			Description:    ws.Description,
 			FolderSlug:     ws.FolderSlug,
 			ProjectPath:    ws.ProjectPath,
+			Tags:           append([]string(nil), ws.Tags...),
 			ParentID:       ws.ParentID,
 			Agents:         append([]string{}, ws.Agents...),
 			AgentInstances: toWorkspaceAgentInstances(ws.AgentInstances),
@@ -635,6 +641,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		OrderIndex         *int                       `json:"order_index,omitempty"`
 		Color              *string                    `json:"color,omitempty"`
 		ProjectPath        *string                    `json:"project_path,omitempty"`
+		Tags               *[]string                  `json:"tags,omitempty"`
 		PrimaryDirectoryID *string                    `json:"primary_directory_id,omitempty"`
 		WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 	}
@@ -642,6 +649,8 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+
+	h.hydrateWorkspaceMetadataInto(workspace)
 
 	// Apply partial updates
 	if req.Name != nil {
@@ -669,6 +678,14 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 	if req.ProjectPath != nil {
 		workspace.ProjectPath = *req.ProjectPath
+	}
+	if req.Tags != nil {
+		tags, err := agentworkspace.ValidateWorkspaceTags(*req.Tags)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		workspace.Tags = tags
 	}
 	if req.PrimaryDirectoryID != nil {
 		setWorkspacePrimaryDirectoryID(workspace, *req.PrimaryDirectoryID)
@@ -747,13 +764,18 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
 			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
 		}
+	} else if req.Tags != nil {
+		if err := h.syncWorkspaceTagsToFileStore(workspace); err != nil {
+			logger.Warn("Failed to sync workspace tags after workspace update", logger.Fields{"id": id, "error": err})
+		}
 	}
 
 	logger.Info("Workspace updated", logger.Fields{"id": id})
 
+	hydrated := h.hydrateWorkspaceMetadataFromFileStore(workspace)
 	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
-		"folder":  workspace,
+		"folder":  hydrated,
 	})
 }
 
@@ -1373,6 +1395,9 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	// store, so reads always hydrate it from disk.
 	if strings.TrimSpace(workspace.ProjectPath) == "" {
 		workspace.ProjectPath = fallback.ProjectPath
+	}
+	if workspace.Tags == nil {
+		workspace.Tags = append([]string(nil), fallback.Tags...)
 	}
 	if workspace.SharedData == nil && fallback.SharedData != nil {
 		workspace.SharedData = fallback.SharedData
@@ -3692,6 +3717,7 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 		Description:    workspace.Description,
 		FolderSlug:     workspace.FolderSlug,
 		ProjectPath:    workspace.ProjectPath,
+		Tags:           append([]string(nil), workspace.Tags...),
 		ParentID:       workspace.ParentID,
 		Agents:         append([]string{}, workspace.Agents...),
 		AgentInstances: toWorkspaceAgentInstances(workspace.AgentInstances),

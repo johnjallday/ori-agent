@@ -197,3 +197,37 @@ test('workspace detail disables create-project action for groups and existing pr
   assert.equal(button.disabled, true);
   assert.match(button.title, /Groups cannot hold projects/);
 });
+
+test('workspace detail normalizes workspace tag drafts', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  const result = page.normalizeWorkspaceTagList([' Music ', 'music', 'Client:Acme', '']);
+
+  assert.deepEqual(result, { tags: ['music', 'client:acme'], error: '' });
+
+  const overlong = page.normalizeWorkspaceTagList(['x'.repeat(65)]);
+  assert.match(overlong.error, /64 character limit/);
+
+  const tooMany = page.normalizeWorkspaceTagList(
+    Array.from({ length: 21 }, (_, index) => `tag-${index}`)
+  );
+  assert.match(tooMany.error, /at most 20 tags/);
+});
+
+test('workspace detail renders escaped read-only workspace tags', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const container = { hidden: true };
+  const list = { innerHTML: '' };
+  page.elements = {
+    workspaceTagsContainer: container,
+    workspaceTagsList: list
+  };
+  page.workspace = { tags: ['music', '<script>', 'Client & Research'] };
+
+  page.renderWorkspaceTags();
+
+  assert.equal(container.hidden, false);
+  assert.match(list.innerHTML, /title="music">music<\/span>/);
+  assert.match(list.innerHTML, /title="&lt;script&gt;">&lt;script&gt;<\/span>/);
+  assert.match(list.innerHTML, /title="Client &amp; Research">Client &amp; Research<\/span>/);
+});

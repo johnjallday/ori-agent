@@ -38,6 +38,10 @@ func templateTestEnv(t *testing.T) (*Handler, string, string, <-chan agentworksp
 		cleanup()
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(libDir, "demo-template", "template.json"), []byte(`{"name":"Demo Template","tags":[" Music ","reaper","music"]}`), 0o640); err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
 	handler.SetTemplatesRootResolver(func() string { return libDir })
 
 	bus := agentworkspace.NewEventBus(10, 10)
@@ -83,6 +87,10 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if got := folder["project_path"]; got != "song-x" {
 		t.Fatalf("project_path = %v, want song-x", got)
 	}
+	tags, ok := folder["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "music" || tags[1] != "reaper" {
+		t.Fatalf("response tags = %#v, want [music reaper]", folder["tags"])
+	}
 
 	// Project name defaulted to the workspace name; filename token substituted;
 	// project folder sits beside files/ and notes/, not inside files/.
@@ -113,6 +121,9 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if diskWS.ProjectPath != "song-x" {
 		t.Fatalf("disk project_path = %q, want song-x", diskWS.ProjectPath)
 	}
+	if len(diskWS.Tags) != 2 || diskWS.Tags[0] != "music" || diskWS.Tags[1] != "reaper" {
+		t.Fatalf("disk tags = %#v, want [music reaper]", diskWS.Tags)
+	}
 	if len(diskWS.DirectoryReferences) != 2 {
 		t.Fatalf("expected project directory reference, got %#v", diskWS.DirectoryReferences)
 	}
@@ -133,6 +144,9 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	hydrated := handler.hydrateWorkspaceMetadataFromFileStore(&session.Workspace{ID: wsID})
 	if hydrated == nil || hydrated.ProjectPath != "song-x" {
 		t.Fatalf("hydrated project_path = %+v, want song-x", hydrated)
+	}
+	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
+		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
 
 	select {
@@ -185,6 +199,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if diskWS.ProjectPath != "first-song" {
 		t.Fatalf("disk project_path = %q, want first-song", diskWS.ProjectPath)
 	}
+	if len(diskWS.Tags) != 2 || diskWS.Tags[0] != "music" || diskWS.Tags[1] != "reaper" {
+		t.Fatalf("disk tags = %#v, want [music reaper]", diskWS.Tags)
+	}
 	if len(diskWS.DirectoryReferences) != 2 {
 		t.Fatalf("expected one project directory reference, got %#v", diskWS.DirectoryReferences)
 	}
@@ -214,6 +231,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	hydrated := handler.hydrateWorkspaceMetadataFromFileStore(&session.Workspace{ID: wsID})
 	if hydrated == nil || hydrated.ProjectPath != "first-song" {
 		t.Fatalf("hydrated project_path = %+v, want first-song", hydrated)
+	}
+	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
+		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
 
 	select {

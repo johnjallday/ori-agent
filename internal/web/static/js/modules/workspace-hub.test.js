@@ -154,14 +154,22 @@ function loadWorkspaceHub(overrides = {}) {
   const hubEl = createElement('workspaceHub');
   const launcherGrid = createElement('launcherGrid');
   const launcherEmpty = createElement('launcherEmptyState');
+  const launcherTagFilterbar = createElement('launcherTagFilterbar');
+  const launcherTagFilterChips = createElement('launcherTagFilterChips');
+  const launcherTagFilterClear = createElement('launcherTagFilterClear');
   const launcherViewCards = createElement('launcherViewCards');
   const launcherViewTree = createElement('launcherViewTree');
+  const workspaceTags = createElement('hubWorkspaceTags');
 
   elements.set('workspaceHub', hubEl);
   elements.set('launcherGrid', launcherGrid);
   elements.set('launcherEmptyState', launcherEmpty);
+  elements.set('launcherTagFilterbar', launcherTagFilterbar);
+  elements.set('launcherTagFilterChips', launcherTagFilterChips);
+  elements.set('launcherTagFilterClear', launcherTagFilterClear);
   elements.set('launcherViewCards', launcherViewCards);
   elements.set('launcherViewTree', launcherViewTree);
+  elements.set('hubWorkspaceTags', workspaceTags);
 
   const state = {
     launcherCollapsedGroups: new Set(),
@@ -248,18 +256,20 @@ function loadWorkspaceHub(overrides = {}) {
     querySelectorAll: () => []
   };
 
+  const defaultFetch = async (url) => {
+    if (String(url).includes('/api/workspaces?tree=true')) {
+      return { ok: true, json: async () => ({ folders: state.workspaces }) };
+    }
+    return { ok: true, json: async () => ({ path: '/tmp/workspaces' }), text: async () => '' };
+  };
+
   const context = {
     bootstrap: {},
     clearTimeout,
     console,
     document,
     escapeHtml,
-    fetch: async (url) => {
-      if (String(url).includes('/api/workspaces?tree=true')) {
-        return { ok: true, json: async () => ({ folders: state.workspaces }) };
-      }
-      return { ok: true, json: async () => ({ path: '/tmp/workspaces' }), text: async () => '' };
-    },
+    fetch: overrides.fetch || defaultFetch,
     localStorage: window.localStorage,
     sessionStorage: window.sessionStorage,
     setTimeout,
@@ -272,11 +282,15 @@ function loadWorkspaceHub(overrides = {}) {
     helpers: window.WorkspaceHub.__test,
     launcherEmpty,
     launcherGrid,
+    launcherTagFilterbar,
+    launcherTagFilterChips,
+    launcherTagFilterClear,
     launcherViewCards,
     launcherViewTree,
     state,
     storage,
-    window
+    window,
+    workspaceTags
   };
 }
 
@@ -359,6 +373,112 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.match(launcherGrid.innerHTML, /launcher-card-item launcher-group-header has-selection-checkbox/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
+});
+
+test('launcher cards render tag chips with filter and remove controls', () => {
+  const workspaces = [
+    {
+      id: 'workspace-1',
+      kind: 'workspace',
+      name: 'Song',
+      tags: ['music', 'reaper', 'client:acme', 'archive']
+    }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.match(launcherGrid.innerHTML, /class="launcher-card-tags"/);
+  assert.match(launcherGrid.innerHTML, /data-launcher-tag-filter="music"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-tag-remove="workspace-1"/);
+  assert.match(launcherGrid.innerHTML, /data-workspace-tag="reaper"/);
+  assert.match(launcherGrid.innerHTML, /\+1 more/);
+});
+
+test('launcher tag filters use AND logic and retain matching groups', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Music',
+      children: [
+        { id: 'song-a', kind: 'workspace', name: 'Song A', parent_id: 'group-1', tags: ['music', 'reaper'] },
+        { id: 'song-b', kind: 'workspace', name: 'Song B', parent_id: 'group-1', tags: ['music'] }
+      ]
+    },
+    { id: 'client', kind: 'workspace', name: 'Client', tags: ['client:acme'] }
+  ];
+  const { helpers, launcherGrid, state } = loadWorkspaceHub({
+    state: {
+      launcherActiveTags: new Set(['music', 'reaper']),
+      workspaces
+    }
+  });
+
+  helpers.renderLauncherActiveView(flattenWorkspaces(workspaces));
+
+  assert.equal(state.launcherActiveTags.has('music'), true);
+  assert.match(launcherGrid.innerHTML, /data-workspace-id="group-1"/);
+  assert.match(launcherGrid.innerHTML, /Song A/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /Song B/);
+  assert.doesNotMatch(launcherGrid.innerHTML, /Client/);
+});
+
+test('launcher tag filters drop stale active tags', () => {
+  const workspaces = [{ id: 'workspace-1', kind: 'workspace', name: 'API', tags: ['backend'] }];
+  const { helpers, state } = loadWorkspaceHub({
+    state: {
+      launcherActiveTags: new Set(['missing']),
+      workspaces
+    }
+  });
+
+  helpers.renderLauncherActiveView(flattenWorkspaces(workspaces));
+
+  assert.equal(state.launcherActiveTags.size, 0);
+});
+
+test('launcher tag removal rolls back when patch fails', async () => {
+  const workspace = { id: 'workspace-1', name: 'API', tags: ['music', 'reaper'], children: [] };
+  let toastMessage = '';
+  const { helpers, state, window } = loadWorkspaceHub({
+    state: {
+      workspaceMap: new Map([[workspace.id, workspace]]),
+      workspaces: [workspace]
+    },
+    fetch: async (url, options = {}) => {
+      if (String(url).includes('/api/workspaces?tree=true')) {
+        return { ok: true, json: async () => ({ folders: [workspace] }) };
+      }
+      if (options.method === 'PATCH') {
+        return { ok: false, text: async () => 'tag update failed' };
+      }
+      return { ok: true, json: async () => ({ path: '/tmp/workspaces' }), text: async () => '' };
+    }
+  });
+  window.Toast.error = message => {
+    toastMessage = message;
+  };
+
+  await helpers.removeWorkspaceTag('workspace-1', 'music');
+
+  assert.deepEqual(Array.from(state.workspaceMap.get('workspace-1').tags), ['music', 'reaper']);
+  assert.equal(toastMessage, 'tag update failed');
+});
+
+test('selected workspace summary renders read-only header tags', () => {
+  const { helpers, workspaceTags } = loadWorkspaceHub();
+
+  helpers.renderWorkspaceSummary({ id: 'workspace-1', name: 'Song', tags: ['music', 'reaper'] });
+
+  assert.equal(workspaceTags.hidden, false);
+  assert.match(workspaceTags.innerHTML, /hub-workspace-tag-chip/);
+  assert.match(workspaceTags.innerHTML, /music/);
+
+  helpers.renderWorkspaceSummary({ id: 'workspace-1', name: 'Song', tags: [] });
+  assert.equal(workspaceTags.hidden, true);
+  assert.equal(workspaceTags.innerHTML, '');
 });
 
 test('launcher checkbox click handlers select without triggering workspace navigation', () => {

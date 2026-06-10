@@ -124,6 +124,7 @@ func TestMigrations(t *testing.T) {
 		"skill_bindings_json":     false,
 		"agent_skill_access_json": false,
 		"folders_json":            false,
+		"tags":                    false,
 	}
 	vaultColumns := map[string]bool{
 		"name":        false,
