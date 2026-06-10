@@ -812,6 +812,43 @@ if (result) {
 }
 ```
 
+## Project Templates
+
+Project templates are folder skeletons that can be instantiated into a new workspace as its **project** (recorded as the workspace's `project_path`, a path relative to the workspace folder). The mechanism is domain-blind: the server copies bytes and substitutes `{{name}}` and `{{date}}` in file/folder **names only** — all domain specificity lives in the template's contents. See [Project Templates](../features/project-templates.md) for authoring details.
+
+**List the template library:**
+
+```http
+GET /api/project-templates
+```
+
+```json
+{
+  "templates": [
+    { "id": "reaper-song", "name": "Reaper Song", "description": "A minimal REAPER project..." }
+  ],
+  "templates_root": "/path/to/templates"
+}
+```
+
+The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template; an optional `template.json` provides display `name`/`description` metadata only.
+
+**Create a workspace with a project** — `POST /api/workspaces` accepts three additional optional fields:
+
+```json
+{
+  "name": "Song X",
+  "description": "...",
+  "template_id": "reaper-song",        // library template, or:
+  "template_path": "/any/folder",      // arbitrary folder as template (mutually exclusive with template_id)
+  "project_name": "Midnight"           // optional; defaults to the workspace name
+}
+```
+
+The project folder is created inside the workspace folder as a sibling of `files/` and `notes/`, and `project_path` is persisted in `workspace.json` (its canonical store). Instantiation failures are **non-fatal**: the workspace is still created and the response carries a `project_warning` string. Group workspaces reject template fields with `400`. A `project.created` event is published on success.
+
+**Chat tools** — workspace chats expose `workspace_project_templates` (list) and `workspace_create_project` (`template_id`, optional `name`), which instantiate into the *current* workspace through the same engine. The create tool refuses when the workspace is a group or already has a project.
+
 ## Workspace Groups
 
 A **group** is a workspace whose `kind` is `"group"`. Groups are full workspaces that can additionally contain member workspaces (physical folder nesting under `sub-workspaces/`). They support everything a concrete workspace supports — chat sessions, notes, tasks, agents, MCP/skill bindings, settings, and `project_path` — with one structural rule: **only groups can be parents** (`parent_id` must reference a group).
