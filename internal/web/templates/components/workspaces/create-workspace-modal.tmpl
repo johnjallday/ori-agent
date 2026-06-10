@@ -83,6 +83,35 @@
               Optional. Choose a group for this workspace.
             </div>
 
+            <div class="workspace-setup-card mb-2" id="projectTemplateCard">
+              <div class="workspace-setup-header" style="align-items: flex-start;">
+                <div>
+                  <div class="workspace-setup-title">Project (optional)</div>
+                  <p class="workspace-setup-help mb-0">Scaffold a project folder inside this workspace from a template — for example a REAPER song. Agents can read and edit it immediately.</p>
+                </div>
+              </div>
+
+              <label for="projectTemplateSelect" style="font-size: 12px; color: var(--text-secondary);">Project template</label>
+              <select id="projectTemplateSelect" class="modern-input w-100 mb-2" aria-label="Project template">
+                <option value="" selected>None</option>
+              </select>
+              <div id="projectTemplateDescription" style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
+              <div id="projectTemplateEmptyHint" style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);" hidden></div>
+
+              <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Or use any folder as a template</label>
+              <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+                <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
+                <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
+                  Choose folder…
+                </button>
+              </div>
+
+              <div id="projectNameRow" hidden>
+                <label for="projectNameInput" style="font-size: 12px; color: var(--text-secondary);">Project name</label>
+                <input type="text" id="projectNameInput" class="modern-input w-100" placeholder="Defaults to the workspace name" autocomplete="off">
+              </div>
+            </div>
+
             <div class="folder-color-picker">
               <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
               <div id="folderColorOptions" class="folder-color-options mt-1">
