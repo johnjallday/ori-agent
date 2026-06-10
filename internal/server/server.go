@@ -422,49 +422,17 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	s.renderAndWritePage(w, "note-page", data)
 }
 
+// serveWorkspaceDetail renders the workspace detail page for every workspace
+// kind. Groups render the same page as concrete workspaces; the page itself
+// shows group-specific UI (header badge, Members panel) based on the loaded
+// workspace's kind.
 func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string) {
-	// Groups reuse the /workspaces/{id} path but render a dedicated details
-	// page. Detect the kind server-side; concrete workspaces, missing IDs, and
-	// an unavailable store all fall through to the standard workspace detail
-	// page, preserving existing behavior (FR4/FR5/FR6). The group page itself
-	// handles the trashed/not-found case client-side.
-	if s.isGroupWorkspace(workspaceID) {
-		s.serveGroupDetail(w, workspaceID)
-		return
-	}
-
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
-}
-
-// isGroupWorkspace reports whether workspaceID refers to a group workspace.
-// Missing workspaces, concrete workspaces, and an unavailable session store all
-// return false so the caller keeps the standard workspace-detail behavior.
-func (s *Server) isGroupWorkspace(workspaceID string) bool {
-	if s.Storage == nil || s.Storage.SessionStore == nil {
-		return false
-	}
-	ws, err := s.Storage.SessionStore.GetWorkspace(context.Background(), workspaceID)
-	if err != nil || ws == nil {
-		return false
-	}
-	return ws.IsGroup()
-}
-
-// serveGroupDetail renders the dedicated group details page. The page is
-// client-rendered; it derives the group ID from the URL and loads data via the
-// workspace API, showing a not-found state if the group is missing or trashed.
-func (s *Server) serveGroupDetail(w http.ResponseWriter, groupID string) {
-	data := s.prepareBasePageData("workspaces")
-	data.Title = "Group - Ori Agent"
-	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
-	data.Extra["WorkspaceID"] = groupID
-	s.renderAndWritePage(w, "group-detail", data)
 }
 
 func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {

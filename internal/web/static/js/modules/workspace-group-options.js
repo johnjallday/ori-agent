@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  // Walk a workspace tree and collect organization-only groups (kind ===
-  // 'group'), tracking nesting depth so options can be indented.
+  // Walk a workspace tree and collect groups (kind === 'group'), tracking
+  // nesting depth so options can be indented.
   function collectWorkspaceGroupOptions(nodes) {
     const groups = [];
 
@@ -59,7 +59,7 @@
     const help = document.getElementById('folderParentHelp');
     if (help) {
       help.textContent = hasGroups
-        ? 'Optional. Choose an organization-only group for this workspace.'
+        ? 'Optional. Choose a group for this workspace.'
         : 'No groups yet. Select workspaces in the launcher and click Group to create one.';
     }
   }

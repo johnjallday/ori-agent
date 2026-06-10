@@ -18,7 +18,7 @@ import {
   sortTasksForRollup,
   isFileAttachment,
   extractFileItems,
-} from './group-detail.js';
+} from './workspace-detail-members.js';
 
 const tree = [
   {

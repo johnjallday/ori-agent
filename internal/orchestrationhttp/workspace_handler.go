@@ -80,6 +80,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		response := map[string]any{
 			"id":                                    ws.ID,
 			"name":                                  ws.Name,
+			"kind":                                  ws.Kind,
 			"description":                           ws.Description,
 			"entry_agent_name":                      ws.EntryAgentName(),
 			"agents":                                ws.Agents,

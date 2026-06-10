@@ -146,8 +146,8 @@ const (
 	WorkspaceStatusTrashed WorkspaceStatus = "trashed"
 )
 
-// WorkspaceKind describes whether a record is a real workspace or an
-// organization-only group container.
+// WorkspaceKind describes whether a record is a concrete workspace or a
+// group: a full workspace that can additionally contain member workspaces.
 type WorkspaceKind string
 
 const (
@@ -168,7 +168,8 @@ func NormalizeWorkspaceKind(value string) WorkspaceKind {
 	}
 }
 
-// IsGroup reports whether the workspace is an organization-only group.
+// IsGroup reports whether the workspace is a group (a full workspace that can
+// also contain member workspaces).
 func (w Workspace) IsGroup() bool {
 	return NormalizeWorkspaceKind(string(w.Kind)) == WorkspaceKindGroup
 }
@@ -243,8 +244,8 @@ type Workspace struct {
 	// Name is the display name of the workspace.
 	Name string `json:"name"`
 
-	// Kind indicates whether this record is a real workspace or an
-	// organization-only group container.
+	// Kind indicates whether this record is a concrete workspace or a group
+	// (a full workspace that can also contain member workspaces).
 	Kind WorkspaceKind `json:"kind,omitempty"`
 
 	// Description is an optional short description of the workspace's purpose.

@@ -10,7 +10,7 @@ import (
 // location on disk. Structural operations like rename/move still use dedicated
 // handlers.
 func (h *Handler) syncWorkspacePortableStateToFileStore(workspace *session.Workspace) error {
-	if h == nil || h.workspaceStore == nil || workspace == nil || workspace.IsGroup() {
+	if h == nil || h.workspaceStore == nil || workspace == nil {
 		return nil
 	}
 

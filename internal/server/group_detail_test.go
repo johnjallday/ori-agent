@@ -1,66 +1,57 @@
 package server
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
-
-	"github.com/johnjallday/ori-agent/internal/database"
-	"github.com/johnjallday/ori-agent/internal/session"
 )
 
-// TestIsGroupWorkspace verifies the routing branch used by serveWorkspaceDetail:
-// group IDs are detected as groups, while concrete workspaces, missing IDs, and
-// an unavailable store are not (so they keep the standard workspace-detail path).
-func TestIsGroupWorkspace(t *testing.T) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("open in-memory db: %v", err)
+// TestGroupWorkspaceServesWorkspaceDetailPage locks in the page-merge behavior:
+// a group's /workspaces/{id} URL renders the standard workspace-detail page
+// (group-specific UI is handled client-side from the loaded workspace's kind),
+// not a separate group page.
+func TestGroupWorkspaceServesWorkspaceDetailPage(t *testing.T) {
+	// Sandbox HOME so the workspace root (~/Ori Workspaces) — where group
+	// creation writes its folder — resolves inside the test directory instead
+	// of the developer's real workspace root.
+	t.Setenv("HOME", t.TempDir())
+	handler := newRoutesTestHandler(t)
+
+	body := bytes.NewBufferString(`{"name":"Routing Group","kind":"group"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create group: got %d, want 201: %s", createRec.Code, createRec.Body.String())
 	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	store := session.NewHybridStoreWithDB(db, 50)
-	now := time.Now()
-
-	createWorkspace(t, ctx, store, &session.Workspace{
-		ID: "grp", Name: "Clients", Kind: session.WorkspaceKindGroup,
-		CreatedAt: now, UpdatedAt: now,
-	})
-	createWorkspace(t, ctx, store, &session.Workspace{
-		ID: "ws", Name: "Project", Kind: session.WorkspaceKindWorkspace,
-		CreatedAt: now, UpdatedAt: now,
-	})
-
-	s := &Server{Storage: &StorageSystemFacade{SessionStore: store}}
-
-	cases := []struct {
-		name string
-		id   string
-		want bool
-	}{
-		{"group is detected", "grp", true},
-		{"concrete workspace is not a group", "ws", false},
-		{"missing id is not a group", "does-not-exist", false},
+	var resp struct {
+		Folder struct {
+			ID string `json:"id"`
+		} `json:"folder"`
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := s.isGroupWorkspace(tc.id); got != tc.want {
-				t.Errorf("isGroupWorkspace(%q) = %v, want %v", tc.id, got, tc.want)
-			}
-		})
+	if err := json.Unmarshal(createRec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if resp.Folder.ID == "" {
+		t.Fatalf("expected created group id in response: %s", createRec.Body.String())
 	}
 
-	// An unavailable store must never panic and must report false.
-	empty := &Server{Storage: &StorageSystemFacade{}}
-	if empty.isGroupWorkspace("grp") {
-		t.Errorf("isGroupWorkspace with nil SessionStore = true, want false")
-	}
-}
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+resp.Folder.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
 
-func createWorkspace(t *testing.T, ctx context.Context, store session.HybridStore, ws *session.Workspace) {
-	t.Helper()
-	if err := store.CreateWorkspace(ctx, ws); err != nil {
-		t.Fatalf("create workspace %q: %v", ws.ID, err)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected group page route to return 200, got %d", rec.Code)
+	}
+	page := rec.Body.String()
+	if !strings.Contains(page, "js/modules/workspace-detail.js") {
+		t.Fatalf("expected group URL to render the workspace-detail page")
+	}
+	if strings.Contains(page, "group-detail.css") {
+		t.Fatalf("group URL still renders the retired group-detail page")
 	}
 }

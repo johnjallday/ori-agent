@@ -251,7 +251,7 @@ async function loadWorkspaces(options = {}) {
 
     // Connection successful
     handleConnectionSuccess();
-    // Flat workspace list excludes organization-only groups.
+    // Flat workspace list includes groups (kind === 'group').
     renderWorkspaces(data.folders || []);
     hasLoadedWorkspaces = true;
 
@@ -635,7 +635,10 @@ function populateCanvasWorkspaceSelect() {
       // API returns { folders: [...] } - map to workspaces
       const workspaces = data.folders || [];
       select.innerHTML = '<option value="">Choose a workspace...</option>' +
-                workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
+                workspaces.map(ws => {
+                  const groupLabel = String(ws.kind || '').toLowerCase() === 'group' ? ' (group)' : '';
+                  return `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}${groupLabel}</option>`;
+                }).join('');
     })
     .catch(err => console.error('Error loading workspaces:', err));
 }
