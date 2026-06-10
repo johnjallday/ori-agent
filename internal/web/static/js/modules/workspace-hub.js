@@ -1692,6 +1692,16 @@ console.log('[workspace-hub.js] FILE LOADED');
       </button>
     `;
 
+    const tagRow = renderWorkspaceTagRow(row, {
+      rowClass: 'launcher-tree-tags',
+      chipClass: 'workspace-tag-chip',
+      chipExtraClass: 'launcher-tag-chip launcher-tag-chip--tree',
+      workspaceId: row.id,
+      removable: true,
+      filterable: true,
+      limit: 4
+    });
+
     const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
     const emptyHint = isGroup && children.length === 0
       ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
@@ -1709,6 +1719,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${caret}
           ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
           <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
+          ${tagRow}
           ${deleteButton}
         </div>
         ${childrenWrapper}

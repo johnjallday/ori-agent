@@ -3022,6 +3022,30 @@ button.hub-stat[hidden] {
   line-height: 1.2;
 }
 
+.launcher-tree-tags {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  max-width: 12rem;
+  overflow: hidden;
+  margin-right: 0.35rem;
+}
+
+.launcher-tag-chip--tree {
+  min-height: 1.25rem;
+  font-size: 0.63rem;
+}
+
+.launcher-tag-chip--tree .workspace-tag-chip-label {
+  padding: 0.1rem 0.38rem;
+}
+
+.launcher-tag-chip--tree .workspace-tag-chip-remove {
+  width: 1.15rem;
+}
+
 .launcher-tree-delete.launcher-card-delete {
   position: static;
   flex: 0 0 24px;
