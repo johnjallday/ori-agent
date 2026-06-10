@@ -1366,6 +1366,11 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	if strings.TrimSpace(workspace.FolderSlug) == "" {
 		workspace.FolderSlug = fallback.FolderSlug
 	}
+	// project_path has no SQLite column: workspace.json is its canonical
+	// store, so reads always hydrate it from disk.
+	if strings.TrimSpace(workspace.ProjectPath) == "" {
+		workspace.ProjectPath = fallback.ProjectPath
+	}
 	if workspace.SharedData == nil && fallback.SharedData != nil {
 		workspace.SharedData = fallback.SharedData
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -103,6 +104,13 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	}
 	if !info.Resolved || info.RelativePath != "song-x" {
 		t.Fatalf("project path not resolved via folder store: %+v", info)
+	}
+
+	// Session reads hydrate project_path from workspace.json (it has no
+	// SQLite column), so a bare session row must come back with the path.
+	hydrated := handler.hydrateWorkspaceMetadataFromFileStore(&session.Workspace{ID: wsID})
+	if hydrated == nil || hydrated.ProjectPath != "song-x" {
+		t.Fatalf("hydrated project_path = %+v, want song-x", hydrated)
 	}
 
 	select {

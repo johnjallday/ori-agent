@@ -64,7 +64,11 @@ type Handler struct {
 	fileStore        *workspace.FileStore
 	runtimeResolver  chatRuntimeResolver
 	toolCallStore    session.ToolCallStore
-	evolutionSvc     interface {
+
+	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
+	templatesRootResolver func() string
+	workspaceEventBus     *workspace.EventBus
+	evolutionSvc          interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
 	}
 	skillsManager interface {
@@ -139,6 +143,14 @@ func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 // SetFileStore sets the folder-based workspace store for syncing notes to disk.
 func (h *Handler) SetFileStore(fs *workspace.FileStore) {
 	h.fileStore = fs
+}
+
+// SetProjectTemplateDeps enables the workspace project-template tools for
+// chats: a resolver for the templates library directory and the event bus
+// used to publish project.created.
+func (h *Handler) SetProjectTemplateDeps(templatesRootResolver func() string, eventBus *workspace.EventBus) {
+	h.templatesRootResolver = templatesRootResolver
+	h.workspaceEventBus = eventBus
 }
 
 // SetShutdownFunc sets the shutdown function for the /exit command

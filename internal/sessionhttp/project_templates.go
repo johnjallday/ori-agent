@@ -63,21 +63,24 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 		return err
 	}
 
+	// workspace.json is the canonical store for project_path (there is no
+	// SQLite column; session reads hydrate it from disk), so its write is the
+	// one that must succeed — otherwise roll the project folder back.
 	now := time.Now()
-	ws.ProjectPath = relPath
-	ws.UpdatedAt = now
-	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
-		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
-		ws.ProjectPath = ""
-		return fmt.Errorf("failed to persist project path: %w", err)
-	}
-
 	folderWS.ProjectPath = relPath
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
-		// workspace.json is rebuilt from the session store on later syncs, so
-		// this is a warning rather than a rollback.
-		logger.Warn("Failed to sync project path to workspace.json", logger.Fields{"id": ws.ID, "error": err})
+		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
+		folderWS.ProjectPath = ""
+		return fmt.Errorf("failed to persist project path: %w", err)
+	}
+
+	ws.ProjectPath = relPath
+	ws.UpdatedAt = now
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		// Best-effort: the session row only mirrors metadata; reads hydrate
+		// project_path from workspace.json regardless.
+		logger.Warn("Failed to sync workspace metadata after project creation", logger.Fields{"id": ws.ID, "error": err})
 	}
 
 	if h.eventBus != nil {

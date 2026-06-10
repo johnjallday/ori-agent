@@ -39,6 +39,10 @@ type WorkspaceToolProvider struct {
 	agentStore    store.Store
 	mcpRegistry   mcpServerLister
 	skillsManager skillLister
+
+	// Optional dependencies for project-template tools
+	templatesRootResolver func() string
+	projectEventBus       *workspace.EventBus
 }
 
 // mcpServerLister allows listing available MCP servers.
@@ -100,6 +104,11 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	// Task-scoped tools (only when the chat is bound to a specific task)
 	if p.taskID != "" {
 		tools = append(tools, p.currentTaskTool(), p.taskRunsTool())
+	}
+
+	// Project-template tools (only when the library resolver is wired)
+	if p.templatesRootResolver != nil {
+		tools = append(tools, p.projectTemplatesTool(), p.createProjectTool())
 	}
 
 	// Phase 2: Management tools (only when dependencies are available)
