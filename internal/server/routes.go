@@ -584,6 +584,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
 
+		// Project template library (used by the workspace creation flow)
+		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
+
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
 	}

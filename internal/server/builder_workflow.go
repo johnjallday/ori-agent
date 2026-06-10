@@ -212,6 +212,12 @@ func (b *ServerBuilder) initializeEventSystem() {
 		logger.Info("Notification service initialized", logger.Fields{})
 	}
 
+	// The session handler is built before the event system (Phase 17 vs 19),
+	// so its project.created publishing is wired here.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetEventBus(b.eventBus)
+	}
+
 	if b.workspaceStore != nil {
 		syncMgr, err := workspace.NewDirectorySyncManager(b.workspaceStore, b.eventBus, workspace.DefaultDirectorySyncConfig())
 		if err != nil {

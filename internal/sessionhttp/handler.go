@@ -21,8 +21,10 @@ type Handler struct {
 	store                 session.HybridStore
 	workspaceStore        *workspace.FileStore // optional folder-based workspace store
 	workspaceRootResolver func() string
+	templatesRootResolver func() string // resolves the project templates library directory
 	agentStore            store.Store
 	workspaceAllowlist    *workspace.Allowlist
+	eventBus              *workspace.EventBus // optional, for project.created events
 }
 
 // New creates a new session handler.
@@ -44,6 +46,18 @@ func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
 // SetAgentStore sets the agent store used for workspace entry-agent provisioning.
 func (h *Handler) SetAgentStore(agentStore store.Store) {
 	h.agentStore = agentStore
+}
+
+// SetTemplatesRootResolver sets the resolver used to locate the project
+// templates library directory.
+func (h *Handler) SetTemplatesRootResolver(fn func() string) {
+	h.templatesRootResolver = fn
+}
+
+// SetEventBus sets the workspace event bus used to publish project lifecycle
+// events.
+func (h *Handler) SetEventBus(bus *workspace.EventBus) {
+	h.eventBus = bus
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which

@@ -58,6 +58,9 @@ const (
 	EventAttachmentUpdated EventType = "attachment.updated"
 	EventAttachmentDeleted EventType = "attachment.deleted"
 
+	// Project events (project folders instantiated from templates)
+	EventProjectCreated EventType = "project.created"
+
 	// Workflow events
 	EventWorkflowStarted   EventType = "workflow.started"
 	EventWorkflowCompleted EventType = "workflow.completed"

@@ -173,3 +173,8 @@ workflow_templates/
 # Misplaced generated protobuf files
 github.com/
 
+
+# Runtime project-templates library (materialized on startup; user data)
+/templates/
+# Test-run artifact: server builder tests materialize starters into the package dir
+internal/server/templates/

@@ -138,6 +138,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.sessionHandler.SetWorkspaceRootResolver(func() string {
 			return resolveWorkspaceRoot(b.configManager)
 		})
+		b.sessionHandler.SetTemplatesRootResolver(func() string {
+			return resolveTemplatesRoot(b.configManager)
+		})
 		b.sessionHandler.SetAgentStore(b.st)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)

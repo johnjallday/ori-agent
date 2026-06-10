@@ -292,6 +292,18 @@ func resolveVaultRoot(configManager *config.Manager) string {
 	return config.ResolveVaultRoot("")
 }
 
+// resolveTemplatesRoot determines the directory holding project template folders.
+// Priority: 1) settings templates_root, 2) ORI_TEMPLATES_DIR env, 3) current data dir + /templates
+func resolveTemplatesRoot(configManager *config.Manager) string {
+	if configManager != nil {
+		if root := configManager.GetTemplatesRoot(); root != "" {
+			return root
+		}
+	}
+
+	return config.ResolveTemplatesRoot("")
+}
+
 // createWorkspaceStore creates a new file-based workspace storage system.
 func createWorkspaceStore(workspaceDir string) (workspace.Store, error) {
 	ws, err := workspace.NewFileStore(workspaceDir)
