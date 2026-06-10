@@ -1057,6 +1057,11 @@
                   Linked Folders
                 </h2>
                 <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-create-project" class="workspace-detail-panel-btn" type="button" title="Create project from template" aria-label="Create project from template">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M4,4H20A2,2 0 0,1 22,6V10H20V8H4V18H10V20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M12,10H18V12H12V10M12,14H16V16H12V14M19,13V16H22V18H19V21H17V18H14V16H17V13H19Z"/>
+                    </svg>
+                  </button>
                   <button id="workspace-detail-add-directory" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add linked folder" aria-label="Add linked folder">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -1075,9 +1080,14 @@
                     <div class="workspace-detail-link-empty-eyebrow">Unlinked Workspace</div>
                     <div class="workspace-detail-link-empty-title">No project folder linked yet.</div>
                     <p class="workspace-detail-link-empty-copy">Attach the local project folder so this workspace can browse files in context.</p>
-                    <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
-                      Link Project
-                    </button>
+                    <div class="workspace-detail-empty-actions">
+                      <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showProjectTemplateModal(this)">
+                        Create Project
+                      </button>
+                      <button type="button" class="workspace-detail-empty-action workspace-detail-empty-action-secondary" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
+                        Link Folder
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1179,6 +1189,59 @@
 
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
+
+  <!-- Project Template Modal -->
+  <div class="modal fade" id="workspace-detail-project-template-modal" tabindex="-1" aria-labelledby="workspace-detail-project-template-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <form class="modal-content workspace-detail-project-modal-content" id="workspace-detail-project-template-form">
+        <div class="modal-header workspace-detail-project-modal-header">
+          <div>
+            <div class="workspace-detail-project-modal-kicker">Project Template</div>
+            <h5 class="modal-title" id="workspace-detail-project-template-title">Create Project</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body workspace-detail-project-modal-body">
+          <div id="workspace-detail-project-template-error" class="workspace-detail-project-modal-error" role="alert" hidden></div>
+
+          <div class="workspace-detail-project-modal-field">
+            <div class="d-flex align-items-center justify-content-between gap-2">
+              <label for="workspace-detail-project-template-select" class="form-label">Library Template</label>
+              <span class="d-flex gap-2">
+                <button type="button" id="workspace-detail-project-template-manage" class="workspace-detail-project-modal-link">Manage</button>
+                <button type="button" id="workspace-detail-project-template-refresh" class="workspace-detail-project-modal-link">Refresh</button>
+              </span>
+            </div>
+            <select id="workspace-detail-project-template-select" class="form-select">
+              <option value="">Loading templates...</option>
+            </select>
+            <div id="workspace-detail-project-template-description" class="workspace-detail-project-template-description" hidden></div>
+          </div>
+
+          <div class="workspace-detail-project-modal-root" id="workspace-detail-project-template-root" hidden></div>
+
+          <div class="workspace-detail-project-modal-divider" aria-hidden="true"><span>or</span></div>
+
+          <div class="workspace-detail-project-modal-field">
+            <label for="workspace-detail-project-template-path" class="form-label">Template Folder</label>
+            <div class="input-group">
+              <input type="text" id="workspace-detail-project-template-path" class="form-control" placeholder="/path/to/template-folder">
+              <button type="button" id="workspace-detail-project-template-browse" class="btn btn-outline-secondary">Choose</button>
+            </div>
+          </div>
+
+          <div class="workspace-detail-project-modal-field">
+            <label for="workspace-detail-project-name" class="form-label">Project Name</label>
+            <input type="text" id="workspace-detail-project-name" class="form-control" maxlength="120" placeholder="Uses workspace name">
+          </div>
+        </div>
+        <div class="modal-footer workspace-detail-project-modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" id="workspace-detail-project-template-submit" class="btn btn-primary">Create Project</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   {{if index .Extra "WorkspaceFloatingAssistantEnabled"}}
   {{template "support-chat.tmpl" .}}
@@ -4802,6 +4865,15 @@
       color: var(--text-secondary);
     }
 
+    .workspace-detail-empty-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.1rem;
+    }
+
     .workspace-detail-empty-action {
       display: inline-flex;
       align-items: center;
@@ -4820,9 +4892,22 @@
       box-shadow: 0 10px 24px rgba(var(--primary-color-rgb, 255, 138, 86), 0.22);
     }
 
+    .workspace-detail-empty-action-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: none;
+    }
+
     .workspace-detail-empty-action:hover:not(:disabled) {
       transform: translateY(-1px);
       box-shadow: 0 14px 28px rgba(var(--primary-color-rgb, 255, 138, 86), 0.28);
+    }
+
+    .workspace-detail-empty-action-secondary:hover:not(:disabled) {
+      border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.38);
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.1);
+      box-shadow: none;
     }
 
     .workspace-detail-empty-action:disabled {
@@ -4840,6 +4925,14 @@
       border: 1px solid transparent;
       transition: background-color 0.15s ease, border-color 0.15s ease;
       position: relative;
+    }
+
+    .workspace-detail-project-path-only {
+      padding-right: 0.65rem;
+    }
+
+    .workspace-detail-project-directory {
+      padding-right: 3rem;
     }
 
     .workspace-detail-item[role="button"] {
@@ -5960,6 +6053,98 @@
       background: rgba(59, 130, 246, 0.18);
       color: #dbeafe;
       border-color: rgba(147, 197, 253, 0.34);
+    }
+
+    .workspace-detail-project-modal-content {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .workspace-detail-project-modal-header,
+    .workspace-detail-project-modal-footer {
+      border-color: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .workspace-detail-project-modal-kicker {
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.16rem;
+    }
+
+    .workspace-detail-project-modal-body {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    .workspace-detail-project-modal-field {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-project-modal-field .form-label {
+      margin-bottom: 0;
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .workspace-detail-project-template-description,
+    .workspace-detail-project-modal-root {
+      font-size: 0.72rem;
+      line-height: 1.45;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-project-modal-root {
+      padding: 0.55rem 0.65rem;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      word-break: break-all;
+    }
+
+    .workspace-detail-project-modal-link {
+      border: 0;
+      background: transparent;
+      color: var(--primary-color);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0;
+    }
+
+    .workspace-detail-project-modal-divider {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      color: var(--text-muted);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-project-modal-divider::before,
+    .workspace-detail-project-modal-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.09);
+    }
+
+    .workspace-detail-project-modal-error {
+      padding: 0.62rem 0.75rem;
+      border-radius: 8px;
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.22);
+      font-size: 0.76rem;
     }
 
     .workspace-detail-workflow-link--inline {
@@ -8265,6 +8450,7 @@
   <script src="/js/modules/workspace-hub-notes.js"></script>
   <script src="/js/modules/workspace-hub-files.js"></script>
   <script src="/js/modules/workspace-mission.js"></script>
+  <script src="/js/modules/project-templates-manage.js"></script>
   <script src="/js/modules/workspace-hub-support-chat.js"></script>
 
   <!-- Workspace Detail Page -->

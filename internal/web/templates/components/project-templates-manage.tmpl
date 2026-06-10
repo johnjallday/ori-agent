@@ -1,0 +1,35 @@
+{{define "components/project-templates-manage.tmpl"}}
+<!-- Project Templates management modal (library list + import/edit/delete) -->
+<div class="modal fade" id="projectTemplatesManageModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="ptmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 id="ptmTitle" class="modal-title" style="color: var(--text-primary);">Project Templates</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-2 mb-1">
+          <div class="flex-grow-1" style="min-width: 0;">
+            <div style="font-size: 12px; color: var(--text-secondary);">Library folder</div>
+            <div id="ptmRootPath" style="font-size: 12px; color: var(--text-primary); font-family: var(--font-mono, monospace); overflow-wrap: anywhere;"></div>
+          </div>
+          <div class="d-flex gap-2" style="white-space: nowrap;">
+            <button type="button" id="ptmOpenRootBtn" class="modern-btn modern-btn-secondary">Open Folder</button>
+            <button type="button" id="ptmImportBtn" class="modern-btn modern-btn-primary">Import Folder…</button>
+          </div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+          A template is just a folder — drop one into the library (or import it here) and it appears in the pickers. <code>{{`{{name}}`}}</code> and <code>{{`{{date}}`}}</code> in file names are filled in when a project is created. Deleted starter templates return on the next app start.
+        </div>
+        <div id="ptmEmpty" style="font-size: 13px; color: var(--text-secondary);" hidden>
+          No templates yet. Import a folder above, or drop a template folder into the library.
+        </div>
+        <div id="ptmList" class="d-flex flex-column gap-2" role="list" aria-label="Installed project templates"></div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

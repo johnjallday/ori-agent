@@ -80,6 +80,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "board":
 			h.handleWorkspaceBoard(w, r, id)
 			return
+		case "project":
+			h.handleWorkspaceProject(w, r, id)
+			return
 		case "rename":
 			h.handleWorkspaceRename(w, r, id)
 			return
@@ -199,6 +202,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Location           string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
 		EntryAgentName     string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
 		WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
+		TemplateID         string                     `json:"template_id,omitempty"`   // Optional project template from the library
+		TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template
+		ProjectName        string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -217,6 +223,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
 		handleWorkspaceParentError(w, err)
+		return
+	}
+
+	wantsProject := strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != ""
+	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
+		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
+		return
+	}
+	if wantsProject && kind == session.WorkspaceKindGroup {
+		_ = orihttp.RespondBadRequest(w, "group workspaces cannot be created from a project template")
 		return
 	}
 
@@ -275,6 +291,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Create workspace folder on disk if folder-based store is available.
 	// Groups get the same executable scaffolding as real workspaces, scoped to
 	// their own content directories so member sub-workspaces stay hidden.
+	projectWarning := ""
+	if wantsProject {
+		// Cleared when instantiation succeeds; pre-set so every early exit
+		// from the folder branch below reports why no project was created.
+		projectWarning = "workspace was created, but the project template was not applied: workspace folder unavailable"
+	}
 	if h.workspaceStore != nil {
 		folderWS := &agentworkspace.Workspace{
 			ID:             ws.ID,
@@ -335,16 +357,31 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			} else {
 				h.provisionWorkspaceScaffolding(r.Context(), ws, folderWS, folderPath, []string{folderPath})
 				logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
+
+				if wantsProject {
+					// Non-fatal by design: a failed instantiation must not fail
+					// workspace creation. The warning is surfaced to the user.
+					if err := h.instantiateWorkspaceProject(r.Context(), ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+						projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
+						logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
+					} else {
+						projectWarning = ""
+					}
+				}
 			}
 		}
 	}
 
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
-	_ = orihttp.RespondCreated(w, map[string]any{
+	response := map[string]any{
 		"success": true,
 		"folder":  ws,
-	})
+	}
+	if projectWarning != "" {
+		response["project_warning"] = projectWarning
+	}
+	_ = orihttp.RespondCreated(w, response)
 }
 
 func workspacePathsEqual(a, b string) bool {
@@ -1331,6 +1368,11 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 
 	if strings.TrimSpace(workspace.FolderSlug) == "" {
 		workspace.FolderSlug = fallback.FolderSlug
+	}
+	// project_path has no SQLite column: workspace.json is its canonical
+	// store, so reads always hydrate it from disk.
+	if strings.TrimSpace(workspace.ProjectPath) == "" {
+		workspace.ProjectPath = fallback.ProjectPath
 	}
 	if workspace.SharedData == nil && fallback.SharedData != nil {
 		workspace.SharedData = fallback.SharedData

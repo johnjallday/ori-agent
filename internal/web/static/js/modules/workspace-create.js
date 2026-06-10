@@ -155,6 +155,14 @@ function setImportMode(enabled) {
     section.hidden = !workspaceCreateState.importMode;
   }
 
+  // Project templates scaffold a *new* project; they don't apply when
+  // importing an existing folder as the workspace. (ProjectTemplateCard also
+  // syncs this on toggle changes and modal open.)
+  const projectCard = document.getElementById('projectTemplateCard');
+  if (projectCard) {
+    projectCard.hidden = workspaceCreateState.importMode;
+  }
+
   if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
     window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
   }
@@ -283,6 +291,11 @@ async function browseImportFolderPath() {
     importPathInput.focus();
   }
 }
+
+// Project-template card behavior (population, pickers, manage link) lives in
+// project-templates-manage.js (ProjectTemplateCard) so every page that ships
+// the create-workspace markup gets it; this module only merges the card's
+// payload fields into the create request.
 
 /**
  * Opens the workspace creation modal and populates available agents
@@ -491,6 +504,8 @@ async function createWorkspace() {
       payload.path = importPath;
       payload.allow_duplicate = workspaceCreateState.allowDuplicateImport;
       payload.entry_point = workspaceCreateState.entryPoint || 'create_modal';
+    } else if (window.ProjectTemplateCard) {
+      Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
     }
 
     const requestPayload = { ...payload };
@@ -585,8 +600,17 @@ async function createWorkspace() {
     if (importPathInput) importPathInput.value = '';
     setImportMode(false);
     clearDuplicateWarning();
+    if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
     window.selectedAgents.clear();
     resetImportState();
+
+    // The workspace exists even when project-template instantiation failed;
+    // surface the warning and give the toast time to be read before
+    // navigating away.
+    const projectWarning = typeof result.project_warning === 'string' ? result.project_warning : '';
+    if (projectWarning && typeof window.showToast === 'function') {
+      window.showToast(projectWarning, 'warning');
+    }
 
     if (workspaceId) {
       window.dispatchEvent(new CustomEvent('ori:workspace-created', {
@@ -614,7 +638,14 @@ async function createWorkspace() {
           );
         }
       }
-      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+      const navigate = () => {
+        window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+      };
+      if (projectWarning) {
+        setTimeout(navigate, 2500);
+      } else {
+        navigate();
+      }
       return;
     }
 
@@ -730,6 +761,7 @@ function initializeWorkspaceCreationListeners() {
       void browseImportFolderPath();
     });
   }
+
 }
 
 // Export functions for global access

@@ -1,0 +1,167 @@
+package projecttemplates
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/platform"
+	workspace "github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+// ErrTemplateExists reports an import that would overwrite an existing
+// library template.
+var ErrTemplateExists = errors.New("template already exists in the library")
+
+// ImportFolder copies an arbitrary folder into the library as a new template.
+// The copy is verbatim — no token substitution, since template files may
+// legitimately carry {{name}}/{{date}} in their names — with symlinks skipped.
+// displayName, when given, becomes the manifest display name and the basis of
+// the template ID; otherwise the source folder's name is used.
+func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
+	libDir = strings.TrimSpace(libDir)
+	if libDir == "" {
+		return Template{}, fmt.Errorf("templates library is not configured")
+	}
+	src, err := LoadFolder(srcPath)
+	if err != nil {
+		return Template{}, err
+	}
+
+	absLib, err := filepath.Abs(libDir)
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to resolve templates directory: %w", err)
+	}
+	absLib = filepath.Clean(absLib)
+	// Importing from inside the library is a no-op/duplicate; importing a
+	// parent of the library would copy the library into itself.
+	if src.Path == absLib || strings.HasPrefix(src.Path, absLib+string(filepath.Separator)) {
+		return Template{}, fmt.Errorf("%q is already inside the templates library", src.Path)
+	}
+	if strings.HasPrefix(absLib, src.Path+string(filepath.Separator)) {
+		return Template{}, fmt.Errorf("cannot import %q: it contains the templates library", src.Path)
+	}
+
+	idBasis := strings.TrimSpace(displayName)
+	if idBasis == "" {
+		idBasis = filepath.Base(src.Path)
+	}
+	id := workspace.Slugify(idBasis)
+
+	if err := os.MkdirAll(absLib, 0o750); err != nil {
+		return Template{}, fmt.Errorf("failed to create templates directory: %w", err)
+	}
+	dest := filepath.Join(absLib, id)
+	if _, err := os.Lstat(dest); err == nil {
+		return Template{}, fmt.Errorf("%w: %q", ErrTemplateExists, id)
+	} else if !os.IsNotExist(err) {
+		return Template{}, fmt.Errorf("failed to inspect %s: %w", dest, err)
+	}
+
+	if err := copyFolderVerbatim(src.Path, dest); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
+
+	if strings.TrimSpace(displayName) != "" {
+		if _, err := UpdateManifest(absLib, id, displayName, src.Description); err != nil {
+			_ = os.RemoveAll(dest)
+			return Template{}, err
+		}
+	}
+	return newTemplate(dest), nil
+}
+
+// copyFolderVerbatim copies a directory tree without name substitution,
+// skipping symlinks and preserving permission bits.
+func copyFolderVerbatim(srcRoot, destRoot string) error {
+	if err := os.MkdirAll(destRoot, 0o750); err != nil {
+		return fmt.Errorf("failed to create template folder: %w", err)
+	}
+	return fs.WalkDir(os.DirFS(srcRoot), ".", func(relPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("failed to read %q: %w", relPath, err)
+		}
+		if relPath == "." {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if !filepath.IsLocal(filepath.FromSlash(relPath)) {
+			return fmt.Errorf("entry %q escapes the source folder", relPath)
+		}
+		target := filepath.Join(destRoot, filepath.FromSlash(relPath))
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("failed to inspect %q: %w", relPath, err)
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, normalizeDirPerm(info.Mode().Perm()))
+		}
+		return copyFile(filepath.Join(srcRoot, relPath), target, info.Mode().Perm())
+	})
+}
+
+// UpdateManifest writes display metadata into a library template's
+// template.json, preserving any unknown fields a user may have added. Empty
+// values remove the corresponding key (falling back to folder-name display).
+func UpdateManifest(libDir, id, name, description string) (Template, error) {
+	tpl, err := FindLibraryTemplate(libDir, id)
+	if err != nil {
+		return Template{}, err
+	}
+
+	manifestPath := filepath.Join(tpl.Path, ManifestFileName)
+	raw := map[string]any{}
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		// A malformed manifest is replaced rather than failing the edit.
+		_ = json.Unmarshal(data, &raw)
+	}
+
+	setOrDelete := func(key, value string) {
+		if strings.TrimSpace(value) == "" {
+			delete(raw, key)
+			return
+		}
+		raw[key] = strings.TrimSpace(value)
+	}
+	setOrDelete("name", name)
+	setOrDelete("description", description)
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil {
+		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
+	}
+	return newTemplate(tpl.Path), nil
+}
+
+// Delete removes a library template, preferring the system trash so the
+// deletion is recoverable. It reports whether the template went to the trash
+// (false means it was permanently removed on a platform without trash
+// support). Note: deleting a starter template only lasts until the next
+// server start, which re-materializes absent starters.
+func Delete(libDir, id string) (bool, error) {
+	tpl, err := FindLibraryTemplate(libDir, id)
+	if err != nil {
+		return false, err
+	}
+
+	if platform.TrashSupported() {
+		if _, err := platform.MoveToTrash(tpl.Path); err == nil {
+			return true, nil
+		}
+		// Fall through to permanent removal if the trash move failed.
+	}
+	if err := os.RemoveAll(tpl.Path); err != nil {
+		return false, fmt.Errorf("failed to delete template %q: %w", id, err)
+	}
+	return false, nil
+}

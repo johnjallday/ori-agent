@@ -119,3 +119,81 @@ test('workspace detail summary chip counts tasks with reference URLs', () => {
   assert.equal(referenceChip.hidden, true);
   assert.equal(referenceChip.textContent, 'Refs: 0');
 });
+
+test('workspace detail empty project state offers template creation and folder linking', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = { kind: 'workspace' };
+
+  const markup = page.getUnlinkedProjectEmptyStateMarkup();
+
+  assert.match(markup, /showProjectTemplateModal/);
+  assert.match(markup, /Create Project/);
+  assert.match(markup, /showAddDirectoryModal/);
+  assert.match(markup, /Link Folder/);
+});
+
+test('workspace detail renders project_path fallback instead of unlinked empty state', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const list = { innerHTML: '' };
+  page.elements = { directoriesList: list };
+  page.workspace = { project_path: 'smoke-song' };
+  page.directories = [];
+
+  page.renderDirectories();
+
+  assert.match(list.innerHTML, /smoke-song/);
+  assert.match(list.innerHTML, /Project Folder/);
+  assert.match(list.innerHTML, /Template project/);
+  assert.doesNotMatch(list.innerHTML, /No project folder linked yet/);
+});
+
+test('workspace detail protects the managed project directory row', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const list = { innerHTML: '' };
+  page.elements = { directoriesList: list };
+  page.workspace = {
+    project_path: 'song-x',
+    primary_directory_id: 'dir-project',
+    shared_data: { project_directory_id: 'dir-project' }
+  };
+  page.directories = [
+    { id: 'dir-project', name: 'Song X', path: '/workspaces/song-x/song-x', source: 'reference' },
+    { id: 'dir-root', name: 'song-x', path: '/workspaces/song-x', source: 'reference' }
+  ];
+
+  page.renderDirectories();
+
+  assert.match(list.innerHTML, /Template project/);
+  assert.match(list.innerHTML, /openDirectoryExplorer\('dir-project'/);
+  assert.doesNotMatch(list.innerHTML, /promptRelinkDirectory\('dir-project'/);
+  assert.doesNotMatch(list.innerHTML, /deleteDirectory\('dir-project'/);
+  assert.match(list.innerHTML, /promptRelinkDirectory\('dir-root'/);
+});
+
+test('workspace detail disables create-project action for groups and existing projects', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const button = {
+    disabled: false,
+    title: '',
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    }
+  };
+  page.elements = { createProjectBtn: button };
+
+  page.workspace = { kind: 'workspace' };
+  page.syncProjectActionState();
+  assert.equal(button.disabled, false);
+
+  page.workspace = { kind: 'workspace', project_path: 'song-x' };
+  page.syncProjectActionState();
+  assert.equal(button.disabled, true);
+  assert.equal(button.attributes['aria-disabled'], 'true');
+  assert.match(button.title, /already has a project/);
+
+  page.workspace = { kind: 'group' };
+  page.syncProjectActionState();
+  assert.equal(button.disabled, true);
+  assert.match(button.title, /Groups cannot hold projects/);
+});

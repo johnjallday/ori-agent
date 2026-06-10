@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -314,6 +315,72 @@ func (h *Handler) VaultRootSettingsHandler(w http.ResponseWriter, r *http.Reques
 			"effective_vault_root": effectiveRoot,
 			"default_vault_root":   config.DefaultVaultRoot(),
 			"source":               config.VaultRootSource(configured),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// TemplatesRootResponse describes the configured and effective project
+// templates directory.
+type TemplatesRootResponse struct {
+	TemplatesRoot          string `json:"templates_root,omitempty"`
+	EffectiveTemplatesRoot string `json:"effective_templates_root"`
+	DefaultTemplatesRoot   string `json:"default_templates_root"`
+	Source                 string `json:"source"`
+}
+
+// TemplatesRootSettingsHandler handles project templates directory persistence.
+func (h *Handler) TemplatesRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		configured := h.configManager.GetTemplatesRoot()
+		orihttp.WriteJSON(w, TemplatesRootResponse{
+			TemplatesRoot:          configured,
+			EffectiveTemplatesRoot: config.ResolveTemplatesRoot(configured),
+			DefaultTemplatesRoot:   config.DefaultTemplatesRoot(),
+			Source:                 config.TemplatesRootSource(configured),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			TemplatesRoot string `json:"templates_root"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		configured, err := config.NormalizeTemplatesRoot(req.TemplatesRoot)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid templates directory", err)
+			return
+		}
+
+		effectiveRoot := config.ResolveTemplatesRoot(configured)
+		// Materialize the library (dir + absent starter templates) in the new
+		// location, matching startup behavior.
+		if err := projecttemplates.EnsureLibrary(effectiveRoot); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to use templates directory", err)
+			return
+		}
+
+		if err := h.configManager.SetTemplatesRoot(configured); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid templates directory", err)
+			return
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":                  true,
+			"templates_root":           configured,
+			"effective_templates_root": effectiveRoot,
+			"default_templates_root":   config.DefaultTemplatesRoot(),
+			"source":                   config.TemplatesRootSource(configured),
 		})
 
 	default:

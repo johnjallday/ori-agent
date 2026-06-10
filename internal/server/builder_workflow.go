@@ -38,12 +38,17 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	sessionStore := b.sessionStore
 	workspaceStore := b.workspaceStore
 	fileStore := b.workspaceFileStore
+	configManager := b.configManager
+	eventBus := b.eventBus
 	return func(workspaceID, agentName string) []toolapi.Tool {
 		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
 		provider.SetExecutingAgent(agentName)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
 		}
+		provider.SetProjectTemplateDeps(func() string {
+			return resolveTemplatesRoot(configManager)
+		}, eventBus)
 		return provider.Tools()
 	}
 }
@@ -210,6 +215,17 @@ func (b *ServerBuilder) initializeEventSystem() {
 	b.notificationService = workspace.NewNotificationService(b.eventBus, 500)
 	if verbose {
 		logger.Info("Notification service initialized", logger.Fields{})
+	}
+
+	// The session and chat handlers are built before the event system
+	// (Phase 17 vs 19), so their project-template wiring lands here.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetEventBus(b.eventBus)
+	}
+	if b.chatHandler != nil {
+		b.chatHandler.SetProjectTemplateDeps(func() string {
+			return resolveTemplatesRoot(b.configManager)
+		}, b.eventBus)
 	}
 
 	if b.workspaceStore != nil {

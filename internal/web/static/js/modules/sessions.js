@@ -3319,6 +3319,10 @@ const sessionManager = {
         payload.path = importPath;
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
+      } else if (window.ProjectTemplateCard) {
+        // Optional project scaffolding from the "Project (optional)" card
+        // (template_id/template_path + project_name).
+        Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
       }
 
       const requestPayload = { ...payload };
@@ -3368,6 +3372,13 @@ const sessionManager = {
         const fallbackMessage = importEnabled ? 'Failed to import folder as workspace' : 'Failed to create workspace';
         throw new Error(result.error || fallbackMessage);
       }
+
+      // The workspace exists even when project-template instantiation failed;
+      // surface the non-fatal warning.
+      if (typeof result.project_warning === 'string' && result.project_warning) {
+        this.showToast(result.project_warning, 'warning');
+      }
+      if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
 
       const createdWorkspaceId = result && result.folder && result.folder.id
         ? String(result.folder.id)

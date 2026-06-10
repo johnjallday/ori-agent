@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
@@ -28,6 +29,12 @@ func (b *ServerBuilder) initializeConfiguration() error {
 	}
 	b.configManager = configMgr
 	b.privateServicesClient = privateservices.NewEnvClient()
+
+	// Materialize the project templates library (starter templates are only
+	// written when absent). Non-fatal: the app works without templates.
+	if err := projecttemplates.EnsureLibrary(resolveTemplatesRoot(configMgr)); err != nil {
+		logger.Warn("Failed to prepare project templates library", logger.Fields{"error": err})
+	}
 	return nil
 }
 

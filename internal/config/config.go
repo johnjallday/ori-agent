@@ -87,6 +87,7 @@ type Settings struct {
 	// Workspace settings
 	WorkspaceRoot string `json:"workspace_root,omitempty"` // Default directory for new workspace folders (e.g., ~/Documents/Ori Workspaces)
 	VaultRoot     string `json:"vault_root,omitempty"`     // Default directory for new managed vault files
+	TemplatesRoot string `json:"templates_root,omitempty"` // Directory holding project template folders (defaults to <app data>/templates)
 
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
@@ -221,6 +222,27 @@ func DefaultVaultRoot() string {
 	return filepath.Join(".", "vaults")
 }
 
+// DefaultTemplatesRoot returns the fallback directory holding project
+// template folders.
+func DefaultTemplatesRoot() string {
+	if dir := strings.TrimSpace(os.Getenv("ORI_DATA_DIR")); dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			return filepath.Join(abs, "templates")
+		}
+		return filepath.Join(dir, "templates")
+	}
+
+	cwd, err := os.Getwd()
+	if err == nil {
+		if abs, absErr := filepath.Abs(cwd); absErr == nil {
+			return filepath.Join(abs, "templates")
+		}
+		return filepath.Join(cwd, "templates")
+	}
+
+	return filepath.Join(".", "templates")
+}
+
 // NormalizeWorkspaceRoot expands and normalizes a configured workspace root path.
 func NormalizeWorkspaceRoot(path string) (string, error) {
 	path = strings.TrimSpace(path)
@@ -259,6 +281,43 @@ func NormalizeVaultRoot(path string) (string, error) {
 	}
 
 	return filepath.Clean(abs), nil
+}
+
+// NormalizeTemplatesRoot expands and normalizes a configured templates root path.
+func NormalizeTemplatesRoot(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+
+	expanded, err := platform.ExpandHome(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to expand templates directory: %w", err)
+	}
+
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve templates directory: %w", err)
+	}
+
+	return filepath.Clean(abs), nil
+}
+
+// ResolveTemplatesRoot determines the effective templates root using settings
+// first, then ORI_TEMPLATES_DIR, then the built-in default.
+func ResolveTemplatesRoot(configured string) string {
+	if normalized, err := NormalizeTemplatesRoot(configured); err == nil && normalized != "" {
+		return normalized
+	}
+
+	if envPath := strings.TrimSpace(os.Getenv("ORI_TEMPLATES_DIR")); envPath != "" {
+		if normalized, err := NormalizeTemplatesRoot(envPath); err == nil && normalized != "" {
+			return normalized
+		}
+		return envPath
+	}
+
+	return DefaultTemplatesRoot()
 }
 
 // ResolveWorkspaceRoot determines the effective workspace root using
@@ -312,6 +371,17 @@ func VaultRootSource(configured string) string {
 		return "settings"
 	}
 	if strings.TrimSpace(os.Getenv("ORI_VAULT_DIR")) != "" {
+		return "environment"
+	}
+	return "default"
+}
+
+// TemplatesRootSource reports where the effective templates root comes from.
+func TemplatesRootSource(configured string) string {
+	if strings.TrimSpace(configured) != "" {
+		return "settings"
+	}
+	if strings.TrimSpace(os.Getenv("ORI_TEMPLATES_DIR")) != "" {
 		return "environment"
 	}
 	return "default"
@@ -433,6 +503,46 @@ func (m *Manager) GetVaultRoot() string {
 		return raw
 	}
 	return normalized
+}
+
+// GetTemplatesRoot returns the explicitly configured templates root, if any.
+func (m *Manager) GetTemplatesRoot() string {
+	m.mu.RLock()
+	raw := strings.TrimSpace(m.settings.TemplatesRoot)
+	m.mu.RUnlock()
+
+	if raw == "" {
+		return ""
+	}
+
+	normalized, err := NormalizeTemplatesRoot(raw)
+	if err != nil {
+		return raw
+	}
+	return normalized
+}
+
+// SetTemplatesRoot updates the configured project templates directory.
+func (m *Manager) SetTemplatesRoot(path string) error {
+	normalized, err := NormalizeTemplatesRoot(path)
+	if err != nil {
+		return err
+	}
+
+	if normalized != "" {
+		info, statErr := os.Stat(normalized)
+		if statErr == nil && !info.IsDir() {
+			return fmt.Errorf("templates directory must be a folder")
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("failed to inspect templates directory: %w", statErr)
+		}
+	}
+
+	m.mu.Lock()
+	m.settings.TemplatesRoot = normalized
+	m.mu.Unlock()
+	return nil
 }
 
 // SetWorkspaceRoot updates the configured default workspace directory.
@@ -709,6 +819,12 @@ func (m *Manager) validate() error {
 		normalized, err := NormalizeVaultRoot(m.settings.VaultRoot)
 		if err == nil {
 			m.settings.VaultRoot = normalized
+		}
+	}
+	if m.settings.TemplatesRoot != "" {
+		normalized, err := NormalizeTemplatesRoot(m.settings.TemplatesRoot)
+		if err == nil {
+			m.settings.TemplatesRoot = normalized
 		}
 	}
 
