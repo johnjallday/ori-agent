@@ -257,6 +257,9 @@ type Workspace struct {
 	// ProjectPath is an optional relative path to the associated project code directory.
 	ProjectPath string `json:"project_path,omitempty"`
 
+	// Tags are normalized labels used for workspace organization and filtering.
+	Tags []string `json:"tags,omitempty"`
+
 	// ParentID is the ID of the parent workspace, or empty for root-level workspaces.
 	ParentID string `json:"parent_id,omitempty"`
 

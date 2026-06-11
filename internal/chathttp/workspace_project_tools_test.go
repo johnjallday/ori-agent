@@ -47,7 +47,7 @@ func setupProjectToolProvider(t *testing.T, ws *session.Workspace) (*WorkspaceTo
 		cleanup()
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(libDir, "demo", "template.json"), []byte(`{"name":"Demo","description":"demo template"}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(libDir, "demo", "template.json"), []byte(`{"name":"Demo","description":"demo template","tags":[" Music ","reaper","music"]}`), 0o640); err != nil {
 		cleanup()
 		t.Fatal(err)
 	}
@@ -84,9 +84,10 @@ func TestWorkspaceProjectTemplatesToolLists(t *testing.T) {
 	}
 	var payload struct {
 		Templates []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Tags        []string `json:"tags"`
 		} `json:"templates"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
@@ -94,6 +95,9 @@ func TestWorkspaceProjectTemplatesToolLists(t *testing.T) {
 	}
 	if len(payload.Templates) != 1 || payload.Templates[0].ID != "demo" || payload.Templates[0].Name != "Demo" {
 		t.Fatalf("unexpected templates: %+v", payload.Templates)
+	}
+	if len(payload.Templates[0].Tags) != 2 || payload.Templates[0].Tags[0] != "music" || payload.Templates[0].Tags[1] != "reaper" {
+		t.Fatalf("unexpected template tags: %#v", payload.Templates[0].Tags)
 	}
 }
 
@@ -108,14 +112,18 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 		t.Fatalf("create tool: %v", err)
 	}
 	var payload struct {
-		ProjectPath string `json:"project_path"`
-		TemplateID  string `json:"template_id"`
+		ProjectPath string   `json:"project_path"`
+		TemplateID  string   `json:"template_id"`
+		Tags        []string `json:"tags"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if payload.ProjectPath != "song-x" || payload.TemplateID != "demo" {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if len(payload.Tags) != 2 || payload.Tags[0] != "music" || payload.Tags[1] != "reaper" {
+		t.Fatalf("unexpected response tags: %#v", payload.Tags)
 	}
 
 	// File materialized with substituted name; manifest excluded.
@@ -131,6 +139,16 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 	folderWS, err := provider.fileStore.Get(ws.ID)
 	if err != nil || folderWS.ProjectPath != "song-x" {
 		t.Fatalf("workspace.json project_path = %q err=%v", folderWS.ProjectPath, err)
+	}
+	if len(folderWS.Tags) != 2 || folderWS.Tags[0] != "music" || folderWS.Tags[1] != "reaper" {
+		t.Fatalf("workspace.json tags = %#v, want [music reaper]", folderWS.Tags)
+	}
+	sessionWS, err := provider.sessionStore.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("session workspace: %v", err)
+	}
+	if len(sessionWS.Tags) != 2 || sessionWS.Tags[0] != "music" || sessionWS.Tags[1] != "reaper" {
+		t.Fatalf("session workspace tags = %#v, want [music reaper]", sessionWS.Tags)
 	}
 	if len(folderWS.DirectoryReferences) != 1 {
 		t.Fatalf("expected project directory reference, got %#v", folderWS.DirectoryReferences)

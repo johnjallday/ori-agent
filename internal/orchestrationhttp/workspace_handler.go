@@ -82,6 +82,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"name":                                  ws.Name,
 			"kind":                                  ws.Kind,
 			"description":                           ws.Description,
+			"tags":                                  append([]string(nil), ws.Tags...),
 			"entry_agent_name":                      ws.EntryAgentName(),
 			"agents":                                ws.Agents,
 			"agent_instances":                       ws.AgentInstances,

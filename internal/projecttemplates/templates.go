@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // ManifestFileName is the optional per-template metadata file. It carries
@@ -20,9 +22,10 @@ const ManifestFileName = "template.json"
 
 // Template describes one instantiable folder skeleton.
 type Template struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
 }
@@ -30,14 +33,18 @@ type Template struct {
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
 // by design: the manifest must stay metadata-only.
 type manifest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
 // is not an error — the template simply falls back to folder-name display.
+// dir is either a library template folder or a folder the caller (an
+// admin-facing, local-first tool) explicitly chose via LoadFolder; the
+// filename is always the fixed ManifestFileName constant.
 func readManifest(dir string) manifest {
-	data, err := os.ReadFile(filepath.Join(dir, ManifestFileName))
+	data, err := os.ReadFile(filepath.Join(dir, ManifestFileName)) // #nosec G304 -- dir is a library/template folder resolved by the caller; filename is the fixed ManifestFileName constant
 	if err != nil {
 		return manifest{}
 	}
@@ -61,6 +68,7 @@ func newTemplate(path string) Template {
 		t.Name = t.ID
 	}
 	t.Description = strings.TrimSpace(m.Description)
+	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
 	return t
 }
 

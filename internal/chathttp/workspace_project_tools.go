@@ -45,6 +45,7 @@ func (p *WorkspaceToolProvider) projectTemplatesTool() toolapi.Tool {
 					"id":          tpl.ID,
 					"name":        tpl.Name,
 					"description": tpl.Description,
+					"tags":        tpl.Tags,
 				})
 			}
 			message := fmt.Sprintf("%d project template(s) available.", len(items))
@@ -138,7 +139,7 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 				return "", err
 			}
 
-			projectDirID, err := ensureProjectDirectoryReference(folderWS, projectName, folderPath, relPath)
+			projectDirID, err := projecttemplates.EnsureProjectDirectoryReference(folderWS, projectName, folderPath, relPath)
 			if err != nil {
 				_ = os.RemoveAll(filepath.Join(folderPath, relPath))
 				return "", fmt.Errorf("failed to register project folder: %w", err)
@@ -148,10 +149,11 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 			// write must succeed — otherwise roll the project folder back.
 			now := time.Now()
 			folderWS.ProjectPath = relPath
+			folderWS.Tags = workspace.MergeWorkspaceTags(folderWS.Tags, tpl.Tags)
 			if folderWS.SharedData == nil {
 				folderWS.SharedData = make(map[string]any)
 			}
-			setWorkspaceToolPrimaryDirectoryID(folderWS.SharedData, projectDirID)
+			projecttemplates.SetPrimaryDirectoryID(folderWS.SharedData, projectDirID)
 			folderWS.UpdatedAt = now
 			if err := p.fileStore.Save(folderWS); err != nil {
 				_ = os.RemoveAll(filepath.Join(folderPath, relPath))
@@ -160,10 +162,11 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 
 			// Best-effort metadata sync; reads hydrate project_path from disk.
 			ws.ProjectPath = relPath
+			ws.Tags = workspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
 			if ws.SharedData == nil {
 				ws.SharedData = make(map[string]any)
 			}
-			setWorkspaceToolPrimaryDirectoryID(ws.SharedData, projectDirID)
+			projecttemplates.SetPrimaryDirectoryID(ws.SharedData, projectDirID)
 			if refsJSON, err := json.Marshal(folderWS.DirectoryReferences); err == nil {
 				ws.DirectoryReferencesJSON = refsJSON
 			}
@@ -192,57 +195,9 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 			return marshalToolResponse(map[string]any{
 				"project_path": relPath,
 				"template_id":  tpl.ID,
+				"tags":         ws.Tags,
 				"message":      fmt.Sprintf("Project created at %q inside the workspace folder (template %q). It is recorded as the workspace's project_path and is readable through the workspace filesystem tools.", relPath, tpl.ID),
 			})
 		},
 	}
-}
-
-func ensureProjectDirectoryReference(folderWS *workspace.Workspace, projectName, folderPath, relPath string) (string, error) {
-	if folderWS == nil {
-		return "", fmt.Errorf("workspace metadata is unavailable")
-	}
-
-	projectPath := filepath.Clean(filepath.Join(folderPath, relPath))
-	for _, ref := range folderWS.DirectoryReferences {
-		if filepath.Clean(ref.Path) == projectPath {
-			return ref.ID, nil
-		}
-	}
-
-	name := strings.TrimSpace(projectName)
-	if name == "" {
-		name = strings.TrimSpace(filepath.Base(relPath))
-	}
-	if name == "" || name == "." {
-		name = "Project Folder"
-	}
-
-	if err := folderWS.AddDirectoryReference(workspace.DirectoryReference{
-		Name: name,
-		Path: projectPath,
-	}); err != nil {
-		return "", err
-	}
-
-	for _, ref := range folderWS.DirectoryReferences {
-		if filepath.Clean(ref.Path) == projectPath {
-			return ref.ID, nil
-		}
-	}
-	return "", fmt.Errorf("project directory reference was not recorded")
-}
-
-func setWorkspaceToolPrimaryDirectoryID(sharedData map[string]any, directoryID string) {
-	if sharedData == nil {
-		return
-	}
-	directoryID = strings.TrimSpace(directoryID)
-	if directoryID == "" {
-		delete(sharedData, "primary_directory_id")
-		delete(sharedData, "project_directory_id")
-		return
-	}
-	sharedData["primary_directory_id"] = directoryID
-	sharedData["project_directory_id"] = directoryID
 }

@@ -1,4 +1,8 @@
 {
   "name": "Reaper Song",
-  "description": "A minimal REAPER project seeded with a single .rpp file named after your project."
+  "description": "A minimal REAPER project seeded with a single .rpp file named after your project.",
+  "tags": [
+    "music",
+    "reaper"
+  ]
 }

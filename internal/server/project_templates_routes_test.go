@@ -17,7 +17,7 @@ func TestHandleProjectTemplates(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(libDir, "alpha"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(libDir, "alpha", "template.json"), []byte(`{"name":"Alpha","description":"first"}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(libDir, "alpha", "template.json"), []byte(`{"name":"Alpha","description":"first","tags":[" Music ","music","Client"]}`), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,9 +41,10 @@ func TestHandleProjectTemplates(t *testing.T) {
 	}
 	var resp struct {
 		Templates []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Tags        []string `json:"tags"`
 		} `json:"templates"`
 		TemplatesRoot string `json:"templates_root"`
 	}
@@ -52,6 +53,9 @@ func TestHandleProjectTemplates(t *testing.T) {
 	}
 	if len(resp.Templates) != 1 || resp.Templates[0].ID != "alpha" || resp.Templates[0].Name != "Alpha" {
 		t.Fatalf("unexpected templates: %+v", resp.Templates)
+	}
+	if len(resp.Templates[0].Tags) != 2 || resp.Templates[0].Tags[0] != "music" || resp.Templates[0].Tags[1] != "client" {
+		t.Fatalf("unexpected template tags: %#v", resp.Templates[0].Tags)
 	}
 	if resp.TemplatesRoot != libDir {
 		t.Fatalf("templates_root = %q, want %q", resp.TemplatesRoot, libDir)

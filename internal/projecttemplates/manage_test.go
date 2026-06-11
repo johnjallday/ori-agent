@@ -84,7 +84,7 @@ func TestImportFolderSkipsSymlinks(t *testing.T) {
 
 func TestUpdateManifest(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
-	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Old","description":"old desc","custom_field":42}`)
+	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Old","description":"old desc","tags":["music","reaper"],"custom_field":42}`)
 
 	tpl, err := UpdateManifest(libDir, "demo", "New Name", "new desc")
 	if err != nil {
@@ -101,6 +101,9 @@ func TestUpdateManifest(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"custom_field"`) {
 		t.Errorf("custom field dropped: %s", data)
+	}
+	if !strings.Contains(string(data), `"tags"`) {
+		t.Errorf("tags dropped: %s", data)
 	}
 
 	// Clearing the name falls back to the folder name.

@@ -128,6 +128,13 @@
         <div id="launcherRootDropZone" class="launcher-root-drop" hidden>
           Drop here to move to top level
         </div>
+        <div id="launcherTagFilterbar" class="launcher-tag-filterbar" hidden>
+          <div class="launcher-tag-filterbar-main">
+            <span class="launcher-tag-filterbar-label">Tags</span>
+            <div id="launcherTagFilterChips" class="launcher-tag-filter-chips" aria-label="Workspace tag filters"></div>
+          </div>
+          <button id="launcherTagFilterClear" class="launcher-tag-filter-clear" type="button" hidden>Clear filters</button>
+        </div>
         <div id="launcherGrid" class="launcher-grid"></div>
         <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
       </section>
@@ -267,6 +274,7 @@
         <span class="hub-title-eyebrow">Workspace Hub</span>
         <h1 class="hub-title-text"></h1>
         <div id="hubWorkspaceDescription" class="hub-workspace-description" style="display: none;"></div>
+        <div id="hubWorkspaceTags" class="hub-workspace-tags" hidden></div>
       </div>
       <div class="hub-header-controls">
         <div class="hub-workspace-select">

@@ -275,6 +275,8 @@ export class WorkspaceDetailPage {
     this.projectTemplates = [];
     this.projectTemplatesRoot = '';
     this.projectTemplateSubmitting = false;
+    this.workspaceTagDraft = [];
+    this.workspaceTagsSaving = false;
 
     // DOM elements
     this.elements = {};
@@ -955,6 +957,16 @@ export class WorkspaceDetailPage {
       // Header elements
       workspaceName: document.getElementById('workspace-name'),
       workspaceDescription: document.getElementById('workspace-description'),
+      workspaceTagsContainer: document.getElementById('workspace-tags-container'),
+      workspaceTagsList: document.getElementById('workspace-tags-list'),
+      workspaceTagsEditBtn: document.getElementById('workspace-tags-edit-btn'),
+      workspaceTagsEditor: document.getElementById('workspace-tags-editor'),
+      workspaceTagsEditorList: document.getElementById('workspace-tags-editor-list'),
+      workspaceTagsInput: document.getElementById('workspace-tags-input'),
+      workspaceTagsAddBtn: document.getElementById('workspace-tags-add-btn'),
+      workspaceTagsSaveBtn: document.getElementById('workspace-tags-save-btn'),
+      workspaceTagsCancelBtn: document.getElementById('workspace-tags-cancel-btn'),
+      workspaceTagsError: document.getElementById('workspace-tags-error'),
       workspaceBreadcrumb: document.getElementById('workspace-breadcrumb-name'),
       openCanvasBtn: document.getElementById('open-canvas-btn'),
       openDiagnosticsBtn: document.getElementById('open-diagnostics-btn'),
@@ -1664,6 +1676,25 @@ export class WorkspaceDetailPage {
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
     this.makeEditable(this.elements.workspaceDescription, 'description', true);
+    this.elements.workspaceTagsEditBtn?.addEventListener('click', () =>
+      this.openWorkspaceTagsEditor()
+    );
+    this.elements.workspaceTagsAddBtn?.addEventListener('click', () =>
+      this.addWorkspaceTagFromInput()
+    );
+    this.elements.workspaceTagsSaveBtn?.addEventListener('click', () => this.saveWorkspaceTags());
+    this.elements.workspaceTagsCancelBtn?.addEventListener('click', () =>
+      this.closeWorkspaceTagsEditor()
+    );
+    this.elements.workspaceTagsInput?.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        this.addWorkspaceTagFromInput();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeWorkspaceTagsEditor();
+      }
+    });
 
     // Subscribe to EventBus events for auto-refresh
     console.log('[workspace-detail] EventBus available:', !!window.EventBus);
@@ -1932,6 +1963,196 @@ export class WorkspaceDetailPage {
     }
   }
 
+  getWorkspaceTags(workspace = this.workspace) {
+    if (!workspace || !Array.isArray(workspace.tags)) return [];
+    return workspace.tags
+      .map(tag => String(tag || '').trim())
+      .filter(Boolean);
+  }
+
+  normalizeWorkspaceTagValue(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  normalizeWorkspaceTagList(tags) {
+    const normalized = [];
+    const seen = new Set();
+    (Array.isArray(tags) ? tags : []).forEach(tag => {
+      const value = this.normalizeWorkspaceTagValue(tag);
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      normalized.push(value);
+    });
+
+    const overlong = normalized.find(tag => Array.from(tag).length > 64);
+    if (overlong) {
+      return { tags: normalized, error: `"${overlong}" exceeds the 64 character limit.` };
+    }
+    if (normalized.length > 20) {
+      return { tags: normalized, error: 'Workspaces can have at most 20 tags.' };
+    }
+    return { tags: normalized, error: '' };
+  }
+
+  renderWorkspaceTags() {
+    const container = this.elements.workspaceTagsContainer;
+    const list = this.elements.workspaceTagsList;
+    if (!container || !list) return;
+
+    const tags = this.getWorkspaceTags();
+    list.innerHTML = tags.length
+      ? tags
+          .map(
+            tag =>
+              `<span class="workspace-detail-tag-chip" title="${this.escapeAttribute(tag)}">${this.escapeHtml(tag)}</span>`
+          )
+          .join('')
+      : '<span class="workspace-detail-tag-empty">No tags</span>';
+
+    container.hidden = false;
+    if (this.elements.workspaceTagsEditor && !this.elements.workspaceTagsEditor.hidden) {
+      this.renderWorkspaceTagEditor();
+    }
+  }
+
+  openWorkspaceTagsEditor() {
+    this.workspaceTagDraft = this.getWorkspaceTags();
+    this.setWorkspaceTagsError('');
+    if (this.elements.workspaceTagsEditor) {
+      this.elements.workspaceTagsEditor.hidden = false;
+    }
+    this.renderWorkspaceTagEditor();
+    this.elements.workspaceTagsInput?.focus();
+  }
+
+  closeWorkspaceTagsEditor() {
+    this.workspaceTagDraft = this.getWorkspaceTags();
+    this.setWorkspaceTagsError('');
+    if (this.elements.workspaceTagsInput) {
+      this.elements.workspaceTagsInput.value = '';
+    }
+    if (this.elements.workspaceTagsEditor) {
+      this.elements.workspaceTagsEditor.hidden = true;
+    }
+  }
+
+  setWorkspaceTagsError(message) {
+    const errorEl = this.elements.workspaceTagsError;
+    if (!errorEl) return;
+    const text = String(message || '').trim();
+    errorEl.textContent = text;
+    errorEl.hidden = text === '';
+  }
+
+  addWorkspaceTagFromInput() {
+    const input = this.elements.workspaceTagsInput;
+    const raw = input?.value || '';
+    if (!this.normalizeWorkspaceTagValue(raw)) return;
+
+    const result = this.normalizeWorkspaceTagList([...this.workspaceTagDraft, raw]);
+    if (result.error) {
+      this.setWorkspaceTagsError(result.error);
+      return;
+    }
+
+    this.workspaceTagDraft = result.tags;
+    this.setWorkspaceTagsError('');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    this.renderWorkspaceTagEditor();
+  }
+
+  removeWorkspaceTagDraft(index) {
+    if (index < 0 || index >= this.workspaceTagDraft.length) return;
+    this.workspaceTagDraft = this.workspaceTagDraft.filter((_, tagIndex) => tagIndex !== index);
+    this.setWorkspaceTagsError('');
+    this.renderWorkspaceTagEditor();
+  }
+
+  moveWorkspaceTagDraft(index, direction) {
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || index >= this.workspaceTagDraft.length || nextIndex >= this.workspaceTagDraft.length) {
+      return;
+    }
+    const tags = [...this.workspaceTagDraft];
+    [tags[index], tags[nextIndex]] = [tags[nextIndex], tags[index]];
+    this.workspaceTagDraft = tags;
+    this.renderWorkspaceTagEditor();
+  }
+
+  renderWorkspaceTagEditor() {
+    const list = this.elements.workspaceTagsEditorList;
+    if (!list) return;
+
+    const tags = Array.isArray(this.workspaceTagDraft) ? this.workspaceTagDraft : [];
+    list.innerHTML = tags.length
+      ? tags
+          .map((tag, index) => {
+            const safe = this.escapeHtml(tag);
+            const attr = this.escapeAttribute(tag);
+            return `
+              <span class="workspace-detail-tag-edit-chip">
+                <span class="workspace-detail-tag-edit-label" title="${attr}">${safe}</span>
+                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-move="-1" data-index="${index}" title="Move left" aria-label="Move ${attr} left"${index === 0 ? ' disabled' : ''}>&lt;</button>
+                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-move="1" data-index="${index}" title="Move right" aria-label="Move ${attr} right"${index === tags.length - 1 ? ' disabled' : ''}>&gt;</button>
+                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-remove data-index="${index}" title="Remove" aria-label="Remove ${attr}">x</button>
+              </span>
+            `;
+          })
+          .join('')
+      : '<span class="workspace-detail-tag-empty">No tags</span>';
+
+    list.querySelectorAll('[data-workspace-tag-remove]').forEach(button => {
+      button.addEventListener('click', () => {
+        this.removeWorkspaceTagDraft(Number(button.dataset.index));
+      });
+    });
+    list.querySelectorAll('[data-workspace-tag-move]').forEach(button => {
+      button.addEventListener('click', () => {
+        this.moveWorkspaceTagDraft(Number(button.dataset.index), Number(button.dataset.workspaceTagMove));
+      });
+    });
+  }
+
+  async saveWorkspaceTags() {
+    if (this.workspaceTagsSaving) return;
+
+    const result = this.normalizeWorkspaceTagList(this.workspaceTagDraft);
+    if (result.error) {
+      this.setWorkspaceTagsError(result.error);
+      return;
+    }
+
+    this.workspaceTagsSaving = true;
+    if (this.elements.workspaceTagsSaveBtn) {
+      this.elements.workspaceTagsSaveBtn.disabled = true;
+    }
+
+    try {
+      const response = await this.updateWorkspace({ tags: result.tags });
+      const updatedWorkspace = response?.folder || response?.workspace || {};
+      const updatedTags = Array.isArray(updatedWorkspace.tags) ? updatedWorkspace.tags : result.tags;
+      this.workspace = {
+        ...(this.workspace || {}),
+        ...updatedWorkspace,
+        tags: updatedTags
+      };
+      this.closeWorkspaceTagsEditor();
+      this.renderWorkspaceTags();
+      if (window.Toast) window.Toast.success('Tags updated');
+    } catch (error) {
+      console.error('Failed to update workspace tags:', error);
+      this.setWorkspaceTagsError(error.message || 'Failed to update tags');
+    } finally {
+      this.workspaceTagsSaving = false;
+      if (this.elements.workspaceTagsSaveBtn) {
+        this.elements.workspaceTagsSaveBtn.disabled = false;
+      }
+    }
+  }
+
   /**
    * Load workspace data
    */
@@ -2005,6 +2226,7 @@ export class WorkspaceDetailPage {
         this.elements.workspaceDescription.style.opacity = '0.6';
       }
     }
+    this.renderWorkspaceTags();
     if (this.elements.workspaceBreadcrumb) {
       this.elements.workspaceBreadcrumb.textContent = this.workspace.name || 'Workspace';
     }

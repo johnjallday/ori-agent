@@ -27,6 +27,12 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if templates[0].Name != "Reaper Song" || templates[1].Name != "Writing Project" {
 		t.Errorf("manifest names not applied: %+v", templates)
 	}
+	if len(templates[0].Tags) != 2 || templates[0].Tags[0] != "music" || templates[0].Tags[1] != "reaper" {
+		t.Errorf("reaper starter tags not applied: %+v", templates[0].Tags)
+	}
+	if len(templates[1].Tags) != 1 || templates[1].Tags[0] != "writing" {
+		t.Errorf("writing starter tags not applied: %+v", templates[1].Tags)
+	}
 
 	// Seed file with token name plus the dot-file under chapters/ made it out
 	// of the embed (all: prefix) and onto disk.

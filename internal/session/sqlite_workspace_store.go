@@ -19,6 +19,7 @@ import (
 type workspaceJSONFields struct {
 	agents              []byte
 	agentInstances      []byte
+	tags                []byte
 	sharedData          []byte
 	layout              []byte
 	messages            []byte
@@ -131,6 +132,15 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 		fields.agentInstances = data
 	}
 
+	// Serialize tags array
+	if workspace.Tags == nil {
+		fields.tags = []byte("[]")
+	} else if data, err := json.Marshal(workspace.Tags); err != nil {
+		fields.tags = []byte("[]")
+	} else {
+		fields.tags = data
+	}
+
 	// Serialize shared data map
 	if workspace.SharedData == nil {
 		fields.sharedData = []byte("{}")
@@ -229,13 +239,13 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
-			agents, agent_instances, shared_data, status, layout,
+			agents, agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, version)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
-		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
+		string(f.agents), string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), string(f.opportunities), workspace.Version)
 
@@ -278,6 +288,7 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var kind sql.NullString
 	var agentsJSON sql.NullString
 	var agentInstancesJSON sql.NullString
+	var tagsJSON sql.NullString
 	var sharedDataJSON sql.NullString
 	var status sql.NullString
 	var layoutJSON sql.NullString
@@ -299,13 +310,13 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
-			agents, agent_instances, shared_data, status, layout,
+			agents, agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, version
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
-		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
+		&agentsJSON, &agentInstancesJSON, &tagsJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
 		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &opportunitiesJSON, &workspace.Version)
 
@@ -330,6 +341,9 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	}
 	if agentInstancesJSON.Valid && agentInstancesJSON.String != "" {
 		_ = json.Unmarshal([]byte(agentInstancesJSON.String), &workspace.AgentInstances)
+	}
+	if tagsJSON.Valid && tagsJSON.String != "" {
+		_ = json.Unmarshal([]byte(tagsJSON.String), &workspace.Tags)
 	}
 	if sharedDataJSON.Valid && sharedDataJSON.String != "" {
 		_ = json.Unmarshal([]byte(sharedDataJSON.String), &workspace.SharedData)
@@ -396,12 +410,12 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
 		SET name = ?, kind = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
-			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
+			agents = ?, agent_instances = ?, tags = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, folders_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
 			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?, opportunities_json = ?, version = ?
 		WHERE id = ?
 	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
-		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
+		string(f.agents), string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), string(f.opportunities), workspace.Version,
 		workspace.ID)
@@ -499,7 +513,7 @@ func (s *SQLiteStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspace
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
-			agents, agent_instances, status, version
+			agents, agent_instances, tags, status, version
 		FROM workspaces
 		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
 	`)
@@ -512,13 +526,13 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	for rows.Next() {
 		var workspace Workspace
 		var parentID, color, description, kind sql.NullString
-		var agentsJSON, agentInstancesJSON, status sql.NullString
+		var agentsJSON, agentInstancesJSON, tagsJSON, status sql.NullString
 		var createdAtRaw any
 		var updatedAtRaw any
 
 		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
-			&agentsJSON, &agentInstancesJSON, &status, &workspace.Version); err != nil {
+			&agentsJSON, &agentInstancesJSON, &tagsJSON, &status, &workspace.Version); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)
 		}
 		if err := assignWorkspaceTimes(&workspace, createdAtRaw, updatedAtRaw); err != nil {
@@ -536,6 +550,9 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		}
 		if agentInstancesJSON.Valid && agentInstancesJSON.String != "" {
 			_ = json.Unmarshal([]byte(agentInstancesJSON.String), &workspace.AgentInstances)
+		}
+		if tagsJSON.Valid && tagsJSON.String != "" {
+			_ = json.Unmarshal([]byte(tagsJSON.String), &workspace.Tags)
 		}
 		if status.Valid && status.String != "" {
 			workspace.Status = WorkspaceStatus(status.String)

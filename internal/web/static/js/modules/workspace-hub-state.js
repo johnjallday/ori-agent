@@ -22,6 +22,7 @@
     workspaceMap: new Map(),
     selectedId: null,
     selectedWorkspaces: new Set(),
+    launcherActiveTags: new Set(),
     launcherCollapsedGroups: new Set(),
     launcherJustExpandedGroups: new Set(),
     tasks: [],

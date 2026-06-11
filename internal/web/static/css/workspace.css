@@ -339,6 +339,30 @@
     -webkit-box-orient: vertical;
 }
 
+.workspace-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: -0.25rem 0 0.85rem;
+}
+
+.workspace-card-tag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 10rem;
+    min-height: 1.45rem;
+    padding: 0.16rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid rgba(31, 107, 78, 0.22);
+    background: rgba(31, 107, 78, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .workspace-card-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

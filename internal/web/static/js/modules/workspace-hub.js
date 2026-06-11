@@ -38,6 +38,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     workspaceUpdated: document.getElementById('hubWorkspaceUpdated'),
     workspaceAgents: document.getElementById('hubWorkspaceAgents'),
     workspaceDescription: document.getElementById('hubWorkspaceDescription'),
+    workspaceTags: document.getElementById('hubWorkspaceTags'),
     workspaceCanvasBtn: document.getElementById('hubOpenCanvasBtn'),
     workspaceMoveBtn: document.getElementById('hubWorkspaceMoveBtn'),
     workspaceMoveModal: document.getElementById('hubWorkspaceMoveModal'),
@@ -98,6 +99,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcher: document.getElementById('workspaceLauncher'),
     launcherGrid: document.getElementById('launcherGrid'),
     launcherEmpty: document.getElementById('launcherEmptyState'),
+    launcherTagFilterbar: document.getElementById('launcherTagFilterbar'),
+    launcherTagFilterChips: document.getElementById('launcherTagFilterChips'),
+    launcherTagFilterClear: document.getElementById('launcherTagFilterClear'),
     launcherViewCardsBtn: document.getElementById('launcherViewCards'),
     launcherViewTreeBtn: document.getElementById('launcherViewTree'),
     launcherWorkspaceRootPath: document.getElementById('launcherWorkspaceRootPath'),
@@ -1290,18 +1294,180 @@ console.log('[workspace-hub.js] FILE LOADED');
     elements.workspaceSelect.innerHTML = options.join('');
   }
 
+  function getWorkspaceTags(workspace) {
+    if (!workspace || !Array.isArray(workspace.tags)) return [];
+    return workspace.tags
+      .map((tag) => String(tag || '').trim())
+      .filter((tag) => tag.length > 0);
+  }
+
+  function ensureLauncherActiveTags(state) {
+    const candidate = state.launcherActiveTags;
+    const looksLikeSet = candidate
+      && typeof candidate.has === 'function'
+      && typeof candidate.add === 'function'
+      && typeof candidate.delete === 'function'
+      && typeof candidate.clear === 'function';
+    if (!looksLikeSet) {
+      const values = Array.isArray(candidate) ? candidate : [];
+      state.launcherActiveTags = new Set(values.map((tag) => String(tag || '').trim()).filter(Boolean));
+    }
+    return state.launcherActiveTags;
+  }
+
+  function workspaceMatchesActiveTags(workspace, activeTags) {
+    if (!activeTags || activeTags.size === 0) return true;
+    const tags = new Set(getWorkspaceTags(workspace));
+    for (const tag of activeTags) {
+      if (!tags.has(tag)) return false;
+    }
+    return true;
+  }
+
+  function filterWorkspaceTreeByTags(workspaces, activeTags) {
+    if (!activeTags || activeTags.size === 0) return Array.isArray(workspaces) ? workspaces : [];
+    return (Array.isArray(workspaces) ? workspaces : [])
+      .map((workspace) => {
+        if (!workspace) return null;
+        const children = filterWorkspaceTreeByTags(workspace.children || [], activeTags);
+        const matches = workspaceMatchesActiveTags(workspace, activeTags);
+        if (!matches && children.length === 0) return null;
+        return { ...workspace, children };
+      })
+      .filter(Boolean);
+  }
+
+  function collectLauncherTags(flattened) {
+    const tags = new Set();
+    (flattened || []).forEach((workspace) => {
+      getWorkspaceTags(workspace).forEach((tag) => tags.add(tag));
+    });
+    return Array.from(tags).sort((a, b) => a.localeCompare(b));
+  }
+
+  function renderLauncherTagFilterBar(flattened) {
+    if (!elements.launcherTagFilterbar || !elements.launcherTagFilterChips) return;
+
+    const state = window.WorkspaceHubState.getState();
+    const activeTags = ensureLauncherActiveTags(state);
+    const availableTags = collectLauncherTags(flattened);
+    const availableSet = new Set(availableTags);
+    Array.from(activeTags).forEach((tag) => {
+      if (!availableSet.has(tag)) {
+        activeTags.delete(tag);
+      }
+    });
+
+    if (availableTags.length === 0) {
+      elements.launcherTagFilterbar.hidden = true;
+      elements.launcherTagFilterChips.innerHTML = '';
+      if (elements.launcherTagFilterClear) elements.launcherTagFilterClear.hidden = true;
+      return;
+    }
+
+    elements.launcherTagFilterbar.hidden = false;
+    elements.launcherTagFilterChips.innerHTML = availableTags.map((tag) => {
+      const active = activeTags.has(tag);
+      return `
+        <button type="button" class="launcher-tag-filter-chip${active ? ' is-active' : ''}" data-launcher-tag-toggle="${escapeHtml(tag)}" aria-pressed="${active ? 'true' : 'false'}" title="${escapeHtml(tag)}">
+          ${escapeHtml(tag)}
+        </button>
+      `;
+    }).join('');
+    if (elements.launcherTagFilterClear) {
+      elements.launcherTagFilterClear.hidden = activeTags.size === 0;
+    }
+
+    elements.launcherTagFilterChips.querySelectorAll('[data-launcher-tag-toggle]').forEach((chip) => {
+      chip.addEventListener('click', (event) => {
+        event.preventDefault();
+        toggleLauncherTagFilter(chip.getAttribute('data-launcher-tag-toggle'));
+      });
+    });
+    if (elements.launcherTagFilterClear) {
+      elements.launcherTagFilterClear.onclick = (event) => {
+        event.preventDefault();
+        clearLauncherTagFilters();
+      };
+    }
+
+  }
+
+  function refreshLauncherView() {
+    const state = window.WorkspaceHubState.getState();
+    renderLauncherActiveView(flattenWorkspaces(state.workspaces || []));
+  }
+
+  function toggleLauncherTagFilter(tag) {
+    const value = String(tag || '').trim();
+    if (!value) return;
+    const state = window.WorkspaceHubState.getState();
+    const activeTags = ensureLauncherActiveTags(state);
+    if (activeTags.has(value)) activeTags.delete(value);
+    else activeTags.add(value);
+    refreshLauncherView();
+  }
+
+  function clearLauncherTagFilters() {
+    const state = window.WorkspaceHubState.getState();
+    ensureLauncherActiveTags(state).clear();
+    refreshLauncherView();
+  }
+
+  function renderWorkspaceTagChips(tags, options = {}) {
+    const values = Array.isArray(tags) ? tags : [];
+    if (values.length === 0) return '';
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : values.length;
+    const visible = values.slice(0, limit);
+    const overflow = Math.max(0, values.length - visible.length);
+    const workspaceId = String(options.workspaceId || '');
+    const canRemove = Boolean(options.removable && workspaceId);
+    const canFilter = Boolean(options.filterable);
+    const chipClass = options.chipClass || 'workspace-tag-chip';
+    const chipExtraClass = options.chipExtraClass ? ` ${options.chipExtraClass}` : '';
+
+    const chips = visible.map((tag) => {
+      const safeTag = escapeHtml(tag);
+      if (canRemove || canFilter) {
+        const label = canFilter
+          ? `<button type="button" class="${chipClass}-label" data-launcher-tag-filter="${safeTag}" title="Filter by ${safeTag}">${safeTag}</button>`
+          : `<span class="${chipClass}-label" title="${safeTag}">${safeTag}</span>`;
+        const remove = canRemove
+          ? `<button type="button" class="${chipClass}-remove" data-workspace-tag-remove="${escapeHtml(workspaceId)}" data-workspace-tag="${safeTag}" aria-label="Remove tag ${safeTag}" title="Remove tag">&times;</button>`
+          : '';
+        return `<span class="${chipClass}${chipExtraClass}" title="${safeTag}">${label}${remove}</span>`;
+      }
+      return `<span class="${chipClass}${chipExtraClass}" title="${safeTag}">${safeTag}</span>`;
+    });
+
+    if (overflow > 0) {
+      chips.push(`<span class="${chipClass}${chipExtraClass} ${chipClass}-more" title="${escapeHtml(values.slice(limit).join(', '))}">+${overflow} more</span>`);
+    }
+    return chips.join('');
+  }
+
+  function renderWorkspaceTagRow(workspace, options = {}) {
+    const tags = getWorkspaceTags(workspace);
+    if (tags.length === 0) return '';
+    const rowClass = options.rowClass || 'workspace-tag-row';
+    const chips = renderWorkspaceTagChips(tags, options);
+    return chips ? `<div class="${rowClass}">${chips}</div>` : '';
+  }
+
   /**
    * Render launcher grid
    * @param {Array} flattened - Flattened workspace list
    */
-  function renderLauncherCards(flattened) {
+  function renderLauncherCards(flattened, treeOverride = null) {
     if (!elements.launcherGrid || !elements.launcherEmpty) return;
 
     const state = window.WorkspaceHubState.getState();
+    const activeTags = ensureLauncherActiveTags(state);
     elements.launcherGrid.classList.remove('is-tree-view');
 
     if (flattened.length === 0) {
       elements.launcherGrid.innerHTML = '';
+      elements.launcherEmpty.textContent = activeTags.size > 0 ? 'No workspaces match the selected tags.' : 'No workspaces yet. Create one to get started.';
       elements.launcherEmpty.style.display = 'flex';
       return;
     }
@@ -1326,6 +1492,15 @@ console.log('[workspace-hub.js] FILE LOADED');
       const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
         ? `<span class="launcher-card-parent-chip">In ${escapeHtml(parentGroup.name || 'Group')}</span>`
         : '';
+      const tagRow = renderWorkspaceTagRow(row, {
+        rowClass: 'launcher-card-tags',
+        chipClass: 'workspace-tag-chip',
+        chipExtraClass: 'launcher-tag-chip',
+        workspaceId: row.id,
+        removable: true,
+        filterable: true,
+        limit: 3
+      });
       const folderState = `
           <div class="launcher-card-folder-state ${folderDisplay.badgeClass}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1362,6 +1537,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${parentGroupChip}
           ${folderState}
           <div class="launcher-card-path${folderDisplay.linked ? '' : ' is-empty'}" title="${escapeHtml(folderDisplay.detailTitle)}">${escapeHtml(folderDisplay.detail)}</div>
+          ${tagRow}
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
             <span class="launcher-card-status status-${escapeHtml(status)}">${statusLabel}</span>
@@ -1382,6 +1558,15 @@ console.log('[workspace-hub.js] FILE LOADED');
         .join(' · ');
       const previewSuffix = childCount > 3 ? ` +${childCount - 3} more` : '';
       const groupDescription = row.description || 'Group workspace';
+      const groupTagRow = renderWorkspaceTagRow(row, {
+        rowClass: 'launcher-card-tags',
+        chipClass: 'workspace-tag-chip',
+        chipExtraClass: 'launcher-tag-chip',
+        workspaceId: row.id,
+        removable: true,
+        filterable: true,
+        limit: 3
+      });
 
       const toggleBtn = `
         <button class="launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${escapeHtml(row.id)}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -1413,6 +1598,7 @@ console.log('[workspace-hub.js] FILE LOADED');
             <span class="launcher-group-kind-pill">Group</span>
           </div>
           <div class="launcher-card-path">Contains ${childCount} workspace${childCount === 1 ? '' : 's'} &middot; ${row.session_count || 0} session${(row.session_count || 0) === 1 ? '' : 's'}</div>
+          ${groupTagRow}
           <div class="launcher-card-description">${escapeHtml(groupDescription)}</div>
           <div class="launcher-group-preview">${previewNames ? `${previewNames}${escapeHtml(previewSuffix)}` : 'Drop workspaces here to organize related work.'}</div>
         </div>
@@ -1437,7 +1623,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
     }
 
-    const tree = Array.isArray(state.workspaces) ? state.workspaces : [];
+    const tree = Array.isArray(treeOverride) ? treeOverride : (Array.isArray(state.workspaces) ? state.workspaces : []);
     const html = tree.map((ws) => {
       if (ws && (isGroupWorkspace(ws) || (Array.isArray(ws.children) && ws.children.length > 0))) {
         return renderGroupSection(ws);
@@ -1506,6 +1692,16 @@ console.log('[workspace-hub.js] FILE LOADED');
       </button>
     `;
 
+    const tagRow = renderWorkspaceTagRow(row, {
+      rowClass: 'launcher-tree-tags',
+      chipClass: 'workspace-tag-chip',
+      chipExtraClass: 'launcher-tag-chip launcher-tag-chip--tree',
+      workspaceId: row.id,
+      removable: true,
+      filterable: true,
+      limit: 4
+    });
+
     const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
     const emptyHint = isGroup && children.length === 0
       ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
@@ -1523,6 +1719,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${caret}
           ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
           <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
+          ${tagRow}
           ${deleteButton}
         </div>
         ${childrenWrapper}
@@ -1530,15 +1727,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     `;
   }
 
-  function renderLauncherTree(flattened) {
+  function renderLauncherTree(flattened, treeOverride = null) {
     if (!elements.launcherGrid || !elements.launcherEmpty) return;
 
     const state = window.WorkspaceHubState.getState();
-    const tree = Array.isArray(state.workspaces) ? state.workspaces : [];
+    const activeTags = ensureLauncherActiveTags(state);
+    const tree = Array.isArray(treeOverride) ? treeOverride : (Array.isArray(state.workspaces) ? state.workspaces : []);
     elements.launcherGrid.classList.add('is-tree-view');
 
     if (tree.length === 0) {
       elements.launcherGrid.innerHTML = '';
+      elements.launcherEmpty.textContent = activeTags.size > 0 ? 'No workspaces match the selected tags.' : 'No workspaces yet. Create one to get started.';
       elements.launcherEmpty.style.display = 'flex';
       return;
     }
@@ -1560,12 +1759,102 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function renderLauncherActiveView(flattened) {
+    const state = window.WorkspaceHubState.getState();
+    const sourceTree = Array.isArray(state.workspaces) ? state.workspaces : [];
+    const sourceFlattened = Array.isArray(flattened) ? flattened : flattenWorkspaces(sourceTree);
+    renderLauncherTagFilterBar(sourceFlattened);
+    const activeTags = ensureLauncherActiveTags(state);
+    const tree = activeTags.size > 0 ? filterWorkspaceTreeByTags(sourceTree, activeTags) : sourceTree;
+    const visibleFlattened = activeTags.size > 0 ? flattenWorkspaces(tree) : sourceFlattened;
     updateLauncherViewToggle(launcherActiveView);
     if (launcherActiveView === LAUNCHER_VIEW_TREE) {
-      renderLauncherTree(flattened);
+      renderLauncherTree(visibleFlattened, tree);
       return;
     }
-    renderLauncherCards(flattened);
+    renderLauncherCards(visibleFlattened, tree);
+  }
+
+  function rebuildWorkspaceMapFromTree() {
+    const state = window.WorkspaceHubState.getState();
+    const flattened = flattenWorkspaces(state.workspaces || []);
+    state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+    return flattened;
+  }
+
+  function mergeWorkspaceIntoTree(workspaces, updatedWorkspace) {
+    if (!Array.isArray(workspaces) || !updatedWorkspace || !updatedWorkspace.id) return false;
+    for (const workspace of workspaces) {
+      if (!workspace) continue;
+      if (workspace.id === updatedWorkspace.id) {
+        Object.assign(workspace, updatedWorkspace);
+        return true;
+      }
+      if (mergeWorkspaceIntoTree(workspace.children || [], updatedWorkspace)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function setWorkspaceTagsInTree(workspaces, workspaceId, tags) {
+    if (!Array.isArray(workspaces) || !workspaceId) return false;
+    for (const workspace of workspaces) {
+      if (!workspace) continue;
+      if (workspace.id === workspaceId) {
+        workspace.tags = Array.isArray(tags) ? [...tags] : [];
+        return true;
+      }
+      if (setWorkspaceTagsInTree(workspace.children || [], workspaceId, tags)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function applyWorkspaceUpdateToState(updatedWorkspace) {
+    if (!updatedWorkspace || !updatedWorkspace.id) return null;
+    const state = window.WorkspaceHubState.getState();
+    mergeWorkspaceIntoTree(state.workspaces || [], updatedWorkspace);
+    const flattened = rebuildWorkspaceMapFromTree();
+    const current = state.workspaceMap.get(updatedWorkspace.id) || updatedWorkspace;
+    if (state.selectedId === updatedWorkspace.id) {
+      renderWorkspaceSummary(current);
+    }
+    renderLauncherActiveView(flattened);
+    return current;
+  }
+
+  function applyWorkspaceTagsToState(workspaceId, tags) {
+    const state = window.WorkspaceHubState.getState();
+    setWorkspaceTagsInTree(state.workspaces || [], workspaceId, tags);
+    const flattened = rebuildWorkspaceMapFromTree();
+    if (state.selectedId === workspaceId) {
+      const current = state.workspaceMap.get(workspaceId);
+      if (current) renderWorkspaceSummary(current);
+    }
+    renderLauncherActiveView(flattened);
+  }
+
+  async function removeWorkspaceTag(workspaceId, tag) {
+    const state = window.WorkspaceHubState.getState();
+    const workspace = state.workspaceMap.get(workspaceId);
+    if (!workspace) return;
+    const previousTags = getWorkspaceTags(workspace);
+    const nextTags = previousTags.filter((value) => value !== tag);
+    applyWorkspaceTagsToState(workspaceId, nextTags);
+
+    try {
+      const result = await updateWorkspace(workspaceId, { tags: nextTags });
+      const updatedWorkspace = result && (result.workspace || result.folder);
+      if (updatedWorkspace) {
+        applyWorkspaceUpdateToState(updatedWorkspace);
+      } else {
+        await loadWorkspaces();
+      }
+    } catch (error) {
+      applyWorkspaceTagsToState(workspaceId, previousTags);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to remove tag');
+    }
   }
 
   function bindLauncherInteractions() {
@@ -1615,6 +1904,25 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     elements.launcherGrid.querySelectorAll('.launcher-card-checkbox, .launcher-tree-checkbox').forEach((checkboxShell) => {
       checkboxShell.addEventListener('click', (e) => e.stopPropagation());
+    });
+
+    elements.launcherGrid.querySelectorAll('[data-launcher-tag-filter]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLauncherTagFilter(btn.getAttribute('data-launcher-tag-filter'));
+      });
+    });
+
+    elements.launcherGrid.querySelectorAll('[data-workspace-tag-remove]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void removeWorkspaceTag(
+          btn.getAttribute('data-workspace-tag-remove'),
+          btn.getAttribute('data-workspace-tag')
+        );
+      });
     });
 
     // Group checkboxes render an indeterminate dash when only part of their
@@ -3040,6 +3348,20 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
     }
 
+    if (elements.workspaceTags) {
+      const tags = getWorkspaceTags(workspace);
+      if (tags.length > 0) {
+        elements.workspaceTags.innerHTML = renderWorkspaceTagChips(tags, {
+          chipClass: 'workspace-tag-chip',
+          chipExtraClass: 'hub-workspace-tag-chip'
+        });
+        elements.workspaceTags.hidden = false;
+      } else {
+        elements.workspaceTags.innerHTML = '';
+        elements.workspaceTags.hidden = true;
+      }
+    }
+
     if (elements.workspaceStatus) {
       elements.workspaceStatus.textContent = workspace.status || 'active';
     }
@@ -3072,6 +3394,10 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.workspaceDescription) {
       elements.workspaceDescription.textContent = '';
       elements.workspaceDescription.style.display = 'none';
+    }
+    if (elements.workspaceTags) {
+      elements.workspaceTags.innerHTML = '';
+      elements.workspaceTags.hidden = true;
     }
 
     if (elements.workspaceCanvasBtn) elements.workspaceCanvasBtn.removeAttribute('href');
@@ -3881,8 +4207,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     getVisibleLauncherTreeRows,
     normalizeLauncherView,
     bindLauncherInteractions,
+    clearLauncherTagFilters,
+    collectLauncherTags,
+    filterWorkspaceTreeByTags,
+    getWorkspaceTags,
+    removeWorkspaceTag,
     renderLauncherCards,
+    renderLauncherActiveView,
     renderLauncherTree,
+    renderWorkspaceSummary,
+    toggleLauncherTagFilter,
     setLauncherViewPreference,
     setLauncherViewMode,
     shouldIgnoreLauncherTreeKeyboardEvent,
