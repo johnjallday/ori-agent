@@ -248,9 +248,14 @@ function loadWorkspaceHub(overrides = {}) {
     setTimeout
   };
 
+  const documentListeners = new Map();
   const document = {
     activeElement: null,
-    addEventListener: () => {},
+    addEventListener: (type, handler) => documentListeners.set(type, handler),
+    removeEventListener: (type, handler) => {
+      if (documentListeners.get(type) === handler) documentListeners.delete(type);
+    },
+    elementFromPoint: overrides.elementFromPoint || (() => null),
     getElementById: (id) => elements.get(id) || null,
     querySelector: (selector) => selector === '.workspace-hub-header .hub-title-text' ? createElement('headerTitle') : null,
     querySelectorAll: () => []
@@ -287,6 +292,7 @@ function loadWorkspaceHub(overrides = {}) {
     launcherTagFilterClear,
     launcherViewCards,
     launcherViewTree,
+    documentListeners,
     state,
     storage,
     window,
@@ -340,6 +346,7 @@ test('launcher tree renders minimal hierarchy with always-available workspace ch
   assert.doesNotMatch(launcherGrid.innerHTML, /launcher-tree-checkbox-placeholder/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
   assert.match(launcherGrid.innerHTML, /Drop workspaces here/);
+  assert.match(launcherGrid.innerHTML, /data-tree-root-drop/);
   assert.doesNotMatch(launcherGrid.innerHTML, /No description yet/);
   assert.equal(state.workspaces, workspaces);
 });
@@ -780,4 +787,175 @@ test('launcher card drop intent moves into group cards and before workspace card
     JSON.stringify(helpers.getLauncherCardDropIntent(workspaceCard)),
     JSON.stringify({ type: 'before', targetParentId: 'group-1', insertBeforeId: 'workspace-1' })
   );
+});
+
+test('launcher dragstart is not blocked by checkbox selection', () => {
+  const listeners = new Map();
+  const workspaceRow = {
+    classList: createClassList(),
+    dataset: { workspaceId: 'workspace-1', workspaceKind: 'workspace' },
+    addEventListener: (type, handler) => listeners.set(type, handler),
+    closest: () => null
+  };
+  const { helpers, launcherGrid, state } = loadWorkspaceHub({
+    state: {
+      selectedWorkspaces: new Set(['workspace-2'])
+    }
+  });
+  launcherGrid.querySelector = () => null;
+  launcherGrid.querySelectorAll = (selector) => {
+    if (selector === '[data-workspace-id]') return [workspaceRow];
+    if (selector === '[data-workspace-id][draggable="true"]') return [workspaceRow];
+    return [];
+  };
+
+  helpers.bindLauncherInteractions();
+
+  const dragData = new Map();
+  const event = {
+    currentTarget: workspaceRow,
+    dataTransfer: {
+      effectAllowed: '',
+      setData: (key, value) => dragData.set(key, value)
+    },
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
+  listeners.get('dragstart')(event);
+
+  assert.equal(state.selectedWorkspaces.has('workspace-2'), true);
+  assert.equal(event.prevented, false);
+  assert.equal(dragData.get('text/plain'), 'workspace-1');
+  assert.equal(workspaceRow.classList.contains('is-dragging'), true);
+});
+
+test('pointer dragging a tree row can move it to top level', async () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Clients',
+      children: [
+        { id: 'workspace-1', kind: 'workspace', name: 'Campaign', parent_id: 'group-1' },
+        { id: 'workspace-2', kind: 'workspace', name: 'Planning', parent_id: 'group-1' }
+      ]
+    }
+  ];
+  const listeners = new Map();
+  const workspaceRow = {
+    classList: createClassList(),
+    dataset: { workspaceId: 'workspace-1', workspaceKind: 'workspace' },
+    addEventListener: (type, handler) => listeners.set(type, handler),
+    closest: () => null
+  };
+  const rootDrop = {
+    classList: createClassList(),
+    addEventListener: () => {},
+    closest: (selector) => selector === '[data-tree-root-drop]' ? rootDrop : null
+  };
+  const patches = [];
+  const { helpers, launcherGrid, documentListeners } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces)
+    },
+    elementFromPoint: () => rootDrop,
+    fetch: async (url, options = {}) => {
+      if (String(url).includes('/api/workspaces?tree=true')) {
+        return { ok: true, json: async () => ({ folders: workspaces }), text: async () => '' };
+      }
+      if (options.method === 'PATCH') {
+        patches.push({ url: String(url), body: JSON.parse(options.body) });
+      }
+      return { ok: true, json: async () => ({ path: '/tmp/workspaces' }), text: async () => '' };
+    }
+  });
+  launcherGrid.querySelector = () => null;
+  launcherGrid.querySelectorAll = (selector) => {
+    if (selector === '[data-workspace-id]') return [workspaceRow];
+    if (selector === '[data-workspace-id][draggable="true"]') return [workspaceRow];
+    if (selector === '[data-tree-root-drop]') return [rootDrop];
+    return [];
+  };
+
+  helpers.bindLauncherInteractions();
+
+  listeners.get('pointerdown')({
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    pointerId: 7,
+    target: workspaceRow
+  });
+  documentListeners.get('pointermove')({
+    clientX: 12,
+    clientY: 0,
+    pointerId: 7,
+    preventDefault() {}
+  });
+  documentListeners.get('pointerup')({
+    pointerId: 7,
+    preventDefault() {},
+    stopPropagation() {}
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const movedWorkspace = patches.find((patch) => patch.url.endsWith('/api/workspaces/workspace-1'));
+  assert.equal(movedWorkspace.body.parent_id, '');
+});
+
+test('launcher tree root drop target moves workspace to top level', async () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Clients',
+      children: [
+        { id: 'workspace-1', kind: 'workspace', name: 'Campaign', parent_id: 'group-1' },
+        { id: 'workspace-2', kind: 'workspace', name: 'Planning', parent_id: 'group-1' }
+      ]
+    }
+  ];
+  const listeners = new Map();
+  const rootDrop = {
+    classList: createClassList(),
+    addEventListener: (type, handler) => listeners.set(type, handler)
+  };
+  const patches = [];
+  const { helpers, launcherGrid } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces)
+    },
+    fetch: async (url, options = {}) => {
+      if (String(url).includes('/api/workspaces?tree=true')) {
+        return { ok: true, json: async () => ({ folders: workspaces }), text: async () => '' };
+      }
+      if (options.method === 'PATCH') {
+        patches.push({ url: String(url), body: JSON.parse(options.body) });
+      }
+      return { ok: true, json: async () => ({ path: '/tmp/workspaces' }), text: async () => '' };
+    }
+  });
+
+  launcherGrid.querySelector = () => null;
+  launcherGrid.querySelectorAll = (selector) => {
+    if (selector === '[data-tree-root-drop]') return [rootDrop];
+    return [];
+  };
+
+  helpers.bindLauncherInteractions();
+  listeners.get('drop')({
+    dataTransfer: { getData: () => 'workspace-1' },
+    preventDefault() {},
+    stopPropagation() {}
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const movedWorkspace = patches.find((patch) => patch.url.endsWith('/api/workspaces/workspace-1'));
+  assert.equal(movedWorkspace.body.parent_id, '');
 });
