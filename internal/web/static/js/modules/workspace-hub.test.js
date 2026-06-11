@@ -744,3 +744,40 @@ test('launcher tree drop intent maps edge and middle regions', () => {
     JSON.stringify({ type: 'after', targetParentId: 'group-parent', insertBeforeId: '' })
   );
 });
+
+test('launcher card drop intent moves into group cards and before workspace cards', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Clients',
+      children: [
+        { id: 'workspace-1', kind: 'workspace', name: 'Campaign', parent_id: 'group-1' }
+      ]
+    }
+  ];
+  const { helpers } = loadWorkspaceHub({
+    state: {
+      workspaces,
+      workspaceMap: buildWorkspaceMap(workspaces)
+    }
+  });
+
+  const groupCard = {
+    classList: { contains: (className) => className === 'launcher-card-item' },
+    dataset: { workspaceId: 'group-1', workspaceKind: 'group' }
+  };
+  const workspaceCard = {
+    classList: { contains: (className) => className === 'launcher-card-item' },
+    dataset: { workspaceId: 'workspace-1', workspaceKind: 'workspace' }
+  };
+
+  assert.equal(
+    JSON.stringify(helpers.getLauncherCardDropIntent(groupCard)),
+    JSON.stringify({ type: 'into', targetParentId: 'group-1', insertBeforeId: '' })
+  );
+  assert.equal(
+    JSON.stringify(helpers.getLauncherCardDropIntent(workspaceCard)),
+    JSON.stringify({ type: 'before', targetParentId: 'group-1', insertBeforeId: 'workspace-1' })
+  );
+});

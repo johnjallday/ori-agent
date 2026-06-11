@@ -4605,6 +4605,16 @@ body.chat-panel-open .chat-panel-backdrop {
   background-color: rgba(31, 107, 78, 0.15);
 }
 
+.launcher-card-item.is-drop-into {
+  border-color: var(--accent-primary, #1F6B4E) !important;
+  background: rgba(31, 107, 78, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 78, 0.28), 0 0 0 2px rgba(31, 107, 78, 0.2);
+}
+
+.launcher-group-header.is-drop-into {
+  background: rgba(31, 107, 78, 0.18);
+}
+
 /* ============================================================
    Floating Support Chat Widget
    ============================================================ */

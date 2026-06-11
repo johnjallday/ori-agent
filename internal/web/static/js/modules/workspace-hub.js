@@ -2097,8 +2097,8 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function clearLauncherTreeDropIndicators() {
     if (!elements.launcherGrid) return;
-    elements.launcherGrid.querySelectorAll('.launcher-tree-row').forEach((row) => {
-      row.classList.remove('is-drop-before', 'is-drop-after', 'is-drop-into');
+    elements.launcherGrid.querySelectorAll('.launcher-tree-row, .launcher-card-item').forEach((row) => {
+      row.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
     });
   }
 
@@ -2152,6 +2152,38 @@ console.log('[workspace-hub.js] FILE LOADED');
     } else if (intent.type === 'into') {
       row.classList.add('is-drop-into');
     }
+  }
+
+  function getLauncherCardDropIntent(item) {
+    if (!item || !item.classList || !item.classList.contains('launcher-card-item')) return null;
+
+    const targetId = item.dataset?.workspaceId || '';
+    if (!targetId) return null;
+
+    const workspaceKind = normalizeWorkspaceKind(item.dataset?.workspaceKind);
+    if (workspaceKind === 'group') {
+      return {
+        type: 'into',
+        targetParentId: targetId,
+        insertBeforeId: ''
+      };
+    }
+
+    return {
+      type: 'before',
+      targetParentId: getWorkspaceParentId(targetId),
+      insertBeforeId: targetId
+    };
+  }
+
+  function applyLauncherCardDropIndicator(item, intent) {
+    if (!item || !intent) return;
+    clearLauncherTreeDropIndicators();
+    if (intent.type === 'into') {
+      item.classList.add('is-drop-into');
+      return;
+    }
+    item.classList.add('is-drag-over');
   }
 
   function animateLauncherGroupReveal() {
@@ -2251,7 +2283,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       item.addEventListener('dragend', (e) => {
         e.currentTarget.classList.remove('is-dragging');
         // Clean up any remaining drag-over classes
-        items.forEach(i => i.classList.remove('is-drag-over'));
+        items.forEach(i => i.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into'));
         clearLauncherTreeDropIndicators();
         if (rootDrop) {
           rootDrop.classList.remove('is-drag-over');
@@ -2277,14 +2309,18 @@ console.log('[workspace-hub.js] FILE LOADED');
           applyLauncherTreeDropIndicator(e.currentTarget, treeIntent);
           return;
         }
+
+        const cardIntent = getLauncherCardDropIntent(e.currentTarget);
+        if (cardIntent) {
+          applyLauncherCardDropIndicator(e.currentTarget, cardIntent);
+          return;
+        }
+
         e.currentTarget.classList.add('is-drag-over');
       });
 
       item.addEventListener('dragleave', (e) => {
-        e.currentTarget.classList.remove('is-drag-over');
-        if (e.currentTarget.classList.contains('launcher-tree-row')) {
-          e.currentTarget.classList.remove('is-drop-before', 'is-drop-after', 'is-drop-into');
-        }
+        e.currentTarget.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
       });
 
       item.addEventListener('drop', (e) => {
@@ -2301,6 +2337,12 @@ console.log('[workspace-hub.js] FILE LOADED');
         const treeIntent = getLauncherTreeDropIntent(e.currentTarget, e);
         if (treeIntent) {
           reorderWorkspace(draggedId, treeIntent.targetParentId, treeIntent.insertBeforeId);
+          return;
+        }
+
+        const cardIntent = getLauncherCardDropIntent(e.currentTarget);
+        if (cardIntent) {
+          reorderWorkspace(draggedId, cardIntent.targetParentId, cardIntent.insertBeforeId);
           return;
         }
 
@@ -4200,6 +4242,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
   window.WorkspaceHub.__test = {
+    getLauncherCardDropIntent,
     getLauncherTreeDropIntent,
     getLauncherViewPreference,
     bindLauncherTreeKeyboardEvents,
