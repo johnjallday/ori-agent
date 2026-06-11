@@ -116,9 +116,12 @@ func UpdateManifest(libDir, id, name, description string) (Template, error) {
 		return Template{}, err
 	}
 
+	// manifestPath is the resolved library template's folder (from
+	// FindLibraryTemplate, which rejects ids outside the library) joined with
+	// the fixed ManifestFileName constant — never a caller-supplied filename.
 	manifestPath := filepath.Join(tpl.Path, ManifestFileName)
 	raw := map[string]any{}
-	if data, err := os.ReadFile(manifestPath); err == nil {
+	if data, err := os.ReadFile(manifestPath); err == nil { // #nosec G304 -- manifestPath is libDir/<validated id>/template.json, not user-controlled
 		// A malformed manifest is replaced rather than failing the edit.
 		_ = json.Unmarshal(data, &raw)
 	}
@@ -137,7 +140,7 @@ func UpdateManifest(libDir, id, name, description string) (Template, error) {
 	if err != nil {
 		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil {
+	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil { // #nosec G304 -- manifestPath is libDir/<validated id>/template.json, not user-controlled
 		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
 	}
 	return newTemplate(tpl.Path), nil

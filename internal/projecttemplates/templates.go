@@ -40,8 +40,11 @@ type manifest struct {
 
 // readManifest loads template.json from dir. A missing or malformed manifest
 // is not an error — the template simply falls back to folder-name display.
+// dir is either a library template folder or a folder the caller (an
+// admin-facing, local-first tool) explicitly chose via LoadFolder; the
+// filename is always the fixed ManifestFileName constant.
 func readManifest(dir string) manifest {
-	data, err := os.ReadFile(filepath.Join(dir, ManifestFileName))
+	data, err := os.ReadFile(filepath.Join(dir, ManifestFileName)) // #nosec G304 -- dir is a library/template folder resolved by the caller; filename is the fixed ManifestFileName constant
 	if err != nil {
 		return manifest{}
 	}

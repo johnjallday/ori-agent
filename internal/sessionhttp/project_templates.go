@@ -18,11 +18,21 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-const workspaceSharedDataProjectDirectoryIDKey = "project_directory_id"
+// workspaceSharedDataProjectDirectoryIDKey mirrors projecttemplates.ProjectDirectoryIDKey
+// so this package and the workspace_create_project chat tool agree on the
+// SharedData key used to record a workspace's project directory.
+const workspaceSharedDataProjectDirectoryIDKey = projecttemplates.ProjectDirectoryIDKey
 
 // resolveProjectTemplate picks the requested template: a library ID when
 // templateID is set, otherwise an arbitrary folder path (the "Choose folder…"
 // escape hatch).
+//
+// Note: templatePath is not restricted to the templates library — LoadFolder
+// will os.Stat and later copy from any absolute path the caller supplies.
+// That is acceptable for this admin-facing, local-first, single-user app
+// (the caller already has filesystem access), but this endpoint and
+// LoadFolder should not be exposed to untrusted callers without adding a
+// path allowlist/containment check.
 func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (projecttemplates.Template, error) {
 	switch {
 	case strings.TrimSpace(templateID) != "":
@@ -70,7 +80,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 		return err
 	}
 
-	projectDirID, err := ensureProjectDirectoryReference(folderWS, displayProjectName, folderPath, relPath)
+	projectDirID, err := projecttemplates.EnsureProjectDirectoryReference(folderWS, displayProjectName, folderPath, relPath)
 	if err != nil {
 		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
 		return fmt.Errorf("failed to register project folder: %w", err)
@@ -131,41 +141,6 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	return nil
 }
 
-func ensureProjectDirectoryReference(folderWS *agentworkspace.Workspace, projectName, folderPath, relPath string) (string, error) {
-	if folderWS == nil {
-		return "", fmt.Errorf("workspace metadata is unavailable")
-	}
-
-	projectPath := filepath.Clean(filepath.Join(folderPath, relPath))
-	for _, ref := range folderWS.DirectoryReferences {
-		if filepath.Clean(ref.Path) == projectPath {
-			return ref.ID, nil
-		}
-	}
-
-	name := strings.TrimSpace(projectName)
-	if name == "" {
-		name = strings.TrimSpace(filepath.Base(relPath))
-	}
-	if name == "" || name == "." {
-		name = "Project Folder"
-	}
-
-	if err := folderWS.AddDirectoryReference(agentworkspace.DirectoryReference{
-		Name: name,
-		Path: projectPath,
-	}); err != nil {
-		return "", err
-	}
-
-	for _, ref := range folderWS.DirectoryReferences {
-		if filepath.Clean(ref.Path) == projectPath {
-			return ref.ID, nil
-		}
-	}
-	return "", fmt.Errorf("project directory reference was not recorded")
-}
-
 func setFileStoreWorkspacePrimaryDirectoryID(ws *agentworkspace.Workspace, directoryID string) {
 	if ws == nil {
 		return
@@ -173,14 +148,7 @@ func setFileStoreWorkspacePrimaryDirectoryID(ws *agentworkspace.Workspace, direc
 	if ws.SharedData == nil {
 		ws.SharedData = make(map[string]any)
 	}
-	directoryID = strings.TrimSpace(directoryID)
-	if directoryID == "" {
-		delete(ws.SharedData, workspaceSharedDataPrimaryDirectoryIDKey)
-		delete(ws.SharedData, workspaceSharedDataProjectDirectoryIDKey)
-		return
-	}
-	ws.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] = directoryID
-	ws.SharedData[workspaceSharedDataProjectDirectoryIDKey] = directoryID
+	projecttemplates.SetPrimaryDirectoryID(ws.SharedData, directoryID)
 }
 
 func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request, id string) {

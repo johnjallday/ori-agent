@@ -205,15 +205,18 @@ func normalizeDirPerm(perm fs.FileMode) fs.FileMode {
 }
 
 // copyFile byte-copies src to dst preserving the source permission bits
-// (owner read/write forced so the copy is always manageable).
+// (owner read/write forced so the copy is always manageable). src and dst are
+// not user-supplied directly: callers (copyTemplateTree, copyFolderVerbatim)
+// derive them from a template directory that was already validated to be a
+// folder, with traversal/collision guards applied to every destination path.
 func copyFile(src, dst string, perm fs.FileMode) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) // #nosec G304 -- src is a template entry path validated by the caller's traversal/collision guards
 	if err != nil {
 		return fmt.Errorf("failed to open template file %q: %w", src, err)
 	}
 	defer func() { _ = in.Close() }()
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, (perm|0o600)&fs.ModePerm)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, (perm|0o600)&fs.ModePerm) // #nosec G304 -- dst is constructed under destRoot with traversal/collision guards applied by the caller
 	if err != nil {
 		return fmt.Errorf("failed to create project file %q: %w", dst, err)
 	}

@@ -17,6 +17,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
@@ -24,7 +25,10 @@ import (
 
 var errParentWorkspaceMustBeGroup = errors.New("parent workspace must be a group")
 
-const workspaceSharedDataPrimaryDirectoryIDKey = "primary_directory_id"
+// workspaceSharedDataPrimaryDirectoryIDKey mirrors projecttemplates.PrimaryDirectoryIDKey
+// so this package and the workspace_create_project chat tool agree on the
+// SharedData key used to record a workspace's primary linked directory.
+const workspaceSharedDataPrimaryDirectoryIDKey = projecttemplates.PrimaryDirectoryIDKey
 
 // workspaceTrashSharedDataKey is the SharedData key under which trash metadata
 // ({original_path, trashed_path, deleted_at}) is stored while a workspace is
@@ -203,7 +207,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		EntryAgentName     string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
 		WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 		TemplateID         string                     `json:"template_id,omitempty"`   // Optional project template from the library
-		TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template
+		TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
 		ProjectName        string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
 	}
 
@@ -298,8 +302,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// their own content directories so member sub-workspaces stay hidden.
 	projectWarning := ""
 	if wantsProject {
-		// Cleared when instantiation succeeds; pre-set so every early exit
-		// from the folder branch below reports why no project was created.
+		// Default/fallback message for every path below that does not reach
+		// (or does not succeed in) instantiateWorkspaceProject: workspaceStore
+		// being nil, folder creation failing, or GetFolderPath failing all
+		// leave the workspace without a usable folder, so "workspace folder
+		// unavailable" is accurate for each of them. It is overwritten with a
+		// more specific message (or cleared on success) only inside the
+		// `if wantsProject` branch nested under the non-group folder-creation
+		// success path below. Set here, ahead of the workspaceStore nil-check,
+		// so it covers every one of those early-exit paths without each of
+		// them having to remember to set it.
 		projectWarning = "workspace was created, but the project template was not applied: workspace folder unavailable"
 	}
 	if h.workspaceStore != nil {
@@ -1396,7 +1408,10 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	if strings.TrimSpace(workspace.ProjectPath) == "" {
 		workspace.ProjectPath = fallback.ProjectPath
 	}
-	if workspace.Tags == nil {
+	// len()==0 rather than nil: SQLite deserializes the '[]' column default to
+	// an empty non-nil slice, which must not shadow tags that live only in
+	// workspace.json (e.g. a workspace imported from another machine).
+	if len(workspace.Tags) == 0 {
 		workspace.Tags = append([]string(nil), fallback.Tags...)
 	}
 	if workspace.SharedData == nil && fallback.SharedData != nil {

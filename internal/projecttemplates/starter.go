@@ -72,6 +72,9 @@ func materializeStarter(name, dest string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read embedded file %s: %w", entryPath, err)
 		}
-		return os.WriteFile(target, data, 0o640)
+		// target is the admin-configured templates directory joined with a
+		// relative path produced by walking the embedded starterFS, so it is
+		// not influenced by external/user input.
+		return os.WriteFile(target, data, 0o640) // #nosec G304 -- target derives from the configured templates dir + an embedded starter's relative path
 	})
 }

@@ -170,8 +170,8 @@ func TestInstantiateRejectsSubstitutionCollision(t *testing.T) {
 }
 
 func TestInstantiateCleansUpOnFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permission bits")
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("permission-based copy failure not reliable on windows or as root")
 	}
 	tplDir := t.TempDir()
 	wsDir := t.TempDir()

@@ -133,6 +133,9 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	case errors.Is(err, projecttemplates.ErrTemplateExists):
 		_ = orihttp.RespondConflict(w, err.Error())
 	default:
-		_ = orihttp.RespondBadRequest(w, err.Error())
+		// Non-sentinel errors here are filesystem/server faults (copy
+		// failures, unreadable library dir), not bad client input.
+		logger.Error("Project template operation failed", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Project template operation failed")
 	}
 }
