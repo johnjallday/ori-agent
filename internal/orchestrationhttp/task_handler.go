@@ -343,6 +343,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Description            string                         `json:"description"`
 		Details                string                         `json:"details"`
 		ReferenceURL           string                         `json:"reference_url"`
+		Tags                   []string                       `json:"tags"`
 		Priority               int                            `json:"priority"`
 		InputTaskIDs           []string                       `json:"input_task_ids"`
 		ParentTaskID           string                         `json:"parent_task_id"`
@@ -390,6 +391,11 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
+	tags, err := workspace.ValidateWorkspaceTags(req.Tags)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
 
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
@@ -417,6 +423,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Description:            req.Description,
 		Details:                req.Details,
 		ReferenceURL:           referenceURL,
+		Tags:                   tags,
 		Priority:               normalizeTaskPriority(req.Priority),
 		InputTaskIDs:           req.InputTaskIDs,
 		ParentTaskID:           req.ParentTaskID,
@@ -551,6 +558,7 @@ type taskUpdateRequest struct {
 	Description            *string                        `json:"description"`
 	Details                *string                        `json:"details"`
 	ReferenceURL           *string                        `json:"reference_url"`
+	Tags                   *[]string                      `json:"tags"`
 	Priority               *int                           `json:"priority"`
 	Context                map[string]any                 `json:"context"`
 	To                     *string                        `json:"to"`
@@ -581,7 +589,7 @@ type taskUpdateRequest struct {
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
-	return r.Description != nil || r.Details != nil || r.ReferenceURL != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
+	return r.Description != nil || r.Details != nil || r.ReferenceURL != nil || r.Tags != nil || r.Priority != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
 		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
 		r.OutputContract != nil || r.OutputSpec != nil || r.DraftOutputSpec != nil ||
@@ -608,6 +616,13 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.ReferenceURL != nil {
 		task.ReferenceURL = *req.ReferenceURL
 		logger.Debug("Updated task reference URL", logger.Fields{"task_id": req.TaskID, "has_reference_url": task.ReferenceURL != ""})
+	}
+	if req.Tags != nil {
+		// Lenient normalization (dedupe, lowercase, cap) — the strict
+		// validation path lives on the workspace task endpoints; the shared
+		// tag widget already enforces limits client-side.
+		task.Tags = workspace.NormalizeWorkspaceTags(*req.Tags)
+		logger.Debug("Updated task tags", logger.Fields{"task_id": req.TaskID, "tag_count": len(task.Tags)})
 	}
 	if req.Priority != nil {
 		task.Priority = normalizeTaskPriority(*req.Priority)

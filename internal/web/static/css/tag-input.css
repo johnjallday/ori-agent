@@ -1,0 +1,232 @@
+/* Shared tag input component (js/modules/tag-input.js).
+   Chip styling matches the existing workspace tag pills; colors come from
+   theme variables so light and dark mode both work. */
+
+.tag-input {
+  position: relative;
+  min-width: 0;
+}
+
+.tag-input-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-primary);
+  cursor: text;
+}
+
+.tag-input-chips:focus-within {
+  border-color: rgba(31, 107, 78, 0.55);
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 12rem;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 107, 78, 0.24);
+  background: rgba(31, 107, 78, 0.12);
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.tag-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag-chip-remove:hover {
+  background: rgba(31, 107, 78, 0.18);
+  color: var(--text-primary);
+}
+
+.tag-input-field {
+  flex: 1 1 7rem;
+  min-width: 7rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  padding: 0.15rem 0.1rem;
+}
+
+.tag-input-field::placeholder {
+  color: var(--text-secondary);
+}
+
+.tag-input-dropdown {
+  position: absolute;
+  z-index: 1080;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.tag-input-option {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-input-option:hover,
+.tag-input-option.is-highlighted {
+  background: rgba(31, 107, 78, 0.14);
+}
+
+.tag-input-suggested {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+}
+
+.tag-input-suggested-label {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag-input-suggested-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 10rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px dashed rgba(31, 107, 78, 0.4);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-input-suggested-chip:hover {
+  background: rgba(31, 107, 78, 0.12);
+  border-style: solid;
+}
+
+.tag-input-hint {
+  margin-top: 0.35rem;
+  color: var(--danger-color, #c0392b);
+  font-size: 0.76rem;
+}
+
+/* Shared tag filter bar (js/modules/tag-filter-bar.js) */
+
+.tag-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.tag-filter-bar-label {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag-filter-bar-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.tag-filter-bar-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 11rem;
+  padding: 0.14rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-filter-bar-chip:hover {
+  border-color: rgba(31, 107, 78, 0.45);
+  background: rgba(31, 107, 78, 0.08);
+}
+
+.tag-filter-bar-chip.is-active {
+  border-color: rgba(31, 107, 78, 0.5);
+  background: rgba(31, 107, 78, 0.16);
+}
+
+.tag-filter-bar-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+
+.tag-filter-bar-clear:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}

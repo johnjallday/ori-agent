@@ -280,9 +280,6 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingEntryPoint;
     });
 
-    // Save tags button
-    document.getElementById('saveTagsBtn')?.addEventListener('click', () => this.saveTags());
-
     // Close dropdowns when clicking outside
     document.addEventListener('click', () => this.closeDropdowns());
 
@@ -539,14 +536,17 @@ const sessionManager = {
     }
   },
 
-  // Load all tags from API
+  // Load all tags from API. The session filter list stays sessions-only;
+  // the API returns {name, usage_count} objects, which we flatten to names.
   async loadTags() {
     try {
       const response = await fetch('/api/tags');
       if (!response.ok) throw new Error('Failed to load tags');
 
       const data = await response.json();
-      this.tags = data.tags || [];
+      this.tags = (data.tags || [])
+        .map((tag) => (typeof tag === 'string' ? tag : tag?.name))
+        .filter(Boolean);
       this.renderTagFilters();
     } catch (error) {
       console.error('Failed to load tags:', error);
@@ -3184,6 +3184,7 @@ const sessionManager = {
     if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
       window.WorkspaceBootstrapReview.reset();
     }
+    if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
   },
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
@@ -3319,10 +3320,15 @@ const sessionManager = {
         payload.path = importPath;
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
-      } else if (window.ProjectTemplateCard) {
-        // Optional project scaffolding from the "Project (optional)" card
-        // (template_id/template_path + project_name).
-        Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+      } else {
+        if (window.ProjectTemplateCard) {
+          // Optional project scaffolding from the "Project (optional)" card
+          // (template_id/template_path + project_name).
+          Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+        }
+        if (window.WorkspaceTagsCard) {
+          Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
+        }
       }
 
       const requestPayload = { ...payload };
@@ -3379,6 +3385,8 @@ const sessionManager = {
         this.showToast(result.project_warning, 'warning');
       }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
+      if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+      window.OriTagInput?.clearTagPoolCache?.();
 
       const createdWorkspaceId = result && result.folder && result.folder.id
         ? String(result.folder.id)
@@ -4119,78 +4127,32 @@ const sessionManager = {
     modal.show();
   },
 
-  // Show edit tags modal
+  // Show edit tags modal (shared tag input widget with unified-pool suggestions)
   showEditTagsModal(sessionId) {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) return;
 
     const currentTags = session.tags || [];
-    const tagInput = document.getElementById('tagInput');
-    const currentTagsContainer = document.getElementById('currentTags');
-    const suggestedTagsContainer = document.getElementById('suggestedTags');
-
-    // Clear input
-    if (tagInput) tagInput.value = '';
-
-    // Render current tags
-    if (currentTagsContainer) {
-      currentTagsContainer.innerHTML = currentTags.map(tag => `
-        <span class="session-tag-edit" data-color="${this.getTagColor(tag)}">
-          ${this.escapeHtml(tag)}
-          <button class="tag-remove" data-tag="${this.escapeHtml(tag)}">
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="white">
-              <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-            </svg>
-          </button>
-        </span>
-      `).join('');
-
-      // Bind remove handlers
-      currentTagsContainer.querySelectorAll('.tag-remove').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const tagToRemove = e.currentTarget.dataset.tag;
-          const newTags = currentTags.filter(t => t !== tagToRemove);
-          this.updateSessionTags(sessionId, newTags);
-
-          // Update UI
-          e.currentTarget.parentElement.remove();
+    const mount = document.getElementById('sessionTagsMount');
+    if (mount && window.OriTagInput?.createTagInput) {
+      if (!this.sessionTagsWidget) {
+        this.sessionTagsWidget = window.OriTagInput.createTagInput({
+          container: mount,
+          initialTags: currentTags
         });
-      });
+      } else {
+        this.sessionTagsWidget.setTags(currentTags);
+      }
+      void this.sessionTagsWidget.refreshPool?.();
     }
 
-    // Render suggested tags (tags not already on this session)
-    if (suggestedTagsContainer) {
-      const suggestedTags = this.tags.filter(t => !currentTags.includes(t));
-      suggestedTagsContainer.innerHTML = suggestedTags.length > 0
-        ? suggestedTags.map(tag => `
-            <button class="session-tag-suggest" data-tag="${this.escapeHtml(tag)}">+ ${this.escapeHtml(tag)}</button>
-          `).join('')
-        : '<span class="text-muted small">No suggestions</span>';
-
-      // Bind add handlers
-      suggestedTagsContainer.querySelectorAll('.session-tag-suggest').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const tagToAdd = e.currentTarget.dataset.tag;
-          const newTags = [...currentTags, tagToAdd];
-          this.updateSessionTags(sessionId, newTags);
-
-          // Remove from suggestions, add to current
-          e.currentTarget.remove();
-        });
-      });
-    }
-
-    // Setup save button
+    // Setup save button (Save commits, Cancel discards)
     const saveBtn = document.getElementById('saveTagsBtn');
     if (saveBtn) {
-      saveBtn.onclick = () => {
-        const input = document.getElementById('tagInput');
-        if (input?.value.trim()) {
-          const newTags = input.value.split(',').map(t => t.trim()).filter(t => t);
-          const allTags = [...new Set([...currentTags, ...newTags])];
-          this.updateSessionTags(sessionId, allTags);
-        }
+      saveBtn.onclick = async () => {
+        const tags = this.sessionTagsWidget ? this.sessionTagsWidget.getTags() : currentTags;
+        await this.updateSessionTags(sessionId, tags);
+        window.OriTagInput?.clearTagPoolCache?.();
 
         const modal = bootstrap.Modal.getInstance(document.getElementById('editTagsModal'));
         modal?.hide();

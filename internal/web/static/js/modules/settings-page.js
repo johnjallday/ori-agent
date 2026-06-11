@@ -3136,3 +3136,163 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     if (VALID.has(v)) select(v, false);
   }).catch(() => {});
 })();
+
+// =============================================================================
+// Tag Management (Settings → Tags)
+// =============================================================================
+// Lists the unified tag pool (GET /api/tags?scope=all) with per-source usage
+// counts, and offers global rename/delete. Both actions confirm with live
+// usage counts from /api/tags/usage. Template-declared tags can still be
+// renamed/deleted on entities, but the dialogs warn that template manifests
+// are read-only and will reintroduce the tag on new workspaces.
+(function initTagManagement() {
+  const tableBody = document.getElementById('tagManagementTableBody');
+  if (!tableBody) return;
+
+  const refreshBtn = document.getElementById('tagManagementRefreshBtn');
+  const esc = (value) => (typeof escapeHtml === 'function'
+    ? escapeHtml(String(value ?? ''))
+    : String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]));
+
+  async function fetchPool() {
+    const response = await fetch('/api/tags?scope=all');
+    if (!response.ok) throw new Error('Failed to load tags');
+    const data = await response.json();
+    return Array.isArray(data?.tags) ? data.tags : [];
+  }
+
+  async function fetchUsage(tag) {
+    const response = await fetch(`/api/tags/usage?tag=${encodeURIComponent(tag)}`);
+    if (!response.ok) throw new Error('Failed to load tag usage');
+    return response.json();
+  }
+
+  function usageSummary(usage) {
+    const counts = usage?.counts || {};
+    const parts = [
+      `${counts.workspaces || 0} workspace(s)`,
+      `${counts.sessions || 0} session(s)`,
+      `${counts.notes || 0} note(s)`,
+      `${counts.tasks || 0} task(s)`
+    ];
+    let summary = parts.join(', ');
+    const templates = Array.isArray(usage?.templates) ? usage.templates : [];
+    if (templates.length > 0) {
+      summary += `\n\nNote: declared by template${templates.length === 1 ? '' : 's'} ${templates.join(', ')}. ` +
+        'Template manifests are read-only, so new workspaces created from them will reintroduce this tag.';
+    }
+    return summary;
+  }
+
+  function renderRows(pool) {
+    if (!Array.isArray(pool) || pool.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="7" class="text-muted">No tags yet. Tags you add to workspaces, sessions, notes, or tasks show up here.</td></tr>';
+      return;
+    }
+
+    tableBody.innerHTML = pool.map((tag) => {
+      const counts = tag.counts || {};
+      const templateOnly = (tag.total || 0) > 0 && tag.total === (counts.templates || 0);
+      const lockHint = (counts.templates || 0) > 0
+        ? ' <span class="text-muted" title="Declared by a project template (read-only in the manifest)">●</span>'
+        : '';
+      const actions = templateOnly
+        ? '<span class="text-muted" title="Only declared by templates — nothing to rename or delete on entities">template-only</span>'
+        : `
+          <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tag-rename="${esc(tag.name)}">Rename</button>
+          <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tag-delete="${esc(tag.name)}">Delete</button>
+        `;
+      return `
+        <tr>
+          <td><span class="workspace-detail-tag-chip" style="max-width: 16rem;">${esc(tag.name)}</span>${lockHint}</td>
+          <td class="text-end">${counts.workspaces || 0}</td>
+          <td class="text-end">${counts.sessions || 0}</td>
+          <td class="text-end">${counts.notes || 0}</td>
+          <td class="text-end">${counts.tasks || 0}</td>
+          <td class="text-end">${counts.templates || 0}</td>
+          <td class="text-end" style="white-space: nowrap;">${actions}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tableBody.querySelectorAll('[data-tag-rename]').forEach((button) => {
+      button.addEventListener('click', () => renameTag(button.getAttribute('data-tag-rename')));
+    });
+    tableBody.querySelectorAll('[data-tag-delete]').forEach((button) => {
+      button.addEventListener('click', () => deleteTag(button.getAttribute('data-tag-delete')));
+    });
+  }
+
+  async function loadTable() {
+    try {
+      renderRows(await fetchPool());
+    } catch (error) {
+      console.error('Failed to load tag management table:', error);
+      tableBody.innerHTML = '<tr><td colspan="7" class="text-danger">Failed to load tags.</td></tr>';
+    }
+  }
+
+  async function renameTag(tag) {
+    const raw = window.prompt(`Rename tag "${tag}" to:`, tag);
+    if (raw === null) return;
+    const to = String(raw).trim().toLowerCase();
+    if (!to) return;
+    if (to === tag) {
+      notify('That is already the tag name', 'info');
+      return;
+    }
+
+    try {
+      const usage = await fetchUsage(tag);
+      const confirmed = window.confirm(
+        `Rename "${tag}" to "${to}"?\n\nThis updates ${usageSummary(usage)}`
+      );
+      if (!confirmed) return;
+
+      const response = await fetch('/api/tags/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: tag, to })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Failed to rename tag');
+
+      window.OriTagInput?.clearTagPoolCache?.();
+      notify(`Renamed "${tag}" to "${to}"`, 'success');
+      await loadTable();
+    } catch (error) {
+      console.error('Failed to rename tag:', error);
+      notify(error.message || 'Failed to rename tag', 'error');
+    }
+  }
+
+  async function deleteTag(tag) {
+    try {
+      const usage = await fetchUsage(tag);
+      const confirmed = window.confirm(
+        `Delete tag "${tag}" everywhere?\n\nThis removes it from ${usageSummary(usage)}`
+      );
+      if (!confirmed) return;
+
+      const response = await fetch('/api/tags/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Failed to delete tag');
+
+      window.OriTagInput?.clearTagPoolCache?.();
+      notify(`Deleted "${tag}"`, 'success');
+      await loadTable();
+    } catch (error) {
+      console.error('Failed to delete tag:', error);
+      notify(error.message || 'Failed to delete tag', 'error');
+    }
+  }
+
+  refreshBtn?.addEventListener('click', () => loadTable());
+  loadTable();
+})();

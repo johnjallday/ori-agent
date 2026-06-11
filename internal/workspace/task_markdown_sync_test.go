@@ -133,6 +133,66 @@ workspace_id: workspace-1
 	}
 }
 
+func TestTaskMarkdown_TagsRoundTrip(t *testing.T) {
+	ws := &Workspace{
+		ID:   "workspace-1",
+		Name: "Tagged Tasks",
+		Tasks: []Task{
+			{
+				ID:          "task-1",
+				WorkspaceID: "workspace-1",
+				Description: "Mix the track",
+				Tags:        []string{"music", "deep work"},
+				Status:      TaskStatusPending,
+				CreatedAt:   time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	rendered := RenderWorkspaceTasksMarkdown(ws)
+	if !strings.Contains(rendered, "tags=music%2Cdeep+work") {
+		t.Fatalf("expected rendered markdown to contain escaped tags metadata:\n%s", rendered)
+	}
+
+	items, warnings, err := ParseWorkspaceTasksMarkdown(rendered, "workspace-1")
+	if err != nil {
+		t.Fatalf("ParseWorkspaceTasksMarkdown: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %#v", items)
+	}
+	if len(items[0].Tags) != 2 || items[0].Tags[0] != "music" || items[0].Tags[1] != "deep work" {
+		t.Fatalf("expected tags to round-trip, got %#v", items[0].Tags)
+	}
+
+	// A no-op re-import must not report changes.
+	var importWarnings []string
+	if changed := applyMarkdownItemsToWorkspace(ws, items, &importWarnings); changed {
+		t.Fatalf("expected unchanged workspace on re-import, warnings=%v", importWarnings)
+	}
+
+	// An external tag edit in the markdown is pulled back into the task,
+	// normalized (lowercased, deduped).
+	edited := strings.Replace(rendered, "tags=music%2Cdeep+work", "tags=Music%2Cmastering", 1)
+	items, _, err = ParseWorkspaceTasksMarkdown(edited, "workspace-1")
+	if err != nil {
+		t.Fatalf("ParseWorkspaceTasksMarkdown (edited): %v", err)
+	}
+	if changed := applyMarkdownItemsToWorkspace(ws, items, &importWarnings); !changed {
+		t.Fatal("expected tag edit to mark workspace changed")
+	}
+	task, err := ws.GetTask("task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if len(task.Tags) != 2 || task.Tags[0] != "music" || task.Tags[1] != "mastering" {
+		t.Fatalf("expected normalized edited tags, got %#v", task.Tags)
+	}
+}
+
 func TestImportTaskMarkdownFromStore_UpdatesStatusAndPreservesRuntimeFields(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

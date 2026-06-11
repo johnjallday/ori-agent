@@ -153,6 +153,14 @@
               </span>
               <span class="settings-nav-item-text">Project Templates</span>
             </a>
+            <a href="#tag-management" class="settings-nav-item" data-section="tag-management">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5.5,7A1.5,1.5 0 0,1 7,5.5A1.5,1.5 0 0,1 8.5,7A1.5,1.5 0 0,1 7,8.5A1.5,1.5 0 0,1 5.5,7M21.41,11.58L12.41,2.58C12.05,2.22 11.55,2 11,2H4C2.89,2 2,2.89 2,4V11C2,11.55 2.22,12.05 2.59,12.41L11.58,21.41C11.95,21.77 12.45,22 13,22C13.55,22 14.05,21.77 14.41,21.41L21.41,14.41C21.78,14.05 22,13.55 22,13C22,12.44 21.77,11.94 21.41,11.58Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Tags</span>
+            </a>
             <a href="#session-management" class="settings-nav-item" data-section="session-management">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -1113,6 +1121,45 @@
               <button id="manageTemplatesBtn" class="modern-btn modern-btn-secondary">
                 Manage Templates
               </button>
+            </div>
+          </section>
+
+          <!-- Tag Management Section -->
+          <section id="tag-management" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5.5,7A1.5,1.5 0 0,1 7,5.5A1.5,1.5 0 0,1 8.5,7A1.5,1.5 0 0,1 7,8.5A1.5,1.5 0 0,1 5.5,7M21.41,11.58L12.41,2.58C12.05,2.22 11.55,2 11,2H4C2.89,2 2,2.89 2,4V11C2,11.55 2.22,12.05 2.59,12.41L11.58,21.41C11.95,21.77 12.45,22 13,22C13.55,22 14.05,21.77 14.41,21.41L21.41,14.41C21.78,14.05 22,13.55 22,13C22,12.44 21.77,11.94 21.41,11.58Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Tags</h2>
+            </div>
+
+            <p class="settings-section-description">
+              One tag vocabulary across workspaces, sessions, notes, and tasks. Rename or delete a tag here and it updates everywhere it is used. Tags declared by project templates are read-only — template manifests are never modified, and new workspaces created from those templates reintroduce their tags.
+            </p>
+
+            <div class="table-responsive">
+              <table class="table align-middle" id="tagManagementTable">
+                <thead>
+                  <tr>
+                    <th scope="col">Tag</th>
+                    <th scope="col" class="text-end">Workspaces</th>
+                    <th scope="col" class="text-end">Sessions</th>
+                    <th scope="col" class="text-end">Notes</th>
+                    <th scope="col" class="text-end">Tasks</th>
+                    <th scope="col" class="text-end">Templates</th>
+                    <th scope="col" class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tagManagementTableBody">
+                  <tr><td colspan="7" class="text-muted">Loading tags…</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="settings-actions">
+              <button id="tagManagementRefreshBtn" class="modern-btn modern-btn-secondary" type="button">Refresh</button>
             </div>
           </section>
 

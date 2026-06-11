@@ -440,6 +440,45 @@ func (s *SQLiteStore) getSessionPreview(ctx context.Context, sessionID string) s
 	return content
 }
 
+// RenameSessionTag renames a tag across all sessions, merging when the new
+// name already exists on a session. Returns the number of affected sessions.
+func (s *SQLiteStore) RenameSessionTag(ctx context.Context, from, to string) (int, error) {
+	affected := 0
+	err := s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx,
+			"SELECT COUNT(DISTINCT session_id) FROM session_tags WHERE tag = ?", from,
+		).Scan(&affected); err != nil {
+			return err
+		}
+		if affected == 0 {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO session_tags (session_id, tag) SELECT session_id, ? FROM session_tags WHERE tag = ?",
+			to, from,
+		); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM session_tags WHERE tag = ?", from)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to rename session tag: %w", err)
+	}
+	return affected, nil
+}
+
+// RemoveSessionTag removes a tag from all sessions. Returns the number of
+// affected sessions.
+func (s *SQLiteStore) RemoveSessionTag(ctx context.Context, tag string) (int, error) {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM session_tags WHERE tag = ?", tag)
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove session tag: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 func (s *SQLiteStore) updateTagsInternal(ctx context.Context, sessionID string, tags []string) error {
 	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		// Delete existing tags

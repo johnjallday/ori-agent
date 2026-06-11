@@ -961,9 +961,7 @@ export class WorkspaceDetailPage {
       workspaceTagsList: document.getElementById('workspace-tags-list'),
       workspaceTagsEditBtn: document.getElementById('workspace-tags-edit-btn'),
       workspaceTagsEditor: document.getElementById('workspace-tags-editor'),
-      workspaceTagsEditorList: document.getElementById('workspace-tags-editor-list'),
-      workspaceTagsInput: document.getElementById('workspace-tags-input'),
-      workspaceTagsAddBtn: document.getElementById('workspace-tags-add-btn'),
+      workspaceTagsEditorMount: document.getElementById('workspace-tags-editor-mount'),
       workspaceTagsSaveBtn: document.getElementById('workspace-tags-save-btn'),
       workspaceTagsCancelBtn: document.getElementById('workspace-tags-cancel-btn'),
       workspaceTagsError: document.getElementById('workspace-tags-error'),
@@ -1679,18 +1677,14 @@ export class WorkspaceDetailPage {
     this.elements.workspaceTagsEditBtn?.addEventListener('click', () =>
       this.openWorkspaceTagsEditor()
     );
-    this.elements.workspaceTagsAddBtn?.addEventListener('click', () =>
-      this.addWorkspaceTagFromInput()
-    );
     this.elements.workspaceTagsSaveBtn?.addEventListener('click', () => this.saveWorkspaceTags());
     this.elements.workspaceTagsCancelBtn?.addEventListener('click', () =>
       this.closeWorkspaceTagsEditor()
     );
-    this.elements.workspaceTagsInput?.addEventListener('keydown', event => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        this.addWorkspaceTagFromInput();
-      } else if (event.key === 'Escape') {
+    // Esc anywhere inside the editor closes it (the tag widget swallows Esc
+    // itself when it is only dismissing its suggestion dropdown).
+    this.elements.workspaceTagsEditor?.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
         event.preventDefault();
         this.closeWorkspaceTagsEditor();
       }
@@ -2010,27 +2004,39 @@ export class WorkspaceDetailPage {
       : '<span class="workspace-detail-tag-empty">No tags</span>';
 
     container.hidden = false;
-    if (this.elements.workspaceTagsEditor && !this.elements.workspaceTagsEditor.hidden) {
-      this.renderWorkspaceTagEditor();
-    }
   }
 
   openWorkspaceTagsEditor() {
     this.workspaceTagDraft = this.getWorkspaceTags();
     this.setWorkspaceTagsError('');
+    this.ensureWorkspaceTagInput();
+    this.workspaceTagInput?.setTags(this.workspaceTagDraft);
     if (this.elements.workspaceTagsEditor) {
       this.elements.workspaceTagsEditor.hidden = false;
     }
-    this.renderWorkspaceTagEditor();
-    this.elements.workspaceTagsInput?.focus();
+    this.workspaceTagInput?.focus();
+  }
+
+  // Lazily mount the shared tag input widget (suggestions from the unified
+  // tag pool) into the editor. Falls back to a no-op when the module failed
+  // to load — Save then just submits the unchanged draft.
+  ensureWorkspaceTagInput() {
+    if (this.workspaceTagInput || !this.elements.workspaceTagsEditorMount) return;
+    if (!window.OriTagInput?.createTagInput) return;
+    this.workspaceTagInput = window.OriTagInput.createTagInput({
+      container: this.elements.workspaceTagsEditorMount,
+      initialTags: this.workspaceTagDraft,
+      onChange: tags => {
+        this.workspaceTagDraft = tags;
+        this.setWorkspaceTagsError('');
+      }
+    });
   }
 
   closeWorkspaceTagsEditor() {
     this.workspaceTagDraft = this.getWorkspaceTags();
     this.setWorkspaceTagsError('');
-    if (this.elements.workspaceTagsInput) {
-      this.elements.workspaceTagsInput.value = '';
-    }
+    this.workspaceTagInput?.setTags(this.workspaceTagDraft);
     if (this.elements.workspaceTagsEditor) {
       this.elements.workspaceTagsEditor.hidden = true;
     }
@@ -2044,82 +2050,11 @@ export class WorkspaceDetailPage {
     errorEl.hidden = text === '';
   }
 
-  addWorkspaceTagFromInput() {
-    const input = this.elements.workspaceTagsInput;
-    const raw = input?.value || '';
-    if (!this.normalizeWorkspaceTagValue(raw)) return;
-
-    const result = this.normalizeWorkspaceTagList([...this.workspaceTagDraft, raw]);
-    if (result.error) {
-      this.setWorkspaceTagsError(result.error);
-      return;
-    }
-
-    this.workspaceTagDraft = result.tags;
-    this.setWorkspaceTagsError('');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
-    this.renderWorkspaceTagEditor();
-  }
-
-  removeWorkspaceTagDraft(index) {
-    if (index < 0 || index >= this.workspaceTagDraft.length) return;
-    this.workspaceTagDraft = this.workspaceTagDraft.filter((_, tagIndex) => tagIndex !== index);
-    this.setWorkspaceTagsError('');
-    this.renderWorkspaceTagEditor();
-  }
-
-  moveWorkspaceTagDraft(index, direction) {
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || index >= this.workspaceTagDraft.length || nextIndex >= this.workspaceTagDraft.length) {
-      return;
-    }
-    const tags = [...this.workspaceTagDraft];
-    [tags[index], tags[nextIndex]] = [tags[nextIndex], tags[index]];
-    this.workspaceTagDraft = tags;
-    this.renderWorkspaceTagEditor();
-  }
-
-  renderWorkspaceTagEditor() {
-    const list = this.elements.workspaceTagsEditorList;
-    if (!list) return;
-
-    const tags = Array.isArray(this.workspaceTagDraft) ? this.workspaceTagDraft : [];
-    list.innerHTML = tags.length
-      ? tags
-          .map((tag, index) => {
-            const safe = this.escapeHtml(tag);
-            const attr = this.escapeAttribute(tag);
-            return `
-              <span class="workspace-detail-tag-edit-chip">
-                <span class="workspace-detail-tag-edit-label" title="${attr}">${safe}</span>
-                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-move="-1" data-index="${index}" title="Move left" aria-label="Move ${attr} left"${index === 0 ? ' disabled' : ''}>&lt;</button>
-                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-move="1" data-index="${index}" title="Move right" aria-label="Move ${attr} right"${index === tags.length - 1 ? ' disabled' : ''}>&gt;</button>
-                <button type="button" class="workspace-detail-tag-action" data-workspace-tag-remove data-index="${index}" title="Remove" aria-label="Remove ${attr}">x</button>
-              </span>
-            `;
-          })
-          .join('')
-      : '<span class="workspace-detail-tag-empty">No tags</span>';
-
-    list.querySelectorAll('[data-workspace-tag-remove]').forEach(button => {
-      button.addEventListener('click', () => {
-        this.removeWorkspaceTagDraft(Number(button.dataset.index));
-      });
-    });
-    list.querySelectorAll('[data-workspace-tag-move]').forEach(button => {
-      button.addEventListener('click', () => {
-        this.moveWorkspaceTagDraft(Number(button.dataset.index), Number(button.dataset.workspaceTagMove));
-      });
-    });
-  }
-
   async saveWorkspaceTags() {
     if (this.workspaceTagsSaving) return;
 
-    const result = this.normalizeWorkspaceTagList(this.workspaceTagDraft);
+    const draft = this.workspaceTagInput ? this.workspaceTagInput.getTags() : this.workspaceTagDraft;
+    const result = this.normalizeWorkspaceTagList(draft);
     if (result.error) {
       this.setWorkspaceTagsError(result.error);
       return;
@@ -2141,6 +2076,8 @@ export class WorkspaceDetailPage {
       };
       this.closeWorkspaceTagsEditor();
       this.renderWorkspaceTags();
+      // New tags should show up in suggestions everywhere right away.
+      window.OriTagInput?.clearTagPoolCache?.();
       if (window.Toast) window.Toast.success('Tags updated');
     } catch (error) {
       console.error('Failed to update workspace tags:', error);
@@ -3423,8 +3360,23 @@ export class WorkspaceDetailPage {
    * Render tasks grouped by agent
    */
   renderTasks() {
+    this.syncTasksTagFilter();
     this.renderAgentGroups();
     this.refreshTaskActivityBadges();
+  }
+
+  // Mounts the shared tag filter bar above the task/agent groups and keeps
+  // its available tags in sync. The bar hides itself while no task has tags.
+  syncTasksTagFilter() {
+    const mount = document.getElementById('workspace-detail-tasks-tag-filter');
+    if (!mount || !window.OriTagFilterBar?.createTagFilterBar) return;
+    if (!this.tasksTagFilterBar) {
+      this.tasksTagFilterBar = window.OriTagFilterBar.createTagFilterBar({
+        container: mount,
+        onChange: () => this.renderTasks()
+      });
+    }
+    this.tasksTagFilterBar.setAvailableTags(window.OriTagFilterBar.collectTags(this.tasks || []));
   }
 
   // refreshTaskActivityBadges is called after renderTasks() (which rebuilds
@@ -4157,9 +4109,26 @@ export class WorkspaceDetailPage {
       });
     }
 
-    const topLevelTasks = Array.isArray(this.tasks)
+    let topLevelTasks = Array.isArray(this.tasks)
       ? this.tasks.filter(task => !task.parent_task_id)
       : [];
+
+    // Tag filter: keep a parent visible when it or any of its subtasks
+    // carries every selected tag.
+    const activeTaskTags = this.tasksTagFilterBar ? this.tasksTagFilterBar.getActiveTags() : [];
+    if (activeTaskTags.length > 0 && window.OriTagFilterBar) {
+      const matchesTags = task =>
+        window.OriTagFilterBar.matchesActiveTags(
+          Array.isArray(task?.tags) ? task.tags : [],
+          activeTaskTags
+        );
+      topLevelTasks = topLevelTasks.filter(task => {
+        if (matchesTags(task)) return true;
+        return this.tasks.some(
+          subtask => subtask.parent_task_id === task.id && matchesTags(subtask)
+        );
+      });
+    }
 
     topLevelTasks.forEach(task => {
       const assigned = String(task?.to || '').trim();
@@ -4409,10 +4378,23 @@ export class WorkspaceDetailPage {
       statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const referenceIndicator = this.renderTaskReferenceURLIndicator(task);
+    const taskTags = Array.isArray(task.tags)
+      ? task.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : [];
     const taskMetaParts = [];
     if (isParent) {
       const stepsLabel = `${parentSubtaskCount} step${parentSubtaskCount === 1 ? '' : 's'}`;
       taskMetaParts.push(`<span class="workspace-detail-workflow-steps">${stepsLabel}</span>`);
+    }
+    if (taskTags.length > 0) {
+      taskMetaParts.push(
+        `<span class="workspace-detail-item-tags">${taskTags
+          .map(
+            tag =>
+              `<span class="workspace-detail-tag-chip" title="${this.escapeAttribute(tag)}">${this.escapeHtml(tag)}</span>`
+          )
+          .join('')}</span>`
+      );
     }
     if (assignedAgent) {
       taskMetaParts.push(
@@ -13403,15 +13385,40 @@ export class WorkspaceDetailPage {
     });
 
     if (this.notes.length === 0) {
+      this.syncNotesTagFilter();
       this.elements.notesList.innerHTML = '<div class="workspace-detail-empty">No notes yet.</div>';
       this.updateCopyNotesButtonState(false);
       return;
     }
 
-    this.elements.notesList.innerHTML = this.notes
+    this.syncNotesTagFilter();
+    const activeNoteTags = this.notesTagFilterBar ? this.notesTagFilterBar.getActiveTags() : [];
+    const visibleNotes = window.OriTagFilterBar
+      ? window.OriTagFilterBar.filterItems(this.notes, activeNoteTags)
+      : this.notes;
+
+    if (visibleNotes.length === 0) {
+      this.elements.notesList.innerHTML =
+        '<div class="workspace-detail-empty">No notes match the selected tags.</div>';
+      this.updateCopyNotesButtonState(false);
+      return;
+    }
+
+    this.elements.notesList.innerHTML = visibleNotes
       .map(note => {
         const title = note.name || note.title || 'Untitled Note';
         const preview = note.preview || note.content || '';
+        const noteTags = Array.isArray(note.tags)
+          ? note.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+          : [];
+        const tagChips = noteTags.length
+          ? `<div class="workspace-detail-item-tags">${noteTags
+              .map(
+                tag =>
+                  `<span class="workspace-detail-tag-chip" title="${this.escapeAttribute(tag)}">${this.escapeHtml(tag)}</span>`
+              )
+              .join('')}</div>`
+          : '';
         const noteUrl = `/notes/${encodeURIComponent(note.id)}`;
         const vaultReference = this.normalizeVaultReference(note.vault_reference);
         const isSelected = this.selectedNoteIds.has(String(note.id));
@@ -13444,6 +13451,7 @@ export class WorkspaceDetailPage {
              aria-label="Open note ${this.escapeHtml(title)}"
              onclick="event.stopPropagation()">
 	          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+	          ${tagChips}
 	          <div class="workspace-detail-item-meta">
 	            ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '…' : '') : 'Empty note'}
 	            ${vaultReference ? this.renderVaultReferenceBadge(vaultReference) : ''}
@@ -13454,6 +13462,20 @@ export class WorkspaceDetailPage {
       })
       .join('');
     this.updateCopyNotesButtonState(false);
+  }
+
+  // Mounts the shared tag filter bar above the notes list and keeps its
+  // available tags in sync. The bar hides itself while no note has tags.
+  syncNotesTagFilter() {
+    const mount = document.getElementById('workspace-detail-notes-tag-filter');
+    if (!mount || !window.OriTagFilterBar?.createTagFilterBar) return;
+    if (!this.notesTagFilterBar) {
+      this.notesTagFilterBar = window.OriTagFilterBar.createTagFilterBar({
+        container: mount,
+        onChange: () => this.renderNotes()
+      });
+    }
+    this.notesTagFilterBar.setAvailableTags(window.OriTagFilterBar.collectTags(this.notes));
   }
 
   /**

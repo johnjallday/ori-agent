@@ -22,6 +22,7 @@ type CreateTaskRequest struct {
 	ReferenceURL           string               `json:"reference_url"`
 	From                   string               `json:"from"`
 	To                     string               `json:"to"`
+	Tags                   []string             `json:"tags,omitempty"`
 	Priority               int                  `json:"priority"`
 	ParentTaskID           string               `json:"parent_task_id"`
 	SubtaskIndex           int                  `json:"subtask_index"`
@@ -69,6 +70,11 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
+	tags, err := ValidateWorkspaceTags(req.Tags)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
 
 	// Get workspace
 	workspace, err := h.store.Get(workspaceID)
@@ -98,6 +104,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		From:                   req.From,
 		Description:            req.Description,
 		ReferenceURL:           referenceURL,
+		Tags:                   tags,
 		Priority:               req.Priority,
 		Context:                make(map[string]any),
 		ParentTaskID:           req.ParentTaskID,
@@ -187,6 +194,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		Description            *string              `json:"description,omitempty"`
 		Details                *string              `json:"details,omitempty"`
 		ReferenceURL           *string              `json:"reference_url,omitempty"`
+		Tags                   *[]string            `json:"tags,omitempty"`
 		To                     *string              `json:"to,omitempty"`
 		From                   *string              `json:"from,omitempty"`
 		InputTaskIDs           *[]string            `json:"input_task_ids,omitempty"`
@@ -233,6 +241,14 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				workspace.Tasks[i].ReferenceURL = referenceURL
+			}
+			if req.Tags != nil {
+				tags, err := ValidateWorkspaceTags(*req.Tags)
+				if err != nil {
+					orihttp.BadRequest(w, err.Error())
+					return
+				}
+				workspace.Tasks[i].Tags = tags
 			}
 			if req.From != nil {
 				workspace.Tasks[i].From = *req.From

@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/vaultref"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // HandleNotes routes requests to /api/notes.
@@ -103,9 +104,10 @@ func (h *Handler) handleNote(w http.ResponseWriter, r *http.Request, id string) 
 // createNote handles POST /api/notes.
 func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-		Name        string `json:"name"`
-		Content     string `json:"content"`
+		WorkspaceID string   `json:"workspace_id"`
+		Name        string   `json:"name"`
+		Content     string   `json:"content"`
+		Tags        []string `json:"tags,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -114,6 +116,11 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 
 	if req.WorkspaceID == "" {
 		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
+		return
+	}
+	tags, err := agentworkspace.ValidateWorkspaceTags(req.Tags)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 	if _, err := h.requireWorkspace(r.Context(), req.WorkspaceID); err != nil {
@@ -136,6 +143,7 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Content:     req.Content,
+		Tags:        tags,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -166,6 +174,7 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 	var req struct {
 		Name     string              `json:"name"`
 		Content  string              `json:"content"`
+		Tags     []string            `json:"tags,omitempty"`
 		VaultRef *vaultref.Reference `json:"vault_reference,omitempty"`
 	}
 
@@ -175,6 +184,11 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 
 	if req.Name == "" {
 		req.Name = "Untitled Note"
+	}
+	tags, err := agentworkspace.ValidateWorkspaceTags(req.Tags)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
 	}
 	if _, err := h.requireWorkspace(r.Context(), workspaceID); err != nil {
 		switch {
@@ -192,6 +206,7 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 		WorkspaceID: workspaceID,
 		Name:        req.Name,
 		Content:     req.Content,
+		Tags:        tags,
 		VaultRef:    vaultref.Normalize(req.VaultRef),
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -253,6 +268,7 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 		Name        *string             `json:"name,omitempty"`
 		Content     *string             `json:"content,omitempty"`
 		WorkspaceID *string             `json:"workspace_id,omitempty"`
+		Tags        *[]string           `json:"tags,omitempty"`
 		VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
 	}
 
@@ -272,6 +288,14 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if req.WorkspaceID != nil {
 		note.WorkspaceID = *req.WorkspaceID
+	}
+	if req.Tags != nil {
+		tags, err := agentworkspace.ValidateWorkspaceTags(*req.Tags)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		note.Tags = tags
 	}
 	if req.VaultRef != nil {
 		note.VaultRef = vaultref.Normalize(req.VaultRef)

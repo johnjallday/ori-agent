@@ -147,10 +147,8 @@
                   </button>
                 </div>
                 <div class="workspace-detail-tags-editor" id="workspace-tags-editor" hidden>
-                  <div id="workspace-tags-editor-list" class="workspace-detail-tags-editor-list" aria-live="polite"></div>
+                  <div id="workspace-tags-editor-mount" aria-live="polite"></div>
                   <div class="workspace-detail-tags-editor-row">
-                    <input id="workspace-tags-input" class="workspace-detail-tags-input" type="text" maxlength="64" autocomplete="off" spellcheck="false" aria-label="Tag">
-                    <button id="workspace-tags-add-btn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Add</button>
                     <button id="workspace-tags-save-btn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Save</button>
                     <button id="workspace-tags-cancel-btn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Cancel</button>
                   </div>
@@ -929,6 +927,7 @@
                 </div>
               </div>
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Agents panel content">
+                <div id="workspace-detail-tasks-tag-filter" class="workspace-detail-list-tag-filter"></div>
                 <div id="workspace-detail-agents-list" class="workspace-detail-agent-grid">
                   <div class="workspace-detail-loading">Loading agents...</div>
                 </div>
@@ -1026,6 +1025,7 @@
                     </svg>
                   </button>
                 </div>
+                <div id="workspace-detail-notes-tag-filter" class="workspace-detail-list-tag-filter"></div>
                 <div id="workspace-detail-notes-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No notes yet.</div>
                 </div>
@@ -8389,6 +8389,18 @@
       flex-wrap: wrap;
       gap: 0.4rem;
       min-width: 0;
+    }
+
+    .workspace-detail-list-tag-filter:not(:empty) {
+      margin-bottom: 0.5rem;
+    }
+
+    .workspace-detail-item-tags {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin: 0.15rem 0;
     }
 
     .workspace-detail-tag-chip,

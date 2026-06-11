@@ -49,6 +49,9 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error
 		return fmt.Errorf("failed to create note: %w", err)
 	}
 
+	if err := s.replaceNoteTags(ctx, note.ID, note.Tags); err != nil {
+		return fmt.Errorf("failed to save note tags: %w", err)
+	}
 	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
 		return fmt.Errorf("failed to index note headings: %w", err)
 	}
@@ -88,6 +91,9 @@ func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, e
 	if note.VaultRef, err = decodeNoteVaultReference(vaultReferenceJSON.String); err != nil {
 		return nil, fmt.Errorf("failed to decode note vault reference: %w", err)
 	}
+	if note.Tags, err = s.getNoteTags(ctx, note.ID); err != nil {
+		return nil, fmt.Errorf("failed to load note tags: %w", err)
+	}
 
 	return note, nil
 }
@@ -108,6 +114,9 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error
 		return err
 	}
 
+	if err := s.replaceNoteTags(ctx, note.ID, note.Tags); err != nil {
+		return fmt.Errorf("failed to save note tags: %w", err)
+	}
 	if err := s.indexNoteHeadings(ctx, note.ID, note.Content); err != nil {
 		return fmt.Errorf("failed to index note headings: %w", err)
 	}
@@ -174,7 +183,172 @@ func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID stri
 		notes = append(notes, note)
 	}
 
+	if err := s.attachNoteListTags(ctx, workspaceID, notes); err != nil {
+		return nil, fmt.Errorf("failed to load note tags: %w", err)
+	}
+
 	return notes, nil
+}
+
+// replaceNoteTags replaces all tags for a note (normalized lowercase/trimmed),
+// mirroring the session updateTagsInternal pattern.
+func (s *SQLiteStore) replaceNoteTags(ctx context.Context, noteID string, tags []string) error {
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM note_tags WHERE note_id = ?", noteID); err != nil {
+			return err
+		}
+		seen := make(map[string]struct{}, len(tags))
+		for _, tag := range tags {
+			normalized := strings.ToLower(strings.TrimSpace(tag))
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO note_tags (note_id, tag) VALUES (?, ?)",
+				noteID, normalized); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// getNoteTags returns the tags for a single note.
+func (s *SQLiteStore) getNoteTags(ctx context.Context, noteID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT tag FROM note_tags WHERE note_id = ?", noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		tags = append(tags, tag)
+	}
+	return tags, rows.Err()
+}
+
+// attachNoteListTags hydrates Tags onto note list items with one query for the
+// whole workspace instead of one query per note.
+func (s *SQLiteStore) attachNoteListTags(ctx context.Context, workspaceID string, notes []WorkspaceNoteListItem) error {
+	if len(notes) == 0 {
+		return nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT nt.note_id, nt.tag
+		FROM note_tags nt
+		JOIN workspace_notes wn ON wn.id = nt.note_id
+		WHERE wn.workspace_id = ?
+	`, workspaceID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tagsByNote := map[string][]string{}
+	for rows.Next() {
+		var noteID, tag string
+		if err := rows.Scan(&noteID, &tag); err != nil {
+			return err
+		}
+		tagsByNote[noteID] = append(tagsByNote[noteID], tag)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range notes {
+		notes[i].Tags = tagsByNote[notes[i].ID]
+	}
+	return nil
+}
+
+// noteIDsWithTag returns the IDs of notes carrying the tag.
+func (s *SQLiteStore) noteIDsWithTag(ctx context.Context, tag string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT note_id FROM note_tags WHERE tag = ?", tag)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// RenameNoteTag renames a tag across all notes, merging when the new name
+// already exists on a note. Returns the IDs of affected notes so callers can
+// re-sync their markdown files.
+func (s *SQLiteStore) RenameNoteTag(ctx context.Context, from, to string) ([]string, error) {
+	ids, err := s.noteIDsWithTag(ctx, from)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rename note tag: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO note_tags (note_id, tag) SELECT note_id, ? FROM note_tags WHERE tag = ?",
+			to, from,
+		); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM note_tags WHERE tag = ?", from)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to rename note tag: %w", err)
+	}
+	return ids, nil
+}
+
+// RemoveNoteTag removes a tag from all notes. Returns the IDs of affected
+// notes so callers can re-sync their markdown files.
+func (s *SQLiteStore) RemoveNoteTag(ctx context.Context, tag string) ([]string, error) {
+	ids, err := s.noteIDsWithTag(ctx, tag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to remove note tag: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM note_tags WHERE tag = ?", tag); err != nil {
+		return nil, fmt.Errorf("failed to remove note tag: %w", err)
+	}
+	return ids, nil
+}
+
+// GetAllNoteTags returns all unique note tags with usage counts.
+func (s *SQLiteStore) GetAllNoteTags(ctx context.Context) ([]Tag, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT tag, COUNT(*) FROM note_tags GROUP BY tag ORDER BY COUNT(*) DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get note tags: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	tags := make([]Tag, 0)
+	for rows.Next() {
+		var tag Tag
+		if err := rows.Scan(&tag.Name, &tag.UsageCount); err != nil {
+			return nil, fmt.Errorf("failed to scan note tag: %w", err)
+		}
+		tags = append(tags, tag)
+	}
+	return tags, rows.Err()
 }
 
 func encodeNoteVaultReference(ref *vaultref.Reference) string {

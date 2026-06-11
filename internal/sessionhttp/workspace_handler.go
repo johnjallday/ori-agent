@@ -209,6 +209,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		TemplateID         string                     `json:"template_id,omitempty"`   // Optional project template from the library
 		TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
 		ProjectName        string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
+		Tags               []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -217,6 +218,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" {
 		_ = orihttp.RespondBadRequest(w, "name is required")
+		return
+	}
+
+	requestedTags, err := agentworkspace.ValidateWorkspaceTags(req.Tags)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 
@@ -248,6 +255,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Color:       req.Color,
 		FolderSlug:  agentworkspace.Slugify(req.Name),
 		ProjectPath: req.ProjectPath,
+		Tags:        requestedTags,
 	}
 	if wantsProject {
 		if tpl, tplErr := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath); tplErr == nil {

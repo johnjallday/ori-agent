@@ -346,6 +346,56 @@ async function savePageNote() {
   } catch (_) { return false; }
 }
 
+// =============================================================================
+// Note tags (shared tag input widget; saved independently of content autosave)
+// =============================================================================
+
+let noteTagsWidget = null;
+
+async function saveNoteTags(tags) {
+  if (!currentNote?.id) return;
+  const noteId = currentNote.id;
+  try {
+    const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags }),
+    });
+    if (!resp.ok) {
+      showToast('Failed to save tags', 'error');
+      return;
+    }
+    const data = await resp.json();
+    if (currentNote?.id === noteId) {
+      currentNote = { ...currentNote, tags: data?.note?.tags || tags };
+    }
+    // New tags should show up in suggestions everywhere right away.
+    window.OriTagInput?.clearTagPoolCache?.();
+  } catch (_) {
+    showToast('Failed to save tags', 'error');
+  }
+}
+
+function syncNoteTagsWidget() {
+  const row = document.getElementById('notePageTagsRow');
+  const mount = document.getElementById('notePageTagsMount');
+  if (!row || !mount) return;
+  if (!currentNote?.id) {
+    row.hidden = true;
+    return;
+  }
+  if (!noteTagsWidget && window.OriTagInput?.createTagInput) {
+    noteTagsWidget = window.OriTagInput.createTagInput({
+      container: mount,
+      initialTags: currentNote.tags || [],
+      onChange: (tags) => { void saveNoteTags(tags); },
+    });
+  } else if (noteTagsWidget) {
+    noteTagsWidget.setTags(currentNote.tags || []);
+  }
+  row.hidden = !noteTagsWidget;
+}
+
 function primaryNoteIsDirty() {
   return Boolean(currentNote?.id && bundle?.autosave?.isDirty?.() && !switching);
 }
@@ -889,6 +939,7 @@ async function loadNoteIntoActivePane(noteId) {
 
   currentNote = next;
   resetPageAIAssistForCurrentNote(null);
+  syncNoteTagsWidget();
   fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));
 
   // 4. Reset history so undo doesn't cross note boundaries.
@@ -1442,6 +1493,7 @@ async function bootstrap() {
     showWorkspaceEmptyState();
     document.title = 'Workspace Notes - Ori Agent';
   }
+  syncNoteTagsWidget();
 
   // 4. Breadcrumb workspace name (best effort).
   fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));

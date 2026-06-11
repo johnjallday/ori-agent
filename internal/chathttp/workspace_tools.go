@@ -522,6 +522,7 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 				workspace.SyncNoteFile(p.fileStore, workspace.NoteFileParams{
 					ID: existing.ID, WorkspaceID: existing.WorkspaceID,
 					Name: existing.Name, Content: existing.Content,
+					Tags:      existing.Tags,
 					CreatedAt: existing.CreatedAt, UpdatedAt: existing.UpdatedAt,
 				})
 				return marshalToolResponse(map[string]any{
@@ -551,6 +552,7 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 			workspace.SyncNoteFile(p.fileStore, workspace.NoteFileParams{
 				ID: note.ID, WorkspaceID: note.WorkspaceID,
 				Name: note.Name, Content: note.Content,
+				Tags:      note.Tags,
 				CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt,
 			})
 			logger.Info("Workspace tool created note", logger.Fields{
