@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -65,6 +68,42 @@ func (a homeUsageAdapter) UsageSummary() (agenthttp.HomeUsageSummary, bool) {
 		MonthTokens: month.TotalTokens,
 		Currency:    currency,
 	}, true
+}
+
+// homeAgentsAdapter bridges the agent store to the home harness's agent-roster
+// reader, keeping agenthttp decoupled from the agent/store packages. Workspace
+// usage is cross-referenced in the snapshot/tool, so the roster carries only
+// per-agent profile fields.
+type homeAgentsAdapter struct {
+	agents store.Store
+}
+
+func (a homeAgentsAdapter) AgentRoster() ([]agenthttp.HomeAgentSummary, bool) {
+	if a.agents == nil {
+		return nil, false
+	}
+	names := a.agents.ListAgents()
+	out := make([]agenthttp.HomeAgentSummary, 0, len(names))
+	for _, name := range names {
+		ag, ok := a.agents.GetAgent(name)
+		if !ok || ag == nil {
+			continue
+		}
+		summary := agenthttp.HomeAgentSummary{
+			Name:         name,
+			Type:         ag.Type,
+			Role:         string(ag.Role),
+			Model:        ag.Settings.Model,
+			Provider:     ag.Settings.Provider,
+			Capabilities: ag.Capabilities,
+			Status:       string(ag.Status),
+		}
+		if ag.Metadata != nil {
+			summary.Description = ag.Metadata.Description
+		}
+		out = append(out, summary)
+	}
+	return out, true
 }
 
 // homeActionMutator executes confirmed home actions (PRD 4.6). CreateWorkspace,
@@ -187,6 +226,79 @@ func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID st
 	return href, nil
 }
 
+func (m homeActionMutator) AssignAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
+	href := "/workspaces/" + workspaceID
+	if m.workspaces == nil {
+		return href, fmt.Errorf("workspace store unavailable")
+	}
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	// Defense in depth: never add a phantom agent even if the client supplies one.
+	if m.agents != nil {
+		if _, ok := m.agents.GetAgent(agentName); !ok {
+			return href, fmt.Errorf("agent %q does not exist", agentName)
+		}
+	}
+	err := m.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
+		return ws.AddAgent(agentName)
+	})
+	if err != nil {
+		return href, err
+	}
+	return href, nil
+}
+
+func (m homeActionMutator) CreateAgent(ctx context.Context, name, description string) (string, error) {
+	const href = "/agents"
+	if m.agents == nil {
+		return href, fmt.Errorf("agent store unavailable")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	if _, exists := m.agents.GetAgent(name); exists {
+		return href, fmt.Errorf("an agent named %q already exists", name)
+	}
+	if err := m.agents.CreateAgent(name, &store.CreateAgentConfig{}); err != nil {
+		return href, err
+	}
+	if description = strings.TrimSpace(description); description != "" {
+		// The agent already exists at this point; a failed description write is
+		// non-fatal (creation succeeded) but worth a warning for debugging.
+		if updErr := m.agents.UpdateAgent(name, func(ag *agent.Agent) error {
+			if ag.Metadata == nil {
+				ag.Metadata = &types.AgentMetadata{}
+			}
+			ag.Metadata.Description = description
+			return nil
+		}); updErr != nil {
+			logger.Warn("home assistant: failed to set new agent description", logger.Fields{"agent": name, "err": updErr})
+		}
+	}
+	return href, nil
+}
+
+func (m homeActionMutator) RemoveAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
+	href := "/workspaces/" + workspaceID
+	if m.workspaces == nil {
+		return href, fmt.Errorf("workspace store unavailable")
+	}
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	err := m.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
+		return ws.RemoveAgent(agentName)
+	})
+	if err != nil {
+		return href, err
+	}
+	return href, nil
+}
+
 // newHomeAssistantAskHandler constructs the home harness handler with its data
 // sources, model access, and confirmed-action executor.
 func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler {
@@ -201,6 +313,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			sources.Opportunities = workspace.NewOpportunityStore(s.Storage.WorkspaceStore)
 		}
 		sources.Sessions = homeRecentSessionsAdapter{store: s.Storage.SessionStore}
+		if s.Storage.AgentStore != nil {
+			sources.Agents = homeAgentsAdapter{agents: s.Storage.AgentStore}
+		}
 	}
 	if s.Core != nil {
 		sources.Usage = homeUsageAdapter{tracker: s.Core.CostTracker}

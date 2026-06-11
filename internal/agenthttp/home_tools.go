@@ -90,13 +90,25 @@ func (r *homeToolRegistry) Definitions() []llm.Tool {
 				"properties": map[string]any{},
 			},
 		},
+		{
+			Name:        "home_agents",
+			Description: "List the user's agents (the roster the OS manages), with type, role, model, capabilities, and which workspaces use each. Read-only.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":         map[string]any{"type": "string", "description": "Optional case-insensitive substring filter on agent name."},
+					"workspace_id": map[string]any{"type": "string", "description": "Optional: only agents used by this workspace."},
+					"limit":        map[string]any{"type": "integer", "description": "Max results (default 50, max 100)."},
+				},
+			},
+		},
 	}
 }
 
 // Has reports whether a tool name belongs to this registry.
 func (r *homeToolRegistry) Has(name string) bool {
 	switch name {
-	case "home_workspaces", "home_tasks", "home_sessions", "home_opportunities", "home_usage":
+	case "home_workspaces", "home_tasks", "home_sessions", "home_opportunities", "home_usage", "home_agents":
 		return true
 	}
 	return false
@@ -119,6 +131,8 @@ func (r *homeToolRegistry) Execute(ctx context.Context, name, argsJSON string) (
 		return r.opportunities(args)
 	case "home_usage":
 		return r.usage()
+	case "home_agents":
+		return r.agents(args)
 	default:
 		return "", fmt.Errorf("unknown home tool %q", name)
 	}
@@ -363,6 +377,85 @@ func (r *homeToolRegistry) opportunities(args map[string]any) (string, error) {
 		rows = rows[:limit]
 	}
 	return homeToolJSON(map[string]any{"opportunities": rows, "total": total})
+}
+
+func (r *homeToolRegistry) agents(args map[string]any) (string, error) {
+	if r.sources.Agents == nil {
+		return homeToolJSON(map[string]any{"agents": []any{}, "note": "agent roster unavailable"})
+	}
+	roster, ok := r.sources.Agents.AgentRoster()
+	if !ok {
+		return homeToolJSON(map[string]any{"agents": []any{}, "note": "agent roster unavailable"})
+	}
+	nameFilter := strings.ToLower(homeToolString(args, "name"))
+	wsFilter := homeToolString(args, "workspace_id")
+	limit := homeToolLimit(args)
+
+	// Cross-reference workspace usage from the workspace list (read-only).
+	agentWorkspaces := map[string][]string{}
+	if r.sources.Workspaces != nil {
+		if ids, err := r.sources.Workspaces.List(); err == nil {
+			for _, id := range ids {
+				ws, getErr := r.sources.Workspaces.Get(id)
+				if getErr != nil || ws == nil || isGroupWorkspace(ws) {
+					continue
+				}
+				if wsFilter != "" && ws.ID != wsFilter {
+					continue
+				}
+				for _, agentName := range workspaceAgentNames(ws) {
+					agentWorkspaces[agentName] = append(agentWorkspaces[agentName], ws.Name)
+				}
+			}
+		}
+	}
+
+	type row struct {
+		Name           string   `json:"name"`
+		Type           string   `json:"type"`
+		Role           string   `json:"role"`
+		Model          string   `json:"model"`
+		Provider       string   `json:"provider"`
+		Description    string   `json:"description,omitempty"`
+		Capabilities   []string `json:"capabilities,omitempty"`
+		Status         string   `json:"status,omitempty"`
+		WorkspaceCount int      `json:"workspace_count"`
+		Workspaces     []string `json:"workspaces,omitempty"`
+	}
+	var rows []row
+	for _, a := range roster {
+		if nameFilter != "" && !strings.Contains(strings.ToLower(a.Name), nameFilter) {
+			continue
+		}
+		used := dedupeSortedStrings(agentWorkspaces[a.Name])
+		// When filtering by workspace, drop agents not used by it.
+		if wsFilter != "" && len(used) == 0 {
+			continue
+		}
+		rows = append(rows, row{
+			Name:           a.Name,
+			Type:           a.Type,
+			Role:           a.Role,
+			Model:          a.Model,
+			Provider:       a.Provider,
+			Description:    homeSnapshotClip(a.Description, homeSnapshotPreviewLimit),
+			Capabilities:   a.Capabilities,
+			Status:         a.Status,
+			WorkspaceCount: len(used),
+			Workspaces:     used,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].WorkspaceCount != rows[j].WorkspaceCount {
+			return rows[i].WorkspaceCount > rows[j].WorkspaceCount
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	total := len(rows)
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return homeToolJSON(map[string]any{"agents": rows, "total": total})
 }
 
 func (r *homeToolRegistry) usage() (string, error) {

@@ -34,6 +34,13 @@ type stubUsageReader struct {
 
 func (u stubUsageReader) UsageSummary() (HomeUsageSummary, bool) { return u.summary, u.ok }
 
+type stubAgentsReader struct {
+	roster []HomeAgentSummary
+	ok     bool
+}
+
+func (a stubAgentsReader) AgentRoster() ([]HomeAgentSummary, bool) { return a.roster, a.ok }
+
 func fixedNow() time.Time {
 	// A Wednesday so "this week" (Mon-based) has prior days inside the window.
 	return time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
@@ -87,11 +94,15 @@ func TestBuildHomeSnapshot_WithData(t *testing.T) {
 		Opportunities: workspace.NewOpportunityStore(store),
 		Sessions:      stubSessionsReader{sessions: []HomeSessionSummary{{ID: "s1", Title: "Chat", AgentName: "Ori", MessageCount: 4, UpdatedAt: now}}},
 		Usage:         stubUsageReader{summary: HomeUsageSummary{TodayCost: 0.12, TodayTokens: 1000, MonthCost: 3.4, MonthTokens: 50000, Currency: "USD"}, ok: true},
+		Agents:        stubAgentsReader{roster: []HomeAgentSummary{{Name: "Ori", Type: "tool-calling", Role: "orchestrator", Model: "gpt-5", Provider: "openai"}}, ok: true},
 		Now:           fixedNow,
 	}, HomeWindowThisWeek)
 
 	if snap.Meta.WorkspaceCount != 2 {
 		t.Errorf("WorkspaceCount = %d, want 2", snap.Meta.WorkspaceCount)
+	}
+	if snap.Meta.AgentCount != 1 || len(snap.Agents) != 1 || snap.Agents[0].Name != "Ori" {
+		t.Errorf("expected 1 agent 'Ori', got count=%d agents=%+v", snap.Meta.AgentCount, snap.Agents)
 	}
 	// Only the in-window task should appear; the 3-month-old completed task is out.
 	if snap.Meta.TaskCount != 1 || len(snap.Tasks) != 1 || snap.Tasks[0].Description != "recent task" {

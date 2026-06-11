@@ -231,10 +231,16 @@ func TestAsk_ConfirmAndExecuteStartTask(t *testing.T) {
 
 // recordingMutator captures the arguments passed to each mutator method.
 type recordingMutator struct {
-	startedWS      string
-	startedTask    string
-	createdTaskWS  string
-	createdTaskDsc string
+	startedWS       string
+	startedTask     string
+	createdTaskWS   string
+	createdTaskDsc  string
+	assignedWS      string
+	assignedAgent   string
+	createdAgent    string
+	createdAgentDsc string
+	removedWS       string
+	removedAgent    string
 }
 
 func (m *recordingMutator) CreateWorkspace(_ context.Context, name, _ string) (string, string, error) {
@@ -250,5 +256,23 @@ func (m *recordingMutator) CreateTask(_ context.Context, wsID, description strin
 func (m *recordingMutator) StartTask(_ context.Context, wsID, taskID string) (string, error) {
 	m.startedWS = wsID
 	m.startedTask = taskID
+	return "/workspaces/" + wsID, nil
+}
+
+func (m *recordingMutator) AssignAgent(_ context.Context, wsID, agentName string) (string, error) {
+	m.assignedWS = wsID
+	m.assignedAgent = agentName
+	return "/workspaces/" + wsID, nil
+}
+
+func (m *recordingMutator) CreateAgent(_ context.Context, name, description string) (string, error) {
+	m.createdAgent = name
+	m.createdAgentDsc = description
+	return "/agents", nil
+}
+
+func (m *recordingMutator) RemoveAgent(_ context.Context, wsID, agentName string) (string, error) {
+	m.removedWS = wsID
+	m.removedAgent = agentName
 	return "/workspaces/" + wsID, nil
 }
