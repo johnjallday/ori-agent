@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -241,6 +243,51 @@ func (m homeActionMutator) AssignAgent(ctx context.Context, workspaceID, agentNa
 	}
 	err := m.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
 		return ws.AddAgent(agentName)
+	})
+	if err != nil {
+		return href, err
+	}
+	return href, nil
+}
+
+func (m homeActionMutator) CreateAgent(ctx context.Context, name, description string) (string, error) {
+	const href = "/agents"
+	if m.agents == nil {
+		return href, fmt.Errorf("agent store unavailable")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	if _, exists := m.agents.GetAgent(name); exists {
+		return href, fmt.Errorf("an agent named %q already exists", name)
+	}
+	if err := m.agents.CreateAgent(name, &store.CreateAgentConfig{}); err != nil {
+		return href, err
+	}
+	if description = strings.TrimSpace(description); description != "" {
+		_ = m.agents.UpdateAgent(name, func(ag *agent.Agent) error {
+			if ag.Metadata == nil {
+				ag.Metadata = &types.AgentMetadata{}
+			}
+			ag.Metadata.Description = description
+			return nil
+		})
+	}
+	return href, nil
+}
+
+func (m homeActionMutator) RemoveAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
+	href := "/workspaces/" + workspaceID
+	if m.workspaces == nil {
+		return href, fmt.Errorf("workspace store unavailable")
+	}
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	err := m.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
+		return ws.RemoveAgent(agentName)
 	})
 	if err != nil {
 		return href, err

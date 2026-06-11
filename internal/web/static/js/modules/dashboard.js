@@ -8635,7 +8635,8 @@
   }
 
   function isMutatingHomeActionType(type) {
-    return type === 'create_workspace' || type === 'create_task' || type === 'start_task' || type === 'assign_agent';
+    return type === 'create_workspace' || type === 'create_task' || type === 'start_task' ||
+      type === 'assign_agent' || type === 'create_agent' || type === 'remove_agent';
   }
 
   // buildHomeActionButtons maps the backend action schema to renderHomeAssistant-

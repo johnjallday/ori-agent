@@ -26,6 +26,8 @@ const (
 	HomeActionCreateTask      = "create_task"
 	HomeActionStartTask       = "start_task"
 	HomeActionAssignAgent     = "assign_agent"
+	HomeActionCreateAgent     = "create_agent"
+	HomeActionRemoveAgent     = "remove_agent"
 	HomeActionAskFollowup     = "ask_followup"
 )
 
@@ -36,6 +38,8 @@ var homeMutatingActionTypes = map[string]bool{
 	HomeActionCreateTask:      true,
 	HomeActionStartTask:       true,
 	HomeActionAssignAgent:     true,
+	HomeActionCreateAgent:     true,
+	HomeActionRemoveAgent:     true,
 }
 
 // HomeAction is a serializable next-step action descriptor returned to the
@@ -88,6 +92,8 @@ type HomeActionMutator interface {
 	CreateTask(ctx context.Context, workspaceID, description string) (taskID, href string, err error)
 	StartTask(ctx context.Context, workspaceID, taskID string) (href string, err error)
 	AssignAgent(ctx context.Context, workspaceID, agentName string) (href string, err error)
+	CreateAgent(ctx context.Context, name, description string) (href string, err error)
+	RemoveAgent(ctx context.Context, workspaceID, agentName string) (href string, err error)
 }
 
 type homeAskSystemModelReader interface {
@@ -385,6 +391,38 @@ func (h *HomeAssistantAskHandler) executeConfirmedAction(ctx context.Context, in
 			Response: "Assigned " + agentName + " to the workspace.",
 			Intent:   intent,
 			Actions:  []HomeAction{{ID: "open-assigned-ws", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID}},
+		}
+	case HomeActionCreateAgent:
+		name := actionArgString(args, "name")
+		description := actionArgString(args, "description")
+		if name == "" {
+			return HomeAssistantAskResponse{Response: "I need a name to create an agent.", Intent: intent}
+		}
+		href, err := h.Mutator.CreateAgent(ctx, name, description)
+		if err != nil {
+			return HomeAssistantAskResponse{Response: "I couldn't create the agent: " + err.Error(), Intent: intent}
+		}
+		h.recordMutation(ctx, intent, HomeActionCreateAgent)
+		return HomeAssistantAskResponse{
+			Response: "Created the agent " + name + ".",
+			Intent:   intent,
+			Actions:  []HomeAction{{ID: "open-agents", Type: HomeActionNavigate, Label: "Open Agents", Href: href}},
+		}
+	case HomeActionRemoveAgent:
+		wsID := firstNonEmpty(action.WorkspaceID, actionArgString(args, "workspace_id"))
+		agentName := actionArgString(args, "agent_name")
+		if wsID == "" || agentName == "" {
+			return HomeAssistantAskResponse{Response: "I need a workspace and an agent to remove.", Intent: intent}
+		}
+		href, err := h.Mutator.RemoveAgent(ctx, wsID, agentName)
+		if err != nil {
+			return HomeAssistantAskResponse{Response: "I couldn't remove the agent: " + err.Error(), Intent: intent}
+		}
+		h.recordMutation(ctx, intent, HomeActionRemoveAgent)
+		return HomeAssistantAskResponse{
+			Response: "Removed " + agentName + " from the workspace.",
+			Intent:   intent,
+			Actions:  []HomeAction{{ID: "open-removed-ws", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID}},
 		}
 	}
 	return HomeAssistantAskResponse{Response: "Unsupported action.", Intent: intent}

@@ -264,7 +264,7 @@ model may call are `home_workspaces`, `home_tasks`, `home_sessions`,
 
 **Action schema:**
 - `id`: Stable action id.
-- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `ask_followup`.
+- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `create_agent`, `remove_agent`, `ask_followup`.
 - `label`: Button label.
 - `href` (optional): Destination for navigation/`open_*` actions.
 - `workspace_id` / `task_id` / `session_id` (optional): Resolved target ids.
@@ -281,13 +281,18 @@ mutations are recognized from natural language, each requiring confirmation:
 | `create_task` | `"create a task to summarize Q2 sales in Q3 Planning"` | `workspace_id`, `description` |
 | `start_task` | `"start the deploy task in Operations"` | `workspace_id`, `task_id` |
 | `assign_agent` | `"add agent Scout to Operations"` / `"assign Scout to Operations"` | `workspace_id`, `agent_name` |
+| `create_agent` | `"create an agent called Atlas"` | `name` |
+| `remove_agent` | `"remove agent Scout from Operations"` | `workspace_id`, `agent_name` |
 
 Task and agent mutations resolve the named workspace (and the target task or
 agent) against real state before proposing; an unresolved workspace/task/agent, an
 empty description, or an ambiguous task match falls through to the normal answer
 path rather than guessing. `start_task` uses the workspace's sole runnable task
-when the prompt doesn't name one. `assign_agent` only resolves agents that exist
-in the user's roster, and the server re-validates the agent before adding it.
+when the prompt doesn't name one. `assign_agent` / `remove_agent` only resolve
+agents that exist in the user's roster, and the server re-validates before
+mutating (`create_agent` rejects a duplicate name; `remove_agent` cannot remove a
+workspace's required entry agent). Agent management covers the lifecycle: create a
+new agent, add it to a workspace, and remove it.
 
 ```json
 {

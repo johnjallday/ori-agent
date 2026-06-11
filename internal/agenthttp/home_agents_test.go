@@ -200,6 +200,122 @@ func TestDetectMutation_AddTaskNotMisreadAsAgent(t *testing.T) {
 	}
 }
 
+func TestDetectMutation_CreateAgent(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	for _, prompt := range []string{
+		"create an agent called Atlas",
+		"make a new agent named Atlas",
+	} {
+		conf := h.detectHomeMutationRequest(prompt)
+		if conf == nil {
+			t.Fatalf("prompt %q: expected a create_agent confirmation", prompt)
+		}
+		if conf.ActionType != HomeActionCreateAgent {
+			t.Errorf("prompt %q: action type = %q, want %q", prompt, conf.ActionType, HomeActionCreateAgent)
+		}
+		if got, _ := conf.Arguments["name"].(string); got != "Atlas" {
+			t.Errorf("prompt %q: name = %q, want Atlas", prompt, got)
+		}
+	}
+}
+
+func TestDetectMutation_CreateAgentNotConfusedWithWorkspace(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	conf := h.detectHomeMutationRequest("create a workspace called Atlas")
+	if conf == nil || conf.ActionType != HomeActionCreateWorkspace {
+		t.Fatalf("expected create_workspace, got %+v", conf)
+	}
+}
+
+func TestDetectMutation_RemoveAgent(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori", "Scout"})
+	h := NewHomeAssistantAskHandler(
+		HomeSnapshotSources{Workspaces: store, Agents: agentRoster(), Now: fixedNow},
+		nil, nil,
+	)
+
+	conf := h.detectHomeMutationRequest("remove agent Scout from Alpha")
+	if conf == nil {
+		t.Fatal("expected a remove_agent confirmation")
+	}
+	if conf.ActionType != HomeActionRemoveAgent {
+		t.Errorf("action type = %q, want %q", conf.ActionType, HomeActionRemoveAgent)
+	}
+	if got, _ := conf.Arguments["workspace_id"].(string); got != "ws-1" {
+		t.Errorf("workspace_id = %q, want ws-1", got)
+	}
+	if got, _ := conf.Arguments["agent_name"].(string); got != "Scout" {
+		t.Errorf("agent_name = %q, want Scout", got)
+	}
+}
+
+func TestDetectMutation_RemoveTaskNotMisreadAsAgent(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori"})
+	h := NewHomeAssistantAskHandler(
+		HomeSnapshotSources{Workspaces: store, Agents: agentRoster(), Now: fixedNow},
+		nil, nil,
+	)
+	// No roster agent named in this prompt -> must not propose remove_agent.
+	if conf := h.detectHomeMutationRequest("remove the stale task from Alpha"); conf != nil {
+		t.Fatalf("expected no confirmation, got %+v", conf)
+	}
+}
+
+func TestAsk_ConfirmAndExecuteCreateAgent(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	factory := llm.NewFactory()
+	factory.Register("fake", &fakeProvider{content: "irrelevant"})
+	h.LLMFactory = factory
+	h.SystemModel = stubSystemModel{provider: "fake", model: "fake-model"}
+	mut := &recordingMutator{}
+	h.SetMutator(mut)
+
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "create an agent called Atlas",
+		Intent: "app_introspection",
+	})
+	if !resp.RequiresConfirmation || resp.Confirmation == nil || resp.Confirmation.ActionType != HomeActionCreateAgent {
+		t.Fatalf("expected create_agent confirmation, got %+v", resp)
+	}
+	h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent:          "app_introspection",
+		ConfirmedAction: &HomeAction{Type: HomeActionCreateAgent, Arguments: resp.Confirmation.Arguments},
+	})
+	if mut.createdAgent != "Atlas" {
+		t.Errorf("CreateAgent called with %q, want Atlas", mut.createdAgent)
+	}
+}
+
+func TestAsk_ConfirmAndExecuteRemoveAgent(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori", "Scout"})
+	factory := llm.NewFactory()
+	factory.Register("fake", &fakeProvider{content: "irrelevant"})
+	h := NewHomeAssistantAskHandler(
+		HomeSnapshotSources{Workspaces: store, Agents: agentRoster(), Now: fixedNow},
+		factory, stubSystemModel{provider: "fake", model: "fake-model"},
+	)
+	mut := &recordingMutator{}
+	h.SetMutator(mut)
+
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "remove agent Scout from Alpha",
+		Intent: "app_introspection",
+	})
+	if !resp.RequiresConfirmation || resp.Confirmation == nil || resp.Confirmation.ActionType != HomeActionRemoveAgent {
+		t.Fatalf("expected remove_agent confirmation, got %+v", resp)
+	}
+	h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent:          "app_introspection",
+		ConfirmedAction: &HomeAction{Type: HomeActionRemoveAgent, Arguments: resp.Confirmation.Arguments},
+	})
+	if mut.removedWS != "ws-1" || mut.removedAgent != "Scout" {
+		t.Errorf("RemoveAgent called with (%q, %q), want (ws-1, Scout)", mut.removedWS, mut.removedAgent)
+	}
+}
+
 func TestAsk_ConfirmAndExecuteAssignAgent(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori"})

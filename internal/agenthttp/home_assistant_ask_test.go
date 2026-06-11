@@ -54,6 +54,12 @@ func (m *fakeMutator) StartTask(_ context.Context, wsID, _ string) (string, erro
 func (m *fakeMutator) AssignAgent(_ context.Context, wsID, _ string) (string, error) {
 	return "/workspaces/" + wsID, nil
 }
+func (m *fakeMutator) CreateAgent(_ context.Context, _, _ string) (string, error) {
+	return "/agents", nil
+}
+func (m *fakeMutator) RemoveAgent(_ context.Context, wsID, _ string) (string, error) {
+	return "/workspaces/" + wsID, nil
+}
 
 func newAskHandlerWithProvider(t *testing.T, content string) *HomeAssistantAskHandler {
 	t.Helper()

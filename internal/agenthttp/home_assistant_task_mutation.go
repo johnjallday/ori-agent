@@ -21,12 +21,80 @@ func (h *HomeAssistantAskHandler) detectHomeMutationRequest(prompt string) *Home
 	if conf := detectWorkspaceCreationRequest(prompt); conf != nil {
 		return conf
 	}
+	if conf := detectCreateAgentRequest(prompt); conf != nil {
+		return conf
+	}
+	if conf := h.detectRemoveAgentRequest(prompt); conf != nil {
+		return conf
+	}
 	// Agent assignment is checked before task creation: "add agent X to Y" and
 	// "add a task to Y" share the "add" verb but differ by the agent/task keyword.
 	if conf := h.detectAssignAgentRequest(prompt); conf != nil {
 		return conf
 	}
 	return h.detectTaskMutationRequest(prompt)
+}
+
+// detectCreateAgentRequest matches "create/new/make an agent called/named X" and
+// proposes a create_agent confirmation. Parallels workspace creation.
+func detectCreateAgentRequest(prompt string) *HomeActionConfirmation {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	if lower == "" || !hasCreateVerb(lower) {
+		return nil
+	}
+	for _, marker := range []string{"agent called ", "agent named "} {
+		idx := strings.Index(lower, marker)
+		if idx < 0 {
+			continue
+		}
+		name := strings.TrimSpace(trimmed[idx+len(marker):])
+		name = strings.Trim(name, " .\"'")
+		if name == "" {
+			continue
+		}
+		return &HomeActionConfirmation{
+			ActionID:   "create-agent",
+			ActionType: HomeActionCreateAgent,
+			Summary:    fmt.Sprintf("Create a new agent named %q?", name),
+			Arguments:  map[string]any{"name": name},
+		}
+	}
+	return nil
+}
+
+// detectRemoveAgentRequest matches "remove/unassign agent X from <workspace>" and
+// proposes a remove_agent confirmation. The agent (against the roster) and the
+// workspace must both resolve, otherwise it falls through.
+func (h *HomeAssistantAskHandler) detectRemoveAgentRequest(prompt string) *HomeActionConfirmation {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	if lower == "" {
+		return nil
+	}
+	if !strings.HasPrefix(lower, "remove ") && !strings.HasPrefix(lower, "unassign ") {
+		return nil
+	}
+	if !strings.Contains(lower, " from ") {
+		return nil
+	}
+	if h.Sources.Workspaces == nil || h.Sources.Agents == nil {
+		return nil
+	}
+	agentName, ok := matchAgentInPrompt(h.Sources.Agents, prompt)
+	if !ok {
+		return nil
+	}
+	wsID, wsName, ok := matchWorkspaceInPrompt(h.Sources.Workspaces, prompt)
+	if !ok {
+		return nil
+	}
+	return &HomeActionConfirmation{
+		ActionID:   "remove-agent",
+		ActionType: HomeActionRemoveAgent,
+		Summary:    fmt.Sprintf("Remove agent %q from workspace %q?", agentName, wsName),
+		Arguments:  map[string]any{"workspace_id": wsID, "agent_name": agentName},
+	}
 }
 
 // detectAssignAgentRequest matches "add/assign agent X to <workspace>" and
