@@ -264,7 +264,7 @@ model may call are `home_workspaces`, `home_tasks`, `home_sessions`,
 
 **Action schema:**
 - `id`: Stable action id.
-- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `ask_followup`.
+- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `ask_followup`.
 - `label`: Button label.
 - `href` (optional): Destination for navigation/`open_*` actions.
 - `workspace_id` / `task_id` / `session_id` (optional): Resolved target ids.
@@ -280,12 +280,14 @@ mutations are recognized from natural language, each requiring confirmation:
 | `create_workspace` | `"create a workspace called Q3 Planning"` | `name` |
 | `create_task` | `"create a task to summarize Q2 sales in Q3 Planning"` | `workspace_id`, `description` |
 | `start_task` | `"start the deploy task in Operations"` | `workspace_id`, `task_id` |
+| `assign_agent` | `"add agent Scout to Operations"` / `"assign Scout to Operations"` | `workspace_id`, `agent_name` |
 
-Task mutations resolve the named workspace (and, for `start_task`, the target
-task) against real state before proposing; an unresolved workspace/task, an empty
-description, or an ambiguous task match falls through to the normal answer path
-rather than guessing. `start_task` uses the workspace's sole runnable task when
-the prompt doesn't name one.
+Task and agent mutations resolve the named workspace (and the target task or
+agent) against real state before proposing; an unresolved workspace/task/agent, an
+empty description, or an ambiguous task match falls through to the normal answer
+path rather than guessing. `start_task` uses the workspace's sole runnable task
+when the prompt doesn't name one. `assign_agent` only resolves agents that exist
+in the user's roster, and the server re-validates the agent before adding it.
 
 ```json
 {

@@ -21,7 +21,72 @@ func (h *HomeAssistantAskHandler) detectHomeMutationRequest(prompt string) *Home
 	if conf := detectWorkspaceCreationRequest(prompt); conf != nil {
 		return conf
 	}
+	// Agent assignment is checked before task creation: "add agent X to Y" and
+	// "add a task to Y" share the "add" verb but differ by the agent/task keyword.
+	if conf := h.detectAssignAgentRequest(prompt); conf != nil {
+		return conf
+	}
 	return h.detectTaskMutationRequest(prompt)
+}
+
+// detectAssignAgentRequest matches "add/assign agent X to <workspace>" and
+// proposes an assign_agent confirmation. Both the agent (against the roster) and
+// the workspace must resolve to real state, otherwise it falls through.
+func (h *HomeAssistantAskHandler) detectAssignAgentRequest(prompt string) *HomeActionConfirmation {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	if lower == "" {
+		return nil
+	}
+	assignVerb := strings.HasPrefix(lower, "assign ")
+	addVerb := strings.HasPrefix(lower, "add ") || strings.HasPrefix(lower, "put ")
+	if !assignVerb && !addVerb {
+		return nil
+	}
+	// "assign X to Y" is unambiguous; "add/put" share the "add" verb with task
+	// creation, so require the explicit "agent" keyword to disambiguate.
+	if addVerb && !strings.Contains(lower, "agent") {
+		return nil
+	}
+	if h.Sources.Workspaces == nil || h.Sources.Agents == nil {
+		return nil
+	}
+	wsID, wsName, ok := matchWorkspaceInPrompt(h.Sources.Workspaces, prompt)
+	if !ok {
+		return nil
+	}
+	agentName, ok := matchAgentInPrompt(h.Sources.Agents, prompt)
+	if !ok {
+		return nil
+	}
+	return &HomeActionConfirmation{
+		ActionID:   "assign-agent",
+		ActionType: HomeActionAssignAgent,
+		Summary:    fmt.Sprintf("Add agent %q to workspace %q?", agentName, wsName),
+		Arguments:  map[string]any{"workspace_id": wsID, "agent_name": agentName},
+	}
+}
+
+// matchAgentInPrompt returns the name of a roster agent that appears in the
+// prompt (longest match wins), so assignment resolves to a real agent.
+func matchAgentInPrompt(reader homeAgentsReader, prompt string) (string, bool) {
+	if reader == nil {
+		return "", false
+	}
+	roster, ok := reader.AgentRoster()
+	if !ok {
+		return "", false
+	}
+	p := strings.ToLower(prompt)
+	best := ""
+	bestLen := 0
+	for _, a := range roster {
+		name := strings.ToLower(strings.TrimSpace(a.Name))
+		if len(name) >= 2 && strings.Contains(p, name) && len(name) > bestLen {
+			best, bestLen = a.Name, len(name)
+		}
+	}
+	return best, bestLen > 0
 }
 
 // detectWorkspaceCreationRequest matches "create/new/make/add a workspace

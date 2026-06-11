@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -141,5 +142,105 @@ func TestHomeAgentsTool_UnavailableReader(t *testing.T) {
 	}
 	if !strings.Contains(out, "unavailable") {
 		t.Errorf("expected unavailable note, got %s", out)
+	}
+}
+
+func newAgentAssignHandler(t *testing.T) *HomeAssistantAskHandler {
+	t.Helper()
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori"})
+	return NewHomeAssistantAskHandler(
+		HomeSnapshotSources{Workspaces: store, Agents: agentRoster(), Now: fixedNow},
+		nil,
+		nil,
+	)
+}
+
+func TestDetectMutation_AssignAgent(t *testing.T) {
+	h := newAgentAssignHandler(t)
+
+	conf := h.detectHomeMutationRequest("add agent Scout to Alpha")
+	if conf == nil {
+		t.Fatal("expected an assign_agent confirmation")
+	}
+	if conf.ActionType != HomeActionAssignAgent {
+		t.Errorf("action type = %q, want %q", conf.ActionType, HomeActionAssignAgent)
+	}
+	if got, _ := conf.Arguments["workspace_id"].(string); got != "ws-1" {
+		t.Errorf("workspace_id = %q, want ws-1", got)
+	}
+	if got, _ := conf.Arguments["agent_name"].(string); got != "Scout" {
+		t.Errorf("agent_name = %q, want Scout", got)
+	}
+}
+
+func TestDetectMutation_AssignAgentUnknownAgentDeclines(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	if conf := h.detectHomeMutationRequest("add agent Nonexistent to Alpha"); conf != nil {
+		t.Fatalf("expected no confirmation for unknown agent, got %+v", conf)
+	}
+}
+
+func TestDetectMutation_AssignAgentUnknownWorkspaceDeclines(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	if conf := h.detectHomeMutationRequest("add agent Scout to Nowhere"); conf != nil {
+		t.Fatalf("expected no confirmation for unknown workspace, got %+v", conf)
+	}
+}
+
+func TestDetectMutation_AddTaskNotMisreadAsAgent(t *testing.T) {
+	h := newAgentAssignHandler(t)
+	// "add a task ... in <workspace>" must remain a create_task, not assign_agent.
+	conf := h.detectHomeMutationRequest("add a task to review metrics in Alpha")
+	if conf == nil {
+		t.Fatal("expected a create_task confirmation")
+	}
+	if conf.ActionType != HomeActionCreateTask {
+		t.Errorf("action type = %q, want %q", conf.ActionType, HomeActionCreateTask)
+	}
+}
+
+func TestAsk_ConfirmAndExecuteAssignAgent(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspaceWithAgents(t, store, "ws-1", "Alpha", []string{"Ori"})
+	factory := llm.NewFactory()
+	factory.Register("fake", &fakeProvider{content: "irrelevant"})
+	h := NewHomeAssistantAskHandler(
+		HomeSnapshotSources{Workspaces: store, Agents: agentRoster(), Now: fixedNow},
+		factory,
+		stubSystemModel{provider: "fake", model: "fake-model"},
+	)
+	mut := &recordingMutator{}
+	h.SetMutator(mut)
+
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "assign Scout to Alpha",
+		Intent: "app_introspection",
+	})
+	if !resp.RequiresConfirmation || resp.Confirmation == nil {
+		t.Fatalf("expected an assign_agent confirmation, got %+v", resp)
+	}
+	if resp.Confirmation.ActionType != HomeActionAssignAgent {
+		t.Fatalf("confirmation type = %q, want %q", resp.Confirmation.ActionType, HomeActionAssignAgent)
+	}
+
+	resp2 := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent: "app_introspection",
+		ConfirmedAction: &HomeAction{
+			Type:      HomeActionAssignAgent,
+			Arguments: resp.Confirmation.Arguments,
+		},
+	})
+	if mut.assignedWS != "ws-1" || mut.assignedAgent != "Scout" {
+		t.Errorf("AssignAgent called with (%q, %q), want (ws-1, Scout)", mut.assignedWS, mut.assignedAgent)
+	}
+	foundOpen := false
+	for _, a := range resp2.Actions {
+		if a.Type == HomeActionOpenWorkspace && a.WorkspaceID == "ws-1" {
+			foundOpen = true
+		}
+	}
+	if !foundOpen {
+		t.Errorf("expected open_workspace action after assign, got %+v", resp2.Actions)
 	}
 }

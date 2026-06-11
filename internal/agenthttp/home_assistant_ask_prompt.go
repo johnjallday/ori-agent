@@ -19,7 +19,7 @@ func buildHomeSystemPrompt() string {
 	b.WriteString("Never invent agents, workspaces, tasks, sessions, opportunities, or activity. If a section is empty or marked degraded (data unavailable), say so plainly instead of guessing. ")
 	b.WriteString("For navigation questions, only reference destinations that appear in the Navigation Catalog; never invent a URL or page name. ")
 	b.WriteString("Be concise and skimmable: lead with the key counts, then a few highlights. ")
-	b.WriteString("Beyond answering, you can act on the user's behalf: create a workspace, create a task in an existing workspace, and start (run) an existing task. ")
+	b.WriteString("Beyond answering, you can act on the user's behalf: create a workspace, create a task in an existing workspace, start (run) an existing task, and add one of the user's agents to a workspace. ")
 	b.WriteString("These actions always require the user's explicit confirmation before anything happens, so when a user asks you to create or start something, confirm you can and let the confirmation step handle it. ")
 	b.WriteString("When helpful, end with a brief suggestion of a concrete next step. ")
 	b.WriteString("Do not output raw JSON or tool results as your final answer; write a short natural-language summary.")

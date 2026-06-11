@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -220,6 +221,30 @@ func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID st
 		}
 	}()
 
+	return href, nil
+}
+
+func (m homeActionMutator) AssignAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
+	href := "/workspaces/" + workspaceID
+	if m.workspaces == nil {
+		return href, fmt.Errorf("workspace store unavailable")
+	}
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return href, fmt.Errorf("agent name is required")
+	}
+	// Defense in depth: never add a phantom agent even if the client supplies one.
+	if m.agents != nil {
+		if _, ok := m.agents.GetAgent(agentName); !ok {
+			return href, fmt.Errorf("agent %q does not exist", agentName)
+		}
+	}
+	err := m.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
+		return ws.AddAgent(agentName)
+	})
+	if err != nil {
+		return href, err
+	}
 	return href, nil
 }
 

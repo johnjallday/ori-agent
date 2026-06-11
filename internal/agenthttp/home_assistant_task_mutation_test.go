@@ -235,6 +235,8 @@ type recordingMutator struct {
 	startedTask    string
 	createdTaskWS  string
 	createdTaskDsc string
+	assignedWS     string
+	assignedAgent  string
 }
 
 func (m *recordingMutator) CreateWorkspace(_ context.Context, name, _ string) (string, string, error) {
@@ -250,5 +252,11 @@ func (m *recordingMutator) CreateTask(_ context.Context, wsID, description strin
 func (m *recordingMutator) StartTask(_ context.Context, wsID, taskID string) (string, error) {
 	m.startedWS = wsID
 	m.startedTask = taskID
+	return "/workspaces/" + wsID, nil
+}
+
+func (m *recordingMutator) AssignAgent(_ context.Context, wsID, agentName string) (string, error) {
+	m.assignedWS = wsID
+	m.assignedAgent = agentName
 	return "/workspaces/" + wsID, nil
 }
