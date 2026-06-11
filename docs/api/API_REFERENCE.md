@@ -265,7 +265,21 @@ actions. Used by the home page "Ask Ori" panel when
 - `confirmation_summary` / `arguments` (optional): Confirmation copy and payload.
 
 **Confirmation flow (mutations):**
-An explicit mutation request (e.g. `"create a workspace called Q3 Planning"`) returns a confirmation instead of acting:
+An explicit mutation request returns a confirmation instead of acting. Three
+mutations are recognized from natural language, each requiring confirmation:
+
+| Action | Example prompt | Arguments |
+| --- | --- | --- |
+| `create_workspace` | `"create a workspace called Q3 Planning"` | `name` |
+| `create_task` | `"create a task to summarize Q2 sales in Q3 Planning"` | `workspace_id`, `description` |
+| `start_task` | `"start the deploy task in Operations"` | `workspace_id`, `task_id` |
+
+Task mutations resolve the named workspace (and, for `start_task`, the target
+task) against real state before proposing; an unresolved workspace/task, an empty
+description, or an ambiguous task match falls through to the normal answer path
+rather than guessing. `start_task` uses the workspace's sole runnable task when
+the prompt doesn't name one.
+
 ```json
 {
   "response": "Create a new workspace named \"Q3 Planning\"?",
@@ -279,7 +293,7 @@ An explicit mutation request (e.g. `"create a workspace called Q3 Planning"`) re
   }
 }
 ```
-The client confirms by re-calling the endpoint with `confirmed_action` set to a `HomeAction` of that type and arguments. The server executes only known mutation types after confirmation; the model is never given write tools.
+The client confirms by re-calling the endpoint with `confirmed_action` set to a `HomeAction` of that type and arguments. The server executes only known mutation types after confirmation; the model is never given write tools. `start_task` runs the task through the same orchestrator path as the workspace UI (coordinator assignment and the delegation loop apply), executing asynchronously so the response returns immediately.
 
 ## Settings API
 
