@@ -6,6 +6,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -66,12 +67,14 @@ func (a homeUsageAdapter) UsageSummary() (agenthttp.HomeUsageSummary, bool) {
 	}, true
 }
 
-// homeActionMutator executes confirmed home actions (PRD 4.6). CreateWorkspace
-// and CreateTask are wired; StartTask is deferred to a follow-up (kept behind the
-// same confirmation contract, returns a clear message for now).
+// homeActionMutator executes confirmed home actions (PRD 4.6). CreateWorkspace,
+// CreateTask, and StartTask are wired; StartTask runs the task through the same
+// orchestrator path the workspace UI uses, so coordinator-driven assignment and
+// the delegation loop apply identically.
 type homeActionMutator struct {
-	workspaces workspace.Store
-	agents     store.Store
+	workspaces   workspace.Store
+	agents       store.Store
+	orchestrator *workspace.Orchestrator
 }
 
 func (m homeActionMutator) defaultAgentName() string {
@@ -135,7 +138,48 @@ func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, descript
 }
 
 func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID string) (string, error) {
-	return "/workspaces/" + workspaceID, fmt.Errorf("starting a task from here isn't supported yet — open the workspace to run it")
+	href := "/workspaces/" + workspaceID
+	if m.workspaces == nil {
+		return href, fmt.Errorf("workspace store unavailable")
+	}
+	if m.orchestrator == nil {
+		return href, fmt.Errorf("task execution is not available right now")
+	}
+
+	ws, err := m.workspaces.Get(workspaceID)
+	if err != nil {
+		return href, fmt.Errorf("workspace not found: %w", err)
+	}
+
+	var target *workspace.Task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			target = &ws.Tasks[i]
+			break
+		}
+	}
+	if target == nil {
+		return href, fmt.Errorf("task not found in workspace")
+	}
+	if target.Status == workspace.TaskStatusInProgress {
+		return href, fmt.Errorf("task is already running")
+	}
+	if target.Status == workspace.TaskStatusCompleted {
+		return href, fmt.Errorf("task is already completed")
+	}
+
+	// Execute asynchronously with a detached context: the HTTP request that
+	// confirmed this action returns immediately, so the task must not be
+	// cancelled when its context is torn down. Mirrors ExecuteTaskManually.
+	task := *target
+	orchestrator := m.orchestrator
+	go func() {
+		if execErr := orchestrator.ExecuteTask(context.Background(), workspaceID, task); execErr != nil {
+			logger.Error("home assistant: failed to start task", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "err": execErr})
+		}
+	}()
+
+	return href, nil
 }
 
 // newHomeAssistantAskHandler constructs the home harness handler with its data
@@ -163,10 +207,14 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
 	if s.Storage != nil {
-		handler.SetMutator(homeActionMutator{
+		mutator := homeActionMutator{
 			workspaces: s.Storage.WorkspaceStore,
 			agents:     s.Storage.AgentStore,
-		})
+		}
+		if s.Workflow != nil {
+			mutator.orchestrator = s.Workflow.WorkspaceOrchestrator
+		}
+		handler.SetMutator(mutator)
 	}
 	return handler
 }

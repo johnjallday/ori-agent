@@ -172,7 +172,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	// Explicit, supported mutation request: ask for confirmation before doing
 	// anything (FR #24). Execution happens only on a follow-up with ConfirmedAction.
-	if conf := detectHomeMutationRequest(prompt); conf != nil {
+	if conf := h.detectHomeMutationRequest(prompt); conf != nil {
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
 		return HomeAssistantAskResponse{
 			Response:             conf.Summary,
@@ -392,36 +392,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// detectHomeMutationRequest recognizes an explicit, supported mutation request in
-// the prompt and returns a confirmation to present before executing (FR #24). v1
-// recognizes "create/new/make a workspace called|named X".
-func detectHomeMutationRequest(prompt string) *HomeActionConfirmation {
-	trimmed := strings.TrimSpace(prompt)
-	lower := strings.ToLower(trimmed)
-	if lower == "" {
-		return nil
-	}
-	if !strings.HasPrefix(lower, "create ") && !strings.HasPrefix(lower, "new ") && !strings.HasPrefix(lower, "make ") && !strings.HasPrefix(lower, "add ") {
-		return nil
-	}
-	for _, marker := range []string{"workspace called ", "workspace named "} {
-		idx := strings.Index(lower, marker)
-		if idx < 0 {
-			continue
-		}
-		name := strings.TrimSpace(trimmed[idx+len(marker):])
-		name = strings.Trim(name, " .\"'")
-		if name == "" {
-			continue
-		}
-		return &HomeActionConfirmation{
-			ActionID:   "create-workspace",
-			ActionType: HomeActionCreateWorkspace,
-			Summary:    fmt.Sprintf("Create a new workspace named %q?", name),
-			Arguments:  map[string]any{"name": name},
-		}
-	}
-	return nil
 }
