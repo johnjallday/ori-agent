@@ -266,13 +266,17 @@ func (m homeActionMutator) CreateAgent(ctx context.Context, name, description st
 		return href, err
 	}
 	if description = strings.TrimSpace(description); description != "" {
-		_ = m.agents.UpdateAgent(name, func(ag *agent.Agent) error {
+		// The agent already exists at this point; a failed description write is
+		// non-fatal (creation succeeded) but worth a warning for debugging.
+		if updErr := m.agents.UpdateAgent(name, func(ag *agent.Agent) error {
 			if ag.Metadata == nil {
 				ag.Metadata = &types.AgentMetadata{}
 			}
 			ag.Metadata.Description = description
 			return nil
-		})
+		}); updErr != nil {
+			logger.Warn("home assistant: failed to set new agent description", logger.Fields{"agent": name, "err": updErr})
+		}
 	}
 	return href, nil
 }

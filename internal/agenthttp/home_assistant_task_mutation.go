@@ -150,7 +150,9 @@ func matchAgentInPrompt(reader homeAgentsReader, prompt string) (string, bool) {
 	bestLen := 0
 	for _, a := range roster {
 		name := strings.ToLower(strings.TrimSpace(a.Name))
-		if len(name) >= 2 && strings.Contains(p, name) && len(name) > bestLen {
+		// Require >= 3 chars (matching matchWorkspaceInPrompt) so very short agent
+		// names don't substring-match unrelated words; longest match wins.
+		if len(name) >= 3 && strings.Contains(p, name) && len(name) > bestLen {
 			best, bestLen = a.Name, len(name)
 		}
 	}
