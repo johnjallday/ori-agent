@@ -403,7 +403,7 @@ func detectHomeMutationRequest(prompt string) *HomeActionConfirmation {
 	if lower == "" {
 		return nil
 	}
-	if !(strings.HasPrefix(lower, "create ") || strings.HasPrefix(lower, "new ") || strings.HasPrefix(lower, "make ") || strings.HasPrefix(lower, "add ")) {
+	if !strings.HasPrefix(lower, "create ") && !strings.HasPrefix(lower, "new ") && !strings.HasPrefix(lower, "make ") && !strings.HasPrefix(lower, "add ") {
 		return nil
 	}
 	for _, marker := range []string{"workspace called ", "workspace named "} {

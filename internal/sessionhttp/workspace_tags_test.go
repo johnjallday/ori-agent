@@ -14,7 +14,7 @@ import (
 )
 
 func TestWorkspaceTagsPatchNormalizesAndPersists(t *testing.T) {
-	handler, _, _, _, cleanup := templateTestEnv(t)
+	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	createW, createResp := postCreateWorkspace(t, handler, `{"name":"Tagged Workspace"}`)

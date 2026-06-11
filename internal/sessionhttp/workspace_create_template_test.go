@@ -17,7 +17,7 @@ import (
 
 // templateTestEnv wires a handler with a folder store, a templates library
 // holding one template, and an event bus subscription for project.created.
-func templateTestEnv(t *testing.T) (*Handler, string, string, <-chan agentworkspace.Event, func()) {
+func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Event, func()) {
 	t.Helper()
 	handler, cleanup := createTestHandler(t)
 
@@ -51,7 +51,7 @@ func templateTestEnv(t *testing.T) (*Handler, string, string, <-chan agentworksp
 	})
 	handler.SetEventBus(bus)
 
-	return handler, baseDir, libDir, events, cleanup
+	return handler, baseDir, events, cleanup
 }
 
 func postCreateWorkspace(t *testing.T, handler *Handler, body string) (*httptest.ResponseRecorder, map[string]any) {
@@ -69,7 +69,7 @@ func postCreateWorkspace(t *testing.T, handler *Handler, body string) (*httptest
 }
 
 func TestCreateWorkspaceWithTemplate(t *testing.T) {
-	handler, baseDir, _, events, cleanup := templateTestEnv(t)
+	handler, baseDir, events, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Song X","template_id":"demo-template"}`)
@@ -160,7 +160,7 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 }
 
 func TestCreateProjectForExistingWorkspace(t *testing.T) {
-	handler, baseDir, _, events, cleanup := templateTestEnv(t)
+	handler, baseDir, events, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Album"}`)
@@ -275,7 +275,7 @@ func findSessionWorkspaceDirectoryReference(refs []workspaceDirectoryReference, 
 }
 
 func TestCreateWorkspaceWithTemplatePathEscapeHatch(t *testing.T) {
-	handler, baseDir, _, _, cleanup := templateTestEnv(t)
+	handler, baseDir, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	adHoc := t.TempDir()
@@ -297,7 +297,7 @@ func TestCreateWorkspaceWithTemplatePathEscapeHatch(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithoutTemplateUnchanged(t *testing.T) {
-	handler, baseDir, _, _, cleanup := templateTestEnv(t)
+	handler, baseDir, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Plain"}`)
@@ -317,7 +317,7 @@ func TestCreateWorkspaceWithoutTemplateUnchanged(t *testing.T) {
 }
 
 func TestCreateGroupWorkspaceRejectsTemplate(t *testing.T) {
-	handler, _, _, _, cleanup := templateTestEnv(t)
+	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, _ := postCreateWorkspace(t, handler, `{"name":"Album","kind":"group","template_id":"demo-template"}`)
@@ -327,7 +327,7 @@ func TestCreateGroupWorkspaceRejectsTemplate(t *testing.T) {
 }
 
 func TestCreateWorkspaceRejectsBothTemplateFields(t *testing.T) {
-	handler, _, _, _, cleanup := templateTestEnv(t)
+	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, _ := postCreateWorkspace(t, handler, `{"name":"Both","template_id":"demo-template","template_path":"/tmp/x"}`)
@@ -337,7 +337,7 @@ func TestCreateWorkspaceRejectsBothTemplateFields(t *testing.T) {
 }
 
 func TestCreateWorkspaceTemplateFailureIsNonFatal(t *testing.T) {
-	handler, baseDir, _, _, cleanup := templateTestEnv(t)
+	handler, baseDir, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Broken","template_id":"no-such-template"}`)
