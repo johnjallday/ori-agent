@@ -200,12 +200,18 @@ Classify a home page assistant prompt and find the best matching existing agent.
 ### Ask Home Assistant (Inline Harness)
 
 Answer an app-introspection or app-navigation prompt inline. The server builds a
-cross-workspace **home snapshot** (workspaces, windowed task activity, recent
-sessions, open Action Center opportunities, usage), runs the system model with
-read-only `home_*` tools, and returns a written answer plus grounded next-step
-actions. Used by the home page "Ask Ori" panel when
+cross-workspace **home snapshot** (the agent roster, workspaces, windowed task
+activity, recent sessions, open Action Center opportunities, usage), runs the
+system model with read-only `home_*` tools, and returns a written answer plus
+grounded next-step actions. Used by the home page "Ask Ori" panel when
 `/api/home-assistant/route` classifies the prompt as `app_introspection` or
 `app_navigation` (route mode `home_inline`).
+
+The agent section lists each agent's type, role, model, and the workspaces that
+use it, so the assistant can answer questions like "what agents do I have", "what
+can agent X do", and "which agents aren't used anywhere". The read-only tools the
+model may call are `home_workspaces`, `home_tasks`, `home_sessions`,
+`home_opportunities`, `home_usage`, and `home_agents`.
 
 **Endpoint:** `POST /api/home-assistant/ask`
 
@@ -238,6 +244,7 @@ actions. Used by the home page "Ask Ori" panel when
     "task_count": 5,
     "session_count": 4,
     "opportunity_count": 1,
+    "agent_count": 3,
     "degraded": [],
     "truncated": []
   },

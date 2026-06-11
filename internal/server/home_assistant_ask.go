@@ -67,6 +67,42 @@ func (a homeUsageAdapter) UsageSummary() (agenthttp.HomeUsageSummary, bool) {
 	}, true
 }
 
+// homeAgentsAdapter bridges the agent store to the home harness's agent-roster
+// reader, keeping agenthttp decoupled from the agent/store packages. Workspace
+// usage is cross-referenced in the snapshot/tool, so the roster carries only
+// per-agent profile fields.
+type homeAgentsAdapter struct {
+	agents store.Store
+}
+
+func (a homeAgentsAdapter) AgentRoster() ([]agenthttp.HomeAgentSummary, bool) {
+	if a.agents == nil {
+		return nil, false
+	}
+	names := a.agents.ListAgents()
+	out := make([]agenthttp.HomeAgentSummary, 0, len(names))
+	for _, name := range names {
+		ag, ok := a.agents.GetAgent(name)
+		if !ok || ag == nil {
+			continue
+		}
+		summary := agenthttp.HomeAgentSummary{
+			Name:         name,
+			Type:         ag.Type,
+			Role:         string(ag.Role),
+			Model:        ag.Settings.Model,
+			Provider:     ag.Settings.Provider,
+			Capabilities: ag.Capabilities,
+			Status:       string(ag.Status),
+		}
+		if ag.Metadata != nil {
+			summary.Description = ag.Metadata.Description
+		}
+		out = append(out, summary)
+	}
+	return out, true
+}
+
 // homeActionMutator executes confirmed home actions (PRD 4.6). CreateWorkspace,
 // CreateTask, and StartTask are wired; StartTask runs the task through the same
 // orchestrator path the workspace UI uses, so coordinator-driven assignment and
@@ -201,6 +237,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			sources.Opportunities = workspace.NewOpportunityStore(s.Storage.WorkspaceStore)
 		}
 		sources.Sessions = homeRecentSessionsAdapter{store: s.Storage.SessionStore}
+		if s.Storage.AgentStore != nil {
+			sources.Agents = homeAgentsAdapter{agents: s.Storage.AgentStore}
+		}
 	}
 	if s.Core != nil {
 		sources.Usage = homeUsageAdapter{tracker: s.Core.CostTracker}

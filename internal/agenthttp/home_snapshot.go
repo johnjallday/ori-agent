@@ -3,6 +3,7 @@ package agenthttp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ const (
 	homeSnapshotMaxTasks         = 40
 	homeSnapshotMaxSessions      = 20
 	homeSnapshotMaxOpportunities = 20
+	homeSnapshotMaxAgents        = 30
 	homeSnapshotPreviewLimit     = 180
 	homeSnapshotTextLimit        = 120
 )
@@ -66,6 +68,15 @@ type homeUsageReader interface {
 	UsageSummary() (HomeUsageSummary, bool)
 }
 
+// homeAgentsReader returns the app-wide agent roster. The server wires an
+// agent-store adapter so agenthttp stays decoupled from the agent/store
+// packages. A false ok degrades the agents section rather than failing the
+// answer. Workspace usage is cross-referenced from the workspace list, not the
+// reader, so the roster carries only per-agent profile fields.
+type homeAgentsReader interface {
+	AgentRoster() ([]HomeAgentSummary, bool)
+}
+
 // HomeSnapshotSources bundles the data sources the snapshot aggregates. Any may
 // be nil; a nil source degrades its section instead of failing the snapshot.
 type HomeSnapshotSources struct {
@@ -73,6 +84,7 @@ type HomeSnapshotSources struct {
 	Opportunities workspace.OpportunityStore
 	Sessions      homeRecentSessionsReader
 	Usage         homeUsageReader
+	Agents        homeAgentsReader
 	// Now allows tests to pin the clock; defaults to time.Now.
 	Now func() time.Time
 }
@@ -99,6 +111,23 @@ type HomeTaskSummary struct {
 	UpdatedAt     time.Time
 }
 
+// HomeAgentSummary is a single agent profile in the app-wide roster, plus the
+// count and names of workspaces that use it (cross-referenced from the workspace
+// list, so the home assistant can answer "which agents do I have and where are
+// they used").
+type HomeAgentSummary struct {
+	Name           string
+	Type           string
+	Role           string
+	Model          string
+	Provider       string
+	Description    string
+	Capabilities   []string
+	Status         string
+	WorkspaceCount int
+	Workspaces     []string
+}
+
 // HomeOpportunitySummary is a single open Action Center opportunity.
 type HomeOpportunitySummary struct {
 	ID            string
@@ -120,6 +149,7 @@ type HomeSnapshotMeta struct {
 	TaskCount        int            `json:"task_count"`
 	SessionCount     int            `json:"session_count"`
 	OpportunityCount int            `json:"opportunity_count"`
+	AgentCount       int            `json:"agent_count"`
 	Truncated        []string       `json:"truncated,omitempty"`
 	Degraded         []string       `json:"degraded,omitempty"`
 }
@@ -132,6 +162,7 @@ type HomeSnapshot struct {
 	Tasks         []HomeTaskSummary
 	Sessions      []HomeSessionSummary
 	Opportunities []HomeOpportunitySummary
+	Agents        []HomeAgentSummary
 	Usage         *HomeUsageSummary
 }
 
@@ -234,7 +265,8 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 		TaskCounts: map[string]int{},
 	}
 
-	wsByID := map[string]string{} // id -> name, for cross-section labeling
+	wsByID := map[string]string{}            // id -> name, for cross-section labeling
+	agentWorkspaces := map[string][]string{} // agent name -> workspace names that use it
 
 	// Workspaces + tasks.
 	if sources.Workspaces == nil {
@@ -265,6 +297,9 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 			var windowedTasks []HomeTaskSummary
 			for _, ws := range workspaces {
 				wsByID[ws.ID] = ws.Name
+				for _, agentName := range workspaceAgentNames(ws) {
+					agentWorkspaces[agentName] = append(agentWorkspaces[agentName], ws.Name)
+				}
 				stats := ws.GetTaskStats()
 				for k, v := range stats {
 					snap.TaskCounts[k] += v
@@ -334,7 +369,91 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 		snap.Meta.Degraded = append(snap.Meta.Degraded, "usage")
 	}
 
+	// Agents (roster + workspace usage cross-referenced from the workspace loop).
+	snap.Agents, snap.Meta.AgentCount = collectHomeAgents(sources.Agents, agentWorkspaces, &snap.Meta)
+
 	return snap
+}
+
+// collectHomeAgents reads the agent roster, fills in each agent's workspace usage
+// from the cross-reference map, and applies the snapshot cap. A nil/failed reader
+// degrades the agents section.
+func collectHomeAgents(reader homeAgentsReader, agentWorkspaces map[string][]string, meta *HomeSnapshotMeta) ([]HomeAgentSummary, int) {
+	if reader == nil {
+		meta.Degraded = append(meta.Degraded, "agents")
+		return nil, 0
+	}
+	roster, ok := reader.AgentRoster()
+	if !ok {
+		meta.Degraded = append(meta.Degraded, "agents")
+		return nil, 0
+	}
+	for i := range roster {
+		names := dedupeSortedStrings(agentWorkspaces[roster[i].Name])
+		roster[i].Workspaces = names
+		roster[i].WorkspaceCount = len(names)
+	}
+	// Most-used agents first, then alphabetical for stability.
+	sort.Slice(roster, func(i, j int) bool {
+		if roster[i].WorkspaceCount != roster[j].WorkspaceCount {
+			return roster[i].WorkspaceCount > roster[j].WorkspaceCount
+		}
+		return roster[i].Name < roster[j].Name
+	})
+	total := len(roster)
+	if len(roster) > homeSnapshotMaxAgents {
+		roster = roster[:homeSnapshotMaxAgents]
+		meta.Truncated = append(meta.Truncated, "agents")
+	}
+	return roster, total
+}
+
+// workspaceAgentNames returns the distinct agent profile names a workspace uses,
+// preferring stable AgentInstances and falling back to the deprecated Agents
+// slice. Field access mirrors the lock-free reads elsewhere in this snapshot.
+func workspaceAgentNames(ws *workspace.Workspace) []string {
+	seen := map[string]struct{}{}
+	var names []string
+	add := func(raw string) {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, inst := range ws.AgentInstances {
+		add(inst.Name)
+	}
+	for _, name := range ws.Agents {
+		add(name)
+	}
+	return names
+}
+
+// dedupeSortedStrings returns the unique, sorted set of non-empty strings.
+func dedupeSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func collectHomeOpportunities(store workspace.OpportunityStore, workspaces []*workspace.Workspace, meta *HomeSnapshotMeta) ([]HomeOpportunitySummary, int) {
@@ -433,6 +552,21 @@ func (s HomeSnapshot) PromptText() string {
 			homeSnapshotDate(ws.UpdatedAt), ws.ID)
 	}
 
+	fmt.Fprintf(&b, "\n### Agents (%d)\n\n", s.Meta.AgentCount)
+	if len(s.Agents) == 0 {
+		if slices.Contains(s.Meta.Degraded, "agents") {
+			b.WriteString("- unavailable\n")
+		} else {
+			b.WriteString("- none\n")
+		}
+	}
+	for _, a := range s.Agents {
+		fmt.Fprintf(&b, "- %q type=%s role=%s model=%s/%s used_in=%d workspace(s)%s%s\n",
+			homeSnapshotClip(a.Name, homeSnapshotTextLimit), emptyTo(a.Type, "n/a"), emptyTo(a.Role, "n/a"),
+			emptyTo(a.Provider, "n/a"), emptyTo(a.Model, "n/a"), a.WorkspaceCount,
+			homeAgentWorkspacesText(a.Workspaces), homeAgentDescriptionText(a.Description))
+	}
+
 	b.WriteString("\n### Task activity\n\n")
 	b.WriteString("- Counts (all-time): " + homeTaskCountsLine(s.TaskCounts) + "\n")
 	fmt.Fprintf(&b, "- Tasks active in window: %d\n", s.Meta.TaskCount)
@@ -475,6 +609,32 @@ func (s HomeSnapshot) PromptText() string {
 
 	b.WriteString("\nUse this snapshot as the source of truth for app-data questions. Call the home_* tools to read full state when a section is truncated or you need detail. Do not fabricate activity; if a section is empty or degraded, say so.\n")
 	return b.String()
+}
+
+func homeAgentWorkspacesText(workspaces []string) string {
+	if len(workspaces) == 0 {
+		return ""
+	}
+	const maxNamed = 5
+	named := workspaces
+	suffix := ""
+	if len(named) > maxNamed {
+		named = named[:maxNamed]
+		suffix = ", …"
+	}
+	clipped := make([]string, 0, len(named))
+	for _, name := range named {
+		clipped = append(clipped, homeSnapshotClip(name, homeSnapshotTextLimit))
+	}
+	return " [" + strings.Join(clipped, ", ") + suffix + "]"
+}
+
+func homeAgentDescriptionText(description string) string {
+	clipped := homeSnapshotClip(description, homeSnapshotPreviewLimit)
+	if clipped == "" {
+		return ""
+	}
+	return " — " + clipped
 }
 
 func homeTaskCountsLine(stats map[string]int) string {
