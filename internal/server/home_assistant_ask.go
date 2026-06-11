@@ -168,13 +168,18 @@ func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID st
 		return href, fmt.Errorf("task is already completed")
 	}
 
-	// Execute asynchronously with a detached context: the HTTP request that
-	// confirmed this action returns immediately, so the task must not be
-	// cancelled when its context is torn down. Mirrors ExecuteTaskManually.
+	// Execute asynchronously. The HTTP request that confirmed this action
+	// returns immediately, so derive a context that keeps the request's values
+	// (tracing, etc.) but is not cancelled when the request ends — otherwise the
+	// task would be torn down the moment we respond.
+	execCtx := context.Background()
+	if ctx != nil {
+		execCtx = context.WithoutCancel(ctx)
+	}
 	task := *target
 	orchestrator := m.orchestrator
 	go func() {
-		if execErr := orchestrator.ExecuteTask(context.Background(), workspaceID, task); execErr != nil {
+		if execErr := orchestrator.ExecuteTask(execCtx, workspaceID, task); execErr != nil {
 			logger.Error("home assistant: failed to start task", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "err": execErr})
 		}
 	}()
