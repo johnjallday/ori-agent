@@ -337,7 +337,7 @@
   function truncateText(value, maxLength) {
     var text = String(value || '').trim();
     if (text.length <= maxLength) return text;
-    return text.slice(0, Math.max(0, maxLength - 3)) + '...';
+    return text.slice(0, Math.max(0, maxLength - 1)) + '…';
   }
 
   function formatRelativeTime(timestamp) {
@@ -1126,7 +1126,7 @@
       els.thinkingModalLabel.textContent = label + ' has an update ready';
       return;
     }
-    els.thinkingModalLabel.textContent = label + ' is working';
+    els.thinkingModalLabel.textContent = label + (homeAssistantState.busy ? ' is working' : ' is ready');
   }
 
   function setHomeAssistantConversationCollapsed(collapsed) {
@@ -1224,7 +1224,7 @@
     } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
-      statusText = 'Working...';
+      statusText = 'Working…';
     } else if (hasVisibleHomeAssistantPlanning()) {
       statusText = 'Complete the active planning step below.';
     } else if (hasVisibleHomeAssistantInlineReply()) {
@@ -1604,7 +1604,7 @@
       els.input.disabled = homeAssistantState.busy;
       setHomeAssistantSendButtonLabel(
         els.sendBtn,
-        homeAssistantState.busy ? (busyLabel || 'Working...') : els.sendBtn.dataset.defaultLabel
+        homeAssistantState.busy ? (busyLabel || 'Working…') : els.sendBtn.dataset.defaultLabel
       );
     }
     for (var i = 0; i < els.quickButtons.length; i++) {
@@ -2546,12 +2546,12 @@
 
     if (planningState && planningState.specialistBusy === specialistKey) {
       if (status && status.taskId) {
-        return 'Opening ' + config.label + ' Task...';
+        return 'Opening ' + config.label + ' Task…';
       }
       if (status && status.agentName) {
-        return 'Handing Off To ' + status.agentName + '...';
+        return 'Handing Off To ' + status.agentName + '…';
       }
-      return 'Creating ' + config.label + '...';
+      return 'Creating ' + config.label + '…';
     }
 
     if (status && status.taskId) {
@@ -2809,7 +2809,7 @@
       if (!planningState.mainTask || !planningState.mainTask.id) {
         planningState.mainTaskCreating = true;
         renderHomeAssistantPlanning();
-        setHomeAssistantBusy(true, 'Adding Main Task...');
+        setHomeAssistantBusy(true, 'Adding Main Task…');
         setHomeAssistantRoutingSummary(
           'Planning Review',
           'Adding the main task to this workspace before the planning subtasks continue.'
@@ -2823,7 +2823,7 @@
 
       planningState.mainTaskCreating = false;
       renderHomeAssistantPlanning();
-      setHomeAssistantBusy(true, 'Starting Task...');
+      setHomeAssistantBusy(true, 'Starting Task…');
       setHomeAssistantRoutingSummary(
         planningState.agentLabel,
         isTravelPlanningReviewState(planningState)
@@ -2872,7 +2872,7 @@
     if (intent && intent.key === 'travel_planning') {
       return 'Example: 1A, 2C, 3B, 4B, and I care about food and museums.';
     }
-    return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '...';
+    return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '…';
   }
 
   function getInlineReplyWorkspaceName(routeContext) {
@@ -3181,7 +3181,7 @@
       saveNoteButton.className = 'modern-btn modern-btn-secondary';
       saveNoteButton.disabled = isReviewBusy || Boolean(planningState.noteSaved);
       saveNoteButton.textContent = planningState.noteSaving
-        ? 'Saving Note...'
+        ? 'Saving Note…'
         : (planningState.noteSaved && planningState.noteSaved.name
             ? 'Saved To "' + planningState.noteSaved.name + '"'
             : 'Save Summary To Note');
@@ -3197,9 +3197,9 @@
         : 'modern-btn modern-btn-primary';
       continueButton.disabled = isReviewBusy;
       continueButton.textContent = planningState.mainTaskCreating
-        ? 'Adding Main Task...'
+        ? 'Adding Main Task…'
         : planningState.continuing
-        ? 'Continuing...'
+        ? 'Continuing…'
         : specialistFirstReview
         ? ('Keep Task With ' + planningState.agentLabel)
         : ('Start Task With ' + planningState.agentLabel);
@@ -3459,7 +3459,7 @@
     submitButton.type = 'submit';
     submitButton.className = 'modern-btn modern-btn-primary';
     submitButton.textContent = isSubmitting
-      ? 'Sending...'
+      ? 'Sending…'
       : (planningState.schema.submit_label || ('Continue With ' + planningState.agentLabel));
     submitButton.disabled = isSubmitting;
     actions.appendChild(submitButton);
@@ -3715,7 +3715,7 @@
     sendButton.className = 'modern-btn modern-btn-primary';
     sendButton.disabled = isSubmitting || (choiceStep ? !replyState.selectedChoiceId : false);
     sendButton.textContent = isSubmitting
-      ? 'Sending...'
+      ? 'Sending…'
       : choiceStep
       ? 'Complete Subtask'
       : 'Submit Subtask';
@@ -3780,7 +3780,7 @@
     replyState.submitting = true;
     renderHomeAssistantInlineReply();
     appendHomeAssistantMessage('user', submittedText);
-    setHomeAssistantBusy(true, 'Sending Reply...');
+    setHomeAssistantBusy(true, 'Sending Reply…');
     setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
 
     try {
@@ -3859,7 +3859,7 @@
     var manager = window.sessionManager;
     var deleted = false;
 
-    setHomeAssistantBusy(true, 'Deleting...');
+    setHomeAssistantBusy(true, 'Deleting…');
     renderHomeAssistantActions([]);
     try {
       if (manager && typeof manager.deleteSession === 'function') {
@@ -5125,7 +5125,7 @@
       + '      <p class="small mb-3" style="color: var(--text-secondary);">' + String(modalOptions.description || 'Select an MCP connector and apply it with explicit approval.') + '</p>'
       + '      <div class="input-group mb-2">'
       + '        <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">Search</span>'
-      + '        <input id="' + searchId + '" type="text" class="form-control" placeholder="' + String(modalOptions.searchPlaceholder || 'Search connectors...') + '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">'
+      + '        <input id="' + searchId + '" type="text" class="form-control" placeholder="' + String(modalOptions.searchPlaceholder || 'Search connectors…') + '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">'
       + '      </div>'
       + '      <div id="' + countId + '" class="small mb-2" style="color: var(--text-secondary);"></div>'
       + '      <div id="' + listId + '" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>'
@@ -5354,8 +5354,8 @@
           if (switchButton) switchButton.disabled = true;
           var originalLabel = confirmButton.textContent;
           confirmButton.textContent = agentName
-            ? String(modalOptions.progressWithAgentLabel || 'Applying...')
-            : String(modalOptions.progressWithoutAgentLabel || 'Installing...');
+            ? String(modalOptions.progressWithAgentLabel || 'Applying…')
+            : String(modalOptions.progressWithoutAgentLabel || 'Installing…');
 
           try {
             var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate, routeContext);
@@ -5390,7 +5390,7 @@
       modalPrefix: 'homeEmailMCPBrowseModal',
       title: 'Browse Email MCP Connectors',
       description: 'Select an email connector for Gmail, Outlook, or IMAP. Installed connectors are bound from the active workspace when one is available.',
-      searchPlaceholder: 'gmail, outlook, imap...',
+      searchPlaceholder: 'gmail, outlook, imap…',
       emptyStateText: 'No matching email MCP connectors found.',
       pendingInstallText: 'Will be installed and then bound in the active workspace.',
       switchLabel: 'Use Browser Control',
@@ -5404,7 +5404,7 @@
       modalPrefix: 'homeBrowserMCPBrowseModal',
       title: 'Browse Browser Control MCP',
       description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Installed connectors are bound from the active workspace when one is available.',
-      searchPlaceholder: 'playwright, browserbase, puppeteer...',
+      searchPlaceholder: 'playwright, browserbase, puppeteer…',
       emptyStateText: 'No matching browser-control MCP connectors found.',
       pendingInstallText: 'Will be installed and then bound in the active workspace.',
       switchLabel: 'Use Email Connector',
@@ -6102,7 +6102,7 @@
   async function executeCapabilityPlan(plan, prompt, routeContext, appLaunchRequest) {
     if (!plan) return;
 
-    setHomeAssistantBusy(true, 'Applying Plan...');
+    setHomeAssistantBusy(true, 'Applying Plan…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Applying the capability plan now.');
 
@@ -7617,7 +7617,7 @@
 
         submitting = true;
         createButton.disabled = true;
-        createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+        createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating…';
 
         try {
           var requestBody = {
@@ -7734,10 +7734,10 @@
       return;
     }
 
-    setHomeAssistantBusy(true, 'Creating...');
+    setHomeAssistantBusy(true, 'Creating…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating a new agent for this task...');
-    setHomeAssistantRoutingSummary('Agent Creation', 'Creating a new agent for this task...');
+    appendHomeAssistantMessage('assistant', 'Creating a new agent for this task…');
+    setHomeAssistantRoutingSummary('Agent Creation', 'Creating a new agent for this task…');
 
     try {
       var listData = await API.get('/api/agents');
@@ -7802,7 +7802,7 @@
           return;
         }
         agentName = semiAutoConfirmation.agentName;
-        setHomeAssistantBusy(true, 'Finalizing...');
+        setHomeAssistantBusy(true, 'Finalizing…');
       } else if (!payload.model) {
         appendHomeAssistantMessage('assistant',
           'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
@@ -7832,7 +7832,7 @@
           return;
         }
         agentName = confirmation.agentName;
-        setHomeAssistantBusy(true, 'Finalizing...');
+        setHomeAssistantBusy(true, 'Finalizing…');
       } else {
         appendHomeAssistantMessage('assistant', 'Auto-selected model "' + payload.model + '" for "' + agentName + '".');
         await API.post('/api/agents', payload);
@@ -8318,7 +8318,7 @@
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
     var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
 
-    setHomeAssistantBusy(true, 'Running Capability...');
+    setHomeAssistantBusy(true, 'Running Capability…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Using the current capability setup to answer this directly.');
     setHomeAssistantRoutingSummary('Capability Direct', 'Running the request inline with the selected agent.');
@@ -8413,7 +8413,7 @@
       return;
     }
 
-    setHomeAssistantBusy(true, 'Checking Workspace Schedule...');
+    setHomeAssistantBusy(true, 'Checking Workspace Schedule…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Checking scheduled tasks in the current workspace.');
     setHomeAssistantRoutingSummary('Workspace Schedule', 'Loading scheduled tasks for this workspace.');
@@ -8526,7 +8526,7 @@
       routeContext: buildHomeRouteContext(),
       finalHandoffTarget: 'tool'
     });
-    setHomeAssistantBusy(true, 'Running Utility...');
+    setHomeAssistantBusy(true, 'Running Utility…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Running this as a direct utility request in the current assistant session.');
     setHomeAssistantRoutingSummary('Utility Direct', 'Executing directly without creating or handing off to another agent.');
@@ -8589,11 +8589,11 @@
     var confirmedAction = options.confirmedAction || null;
     var summaryLabel = intent === 'app_navigation' ? 'Navigation' : 'Activity';
 
-    setHomeAssistantBusy(true, confirmedAction ? 'Applying...' : 'Thinking...');
+    setHomeAssistantBusy(true, confirmedAction ? 'Applying…' : 'Thinking…');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary(
       summaryLabel,
-      confirmedAction ? 'Applying your confirmed action...' : 'Reviewing your workspaces, tasks, and activity...'
+      confirmedAction ? 'Applying your confirmed action…' : 'Reviewing your workspaces, tasks, and activity…'
     );
 
     try {
@@ -9564,7 +9564,7 @@
     var allowCreate = options && options.allowCreate === true;
     var managerLabel = getWorkspaceHomeAssistantDisplayName();
 
-    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist...' : 'Routing Task...');
+    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist…' : 'Routing Task…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage(
       'assistant',
@@ -9943,10 +9943,10 @@
       var chosenAgent = String(agentName || '').trim();
       if (!chosenAgent) return;
 
-      setHomeAssistantBusy(true, 'Creating Scheduled Task...');
+      setHomeAssistantBusy(true, 'Creating Scheduled Task…');
       renderHomeAssistantActions([]);
-      appendHomeAssistantMessage('assistant', 'Creating a scheduled task and assigning it to "' + chosenAgent + '"...');
-      setHomeAssistantRoutingSummary('Scheduled Task', 'Creating and assigning scheduled task...');
+      appendHomeAssistantMessage('assistant', 'Creating a scheduled task and assigning it to "' + chosenAgent + '"…');
+      setHomeAssistantRoutingSummary('Scheduled Task', 'Creating and assigning scheduled task…');
 
       try {
         await createScheduledWorkspaceTask(workspaceId, prompt, chosenAgent, scheduleConfig, scheduleName);
@@ -10123,7 +10123,7 @@
       commandSummaryText = 'Saving a note in this workspace.';
     }
 
-    setHomeAssistantBusy(true, command === 'task' ? 'Creating Task...' : command === 'note' ? 'Saving Note...' : 'Running Command...');
+    setHomeAssistantBusy(true, command === 'task' ? 'Creating Task…' : command === 'note' ? 'Saving Note…' : 'Running Command…');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary(commandSummaryTitle, commandSummaryText);
 
@@ -10544,9 +10544,9 @@
       workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(sourcePrompt || ('Create workspace: ' + name))
     };
 
-    setHomeAssistantBusy(true, 'Preparing Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Opening the Create Workspace modal for "' + name + '"...');
+    appendHomeAssistantMessage('assistant', 'Opening the Create Workspace modal for "' + name + '"…');
     setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
@@ -10612,9 +10612,9 @@
       finalHandoffTarget: 'workspace_create'
     });
 
-    setHomeAssistantBusy(true, 'Preparing Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Opening Create Workspace so you can review details first...');
+    appendHomeAssistantMessage('assistant', 'Opening Create Workspace so you can review details first…');
     setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
@@ -10677,10 +10677,10 @@
       finalHandoffTarget: 'chat_agent'
     });
 
-    setHomeAssistantBusy(true, 'Opening Chat...');
+    setHomeAssistantBusy(true, 'Opening Chat…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"...');
-    setHomeAssistantRoutingSummary('Handoff', 'Routing task to "' + agentName + '"...');
+    appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"…');
+    setHomeAssistantRoutingSummary('Handoff', 'Routing task to "' + agentName + '"…');
     if (appLaunchRequest && appLaunchRequest.appName) {
       appendHomeAssistantMessage('assistant',
         'Routing steps: 1) Start a new session. 2) Execute /openapp ' + appLaunchRequest.appName + ' to launch the app.');
@@ -10798,7 +10798,7 @@
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
-      setHomeAssistantRoutingSummary('Agent Creation', 'Confirmed. Creating a new agent...');
+      setHomeAssistantRoutingSummary('Agent Creation', 'Confirmed. Creating a new agent…');
       await createAgentForPendingTask();
       return;
     }
@@ -10857,11 +10857,11 @@
       }
 
       var workspaceManagerLabel = getWorkspaceHomeAssistantDisplayName();
-      setHomeAssistantBusy(true, 'Asking...');
+      setHomeAssistantBusy(true, 'Asking…');
       renderHomeAssistantActions([]);
       setHomeAssistantRoutingSummary(
         workspaceManagerLabel,
-        'Sending your request to the workspace manager...'
+        'Sending your request to the workspace manager…'
       );
 
       try {
@@ -10914,9 +10914,9 @@
       return;
     }
 
-    setHomeAssistantBusy(true, 'Routing...');
+    setHomeAssistantBusy(true, 'Routing…');
     renderHomeAssistantActions([]);
-    setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
+    setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent…');
 
     try {
       var routeData = await routePromptWithBackend(text, routeContext);

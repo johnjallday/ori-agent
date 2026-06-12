@@ -5118,6 +5118,12 @@ body.modal-open .hub-support-chat {
   border-radius: 12px;
 }
 
+/* Hidden until the first message lands; dashboard.js toggles is-empty
+   in syncHomeAssistantConversationSection(). */
+.hub-support-chat-conversation-section.home-assistant-conversation-section.is-empty {
+  display: none;
+}
+
 .hub-support-chat-conversation.home-assistant-conversation {
   max-height: 260px;
   overflow-y: auto;

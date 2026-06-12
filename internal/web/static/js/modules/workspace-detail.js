@@ -2154,6 +2154,7 @@ export class WorkspaceDetailPage {
     if (this.elements.workspaceName) {
       this.elements.workspaceName.textContent = this.workspace.name || 'Unnamed Workspace';
     }
+    window.hubSupportChat?.setSubtitle?.(this.workspace.name || '');
     if (this.elements.workspaceDescription) {
       if (this.workspace.description) {
         this.elements.workspaceDescription.textContent = this.workspace.description;

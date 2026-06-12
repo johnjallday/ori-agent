@@ -1,6 +1,6 @@
 {{define "support-chat.tmpl"}}
 <!-- Floating Workspace Assistant -->
-<div id="hubSupportChat" class="hub-support-chat hub-support-chat-workspace" data-state="closed" aria-live="polite">
+<div id="hubSupportChat" class="hub-support-chat hub-support-chat-workspace" data-state="closed">
   <div id="hubSupportChatPanel" class="hub-support-chat-panel" role="dialog" aria-labelledby="hubSupportChatTitle" aria-modal="false" aria-hidden="true" tabindex="-1">
     <header class="hub-support-chat-header">
       <div class="hub-support-chat-header-text">
@@ -28,7 +28,7 @@
         </div>
         <div class="hub-workspace-assistant-compose">
           <textarea id="homeAssistantInput" class="hub-support-chat-input modern-input" rows="1" maxlength="800"
-                    placeholder="Create a task for Workspace Manager..."
+                    placeholder="Create a task for Workspace Manager…"
                     aria-label="Workspace manager prompt"></textarea>
           <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn hub-support-chat-send" aria-label="Send workspace assistant prompt">
             <span class="hub-support-chat-send-label">Create Task</span>
@@ -77,7 +77,7 @@
       <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
       <div id="homeAssistantActions" class="hub-support-chat-actions d-flex flex-wrap gap-2 mt-3 d-none"></div>
 
-      <section id="homeAssistantConversationSection" class="home-assistant-conversation-section hub-support-chat-conversation-section mt-3">
+      <section id="homeAssistantConversationSection" class="home-assistant-conversation-section hub-support-chat-conversation-section mt-3 is-empty">
         <div class="home-assistant-conversation-section-header">
           <div>
             <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
