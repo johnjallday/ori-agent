@@ -712,11 +712,11 @@
     var raw = String(prompt || '').trim();
     if (!raw || raw.charAt(0) !== '/') return null;
 
-    var match = raw.match(/^\/(task|chat|c|note|directory|dir|file|upload)(?:\s+([\s\S]*))?$/i);
+    var match = raw.match(/^\/(task|chat|c|ask|note|directory|dir|file|upload)(?:\s+([\s\S]*))?$/i);
     if (!match) return null;
 
     var command = normalizeToken(match[1]);
-    if (command === 'c') command = 'chat';
+    if (command === 'c' || command === 'ask') command = 'chat';
     if (command === 'dir') command = 'directory';
     if (command === 'upload') command = 'file';
 
@@ -1457,8 +1457,8 @@
     }
     if (hasWorkspaceRouteContext(routeContext)) {
       if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace… (/task creates a task)';
-      if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /chat asks)';
-      return 'Create a task for ' + displayName + '… (/chat asks, /note saves a note)';
+      if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /ask asks)';
+      return 'Create a task for ' + displayName + '… (/ask asks, /note saves a note)';
     }
     return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Ask Ori to do something…';
   }
@@ -11266,8 +11266,17 @@
         if (homeAssistantState.busy) return;
         var prompt = event.currentTarget && event.currentTarget.getAttribute('data-home-prompt');
         if (!prompt) return;
+        // Prefill instead of auto-send so the prompt can be reviewed and
+        // edited before anything is created.
         els.input.value = prompt;
-        handleHomeAssistantSubmit();
+        if (window.hubSupportChat && typeof window.hubSupportChat.resize === 'function') {
+          window.hubSupportChat.resize();
+        }
+        els.input.focus();
+        if (typeof els.input.setSelectionRange === 'function') {
+          var caret = els.input.value.length;
+          els.input.setSelectionRange(caret, caret);
+        }
       });
     }
 

@@ -5054,11 +5054,40 @@ body.modal-open .hub-support-chat {
   width: auto;
   min-width: 148px;
   height: 46px;
-  align-self: flex-end;
   border-radius: 12px;
   gap: 8px;
   padding: 0 18px;
   font-weight: 700;
+}
+
+.hub-workspace-assistant-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.hub-workspace-assistant-actions .hub-support-chat-configure {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hub-workspace-assistant-actions .hub-support-chat-configure[hidden] {
+  display: none;
+}
+
+/* The workspaces hub has no single workspace context: the manager identity,
+   Task/Ask/Note modes, and workspace quick actions don't apply there. */
+.hub-support-chat[data-surface="workspace_hub"] .hub-workspace-assistant-meta,
+.hub-support-chat[data-surface="workspace_hub"] .hub-workspace-mode-switch,
+.hub-support-chat[data-surface="workspace_hub"] .hub-workspace-assistant-quick {
+  display: none;
 }
 
 .hub-workspace-assistant-quick {
@@ -5236,8 +5265,8 @@ body.modal-open .hub-support-chat {
   }
 
   .hub-support-chat-workspace .hub-support-chat-send {
-    width: 100%;
-    align-self: stretch;
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .hub-support-chat-launcher {

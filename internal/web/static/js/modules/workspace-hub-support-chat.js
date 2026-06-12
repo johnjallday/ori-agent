@@ -63,11 +63,18 @@
     const titleEl = $('hubSupportChatTitle');
     const subtitleEl = $('hubSupportChatSubtitle');
     const inputEl = $('homeAssistantInput');
+    const configureBtn = $('homeAssistantConfigureTaskBtn');
     const config = surface || SURFACES.workspace_detail;
 
     if (titleEl) titleEl.textContent = config.title;
     if (subtitleEl) subtitleEl.textContent = config.subtitle;
     if (inputEl) inputEl.setAttribute('aria-label', config.inputLabel);
+    if (elements && elements.root) {
+      elements.root.setAttribute('data-surface', surface ? surface.key : 'workspace_detail');
+    }
+    // The task editor is bound by the workspace detail page module; the
+    // button is dead weight on other surfaces.
+    if (configureBtn) configureBtn.hidden = !surface || surface.key !== 'workspace_detail';
   }
 
   // Page modules call this once they know the concrete context (e.g. the
