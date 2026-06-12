@@ -308,6 +308,5 @@ make test-scenarios
 - [TEST_CHEATSHEET.md](TEST_CHEATSHEET.md) - Quick command reference
 - [SHARED_PLUGINS_TESTING.md](SHARED_PLUGINS_TESTING.md) - Testing ../plugins directory
 - [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - What was built
-- [TESTING.md](../../TESTING.md) - Complete testing guide
-- [PROJECT_GUIDELINES.md](../../PROJECT_GUIDELINES.md) - Architecture overview
-- [Plugin Development](../../CLAUDE.md#plugin-development) - Plugin creation guide
+- [Testing docs](../../docs/testing/) - Test cheat sheet, setup summary, and guides
+- [CLAUDE.md](../../CLAUDE.md) - Architecture overview and development guide
