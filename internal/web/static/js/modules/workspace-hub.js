@@ -2899,14 +2899,18 @@ console.log('[workspace-hub.js] FILE LOADED');
       const result = await res.json().catch(() => ({}));
       const imported = Number(result?.imported || 0);
       const reparented = Number(result?.reparented || 0);
+      const orphaned = Number(result?.orphaned || 0);
+      const restored = Number(result?.restored || 0);
       await loadWorkspaces();
       if (window.Toast) {
-        if (imported === 0 && reparented === 0) {
+        if (imported === 0 && reparented === 0 && orphaned === 0 && restored === 0) {
           window.Toast.success('Workspaces are up to date with disk');
         } else {
           const parts = [];
           if (imported > 0) parts.push(`${imported} imported`);
           if (reparented > 0) parts.push(`${reparented} re-grouped`);
+          if (orphaned > 0) parts.push(`${orphaned} hidden (folder missing on disk)`);
+          if (restored > 0) parts.push(`${restored} restored`);
           window.Toast.success(`Rescanned from disk: ${parts.join(', ')}`);
         }
       }
@@ -2915,6 +2919,30 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (window.Toast) window.Toast.error('Failed to rescan workspaces');
     } finally {
       if (btn) btn.disabled = false;
+    }
+  }
+
+  // Silently reconcile the session store with the workspaces root once when the
+  // hub loads, so folders deleted/created outside this app (Finder, another
+  // instance) are reflected without a manual rescan. The background flag lets
+  // the server apply a cooldown so several tabs opening at once don't each
+  // trigger a filesystem walk. Refreshes the list only when the reconcile
+  // actually changed something; errors are non-fatal.
+  async function reconcileWorkspacesOnLoad() {
+    try {
+      const res = await fetch('/api/workspaces/rescan?background=1', { method: 'POST' });
+      if (!res.ok) return;
+      const result = await res.json().catch(() => ({}));
+      const changed =
+        Number(result?.imported || 0) +
+        Number(result?.reparented || 0) +
+        Number(result?.orphaned || 0) +
+        Number(result?.restored || 0);
+      if (changed > 0) {
+        await loadWorkspaces();
+      }
+    } catch (err) {
+      console.warn('Background workspace reconcile failed:', err);
     }
   }
 
@@ -4450,5 +4478,5 @@ console.log('[workspace-hub.js] FILE LOADED');
     areAllLauncherWorkspacesSelected
   };
 
-  loadWorkspaces();
+  loadWorkspaces().then(() => reconcileWorkspacesOnLoad());
 })();

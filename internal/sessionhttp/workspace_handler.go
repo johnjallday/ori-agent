@@ -595,19 +595,20 @@ func rewriteWorkspaceProjectPath(ws *session.Workspace, oldPath, newPath string)
 	return true
 }
 
-// pruneTrashedWorkspaces removes workspaces that have been moved to the trash,
-// recursing into children so trashed sub-workspaces don't leak into the tree.
-func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace {
+// pruneHiddenWorkspaces removes workspaces that have been moved to the trash
+// or whose folder is missing from disk, recursing into children so hidden
+// sub-workspaces don't leak into the tree.
+func pruneHiddenWorkspaces(workspaces []session.Workspace) []session.Workspace {
 	if len(workspaces) == 0 {
 		return workspaces
 	}
 
 	filtered := make([]session.Workspace, 0, len(workspaces))
 	for _, ws := range workspaces {
-		if ws.Status == session.WorkspaceStatusTrashed {
+		if ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
 			continue
 		}
-		ws.Children = pruneTrashedWorkspaces(ws.Children)
+		ws.Children = pruneHiddenWorkspaces(ws.Children)
 		filtered = append(filtered, ws)
 	}
 	return filtered
@@ -1338,7 +1339,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
 		}
-		workspaces = pruneTrashedWorkspaces(workspaces)
+		workspaces = pruneHiddenWorkspaces(workspaces)
 		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 		orihttp.WriteJSON(w, map[string]any{
@@ -1359,7 +1360,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaces = pruneTrashedWorkspaces(workspaces)
+	workspaces = pruneHiddenWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 	orihttp.WriteJSON(w, map[string]any{
@@ -3078,16 +3079,33 @@ func (h *Handler) handleWorkspaceSyncStatus(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Store → Disk: in SQLite but not on disk.
+	// Store → Disk: in SQLite but not on disk. Rows already marked missing are
+	// always listed — their folder may have been recreated as a different
+	// workspace, in which case the path exists but no longer belongs to them.
 	for id, ws := range sqliteIDs {
-		path, managed := h.syncManagedWorkspacePath(ws)
-		if !managed {
+		isMissing := ws.Status == session.WorkspaceStatusMissing
+		resolved := ws
+		if isMissing {
+			// The flat listing omits the JSON columns that hold directory
+			// references; hydrate the full row so the last-known path resolves.
+			if full, err := h.store.GetWorkspace(ctx, id); err == nil && full != nil {
+				resolved = *full
+			}
+		}
+
+		path, managed := h.syncManagedWorkspacePath(resolved)
+		if managed {
+			existsOnDisk, err := workspaceFolderExists(path)
+			if err != nil {
+				continue
+			}
+			if existsOnDisk && !isMissing {
+				continue
+			}
+		} else if !isMissing {
 			continue
 		}
-		existsOnDisk, err := workspaceFolderExists(path)
-		if err != nil || existsOnDisk {
-			continue
-		}
+
 		orphaned = append(orphaned, agentworkspace.SyncWorkspaceInfo{
 			ID:   id,
 			Name: ws.Name,
@@ -3196,6 +3214,10 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			// Locating a folder recovers a workspace hidden as missing.
+			if sessionWS.Status == session.WorkspaceStatusMissing {
+				sessionWS.Status = session.WorkspaceStatusActive
+			}
 			sessionWS.UpdatedAt = time.Now()
 			folderWS, err := buildFileStoreWorkspace(sessionWS)
 			if err != nil {
@@ -3240,12 +3262,23 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			// Refuse to overwrite a folder that was recreated externally as a
+			// different workspace; cleanup is the right action for this row.
+			if diskID := h.workspaceIDOnDisk(targetPath); diskID != "" && diskID != sessionWS.ID {
+				warnings = append(warnings, fmt.Sprintf("Folder for %s now belongs to a different workspace; remove this entry instead", sessionWS.Name))
+				continue
+			}
+
 			if err := updateManagedWorkspaceReferences(sessionWS, targetPath, targetPath); err != nil {
 				logger.Warn("Sync recreate: failed to update workspace folder references", logger.Fields{"id": id, "error": err})
 				warnings = append(warnings, fmt.Sprintf("Failed to update workspace references for %s", sessionWS.Name))
 				continue
 			}
 
+			// Recreating the folder recovers a workspace hidden as missing.
+			if sessionWS.Status == session.WorkspaceStatusMissing {
+				sessionWS.Status = session.WorkspaceStatusActive
+			}
 			sessionWS.UpdatedAt = time.Now()
 			folderWS, err := buildFileStoreWorkspace(sessionWS)
 			if err != nil {
@@ -3329,10 +3362,12 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 // handleWorkspaceRescan re-reads the workspace folder tree from disk and
 // reconciles the session store's structure (existence, kind, derived parent,
 // order) to match — disk is the source of truth for grouping. It imports
-// workspaces newly present on disk and re-parents existing ones whose folder
-// moved (e.g. via git pull or a cloud-sync client). It never deletes
-// session-only data such as chat history; workspaces missing from disk are left
-// for the existing orphaned-workspace flow (sync-status / cleanup).
+// workspaces newly present on disk, re-parents existing ones whose folder
+// moved (e.g. via git pull or a cloud-sync client), marks folder-managed
+// workspaces whose folder disappeared as missing (hidden from listings), and
+// restores previously-missing ones whose folder reappeared. It never deletes
+// session-only data such as chat history; missing workspaces remain available
+// through the sync-status / cleanup flow.
 func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		_ = orihttp.RespondMethodNotAllowed(w)
@@ -3343,38 +3378,92 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	imported, reparented, warnings, err := h.reconcileWorkspacesFromDisk(r.Context())
+	// Background rescans (fired on every hub page load) honor a cooldown so
+	// several tabs opening at once don't each trigger a full filesystem walk.
+	// Explicit user-initiated rescans always run.
+	if r.URL.Query().Get("background") == "1" {
+		h.rescanMu.Lock()
+		recent := time.Since(h.lastRescanAt) < workspaceRescanCooldown
+		h.rescanMu.Unlock()
+		if recent {
+			orihttp.WriteJSON(w, map[string]any{
+				"success":    true,
+				"skipped":    true,
+				"imported":   0,
+				"reparented": 0,
+				"orphaned":   0,
+				"restored":   0,
+				"warnings":   []string{},
+			})
+			return
+		}
+	}
+
+	stats, warnings, err := h.reconcileWorkspacesFromDisk(r.Context())
 	if err != nil {
 		logger.Error("Rescan: failed to reconcile workspaces from disk", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to rescan workspaces")
 		return
 	}
 
-	logger.Info("Workspaces rescanned from disk", logger.Fields{"imported": imported, "reparented": reparented})
+	logger.Info("Workspaces rescanned from disk", logger.Fields{
+		"imported":   stats.Imported,
+		"reparented": stats.Reparented,
+		"orphaned":   stats.Orphaned,
+		"restored":   stats.Restored,
+	})
 	orihttp.WriteJSON(w, map[string]any{
 		"success":    true,
-		"imported":   imported,
-		"reparented": reparented,
+		"imported":   stats.Imported,
+		"reparented": stats.Reparented,
+		"orphaned":   stats.Orphaned,
+		"restored":   stats.Restored,
 		"warnings":   warnings,
 	})
 }
 
+// workspaceReconcileStats summarizes the outcome of a disk reconcile pass.
+type workspaceReconcileStats struct {
+	// Imported counts disk workspaces newly created in the session store.
+	Imported int
+	// Reparented counts session workspaces whose parent changed to match disk.
+	Reparented int
+	// Orphaned counts session workspaces marked missing because their folder
+	// is gone from disk (or was recreated as a different workspace).
+	Orphaned int
+	// Restored counts previously-missing workspaces whose folder reappeared.
+	Restored int
+}
+
+// workspaceRescanCooldown is the minimum interval between background-initiated
+// disk reconciles (page loads); explicit rescans are exempt.
+const workspaceRescanCooldown = 30 * time.Second
+
 // reconcileWorkspacesFromDisk reloads the folder store from disk and updates the
-// session store so its structure matches the on-disk layout. Returns counts of
-// newly-imported and re-parented workspaces plus any non-fatal warnings. Safe to
-// call on startup and on demand.
-func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (imported int, reparented int, warnings []string, err error) {
+// session store so its structure matches the on-disk layout. Returns reconcile
+// stats plus any non-fatal warnings. Safe to call on startup and on demand;
+// concurrent calls are serialized.
+func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (stats workspaceReconcileStats, warnings []string, err error) {
 	if h.workspaceStore == nil {
-		return 0, 0, nil, nil
+		return stats, nil, nil
 	}
+
+	h.rescanMu.Lock()
+	defer func() {
+		if err == nil {
+			h.lastRescanAt = time.Now()
+		}
+		h.rescanMu.Unlock()
+	}()
 
 	// Refresh the file-store cache + index from disk; physical layout wins.
 	if err := h.workspaceStore.Reload(); err != nil {
-		return 0, 0, nil, err
+		return stats, nil, err
 	}
 
 	warnings = make([]string, 0)
-	for id, diskWS := range h.workspaceStore.CachedWorkspaces() {
+	diskWorkspaces := h.workspaceStore.CachedWorkspaces()
+	for id, diskWS := range diskWorkspaces {
 		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
 		if getErr == session.ErrWorkspaceNotFound {
 			converted := session.ConvertAgentWorkspace(diskWS)
@@ -3386,7 +3475,7 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (imported int
 				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
 				continue
 			}
-			imported++
+			stats.Imported++
 			continue
 		}
 		if getErr != nil {
@@ -3406,18 +3495,128 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (imported int
 			sessionWS.OrderIndex = diskWS.OrderIndex
 			changed = true
 		}
+		// Disk reappearance heals a workspace previously marked missing.
+		if sessionWS.Status == session.WorkspaceStatusMissing {
+			sessionWS.Status = session.WorkspaceStatusActive
+			changed = true
+			stats.Restored++
+		}
 		if changed {
 			if updateErr := h.store.UpdateWorkspace(ctx, sessionWS); updateErr != nil {
 				warnings = append(warnings, fmt.Sprintf("Failed to update %s", sessionWS.Name))
 				continue
 			}
 			if parentChanged {
-				reparented++
+				stats.Reparented++
 			}
 		}
 	}
 
-	return imported, reparented, warnings, nil
+	// Disk is the source of truth for existence too: folder-managed session
+	// workspaces whose folder is no longer on disk are marked missing so they
+	// drop out of listings. Chat history is preserved on the hidden row and the
+	// sync-status / cleanup flow can recover or remove it.
+	orphaned, sweepWarnings := h.sweepMissingWorkspaces(ctx, diskWorkspaces)
+	stats.Orphaned = orphaned
+	warnings = append(warnings, sweepWarnings...)
+
+	return stats, warnings, nil
+}
+
+// sweepMissingWorkspaces marks folder-managed session workspaces as missing when
+// their backing folder is gone from disk or has been recreated as a different
+// workspace (same path, different ID). Returns the number of workspaces marked.
+func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map[string]*agentworkspace.Workspace) (int, []string) {
+	sessionWorkspaces, listErr := h.store.ListWorkspaces(ctx)
+	if listErr != nil {
+		return 0, []string{"Failed to list workspaces for missing-folder sweep"}
+	}
+
+	orphaned := 0
+	warnings := make([]string, 0)
+	for _, listed := range sessionWorkspaces {
+		if _, onDisk := diskWorkspaces[listed.ID]; onDisk {
+			continue
+		}
+		// Trashed rows are owned by the trash/undo flow; missing rows are
+		// already hidden.
+		if listed.Status == session.WorkspaceStatusTrashed || listed.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+
+		// The flat listing omits JSON columns; load the full row so the
+		// managed-path resolution can inspect directory references.
+		sessionWS, getErr := h.store.GetWorkspace(ctx, listed.ID)
+		if getErr != nil {
+			warnings = append(warnings, fmt.Sprintf("Failed to load %s", listed.ID))
+			continue
+		}
+
+		path, managed := h.syncManagedWorkspacePath(*sessionWS)
+		if !managed {
+			continue // legacy DB-only workspace; nothing on disk to compare
+		}
+
+		exists, statErr := workspaceFolderExists(path)
+		if statErr != nil {
+			continue // unreadable path: leave the workspace alone
+		}
+		if exists {
+			// The folder is still there but this ID is not in the disk cache:
+			// either the folder now belongs to a different workspace (deleted
+			// and recreated externally — mark the stale row missing), or it
+			// lives outside the workspaces root (located/imported — leave it).
+			diskID := h.workspaceIDOnDisk(path)
+			if diskID == "" || diskID == sessionWS.ID {
+				continue
+			}
+		}
+
+		sessionWS.Status = session.WorkspaceStatusMissing
+		sessionWS.UpdatedAt = time.Now()
+		if updateErr := h.store.UpdateWorkspace(ctx, sessionWS); updateErr != nil {
+			warnings = append(warnings, fmt.Sprintf("Failed to mark %s as missing", sessionWS.Name))
+			continue
+		}
+		logger.Info("Workspace folder missing from disk; hiding workspace", logger.Fields{
+			"workspace_id": sessionWS.ID,
+			"name":         sessionWS.Name,
+			"path":         path,
+		})
+		orphaned++
+	}
+
+	return orphaned, warnings
+}
+
+// workspaceIDOnDisk reads the workspace ID recorded in workspace.json at dir.
+// Managed paths may point at the folder root or at a scoped content directory
+// inside it (groups), so the parent directory is checked as a fallback. The
+// workspaces root itself is never probed, bounding the fallback so it cannot
+// walk above workspace folders. Returns "" when no workspace.json is readable.
+func (h *Handler) workspaceIDOnDisk(dir string) string {
+	root := ""
+	if h.workspaceStore != nil {
+		root = cleanWorkspaceSyncPath(h.workspaceStore.BasePath())
+	}
+
+	for _, candidate := range []string{dir, filepath.Dir(dir)} {
+		cleaned := cleanWorkspaceSyncPath(candidate)
+		if cleaned == "" || (root != "" && cleaned == root) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(cleaned, agentworkspace.WorkspaceConfigFile)) // #nosec G304 -- cleaned is a stored workspace directory reference bounded above, not raw user input; filename is the fixed WorkspaceConfigFile constant
+		if err != nil {
+			continue
+		}
+		var meta struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(data, &meta) == nil && meta.ID != "" {
+			return meta.ID
+		}
+	}
+	return ""
 }
 
 // ReconcileWorkspacesFromDisk reconciles the session store's workspace structure
@@ -3428,12 +3627,17 @@ func (h *Handler) ReconcileWorkspacesFromDisk(ctx context.Context) error {
 	if h == nil || h.workspaceStore == nil {
 		return nil
 	}
-	imported, reparented, _, err := h.reconcileWorkspacesFromDisk(ctx)
+	stats, _, err := h.reconcileWorkspacesFromDisk(ctx)
 	if err != nil {
 		return err
 	}
-	if imported > 0 || reparented > 0 {
-		logger.Info("Startup workspace reconcile from disk", logger.Fields{"imported": imported, "reparented": reparented})
+	if stats.Imported > 0 || stats.Reparented > 0 || stats.Orphaned > 0 || stats.Restored > 0 {
+		logger.Info("Startup workspace reconcile from disk", logger.Fields{
+			"imported":   stats.Imported,
+			"reparented": stats.Reparented,
+			"orphaned":   stats.Orphaned,
+			"restored":   stats.Restored,
+		})
 	}
 	return nil
 }
@@ -3505,6 +3709,20 @@ func (h *Handler) syncManagedWorkspacePath(ws session.Workspace) (string, bool) 
 	refs, err := decodeDirectoryReferences(ws.DirectoryReferencesJSON)
 	if err != nil {
 		return "", false
+	}
+
+	// Prefer the primary linked-folder reference recorded at scaffolding time.
+	// FolderSlug has no SQLite column (it is hydrated from disk, which may be
+	// gone), so the primary directory ID in shared_data is the reliable link
+	// between a DB row and its last-known folder path.
+	if primaryID := workspacePrimaryDirectoryID(&ws); primaryID != "" {
+		for _, ref := range refs {
+			if ref.ID == primaryID {
+				if cleaned := cleanWorkspaceSyncPath(ref.Path); cleaned != "" {
+					return cleaned, true
+				}
+			}
+		}
 	}
 
 	folderSlug := strings.TrimSpace(ws.FolderSlug)

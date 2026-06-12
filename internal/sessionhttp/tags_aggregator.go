@@ -67,7 +67,7 @@ func (h *Handler) collectUnifiedTags(ctx context.Context) ([]UnifiedTag, error) 
 	if err != nil {
 		return nil, err
 	}
-	workspaces = pruneTrashedWorkspaces(workspaces)
+	workspaces = pruneHiddenWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 	var countWorkspace func(ws *session.Workspace)
 	countWorkspace = func(ws *session.Workspace) {

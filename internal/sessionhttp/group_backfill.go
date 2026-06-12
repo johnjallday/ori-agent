@@ -32,7 +32,9 @@ func (h *Handler) BackfillGroupScaffolding(ctx context.Context) error {
 	parents := make(map[string]string, len(workspaces))
 	for _, ws := range workspaces {
 		parents[ws.ID] = ws.ParentID
-		if ws.IsGroup() && ws.Status != session.WorkspaceStatusTrashed {
+		// Skip trashed groups (owned by the trash/undo flow) and missing ones
+		// (folder deleted externally — backfill must not resurrect it).
+		if ws.IsGroup() && ws.Status != session.WorkspaceStatusTrashed && ws.Status != session.WorkspaceStatusMissing {
 			groups = append(groups, ws)
 		}
 	}

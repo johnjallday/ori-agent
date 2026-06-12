@@ -158,6 +158,46 @@ func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	}
 }
 
+// TestSyncStore_SaveSkipsDiskForMissingWorkspace guards against resurrection:
+// a workspace whose folder was deleted externally (status missing) must not
+// have its folder silently recreated by a write-through save.
+func TestSyncStore_SaveSkipsDiskForMissingWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:         "ws-missing-test",
+		Name:       "Missing Test",
+		FolderSlug: "missing-test",
+		Status:     StatusMissing,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Primary store should have missing workspace: %v", err)
+	}
+	if got.Status != StatusMissing {
+		t.Fatalf("Primary status = %q, want %q", got.Status, StatusMissing)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing-test")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace folder should not be recreated, stat err = %v", err)
+	}
+}
+
 func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()
@@ -189,6 +229,41 @@ func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "trashed-agent")); !os.IsNotExist(err) {
 		t.Fatalf("trashed workspace folder should not be recreated by agent snapshot, stat err = %v", err)
+	}
+}
+
+func TestSyncStore_SaveWorkspaceAgentSkipsMissingWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:         "ws-missing-agent",
+		Name:       "Missing Agent",
+		FolderSlug: "missing-agent",
+		Status:     StatusMissing,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := primary.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := primary.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {
+		t.Fatalf("primary agent snapshot should not be written for missing workspace, ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing-agent")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace folder should not be recreated by agent snapshot, stat err = %v", err)
 	}
 }
 
