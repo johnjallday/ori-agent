@@ -243,6 +243,25 @@ The `Server` struct in `internal/server/server.go` holds all dependencies:
 
 ## Testing Strategy
 
+### Smoke Testing (manual verification against a running server)
+
+**Always isolate smoke servers from real app data.** `DefaultWorkspaceRoot()` resolves to `$HOME/Ori Workspaces` and does NOT respect `ORI_DATA_DIR` (which only scopes the database, vaults, and templates). A smoke server started without isolation will write workspaces into the user's real tree.
+
+Required recipe:
+
+```bash
+SMOKE_DIR=$(mktemp -d)
+# HOME override redirects "Ori Workspaces"; ORI_DATA_DIR redirects DB/vaults/templates
+HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ./bin/ori-agent
+```
+
+Rules:
+- Start the server as a tracked background process (`run_in_background`) and stop it by PID — never `pkill -f <pattern>`.
+- Keep every smoke artifact under `$SMOKE_DIR`; cleanup is then a single `rm -rf "$SMOKE_DIR"` of a temp path. Nothing under the real `$HOME` should ever need deleting after a smoke test.
+- Run destructive commands (`rm`, `kill`) as standalone commands, not chained with `&&`/`;` onto safe ones — chaining forces a permission prompt for the whole compound and a denial kills the safe parts too.
+
+### Unit & Integration Tests
+
 - Unit tests for providers: `internal/llm/*_test.go`
 - Integration tests: `internal/llm/integration_test.go`
 - Test data isolated per package

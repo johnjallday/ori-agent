@@ -6,7 +6,11 @@
       "Bash(node --check *)",
       "Bash(npx eslint *)",
       "Bash(go vet *)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(go build *)",
+      "Bash(gofmt -l *)",
+      "Bash(git fetch *)",
+      "Bash(golangci-lint run *)"
     ]
   },
   "hooks": {
