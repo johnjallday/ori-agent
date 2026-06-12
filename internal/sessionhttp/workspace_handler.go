@@ -1782,6 +1782,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
+		FolderSlug:  agentworkspace.Slugify(filepath.Base(normalizedPath)),
 	}
 	if req.OrderIndex != nil {
 		workspace.OrderIndex = *req.OrderIndex
@@ -1865,6 +1866,23 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	}
 	workspace.DirectoryReferencesJSON = data
 	setWorkspacePrimaryDirectoryID(workspace, dirRef.ID)
+
+	mcpBinding := newWorkspaceFilesMCPBinding([]string{normalizedPath}, time.Now())
+	if bindingData, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
+		workspace.MCPBindingsJSON = bindingData
+	} else {
+		logger.Error("Failed to marshal MCP binding for workspace import", logger.Fields{"workspace_id": workspace.ID, "error": err})
+		_ = h.store.DeleteWorkspace(r.Context(), workspace.ID)
+		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+			"path_hash":    hashPathForTelemetry(normalizedPath),
+			"workspace_id": workspace.ID,
+			"entry_point":  req.EntryPoint,
+			"reason":       "mcp_binding_marshal_failed",
+		})
+		_ = orihttp.RespondInternalError(w, "Failed to scaffold imported folder")
+		return
+	}
+
 	workspace.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
@@ -1880,6 +1898,38 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		})
 		_ = orihttp.RespondInternalError(w, "Failed to attach imported folder")
 		return
+	}
+
+	if h.workspaceStore != nil {
+		folderWS, err := buildFileStoreWorkspace(workspace)
+		if err != nil {
+			logger.Error("Failed to build workspace file metadata for import", logger.Fields{"workspace_id": workspace.ID, "error": err})
+			if delErr := h.store.DeleteWorkspace(r.Context(), workspace.ID); delErr != nil {
+				logger.Warn("Failed to rollback workspace after import metadata failure", logger.Fields{"workspace_id": workspace.ID, "error": delErr})
+			}
+			recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+				"path_hash":    hashPathForTelemetry(normalizedPath),
+				"workspace_id": workspace.ID,
+				"entry_point":  req.EntryPoint,
+				"reason":       "workspace_file_metadata_failed",
+			})
+			_ = orihttp.RespondInternalError(w, "Failed to scaffold imported folder")
+			return
+		}
+		if err := h.workspaceStore.RebindExistingFolder(folderWS, normalizedPath); err != nil {
+			logger.Error("Failed to scaffold imported folder as workspace", logger.Fields{"workspace_id": workspace.ID, "error": err})
+			if delErr := h.store.DeleteWorkspace(r.Context(), workspace.ID); delErr != nil {
+				logger.Warn("Failed to rollback workspace after import scaffold failure", logger.Fields{"workspace_id": workspace.ID, "error": delErr})
+			}
+			recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+				"path_hash":    hashPathForTelemetry(normalizedPath),
+				"workspace_id": workspace.ID,
+				"entry_point":  req.EntryPoint,
+				"reason":       "workspace_folder_rebind_failed",
+			})
+			_ = orihttp.RespondInternalError(w, "Failed to scaffold imported folder")
+			return
+		}
 	}
 
 	logger.Info("Workspace imported from folder", logger.Fields{

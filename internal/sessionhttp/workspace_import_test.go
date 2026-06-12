@@ -102,6 +102,108 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 	}
 }
 
+func TestHandleWorkspaceImportScaffoldsPlainFolderAsWorkspace(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	storeDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	importDir := filepath.Join(t.TempDir(), "plain-folder")
+	if err := os.MkdirAll(importDir, 0755); err != nil {
+		t.Fatalf("failed to create import directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(importDir, "source.txt"), []byte("keep existing content"), 0644); err != nil {
+		t.Fatalf("failed to seed import directory: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"path":        importDir,
+		"entry_point": "workspace_hub_import",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for import, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	folder, ok := resp["folder"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected folder object in response")
+	}
+	workspaceID, _ := folder["id"].(string)
+	if workspaceID == "" {
+		t.Fatalf("expected workspace id in response")
+	}
+
+	normalizedPath, err := normalizeImportPath(importDir)
+	if err != nil {
+		t.Fatalf("normalize import path: %v", err)
+	}
+	folderPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	if filepath.Clean(folderPath) != filepath.Clean(normalizedPath) {
+		t.Fatalf("expected file store path %q, got %q", normalizedPath, folderPath)
+	}
+	for _, path := range []string{
+		filepath.Join(importDir, agentworkspace.WorkspaceConfigFile),
+		filepath.Join(importDir, agentworkspace.FilesDir),
+		filepath.Join(importDir, agentworkspace.NotesDir),
+		filepath.Join(importDir, "source.txt"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected scaffolded import path %s: %v", path, err)
+		}
+	}
+
+	sessionWS, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to fetch imported workspace: %v", err)
+	}
+	if workspacePrimaryDirectoryID(sessionWS) == "" {
+		t.Fatalf("expected primary directory id to be set")
+	}
+	refs, err := decodeDirectoryReferences(sessionWS.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode directory references: %v", err)
+	}
+	if len(refs) != 1 || filepath.Clean(refs[0].Path) != filepath.Clean(normalizedPath) {
+		t.Fatalf("expected session directory reference for %q, got %#v", normalizedPath, refs)
+	}
+	bindings, err := decodeWorkspaceMCPBindings(sessionWS.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("decode mcp bindings: %v", err)
+	}
+	if len(bindings) != 1 || !workspaceBindingHasRoot(bindings[0].Config, normalizedPath) {
+		t.Fatalf("expected session workspace-files binding for %q, got %#v", normalizedPath, bindings)
+	}
+
+	diskWS, err := fileStore.Get(workspaceID)
+	if err != nil {
+		t.Fatalf("fileStore.Get: %v", err)
+	}
+	if len(diskWS.DirectoryReferences) != 1 || filepath.Clean(diskWS.DirectoryReferences[0].Path) != filepath.Clean(normalizedPath) {
+		t.Fatalf("expected disk directory reference for %q, got %#v", normalizedPath, diskWS.DirectoryReferences)
+	}
+	if len(diskWS.MCPBindings) != 1 || !workspaceBindingHasRoot(diskWS.MCPBindings[0].Config, normalizedPath) {
+		t.Fatalf("expected disk workspace-files binding for %q, got %#v", normalizedPath, diskWS.MCPBindings)
+	}
+}
+
 func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
