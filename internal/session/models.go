@@ -379,6 +379,9 @@ type WorkspaceNote struct {
 	// Content is the markdown content of the note.
 	Content string `json:"content"`
 
+	// Tags are normalized labels used for note organization and filtering.
+	Tags []string `json:"tags,omitempty"`
+
 	// VaultRef records the private vault source when this note was imported.
 	VaultRef *vaultref.Reference `json:"vault_reference,omitempty"`
 
@@ -396,6 +399,7 @@ type WorkspaceNoteListItem struct {
 	WorkspaceID string              `json:"workspace_id"`
 	Name        string              `json:"name"`
 	Preview     string              `json:"preview,omitempty"`
+	Tags        []string            `json:"tags,omitempty"`
 	VaultRef    *vaultref.Reference `json:"vault_reference,omitempty"`
 	CreatedAt   time.Time           `json:"created_at"`
 	UpdatedAt   time.Time           `json:"updated_at"`

@@ -20,6 +20,7 @@ http://localhost:8765/api
 - [Vault API](#vault-api)
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
+- [Tags API](#tags-api)
 - [Workspace Groups](#workspace-groups)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Custom Workflows API](#custom-workflows-api)
@@ -898,6 +899,69 @@ POST   /api/project-templates/reveal          { "id": "..." }   // empty id open
 Import copies the folder **verbatim** (no token substitution — `{{name}}` in file names is preserved for instantiation time; symlinks skipped). Delete prefers the system Trash; deleted starter templates are re-materialized on the next server start. Metadata updates preserve unknown `template.json` fields.
 
 **Settings:** `GET`/`POST /api/settings/templates-root` mirrors the workspace/vault root endpoints (`templates_root`, `effective_templates_root`, `default_templates_root`, `source`). Changing the root materializes the library (including absent starters) in the new location.
+
+## Tags API
+
+Tags form one normalized vocabulary (trimmed, lowercased, ≤64 chars, ≤20 per entity) shared by **workspaces**, **chat sessions**, **notes**, **tasks**, and **project template manifests**. Workspaces, notes, and tasks accept a `tags` array on their create/update endpoints; sessions keep their dedicated `PUT /api/sessions/:id/tags`. Workspace tags live canonically in `workspace.json`, note tags are mirrored into the note file's YAML frontmatter (`tags:` list, Obsidian-compatible), and task tags appear in the task markdown metadata (`tags=` key).
+
+**List tags:**
+
+```http
+GET /api/tags                  // sessions-only (legacy shape, unchanged)
+GET /api/tags?scope=all        // unified pool across all sources
+```
+
+```json
+{
+  "tags": [
+    {
+      "name": "music",
+      "counts": { "workspaces": 2, "sessions": 1, "notes": 3, "tasks": 1, "templates": 1 },
+      "total": 8
+    }
+  ]
+}
+```
+
+The unified pool is computed on request (no caches to refresh), counts each entity once per tag, and is sorted by `total` descending, then name. It powers the shared tag-input suggestions and the Settings → Tags management table.
+
+**Usage preview** (for confirmation dialogs):
+
+```http
+GET /api/tags/usage?tag=music
+```
+
+```json
+{ "tag": "music", "counts": { "...": 0 }, "total": 8, "templates": ["Reaper Song"] }
+```
+
+`templates` lists the display names of library templates whose manifest declares the tag.
+
+**Rename a tag globally:**
+
+```http
+POST /api/tags/rename
+{ "from": "musci", "to": "music" }
+```
+
+```json
+{ "success": true, "from": "musci", "to": "music", "renamed": { "workspaces": 1, "sessions": 2, "notes": 1, "tasks": 0 } }
+```
+
+Renaming applies to workspaces, sessions, notes, and tasks — including their synced files (`workspace.json`, note frontmatter, task markdown). Renaming onto an existing tag **merges** (per-entity dedupe). Template manifests are **read-only**: they are never modified, so new workspaces created from a declaring template reintroduce the original tag.
+
+**Delete a tag globally:**
+
+```http
+POST /api/tags/delete
+{ "tag": "obsolete" }
+```
+
+```json
+{ "success": true, "tag": "obsolete", "removed": { "workspaces": 1, "sessions": 0, "notes": 2, "tasks": 1 } }
+```
+
+Both mutations return per-source affected counts; an unknown tag is a no-op `200` with zero counts. `400` for missing fields, an over-long `to`, or `from == to`.
 
 ## Workspace Groups
 

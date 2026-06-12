@@ -12,6 +12,7 @@ func (h *Handler) syncNoteToFile(note *session.WorkspaceNote) {
 		WorkspaceID: note.WorkspaceID,
 		Name:        note.Name,
 		Content:     note.Content,
+		Tags:        note.Tags,
 		CreatedAt:   note.CreatedAt,
 		UpdatedAt:   note.UpdatedAt,
 	})

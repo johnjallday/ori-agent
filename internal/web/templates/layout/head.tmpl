@@ -59,6 +59,13 @@
   <link href="/css/workspace-hub.css" rel="stylesheet">
   <link href="/css/settings.css" rel="stylesheet">
   <link href="/css/ui-refresh.css" rel="stylesheet">
+  <link href="/css/tag-input.css" rel="stylesheet">
   <link href="/css/keyboard-navigation.css" rel="stylesheet">
   {{if eq .CurrentPage "vault"}}<link href="/css/vault-page.css" rel="stylesheet">{{end}}
+  <!-- Shared tag input widget (deferred ES module; exposes window.OriTagInput) -->
+  <script type="module" src="/js/modules/tag-input.js"></script>
+  <!-- Shared tag filter bar (deferred ES module; exposes window.OriTagFilterBar) -->
+  <script type="module" src="/js/modules/tag-filter-bar.js"></script>
+  <!-- Create-workspace modal tags card (no-op on pages without the modal) -->
+  <script type="module" src="/js/modules/workspace-tags-card.js"></script>
 </head>

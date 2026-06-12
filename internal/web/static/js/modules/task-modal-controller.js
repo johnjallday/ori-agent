@@ -462,6 +462,22 @@ class TaskModalController {
     mirror(autoReferenceURLInput, manualReferenceURLInput);
   }
 
+  // Mounts the shared tag input widget into the modal (lazily, the markup
+  // ships on several pages) and seeds it with the given tags.
+  syncTaskModalTags(tags) {
+    const mount = document.getElementById('taskModalTagsMount');
+    if (!mount) return;
+    if (!this.taskTagsWidget && window.OriTagInput?.createTagInput) {
+      this.taskTagsWidget = window.OriTagInput.createTagInput({
+        container: mount,
+        initialTags: tags || []
+      });
+    } else if (this.taskTagsWidget) {
+      this.taskTagsWidget.setTags(tags || []);
+    }
+    void this.taskTagsWidget?.refreshPool?.();
+  }
+
   getReferenceURLValue() {
     const activeId = this.autoMode && !this.editingTaskId
       ? 'taskAutoReferenceURL'
@@ -841,6 +857,7 @@ class TaskModalController {
     if (referenceURLInput) referenceURLInput.value = referenceURL;
     if (autoReferenceURLInput) autoReferenceURLInput.value = referenceURL;
     if (priorityInput) priorityInput.value = String(createOptions.draftPriority || '3');
+    this.syncTaskModalTags(createOptions.prefillTags || []);
 
     // Populate agent assignment dropdown
     await this.populateAgentDropdown(workspaceId);
@@ -959,6 +976,7 @@ class TaskModalController {
     if (detailsInput) detailsInput.value = task.details || '';
     if (referenceURLInput) referenceURLInput.value = task.reference_url || '';
     if (autoReferenceURLInput) autoReferenceURLInput.value = task.reference_url || '';
+    this.syncTaskModalTags(task.tags || []);
 
     let loadedSubtasks = [];
     if (!isSubtask) {
@@ -2149,6 +2167,7 @@ class TaskModalController {
     const referenceURL = this.getReferenceURLValue();
     const priority = parseInt(priorityInput?.value || '3', 10);
     const assignment = assignmentInput?.value || '';
+    const tags = this.taskTagsWidget ? this.taskTagsWidget.getTags() : [];
 
     if (!description) {
       this.showToast('Task title is required', 'error');
@@ -2295,6 +2314,7 @@ class TaskModalController {
             description,
             details,
             reference_url: referenceURL,
+            tags,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: mainInputIds,
@@ -2310,6 +2330,7 @@ class TaskModalController {
             description,
             details,
             reference_url: referenceURL,
+            tags,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: [],
@@ -2375,6 +2396,7 @@ class TaskModalController {
             description,
             details,
             reference_url: referenceURL,
+            tags,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
             input_task_ids: mainInputIds,
@@ -2420,6 +2442,7 @@ class TaskModalController {
             description,
             details,
             reference_url: referenceURL,
+            tags,
             priority,
             to: to || '',
             assigned_node_id: assignedNodeId || ''
@@ -2449,6 +2472,7 @@ class TaskModalController {
           description,
           details,
           reference_url: referenceURL,
+          tags,
           priority,
           to: to || undefined,
           assigned_node_id: assignedNodeId || undefined,

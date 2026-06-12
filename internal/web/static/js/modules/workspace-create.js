@@ -504,8 +504,13 @@ async function createWorkspace() {
       payload.path = importPath;
       payload.allow_duplicate = workspaceCreateState.allowDuplicateImport;
       payload.entry_point = workspaceCreateState.entryPoint || 'create_modal';
-    } else if (window.ProjectTemplateCard) {
-      Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+    } else {
+      if (window.ProjectTemplateCard) {
+        Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+      }
+      if (window.WorkspaceTagsCard) {
+        Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
+      }
     }
 
     const requestPayload = { ...payload };
@@ -601,6 +606,8 @@ async function createWorkspace() {
     setImportMode(false);
     clearDuplicateWarning();
     if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
+    if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+    window.OriTagInput?.clearTagPoolCache?.();
     window.selectedAgents.clear();
     resetImportState();
 

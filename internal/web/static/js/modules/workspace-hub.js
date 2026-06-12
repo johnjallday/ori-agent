@@ -246,6 +246,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   let launcherActiveView = LAUNCHER_VIEW_CARDS;
   let launcherWorkspaceRootState = null;
   let launcherWorkspaceRootEditorOpen = false;
+  let launcherSuppressClickUntil = 0;
 
   /**
    * Schedule a workspace tasks refresh (debounced)
@@ -1753,6 +1754,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     elements.launcherGrid.innerHTML = `
       <div class="launcher-tree" role="tree" aria-label="Workspaces" aria-multiselectable="true">
         ${tree.map((workspace, index) => renderLauncherTreeNode(workspace, 0, tree, index, ctx)).join('')}
+        <div class="launcher-tree-root-drop" data-tree-root-drop aria-label="Drop here to move workspace to top level">Top level</div>
       </div>
     `;
     bindLauncherInteractions();
@@ -1866,7 +1868,12 @@ console.log('[workspace-hub.js] FILE LOADED');
       // /workspaces/{id}; the server branches on kind). The caret
       // (data-group-toggle), checkboxes, and delete button each stopPropagation
       // so they keep their own behavior and never trigger navigation.
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        if (Date.now() < launcherSuppressClickUntil) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         navigateToWorkspace(card.dataset.workspaceId);
       });
 
@@ -1941,6 +1948,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     elements.launcherGrid.querySelectorAll('[data-group-children]').forEach((grid) => {
       grid.addEventListener('dragover', (e) => {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-workspace-id]')) return;
         e.preventDefault();
         e.stopPropagation();
         grid.classList.add('is-drag-over');
@@ -1950,6 +1958,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         grid.classList.remove('is-drag-over');
       });
       grid.addEventListener('drop', (e) => {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-workspace-id]')) return;
         e.preventDefault();
         e.stopPropagation();
         grid.classList.remove('is-drag-over');
@@ -1957,6 +1966,27 @@ console.log('[workspace-hub.js] FILE LOADED');
         const targetId = grid.getAttribute('data-group-children');
         if (draggedId && targetId && draggedId !== targetId) {
           reorderWorkspace(draggedId, targetId, '');
+        }
+      });
+    });
+
+    elements.launcherGrid.querySelectorAll('[data-tree-root-drop]').forEach((dropTarget) => {
+      dropTarget.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropTarget.classList.add('is-drag-over');
+        e.dataTransfer.dropEffect = 'move';
+      });
+      dropTarget.addEventListener('dragleave', () => {
+        dropTarget.classList.remove('is-drag-over');
+      });
+      dropTarget.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropTarget.classList.remove('is-drag-over');
+        const draggedId = e.dataTransfer.getData('text/plain');
+        if (draggedId) {
+          reorderWorkspace(draggedId, '', '');
         }
       });
     });
@@ -2097,8 +2127,8 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function clearLauncherTreeDropIndicators() {
     if (!elements.launcherGrid) return;
-    elements.launcherGrid.querySelectorAll('.launcher-tree-row').forEach((row) => {
-      row.classList.remove('is-drop-before', 'is-drop-after', 'is-drop-into');
+    elements.launcherGrid.querySelectorAll('.launcher-tree-row, .launcher-card-item, .launcher-tree-root-drop').forEach((row) => {
+      row.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
     });
   }
 
@@ -2152,6 +2182,205 @@ console.log('[workspace-hub.js] FILE LOADED');
     } else if (intent.type === 'into') {
       row.classList.add('is-drop-into');
     }
+  }
+
+  function getLauncherCardDropIntent(item) {
+    if (!item || !item.classList || !item.classList.contains('launcher-card-item')) return null;
+
+    const targetId = item.dataset?.workspaceId || '';
+    if (!targetId) return null;
+
+    const workspaceKind = normalizeWorkspaceKind(item.dataset?.workspaceKind);
+    if (workspaceKind === 'group') {
+      return {
+        type: 'into',
+        targetParentId: targetId,
+        insertBeforeId: ''
+      };
+    }
+
+    return {
+      type: 'before',
+      targetParentId: getWorkspaceParentId(targetId),
+      insertBeforeId: targetId
+    };
+  }
+
+  function applyLauncherCardDropIndicator(item, intent) {
+    if (!item || !intent) return;
+    clearLauncherTreeDropIndicators();
+    if (intent.type === 'into') {
+      item.classList.add('is-drop-into');
+      return;
+    }
+    item.classList.add('is-drag-over');
+  }
+
+  function shouldIgnoreLauncherPointerDragTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest([
+      'input',
+      'textarea',
+      'select',
+      'button',
+      'a',
+      '[contenteditable="true"]',
+      '[role="textbox"]',
+      '[data-workspace-checkbox]',
+      '[data-workspace-delete]',
+      '[data-group-toggle]',
+      '[data-launcher-tag-filter]',
+      '[data-workspace-tag-remove]',
+      '.launcher-card-checkbox',
+      '.launcher-tree-checkbox',
+      '.workspace-tag-chip-remove'
+    ].join(', '));
+  }
+
+  function startLauncherDragVisuals(item, rootDrop, rootGrid) {
+    if (item) item.classList.add('is-dragging');
+    if (rootDrop) {
+      rootDrop.hidden = false;
+      rootDrop.classList.add('is-active');
+    }
+    if (rootGrid) {
+      rootGrid.classList.add('is-dragging-workspace');
+    }
+  }
+
+  function stopLauncherDragVisuals(item, rootDrop, rootGrid, items = []) {
+    if (item) item.classList.remove('is-dragging');
+    items.forEach(i => i.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into'));
+    clearLauncherTreeDropIndicators();
+    if (rootDrop) {
+      rootDrop.classList.remove('is-drag-over');
+      rootDrop.classList.remove('is-active');
+      rootDrop.hidden = true;
+    }
+    if (rootGrid) {
+      rootGrid.classList.remove('is-dragging-workspace');
+      rootGrid.classList.remove('is-drag-over-root');
+    }
+  }
+
+  function getLauncherPointerDropIntent(sourceItem, event) {
+    if (!sourceItem || !event || !document.elementFromPoint) return null;
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    if (!target || typeof target.closest !== 'function') return null;
+
+    const workspaceTarget = target.closest('[data-workspace-id][draggable="true"]');
+    if (workspaceTarget && workspaceTarget !== sourceItem) {
+      const treeIntent = getLauncherTreeDropIntent(workspaceTarget, event);
+      if (treeIntent) {
+        return { element: workspaceTarget, intent: treeIntent, kind: 'workspace' };
+      }
+      const cardIntent = getLauncherCardDropIntent(workspaceTarget);
+      if (cardIntent) {
+        return { element: workspaceTarget, intent: cardIntent, kind: 'workspace' };
+      }
+    }
+
+    const rootDrop = target.closest('[data-tree-root-drop]');
+    if (rootDrop) {
+      return {
+        element: rootDrop,
+        intent: { type: 'root', targetParentId: '', insertBeforeId: '' },
+        kind: 'root'
+      };
+    }
+
+    const groupChildren = target.closest('[data-group-children]');
+    if (groupChildren && !target.closest('[data-workspace-id]')) {
+      const targetId = groupChildren.getAttribute('data-group-children');
+      if (targetId && targetId !== sourceItem.dataset.workspaceId) {
+        return {
+          element: groupChildren,
+          intent: { type: 'into', targetParentId: targetId, insertBeforeId: '' },
+          kind: 'group-children'
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function applyLauncherPointerDropIndicator(drop) {
+    clearLauncherTreeDropIndicators();
+    if (!drop || !drop.element || !drop.intent) return;
+    if (drop.kind === 'root' || drop.kind === 'group-children') {
+      drop.element.classList.add('is-drag-over');
+      return;
+    }
+    if (drop.element.classList.contains('launcher-tree-row')) {
+      applyLauncherTreeDropIndicator(drop.element, drop.intent);
+      return;
+    }
+    if (drop.element.classList.contains('launcher-card-item')) {
+      applyLauncherCardDropIndicator(drop.element, drop.intent);
+    }
+  }
+
+  function bindLauncherPointerDrag(item, items, rootDrop, rootGrid) {
+    item.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (shouldIgnoreLauncherPointerDragTarget(e.target)) return;
+      if (!item.dataset.workspaceId) return;
+
+      const pointerId = e.pointerId;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const threshold = 4;
+      let active = false;
+      let latestDrop = null;
+
+      const cleanup = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
+      };
+
+      const activate = () => {
+        active = true;
+        startLauncherDragVisuals(item, rootDrop, rootGrid);
+      };
+
+      const onMove = (moveEvent) => {
+        if (pointerId !== undefined && moveEvent.pointerId !== pointerId) return;
+        const dx = Math.abs(moveEvent.clientX - startX);
+        const dy = Math.abs(moveEvent.clientY - startY);
+        if (!active && dx < threshold && dy < threshold) return;
+        if (!active) activate();
+        moveEvent.preventDefault();
+        latestDrop = getLauncherPointerDropIntent(item, moveEvent);
+        applyLauncherPointerDropIndicator(latestDrop);
+      };
+
+      const finish = (upEvent) => {
+        if (pointerId !== undefined && upEvent.pointerId !== pointerId) return;
+        cleanup();
+        if (!active) return;
+        upEvent.preventDefault();
+        upEvent.stopPropagation();
+        launcherSuppressClickUntil = Date.now() + 400;
+        stopLauncherDragVisuals(item, rootDrop, rootGrid, Array.from(items || []));
+        if (latestDrop && latestDrop.intent && latestDrop.intent.targetParentId !== item.dataset.workspaceId) {
+          reorderWorkspace(item.dataset.workspaceId, latestDrop.intent.targetParentId, latestDrop.intent.insertBeforeId || '');
+        }
+      };
+
+      const onUp = (upEvent) => finish(upEvent);
+      const onCancel = () => {
+        cleanup();
+        if (active) {
+          launcherSuppressClickUntil = Date.now() + 400;
+          stopLauncherDragVisuals(item, rootDrop, rootGrid, Array.from(items || []));
+        }
+      };
+
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onCancel);
+    });
   }
 
   function animateLauncherGroupReveal() {
@@ -2233,34 +2462,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     items.forEach(item => {
+      bindLauncherPointerDrag(item, items, rootDrop, rootGrid);
+
       item.addEventListener('dragstart', (e) => {
-        // Keep checkbox selection and drag reordering as separate interactions.
-        if (hasLauncherSelection()) {
-          e.preventDefault();
-          return;
-        }
         e.dataTransfer.setData('text/plain', e.currentTarget.dataset.workspaceId);
-        e.currentTarget.classList.add('is-dragging');
         e.dataTransfer.effectAllowed = 'move';
-        if (rootDrop) {
-          rootDrop.hidden = false;
-          rootDrop.classList.add('is-active');
-        }
+        startLauncherDragVisuals(e.currentTarget, rootDrop, rootGrid);
       });
 
       item.addEventListener('dragend', (e) => {
-        e.currentTarget.classList.remove('is-dragging');
-        // Clean up any remaining drag-over classes
-        items.forEach(i => i.classList.remove('is-drag-over'));
-        clearLauncherTreeDropIndicators();
-        if (rootDrop) {
-          rootDrop.classList.remove('is-drag-over');
-          rootDrop.classList.remove('is-active');
-          rootDrop.hidden = true;
-        }
-        if (rootGrid) {
-          rootGrid.classList.remove('is-drag-over-root');
-        }
+        stopLauncherDragVisuals(e.currentTarget, rootDrop, rootGrid, Array.from(items || []));
       });
 
       item.addEventListener('dragover', (e) => {
@@ -2277,14 +2488,18 @@ console.log('[workspace-hub.js] FILE LOADED');
           applyLauncherTreeDropIndicator(e.currentTarget, treeIntent);
           return;
         }
+
+        const cardIntent = getLauncherCardDropIntent(e.currentTarget);
+        if (cardIntent) {
+          applyLauncherCardDropIndicator(e.currentTarget, cardIntent);
+          return;
+        }
+
         e.currentTarget.classList.add('is-drag-over');
       });
 
       item.addEventListener('dragleave', (e) => {
-        e.currentTarget.classList.remove('is-drag-over');
-        if (e.currentTarget.classList.contains('launcher-tree-row')) {
-          e.currentTarget.classList.remove('is-drop-before', 'is-drop-after', 'is-drop-into');
-        }
+        e.currentTarget.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
       });
 
       item.addEventListener('drop', (e) => {
@@ -2301,6 +2516,12 @@ console.log('[workspace-hub.js] FILE LOADED');
         const treeIntent = getLauncherTreeDropIntent(e.currentTarget, e);
         if (treeIntent) {
           reorderWorkspace(draggedId, treeIntent.targetParentId, treeIntent.insertBeforeId);
+          return;
+        }
+
+        const cardIntent = getLauncherCardDropIntent(e.currentTarget);
+        if (cardIntent) {
+          reorderWorkspace(draggedId, cardIntent.targetParentId, cardIntent.insertBeforeId);
           return;
         }
 
@@ -4200,6 +4421,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
   window.WorkspaceHub.__test = {
+    getLauncherCardDropIntent,
     getLauncherTreeDropIntent,
     getLauncherViewPreference,
     bindLauncherTreeKeyboardEvents,

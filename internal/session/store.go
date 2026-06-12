@@ -67,6 +67,14 @@ type SessionStore interface {
 	// Tags are normalized (lowercase, trimmed) before storage.
 	UpdateTags(ctx context.Context, sessionID string, tags []string) error
 
+	// RenameSessionTag renames a tag across all sessions (merging when the
+	// target already exists). Returns the number of affected sessions.
+	RenameSessionTag(ctx context.Context, from, to string) (int, error)
+
+	// RemoveSessionTag removes a tag from all sessions. Returns the number
+	// of affected sessions.
+	RemoveSessionTag(ctx context.Context, tag string) (int, error)
+
 	// GetAllTags returns all unique tags with usage counts.
 	// Useful for tag autocomplete and management.
 	GetAllTags(ctx context.Context) ([]Tag, error)
@@ -131,6 +139,17 @@ type NoteStore interface {
 	// ListNotesByWorkspace returns all notes in a workspace.
 	// Notes are returned without full content for efficiency.
 	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteListItem, error)
+
+	// GetAllNoteTags returns all unique note tags with usage counts.
+	GetAllNoteTags(ctx context.Context) ([]Tag, error)
+
+	// RenameNoteTag renames a tag across all notes (merging when the target
+	// already exists). Returns the IDs of affected notes.
+	RenameNoteTag(ctx context.Context, from, to string) ([]string, error)
+
+	// RemoveNoteTag removes a tag from all notes. Returns the IDs of
+	// affected notes.
+	RemoveNoteTag(ctx context.Context, tag string) ([]string, error)
 
 	// SearchNotes performs full-text search across note names and content.
 	// Returns results with matching text snippets for display.

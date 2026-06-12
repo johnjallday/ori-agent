@@ -16,6 +16,7 @@ type NoteFileParams struct {
 	WorkspaceID string
 	Name        string
 	Content     string
+	Tags        []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -61,6 +62,13 @@ func SyncNoteFile(fs *FileStore, note NoteFileParams) {
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "id: %q\n", note.ID)
 	fmt.Fprintf(&sb, "name: %q\n", note.Name)
+	if tags := NormalizeWorkspaceTags(note.Tags); len(tags) > 0 {
+		// Obsidian-compatible tag list so tags survive in the folder.
+		sb.WriteString("tags:\n")
+		for _, tag := range tags {
+			fmt.Fprintf(&sb, "  - %q\n", tag)
+		}
+	}
 	fmt.Fprintf(&sb, "created_at: %q\n", note.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	fmt.Fprintf(&sb, "updated_at: %q\n", note.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	sb.WriteString("---\n\n")

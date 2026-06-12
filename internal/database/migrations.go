@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 26
+const schemaVersion = 27
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -117,6 +117,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration025WorkspaceOpportunities(ctx)
 	case 26:
 		return db.migration026WorkspaceTags(ctx)
+	case 27:
+		return db.migration027NoteTags(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1168,6 +1170,35 @@ func (db *DB) migration026WorkspaceTags(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN tags TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace tags column: %w", err)
+	}
+	return nil
+}
+
+// migration027NoteTags stores workspace note tags, mirroring the session_tags
+// layout so per-tag usage counting stays a cheap GROUP BY.
+func (db *DB) migration027NoteTags(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_notes")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS note_tags (
+			note_id TEXT NOT NULL,
+			tag TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (note_id, tag),
+			FOREIGN KEY (note_id) REFERENCES workspace_notes(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_tags table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag)
+	`); err != nil {
+		return fmt.Errorf("failed to create note_tags index: %w", err)
 	}
 	return nil
 }

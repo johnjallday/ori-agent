@@ -2715,7 +2715,49 @@ export class WorkspaceTaskPage {
       // last phase from the previous run.
       this._latestActivity = null;
     }
+    this.syncTaskTagsWidget();
     this.renderLiveBadge();
+  }
+
+  // Mounts the shared tag input widget into the hero and keeps it in sync
+  // with the task without clobbering an edit mid-flight: renders happen on
+  // every poll, so the widget is only reset when the lists actually differ.
+  syncTaskTagsWidget() {
+    const row = document.getElementById('workspace-task-tags-row');
+    const mount = document.getElementById('workspace-task-tags-mount');
+    if (!row || !mount) return;
+    if (!this.task?.id) {
+      row.hidden = true;
+      return;
+    }
+    const tags = Array.isArray(this.task.tags) ? this.task.tags : [];
+    if (!this.taskTagsWidget && window.OriTagInput?.createTagInput) {
+      this.taskTagsWidget = window.OriTagInput.createTagInput({
+        container: mount,
+        initialTags: tags,
+        onChange: (next) => { void this.saveTaskTags(next); }
+      });
+    } else if (this.taskTagsWidget) {
+      const current = this.taskTagsWidget.getTags();
+      const same = current.length === tags.length && current.every((tag, index) => tag === tags[index]);
+      if (!same && !this._taskTagsSaving) this.taskTagsWidget.setTags(tags);
+    }
+    row.hidden = !this.taskTagsWidget;
+  }
+
+  async saveTaskTags(tags) {
+    this._taskTagsSaving = true;
+    try {
+      await this.updateTaskFields({ tags }, { deferRender: true });
+      // New tags should show up in suggestions everywhere right away.
+      window.OriTagInput?.clearTagPoolCache?.();
+    } catch (error) {
+      if (window.Toast && typeof window.Toast.error === 'function') {
+        window.Toast.error(error.message || 'Failed to update tags');
+      }
+    } finally {
+      this._taskTagsSaving = false;
+    }
   }
 
   renderHeroActions(statusInfo) {

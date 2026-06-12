@@ -56,6 +56,7 @@ type taskMarkdownItem struct {
 	To             string
 	AssignedNodeID string
 	InputTaskIDs   []string
+	Tags           []string
 	Mode           string
 }
 
@@ -288,6 +289,7 @@ func ParseWorkspaceTasksMarkdown(content, workspaceID string) ([]taskMarkdownIte
 		item.Mode = meta["mode"]
 		item.To = resolveTaskMarkdownAssignee(meta["to"], parseTaskMarkdownAgent(rawText))
 		item.InputTaskIDs = splitTaskMarkdownIDs(meta["depends"])
+		item.Tags = splitTaskMarkdownIDs(meta["tags"])
 		if item.SubtaskIndex == 0 {
 			item.SubtaskIndex = intFromString(meta["index"])
 		}
@@ -438,6 +440,9 @@ func buildTaskMarkdownMetadata(workspaceID string, task Task) string {
 	if len(task.InputTaskIDs) > 0 {
 		parts = append(parts, "depends="+escapeTaskMarkdownValue(strings.Join(task.InputTaskIDs, ",")))
 	}
+	if len(task.Tags) > 0 {
+		parts = append(parts, "tags="+escapeTaskMarkdownValue(strings.Join(task.Tags, ",")))
+	}
 	if mode := strings.TrimSpace(string(task.OrchestrationMode)); mode != "" {
 		parts = append(parts, "mode="+escapeTaskMarkdownValue(mode))
 	}
@@ -539,6 +544,11 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 			}
 			if item.InputTaskIDs != nil && !stringSlicesEqual(item.InputTaskIDs, t.InputTaskIDs) {
 				t.InputTaskIDs = item.InputTaskIDs
+			}
+			if item.Tags != nil {
+				if tags := NormalizeWorkspaceTags(item.Tags); !stringSlicesEqual(tags, t.Tags) {
+					t.Tags = tags
+				}
 			}
 			if item.Checked && t.Status != TaskStatusCompleted {
 				// User edited the markdown checkbox to checked. This is a manual
@@ -851,7 +861,8 @@ func tasksEqualForMarkdownUpdate(a, b Task) bool {
 		a.Status == b.Status &&
 		((a.CompletedAt == nil && b.CompletedAt == nil) ||
 			(a.CompletedAt != nil && b.CompletedAt != nil && a.CompletedAt.Equal(*b.CompletedAt))) &&
-		stringSlicesEqual(a.InputTaskIDs, b.InputTaskIDs)
+		stringSlicesEqual(a.InputTaskIDs, b.InputTaskIDs) &&
+		stringSlicesEqual(a.Tags, b.Tags)
 }
 
 func LogTaskMarkdownWarnings(workspaceID string, warnings []string) {

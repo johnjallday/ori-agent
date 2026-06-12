@@ -212,6 +212,84 @@ func TestDeleteNoteFile(t *testing.T) {
 	}
 }
 
+func TestSyncNoteToFile_TagsFrontmatterRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := workspace.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	now := time.Now()
+	ws := &workspace.Workspace{
+		ID:         "ws-tags-test",
+		Name:       "Tags Test",
+		Status:     workspace.StatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		SharedData: make(map[string]any),
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handler{workspaceStore: store}
+
+	note := &session.WorkspaceNote{
+		ID:          "note-tags-1234",
+		WorkspaceID: "ws-tags-test",
+		Name:        "Tagged Note",
+		Content:     "body",
+		Tags:        []string{"music", "deep work"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	h.syncNoteToFile(note)
+
+	folderPath, err := store.GetFolderPath("ws-tags-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	noteFile := filepath.Join(folderPath, workspace.NotesDir, workspace.NoteFilename("Tagged Note", note.ID))
+	data, err := os.ReadFile(noteFile)
+	if err != nil {
+		t.Fatalf("Expected note file: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "tags:\n  - \"music\"\n  - \"deep work\"\n") {
+		t.Fatalf("Expected tags list in frontmatter, got:\n%s", content)
+	}
+
+	// The workspace-folder importer parses the tags back out.
+	parsed, err := parseImportedWorkspaceNoteFile("ws-tags-test", noteFile, filepath.Base(noteFile))
+	if err != nil {
+		t.Fatalf("parseImportedWorkspaceNoteFile: %v", err)
+	}
+	if len(parsed.Tags) != 2 || parsed.Tags[0] != "music" || parsed.Tags[1] != "deep work" {
+		t.Fatalf("Expected tags to round-trip through the importer, got %#v", parsed.Tags)
+	}
+
+	// A note without tags writes no tags key (legacy format unchanged).
+	plain := &session.WorkspaceNote{
+		ID:          "note-plain-1234",
+		WorkspaceID: "ws-tags-test",
+		Name:        "Plain Note",
+		Content:     "body",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	h.syncNoteToFile(plain)
+	plainFile := filepath.Join(folderPath, workspace.NotesDir, workspace.NoteFilename("Plain Note", plain.ID))
+	plainData, err := os.ReadFile(plainFile)
+	if err != nil {
+		t.Fatalf("Expected plain note file: %v", err)
+	}
+	if strings.Contains(string(plainData), "tags:") {
+		t.Fatalf("Plain note should have no tags key, got:\n%s", string(plainData))
+	}
+}
+
 func TestSyncNoteToFile_NilWorkspaceStore(t *testing.T) {
 	// Handler without workspace store should not panic
 	h := &Handler{}

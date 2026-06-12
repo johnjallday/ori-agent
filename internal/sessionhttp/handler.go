@@ -436,9 +436,28 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 }
 
 // HandleTags handles GET /api/tags for tag listing.
+//
+// The default response lists session tags only (the original behavior, kept
+// byte-compatible for existing consumers). With ?scope=all it returns the
+// unified app-wide pool with per-source usage counts.
 func (h *Handler) HandleTags(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	if r.URL.Query().Get("scope") == "all" {
+		tags, err := h.collectUnifiedTags(r.Context())
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error("Failed to get unified tags", logger.Fields{"error": err})
+			}
+			_ = orihttp.RespondInternalError(w, "Failed to get tags")
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{
+			"tags": tags,
+		})
 		return
 	}
 

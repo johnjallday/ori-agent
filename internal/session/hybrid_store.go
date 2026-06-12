@@ -263,6 +263,61 @@ func (h *hybridStore) GetAllTags(ctx context.Context) ([]Tag, error) {
 	return h.sqlite.GetAllTags(ctx)
 }
 
+// RenameSessionTag renames a tag across all sessions.
+func (h *hybridStore) RenameSessionTag(ctx context.Context, from, to string) (int, error) {
+	affected, err := h.sqlite.RenameSessionTag(ctx, from, to)
+	if err != nil {
+		return 0, err
+	}
+	h.mutateCachedSessionTags(from, to)
+	return affected, nil
+}
+
+// RemoveSessionTag removes a tag from all sessions.
+func (h *hybridStore) RemoveSessionTag(ctx context.Context, tag string) (int, error) {
+	affected, err := h.sqlite.RemoveSessionTag(ctx, tag)
+	if err != nil {
+		return 0, err
+	}
+	h.mutateCachedSessionTags(tag, "")
+	return affected, nil
+}
+
+// mutateCachedSessionTags applies a tag rename (or removal when to == "")
+// to every cached session, so reads don't serve stale tags after a bulk
+// SQL mutation that bypassed the per-session update path.
+func (h *hybridStore) mutateCachedSessionTags(from, to string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, session := range h.cache.GetAll() {
+		if session == nil {
+			continue
+		}
+		next := make([]string, 0, len(session.Tags))
+		seen := make(map[string]struct{}, len(session.Tags))
+		changed := false
+		for _, tag := range session.Tags {
+			value := tag
+			if value == from {
+				changed = true
+				if to == "" {
+					continue
+				}
+				value = to
+			}
+			if _, ok := seen[value]; ok {
+				changed = true
+				continue
+			}
+			seen[value] = struct{}{}
+			next = append(next, value)
+		}
+		if changed {
+			session.Tags = next
+		}
+	}
+}
+
 // CreateWorkspace creates a new workspace.
 func (h *hybridStore) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
 	if workspace.ID == "" {
@@ -754,6 +809,21 @@ func (h *hybridStore) DeleteNote(ctx context.Context, id string) error {
 // ListNotesByWorkspace returns all notes in a workspace.
 func (h *hybridStore) ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteListItem, error) {
 	return h.sqlite.ListNotesByWorkspace(ctx, workspaceID)
+}
+
+// GetAllNoteTags returns all unique note tags with usage counts.
+func (h *hybridStore) GetAllNoteTags(ctx context.Context) ([]Tag, error) {
+	return h.sqlite.GetAllNoteTags(ctx)
+}
+
+// RenameNoteTag renames a tag across all notes.
+func (h *hybridStore) RenameNoteTag(ctx context.Context, from, to string) ([]string, error) {
+	return h.sqlite.RenameNoteTag(ctx, from, to)
+}
+
+// RemoveNoteTag removes a tag from all notes.
+func (h *hybridStore) RemoveNoteTag(ctx context.Context, tag string) ([]string, error) {
+	return h.sqlite.RemoveNoteTag(ctx, tag)
 }
 
 // SearchNotes performs full-text search across note names and content.

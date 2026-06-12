@@ -20,6 +20,11 @@ let serverOfflineNotification = null;
 // Workspace-specific state for agent management
 // Note: Using let instead of const so workspace-agent-modals.js can reassign this array
 let workspaceSystemAgents = [];
+
+// Last successfully loaded workspace list + the shared tag filter bar over it.
+// The filter is plain UI state and intentionally resets on reload.
+let loadedWorkspaces = [];
+let workspaceTagFilterBar = null;
 // workspaceAvailableProviders is declared in workspace-agent-modals.js
 
 /**
@@ -252,7 +257,8 @@ async function loadWorkspaces(options = {}) {
     // Connection successful
     handleConnectionSuccess();
     // Flat workspace list includes groups (kind === 'group').
-    renderWorkspaces(data.folders || []);
+    loadedWorkspaces = data.folders || [];
+    renderFilteredWorkspaces();
     hasLoadedWorkspaces = true;
 
   } catch (error) {
@@ -452,6 +458,32 @@ function renderWorkspaces(workspaces) {
   }
 
   grid.innerHTML = workspaces.map(renderWorkspaceCard).join('');
+}
+
+/**
+ * Render the loaded workspaces through the shared tag filter bar. The bar
+ * only offers tags that appear on the listed workspaces and AND-matches
+ * the selected ones (same behavior as the hub launcher filter).
+ */
+function renderFilteredWorkspaces() {
+  const filterBar = ensureWorkspaceTagFilterBar();
+  if (!filterBar) {
+    renderWorkspaces(loadedWorkspaces);
+    return;
+  }
+  filterBar.setAvailableTags(window.OriTagFilterBar.collectTags(loadedWorkspaces));
+  renderWorkspaces(window.OriTagFilterBar.filterItems(loadedWorkspaces, filterBar.getActiveTags()));
+}
+
+function ensureWorkspaceTagFilterBar() {
+  if (workspaceTagFilterBar) return workspaceTagFilterBar;
+  const mount = document.getElementById('workspaces-tag-filter');
+  if (!mount || !window.OriTagFilterBar?.createTagFilterBar) return null;
+  workspaceTagFilterBar = window.OriTagFilterBar.createTagFilterBar({
+    container: mount,
+    onChange: () => renderFilteredWorkspaces()
+  });
+  return workspaceTagFilterBar;
 }
 
 function renderWorkspaceCard(workspace) {

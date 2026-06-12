@@ -236,6 +236,7 @@ type Task struct {
 	Description      string               `json:"description"`
 	Details          string               `json:"details,omitempty"`
 	ReferenceURL     string               `json:"reference_url,omitempty"`
+	Tags             []string             `json:"tags,omitempty"` // Normalized labels used for organization and filtering
 	Priority         int                  `json:"priority"`
 	Context          map[string]any       `json:"context"`
 	Timeout          time.Duration        `json:"timeout"`

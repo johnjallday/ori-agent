@@ -593,6 +593,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}", s.handleProjectTemplateDelete)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
+		mux.HandleFunc("/api/tags/usage", s.Handlers.Session.HandleTagUsage)
+		mux.HandleFunc("/api/tags/rename", s.Handlers.Session.HandleTagRename)
+		mux.HandleFunc("/api/tags/delete", s.Handlers.Session.HandleTagDelete)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
 	}
 

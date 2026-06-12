@@ -17,10 +17,11 @@ import (
 )
 
 type importedNoteFrontmatter struct {
-	ID        string `yaml:"id"`
-	Name      string `yaml:"name"`
-	CreatedAt string `yaml:"created_at"`
-	UpdatedAt string `yaml:"updated_at"`
+	ID        string   `yaml:"id"`
+	Name      string   `yaml:"name"`
+	Tags      []string `yaml:"tags"`
+	CreatedAt string   `yaml:"created_at"`
+	UpdatedAt string   `yaml:"updated_at"`
 }
 
 func (h *Handler) importWorkspaceNoteFilesForWorkspace(ctx context.Context, workspaceID string) (int, error) {
@@ -133,6 +134,7 @@ func (h *Handler) syncImportedNoteIfChanged(ctx context.Context, existing, parse
 
 	existing.Name = parsed.Name
 	existing.Content = parsed.Content
+	existing.Tags = parsed.Tags
 	existing.UpdatedAt = noteFileModTime(path, time.Now())
 
 	if err := h.store.UpdateNote(ctx, existing); err != nil {
@@ -155,7 +157,30 @@ func importedNoteDiffers(existing, parsed *session.WorkspaceNote) bool {
 	if existing.Name != parsed.Name {
 		return true
 	}
+	if !importedNoteTagsEqual(existing.Tags, parsed.Tags) {
+		return true
+	}
 	return normalizeImportedNoteContent(existing.Content) != normalizeImportedNoteContent(parsed.Content)
+}
+
+// importedNoteTagsEqual compares tag lists order-insensitively: the DB returns
+// tags in insertion order while frontmatter preserves authoring order, and a
+// reordering is not an edit worth syncing.
+func importedNoteTagsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, tag := range a {
+		seen[tag]++
+	}
+	for _, tag := range b {
+		if seen[tag] == 0 {
+			return false
+		}
+		seen[tag]--
+	}
+	return true
 }
 
 func normalizeImportedNoteContent(content string) string {
@@ -208,6 +233,7 @@ func parseImportedWorkspaceNoteFile(workspaceID, path, filename string) (*sessio
 		if fmName := strings.TrimSpace(fm.Name); fmName != "" {
 			note.Name = fmName
 		}
+		note.Tags = agentworkspace.NormalizeWorkspaceTags(fm.Tags)
 		note.CreatedAt = parseImportedNoteTime(fm.CreatedAt, now)
 		note.UpdatedAt = parseImportedNoteTime(fm.UpdatedAt, note.CreatedAt)
 	}
