@@ -88,6 +88,7 @@ activity_logs/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
 model_categories.json
@@ -95,6 +96,7 @@ model_categories.json
 # Backup files
 *.bak
 *.backup
+*.backup-*
 *~
 .backup-*/
 backup-*/
