@@ -118,6 +118,19 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - `mcphttp` - MCP (Model Context Protocol) integration
 - `skillshttp` - Skills management and marketplace
 - `sessionhttp` - Session and workspace data management
+- `actioncenterhttp` - Cross-workspace triage for workspace mission findings (Action Center)
+- `notehttp` - Workspace notes
+- `fileshttp` - Session file management
+- `filehttp` - File serving and preview
+- `vaulthttp` - Vault (secrets) management
+- `workflowhttp` - Custom workflow management
+- `reviewhttp` - Conversation review system
+- `speechhttp` - Speech/voice endpoints
+- `locationhttp` - Location detection
+- `evolutionhttp` - Agent evolution features
+- `externalagentshttp` - External agent integrations
+- `modelcategoryhttp` - Model category configuration and auto-categorization
+- `cliagenthttp` - CLI agent execution
 
 **3. LLM Provider Abstraction** (`internal/llm/`)
 - Factory pattern supports multiple providers: `factory.go`
@@ -129,7 +142,7 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - See `internal/llm/README.md` for detailed usage patterns
 
 **4. Agent Isolation & Workspaces**
-- Agent configs stored in `agents/<agent-name>/config.json`
+- Agent list in `agents.json`; per-agent settings in `agents/<agent-name>/agent_settings.json` (workspace-scoped agents use `config.json` inside the workspace folder)
 - **Workspace System** (`internal/workspace/`): Multi-agent collaboration
   - Workspace-scoped MCP bindings and skill bindings
   - Workspace-scoped tools for notes, tasks, sessions, files
@@ -177,7 +190,6 @@ Tool Execution → Result → UI Rendering
 - `settings.json` - Global settings, API keys, LLM provider config
 - `agents.json` - Agent configurations
 - `app_state.json` - Onboarding and application state
-- `agents/<agent-name>/config.json` - Per-agent settings
 - `agents/<agent-name>/agent_settings.json` - Per-agent settings
 
 ### Build Outputs
@@ -262,7 +274,7 @@ There is a `go.work` file in the parent directory. Edit it and remove non-existe
 ### Port already in use
 ```bash
 # Kill process on port 8765
-./kill-8080.sh  # Script name unchanged for backward compatibility
+lsof -ti :8765 | xargs kill
 
 # Or use custom port
 PORT=9000 go run ./cmd/server
@@ -310,7 +322,6 @@ This project follows a feature branch workflow with squash merging.
 
 ### Documentation
 - `README.md` - Main project documentation
-- `TESTING.md` - Complete testing guide
 - `docs/` - Organized documentation directory
   - `docs/api/API_REFERENCE.md` - HTTP API endpoint reference
   - `docs/testing/TEST_CHEATSHEET.md` - Quick testing commands

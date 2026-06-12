@@ -6,6 +6,9 @@ This directory contains detailed documentation for Ori Agent.
 
 ### Getting Started
 - [Main README](../README.md) - Project overview and quick start
+- [macOS Installation](./INSTALLATION_MACOS.md) - Installing on macOS
+- [Linux Installation](./INSTALLATION_LINUX.md) - Installing on Linux
+- [Windows Installation](./INSTALLATION_WINDOWS.md) - Installing on Windows
 
 ### API & Development
 - [API Reference](./api/API_REFERENCE.md) - HTTP API endpoint documentation
@@ -13,6 +16,14 @@ This directory contains detailed documentation for Ori Agent.
 
 ### Feature Guides
 - [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
+- [Multi-Agent Support](./features/multi-agent-support.md) - Running multiple agents
+- [Home Assistant Task Routing](./features/home-assistant-task-routing.md) - "Ask Ori" task routing
+- [Project Templates](./features/project-templates.md) - Folder-skeleton workspace templates
+- [Session File Management](./features/session-file-management.md) - Managing files in sessions
+- [Task Input Templating](./features/task-input-templating.md) - Templated task inputs
+- [Task Output Contracts](./features/task-output-contracts.md) - Structured task outputs
+- [Workspace Runs Harness Model](./features/workspace-runs-harness-model.md) - Workspace run execution model
+- [Premium Features](./premium_features.md) - Premium feature overview
 
 ### Testing & Quality
 - [Smoke Tests Guide](./testing/SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
@@ -20,18 +31,23 @@ This directory contains detailed documentation for Ori Agent.
 - [Test Cheat Sheet](./testing/TEST_CHEATSHEET.md) - Quick command reference
 - [Testing Setup Summary](./testing/TESTING_SETUP_SUMMARY.md) - Overview of testing infrastructure
 - [Direct Tool Testing](./testing/DIRECT_TOOL_TESTING.md) - Direct tool launch feature testing guide
+- [Ollama Testing](./testing/OLLAMA_TESTING.md) - Testing with local Ollama models
+- [User Test Guide](./testing/USER_TEST_GUIDE.md) - Interactive user testing system
 
 ### Release & Deployment
 - [Release Checklist](./RELEASE_CHECKLIST.md) - Pre-release validation checklist
 - [Dependency Management](./DEPENDENCY_MANAGEMENT.md) - Managing Go dependencies
+- [Building the MSI Installer](./BUILD_MSI.md) - Windows MSI build guide
 
 ### Project Policies
 - [Ori Services](../ORI_SERVICES.md) - Private services access and scope
 - [Trademarks](../TRADEMARKS.md) - Branding and trademark usage
 
 ### Feature Planning
+- [AI Features Roadmap](./features/AI_FEATURES_ROADMAP.md) - Planned AI feature work
 - [Agent Output Viewing Plan](./features/AGENT_OUTPUT_VIEWING_PLAN.md) - Implementation plan for viewing agent outputs
 - [Progress Tracking Plan](./features/PROGRESS_TRACKING_PLAN.md) - Implementation plan for progress tracking
+- [System Home Context Routing Plan](./features/system-home-context-routing-plan.md) - Home context routing plan
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
 
 ### UI Documentation
@@ -46,10 +62,15 @@ This directory contains detailed documentation for Ori Agent.
 docs/
 ├── README.md                           # This file
 │
+├── INSTALLATION_MACOS.md               # macOS installation guide
+├── INSTALLATION_LINUX.md               # Linux installation guide
+├── INSTALLATION_WINDOWS.md             # Windows installation guide
+├── BUILD_MSI.md                        # Windows MSI build guide
 ├── TESTING_INSTALLERS.md               # Manual installer testing guide
 ├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
 ├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
 ├── SCHEDULER_NODES_GUIDE.md            # Scheduler nodes usage guide
+├── premium_features.md                 # Premium feature overview
 │
 ├── api/
 │   └── API_REFERENCE.md                # HTTP API documentation
@@ -58,11 +79,22 @@ docs/
 │   ├── SMOKE_TESTS.md                  # Automated installer smoke testing
 │   ├── TEST_CHEATSHEET.md              # Quick testing commands
 │   ├── TESTING_SETUP_SUMMARY.md        # Testing infrastructure overview
-│   └── DIRECT_TOOL_TESTING.md          # Direct tool launch feature testing guide
+│   ├── DIRECT_TOOL_TESTING.md          # Direct tool launch feature testing guide
+│   ├── OLLAMA_TESTING.md               # Ollama-based local model testing
+│   └── USER_TEST_GUIDE.md              # Interactive user testing system
 │
-├── features/
-│   ├── AGENT_OUTPUT_VIEWING_PLAN.md    # Agent output viewing implementation plan
-│   └── PROGRESS_TRACKING_PLAN.md       # Progress tracking implementation plan
+├── features/                           # Feature guides and implementation plans
+│   ├── AI_FEATURES_ROADMAP.md
+│   ├── AGENT_OUTPUT_VIEWING_PLAN.md
+│   ├── PROGRESS_TRACKING_PLAN.md
+│   ├── home-assistant-task-routing.md
+│   ├── multi-agent-support.md
+│   ├── project-templates.md
+│   ├── session-file-management.md
+│   ├── system-home-context-routing-plan.md
+│   ├── task-input-templating.md
+│   ├── task-output-contracts.md
+│   └── workspace-runs-harness-model.md
 │
 ├── architecture/
 │   └── open-core-boundaries.md         # Open-core vs private service boundaries
