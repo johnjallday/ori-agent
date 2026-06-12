@@ -158,6 +158,46 @@ func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	}
 }
 
+// TestSyncStore_SaveSkipsDiskForMissingWorkspace guards against resurrection:
+// a workspace whose folder was deleted externally (status missing) must not
+// have its folder silently recreated by a write-through save.
+func TestSyncStore_SaveSkipsDiskForMissingWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:         "ws-missing-test",
+		Name:       "Missing Test",
+		FolderSlug: "missing-test",
+		Status:     StatusMissing,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Primary store should have missing workspace: %v", err)
+	}
+	if got.Status != StatusMissing {
+		t.Fatalf("Primary status = %q, want %q", got.Status, StatusMissing)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing-test")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace folder should not be recreated, stat err = %v", err)
+	}
+}
+
 func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

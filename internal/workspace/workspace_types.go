@@ -17,6 +17,10 @@ const (
 	StatusFailed    WorkspaceStatus = "failed"
 	StatusCancelled WorkspaceStatus = "cancelled"
 	StatusTrashed   WorkspaceStatus = "trashed"
+	// StatusMissing marks a workspace whose folder disappeared from disk outside
+	// this app. Hidden from listings and excluded from disk write-through so a
+	// stale record cannot resurrect a deleted folder.
+	StatusMissing WorkspaceStatus = "missing"
 )
 
 // MessageType represents the type of inter-agent message

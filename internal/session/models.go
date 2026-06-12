@@ -144,6 +144,12 @@ const (
 	// WorkspaceStatusTrashed marks a workspace whose folder has been moved to the
 	// system trash. It is hidden from listings but can be restored.
 	WorkspaceStatusTrashed WorkspaceStatus = "trashed"
+	// WorkspaceStatusMissing marks a workspace whose folder disappeared from disk
+	// outside this app (deleted in Finder, removed by another instance, or
+	// superseded by a recreated folder with a different ID). It is hidden from
+	// listings; the status clears automatically if the folder reappears, or the
+	// row can be cleaned up via the workspace sync flow.
+	WorkspaceStatusMissing WorkspaceStatus = "missing"
 )
 
 // WorkspaceKind describes whether a record is a concrete workspace or a
