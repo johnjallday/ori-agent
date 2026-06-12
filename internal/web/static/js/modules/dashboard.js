@@ -1007,12 +1007,14 @@
       return {
         show: function () {
           els.thinkingModal.classList.add('show');
+          els.thinkingModal.classList.remove('is-idle');
           if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
             window.hubSupportChat.open({ focus: 'input' });
           }
         },
         hide: function () {
           els.thinkingModal.classList.remove('show');
+          syncHomeAssistantActivityIdle();
         }
       };
     }
@@ -1134,6 +1136,17 @@
     syncHomeAssistantConversationSection();
   }
 
+  // Embedded-panel surface only: hide the activity area entirely until the
+  // assistant has something to show (busy, summary, structured step, actions,
+  // or conversation), so the idle panel is just compose + quick actions.
+  function syncHomeAssistantActivityIdle() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingModal) return;
+    if (els.thinkingModal.getAttribute('data-home-assistant-surface') !== 'panel') return;
+    var hasActivity = shouldKeepHomeAssistantThinkingModalOpen() || hasHomeAssistantConversation();
+    els.thinkingModal.classList.toggle('is-idle', !hasActivity);
+  }
+
   function syncHomeAssistantConversationSection() {
     var els = getHomeAssistantElements();
     var section = els.conversationSection;
@@ -1242,6 +1255,7 @@
     }
 
     syncHomeAssistantModalHeading();
+    syncHomeAssistantActivityIdle();
     syncHomeAssistantLauncher();
   }
 
