@@ -62,6 +62,50 @@ func rescanCount(t *testing.T, resp map[string]any, key string) int {
 	return int(value)
 }
 
+// TestRescanBackgroundCooldownSkips verifies that background rescans (hub page
+// loads) honor the server-side cooldown while explicit rescans always run.
+func TestRescanBackgroundCooldownSkips(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	rescan := func(background bool) map[string]any {
+		t.Helper()
+		url := "/api/workspaces/rescan"
+		if background {
+			url += "?background=1"
+		}
+		req := httptest.NewRequest(http.MethodPost, url, nil)
+		w := httptest.NewRecorder()
+		handler.HandleWorkspaces(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 for rescan, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode rescan response: %v", err)
+		}
+		return resp
+	}
+
+	if resp := rescan(true); resp["skipped"] == true {
+		t.Fatalf("first background rescan should run, got %#v", resp)
+	}
+	if resp := rescan(true); resp["skipped"] != true {
+		t.Fatalf("second background rescan within cooldown should be skipped, got %#v", resp)
+	}
+	if resp := rescan(false); resp["skipped"] == true {
+		t.Fatalf("explicit rescan must ignore the cooldown, got %#v", resp)
+	}
+}
+
 // TestRescanMarksMissingWorkspaceAndRecreateRestores covers the externally
 // deleted folder flow: the rescan hides the stale row instead of leaving it in
 // listings, and the sync recreate action recovers it.

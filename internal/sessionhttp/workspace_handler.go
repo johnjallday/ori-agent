@@ -595,10 +595,10 @@ func rewriteWorkspaceProjectPath(ws *session.Workspace, oldPath, newPath string)
 	return true
 }
 
-// pruneTrashedWorkspaces removes workspaces that have been moved to the trash
+// pruneHiddenWorkspaces removes workspaces that have been moved to the trash
 // or whose folder is missing from disk, recursing into children so hidden
 // sub-workspaces don't leak into the tree.
-func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace {
+func pruneHiddenWorkspaces(workspaces []session.Workspace) []session.Workspace {
 	if len(workspaces) == 0 {
 		return workspaces
 	}
@@ -608,7 +608,7 @@ func pruneTrashedWorkspaces(workspaces []session.Workspace) []session.Workspace 
 		if ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
 			continue
 		}
-		ws.Children = pruneTrashedWorkspaces(ws.Children)
+		ws.Children = pruneHiddenWorkspaces(ws.Children)
 		filtered = append(filtered, ws)
 	}
 	return filtered
@@ -1339,7 +1339,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
 		}
-		workspaces = pruneTrashedWorkspaces(workspaces)
+		workspaces = pruneHiddenWorkspaces(workspaces)
 		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 		orihttp.WriteJSON(w, map[string]any{
@@ -1360,7 +1360,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaces = pruneTrashedWorkspaces(workspaces)
+	workspaces = pruneHiddenWorkspaces(workspaces)
 	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 	orihttp.WriteJSON(w, map[string]any{
@@ -3264,7 +3264,7 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 
 			// Refuse to overwrite a folder that was recreated externally as a
 			// different workspace; cleanup is the right action for this row.
-			if diskID := workspaceIDOnDisk(targetPath); diskID != "" && diskID != sessionWS.ID {
+			if diskID := h.workspaceIDOnDisk(targetPath); diskID != "" && diskID != sessionWS.ID {
 				warnings = append(warnings, fmt.Sprintf("Folder for %s now belongs to a different workspace; remove this entry instead", sessionWS.Name))
 				continue
 			}
@@ -3378,6 +3378,27 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Background rescans (fired on every hub page load) honor a cooldown so
+	// several tabs opening at once don't each trigger a full filesystem walk.
+	// Explicit user-initiated rescans always run.
+	if r.URL.Query().Get("background") == "1" {
+		h.rescanMu.Lock()
+		recent := time.Since(h.lastRescanAt) < workspaceRescanCooldown
+		h.rescanMu.Unlock()
+		if recent {
+			orihttp.WriteJSON(w, map[string]any{
+				"success":    true,
+				"skipped":    true,
+				"imported":   0,
+				"reparented": 0,
+				"orphaned":   0,
+				"restored":   0,
+				"warnings":   []string{},
+			})
+			return
+		}
+	}
+
 	stats, warnings, err := h.reconcileWorkspacesFromDisk(r.Context())
 	if err != nil {
 		logger.Error("Rescan: failed to reconcile workspaces from disk", logger.Fields{"error": err})
@@ -3414,13 +3435,26 @@ type workspaceReconcileStats struct {
 	Restored int
 }
 
+// workspaceRescanCooldown is the minimum interval between background-initiated
+// disk reconciles (page loads); explicit rescans are exempt.
+const workspaceRescanCooldown = 30 * time.Second
+
 // reconcileWorkspacesFromDisk reloads the folder store from disk and updates the
 // session store so its structure matches the on-disk layout. Returns reconcile
-// stats plus any non-fatal warnings. Safe to call on startup and on demand.
+// stats plus any non-fatal warnings. Safe to call on startup and on demand;
+// concurrent calls are serialized.
 func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (stats workspaceReconcileStats, warnings []string, err error) {
 	if h.workspaceStore == nil {
 		return stats, nil, nil
 	}
+
+	h.rescanMu.Lock()
+	defer func() {
+		if err == nil {
+			h.lastRescanAt = time.Now()
+		}
+		h.rescanMu.Unlock()
+	}()
 
 	// Refresh the file-store cache + index from disk; physical layout wins.
 	if err := h.workspaceStore.Reload(); err != nil {
@@ -3532,7 +3566,7 @@ func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map
 			// either the folder now belongs to a different workspace (deleted
 			// and recreated externally — mark the stale row missing), or it
 			// lives outside the workspaces root (located/imported — leave it).
-			diskID := workspaceIDOnDisk(path)
+			diskID := h.workspaceIDOnDisk(path)
 			if diskID == "" || diskID == sessionWS.ID {
 				continue
 			}
@@ -3557,11 +3591,21 @@ func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map
 
 // workspaceIDOnDisk reads the workspace ID recorded in workspace.json at dir.
 // Managed paths may point at the folder root or at a scoped content directory
-// inside it (groups), so the parent directory is checked as a fallback. Returns
-// "" when no workspace.json is readable.
-func workspaceIDOnDisk(dir string) string {
+// inside it (groups), so the parent directory is checked as a fallback. The
+// workspaces root itself is never probed, bounding the fallback so it cannot
+// walk above workspace folders. Returns "" when no workspace.json is readable.
+func (h *Handler) workspaceIDOnDisk(dir string) string {
+	root := ""
+	if h.workspaceStore != nil {
+		root = cleanWorkspaceSyncPath(h.workspaceStore.BasePath())
+	}
+
 	for _, candidate := range []string{dir, filepath.Dir(dir)} {
-		data, err := os.ReadFile(filepath.Join(candidate, agentworkspace.WorkspaceConfigFile))
+		cleaned := cleanWorkspaceSyncPath(candidate)
+		if cleaned == "" || (root != "" && cleaned == root) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(cleaned, agentworkspace.WorkspaceConfigFile)) // #nosec G304 -- cleaned is a stored workspace directory reference bounded above, not raw user input; filename is the fixed WorkspaceConfigFile constant
 		if err != nil {
 			continue
 		}

@@ -224,7 +224,7 @@ func (h *Handler) mutateWorkspaceTags(ctx context.Context, from, to string) (int
 	if err != nil {
 		return 0, err
 	}
-	workspaces = pruneTrashedWorkspaces(workspaces)
+	workspaces = pruneHiddenWorkspaces(workspaces)
 
 	affected := 0
 	for i := range workspaces {

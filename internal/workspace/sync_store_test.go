@@ -232,6 +232,41 @@ func TestSyncStore_SaveWorkspaceAgentSkipsTrashedWorkspace(t *testing.T) {
 	}
 }
 
+func TestSyncStore_SaveWorkspaceAgentSkipsMissingWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	dir := t.TempDir()
+	fileSync, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+
+	now := time.Now()
+	ws := &Workspace{
+		ID:         "ws-missing-agent",
+		Name:       "Missing Agent",
+		FolderSlug: "missing-agent",
+		Status:     StatusMissing,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := primary.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", &agent.Agent{Type: agent.TypeToolCalling}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := primary.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {
+		t.Fatalf("primary agent snapshot should not be written for missing workspace, ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing-agent")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace folder should not be recreated by agent snapshot, stat err = %v", err)
+	}
+}
+
 func TestSyncStore_DeleteRemovesFromBoth(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

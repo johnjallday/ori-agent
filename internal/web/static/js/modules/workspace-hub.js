@@ -2924,11 +2924,13 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   // Silently reconcile the session store with the workspaces root once when the
   // hub loads, so folders deleted/created outside this app (Finder, another
-  // instance) are reflected without a manual rescan. Refreshes the list only
-  // when the reconcile actually changed something; errors are non-fatal.
+  // instance) are reflected without a manual rescan. The background flag lets
+  // the server apply a cooldown so several tabs opening at once don't each
+  // trigger a filesystem walk. Refreshes the list only when the reconcile
+  // actually changed something; errors are non-fatal.
   async function reconcileWorkspacesOnLoad() {
     try {
-      const res = await fetch('/api/workspaces/rescan', { method: 'POST' });
+      const res = await fetch('/api/workspaces/rescan?background=1', { method: 'POST' });
       if (!res.ok) return;
       const result = await res.json().catch(() => ({}));
       const changed =

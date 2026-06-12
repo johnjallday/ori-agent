@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -25,6 +26,12 @@ type Handler struct {
 	agentStore            store.Store
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
+
+	// rescanMu serializes disk reconciles so concurrent rescan requests
+	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
+	// walks; lastRescanAt backs the cooldown for background-initiated rescans.
+	rescanMu     sync.Mutex
+	lastRescanAt time.Time
 }
 
 // New creates a new session handler.
