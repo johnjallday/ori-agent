@@ -418,7 +418,7 @@
     modalEl.addEventListener('click', (e) => {
       if (e.target === modalEl) closeModal();
       if (e.target.closest('[data-trg-close]')) closeModal();
-      if (e.target.closest('[data-trg-save]')) saveModal(t, type);
+      if (e.target.closest('[data-trg-save]')) saveModal(t);
       if (e.target.closest('[data-trg-copy]') && t) copy(t.webhook_url).then(() => setStatus('Webhook URL copied.'));
       if (e.target.closest('[data-trg-regen]') && t) regenerate(t);
     });
@@ -475,7 +475,7 @@
     return payload;
   }
 
-  async function saveModal(existing, type) {
+  async function saveModal(existing) {
     const wsId = getWorkspaceId();
     let payload;
     try {

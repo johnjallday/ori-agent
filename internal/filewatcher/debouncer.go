@@ -81,6 +81,11 @@ type EventDebouncer struct {
 	mu       sync.Mutex
 	output   chan WatchEvent
 	done     chan struct{}
+	// sendWg tracks timer goroutines that have committed (under mu) to sending
+	// on output. Close waits on it before closing output so a pending debounce
+	// timer firing at shutdown can't race close(output) — a real shutdown race
+	// the select-on-done alone does not prevent.
+	sendWg sync.WaitGroup
 }
 
 type debouncedEvent struct {
@@ -126,9 +131,23 @@ func (d *EventDebouncer) Add(event WatchEvent) {
 		if exists {
 			delete(d.events, key)
 		}
+		// Decide whether a send may proceed while holding the lock, and
+		// register it with sendWg before releasing — so Close (which closes
+		// done under the same lock) either sees the registration and waits,
+		// or this goroutine observes done and never touches output.
+		mayItem := exists
+		if mayItem {
+			select {
+			case <-d.done:
+				mayItem = false
+			default:
+				d.sendWg.Add(1)
+			}
+		}
 		d.mu.Unlock()
 
-		if exists {
+		if mayItem {
+			defer d.sendWg.Done()
 			select {
 			case d.output <- de.event:
 			case <-d.done:
@@ -150,10 +169,9 @@ func (d *EventDebouncer) Events() <-chan WatchEvent {
 // Close stops the debouncer and closes the output channel
 func (d *EventDebouncer) Close() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	select {
 	case <-d.done:
+		d.mu.Unlock()
 		return // Already closed
 	default:
 		close(d.done)
@@ -164,7 +182,12 @@ func (d *EventDebouncer) Close() {
 		de.timer.Stop()
 		delete(d.events, key)
 	}
+	d.mu.Unlock()
 
+	// Wait for any timer send that registered before done was closed; each
+	// observes done and bails, so once they drain there is no concurrent
+	// sender and closing output is race-free.
+	d.sendWg.Wait()
 	close(d.output)
 }
 

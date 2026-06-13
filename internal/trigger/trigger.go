@@ -263,7 +263,7 @@ func (t *Trigger) CheckWatchPath() error {
 	if !info.IsDir() {
 		return fmt.Errorf("watch path %q is not a directory", path)
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is the user-chosen watch directory; watching an arbitrary local folder is the feature, and it is validated as an existing dir above
 	if err != nil {
 		return fmt.Errorf("watch path %q is not readable: %w", path, err)
 	}

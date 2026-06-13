@@ -92,7 +92,7 @@ func (s *Store) readWorkspaceFile(wsID string) ([]*Trigger, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(filepath.Join(folder, TriggersFileName))
+	data, err := os.ReadFile(filepath.Join(folder, TriggersFileName)) // #nosec G304 -- folder is resolved by the workspace store's GetFolderPath, not raw user input; filename is the fixed TriggersFileName constant
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

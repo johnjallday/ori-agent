@@ -20,7 +20,7 @@ const maxWebhookBody = trigger.MaxPayloadBytes + 1
 
 // secretHeader is the header callers present when a webhook trigger defines a
 // shared secret.
-const secretHeader = "X-Ori-Webhook-Secret"
+const secretHeader = "X-Ori-Webhook-Secret" // #nosec G101 -- HTTP header name, not a credential value
 
 // HandleWebhook serves POST /api/hooks/{token}. It validates the content type
 // and size, then hands off to the service, which resolves the token, checks
@@ -41,7 +41,7 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	contentType := r.Header.Get("Content-Type")
 	if !trigger.AcceptedContentType(contentType) {
-		orihttp.RespondError(w, http.StatusUnsupportedMediaType, "unsupported content type")
+		_ = orihttp.RespondError(w, http.StatusUnsupportedMediaType, "unsupported content type")
 		return
 	}
 
@@ -50,14 +50,14 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// MaxBytesReader signals an over-limit read via its error.
 		if strings.Contains(strings.ToLower(err.Error()), "too large") {
-			orihttp.RespondError(w, http.StatusRequestEntityTooLarge, "payload too large")
+			_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, "payload too large")
 			return
 		}
 		orihttp.BadRequest(w, "failed to read request body")
 		return
 	}
 	if len(body) > trigger.MaxPayloadBytes {
-		orihttp.RespondError(w, http.StatusRequestEntityTooLarge, "payload too large")
+		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, "payload too large")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if result != trigger.IngestAccepted {
 		// Uniform bodies; 404 deliberately does not distinguish unknown from
 		// disabled (PRD #9).
-		orihttp.RespondError(w, status, http.StatusText(status))
+		_ = orihttp.RespondError(w, status, http.StatusText(status))
 		return
 	}
 
