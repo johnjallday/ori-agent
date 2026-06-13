@@ -193,6 +193,13 @@ function wt {
       echo "Building folder picker in new worktree..."
       (cd "$WORKTREE_DIR$name" && bash scripts/build-folder-picker.sh)
     fi
+    # Install npm dependencies. node_modules is gitignored and not shared
+    # between worktrees, so a fresh worktree starts without it and tooling
+    # like eslint/prettier/playwright won't run until this completes.
+    if [[ -f "$WORKTREE_DIR$name/package.json" ]] && command -v npm >/dev/null 2>&1; then
+      echo "Installing npm dependencies in new worktree..."
+      (cd "$WORKTREE_DIR$name" && npm install)
+    fi
     ;;
   rm)
     local name="$2"
