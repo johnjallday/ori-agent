@@ -265,7 +265,12 @@ func (b *ServerBuilder) initializeHandlers() {
 
 	runProfiles := workspacerun.NewProfileRegistry()
 	b.workspaceRunExecutors = workspacerun.NewExecutorRegistry()
-	b.workspaceRunExecutors.Register(workspacerun.ExecutorKindNativeCLI, workspacerun.NewNativeCLIExecutor(b.cliAgentRegistry))
+	nativeCLIExecutor := workspacerun.NewNativeCLIExecutor(b.cliAgentRegistry)
+	if b.workspaceFileStore != nil {
+		// Inject workspace memory into native-CLI run prompts (read-only context).
+		nativeCLIExecutor.SetWorkspaceFolderResolver(b.workspaceFileStore)
+	}
+	b.workspaceRunExecutors.Register(workspacerun.ExecutorKindNativeCLI, nativeCLIExecutor)
 	b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor())
 	runEnv := workspacerun.NewLocalEnvironmentManager("")
 	runValidator := workspacerun.NewValidator()

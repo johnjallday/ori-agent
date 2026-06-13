@@ -654,6 +654,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Workspace Memory (MEMORY.md) Endpoints
+	// =============================================================================
+	if s.Handlers.WorkspaceMemory != nil {
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/memory", s.Handlers.WorkspaceMemory.GetMemory)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries", s.Handlers.WorkspaceMemory.AddEntry)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
+	}
+
+	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
 	if s.Handlers.ExternalAgents != nil {

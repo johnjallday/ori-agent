@@ -7,7 +7,12 @@ import (
 
 const referenceURLInspectionRole = "reference_url_inspection"
 
-func BuildRunExecutionPrompt(run *Run) string {
+// BuildRunExecutionPrompt assembles the execution contract for a native-CLI
+// run. memorySection, when non-empty, is a pre-rendered `## Workspace Memory`
+// block (see workspace.RenderMemoryPromptSection) injected as read-only context
+// before the user prompt — CLI backends don't have Ori's memory tools, so it
+// carries no tool guidance.
+func BuildRunExecutionPrompt(run *Run, memorySection string) string {
 	if run == nil {
 		return ""
 	}
@@ -41,6 +46,12 @@ func BuildRunExecutionPrompt(run *Run) string {
 		prompt.WriteString("Do not claim facts about the URL from memory or assumptions. ")
 		prompt.WriteString("If URL access tools are unavailable, the host is not reachable, authentication is required, or access is blocked, state that limitation in the final response.\n\n")
 		prompt.WriteString("In your final response, include `Reference URL inspection: inspected`, `Reference URL inspection: blocked`, or `Reference URL inspection: unknown` with a short reason.\n")
+	}
+
+	if section := strings.TrimSpace(memorySection); section != "" {
+		prompt.WriteString("\n")
+		prompt.WriteString(section)
+		prompt.WriteString("\n")
 	}
 
 	prompt.WriteString("\n## User Prompt\n\n")

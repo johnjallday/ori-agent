@@ -999,6 +999,53 @@ DELETE /api/workspaces/:id?confirm=true&delete_mode=contents
 
 Both modes hard-block with `409 Conflict` while any workspace in the group has active task work.
 
+## Workspace Memory API
+
+Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch.
+
+Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `<type>` is one of `fact`, `feedback`, `decision`, `dead-end`, `watch`, `thread`. Entries are capped at 500 characters and obvious secrets are refused (store credentials in the Vault).
+
+### Get Workspace Memory
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/memory`
+
+```json
+{
+  "entries": [
+    { "index": 0, "type": "watch", "date": "2026-06-13", "provenance": "run:abc (Scout)", "text": "build baseline ~7 min; flag if >10" }
+  ],
+  "unstructured": ["# Workspace Memory"],
+  "raw_size": 149,
+  "char_budget": 8000,
+  "token_budget": 2000,
+  "over_budget": false
+}
+```
+
+`entries` are the structured lines (with their file-order `index`); `unstructured` holds non-entry lines (the header, hand-written prose) for display. `404` if the workspace doesn't exist; `503` if folder storage is unavailable.
+
+### Add Memory Entry
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/memory/entries`
+
+```json
+{ "text": "releases are human-triggered from main", "type": "fact" }
+```
+
+`type` defaults to `fact`. The server fills in today's date and provenance `user`. Returns the full updated memory document (same shape as GET). `400` on empty/over-length/secret-looking text.
+
+### Update Memory Entry
+
+**Endpoint:** `PUT /api/workspaces/{workspaceID}/memory/entries/{index}`
+
+Body identical to add. `index` is the structured-entry index from GET. Returns the updated document. `400` for a non-numeric index or invalid text; `404` when the index is out of range.
+
+### Delete Memory Entry
+
+**Endpoint:** `DELETE /api/workspaces/{workspaceID}/memory/entries/{index}`
+
+Removes one entry by index and returns the updated document. `404` when the index is out of range.
+
 ## Scheduler Nodes API
 
 Scheduler nodes enable automatic execution of tasks at scheduled times on the workspace canvas. They support various schedule types including cron expressions, intervals, daily/weekly schedules, and relative delays.

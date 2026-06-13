@@ -7,11 +7,19 @@ import (
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// workspaceFolderResolver resolves a workspace ID to its folder path so the
+// executor can read MEMORY.md. *workspace.FileStore satisfies it.
+type workspaceFolderResolver interface {
+	GetFolderPath(workspaceID string) (string, error)
+}
 
 type NativeCLIExecutor struct {
 	registry *cliagent.CLIAgentRegistry
 	diff     *cliagent.DiffDetector
+	folders  workspaceFolderResolver
 
 	mu        sync.Mutex
 	artifacts map[string][]Artifact
@@ -29,6 +37,27 @@ func NewNativeCLIExecutor(registry *cliagent.CLIAgentRegistry) *NativeCLIExecuto
 		artifacts: make(map[string][]Artifact),
 		traces:    make(map[string][]TraceEvent),
 	}
+}
+
+// SetWorkspaceFolderResolver wires folder-path resolution so native-CLI runs
+// can inject the workspace's persistent memory. Without it, runs proceed
+// without a memory section.
+func (e *NativeCLIExecutor) SetWorkspaceFolderResolver(resolver workspaceFolderResolver) {
+	e.folders = resolver
+}
+
+// renderMemorySection loads and renders the workspace's memory for the run
+// prompt, or "" when unavailable. Tool guidance is omitted: CLI backends can't
+// call Ori's memory tools, so memory is read-only context here.
+func (e *NativeCLIExecutor) renderMemorySection(run *Run) string {
+	if e.folders == nil || strings.TrimSpace(run.WorkspaceID) == "" {
+		return ""
+	}
+	doc, err := workspace.NewMemoryStore(e.folders).Read(run.WorkspaceID)
+	if err != nil {
+		return ""
+	}
+	return workspace.RenderMemoryPromptSection(doc, false)
 }
 
 func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
@@ -67,16 +96,20 @@ func (e *NativeCLIExecutor) Execute(ctx context.Context, run *Run) error {
 	}
 
 	snapshot, _ := e.diff.Snapshot(workingDir)
+	memoryBefore := snapshotMemoryLines(e.folders, run.WorkspaceID)
 	result, err := adapter.ExecuteStep(ctx, cliagent.StepRequest{
 		TaskID:     run.ID,
 		StepNumber: 1,
-		Prompt:     BuildRunExecutionPrompt(run),
+		Prompt:     BuildRunExecutionPrompt(run, e.renderMemorySection(run)),
 		WorkingDir: workingDir,
 		Model:      cfg.Model,
 		Budget: cliagent.StepBudget{
 			Timeout: cliagent.DefaultStepTimeout,
 		},
 	})
+	if diff := memoryDiffArtifact(run.ID, memoryBefore, snapshotMemoryLines(e.folders, run.WorkspaceID)); diff != nil {
+		e.addArtifact(run.ID, *diff)
+	}
 	if err != nil {
 		return err
 	}

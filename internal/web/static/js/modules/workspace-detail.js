@@ -9,6 +9,7 @@
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
+import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 
@@ -225,6 +226,7 @@ export class WorkspaceDetailPage {
     this.agentSkillsPromises = new Map();
     this.mcpManager = new WorkspaceMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
+    this.memoryManager = new WorkspaceMemoryManager(this);
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
     this.workspaceTaskMarkdownStatus = null;
@@ -1579,6 +1581,7 @@ export class WorkspaceDetailPage {
       await this.loadWorkspace();
     });
     this.skillsManager.bindEvents();
+    this.memoryManager.bindEvents();
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
     });

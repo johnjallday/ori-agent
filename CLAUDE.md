@@ -120,6 +120,7 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - `sessionhttp` - Session and workspace data management
 - `actioncenterhttp` - Cross-workspace triage for workspace mission findings (Action Center)
 - `notehttp` - Workspace notes
+- `memoryhttp` - Workspace memory (MEMORY.md) CRUD for the Memory tab
 - `fileshttp` - Session file management
 - `filehttp` - File serving and preview
 - `vaulthttp` - Vault (secrets) management

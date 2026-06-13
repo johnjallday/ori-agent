@@ -264,7 +264,12 @@ func (b *ServerBuilder) initializeTaskExecution() {
 
 	taskExecutionHandler := workspace.TaskHandler(b.taskHandler)
 	if b.workspaceRunExecutors != nil && b.workspaceRunStore != nil && b.workspaceRunService != nil {
-		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, workspacerun.NewOriAgentExecutor(b.taskHandler))
+		oriExecutor := workspacerun.NewOriAgentExecutor(b.taskHandler)
+		if b.workspaceFileStore != nil {
+			// Snapshot workspace memory before/after each run to record what it learned.
+			oriExecutor.SetWorkspaceFolderResolver(b.workspaceFileStore)
+		}
+		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, oriExecutor)
 		b.runBackedTaskHandler = workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
 		taskExecutionHandler = b.runBackedTaskHandler
 	}

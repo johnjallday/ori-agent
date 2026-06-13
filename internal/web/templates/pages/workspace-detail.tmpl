@@ -400,6 +400,17 @@
                   aria-selected="false">
                   Triggers
                 </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-memory-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-memory-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-memory-pane"
+                  aria-selected="false">
+                  Memory
+                </button>
               </div>
               <div class="tab-content workspace-detail-config-body">
                 <div
@@ -832,7 +843,7 @@
                             <label class="workspace-detail-settings-summary-card" style="cursor: pointer; display: block; margin: 0; padding: 0.75rem;">
                               <input type="radio" name="workspace-detail-mission-autonomy" value="watch" style="margin-right: 0.5rem;">
                               <strong>Watch</strong>
-                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and report findings. Make no changes to anything.</div>
+                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and report findings. Makes no changes — except recording what it learns to workspace memory.</div>
                             </label>
                           </div>
                           <div class="col-md-6">
@@ -940,6 +951,32 @@
                     <button type="button" class="btn btn-outline-primary btn-sm" data-trigger-add="webhook">Add webhook</button>
                     <button type="button" class="btn btn-outline-primary btn-sm" data-trigger-add="file_watch">Watch a folder</button>
                   </div>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-memory-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-memory-tab">
+                  <div class="workspace-detail-config-pane-head">
+                    <div class="workspace-detail-config-pane-title">Workspace Memory</div>
+                    <div class="workspace-detail-config-pane-subtitle">
+                      Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault).
+                    </div>
+                  </div>
+                  <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
+                  <form id="workspace-detail-memory-add-form" class="workspace-detail-memory-add" autocomplete="off">
+                    <select id="workspace-detail-memory-add-type" class="form-select workspace-detail-memory-type" aria-label="Memory entry type">
+                      <option value="fact">fact</option>
+                      <option value="feedback">feedback</option>
+                      <option value="decision">decision</option>
+                      <option value="dead-end">dead-end</option>
+                      <option value="watch">watch</option>
+                      <option value="thread">thread</option>
+                    </select>
+                    <input type="text" id="workspace-detail-memory-add-text" class="form-control workspace-detail-memory-input" maxlength="500" placeholder="Add a memory entry (one line)…" aria-label="New memory entry text">
+                    <button type="submit" class="btn btn-primary" id="workspace-detail-memory-add-btn">Add</button>
+                  </form>
+                  <div id="workspace-detail-memory-list" class="workspace-detail-memory-list"></div>
                 </div>
               </div>
             </div>
@@ -3294,6 +3331,169 @@
       font-size: 0.82rem;
       line-height: 1.5;
       color: var(--text-secondary);
+    }
+
+    .workspace-detail-config-pane-subtitle {
+      max-width: 72ch;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+    }
+
+    .workspace-detail-memory-meta {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      margin: 0.6rem 0;
+    }
+
+    .workspace-detail-memory-size.is-over-budget {
+      color: var(--warning-color, #f5a623);
+      font-weight: 600;
+    }
+
+    .workspace-detail-memory-add {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-detail-memory-type {
+      max-width: 9rem;
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-memory-input {
+      flex: 1 1 18rem;
+    }
+
+    .workspace-detail-memory-list {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-memory-entry {
+      display: grid;
+      gap: 0.4rem;
+      padding: 0.65rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-detail-memory-entry-main {
+      display: flex;
+      gap: 0.5rem;
+      align-items: baseline;
+    }
+
+    .workspace-detail-memory-text {
+      font-size: 0.85rem;
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+
+    .workspace-detail-memory-badge {
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent-color, #4a7dff) 16%, transparent);
+      color: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-badge-watch,
+    .workspace-detail-memory-badge-thread {
+      background: color-mix(in srgb, var(--warning-color, #f5a623) 18%, transparent);
+      color: var(--warning-color, #c77f12);
+    }
+
+    .workspace-detail-memory-badge-dead-end {
+      background: color-mix(in srgb, var(--danger, #c62828) 16%, transparent);
+      color: var(--danger, #c62828);
+    }
+
+    .workspace-detail-memory-entry-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-memory-prov {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      font-family: var(--font-mono, monospace);
+    }
+
+    .workspace-detail-memory-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-memory-action {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.75rem;
+      color: var(--accent-color, #4a7dff);
+      cursor: pointer;
+    }
+
+    .workspace-detail-memory-action.is-danger {
+      color: var(--danger, #c62828);
+    }
+
+    .workspace-detail-memory-edit {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-detail-memory-empty {
+      padding: 1rem;
+      border: 1px dashed color-mix(in srgb, var(--border-color) 80%, transparent);
+      border-radius: 12px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-empty-example {
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      opacity: 0.85;
+    }
+
+    .workspace-detail-memory-unstructured {
+      margin-top: 0.85rem;
+      padding-top: 0.6rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    }
+
+    .workspace-detail-memory-unstructured-label {
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-memory-unstructured-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .workspace-detail-memory-unstructured-line {
+      font-family: var(--font-mono, monospace);
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      opacity: 0.8;
+      word-break: break-word;
     }
 
     .workspace-detail-config-pane-actions {

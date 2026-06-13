@@ -103,10 +103,31 @@ func MissionBindingsReady(ws *Workspace) bool {
 	return len(mcp) == 0 && len(sk) == 0
 }
 
+// Workspace memory tool names. Defined here rather than in chathttp so the
+// autonomy gate, which works by tool name, has a single source of truth.
+const (
+	MemoryWriteToolName  = "memory_write"
+	MemoryForgetToolName = "memory_forget"
+)
+
+// IsWorkspaceMemoryTool reports whether toolName is a native workspace-memory
+// tool. Memory tools are workspace-internal writes permitted under every
+// autonomy policy, including Watch: memory is the agent's own operational
+// state, and a Watch mission that cannot remember what it watched can never
+// deduplicate findings or track trends across runs. The user-facing Watch
+// guarantee is correspondingly worded "no writes anywhere — except workspace
+// memory".
+func IsWorkspaceMemoryTool(toolName string) bool {
+	return toolName == MemoryWriteToolName || toolName == MemoryForgetToolName
+}
+
 // IsAllowedUnderPolicy reports whether a tool call classified with `se` is
 // permitted under the given autonomy policy. The empty SideEffect (unclassified)
 // is always denied. Watch allows only read; Propose allows read and write.
 // Higher policies (Act-with-approval, Autopilot) land in v1.5+.
+// Workspace memory tools are exempted upstream (see IsWorkspaceMemoryTool and
+// the EvaluateMissionToolCall* entry points) — this function stays
+// classification-pure.
 func IsAllowedUnderPolicy(policy AutonomyPolicy, se SideEffect) bool {
 	if se == "" {
 		return false

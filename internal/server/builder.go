@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/memoryhttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -380,6 +381,9 @@ func (b *ServerBuilder) createDomainFacades() {
 	// initializeMissionBridge (which builds the trigger handler) runs before
 	// this facade is rebuilt, so re-attach here — same pattern as ActionCenter.
 	b.server.Handlers.Triggers = b.triggerHandler
+	if b.workspaceFileStore != nil {
+		b.server.Handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
+	}
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

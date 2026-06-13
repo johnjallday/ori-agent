@@ -105,6 +105,8 @@ export class WorkspaceRunPage {
       report: document.getElementById('workspace-run-report'),
       validationCard: document.getElementById('workspace-run-validation-card'),
       validation: document.getElementById('workspace-run-validation'),
+      memoryCard: document.getElementById('workspace-run-memory-card'),
+      memory: document.getElementById('workspace-run-memory'),
       artifactsCard: document.getElementById('workspace-run-artifacts-card'),
       artifacts: document.getElementById('workspace-run-artifacts'),
       trace: document.getElementById('workspace-run-trace'),
@@ -277,9 +279,45 @@ export class WorkspaceRunPage {
     this.renderContext();
     this.renderReport();
     this.renderValidation();
+    this.renderMemoryLearned();
     this.renderArtifacts();
     this.renderTrace();
     this.renderActions();
+  }
+
+  // renderMemoryLearned surfaces the run's memory diff (the memory_diff trace
+  // artifact) as a human-readable "what this run learned" card. Hidden when the
+  // run wrote nothing to workspace memory.
+  renderMemoryLearned() {
+    if (!this.elements.memoryCard || !this.elements.memory) return;
+    const artifacts = Array.isArray(this.artifacts) ? this.artifacts : [];
+    const diff = artifacts.find((a) => a?.metadata && a.metadata.role === 'memory_diff');
+    const added = Array.isArray(diff?.metadata?.added) ? diff.metadata.added : [];
+    const removed = Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed : [];
+
+    if (!added.length && !removed.length) {
+      this.elements.memoryCard.hidden = true;
+      this.elements.memory.innerHTML = '';
+      return;
+    }
+
+    const renderGroup = (label, entries, cls) => {
+      if (!entries.length) return '';
+      const items = entries
+        .map((line) => `<li class="workspace-run-memory-entry ${cls}">${escapeHtml(String(line))}</li>`)
+        .join('');
+      return `
+        <div class="workspace-run-memory-group">
+          <div class="workspace-run-memory-group-label">${escapeHtml(label)}</div>
+          <ul class="workspace-run-memory-entries">${items}</ul>
+        </div>
+      `;
+    };
+
+    this.elements.memoryCard.hidden = false;
+    this.elements.memory.innerHTML =
+      renderGroup(`Remembered (${added.length})`, added, 'is-added') +
+      renderGroup(`Forgotten (${removed.length})`, removed, 'is-removed');
   }
 
   renderHero() {
