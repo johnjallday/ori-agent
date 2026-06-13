@@ -44,6 +44,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/trigger"
+	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
@@ -194,6 +196,11 @@ type ServerBuilder struct {
 
 	// Action Center — cross-workspace mission opportunity triage.
 	actionCenterHandler *actioncenterhttp.Handler
+
+	// Event triggers — webhooks + file-watch that fire missions/tasks.
+	missionBridge  *workspacerun.MissionBridge
+	triggerService *trigger.Service
+	triggerHandler *triggerhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -318,6 +325,9 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.directorySyncManager,
 		b.workspaceOrchestrator,
 	)
+	// Trigger service shares the workflow facade's lifecycle (started during
+	// mission-bridge init; stopped on Shutdown).
+	b.server.Workflow.TriggerService = b.triggerService
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
@@ -367,6 +377,9 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
 	b.server.Handlers.WorkspaceRuns = b.workspaceRunHandler
 	b.server.Handlers.ActionCenter = b.actionCenterHandler
+	// initializeMissionBridge (which builds the trigger handler) runs before
+	// this facade is rebuilt, so re-attach here — same pattern as ActionCenter.
+	b.server.Handlers.Triggers = b.triggerHandler
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

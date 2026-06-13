@@ -130,7 +130,13 @@ type Workspace struct {
 	NextMissionRunAt      *time.Time          `json:"next_mission_run_at,omitempty"`
 	MissionExecutionCount int                 `json:"mission_execution_count,omitempty"`
 	MissionFailureCount   int                 `json:"mission_failure_count,omitempty"`
-	Opportunities         []Opportunity       `json:"opportunities,omitempty"`
+	// MissionCadenceHeartbeat keeps the cadence timer fixed when event triggers
+	// fire the mission: event-fired runs still count (LastMissionRunAt,
+	// counters) but leave NextMissionRunAt untouched, so the cadence acts as a
+	// hard heartbeat regardless of event activity. Default false = an
+	// event-fired run pushes the next cadence run back, like any other run.
+	MissionCadenceHeartbeat bool          `json:"mission_cadence_heartbeat,omitempty"`
+	Opportunities           []Opportunity `json:"opportunities,omitempty"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`

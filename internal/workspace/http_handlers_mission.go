@@ -37,19 +37,20 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]any{
-		"mission":                 ws.Mission,
-		"cadence":                 ws.Cadence,
-		"autonomy_policy":         ws.AutonomyPolicy,
-		"notification_policy":     ws.NotificationPolicy,
-		"mission_enabled":         ws.MissionEnabled,
-		"last_mission_run_at":     ws.LastMissionRunAt,
-		"next_mission_run_at":     ws.NextMissionRunAt,
-		"mission_execution_count": ws.MissionExecutionCount,
-		"mission_failure_count":   ws.MissionFailureCount,
-		"open_findings_count":     openFindings,
-		"unclassified_mcp_ids":    mcpUnclassified,
-		"unclassified_skill_ids":  skillUnclassified,
-		"bindings_ready":          len(mcpUnclassified) == 0 && len(skillUnclassified) == 0,
+		"mission":                   ws.Mission,
+		"cadence":                   ws.Cadence,
+		"autonomy_policy":           ws.AutonomyPolicy,
+		"notification_policy":       ws.NotificationPolicy,
+		"mission_enabled":           ws.MissionEnabled,
+		"mission_cadence_heartbeat": ws.MissionCadenceHeartbeat,
+		"last_mission_run_at":       ws.LastMissionRunAt,
+		"next_mission_run_at":       ws.NextMissionRunAt,
+		"mission_execution_count":   ws.MissionExecutionCount,
+		"mission_failure_count":     ws.MissionFailureCount,
+		"open_findings_count":       openFindings,
+		"unclassified_mcp_ids":      mcpUnclassified,
+		"unclassified_skill_ids":    skillUnclassified,
+		"bindings_ready":            len(mcpUnclassified) == 0 && len(skillUnclassified) == 0,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -69,6 +70,7 @@ type UpdateMissionRequest struct {
 	AutonomyPolicy     *AutonomyPolicy     `json:"autonomy_policy,omitempty"`
 	NotificationPolicy *NotificationPolicy `json:"notification_policy,omitempty"`
 	MissionEnabled     *bool               `json:"mission_enabled,omitempty"`
+	CadenceHeartbeat   *bool               `json:"mission_cadence_heartbeat,omitempty"`
 }
 
 func (req *UpdateMissionRequest) UnmarshalJSON(data []byte) error {
@@ -78,6 +80,7 @@ func (req *UpdateMissionRequest) UnmarshalJSON(data []byte) error {
 		AutonomyPolicy     *AutonomyPolicy     `json:"autonomy_policy,omitempty"`
 		NotificationPolicy *NotificationPolicy `json:"notification_policy,omitempty"`
 		MissionEnabled     *bool               `json:"mission_enabled,omitempty"`
+		CadenceHeartbeat   *bool               `json:"mission_cadence_heartbeat,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -87,6 +90,7 @@ func (req *UpdateMissionRequest) UnmarshalJSON(data []byte) error {
 	req.AutonomyPolicy = raw.AutonomyPolicy
 	req.NotificationPolicy = raw.NotificationPolicy
 	req.MissionEnabled = raw.MissionEnabled
+	req.CadenceHeartbeat = raw.CadenceHeartbeat
 	req.Cadence = nil
 	req.CadenceSet = raw.Cadence != nil
 	if !req.CadenceSet || string(raw.Cadence) == "null" {
@@ -139,6 +143,9 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.NotificationPolicy != nil {
 			ws.NotificationPolicy = req.NotificationPolicy
+		}
+		if req.CadenceHeartbeat != nil {
+			ws.MissionCadenceHeartbeat = *req.CadenceHeartbeat
 		}
 		if req.MissionEnabled != nil {
 			ws.MissionEnabled = *req.MissionEnabled

@@ -19,6 +19,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/trigger"
+	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
@@ -416,6 +418,7 @@ func (b *ServerBuilder) initializeMissionBridge() {
 		return
 	}
 	b.taskScheduler.SetMissionTrigger(bridge)
+	b.missionBridge = bridge
 	if b.workspaceHandler != nil {
 		b.workspaceHandler.SetScheduler(b.taskScheduler)
 	}
@@ -425,9 +428,59 @@ func (b *ServerBuilder) initializeMissionBridge() {
 	// runs that produce findings.
 	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore)
 
+	// Event triggers reuse the same mission bridge (for mission_run actions)
+	// and opportunity store (for failure findings).
+	b.initializeTriggerService(opportunityStore)
+
 	if verbose {
 		logger.Info("Mission bridge initialized", logger.Fields{})
 	}
+}
+
+// initializeTriggerService wires the event-trigger subsystem: webhook
+// ingestion and file-watch triggers that fire missions or tasks. It depends
+// on the workspace store (which must expose folder resolution so triggers can
+// persist into each workspace folder) and reuses the mission bridge +
+// opportunity store. Best-effort: if the store can't resolve folders, trigger
+// support is skipped and the endpoints will 404.
+func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.OpportunityStore) {
+	// Triggers persist into each workspace's folder, so the source must be the
+	// folder-based FileStore (List + GetFolderPath). The primary store may be a
+	// SQLite-backed SyncStore that doesn't expose folder paths; prefer the
+	// dedicated FileStore when present, otherwise fall back to a store that
+	// happens to satisfy the interface.
+	var source trigger.WorkspaceSource
+	if b.workspaceFileStore != nil {
+		source = b.workspaceFileStore
+	} else if s, ok := b.workspaceStore.(trigger.WorkspaceSource); ok {
+		source = s
+	}
+	if source == nil {
+		logger.Warn("Trigger service skipped: no folder-based workspace store available", logger.Fields{})
+		return
+	}
+	cfg := trigger.ServiceConfig{
+		WorkspaceStore: b.workspaceStore,
+		Source:         source,
+		Opportunities:  opportunityStore,
+	}
+	if b.missionBridge != nil {
+		cfg.Mission = b.missionBridge
+	}
+	svc, err := trigger.NewService(cfg)
+	if err != nil {
+		logger.Warn("Trigger service construction failed; event triggers disabled", logger.Fields{"error": err})
+		return
+	}
+	if err := svc.Start(); err != nil {
+		logger.Warn("Trigger service start failed; event triggers disabled", logger.Fields{"error": err})
+		return
+	}
+	b.triggerService = svc
+	b.triggerHandler = triggerhttp.NewHandler(svc)
+	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
+	// attached to the facade in finalizeHandlers (alongside ActionCenter),
+	// not here.
 }
 
 // initializeTemplateManager loads workflow templates and injects into orchestration handler.

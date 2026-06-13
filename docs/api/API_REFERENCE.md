@@ -1418,4 +1418,101 @@ Check if all agents required by a workflow are available in a specific studio.
 }
 ```
 
+## Event Triggers API
+
+Event triggers start a run when something happens externally — an incoming webhook or a local file change — instead of only on the mission cadence. A trigger's **action** either runs the workspace mission (`mission_run`, same path and autonomy gate as cadence) or creates a workspace task from a stored prompt (`task_prompt`). Trigger definitions persist in each workspace's folder (`triggers.json`); disk is the source of truth.
+
+### Webhook Ingestion (public)
+
+```
+POST /api/hooks/{token}
+```
+
+The `{token}` is the per-trigger, unguessable identifier returned when a webhook trigger is created (or regenerated). This is the only authentication: keep the URL secret. If the trigger defines a shared secret, callers must also send it.
+
+**Headers:**
+- `Content-Type`: one of `application/json`, `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data` (others → `415`).
+- `X-Ori-Webhook-Secret`: required only when the trigger has a shared secret.
+
+**Responses:**
+- `202 Accepted` — `{ "accepted": true, "fire_id": "fire-…" }`. The event is processed asynchronously; correlate the eventual run/task via the `fires` endpoint using `fire_id`.
+- `401 Unauthorized` — missing or wrong shared secret.
+- `404 Not Found` — unknown **or** disabled token (deliberately indistinguishable).
+- `413 Payload Too Large` — body over 64 KB.
+- `415 Unsupported Media Type` — unsupported content type.
+- `429 Too Many Requests` — over the per-trigger rate limit (default 60/min).
+
+```bash
+curl -X POST http://localhost:8765/api/hooks/zn5_abitiyNmgT9vEdqbAZPKJtk_6SlP3sScpElkLho \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"opened","number":42}'
+```
+
+Bursts of events within a trigger's debounce window (default 2 s) coalesce into a single run. While a run is in flight, further events merge into one pending follow-up run (persisted, so it survives a restart).
+
+> **Security note — untrusted payloads reach the agent prompt.** A webhook body (and file event detail) is injected into the triggered run's prompt, capped at 64 KB, so a caller can attempt prompt injection (e.g. a body full of "ignore previous instructions…"). There is no content sanitization layer; the mitigations are the unguessable token, the optional shared secret, the per-trigger rate limit, and — critically — the workspace autonomy policy, which gates what the run is actually allowed to do. Only point triggers you control (or trust) at a workspace, and keep the autonomy policy no higher than the workspace needs.
+
+### List Triggers
+
+```
+GET /api/workspaces/{workspaceID}/triggers
+```
+
+Returns `{ "triggers": [ … ] }`. Each trigger includes a computed `webhook_url` and `has_secret`; the shared secret itself is never returned.
+
+### Create Trigger
+
+```
+POST /api/workspaces/{workspaceID}/triggers
+```
+
+Webhook example (token is generated server-side):
+```json
+{
+  "name": "pr-opened",
+  "type": "webhook",
+  "enabled": true,
+  "action": { "kind": "mission_run" },
+  "webhook": { "secret": "optional-shared-secret" }
+}
+```
+
+File-watch example:
+```json
+{
+  "name": "invoice-drop",
+  "type": "file_watch",
+  "enabled": true,
+  "action": { "kind": "task_prompt", "agent": "bookkeeper", "prompt": "File the dropped invoice." },
+  "file_watch": { "path": "/Users/you/Downloads/invoices", "glob": "*.pdf", "events": ["create"] },
+  "debounce_seconds": 2
+}
+```
+
+`201 Created` returns the trigger view; for webhooks the full `webhook_url` is included so it can be copied once.
+
+### Get / Update / Delete Trigger
+
+```
+GET    /api/workspaces/{workspaceID}/triggers/{triggerID}
+PUT    /api/workspaces/{workspaceID}/triggers/{triggerID}
+DELETE /api/workspaces/{workspaceID}/triggers/{triggerID}
+```
+
+`PUT` accepts any subset of `name`, `enabled`, `action`, `file_watch`, `webhook` (secret only — omit to keep the existing token), and `debounce_seconds`.
+
+### Enable / Disable / Regenerate / Test / History
+
+```
+POST /api/workspaces/{workspaceID}/triggers/{triggerID}/enable
+POST /api/workspaces/{workspaceID}/triggers/{triggerID}/disable
+POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token   # new URL; old stops working immediately
+POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire          # dispatch a synthetic event now
+GET  /api/workspaces/{workspaceID}/triggers/{triggerID}/fires              # recent fire history (run/task IDs, errors)
+```
+
+Trigger failures (mission disabled, watched folder removed, run-creation error) are recorded on the trigger and surfaced as Action Center findings for the workspace.
+
+---
+
 This API reference provides complete documentation for integrating with Ori Agent programmatically. For additional help or examples, refer to the main [README](README.md) or check the web interface implementation in the `internal/web/` directory.

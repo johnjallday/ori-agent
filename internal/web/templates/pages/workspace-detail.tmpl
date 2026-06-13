@@ -389,6 +389,17 @@
                   aria-selected="false">
                   Goal Settings
                 </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-triggers-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-triggers-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-triggers-pane"
+                  aria-selected="false">
+                  Triggers
+                </button>
               </div>
               <div class="tab-content workspace-detail-config-body">
                 <div
@@ -871,6 +882,16 @@
                           </label>
                         </div>
                       </div>
+
+                      <div class="col-12">
+                        <div class="form-check form-switch" style="padding-top: 0.25rem;">
+                          <input class="form-check-input" type="checkbox" id="workspace-detail-mission-heartbeat">
+                          <label class="form-check-label" for="workspace-detail-mission-heartbeat">
+                            <strong>Cadence heartbeat</strong>
+                            <div class="workspace-detail-settings-field-hint">Keep the cadence on its fixed schedule even when an event trigger fires the goal. Off (default): an event-fired run pushes the next cadence run back.</div>
+                          </label>
+                        </div>
+                      </div>
                     </div>
 
                     <div class="workspace-detail-settings-actions">
@@ -880,6 +901,45 @@
                       <button type="submit" class="btn btn-primary" id="workspace-detail-mission-save">Save goal settings</button>
                     </div>
                   </form>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-triggers-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-triggers-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Event Triggers</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Start a run when something happens, not just on a timer. Point an incoming webhook (PR opened, form submitted) or a watched folder (a file dropped in) at this workspace's goal or a specific task.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-triggers-refresh" class="workspace-detail-panel-btn" type="button" title="Refresh triggers">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div id="workspace-detail-triggers-status-text" class="workspace-detail-settings-field-hint" aria-live="polite" style="margin-bottom: 0.75rem;"></div>
+
+                  <!-- Empty state -->
+                  <div id="workspace-detail-triggers-empty" class="workspace-detail-empty" style="display: none;">
+                    <div style="margin-bottom: 0.75rem;">No triggers yet. React to events instead of waiting for the cadence.</div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                      <button type="button" class="btn btn-sm btn-outline-primary" data-trigger-add="webhook">Add webhook</button>
+                      <button type="button" class="btn btn-sm btn-outline-primary" data-trigger-add="file_watch">Watch a folder</button>
+                    </div>
+                  </div>
+
+                  <!-- Trigger list -->
+                  <div id="workspace-detail-triggers-list" class="workspace-detail-triggers-list"></div>
+
+                  <div class="workspace-detail-settings-actions" id="workspace-detail-triggers-actions" style="display: none;">
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-trigger-add="webhook">Add webhook</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-trigger-add="file_watch">Watch a folder</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -8627,6 +8687,7 @@
   <script src="/js/modules/workspace-hub-notes.js"></script>
   <script src="/js/modules/workspace-hub-files.js"></script>
   <script src="/js/modules/workspace-mission.js"></script>
+  <script src="/js/modules/workspace-triggers.js"></script>
   <script src="/js/modules/project-templates-manage.js"></script>
   <script src="/js/modules/workspace-hub-support-chat.js"></script>
 

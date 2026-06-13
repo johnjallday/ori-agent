@@ -30,6 +30,7 @@
     baselineBtn: '#workspace-detail-mission-baseline',
     triggerBtn: '#workspace-detail-mission-trigger',
     enabled: '#workspace-detail-mission-enabled',
+    heartbeat: '#workspace-detail-mission-heartbeat',
     text: '#workspace-detail-mission-text',
     autonomyRadios: 'input[name="workspace-detail-mission-autonomy"]',
     cadenceType: '#workspace-detail-mission-cadence-type',
@@ -513,6 +514,8 @@
   function populateFormFromState(state) {
     $(SELECTORS.text).value = state.mission || '';
     $(SELECTORS.enabled).checked = !!state.mission_enabled;
+    const heartbeatEl = $(SELECTORS.heartbeat);
+    if (heartbeatEl) heartbeatEl.checked = !!state.mission_cadence_heartbeat;
 
     // Autonomy
     const radios = document.querySelectorAll(SELECTORS.autonomyRadios);
@@ -566,12 +569,14 @@
       if (onFindings) notification_policy.on_findings = onFindings;
     }
 
+    const heartbeatEl = $(SELECTORS.heartbeat);
     return {
       mission: $(SELECTORS.text).value,
       autonomy_policy: policy ? policy.value : 'propose',
       cadence,
       notification_policy,
       mission_enabled: $(SELECTORS.enabled).checked,
+      mission_cadence_heartbeat: heartbeatEl ? heartbeatEl.checked : false,
     };
   }
 
