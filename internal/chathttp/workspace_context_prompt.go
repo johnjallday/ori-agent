@@ -39,7 +39,36 @@ func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normali
 }
 
 func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
-	return buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
+	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
+	memory := h.buildWorkspaceMemoryPrompt(routeCtx, toolCallable)
+
+	parts := make([]string, 0, 2)
+	if strings.TrimSpace(base) != "" {
+		parts = append(parts, base)
+	}
+	if strings.TrimSpace(memory) != "" {
+		parts = append(parts, memory)
+	}
+	return strings.Join(parts, "\n\n---\n")
+}
+
+// buildWorkspaceMemoryPrompt renders the workspace's persistent memory for the
+// chat runtime prompt. Scoped to workspace surfaces (same gate as the snapshot)
+// and requires the folder-backed file store to read MEMORY.md. Tool guidance is
+// included only when workspace tools are callable on this route.
+func (h *Handler) buildWorkspaceMemoryPrompt(routeCtx normalizedChatRouteContext, toolCallable bool) string {
+	if !shouldAttachWorkspaceSnapshot(routeCtx) || h.fileStore == nil {
+		return ""
+	}
+	doc, err := workspace.NewMemoryStore(h.fileStore).Read(routeCtx.WorkspaceID)
+	if err != nil {
+		logger.Debug("Skipping workspace memory for chat runtime prompt", logger.Fields{
+			"workspace_id": routeCtx.WorkspaceID,
+			"error":        err,
+		})
+		return ""
+	}
+	return workspace.RenderMemoryPromptSection(doc, toolCallable)
 }
 
 func buildWorkspaceRuntimeSystemPrompt(

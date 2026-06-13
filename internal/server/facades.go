@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/memoryhttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -124,6 +125,7 @@ type HandlerFacade struct {
 	WorkspaceRuns    *workspacerun.Handler
 	ActionCenter     *actioncenterhttp.Handler
 	Triggers         *triggerhttp.Handler
+	WorkspaceMemory  *memoryhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

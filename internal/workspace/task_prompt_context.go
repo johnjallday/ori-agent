@@ -79,6 +79,29 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	return prompt.String()
 }
 
+// buildTaskMemorySection renders the workspace's persistent memory for the task
+// prompt. Memory tools are available during task execution, so tool guidance is
+// included. Returns "" when the store can't resolve a folder path (e.g. a
+// non-folder store) or memory is empty and there's nothing to guide.
+func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
+	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
+		return ""
+	}
+	resolver, ok := h.workspaceStore.(workspaceFolderStore)
+	if !ok {
+		return ""
+	}
+	doc, err := NewMemoryStore(resolver).Read(task.WorkspaceID)
+	if err != nil {
+		logger.Debug("Skipping workspace memory for task prompt", logger.Fields{
+			"workspace_id": task.WorkspaceID,
+			"error":        err,
+		})
+		return ""
+	}
+	return RenderMemoryPromptSection(doc, true)
+}
+
 func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Task) string {
 	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return ""
@@ -638,6 +661,11 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 		prompt.WriteString(referenceURL)
 		prompt.WriteString("\n\n")
 		prompt.WriteString("Treat this URL as authoritative source material for this task. Inspect it with available fetch, browser, or web tools before making claims about its contents. If you cannot inspect it, state that limitation in your final response.\n\n")
+	}
+
+	if workspaceMemory := h.buildTaskMemorySection(task); workspaceMemory != "" {
+		prompt.WriteString(workspaceMemory)
+		prompt.WriteString("\n\n")
 	}
 
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {

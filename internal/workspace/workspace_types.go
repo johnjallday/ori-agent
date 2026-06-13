@@ -38,7 +38,9 @@ const (
 type AutonomyPolicy string
 
 const (
-	// AutonomyWatch limits the run to read-classified tools only. No writes anywhere.
+	// AutonomyWatch limits the run to read-classified tools only. No writes
+	// anywhere — except workspace memory (see IsWorkspaceMemoryTool), so even
+	// watch-only missions can learn across runs.
 	AutonomyWatch AutonomyPolicy = "watch"
 	// AutonomyPropose allows read + workspace-internal writes (draft artifacts, notes,
 	// recommended-task drafts). External-effect tools remain denied.

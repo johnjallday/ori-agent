@@ -101,6 +101,11 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		p.readDirectoriesTool(),
 	}
 
+	// Workspace memory tools (need folder storage for MEMORY.md)
+	if p.fileStore != nil {
+		tools = append(tools, p.memoryWriteTool(), p.memoryForgetTool())
+	}
+
 	// Task-scoped tools (only when the chat is bound to a specific task)
 	if p.taskID != "" {
 		tools = append(tools, p.currentTaskTool(), p.taskRunsTool())

@@ -88,6 +88,11 @@ func (h *LLMTaskHandler) evaluateExecutionAutonomyGate(task Task, toolName strin
 // allows) and is deliberately checked BEFORE the name heuristic so an external
 // binding's read-prefixed tool (e.g. "fetch_url") isn't mis-allowed as a read.
 func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName string) SideEffect {
+	// Native workspace-memory tools have a fixed classification; binding
+	// overrides and defaults must not be able to re-classify them.
+	if IsWorkspaceMemoryTool(toolName) {
+		return SideEffectWrite
+	}
 	if h.workspaceStore == nil {
 		return SuggestSideEffect(toolName)
 	}
@@ -173,6 +178,11 @@ func missionDefaultSideEffect(ws *Workspace) SideEffect {
 // classification (avoiding re-resolving). Kept here rather than in mission.go
 // because the resolution step lives on the handler.
 func EvaluateMissionToolCallDecision(policy AutonomyPolicy, classification SideEffect, toolName string) GateDecision {
+	// Memory tools are allowed under every policy regardless of the resolved
+	// classification (see IsWorkspaceMemoryTool); mirror EvaluateMissionToolCall.
+	if IsWorkspaceMemoryTool(toolName) {
+		return GateDecision{Allowed: true, Classification: SideEffectWrite, Policy: policy, ToolName: toolName}
+	}
 	dec := GateDecision{
 		Classification: classification,
 		Policy:         policy,

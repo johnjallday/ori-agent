@@ -94,6 +94,16 @@
             <div id="workspace-run-validation" class="workspace-run-validation-list"></div>
           </section>
 
+          <section id="workspace-run-memory-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Memory</div>
+                <h2>What this run learned</h2>
+              </div>
+            </div>
+            <div id="workspace-run-memory" class="workspace-run-memory-list"></div>
+          </section>
+
           <section id="workspace-run-artifacts-card" class="workspace-run-card" hidden>
             <div class="workspace-run-card-header">
               <div>
@@ -438,9 +448,45 @@
     .workspace-run-validation-list,
     .workspace-run-context-list,
     .workspace-run-artifact-list,
-    .workspace-run-trace-list {
+    .workspace-run-trace-list,
+    .workspace-run-memory-list {
       display: grid;
       gap: 0.65rem;
+    }
+
+    .workspace-run-memory-group-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-run-memory-entries {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.4rem;
+    }
+
+    .workspace-run-memory-entry {
+      padding: 0.5rem 0.65rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      font-family: var(--font-mono, monospace);
+      font-size: 0.82rem;
+      word-break: break-word;
+    }
+
+    .workspace-run-memory-entry.is-added {
+      border-left: 3px solid color-mix(in srgb, var(--success, #2e7d32) 70%, transparent);
+    }
+
+    .workspace-run-memory-entry.is-removed {
+      border-left: 3px solid color-mix(in srgb, var(--danger, #c62828) 60%, transparent);
+      opacity: 0.75;
+      text-decoration: line-through;
     }
 
     .workspace-run-validation-item,

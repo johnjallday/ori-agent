@@ -24,7 +24,8 @@ type OriAgentTaskContextPreparer interface {
 }
 
 type OriAgentExecutor struct {
-	runner OriAgentTaskRunner
+	runner  OriAgentTaskRunner
+	folders workspaceFolderResolver
 
 	mu        sync.Mutex
 	artifacts map[string][]Artifact
@@ -39,6 +40,12 @@ func NewOriAgentExecutor(runners ...OriAgentTaskRunner) *OriAgentExecutor {
 		runner:    runner,
 		artifacts: make(map[string][]Artifact),
 	}
+}
+
+// SetWorkspaceFolderResolver wires folder-path resolution so the executor can
+// snapshot workspace memory before and after the run and record what changed.
+func (e *OriAgentExecutor) SetWorkspaceFolderResolver(resolver workspaceFolderResolver) {
+	e.folders = resolver
 }
 
 func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
@@ -58,9 +65,13 @@ func (e *OriAgentExecutor) Execute(ctx context.Context, run *Run) error {
 	if strings.TrimSpace(task.ReferenceURL) == "" {
 		task.ReferenceURL = strings.TrimSpace(run.ReferenceURL)
 	}
+	memoryBefore := snapshotMemoryLines(e.folders, task.WorkspaceID)
 	result, err := e.runner.ExecuteTask(ctx, run.Executor.Ref, task)
 	if err != nil {
 		return err
+	}
+	if diff := memoryDiffArtifact(run.ID, memoryBefore, snapshotMemoryLines(e.folders, task.WorkspaceID)); diff != nil {
+		e.addArtifact(run.ID, *diff)
 	}
 	e.addArtifact(run.ID, NewArtifact(
 		run.ID,

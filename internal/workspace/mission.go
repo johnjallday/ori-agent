@@ -362,6 +362,13 @@ type GateDecision struct {
 // and the same function works in tests, the executor, and the readiness
 // preview UI.
 func EvaluateMissionToolCall(policy AutonomyPolicy, defaultSE SideEffect, overrides map[string]SideEffect, toolName string) GateDecision {
+	// Native workspace-memory tools bypass binding classification entirely:
+	// they are always workspace-internal writes and are allowed under every
+	// policy, including Watch (see IsWorkspaceMemoryTool for the rationale).
+	// Checked first so binding overrides cannot re-classify or block them.
+	if IsWorkspaceMemoryTool(toolName) {
+		return GateDecision{Allowed: true, Classification: SideEffectWrite, Policy: policy, ToolName: toolName}
+	}
 	resolved := ResolveSideEffect(defaultSE, overrides, toolName)
 	dec := GateDecision{
 		Classification: resolved,

@@ -28,10 +28,10 @@ A mission's reach is bounded by the policy you choose for the workspace:
 
 | Policy | What it can do |
 |--------|----------------|
-| **Watch** | Read-only tools. No writes anywhere. |
+| **Watch** | Read-only tools. No writes anywhere — except workspace memory. |
 | **Propose** | Reads plus workspace-internal writes (draft notes/artifacts, recommended-task drafts). External-effect tools stay denied. |
 
-Each MCP/skill binding is classified by side effect (read / write / external), and the autonomy gate enforces the policy **per tool call** — so a mission can't take an action you haven't authorized for that workspace.
+Each MCP/skill binding is classified by side effect (read / write / external), and the autonomy gate enforces the policy **per tool call** — so a mission can't take an action you haven't authorized for that workspace. The one exception is **workspace memory**: agents may record durable knowledge there under every policy (including Watch), so even a read-only mission can remember what it found and avoid re-reporting it next run.
 
 ## ✨ What you can do
 
@@ -41,6 +41,7 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 - **Multiple agents** — create named agents, each with its own provider/model, system prompt, skills, and MCP servers.
 - **Multi-agent orchestration** — chain agents into workflows and combine their results.
 - **MCP servers & Skills** — extend agents with external tools (MCP) and reusable prompt-based capabilities (Skills), bound per workspace.
+- **Workspace memory** — each workspace keeps a curated `MEMORY.md` of durable knowledge (facts, decisions, dead ends, watch-state) that agents read at the start of every run and chat and update as they learn, so missions compound instead of restarting cold. Editable from a Memory tab; travels with the workspace folder.
 - **Sessions** — persistent, searchable chat history with folders and tagging.
 - **Private Vault** — local encrypted storage for secrets and sensitive records, backed by the OS keychain.
 - **Usage & cost tracking** — monitor token usage and spend across providers.
