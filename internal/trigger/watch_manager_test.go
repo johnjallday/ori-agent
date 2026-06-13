@@ -128,8 +128,6 @@ func TestWatchCreateOnMissingDirFailsValidation(t *testing.T) {
 	}
 	t.Cleanup(m.Close)
 
-	trg, _ := store.Get("ws1", "")
-	_ = trg
 	triggers := store.List("ws1")
 	if addErr := m.Add(triggers[0]); addErr == nil {
 		t.Error("Add should fail for a missing directory")

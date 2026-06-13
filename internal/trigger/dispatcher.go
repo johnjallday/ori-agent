@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -127,7 +128,13 @@ func (d *Dispatcher) fireMissionRun(t Trigger, evCtx *workspace.TriggerEventCont
 // and queues it for the task executor (status assigned → picked up on the
 // next executor poll).
 func (d *Dispatcher) fireTaskPrompt(t Trigger, fire PendingFire, evCtx *workspace.TriggerEventContext) (string, error) {
+	// Assign the ID up front so we report the right one regardless of where
+	// AddTask inserts the task (it preserves a non-empty ID). Avoids relying
+	// on positional lookup of the "last" task, which breaks under any future
+	// insertion-order change.
+	taskID := "trg-task-" + uuid.NewString()
 	task := workspace.Task{
+		ID:          taskID,
 		From:        taskFromTrigger,
 		To:          t.Action.Agent,
 		Description: buildTaskDescription(t.Action.Prompt, evCtx),
@@ -141,16 +148,9 @@ func (d *Dispatcher) fireTaskPrompt(t Trigger, fire PendingFire, evCtx *workspac
 		CreatedAt: time.Now(),
 	}
 
-	var taskID string
-	err := d.workspaceStore.Update(t.WorkspaceID, func(ws *workspace.Workspace) error {
-		if err := ws.AddTask(task); err != nil {
-			return err
-		}
-		// AddTask assigns the ID when empty; read it back off the stored task.
-		taskID = ws.Tasks[len(ws.Tasks)-1].ID
-		return nil
-	})
-	if err != nil {
+	if err := d.workspaceStore.Update(t.WorkspaceID, func(ws *workspace.Workspace) error {
+		return ws.AddTask(task)
+	}); err != nil {
 		return "", fmt.Errorf("create task from trigger: %w", err)
 	}
 	return taskID, nil

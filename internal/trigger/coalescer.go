@@ -149,7 +149,7 @@ func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 			logger.Debug("trigger coalescer: trigger gone, dropping fire", logger.Fields{
 				"trigger_id": triggerID, "workspace_id": wsID,
 			})
-			c.finish(triggerID, false)
+			c.clearInFlight(triggerID)
 			return
 		}
 		if t.Enabled {
@@ -162,7 +162,7 @@ func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 
 		next := c.takePending(wsID, triggerID)
 		if next == nil {
-			c.finish(triggerID, false)
+			c.clearInFlight(triggerID)
 			return
 		}
 		fire = *next
@@ -188,12 +188,13 @@ func (c *Coalescer) takePending(wsID, triggerID string) *PendingFire {
 	return pf
 }
 
-// finish clears the in-flight marker.
-func (c *Coalescer) finish(triggerID string, inFlight bool) {
+// clearInFlight releases the in-flight marker so a future event can start a
+// new run for this trigger.
+func (c *Coalescer) clearInFlight(triggerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if st := c.states[triggerID]; st != nil {
-		st.inFlight = inFlight
+		st.inFlight = false
 	}
 }
 
@@ -220,7 +221,7 @@ func (c *Coalescer) RestorePending() {
 
 		fire := c.takePending(t.WorkspaceID, t.ID)
 		if fire == nil {
-			c.finish(t.ID, false)
+			c.clearInFlight(t.ID)
 			continue
 		}
 		logger.Info("trigger coalescer: restoring pending fire from before restart", logger.Fields{

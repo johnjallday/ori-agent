@@ -36,6 +36,10 @@ type triggerView struct {
 // URL from the request's scheme+host.
 func toView(r *http.Request, t trigger.Trigger) triggerView {
 	v := triggerView{Trigger: t}
+	// Don't expose the queued (not-yet-executed) webhook payload through the
+	// management API — it carries the raw inbound body. Completed fires are
+	// summarized in FireHistory without the body.
+	v.Trigger.PendingFire = nil
 	if t.Webhook != nil {
 		v.HasSecret = t.Webhook.Secret != ""
 		// Never leak the secret.
@@ -175,13 +179,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			t.FileWatch = req.FileWatch
 		}
 		if req.Webhook != nil {
-			// Preserve the existing token unless the caller supplied one;
-			// allow updating the secret (empty clears it).
+			// Only the secret is updatable here (empty clears it). The token is
+			// never settable via the API — it is generated on create and
+			// rotated only through regenerate-token — so a caller can't install
+			// a weak, guessable token through this path.
 			if t.Webhook == nil {
 				t.Webhook = &trigger.WebhookConfig{}
-			}
-			if req.Webhook.Token != "" {
-				t.Webhook.Token = req.Webhook.Token
 			}
 			t.Webhook.Secret = req.Webhook.Secret
 		}

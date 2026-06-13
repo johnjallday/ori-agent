@@ -1450,6 +1450,8 @@ curl -X POST http://localhost:8765/api/hooks/zn5_abitiyNmgT9vEdqbAZPKJtk_6SlP3sS
 
 Bursts of events within a trigger's debounce window (default 2 s) coalesce into a single run. While a run is in flight, further events merge into one pending follow-up run (persisted, so it survives a restart).
 
+> **Security note — untrusted payloads reach the agent prompt.** A webhook body (and file event detail) is injected into the triggered run's prompt, capped at 64 KB, so a caller can attempt prompt injection (e.g. a body full of "ignore previous instructions…"). There is no content sanitization layer; the mitigations are the unguessable token, the optional shared secret, the per-trigger rate limit, and — critically — the workspace autonomy policy, which gates what the run is actually allowed to do. Only point triggers you control (or trust) at a workspace, and keep the autonomy policy no higher than the workspace needs.
+
 ### List Triggers
 
 ```
