@@ -634,6 +634,26 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Event Triggers API Endpoints
+	// =============================================================================
+	if s.Handlers.Triggers != nil {
+		// Public webhook ingestion (auth is the per-trigger token + optional secret).
+		mux.HandleFunc("POST /api/hooks/{token}", s.Handlers.Triggers.HandleWebhook)
+
+		// Per-workspace trigger management.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers", s.Handlers.Triggers.List)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers", s.Handlers.Triggers.Create)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}", s.Handlers.Triggers.Get)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/triggers/{triggerID}", s.Handlers.Triggers.Update)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/triggers/{triggerID}", s.Handlers.Triggers.Delete)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/enable", s.Handlers.Triggers.SetEnabled(true))
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/disable", s.Handlers.Triggers.SetEnabled(false))
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token", s.Handlers.Triggers.RegenerateToken)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
+	}
+
+	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
 	if s.Handlers.ExternalAgents != nil {

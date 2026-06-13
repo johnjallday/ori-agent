@@ -271,6 +271,47 @@ func TestApplyMissionRunOutcome_Failure(t *testing.T) {
 	}
 }
 
+func TestApplyMissionRunOutcome_HoldCadence(t *testing.T) {
+	start := time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)
+	existingNext := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
+	ws := &Workspace{
+		Cadence:          &ScheduleConfig{Type: ScheduleWeekly, DayOfWeek: int(time.Monday), TimeOfDay: "09:00"},
+		NextMissionRunAt: &existingNext,
+	}
+	// An event-fired run with HoldCadence still counts but must NOT move the
+	// next cadence run (PRD #5a — cadence heartbeat).
+	ApplyMissionRunOutcome(ws, MissionRunOutcome{StartedAt: start, Succeeded: true, HoldCadence: true})
+	if ws.MissionExecutionCount != 1 {
+		t.Errorf("execution count = %d; want 1 (event run still counts)", ws.MissionExecutionCount)
+	}
+	if ws.LastMissionRunAt == nil || !ws.LastMissionRunAt.Equal(start) {
+		t.Errorf("LastMissionRunAt should advance even with HoldCadence: %v", ws.LastMissionRunAt)
+	}
+	if ws.NextMissionRunAt == nil || !ws.NextMissionRunAt.Equal(existingNext) {
+		t.Errorf("NextMissionRunAt should stay unchanged with HoldCadence; got %v want %v", ws.NextMissionRunAt, existingNext)
+	}
+}
+
+func TestBuildMissionSystemPrompt_TriggeringEvent(t *testing.T) {
+	out := BuildMissionSystemPrompt(MissionPromptInputs{
+		Mission:      "Watch the repo",
+		CycleOrdinal: 2,
+		TriggeringEvent: &TriggerEventContext{
+			TriggerName: "pr-opened",
+			TriggerType: "webhook",
+			FiredAt:     time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC),
+			EventCount:  1,
+			Summary:     "POST 1.2 KB from 10.0.0.1",
+			Payload:     `{"action":"opened"}`,
+		},
+	})
+	for _, want := range []string{"TRIGGERING EVENT", "pr-opened", "webhook", "POST 1.2 KB", `{"action":"opened"}`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestEvaluateMissionToolCall(t *testing.T) {
 	overrides := map[string]SideEffect{"http_post": SideEffectExternal}
 

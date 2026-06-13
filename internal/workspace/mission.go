@@ -68,6 +68,42 @@ type MissionPromptInputs struct {
 	// snoozed-but-due). Passed back into the run so the agent updates existing
 	// records rather than rediscovering them every cycle.
 	OpenOpportunities []Opportunity
+	// TriggeringEvent is set when this run was started by an event trigger
+	// (webhook or file watch) rather than cadence. Rendered as its own prompt
+	// section so the agent knows why it was woken. nil for cadence/manual runs.
+	TriggeringEvent *TriggerEventContext
+}
+
+// TriggerEventContext describes the external event that started a mission run.
+// Lives in this package (not internal/trigger) because BuildMissionSystemPrompt
+// renders it and internal/trigger already imports workspace — the reverse
+// import would cycle.
+type TriggerEventContext struct {
+	// TriggerName is the user-given name of the trigger that fired.
+	TriggerName string `json:"trigger_name"`
+	// TriggerType is "webhook", "file_watch", or "test" (manual test-fire).
+	TriggerType string `json:"trigger_type"`
+	// FiredAt is when the (coalesced) fire decision was made.
+	FiredAt time.Time `json:"fired_at"`
+	// EventCount is how many raw events were coalesced into this fire (≥ 1).
+	EventCount int `json:"event_count"`
+	// Summary is a one-line human-readable description of the event(s),
+	// e.g. `create: invoice-2026-06.pdf (+2 more)` or `POST 1.2 KB from 192.168.1.10`.
+	Summary string `json:"summary"`
+	// Payload carries the size-capped event detail: the webhook body, or the
+	// list of file events. Already truncated/summarized by the trigger layer.
+	Payload string `json:"payload,omitempty"`
+}
+
+// MissionRunOptions carries optional inputs for an event-initiated mission run.
+// The zero value reproduces plain cadence semantics, so existing callers of
+// TriggerMissionRun are unaffected.
+type MissionRunOptions struct {
+	// Event, when set, is injected into the mission system prompt.
+	Event *TriggerEventContext
+	// HoldCadence, when true, prevents the run outcome from advancing
+	// NextMissionRunAt (the workspace's cadence-heartbeat setting).
+	HoldCadence bool
 }
 
 // BuildMissionSystemPrompt composes the system prompt for a mission run.
@@ -99,6 +135,26 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 		b.WriteString("This is the BASELINE run for this mission. Produce a concise current-state assessment of the workspace and identify the most impactful 1-5 opportunities to address. Do NOT take action on them — only report.\n\n")
 	} else {
 		b.WriteString(fmt.Sprintf("This is recurring mission run #%d. Compare current workspace state against the prior opportunity backlog. Update existing opportunities when the same issue persists, mark resolved when fixed, and add new ones only when they are genuinely new findings. Do NOT take action — only report.\n\n", in.CycleOrdinal))
+	}
+
+	if ev := in.TriggeringEvent; ev != nil {
+		b.WriteString("--- TRIGGERING EVENT ---\n")
+		b.WriteString(fmt.Sprintf("This run was started by the %q %s trigger (not the regular cadence).\n", ev.TriggerName, ev.TriggerType))
+		if !ev.FiredAt.IsZero() {
+			b.WriteString("Fired at: " + ev.FiredAt.Format(time.RFC3339) + "\n")
+		}
+		if ev.EventCount > 1 {
+			b.WriteString(fmt.Sprintf("Coalesced events: %d\n", ev.EventCount))
+		}
+		if strings.TrimSpace(ev.Summary) != "" {
+			b.WriteString("Event: " + strings.TrimSpace(ev.Summary) + "\n")
+		}
+		if strings.TrimSpace(ev.Payload) != "" {
+			b.WriteString("Event detail:\n")
+			b.WriteString(strings.TrimSpace(ev.Payload))
+			b.WriteString("\n")
+		}
+		b.WriteString("Focus this run on what the event implies for the mission; fall back to a normal review only if the event turns out to be irrelevant.\n\n")
 	}
 
 	if len(in.OpenOpportunities) > 0 {
@@ -249,6 +305,10 @@ func stripJSONFence(s string) string {
 type MissionRunOutcome struct {
 	StartedAt time.Time
 	Succeeded bool
+	// HoldCadence leaves NextMissionRunAt untouched: the run still counts
+	// (LastMissionRunAt, counters) but does not push the cadence back. Set for
+	// event-triggered runs when the workspace's MissionCadenceHeartbeat is on.
+	HoldCadence bool
 }
 
 // ApplyMissionRunOutcome updates the workspace's mission tracking fields
@@ -272,6 +332,9 @@ func ApplyMissionRunOutcome(ws *Workspace, outcome MissionRunOutcome) {
 	ws.MissionExecutionCount++
 	if !outcome.Succeeded {
 		ws.MissionFailureCount++
+	}
+	if outcome.HoldCadence {
+		return
 	}
 	if ws.Cadence != nil {
 		ws.NextMissionRunAt = CalculateNextRun(*ws.Cadence, started)

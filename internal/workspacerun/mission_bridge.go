@@ -99,6 +99,14 @@ func NewMissionBridge(cfg MissionBridgeConfig) *MissionBridge {
 // Returns the run ID even on parse/persist failures (the run completed) so the
 // caller can navigate to the run detail page to investigate.
 func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID string, cycleOrdinal int) (string, error) {
+	return b.TriggerMissionRunOpts(ctx, workspaceID, cycleOrdinal, workspace.MissionRunOptions{})
+}
+
+// TriggerMissionRunOpts is TriggerMissionRun with event-trigger extras: an
+// optional triggering event injected into the mission prompt, and the
+// cadence-heartbeat hold. The zero-value opts reproduce TriggerMissionRun
+// exactly; the cadence scheduler keeps calling the plain method.
+func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID string, cycleOrdinal int, opts workspace.MissionRunOptions) (string, error) {
 	if b == nil {
 		return "", fmt.Errorf("mission bridge not configured")
 	}
@@ -137,6 +145,7 @@ func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID strin
 		Mission:                ws.Mission,
 		CycleOrdinal:           cycleOrdinal,
 		OpenOpportunities:      openOpps,
+		TriggeringEvent:        opts.Event,
 	})
 
 	// Build a synthetic task to feed into the OriAgentExecutor. The task is
@@ -200,7 +209,7 @@ func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID strin
 		// is still in the past (i.e. control never reached here), so it will not
 		// double-count the advance we just made.
 		_ = b.workspaceStore.Update(workspaceID, func(w *workspace.Workspace) error {
-			workspace.ApplyMissionRunOutcome(w, workspace.MissionRunOutcome{StartedAt: time.Now(), Succeeded: false})
+			workspace.ApplyMissionRunOutcome(w, workspace.MissionRunOutcome{StartedAt: time.Now(), Succeeded: false, HoldCadence: opts.HoldCadence})
 			return nil
 		})
 		return "", fmt.Errorf("create mission run: %w", err)
@@ -240,8 +249,9 @@ func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID strin
 	succeeded := execErr == nil
 	_ = b.workspaceStore.Update(workspaceID, func(w *workspace.Workspace) error {
 		workspace.ApplyMissionRunOutcome(w, workspace.MissionRunOutcome{
-			StartedAt: started,
-			Succeeded: succeeded,
+			StartedAt:   started,
+			Succeeded:   succeeded,
+			HoldCadence: opts.HoldCadence,
 		})
 		return nil
 	})

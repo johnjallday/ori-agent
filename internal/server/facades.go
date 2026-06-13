@@ -32,6 +32,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/trigger"
+	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
@@ -69,6 +71,9 @@ type WorkflowSystemFacade struct {
 	NotificationService   *workspace.NotificationService
 	DirectorySync         *workspace.DirectorySyncManager
 	WorkspaceOrchestrator *workspace.Orchestrator
+	// TriggerService owns event-trigger file watches; closed on Shutdown.
+	// Assigned post-construction by the builder (not a constructor arg).
+	TriggerService *trigger.Service
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -118,6 +123,7 @@ type HandlerFacade struct {
 	CLIAgentRegistry *cliagent.CLIAgentRegistry
 	WorkspaceRuns    *workspacerun.Handler
 	ActionCenter     *actioncenterhttp.Handler
+	Triggers         *triggerhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
@@ -297,6 +303,9 @@ func (w *WorkflowSystemFacade) Shutdown() {
 	}
 	if w.EventBus != nil {
 		w.EventBus.Shutdown()
+	}
+	if w.TriggerService != nil {
+		w.TriggerService.Close()
 	}
 }
 
