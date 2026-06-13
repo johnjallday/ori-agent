@@ -16,7 +16,7 @@
     },
     workspace_detail: {
       title: 'Workspace Assistant',
-      subtitle: 'Ask about this workspace',
+      subtitle: 'Tasks, questions, and notes for this workspace',
       inputLabel: 'Workspace manager prompt'
     },
     workspace_task: {
@@ -63,11 +63,27 @@
     const titleEl = $('hubSupportChatTitle');
     const subtitleEl = $('hubSupportChatSubtitle');
     const inputEl = $('homeAssistantInput');
+    const configureBtn = $('homeAssistantConfigureTaskBtn');
     const config = surface || SURFACES.workspace_detail;
 
     if (titleEl) titleEl.textContent = config.title;
     if (subtitleEl) subtitleEl.textContent = config.subtitle;
     if (inputEl) inputEl.setAttribute('aria-label', config.inputLabel);
+    if (elements && elements.root) {
+      elements.root.setAttribute('data-surface', surface ? surface.key : 'workspace_detail');
+    }
+    // The task editor is bound by the workspace detail page module; the
+    // button is dead weight on other surfaces.
+    if (configureBtn) configureBtn.hidden = !surface || surface.key !== 'workspace_detail';
+  }
+
+  // Page modules call this once they know the concrete context (e.g. the
+  // workspace name) so the header names what the assistant is acting on.
+  function setSubtitle(text) {
+    const subtitleEl = $('hubSupportChatSubtitle');
+    if (!subtitleEl) return;
+    const value = String(text || '').trim();
+    subtitleEl.textContent = value || (surface ? surface.subtitle : '');
   }
 
   function setPanelState(open) {
@@ -195,7 +211,8 @@
       close: closePanel,
       toggle: togglePanel,
       surface: () => surface.key,
-      resize: autoResizeInput
+      resize: autoResizeInput,
+      setSubtitle: setSubtitle
     };
   }
 

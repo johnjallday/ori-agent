@@ -408,7 +408,7 @@ export class WorkspaceDetailPage {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickNotesBtn,
         'Summarize Notes',
-        `/chat Summarize notes in ${workspaceName} and produce a prioritized execution checklist.`
+        `/ask Summarize notes in ${workspaceName} and produce a prioritized execution checklist.`
       );
     }
 
@@ -2154,6 +2154,7 @@ export class WorkspaceDetailPage {
     if (this.elements.workspaceName) {
       this.elements.workspaceName.textContent = this.workspace.name || 'Unnamed Workspace';
     }
+    window.hubSupportChat?.setSubtitle?.(this.workspace.name || '');
     if (this.elements.workspaceDescription) {
       if (this.workspace.description) {
         this.elements.workspaceDescription.textContent = this.workspace.description;
@@ -14671,8 +14672,8 @@ export class WorkspaceDetailPage {
         requireConfirmation: true,
         source: 'assistant'
       });
-    } else if (input.startsWith('/chat ') || input.startsWith('/c ')) {
-      const message = input.replace(/^\/(chat|c)\s+/, '').trim();
+    } else if (input.startsWith('/chat ') || input.startsWith('/c ') || input.startsWith('/ask ')) {
+      const message = input.replace(/^\/(chat|c|ask)\s+/, '').trim();
       handled = await this.createSessionWithMessage(message);
     } else if (input.startsWith('/note ')) {
       const noteContent = input.substring(6).trim();

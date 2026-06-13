@@ -1,6 +1,6 @@
 {{define "support-chat.tmpl"}}
 <!-- Floating Workspace Assistant -->
-<div id="hubSupportChat" class="hub-support-chat hub-support-chat-workspace" data-state="closed" aria-live="polite">
+<div id="hubSupportChat" class="hub-support-chat hub-support-chat-workspace" data-state="closed">
   <div id="hubSupportChatPanel" class="hub-support-chat-panel" role="dialog" aria-labelledby="hubSupportChatTitle" aria-modal="false" aria-hidden="true" tabindex="-1">
     <header class="hub-support-chat-header">
       <div class="hub-support-chat-header-text">
@@ -28,15 +28,24 @@
         </div>
         <div class="hub-workspace-assistant-compose">
           <textarea id="homeAssistantInput" class="hub-support-chat-input modern-input" rows="1" maxlength="800"
-                    placeholder="Create a task for Workspace Manager..."
+                    placeholder="Create a task for Workspace Manager…"
                     aria-label="Workspace manager prompt"></textarea>
-          <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn hub-support-chat-send" aria-label="Send workspace assistant prompt">
-            <span class="hub-support-chat-send-label">Create Task</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
+          <div class="hub-workspace-assistant-actions">
+            <button id="homeAssistantConfigureTaskBtn" type="button" class="modern-btn modern-btn-secondary hub-support-chat-configure"
+                    title="Open task editor (review details, agent, schedule before saving)"
+                    aria-label="Open task editor" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M3 17v2h6v-2H3M3 5v2h10V5H3M13 21v-2h8v-2h-8v-2h-2v6h2M7 9v2H3v2h4v2h2V9H7M21 13v-2H11v2h10M15 9h2V7h4V5h-4V3h-2v6Z"/>
+              </svg>
+            </button>
+            <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn hub-support-chat-send" aria-label="Send workspace assistant prompt">
+              <span class="hub-support-chat-send-label">Create Task</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -61,7 +70,7 @@
       </div>
     </div>
 
-    <section id="homeAssistantThinkingModal" class="hub-support-chat-activity" data-home-assistant-surface="panel" aria-labelledby="homeAssistantThinkingModalLabel">
+    <section id="homeAssistantThinkingModal" class="hub-support-chat-activity is-idle" data-home-assistant-surface="panel" aria-labelledby="homeAssistantThinkingModalLabel">
       <div class="hub-support-chat-status-row">
         <div>
           <div id="homeAssistantThinkingModalLabel" class="hub-support-chat-activity-title">Workspace Manager is ready</div>
@@ -77,7 +86,7 @@
       <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
       <div id="homeAssistantActions" class="hub-support-chat-actions d-flex flex-wrap gap-2 mt-3 d-none"></div>
 
-      <section id="homeAssistantConversationSection" class="home-assistant-conversation-section hub-support-chat-conversation-section mt-3">
+      <section id="homeAssistantConversationSection" class="home-assistant-conversation-section hub-support-chat-conversation-section mt-3 is-empty">
         <div class="home-assistant-conversation-section-header">
           <div>
             <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
