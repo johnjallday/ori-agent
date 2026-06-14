@@ -362,7 +362,7 @@ func TestRenderMemoryPromptSection_KeepsFileOrder(t *testing.T) {
 	iFirst := strings.Index(section, "first")
 	iSecond := strings.Index(section, "second is watch")
 	iThird := strings.Index(section, "third")
-	if !(iFirst < iSecond && iSecond < iThird) {
+	if iFirst >= iSecond || iSecond >= iThird {
 		t.Errorf("kept entries should render in original file order, got offsets %d/%d/%d in:\n%s", iFirst, iSecond, iThird, section)
 	}
 }

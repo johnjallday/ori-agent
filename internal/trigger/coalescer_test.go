@@ -60,7 +60,7 @@ const testDebounce = 50 * time.Millisecond
 func newTestCoalescer(t *testing.T, rec *dispatchRecorder) (*Coalescer, *Store, Trigger) {
 	t.Helper()
 	store, _ := newTestStore(t, "ws1")
-	created, err := store.Create(webhookTrigger("ws1"))
+	created, err := store.Create(webhookTrigger())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

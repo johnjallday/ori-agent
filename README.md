@@ -4,7 +4,7 @@
 
 Autonomous AI workspaces — guardrailed by policy, running **local-first** on your machine.
 
-![Version](https://img.shields.io/badge/Version-v0.0.78-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.79-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 ![Go](https://img.shields.io/badge/Go-1.25.11-00add8)

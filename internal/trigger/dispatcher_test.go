@@ -123,7 +123,7 @@ func webhookFire() PendingFire {
 
 func TestDispatchMissionRun(t *testing.T) {
 	store, _ := newTestStore(t, "ws1")
-	trg, _ := store.Create(webhookTrigger("ws1"))
+	trg, _ := store.Create(webhookTrigger())
 
 	ws := &workspace.Workspace{ID: "ws1", Name: "W", MissionEnabled: true, MissionExecutionCount: 4}
 	runner := &fakeMissionRunner{}
@@ -153,7 +153,7 @@ func TestDispatchMissionRun(t *testing.T) {
 
 func TestDispatchMissionRunHonorsHeartbeat(t *testing.T) {
 	store, _ := newTestStore(t, "ws1")
-	trg, _ := store.Create(webhookTrigger("ws1"))
+	trg, _ := store.Create(webhookTrigger())
 
 	ws := &workspace.Workspace{ID: "ws1", MissionEnabled: true, MissionCadenceHeartbeat: true}
 	runner := &fakeMissionRunner{}
@@ -168,7 +168,7 @@ func TestDispatchMissionRunHonorsHeartbeat(t *testing.T) {
 
 func TestDispatchMissionDisabledRecordsFailureAndFinding(t *testing.T) {
 	store, _ := newTestStore(t, "ws1")
-	trg, _ := store.Create(webhookTrigger("ws1"))
+	trg, _ := store.Create(webhookTrigger())
 
 	ws := &workspace.Workspace{ID: "ws1", MissionEnabled: false}
 	runner := &fakeMissionRunner{}

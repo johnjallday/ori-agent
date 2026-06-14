@@ -42,9 +42,9 @@ func newTestStore(t *testing.T, wsIDs ...string) (*Store, *fakeSource) {
 	return s, src
 }
 
-func webhookTrigger(wsID string) Trigger {
+func webhookTrigger() Trigger {
 	return Trigger{
-		WorkspaceID: wsID,
+		WorkspaceID: "ws1",
 		Name:        "pr-opened",
 		Type:        TypeWebhook,
 		Enabled:     true,
@@ -55,7 +55,7 @@ func webhookTrigger(wsID string) Trigger {
 func TestStoreCreatePersistsAndReloads(t *testing.T) {
 	s, src := newTestStore(t, "ws1")
 
-	created, err := s.Create(webhookTrigger("ws1"))
+	created, err := s.Create(webhookTrigger())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestStoreCreatePersistsAndReloads(t *testing.T) {
 
 func TestStoreUpdateRollsBackOnValidationError(t *testing.T) {
 	s, _ := newTestStore(t, "ws1")
-	created, err := s.Create(webhookTrigger("ws1"))
+	created, err := s.Create(webhookTrigger())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestStoreUpdateRollsBackOnValidationError(t *testing.T) {
 
 func TestStoreDeleteRemovesTokenIndex(t *testing.T) {
 	s, _ := newTestStore(t, "ws1")
-	created, _ := s.Create(webhookTrigger("ws1"))
+	created, _ := s.Create(webhookTrigger())
 
 	if err := s.Delete("ws1", created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -121,7 +121,7 @@ func TestStoreDeleteRemovesTokenIndex(t *testing.T) {
 
 func TestStoreTokenRegenerationReindexes(t *testing.T) {
 	s, _ := newTestStore(t, "ws1")
-	created, _ := s.Create(webhookTrigger("ws1"))
+	created, _ := s.Create(webhookTrigger())
 	oldToken := created.Webhook.Token
 
 	newToken, err := GenerateToken()
@@ -145,7 +145,7 @@ func TestStoreTokenRegenerationReindexes(t *testing.T) {
 
 func TestRecordFireCapsHistory(t *testing.T) {
 	s, _ := newTestStore(t, "ws1")
-	created, _ := s.Create(webhookTrigger("ws1"))
+	created, _ := s.Create(webhookTrigger())
 
 	for i := 0; i < maxFireHistory+5; i++ {
 		if err := s.RecordFire("ws1", created.ID, FireRecord{
@@ -165,7 +165,7 @@ func TestRecordFireCapsHistory(t *testing.T) {
 
 func TestPendingFireSurvivesReload(t *testing.T) {
 	s, src := newTestStore(t, "ws1")
-	created, _ := s.Create(webhookTrigger("ws1"))
+	created, _ := s.Create(webhookTrigger())
 
 	pf := &PendingFire{
 		FireID:    "fire-restart",
@@ -191,7 +191,7 @@ func TestPendingFireSurvivesReload(t *testing.T) {
 
 func TestStoreSkipsCorruptFile(t *testing.T) {
 	s, src := newTestStore(t, "ws1", "ws2")
-	if _, err := s.Create(webhookTrigger("ws1")); err != nil {
+	if _, err := s.Create(webhookTrigger()); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	// Corrupt ws2's file; ws1 must still load.

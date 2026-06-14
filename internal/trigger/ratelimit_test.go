@@ -19,7 +19,9 @@ func TestRateLimiterAllowsBurstThenBlocks(t *testing.T) {
 
 func TestRateLimiterIsolatesKeys(t *testing.T) {
 	rl := newRateLimiter(2)
-	if !rl.allow("a") || !rl.allow("a") {
+	first := rl.allow("a")
+	second := rl.allow("a")
+	if !first || !second {
 		t.Fatal("first two for key a should pass")
 	}
 	if rl.allow("a") {

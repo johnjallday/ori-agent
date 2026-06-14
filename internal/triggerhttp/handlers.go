@@ -39,13 +39,13 @@ func toView(r *http.Request, t trigger.Trigger) triggerView {
 	// Don't expose the queued (not-yet-executed) webhook payload through the
 	// management API — it carries the raw inbound body. Completed fires are
 	// summarized in FireHistory without the body.
-	v.Trigger.PendingFire = nil
+	v.PendingFire = nil
 	if t.Webhook != nil {
 		v.HasSecret = t.Webhook.Secret != ""
 		// Never leak the secret.
 		safe := *t.Webhook
 		safe.Secret = ""
-		v.Trigger.Webhook = &safe
+		v.Webhook = &safe
 		if t.Webhook.Token != "" {
 			v.WebhookPath = "/api/hooks/" + t.Webhook.Token
 			v.WebhookURL = baseURL(r) + v.WebhookPath
