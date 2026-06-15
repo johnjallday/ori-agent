@@ -187,6 +187,15 @@ function wt {
     fi
     git worktree add -b "feature/$name" "$WORKTREE_DIR$name" "$BASE_BRANCH"
     echo "Created worktree: $WORKTREE_DIR$name (branch: feature/$name, based on $BASE_BRANCH)"
+    # Copy the tasks/ folder into the new worktree. tasks/ is gitignored (it
+    # holds PRDs and task lists), so a fresh worktree starts without it.
+    local source_root
+    source_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [[ -n "$source_root" && -d "$source_root/tasks" ]]; then
+      echo "Copying tasks/ into new worktree..."
+      mkdir -p "$WORKTREE_DIR$name/tasks"
+      cp -R "$source_root/tasks/." "$WORKTREE_DIR$name/tasks/"
+    fi
     # Build folder picker in the new worktree
     local picker_script="$WORKTREE_DIR$name/scripts/build-folder-picker.sh"
     if [[ -f "$picker_script" ]]; then
