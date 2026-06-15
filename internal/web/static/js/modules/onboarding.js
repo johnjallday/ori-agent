@@ -1,5 +1,53 @@
 // Onboarding module - Simplified 3-phase conversational onboarding with Ori character
 
+const FALLBACK_TIMEZONES = [
+  'UTC',
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'Africa/Lagos',
+  'Africa/Nairobi',
+  'America/Anchorage',
+  'America/Argentina/Buenos_Aires',
+  'America/Bogota',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Phoenix',
+  'America/Sao_Paulo',
+  'America/Toronto',
+  'America/Vancouver',
+  'Asia/Bangkok',
+  'Asia/Dubai',
+  'Asia/Hong_Kong',
+  'Asia/Jakarta',
+  'Asia/Jerusalem',
+  'Asia/Kolkata',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Australia/Adelaide',
+  'Australia/Brisbane',
+  'Australia/Melbourne',
+  'Australia/Perth',
+  'Australia/Sydney',
+  'Europe/Amsterdam',
+  'Europe/Berlin',
+  'Europe/Dublin',
+  'Europe/Istanbul',
+  'Europe/Lisbon',
+  'Europe/London',
+  'Europe/Madrid',
+  'Europe/Moscow',
+  'Europe/Paris',
+  'Europe/Rome',
+  'Europe/Stockholm',
+  'Pacific/Auckland',
+  'Pacific/Honolulu'
+];
+
 export class OnboardingManager {
   constructor() {
     this.currentPhase = 0;
@@ -29,6 +77,7 @@ export class OnboardingManager {
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
     this.timezone = status.timezone || this.detectTimezone();
+    this.populateTimezoneSelect();
     if (status.needs_onboarding) {
       setTimeout(() => this.showOnboarding(), 500);
     }
@@ -107,9 +156,16 @@ export class OnboardingManager {
       nameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const assistantInput = document.getElementById('onboardingAssistantName');
-          if (assistantInput) assistantInput.focus();
+          const timezoneSelect = document.getElementById('onboardingTimezone');
+          if (timezoneSelect) timezoneSelect.focus();
         }
+      });
+    }
+
+    const timezoneSelect = document.getElementById('onboardingTimezone');
+    if (timezoneSelect) {
+      timezoneSelect.addEventListener('change', (e) => {
+        this.timezone = e.target.value || '';
       });
     }
 
@@ -197,6 +253,67 @@ export class OnboardingManager {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     } catch (_) {
       return '';
+    }
+  }
+
+  getTimezoneOptions() {
+    let zones = FALLBACK_TIMEZONES;
+    if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+      try {
+        const supported = Intl.supportedValuesOf('timeZone');
+        if (Array.isArray(supported) && supported.length > 0) {
+          zones = supported;
+        }
+      } catch (_) {
+        zones = FALLBACK_TIMEZONES;
+      }
+    }
+
+    const preferred = [
+      this.timezone,
+      this.detectTimezone(),
+      'UTC'
+    ].filter(Boolean);
+
+    const allZones = new Set([...preferred, ...zones]);
+    return Array.from(allZones).sort((a, b) => {
+      if (a === 'UTC') return -1;
+      if (b === 'UTC') return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  formatTimezoneLabel(timezone) {
+    if (!timezone || timezone === 'UTC') {
+      return timezone || '';
+    }
+    return timezone.split('/').map(part => part.replace(/_/g, ' ')).join(' / ');
+  }
+
+  populateTimezoneSelect() {
+    const select = document.getElementById('onboardingTimezone');
+    if (!select) return;
+
+    const selected = this.timezone || this.detectTimezone();
+    const zones = this.getTimezoneOptions();
+    select.innerHTML = '';
+
+    if (!selected) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select timezone…';
+      select.appendChild(placeholder);
+    }
+
+    zones.forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      option.textContent = this.formatTimezoneLabel(zone);
+      select.appendChild(option);
+    });
+
+    if (selected) {
+      select.value = selected;
     }
   }
 
@@ -501,7 +618,7 @@ export class OnboardingManager {
     }
     const timezoneInput = document.getElementById('onboardingTimezone');
     if (timezoneInput) {
-      timezoneInput.value = this.timezone || this.detectTimezone();
+      this.populateTimezoneSelect();
     }
 
     this.showPhase(0);

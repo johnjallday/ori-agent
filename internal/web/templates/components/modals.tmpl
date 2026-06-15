@@ -880,7 +880,9 @@
           </div>
           <div class="mb-3 ori-hatch-reveal" id="welcomeTimezoneReveal">
             <label for="onboardingTimezone" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Timezone</label>
-            <input type="text" class="form-control" id="onboardingTimezone" name="timezone" autocomplete="off" spellcheck="false" placeholder="America/New_York" style="font-size: 1rem; padding: 10px 14px;">
+            <select class="form-select" id="onboardingTimezone" name="timezone" autocomplete="off" style="font-size: 1rem; padding: 10px 14px;">
+              <option value="">Detecting timezone…</option>
+            </select>
           </div>
           <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
