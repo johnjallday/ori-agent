@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 27
+const schemaVersion = 28
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -119,6 +119,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration026WorkspaceTags(ctx)
 	case 27:
 		return db.migration027NoteTags(ctx)
+	case 28:
+		return db.migration028Users(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -128,12 +130,38 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 func (db *DB) migration001Baseline(ctx context.Context) error {
 	// Core tables
 	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			locale TEXT NOT NULL DEFAULT '',
+			role_category TEXT NOT NULL DEFAULT '',
+			specializations TEXT NOT NULL DEFAULT '[]',
+			preferences TEXT NOT NULL DEFAULT '{}',
+			about TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create users table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('local', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO NOTHING
+	`); err != nil {
+		return fmt.Errorf("failed to seed local user row: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			kind TEXT DEFAULT 'workspace',
 			description TEXT DEFAULT '',
 			tags TEXT DEFAULT '[]',
+			owner_user_id TEXT NOT NULL DEFAULT 'local',
 			parent_id TEXT,
 			color TEXT,
 			session_count INTEGER DEFAULT 0,
@@ -157,6 +185,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			skill_bindings_json TEXT DEFAULT '[]',
 			agent_skill_access_json TEXT DEFAULT '[]',
 			order_index INTEGER DEFAULT 0,
+			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
 		)
 	`); err != nil {
@@ -353,6 +382,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 		"CREATE INDEX IF NOT EXISTS idx_workspaces_parent_id ON workspaces(parent_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces(status)",
 		"CREATE INDEX IF NOT EXISTS idx_workspaces_parent_order ON workspaces(parent_id, order_index)",
+		"CREATE INDEX IF NOT EXISTS idx_workspaces_owner_user_id ON workspaces(owner_user_id)",
 
 		// Tool calls indexes
 		"CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id)",
@@ -1199,6 +1229,61 @@ func (db *DB) migration027NoteTags(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag)
 	`); err != nil {
 		return fmt.Errorf("failed to create note_tags index: %w", err)
+	}
+	return nil
+}
+
+// migration028Users creates the user profile table and records workspace ownership.
+func (db *DB) migration028Users(ctx context.Context) error {
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			locale TEXT NOT NULL DEFAULT '',
+			role_category TEXT NOT NULL DEFAULT '',
+			specializations TEXT NOT NULL DEFAULT '[]',
+			preferences TEXT NOT NULL DEFAULT '{}',
+			about TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create users table: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('local', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO NOTHING
+	`); err != nil {
+		return fmt.Errorf("failed to seed local user row: %w", err)
+	}
+
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT 'local'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace owner column: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workspaces
+		SET owner_user_id = 'local'
+		WHERE TRIM(COALESCE(owner_user_id, '')) = ''
+	`); err != nil {
+		return fmt.Errorf("failed to backfill workspace owner user ids: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_workspaces_owner_user_id ON workspaces(owner_user_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace owner index: %w", err)
 	}
 	return nil
 }

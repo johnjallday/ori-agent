@@ -49,6 +49,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/userhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
@@ -131,6 +133,8 @@ type ServerBuilder struct {
 	mcpConfigManager         *mcp.ConfigManager
 	locationManager          *location.Manager
 	onboardingMgr            *onboarding.Manager
+	userStore                userprofile.UserStore
+	userProvider             userprofile.UserProvider
 	gateway                  *gateway.Service
 	evolutionService         *evolution.Service
 
@@ -202,6 +206,9 @@ type ServerBuilder struct {
 	missionBridge  *workspacerun.MissionBridge
 	triggerService *trigger.Service
 	triggerHandler *triggerhttp.Handler
+
+	// User profile API
+	userHandler *userhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -312,6 +319,8 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.agentStorePath,
 		b.workspaceStore,
 		b.sessionStore,
+		b.userStore,
+		b.userProvider,
 		b.onboardingMgr,
 		b.locationManager,
 	)
@@ -373,6 +382,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.vaultHandler,
 		b.externalAgentsHandler,
 		b.skillsHandler,
+		b.userHandler,
 	)
 	b.server.Handlers.CLIAgents = b.cliAgentHandler
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry

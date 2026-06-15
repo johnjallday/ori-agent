@@ -9,6 +9,7 @@ export class OnboardingManager {
     this.availableProviders = [];
     this.userName = '';
     this.assistantName = 'Ori';
+    this.timezone = '';
   }
 
   async init() {
@@ -27,6 +28,7 @@ export class OnboardingManager {
     const status = await this.checkOnboardingStatus();
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
+    this.timezone = status.timezone || this.detectTimezone();
     if (status.needs_onboarding) {
       setTimeout(() => this.showOnboarding(), 500);
     }
@@ -166,6 +168,35 @@ export class OnboardingManager {
     } catch (error) {
       console.error('Error saving names:', error);
       return false;
+    }
+  }
+
+  async saveTimezone() {
+    const timezoneInput = document.getElementById('onboardingTimezone');
+    const timezone = timezoneInput?.value?.trim() || this.detectTimezone();
+
+    try {
+      const response = await fetch('/api/onboarding/timezone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone })
+      });
+      if (!response.ok) throw new Error('Failed to save timezone');
+
+      const data = await response.json();
+      this.timezone = data.timezone || '';
+      return true;
+    } catch (error) {
+      console.error('Error saving timezone:', error);
+      return false;
+    }
+  }
+
+  detectTimezone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (_) {
+      return '';
     }
   }
 
@@ -468,6 +499,10 @@ export class OnboardingManager {
     if (assistantInput && this.assistantName) {
       assistantInput.value = this.assistantName;
     }
+    const timezoneInput = document.getElementById('onboardingTimezone');
+    if (timezoneInput) {
+      timezoneInput.value = this.timezone || this.detectTimezone();
+    }
 
     this.showPhase(0);
     this.modalInstance.show();
@@ -551,6 +586,7 @@ export class OnboardingManager {
 
   async advanceFromWelcome() {
     await this.saveNames();
+    await this.saveTimezone();
     await this.completeStep('step-welcome');
 
     // Update speech bubble on model phase with user's name and assistant's name

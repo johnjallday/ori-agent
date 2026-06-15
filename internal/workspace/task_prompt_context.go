@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 type TaskPromptNoteSummary struct {
@@ -100,6 +101,41 @@ func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
 		return ""
 	}
 	return RenderMemoryPromptSection(doc, true)
+}
+
+func (h *LLMTaskHandler) buildUserProfileSection(ctx context.Context, ownerUserID string) string {
+	if h == nil || h.userProfileStore == nil {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		ownerUserID = userprofile.LocalUserID
+	}
+	profile, err := h.userProfileStore.Get(ctx, ownerUserID)
+	if err != nil || profile == nil {
+		if err != nil {
+			logger.Debug("Skipping user profile for task prompt", logger.Fields{
+				"user_id": ownerUserID,
+				"error":   err,
+			})
+		}
+		return ""
+	}
+	return userprofile.RenderUserProfileSection(profile)
+}
+
+func (h *LLMTaskHandler) taskOwnerUserID(task Task) string {
+	if h == nil || h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
+		return userprofile.LocalUserID
+	}
+	ws, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil || ws == nil {
+		return userprofile.LocalUserID
+	}
+	return strings.TrimSpace(ws.OwnerUserID)
 }
 
 func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Task) string {
@@ -661,6 +697,11 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 		prompt.WriteString(referenceURL)
 		prompt.WriteString("\n\n")
 		prompt.WriteString("Treat this URL as authoritative source material for this task. Inspect it with available fetch, browser, or web tools before making claims about its contents. If you cannot inspect it, state that limitation in your final response.\n\n")
+	}
+
+	if userProfile := h.buildUserProfileSection(ctx, h.taskOwnerUserID(task)); userProfile != "" {
+		prompt.WriteString(userProfile)
+		prompt.WriteString("\n\n")
 	}
 
 	if workspaceMemory := h.buildTaskMemorySection(task); workspaceMemory != "" {

@@ -266,6 +266,10 @@ type Workspace struct {
 	// Tags are normalized labels used for workspace organization and filtering.
 	Tags []string `json:"tags,omitempty"`
 
+	// OwnerUserID links this workspace to the user profile that should be used
+	// for background task runs.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+
 	// ParentID is the ID of the parent workspace, or empty for root-level workspaces.
 	ParentID string `json:"parent_id,omitempty"`
 

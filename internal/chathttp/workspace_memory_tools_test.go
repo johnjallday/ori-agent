@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -100,6 +102,45 @@ func TestMemoryWriteTool_TaskProvenance(t *testing.T) {
 	}
 	if content := readMemoryFile(t, fs); !strings.Contains(content, "task:task-7 (Scout)") {
 		t.Errorf("task-scoped writes should carry task provenance, got:\n%s", content)
+	}
+}
+
+func TestProfileSetTool_UpdatesBehavioralFields(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+
+	p := NewWorkspaceToolProvider(nil, nil, "ws-profile")
+	p.SetUserProfileDeps(store, userprofile.LocalUserProvider{})
+	if _, err := p.profileSetTool().Call(ctx, `{"fields":{"preferences.response_style":"concise","about":"Prefers direct answers."}}`); err != nil {
+		t.Fatalf("profile_set: %v", err)
+	}
+	got, err := store.Get(ctx, userprofile.LocalUserID)
+	if err != nil {
+		t.Fatalf("Get profile: %v", err)
+	}
+	if got.Preferences["response_style"] != "concise" || got.About != "Prefers direct answers." {
+		t.Fatalf("profile_set did not update behavioral fields: %#v", got)
+	}
+}
+
+func TestProfileSetTool_RejectsIdentityFields(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+
+	p := NewWorkspaceToolProvider(nil, nil, "ws-profile")
+	p.SetUserProfileDeps(store, userprofile.LocalUserProvider{})
+	if _, err := p.profileSetTool().Call(ctx, `{"field":"timezone","value":"America/New_York"}`); err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("identity field should be rejected, got %v", err)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/johnjallday/ori-agent/internal/sensitive"
 )
 
 // MemoryFileName is the canonical memory file at the workspace folder root.
@@ -51,20 +53,6 @@ var MemoryEntryTypes = []MemoryEntryType{
 	MemoryTypeThread,
 }
 
-// memorySecretPatterns are obvious credential shapes that ValidateMemoryText
-// refuses: MEMORY.md is plaintext on disk, injected into every prompt, and
-// travels with the workspace folder, so secrets must go to the Vault instead.
-// The list is deliberately conservative — a false positive blocks a legitimate
-// entry, while a miss is still covered by the prompt-contract prohibition.
-var memorySecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}`),            // OpenAI/Anthropic-style keys
-	regexp.MustCompile(`\bgh[poasur]_[A-Za-z0-9]{8,}`),      // GitHub tokens (ghp_, gho_, ...)
-	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{8,}`),     // GitHub fine-grained PAT
-	regexp.MustCompile(`\bAKIA[0-9A-Z]{8,}`),                // AWS access key ID
-	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{8,}`),     // Slack tokens
-	regexp.MustCompile(`-----BEGIN[A-Z ]*PRIVATE KEY-----`), // PEM private keys
-}
-
 // ValidateMemoryText enforces the entry-text contract shared by the memory
 // tools and the HTTP API: collapse to one line, reject empty, cap length, and
 // refuse obvious secrets. Returns the cleaned single-line text. Errors are
@@ -77,10 +65,8 @@ func ValidateMemoryText(raw string) (string, error) {
 	if len(text) > MemoryEntryMaxLen {
 		return "", fmt.Errorf("memory entries are capped at %d characters (got %d) — memory holds one curated line per fact; put long content in a workspace note and store a one-line pointer here instead", MemoryEntryMaxLen, len(text))
 	}
-	for _, re := range memorySecretPatterns {
-		if re.MatchString(text) {
-			return "", errors.New("this text looks like a credential or secret; workspace memory is plaintext on disk and injected into prompts, so secrets are refused — store it in the Vault instead")
-		}
+	if sensitive.ContainsSecretLikeText(text) {
+		return "", errors.New("this text looks like a credential or secret; workspace memory is plaintext on disk and injected into prompts, so secrets are refused — store it in the Vault instead")
 	}
 	return text, nil
 }

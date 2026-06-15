@@ -102,6 +102,7 @@ func TestMigrations(t *testing.T) {
 		"schema_migrations",
 		"vaults",
 		"home_assistant_intake_traces",
+		"users",
 	}
 	for _, table := range tables {
 		var name string
@@ -125,6 +126,7 @@ func TestMigrations(t *testing.T) {
 		"agent_skill_access_json": false,
 		"folders_json":            false,
 		"tags":                    false,
+		"owner_user_id":           false,
 	}
 	vaultColumns := map[string]bool{
 		"name":        false,
@@ -296,6 +298,76 @@ func TestMigration013RemovesLegacyVaultCatalogRowsWithoutFilePath(t *testing.T) 
 	}
 	if fileBackedCount != 1 {
 		t.Fatalf("expected valid file-backed vault row to survive migration, got %d", fileBackedCount)
+	}
+}
+
+func TestMigration028CreatesUsersAndWorkspaceOwners(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-028-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (27)`); err != nil {
+		t.Fatalf("Failed to seed schema version 27: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var localUsers int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id = 'local'`).Scan(&localUsers); err != nil {
+		t.Fatalf("Failed to query users table: %v", err)
+	}
+	if localUsers != 1 {
+		t.Fatalf("expected local user row, got %d", localUsers)
+	}
+	var ownerUserID string
+	if err := db.QueryRowContext(ctx, `SELECT owner_user_id FROM workspaces WHERE id = 'ws-1'`).Scan(&ownerUserID); err != nil {
+		t.Fatalf("Failed to query owner_user_id: %v", err)
+	}
+	if ownerUserID != "local" {
+		t.Fatalf("expected workspace owner local, got %q", ownerUserID)
+	}
+	if err := db.runMigration(ctx, 28); err != nil {
+		t.Fatalf("migration 28 should be idempotent: %v", err)
 	}
 }
 

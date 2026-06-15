@@ -304,7 +304,7 @@
                   <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
                 </svg>
               </span>
-              <h2 class="settings-section-title">Your Profile</h2>
+              <h2 class="settings-section-title">About You</h2>
             </div>
 
             <div id="userProfileContent">
@@ -314,37 +314,55 @@
               </div>
             </div>
 
-            <!-- Profile Summary (read-only) -->
-            <div id="userProfileDisplay" class="d-none">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div id="profileCategoryBadge" class="px-3 py-2" style="background: var(--primary-color); color: white; border-radius: var(--radius-md); font-weight: 600;">
+            <form id="userProfileForm" class="d-none">
+              <div class="settings-grid">
+                <div class="settings-field">
+                  <label class="settings-label" for="profileDisplayName">Display name</label>
+                  <input type="text" id="profileDisplayName" class="form-control settings-input" autocomplete="name">
                 </div>
-                <p id="profileSummaryText" class="mb-0" style="color: var(--text-primary);"></p>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileEmail">Email</label>
+                  <input type="email" id="profileEmail" class="form-control settings-input" autocomplete="email">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileTimezone">Timezone</label>
+                  <input type="text" id="profileTimezone" class="form-control settings-input" placeholder="America/New_York" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileLocale">Locale</label>
+                  <input type="text" id="profileLocale" class="form-control settings-input" placeholder="en-US" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileRoleCategory">Role category</label>
+                  <input type="text" id="profileRoleCategory" class="form-control settings-input" placeholder="developer" autocomplete="organization-title">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileSpecializations">Specializations</label>
+                  <input type="text" id="profileSpecializations" class="form-control settings-input" placeholder="Go, SQLite, product engineering">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileResponseStyle">Response style</label>
+                  <input type="text" id="profileResponseStyle" class="form-control settings-input" placeholder="concise">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileUnits">Units</label>
+                  <input type="text" id="profileUnits" class="form-control settings-input" placeholder="imperial or metric">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="profileLanguage">Language</label>
+                  <input type="text" id="profileLanguage" class="form-control settings-input" placeholder="English">
+                </div>
               </div>
-              <a href="/personalize" class="modern-btn modern-btn-primary">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                </svg>
-                Manage Profile &amp; Personalization
-              </a>
-            </div>
-
-            <!-- Profile Not Set State -->
-            <div id="userProfileEmpty" class="d-none">
-              <div class="empty-state">
-                <svg class="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                </svg>
-                <h3 class="empty-state-title">No profile set yet</h3>
-                <p class="empty-state-description">Set up your profile to get a personalized experience.</p>
-                <a href="/personalize" class="modern-btn modern-btn-primary">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                    <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                  </svg>
-                  Personalize Now
-                </a>
+              <div class="settings-field">
+                <label class="settings-label" for="profileAbout">About</label>
+                <textarea id="profileAbout" class="form-control settings-input" rows="4" maxlength="1000"></textarea>
               </div>
-            </div>
+              <div class="settings-actions">
+                <button type="submit" class="modern-btn modern-btn-primary" id="saveUserProfileBtn">
+                  Save Profile
+                </button>
+              </div>
+            </form>
           </section>
 
           <!-- Web3 Wallet Section -->
