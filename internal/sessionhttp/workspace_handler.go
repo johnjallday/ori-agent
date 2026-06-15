@@ -3523,7 +3523,14 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 	for id, diskWS := range diskWorkspaces {
 		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
 		if getErr == session.ErrWorkspaceNotFound {
-			converted := session.ConvertAgentWorkspace(diskWS)
+			// CachedWorkspaces returns metadata-only structs (item 2.0); Get reads
+			// the full record so the imported workspace keeps its history and tasks.
+			fullWS, loadErr := h.workspaceStore.Get(id)
+			if loadErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to load %s for import", diskWS.Name))
+				continue
+			}
+			converted := session.ConvertAgentWorkspace(fullWS)
 			if converted == nil {
 				warnings = append(warnings, fmt.Sprintf("Failed to convert %s", diskWS.Name))
 				continue
