@@ -109,6 +109,23 @@ type metadataLister interface {
 	CachedWorkspaces() map[string]*Workspace
 }
 
+// schedulingLister is an optional Store capability returning active workspaces for
+// the task scheduler with chat history omitted (the scheduler never reads it). The
+// SQLite-backed adapter implements it with a lighter query; the wrapping stores
+// forward to it so the scheduler avoids deserializing chat history every tick.
+type schedulingLister interface {
+	ListActiveForScheduling() ([]*Workspace, error)
+}
+
+// ListActiveForScheduling forwards to the wrapped store's scheduling-optimized
+// listing when available, else falls back to the full ListActive.
+func (s *AgentSnapshotStore) ListActiveForScheduling() ([]*Workspace, error) {
+	if sl, ok := s.Store.(schedulingLister); ok {
+		return sl.ListActiveForScheduling()
+	}
+	return s.Store.ListActive()
+}
+
 // eachWorkspaceMeta invokes fn for every workspace. When the store exposes a cheap
 // metadata listing (FileStore's lean cache) it iterates that; otherwise it streams
 // via List()+Get() one workspace at a time. The agent-snapshot routines read only

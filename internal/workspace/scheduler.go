@@ -138,7 +138,7 @@ func (ts *TaskScheduler) pollLoop() {
 //
 // Note: Uses pointer iteration (&ws.Tasks[i]) to allow in-place modifications
 func (ts *TaskScheduler) checkScheduledTasks() {
-	workspaceIDs, err := ts.workspaceStore.List()
+	workspaces, err := ts.listActiveWorkspacesForScheduling()
 	if err != nil {
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return
@@ -147,9 +147,8 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 	now := time.Now()
 	wakeCandidates := make([]WakeCandidate, 0)
 
-	for _, wsID := range workspaceIDs {
-		ws, err := ts.workspaceStore.Get(wsID)
-		if err != nil {
+	for _, ws := range workspaces {
+		if ws == nil {
 			continue
 		}
 
@@ -232,6 +231,31 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			logger.Warn("Failed to sync macOS wake schedule", logger.Fields{"error": err})
 		}
 	}
+}
+
+// listActiveWorkspacesForScheduling returns the workspaces to scan this tick.
+// When the store supports the scheduling-optimized listing (SQLite-backed, chat
+// history omitted) it is used; otherwise it falls back to List()+Get() so any
+// Store still works. The scheduler reads only scheduling state and routes writes
+// through Update (which re-fetches the full record), so the lighter view is safe.
+func (ts *TaskScheduler) listActiveWorkspacesForScheduling() ([]*Workspace, error) {
+	if sl, ok := ts.workspaceStore.(schedulingLister); ok {
+		return sl.ListActiveForScheduling()
+	}
+
+	ids, err := ts.workspaceStore.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Workspace, 0, len(ids))
+	for _, id := range ids {
+		ws, err := ts.workspaceStore.Get(id)
+		if err != nil {
+			continue
+		}
+		out = append(out, ws)
+	}
+	return out, nil
 }
 
 func collectWakeCandidates(ws *Workspace, now time.Time) []WakeCandidate {

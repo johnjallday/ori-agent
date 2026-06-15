@@ -75,6 +75,16 @@ func (s *SyncStore) ListActive() ([]*Workspace, error) {
 	return s.primary.ListActive()
 }
 
+// ListActiveForScheduling returns active workspaces for the scheduler, delegating
+// to the primary store's lighter (Messages-omitting) scan when it supports one and
+// falling back to the full ListActive otherwise.
+func (s *SyncStore) ListActiveForScheduling() ([]*Workspace, error) {
+	if sl, ok := s.primary.(schedulingLister); ok {
+		return sl.ListActiveForScheduling()
+	}
+	return s.primary.ListActive()
+}
+
 // GetFilesPath returns the files path from the FileStore so uploads
 // go to the correct workspace folder on disk.
 func (s *SyncStore) GetFilesPath(workspaceID string) string {
