@@ -36,6 +36,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
+	mux.HandleFunc("/profile", s.serveProfile)
 	mux.HandleFunc("/vaults", s.serveVault)
 	mux.HandleFunc("/vault", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)

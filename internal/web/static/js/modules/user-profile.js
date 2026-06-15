@@ -1,3 +1,51 @@
+const USER_PROFILE_FALLBACK_TIMEZONES = [
+  'UTC',
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'Africa/Lagos',
+  'Africa/Nairobi',
+  'America/Anchorage',
+  'America/Argentina/Buenos_Aires',
+  'America/Bogota',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Phoenix',
+  'America/Sao_Paulo',
+  'America/Toronto',
+  'America/Vancouver',
+  'Asia/Bangkok',
+  'Asia/Dubai',
+  'Asia/Hong_Kong',
+  'Asia/Jakarta',
+  'Asia/Jerusalem',
+  'Asia/Kolkata',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Australia/Adelaide',
+  'Australia/Brisbane',
+  'Australia/Melbourne',
+  'Australia/Perth',
+  'Australia/Sydney',
+  'Europe/Amsterdam',
+  'Europe/Berlin',
+  'Europe/Dublin',
+  'Europe/Istanbul',
+  'Europe/Lisbon',
+  'Europe/London',
+  'Europe/Madrid',
+  'Europe/Moscow',
+  'Europe/Paris',
+  'Europe/Rome',
+  'Europe/Stockholm',
+  'Pacific/Auckland',
+  'Pacific/Honolulu'
+];
+
 const userProfileManager = {
   profile: null,
 
@@ -5,6 +53,7 @@ const userProfileManager = {
     this.form = document.getElementById('userProfileForm');
     this.loading = document.getElementById('userProfileContent');
     if (!this.form) return;
+    this.populateTimezoneSelect(this.detectTimezone());
 
     this.form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -37,6 +86,7 @@ const userProfileManager = {
 
   populateForm(profile) {
     const preferences = profile.preferences || {};
+    this.populateTimezoneSelect(profile.timezone || this.detectTimezone());
     this.setValue('profileDisplayName', profile.display_name || '');
     this.setValue('profileEmail', profile.email || '');
     this.setValue('profileTimezone', profile.timezone || this.detectTimezone());
@@ -115,6 +165,67 @@ const userProfileManager = {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     } catch (_) {
       return '';
+    }
+  },
+
+  getTimezoneOptions(selectedTimezone) {
+    let zones = USER_PROFILE_FALLBACK_TIMEZONES;
+    if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+      try {
+        const supported = Intl.supportedValuesOf('timeZone');
+        if (Array.isArray(supported) && supported.length > 0) {
+          zones = supported;
+        }
+      } catch (_) {
+        zones = USER_PROFILE_FALLBACK_TIMEZONES;
+      }
+    }
+
+    const allZones = new Set([
+      selectedTimezone,
+      this.detectTimezone(),
+      'UTC',
+      ...zones
+    ].filter(Boolean));
+
+    return Array.from(allZones).sort((a, b) => {
+      if (a === 'UTC') return -1;
+      if (b === 'UTC') return 1;
+      return a.localeCompare(b);
+    });
+  },
+
+  formatTimezoneLabel(timezone) {
+    if (!timezone || timezone === 'UTC') {
+      return timezone || '';
+    }
+    return timezone.split('/').map(part => part.replace(/_/g, ' ')).join(' / ');
+  },
+
+  populateTimezoneSelect(selectedTimezone) {
+    const select = document.getElementById('profileTimezone');
+    if (!select || select.tagName !== 'SELECT') return;
+
+    const selected = selectedTimezone || this.detectTimezone();
+    const zones = this.getTimezoneOptions(selected);
+    select.innerHTML = '';
+
+    if (!selected) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select timezone...';
+      select.appendChild(placeholder);
+    }
+
+    zones.forEach((zone) => {
+      const option = document.createElement('option');
+      option.value = zone;
+      option.textContent = this.formatTimezoneLabel(zone);
+      select.appendChild(option);
+    });
+
+    if (selected) {
+      select.value = selected;
     }
   },
 

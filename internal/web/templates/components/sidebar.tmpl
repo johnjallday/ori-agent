@@ -101,6 +101,13 @@
 
     <!-- Group 3: System (Bottom-pinned) -->
     <div class="sidebar-group sidebar-group-system">
+      <a href="/profile" class="sidebar-nav-link {{if eq .CurrentPage "profile"}}active{{end}}" data-title="Profile">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+        </svg>
+        <span>Profile</span>
+      </a>
+
       <a href="/vaults" class="sidebar-nav-link {{if eq .CurrentPage "vault"}}active{{end}}" data-title="Private Vaults">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V21A2,2 0 0,1 18,23H6A2,2 0 0,1 4,21V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3M12,12A2,2 0 0,0 10,14A2,2 0 0,0 11,15.73V18H13V15.73A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/>

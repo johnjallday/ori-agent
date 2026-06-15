@@ -508,6 +508,98 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
 }
 
 /* ============================================
+   Profile Page
+   ============================================ */
+
+.profile-page-shell {
+  max-width: 1280px;
+}
+
+.profile-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.profile-page-kicker {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.profile-page-title {
+  color: var(--text-primary);
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0.25rem 0 0;
+}
+
+.profile-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.profile-page-editor,
+.profile-page-context {
+  margin-bottom: 0;
+}
+
+.user-profile-form-section {
+  padding-top: 1.25rem;
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.user-profile-form-section:first-of-type {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 0;
+}
+
+.user-profile-form-heading {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 1rem;
+}
+
+.profile-context-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.profile-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.875rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.profile-context-label {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.profile-context-value {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* ============================================
    Danger Zone Styling
    ============================================ */
 
@@ -549,6 +641,15 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
 
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .profile-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-page-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

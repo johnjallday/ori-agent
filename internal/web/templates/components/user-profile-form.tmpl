@@ -1,0 +1,80 @@
+{{define "user-profile-form.tmpl"}}
+<div id="userProfileContent">
+  <div class="text-center py-4" style="color: var(--text-secondary);">
+    <div class="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading"></div>
+    Loading profile...
+  </div>
+</div>
+
+<form id="userProfileForm" class="user-profile-form d-none">
+  <div class="user-profile-form-section">
+    <h3 class="user-profile-form-heading">Identity</h3>
+    <div class="settings-grid">
+      <div class="settings-field">
+        <label class="settings-label" for="profileDisplayName">Display name</label>
+        <input type="text" id="profileDisplayName" class="form-control settings-input" autocomplete="name">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileEmail">Email</label>
+        <input type="email" id="profileEmail" class="form-control settings-input" autocomplete="email">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileTimezone">Timezone</label>
+        <select id="profileTimezone" class="form-select settings-input settings-select" autocomplete="off">
+          <option value="">Detecting timezone...</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileLocale">Locale</label>
+        <input type="text" id="profileLocale" class="form-control settings-input" placeholder="en-US" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+  </div>
+
+  <div class="user-profile-form-section">
+    <h3 class="user-profile-form-heading">About You</h3>
+    <div class="settings-grid">
+      <div class="settings-field">
+        <label class="settings-label" for="profileRoleCategory">Role category</label>
+        <input type="text" id="profileRoleCategory" class="form-control settings-input" placeholder="developer" autocomplete="organization-title">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileSpecializations">Specializations</label>
+        <input type="text" id="profileSpecializations" class="form-control settings-input" placeholder="Go, SQLite, product engineering">
+      </div>
+    </div>
+    <div class="settings-field">
+      <label class="settings-label" for="profileAbout">About</label>
+      <textarea id="profileAbout" class="form-control settings-input" rows="5" maxlength="1000"></textarea>
+      <span class="settings-help">Keep sensitive data in Vaults rather than your profile.</span>
+    </div>
+  </div>
+
+  <div class="user-profile-form-section">
+    <h3 class="user-profile-form-heading">Assistant Preferences</h3>
+    <div class="settings-grid">
+      <div class="settings-field">
+        <label class="settings-label" for="profileResponseStyle">Response style</label>
+        <input type="text" id="profileResponseStyle" class="form-control settings-input" placeholder="concise">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileUnits">Units</label>
+        <input type="text" id="profileUnits" class="form-control settings-input" placeholder="imperial or metric">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="profileLanguage">Language</label>
+        <input type="text" id="profileLanguage" class="form-control settings-input" placeholder="English">
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-actions user-profile-form-actions">
+    <button type="submit" class="modern-btn modern-btn-primary" id="saveUserProfileBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+      </svg>
+      Save Profile
+    </button>
+  </div>
+</form>
+{{end}}

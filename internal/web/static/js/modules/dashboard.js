@@ -4058,7 +4058,7 @@
   function detectHomeAppIntentLocal(text) {
     if (!text) return null;
     var navCue = /(\bwhere\b|how do i|how to|take me to|go to|navigate|\bopen\b|show me|which page|what page)/.test(text);
-    var navTarget = /(action center|workspaces?|agents?|vaults?|settings|mcp|connectors?|usage|dashboard)/.test(text);
+    var navTarget = /(action center|workspaces?|agents?|vaults?|settings|profile|mcp|connectors?|usage|dashboard)/.test(text);
     if (navCue && navTarget) return HOME_INTENTS.app_navigation;
     if (/(task activity|my tasks|my workspaces|my sessions|my activity|how many tasks|recap|what did i work on)/.test(text)) {
       return HOME_INTENTS.app_introspection;

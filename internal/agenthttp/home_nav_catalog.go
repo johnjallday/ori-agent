@@ -74,6 +74,13 @@ var homeNavCatalog = []HomeNavEntry{
 		Aliases:     []string{"settings", "preferences", "configuration", "config", "api keys"},
 	},
 	{
+		Key:         "profile",
+		Label:       "Profile",
+		Href:        "/profile",
+		Description: "Manage user identity, context, and assistant preferences.",
+		Aliases:     []string{"profile", "user profile", "about you", "my profile"},
+	},
+	{
 		Key:         "usage",
 		Label:       "Usage",
 		Href:        "/usage",

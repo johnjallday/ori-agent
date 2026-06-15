@@ -40,7 +40,7 @@
                   <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
                 </svg>
               </span>
-              <span class="settings-nav-item-text">User Profile</span>
+              <span class="settings-nav-item-text">Profile</span>
             </a>
             <a href="#web3-wallet" class="settings-nav-item" data-section="web3-wallet">
               <span class="settings-nav-item-icon">
@@ -307,62 +307,29 @@
               <h2 class="settings-section-title">About You</h2>
             </div>
 
-            <div id="userProfileContent">
-              <div class="text-center py-4" style="color: var(--text-secondary);">
-                <div class="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading"></div>
-                Loading profile...
+            <p class="settings-section-description">
+              Your profile now has its own page for identity, work context, and assistant preferences.
+            </p>
+
+            <div class="settings-info-box">
+              <div class="settings-info-row">
+                <span class="settings-info-label">Profile page</span>
+                <span class="settings-info-value">/profile</span>
+              </div>
+              <div class="settings-info-row">
+                <span class="settings-info-label">Editable fields</span>
+                <span class="settings-info-value">Identity, About You, Preferences</span>
               </div>
             </div>
 
-            <form id="userProfileForm" class="d-none">
-              <div class="settings-grid">
-                <div class="settings-field">
-                  <label class="settings-label" for="profileDisplayName">Display name</label>
-                  <input type="text" id="profileDisplayName" class="form-control settings-input" autocomplete="name">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileEmail">Email</label>
-                  <input type="email" id="profileEmail" class="form-control settings-input" autocomplete="email">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileTimezone">Timezone</label>
-                  <input type="text" id="profileTimezone" class="form-control settings-input" placeholder="America/New_York" autocomplete="off" spellcheck="false">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileLocale">Locale</label>
-                  <input type="text" id="profileLocale" class="form-control settings-input" placeholder="en-US" autocomplete="off" spellcheck="false">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileRoleCategory">Role category</label>
-                  <input type="text" id="profileRoleCategory" class="form-control settings-input" placeholder="developer" autocomplete="organization-title">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileSpecializations">Specializations</label>
-                  <input type="text" id="profileSpecializations" class="form-control settings-input" placeholder="Go, SQLite, product engineering">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileResponseStyle">Response style</label>
-                  <input type="text" id="profileResponseStyle" class="form-control settings-input" placeholder="concise">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileUnits">Units</label>
-                  <input type="text" id="profileUnits" class="form-control settings-input" placeholder="imperial or metric">
-                </div>
-                <div class="settings-field">
-                  <label class="settings-label" for="profileLanguage">Language</label>
-                  <input type="text" id="profileLanguage" class="form-control settings-input" placeholder="English">
-                </div>
-              </div>
-              <div class="settings-field">
-                <label class="settings-label" for="profileAbout">About</label>
-                <textarea id="profileAbout" class="form-control settings-input" rows="4" maxlength="1000"></textarea>
-              </div>
-              <div class="settings-actions">
-                <button type="submit" class="modern-btn modern-btn-primary" id="saveUserProfileBtn">
-                  Save Profile
-                </button>
-              </div>
-            </form>
+            <div class="settings-actions">
+              <a href="/profile" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                </svg>
+                Open Profile
+              </a>
+            </div>
           </section>
 
           <!-- Web3 Wallet Section -->
@@ -1827,7 +1794,6 @@
   <script src="/js/modules/settings-page.js"></script>
   <script src="/js/modules/project-templates-manage.js"></script>
   <script src="/js/modules/location-settings.js"></script>
-  <script src="/js/modules/user-profile.js"></script>
   <script src="/js/modules/device-capabilities.js"></script>
   <script src="/js/modules/web3-settings.js"></script>
 </body>
