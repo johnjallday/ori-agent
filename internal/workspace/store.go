@@ -137,11 +137,11 @@ func NewFileStore(basePath string) (*FileStore, error) {
 		return nil, fmt.Errorf("failed to load workspace cache: %w", err)
 	}
 
-	// Rebuild the index from disk to ensure consistency
-	if store.index != nil {
-		if err := store.index.Rebuild(); err != nil {
-			logger.Warn("Failed to rebuild workspace index", logger.Fields{"error": err.Error()})
-		}
+	// Repopulate the index from the cache loadCache just built. loadCache already
+	// walked and parsed every workspace.json, so feeding the index from the cache
+	// avoids a second full disk scan + JSON parse on every construction.
+	if err := store.rebuildIndexFromCache(); err != nil {
+		logger.Warn("Failed to rebuild workspace index", logger.Fields{"error": err.Error()})
 	}
 
 	return store, nil
@@ -1344,12 +1344,34 @@ func (s *FileStore) Reload() error {
 	if err := s.loadCache(); err != nil {
 		return err
 	}
-	if s.index != nil {
-		if err := s.index.Rebuild(); err != nil {
-			logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
-		}
+	if err := s.rebuildIndexFromCache(); err != nil {
+		logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
 	}
 	return nil
+}
+
+// rebuildIndexFromCache repopulates the index from the in-memory cache, which
+// loadCache has just filled from disk. This avoids a second disk walk + JSON
+// parse versus index.Rebuild (which re-scans disk). It is exact for normal
+// layouts — loadCache and a disk rebuild derive the same id/name/folder_path/
+// parent/updated_at for every workspace — and stays consistent with the cache on
+// pathological duplicate IDs (last-wins). No-op when no index is configured.
+// Callers must hold s.mu (or run single-threaded, as during construction).
+func (s *FileStore) rebuildIndexFromCache() error {
+	if s.index == nil {
+		return nil
+	}
+	entries := make([]IndexEntry, 0, len(s.cache))
+	for id, ws := range s.cache {
+		entries = append(entries, IndexEntry{
+			ID:         id,
+			Name:       ws.Name,
+			FolderPath: s.idToPath[id],
+			ParentID:   ws.ParentID,
+			UpdatedAt:  ws.UpdatedAt,
+		})
+	}
+	return s.index.RebuildFromEntries(entries)
 }
 
 // loadWorkspacesFromDir recursively loads workspaces from a directory. parentID

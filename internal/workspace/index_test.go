@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -208,6 +209,104 @@ func TestIndex_RebuildWithSubWorkspaces(t *testing.T) {
 	if childEntry.ParentID != "ws-parent" {
 		t.Errorf("child ParentID=%q, want %q", childEntry.ParentID, "ws-parent")
 	}
+}
+
+func TestIndex_RebuildFromEntries(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer func() { _ = idx.Close() }()
+
+	// Seed a stale entry that a rebuild must drop.
+	_ = idx.Register(IndexEntry{ID: "stale", Name: "Stale", FolderPath: "stale", UpdatedAt: time.Now()})
+
+	now := time.Now().Truncate(time.Second)
+	err = idx.RebuildFromEntries([]IndexEntry{
+		{ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: now},
+		{ID: "ws-2", Name: "Beta", FolderPath: "alpha/sub-workspaces/beta", ParentID: "ws-1", UpdatedAt: now},
+	})
+	if err != nil {
+		t.Fatalf("RebuildFromEntries: %v", err)
+	}
+
+	entries, err := idx.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("List returned %d entries, want 2 (stale should be gone)", len(entries))
+	}
+	if _, err := idx.Get("stale"); err == nil {
+		t.Error("stale entry should have been removed by RebuildFromEntries")
+	}
+	child, err := idx.Get("ws-2")
+	if err != nil {
+		t.Fatalf("Get ws-2: %v", err)
+	}
+	if child.ParentID != "ws-1" {
+		t.Errorf("ParentID=%q, want ws-1", child.ParentID)
+	}
+}
+
+// TestFileStore_IndexFromCacheMatchesDiskRebuild guards the 1.3 optimization: the
+// index that NewFileStore builds from the cache (rebuildIndexFromCache) must be
+// identical to the one a full disk-scan Rebuild produces.
+func TestFileStore_IndexFromCacheMatchesDiskRebuild(t *testing.T) {
+	dir := t.TempDir()
+
+	parentDir := filepath.Join(dir, "parent")
+	_ = os.MkdirAll(parentDir, 0755)
+	parent := newTestWorkspace("ws-parent", "Parent")
+	parent.FolderSlug = "parent"
+	pData, _ := parent.ToJSON()
+	_ = os.WriteFile(filepath.Join(parentDir, WorkspaceConfigFile), pData, 0644)
+
+	childDir := filepath.Join(parentDir, SubWorkspacesDir, "child")
+	_ = os.MkdirAll(childDir, 0755)
+	child := newTestWorkspace("ws-child", "Child")
+	child.FolderSlug = "child"
+	cData, _ := child.ToJSON()
+	_ = os.WriteFile(filepath.Join(childDir, WorkspaceConfigFile), cData, 0644)
+
+	// Construction populates the index from the loaded cache.
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	fromCache := indexEntriesByID(t, store.index)
+	if len(fromCache) != 2 {
+		t.Fatalf("cache-built index has %d entries, want 2", len(fromCache))
+	}
+	if fromCache["ws-child"].ParentID != "ws-parent" {
+		t.Errorf("child ParentID=%q, want ws-parent", fromCache["ws-child"].ParentID)
+	}
+
+	// A full disk-scan rebuild must yield the same entries.
+	if err := store.index.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	fromDisk := indexEntriesByID(t, store.index)
+
+	if !reflect.DeepEqual(fromCache, fromDisk) {
+		t.Fatalf("index from cache != index from disk rebuild\n cache=%+v\n disk=%+v", fromCache, fromDisk)
+	}
+}
+
+func indexEntriesByID(t *testing.T, idx *Index) map[string]IndexEntry {
+	t.Helper()
+	list, err := idx.List()
+	if err != nil {
+		t.Fatalf("index List: %v", err)
+	}
+	m := make(map[string]IndexEntry, len(list))
+	for _, e := range list {
+		m[e.ID] = e
+	}
+	return m
 }
 
 func TestIndex_ParentID(t *testing.T) {

@@ -173,6 +173,46 @@ func (idx *Index) Rebuild() error {
 	return nil
 }
 
+// RebuildFromEntries replaces all index entries with the provided set in a single
+// transaction. Callers that have already scanned and parsed every workspace from
+// disk (e.g. FileStore right after loadCache) use this to repopulate the index
+// without a second disk walk + JSON parse. The entries are the authoritative set;
+// duplicate IDs resolve last-wins, mirroring the in-memory cache.
+func (idx *Index) RebuildFromEntries(entries []IndexEntry) error {
+	ctx := context.Background()
+	tx, err := idx.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin rebuild transaction: %w", err)
+	}
+
+	if _, err := tx.Exec(`DELETE FROM workspaces`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("failed to clear index for rebuild: %w", err)
+	}
+
+	for _, e := range entries {
+		if _, err := tx.Exec(`
+			INSERT INTO workspaces (id, name, folder_path, parent_id, updated_at)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				name = excluded.name,
+				folder_path = excluded.folder_path,
+				parent_id = excluded.parent_id,
+				updated_at = excluded.updated_at
+		`, e.ID, e.Name, e.FolderPath, nullString(e.ParentID), e.UpdatedAt); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to insert workspace %s: %w", e.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit rebuild: %w", err)
+	}
+
+	logger.Info("Workspace index rebuilt", logger.Fields{"base_path": idx.basePath, "source": "cache"})
+	return nil
+}
+
 // scanDir recursively scans a directory for workspace folders.
 func (idx *Index) scanDir(tx *sql.Tx, dir, parentID string, depth int) error {
 	if depth > MaxNestingDepth {
