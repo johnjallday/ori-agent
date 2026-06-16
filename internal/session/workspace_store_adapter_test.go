@@ -79,6 +79,27 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreAdapter_OwnerUserIDRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:          "workspace-owner",
+		Name:        "Owner Workspace",
+		OwnerUserID: "user-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	sessionWS := adapter.toSessionWorkspace(input)
+	if sessionWS.OwnerUserID != "user-1" {
+		t.Fatalf("expected session owner user-1, got %q", sessionWS.OwnerUserID)
+	}
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if roundTripped.OwnerUserID != "user-1" {
+		t.Fatalf("expected round-tripped owner user-1, got %q", roundTripped.OwnerUserID)
+	}
+}
+
 func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
 	adapter := &WorkspaceStoreAdapter{}
 	now := time.Now().UTC().Round(time.Second)

@@ -42,11 +42,16 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	fileStore := b.workspaceFileStore
 	configManager := b.configManager
 	eventBus := b.eventBus
+	userStore := b.userStore
+	userProvider := b.userProvider
 	return func(workspaceID, agentName string) []toolapi.Tool {
 		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
 		provider.SetExecutingAgent(agentName)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
+		}
+		if userStore != nil {
+			provider.SetUserProfileDeps(userStore, userProvider)
 		}
 		provider.SetProjectTemplateDeps(func() string {
 			return resolveTemplatesRoot(configManager)
@@ -257,6 +262,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {
 		b.taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+	}
+	if b.userStore != nil {
+		b.taskHandler.SetUserProfileStore(b.userStore)
 	}
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
 		b.taskHandler.SetWorkspaceToolFactory(fn)

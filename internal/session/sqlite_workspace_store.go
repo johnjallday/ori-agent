@@ -220,6 +220,14 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 	return fields
 }
 
+func normalizeOwnerUserID(ownerUserID string) string {
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		return "local"
+	}
+	return ownerUserID
+}
+
 // CreateWorkspace creates a new workspace.
 func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
 	if workspace.ID == "" {
@@ -238,12 +246,12 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	f := serializeWorkspaceFields(workspace)
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
+		INSERT INTO workspaces (id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, version)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
@@ -285,6 +293,7 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var parentID sql.NullString
 	var color sql.NullString
 	var description sql.NullString
+	var ownerUserID sql.NullString
 	var kind sql.NullString
 	var agentsJSON sql.NullString
 	var agentInstancesJSON sql.NullString
@@ -309,12 +318,12 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var updatedAtRaw any
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
+		SELECT id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, version
 		FROM workspaces WHERE id = ?
-	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
+	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 		&agentsJSON, &agentInstancesJSON, &tagsJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
@@ -332,6 +341,7 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 
 	workspace.Description = description.String
 	workspace.Kind = NormalizeWorkspaceKind(kind.String)
+	workspace.OwnerUserID = normalizeOwnerUserID(ownerUserID.String)
 	workspace.ParentID = parentID.String
 	workspace.Color = color.String
 
@@ -409,12 +419,12 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
-		SET name = ?, kind = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
+		SET name = ?, kind = ?, description = ?, owner_user_id = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, tags = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, folders_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
 			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?, opportunities_json = ?, version = ?
 		WHERE id = ?
-	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
+	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), string(f.opportunities), workspace.Version,
@@ -512,7 +522,7 @@ func (s *SQLiteStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspace
 // ListWorkspaces returns all workspaces as a flat list.
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
+		SELECT id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, tags, status, version
 		FROM workspaces
 		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
@@ -525,12 +535,12 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	workspaces := make([]Workspace, 0)
 	for rows.Next() {
 		var workspace Workspace
-		var parentID, color, description, kind sql.NullString
+		var parentID, color, description, ownerUserID, kind sql.NullString
 		var agentsJSON, agentInstancesJSON, tagsJSON, status sql.NullString
 		var createdAtRaw any
 		var updatedAtRaw any
 
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 			&agentsJSON, &agentInstancesJSON, &tagsJSON, &status, &workspace.Version); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)
@@ -541,6 +551,7 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 
 		workspace.Kind = NormalizeWorkspaceKind(kind.String)
 		workspace.Description = description.String
+		workspace.OwnerUserID = normalizeOwnerUserID(ownerUserID.String)
 		workspace.ParentID = parentID.String
 		workspace.Color = color.String
 

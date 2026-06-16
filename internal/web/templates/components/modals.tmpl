@@ -878,6 +878,12 @@
             <label for="onboardingUserName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Your name</label>
             <input type="text" class="form-control" id="onboardingUserName" name="user_name" autocomplete="name" placeholder="Your name…" style="font-size: 1rem; padding: 10px 14px;">
           </div>
+          <div class="mb-3 ori-hatch-reveal" id="welcomeTimezoneReveal">
+            <label for="onboardingTimezone" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Timezone</label>
+            <select class="form-select" id="onboardingTimezone" name="timezone" autocomplete="off" style="font-size: 1rem; padding: 10px 14px;">
+              <option value="">Detecting timezone…</option>
+            </select>
+          </div>
           <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
             <input type="text" class="form-control" id="onboardingAssistantName" name="assistant_name" autocomplete="off" spellcheck="false" placeholder="Ori…" value="Ori" style="font-size: 1rem; padding: 10px 14px;">

@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -62,6 +63,8 @@ type Handler struct {
 	sessionStore     session.HybridStore
 	workspaceStore   workspace.Store
 	fileStore        *workspace.FileStore
+	userProfileStore userprofile.UserStore
+	userProvider     userprofile.UserProvider
 	runtimeResolver  chatRuntimeResolver
 	toolCallStore    session.ToolCallStore
 
@@ -143,6 +146,14 @@ func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 // SetFileStore sets the folder-based workspace store for syncing notes to disk.
 func (h *Handler) SetFileStore(fs *workspace.FileStore) {
 	h.fileStore = fs
+}
+
+func (h *Handler) SetUserProfileDeps(store userprofile.UserStore, provider userprofile.UserProvider) {
+	h.userProfileStore = store
+	if provider == nil {
+		provider = userprofile.LocalUserProvider{}
+	}
+	h.userProvider = provider
 }
 
 // SetProjectTemplateDeps enables the workspace project-template tools for

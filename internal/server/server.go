@@ -280,6 +280,14 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "settings", data)
 }
 
+func (s *Server) serveProfile(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("profile")
+	data.Title = "Profile - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "profile", data)
+}
+
 func (s *Server) serveVault(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("vault")
 	data.Title = "Private Vaults - Ori Agent"

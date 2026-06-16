@@ -32,6 +32,7 @@ type StatusResponse struct {
 	StepsSkipped    []string `json:"steps_skipped,omitempty"`
 	UserName        string   `json:"user_name,omitempty"`
 	AssistantName   string   `json:"assistant_name,omitempty"`
+	Timezone        string   `json:"timezone,omitempty"`
 }
 
 // SkipStepRequest represents a request to skip a step
@@ -50,6 +51,10 @@ type NamesRequest struct {
 	AssistantName string `json:"assistant_name"`
 }
 
+type TimezoneRequest struct {
+	Timezone string `json:"timezone"`
+}
+
 // GetStatus checks if onboarding is needed and returns current state
 // GET /api/onboarding/status
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +66,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
 	userName, assistantName := h.onboardingMgr.GetNames()
+	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -71,6 +77,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		StepsSkipped:    state.StepsSkipped,
 		UserName:        userName,
 		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -107,6 +114,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
 	userName, assistantName := h.onboardingMgr.GetNames()
+	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -117,6 +125,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 		StepsSkipped:    state.StepsSkipped,
 		UserName:        userName,
 		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -152,6 +161,7 @@ func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
 	userName, assistantName := h.onboardingMgr.GetNames()
+	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -162,6 +172,7 @@ func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
 		StepsSkipped:    state.StepsSkipped,
 		UserName:        userName,
 		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -265,6 +276,38 @@ func (h *Handler) SaveNames(w http.ResponseWriter, r *http.Request) {
 		"success":        true,
 		"user_name":      userName,
 		"assistant_name": persistedAssistantName,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SaveTimezone persists onboarding timezone.
+// POST /api/onboarding/timezone
+func (h *Handler) SaveTimezone(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req TimezoneRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	timezone := strings.TrimSpace(req.Timezone)
+	if len(timezone) > 80 {
+		orihttp.BadRequest(w, "timezone must be 80 characters or fewer")
+		return
+	}
+	if err := h.onboardingMgr.SetTimezone(timezone); err != nil {
+		orihttp.InternalError(w, "Failed to save onboarding timezone: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"success":  true,
+		"timezone": h.onboardingMgr.GetTimezone(),
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

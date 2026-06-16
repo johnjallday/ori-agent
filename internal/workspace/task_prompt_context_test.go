@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 type mockTaskPromptContextStore struct {
@@ -40,6 +41,25 @@ func (m *mockTaskPromptContextStore) ListSessionsByWorkspace(_ context.Context, 
 		count = len(m.sessions)
 	}
 	return items, count, nil
+}
+
+type staticTaskUserProfileStore struct {
+	profiles map[string]*userprofile.UserProfile
+}
+
+func (s staticTaskUserProfileStore) Get(_ context.Context, id string) (*userprofile.UserProfile, error) {
+	if profile, ok := s.profiles[id]; ok {
+		return profile, nil
+	}
+	return nil, userprofile.ErrNotFound
+}
+
+func (s staticTaskUserProfileStore) Upsert(context.Context, *userprofile.UserProfile) error {
+	return nil
+}
+
+func (s staticTaskUserProfileStore) SetFields(context.Context, string, map[string]any) (*userprofile.UserProfile, error) {
+	return nil, nil
 }
 
 func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
@@ -123,6 +143,59 @@ func TestBuildTaskPrompt_IncludesWorkspaceSnapshot(t *testing.T) {
 
 	if strings.Contains(prompt, "sensitive body text") {
 		t.Fatalf("expected workspace file body to be excluded from snapshot, got %q", prompt)
+	}
+}
+
+func TestBuildTaskPrompt_IncludesUserProfileBeforeWorkspaceMemory(t *testing.T) {
+	fs, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Profile Workspace", Agents: []string{"Ori"}})
+	ws.ID = "workspace-profile"
+	ws.OwnerUserID = "user-1"
+	if err := fs.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+	if err := NewMemoryStore(fs).Append(ws.ID, MemoryEntry{
+		Type:       MemoryTypeFact,
+		Date:       "2026-06-15",
+		Provenance: "agent:Ori",
+		Text:       "Use release checklist.",
+	}); err != nil {
+		t.Fatalf("Append memory: %v", err)
+	}
+
+	handler := &LLMTaskHandler{
+		workspaceStore: fs,
+		userProfileStore: staticTaskUserProfileStore{profiles: map[string]*userprofile.UserProfile{
+			"user-1": {
+				ID:          "user-1",
+				DisplayName: "Jules",
+				Timezone:    "America/New_York",
+				Preferences: map[string]string{"response_style": "concise"},
+			},
+		}},
+	}
+
+	prompt := handler.buildTaskPrompt(context.Background(), Task{
+		ID:          "task-profile",
+		WorkspaceID: ws.ID,
+		From:        "jj",
+		To:          "Ori",
+		Description: "summarize",
+		Priority:    1,
+	})
+	aboutIndex := strings.Index(prompt, "## About You")
+	memoryIndex := strings.Index(prompt, "## Workspace Memory")
+	if aboutIndex < 0 || memoryIndex < 0 {
+		t.Fatalf("expected About You and Workspace Memory in prompt, got:\n%s", prompt)
+	}
+	if aboutIndex > memoryIndex {
+		t.Fatalf("About You should appear before Workspace Memory, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "- Name: Jules") || !strings.Contains(prompt, "- Response style: concise") {
+		t.Fatalf("expected rendered profile fields in prompt, got:\n%s", prompt)
 	}
 }
 

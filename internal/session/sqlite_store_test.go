@@ -74,6 +74,50 @@ func TestSQLiteStore_SessionNotFound(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspaceOwnerUserIDPersists(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	now := time.Now()
+	ws := &Workspace{
+		ID:          "workspace-owner",
+		Name:        "Owner Workspace",
+		OwnerUserID: "user-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := store.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	got, err := store.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got.OwnerUserID != "user-1" {
+		t.Fatalf("expected owner user id user-1, got %q", got.OwnerUserID)
+	}
+	ws.OwnerUserID = ""
+	ws.UpdatedAt = now.Add(time.Minute)
+	if err := store.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	got, err = store.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace after update: %v", err)
+	}
+	if got.OwnerUserID != "local" {
+		t.Fatalf("empty owner should normalize to local, got %q", got.OwnerUserID)
+	}
+}
+
 func TestSQLiteStore_UpdateSession(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

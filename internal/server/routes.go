@@ -36,6 +36,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
+	mux.HandleFunc("/profile", s.serveProfile)
 	mux.HandleFunc("/vaults", s.serveVault)
 	mux.HandleFunc("/vault", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)
@@ -247,6 +248,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/onboarding/status", s.Handlers.Onboarding.GetStatus)
 	mux.HandleFunc("/api/onboarding/names", s.Handlers.Onboarding.SaveNames)
+	mux.HandleFunc("/api/onboarding/timezone", s.Handlers.Onboarding.SaveTimezone)
 	mux.HandleFunc("/api/onboarding/step", s.Handlers.Onboarding.CompleteStep)
 	mux.HandleFunc("/api/onboarding/skip-step", s.Handlers.Onboarding.SkipStep)
 	mux.HandleFunc("/api/onboarding/skip", s.Handlers.Onboarding.Skip)
@@ -262,6 +264,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
 	mux.HandleFunc("/api/onboarding/personalize", s.Handlers.SmartOnboarding.SavePersonalization)
+
+	if s.Handlers.User != nil {
+		mux.HandleFunc("/api/user/profile", s.Handlers.User.Profile)
+	}
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {

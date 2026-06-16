@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -40,16 +41,49 @@ func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normali
 
 func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
 	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
+	profile := h.buildUserProfilePrompt(ctx, routeCtx)
 	memory := h.buildWorkspaceMemoryPrompt(routeCtx, toolCallable)
 
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if strings.TrimSpace(base) != "" {
 		parts = append(parts, base)
+	}
+	if strings.TrimSpace(profile) != "" {
+		parts = append(parts, profile)
 	}
 	if strings.TrimSpace(memory) != "" {
 		parts = append(parts, memory)
 	}
 	return strings.Join(parts, "\n\n---\n")
+}
+
+func (h *Handler) buildUserProfilePrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {
+	if h == nil || h.userProfileStore == nil || !shouldAttachWorkspaceSnapshot(routeCtx) {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	userID := userprofile.LocalUserID
+	if h.userProvider != nil {
+		if resolved, err := h.userProvider.CurrentUserID(ctx); err == nil && strings.TrimSpace(resolved) != "" {
+			userID = strings.TrimSpace(resolved)
+		} else if err != nil {
+			logger.Debug("Skipping user profile for chat runtime prompt", logger.Fields{"error": err})
+			return ""
+		}
+	}
+	profile, err := h.userProfileStore.Get(ctx, userID)
+	if err != nil || profile == nil {
+		if err != nil {
+			logger.Debug("Skipping user profile for chat runtime prompt", logger.Fields{
+				"user_id": userID,
+				"error":   err,
+			})
+		}
+		return ""
+	}
+	return userprofile.RenderUserProfileSection(profile)
 }
 
 // buildWorkspaceMemoryPrompt renders the workspace's persistent memory for the

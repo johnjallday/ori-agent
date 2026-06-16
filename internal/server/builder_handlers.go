@@ -42,6 +42,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/userhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -134,6 +136,14 @@ func (b *ServerBuilder) initializeHandlers() {
 		// Non-fatal: continue without session management
 	} else {
 		b.sessionStore = sessionStore
+		b.userProvider = userprofile.LocalUserProvider{}
+		b.userStore = userprofile.NewSQLiteStore(sessionStore.DB())
+		b.onboardingMgr.SetUserStore(b.userStore)
+		if err := b.onboardingMgr.SeedLocalUserProfile(ctx); err != nil {
+			logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
+		}
+		b.userHandler = userhttp.NewHandler(b.userStore, b.userProvider)
+		b.chatHandler.SetUserProfileDeps(b.userStore, b.userProvider)
 		b.sessionHandler = sessionhttp.New(sessionStore)
 		b.sessionHandler.SetWorkspaceRootResolver(func() string {
 			return resolveWorkspaceRoot(b.configManager)

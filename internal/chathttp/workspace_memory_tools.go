@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -126,6 +127,75 @@ func (p *WorkspaceToolProvider) memoryForgetTool() toolapi.Tool {
 			return marshalToolResponse(map[string]any{
 				"removed": removed,
 				"message": fmt.Sprintf("Removed from workspace memory: %q", removed.Text),
+			})
+		},
+	}
+}
+
+// --- profile_set (user-scoped behavioral profile write) ---
+
+func (p *WorkspaceToolProvider) profileSetTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        "profile_set",
+			Description: "Update durable About You profile fields for the current user. Use only for explicitly stated, stable assistant-behavior facts. Allowed fields are about and preferences.response_style, preferences.units, preferences.language. Do not store secrets; credentials belong in the Vault. Identity fields such as display_name, email, timezone, and locale are user-set and this tool will refuse them.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"field": map[string]any{
+						"type":        "string",
+						"description": "Single field to update, such as about or preferences.response_style.",
+					},
+					"value": map[string]any{
+						"type":        "string",
+						"description": "Value for field.",
+					},
+					"fields": map[string]any{
+						"type":        "object",
+						"description": "Optional map of field names to values for updating multiple fields at once.",
+					},
+				},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			if p.userStore == nil {
+				return "", fmt.Errorf("user profile storage is unavailable")
+			}
+			var req struct {
+				Field  string         `json:"field"`
+				Value  any            `json:"value"`
+				Fields map[string]any `json:"fields"`
+			}
+			if err := json.Unmarshal([]byte(args), &req); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			fields := map[string]any{}
+			for key, value := range req.Fields {
+				fields[key] = value
+			}
+			if strings.TrimSpace(req.Field) != "" {
+				fields[strings.TrimSpace(req.Field)] = req.Value
+			}
+			if len(fields) == 0 {
+				return "", fmt.Errorf("field or fields is required")
+			}
+			userID := userprofile.LocalUserID
+			if p.userProvider != nil {
+				resolved, err := p.userProvider.CurrentUserID(ctx)
+				if err != nil {
+					return "", err
+				}
+				if strings.TrimSpace(resolved) != "" {
+					userID = strings.TrimSpace(resolved)
+				}
+			}
+			profile, err := p.userStore.SetFields(ctx, userID, fields)
+			if err != nil {
+				return "", err
+			}
+			return marshalToolResponse(map[string]any{
+				"profile": profile,
+				"message": "Updated About You. Future workspace chats and task runs will include this profile context.",
 			})
 		},
 	}

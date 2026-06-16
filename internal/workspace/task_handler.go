@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // classifyContextError returns a user-friendly error message based on the context error type
@@ -49,6 +50,7 @@ type LLMTaskHandler struct {
 	llmFactory       *llm.Factory
 	workspaceStore   Store // Added to access workspace attachments
 	contextStore     taskPromptContextStore
+	userProfileStore userprofile.UserStore
 	eventBus         *EventBus // Optional event bus for publishing execution events
 	mcpRegistry      mcpRegistry
 	runtimeResolver  *AgentRuntimeResolver
@@ -114,6 +116,10 @@ func (h *LLMTaskHandler) SetRuntimeResolver(resolver *AgentRuntimeResolver) {
 // SetContextStore configures optional workspace note/session summaries for task prompts.
 func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 	h.contextStore = store
+}
+
+func (h *LLMTaskHandler) SetUserProfileStore(store userprofile.UserStore) {
+	h.userProfileStore = store
 }
 
 // SetWorkspaceToolFactory wires workspace-scoped tools (notes, tasks, sessions, files)

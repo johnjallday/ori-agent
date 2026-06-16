@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/device"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/version"
 )
 
@@ -26,6 +28,7 @@ type Manager struct {
 	mu        sync.RWMutex
 	statePath string
 	state     *types.AppState
+	userStore userprofile.UserStore
 }
 
 // NewManager creates a new onboarding manager
@@ -265,6 +268,18 @@ func (m *Manager) ensureStateDefaultsUnlocked() {
 	}
 }
 
+func (m *Manager) SetUserStore(store userprofile.UserStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.userStore = store
+}
+
+func (m *Manager) userProfileStore() userprofile.UserStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.userStore
+}
+
 // DetectAndStoreDevice automatically detects device information and stores it
 func (m *Manager) DetectAndStoreDevice() error {
 	m.mu.Lock()
@@ -465,14 +480,75 @@ func (m *Manager) GetNames() (userName string, assistantName string) {
 // SetNames stores display names for the user and assistant.
 func (m *Manager) SetNames(userName, assistantName string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	m.state.UserName = userName
 	m.state.AssistantName = strings.TrimSpace(assistantName)
 	if m.state.AssistantName == "" {
 		m.state.AssistantName = DefaultAssistantName
 	}
-	return m.saveUnlocked()
+	store := m.userStore
+	err := m.saveUnlocked()
+	m.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return updateLocalProfile(context.Background(), store, func(profile *userprofile.UserProfile) {
+		profile.DisplayName = strings.TrimSpace(userName)
+	})
+}
+
+func (m *Manager) GetTimezone() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return strings.TrimSpace(m.state.Timezone)
+}
+
+func (m *Manager) SetTimezone(timezone string) error {
+	timezone = strings.TrimSpace(timezone)
+	m.mu.Lock()
+	m.state.Timezone = timezone
+	store := m.userStore
+	err := m.saveUnlocked()
+	m.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return updateLocalProfile(context.Background(), store, func(profile *userprofile.UserProfile) {
+		profile.Timezone = timezone
+	})
+}
+
+func (m *Manager) SeedLocalUserProfile(ctx context.Context) error {
+	store := m.userProfileStore()
+	if store == nil {
+		return nil
+	}
+	current, err := store.Get(ctx, userprofile.LocalUserID)
+	if err != nil && !errors.Is(err, userprofile.ErrNotFound) {
+		return err
+	}
+	if current != nil && !current.IsEmpty() {
+		return nil
+	}
+
+	m.mu.RLock()
+	displayName := strings.TrimSpace(m.state.UserName)
+	timezone := strings.TrimSpace(m.state.Timezone)
+	var roleCategory string
+	var specializations []string
+	if m.state.UserProfile != nil {
+		roleCategory = strings.TrimSpace(m.state.UserProfile.PrimaryCategory)
+		specializations = append([]string(nil), m.state.UserProfile.Specializations...)
+	}
+	m.mu.RUnlock()
+
+	return store.Upsert(ctx, &userprofile.UserProfile{
+		ID:              userprofile.LocalUserID,
+		DisplayName:     displayName,
+		Timezone:        timezone,
+		RoleCategory:    roleCategory,
+		Specializations: specializations,
+	})
 }
 
 func (m *Manager) getAssistantNameLocked() string {
@@ -481,4 +557,18 @@ func (m *Manager) getAssistantNameLocked() string {
 		return DefaultAssistantName
 	}
 	return name
+}
+
+func updateLocalProfile(ctx context.Context, store userprofile.UserStore, mutate func(*userprofile.UserProfile)) error {
+	if store == nil {
+		return nil
+	}
+	profile, err := store.Get(ctx, userprofile.LocalUserID)
+	if errors.Is(err, userprofile.ErrNotFound) {
+		profile = &userprofile.UserProfile{ID: userprofile.LocalUserID}
+	} else if err != nil {
+		return err
+	}
+	mutate(profile)
+	return store.Upsert(ctx, profile)
 }

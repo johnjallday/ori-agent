@@ -99,6 +99,9 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 	if h.fileStore != nil {
 		wtp.SetFileStore(h.fileStore)
 	}
+	if h.userProfileStore != nil {
+		wtp.SetUserProfileDeps(h.userProfileStore, h.userProvider)
+	}
 	if h.templatesRootResolver != nil {
 		wtp.SetProjectTemplateDeps(h.templatesRootResolver, h.workspaceEventBus)
 	}

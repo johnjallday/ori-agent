@@ -37,6 +37,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/userhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
@@ -59,6 +61,8 @@ type StorageSystemFacade struct {
 	AgentStorePath  string
 	WorkspaceStore  workspace.Store
 	SessionStore    session.HybridStore
+	UserStore       userprofile.UserStore
+	UserProvider    userprofile.UserProvider
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
 }
@@ -126,6 +130,7 @@ type HandlerFacade struct {
 	ActionCenter     *actioncenterhttp.Handler
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler
+	User             *userhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
@@ -151,6 +156,8 @@ func NewStorageSystemFacade(
 	agentStorePath string,
 	workspaceStore workspace.Store,
 	sessionStore session.HybridStore,
+	userStore userprofile.UserStore,
+	userProvider userprofile.UserProvider,
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
 ) *StorageSystemFacade {
@@ -159,6 +166,8 @@ func NewStorageSystemFacade(
 		AgentStorePath:  agentStorePath,
 		WorkspaceStore:  workspaceStore,
 		SessionStore:    sessionStore,
+		UserStore:       userStore,
+		UserProvider:    userProvider,
 		OnboardingMgr:   onboardingMgr,
 		LocationManager: locationManager,
 	}
@@ -237,6 +246,7 @@ func NewHandlerFacade(
 	vaultHandler *vaulthttp.Handler,
 	externalAgents *externalagentshttp.Handler,
 	skills *skillshttp.Handler,
+	user *userhttp.Handler,
 ) *HandlerFacade {
 	return &HandlerFacade{
 		ActivityLogger:  activityLogger,
@@ -267,6 +277,7 @@ func NewHandlerFacade(
 		Vault:           vaultHandler,
 		ExternalAgents:  externalAgents,
 		Skills:          skills,
+		User:            user,
 	}
 }
 

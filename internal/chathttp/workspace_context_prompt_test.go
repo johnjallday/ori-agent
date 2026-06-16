@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -48,6 +49,25 @@ type errWorkspaceSnapshotStore struct {
 
 func (s errWorkspaceSnapshotStore) Get(string) (*workspace.Workspace, error) {
 	return nil, s.err
+}
+
+type staticChatUserProfileStore struct {
+	profiles map[string]*userprofile.UserProfile
+}
+
+func (s staticChatUserProfileStore) Get(_ context.Context, id string) (*userprofile.UserProfile, error) {
+	if profile, ok := s.profiles[id]; ok {
+		return profile, nil
+	}
+	return nil, userprofile.ErrNotFound
+}
+
+func (s staticChatUserProfileStore) Upsert(context.Context, *userprofile.UserProfile) error {
+	return nil
+}
+
+func (s staticChatUserProfileStore) SetFields(context.Context, string, map[string]any) (*userprofile.UserProfile, error) {
+	return nil, nil
 }
 
 func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
@@ -128,6 +148,39 @@ func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
 	}
 	if sessionStore.lastOpts == nil || sessionStore.lastOpts.Sort != session.SortByUpdatedDesc {
 		t.Fatalf("expected session list to use updated-desc sort")
+	}
+}
+
+func TestBuildRuntimeSystemPrompt_IncludesUserProfile(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Alpha Workspace", Agents: []string{"Ori"}})
+	ws.ID = "workspace-profile"
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	h := &Handler{
+		workspaceStore: wsStore,
+		userProfileStore: staticChatUserProfileStore{profiles: map[string]*userprofile.UserProfile{
+			userprofile.LocalUserID: {
+				ID:          userprofile.LocalUserID,
+				DisplayName: "Jules",
+				Timezone:    "America/New_York",
+				Preferences: map[string]string{"language": "English"},
+			},
+		}},
+		userProvider: userprofile.LocalUserProvider{},
+	}
+
+	prompt := h.buildRuntimeSystemPrompt(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+	})
+	for _, want := range []string{"## About You", "- Name: Jules", "- Timezone: America/New_York", "- Language: English"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected runtime prompt to contain %q, got:\n%s", want, prompt)
+		}
 	}
 }
 

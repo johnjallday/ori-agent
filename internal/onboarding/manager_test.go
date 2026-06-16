@@ -1,12 +1,15 @@
 package onboarding
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 func TestManager_AssistantProgress_Defaults(t *testing.T) {
@@ -126,6 +129,117 @@ func TestManager_SetNames_DefaultAssistantName(t *testing.T) {
 	_, assistantName := mgr.GetNames()
 	if assistantName != DefaultAssistantName {
 		t.Fatalf("expected default assistant name %s, got %q", DefaultAssistantName, assistantName)
+	}
+}
+
+func TestManager_TimezonePersistenceAndProfileWriteThrough(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+	mgr.SetUserStore(store)
+	if err := mgr.SetNames("Jules", "Ori"); err != nil {
+		t.Fatalf("SetNames: %v", err)
+	}
+	if err := mgr.SetTimezone("America/New_York"); err != nil {
+		t.Fatalf("SetTimezone: %v", err)
+	}
+
+	got, err := store.Get(ctx, userprofile.LocalUserID)
+	if err != nil {
+		t.Fatalf("Get profile: %v", err)
+	}
+	if got.DisplayName != "Jules" || got.Timezone != "America/New_York" {
+		t.Fatalf("expected name/timezone write-through, got %#v", got)
+	}
+
+	reloaded := NewManager(statePath)
+	if timezone := reloaded.GetTimezone(); timezone != "America/New_York" {
+		t.Fatalf("expected persisted timezone, got %q", timezone)
+	}
+}
+
+func TestManager_SeedLocalUserProfileFromOnboardingState(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+	if err := mgr.SetNames("Jules", "Ori"); err != nil {
+		t.Fatalf("SetNames: %v", err)
+	}
+	if err := mgr.SetTimezone("America/New_York"); err != nil {
+		t.Fatalf("SetTimezone: %v", err)
+	}
+	if err := mgr.SetUserProfile(&types.UserProfile{
+		PrimaryCategory: "developer",
+		Specializations: []string{"Go developer", "Tooling"},
+	}); err != nil {
+		t.Fatalf("SetUserProfile: %v", err)
+	}
+	mgr.SetUserStore(store)
+	if err := mgr.SeedLocalUserProfile(ctx); err != nil {
+		t.Fatalf("SeedLocalUserProfile: %v", err)
+	}
+
+	got, err := store.Get(ctx, userprofile.LocalUserID)
+	if err != nil {
+		t.Fatalf("Get profile: %v", err)
+	}
+	if got.DisplayName != "Jules" || got.Timezone != "America/New_York" || got.RoleCategory != "developer" {
+		t.Fatalf("seed did not populate expected fields: %#v", got)
+	}
+	if len(got.Specializations) != 2 {
+		t.Fatalf("expected specializations to seed, got %#v", got.Specializations)
+	}
+}
+
+func TestManager_SeedLocalUserProfileDoesNotOverwriteExistingProfile(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+	if err := store.Upsert(ctx, &userprofile.UserProfile{
+		ID:          userprofile.LocalUserID,
+		DisplayName: "Existing",
+		Timezone:    "America/Los_Angeles",
+	}); err != nil {
+		t.Fatalf("seed existing profile: %v", err)
+	}
+
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+	if err := mgr.SetNames("Jules", "Ori"); err != nil {
+		t.Fatalf("SetNames: %v", err)
+	}
+	if err := mgr.SetTimezone("America/New_York"); err != nil {
+		t.Fatalf("SetTimezone: %v", err)
+	}
+	mgr.SetUserStore(store)
+	if err := mgr.SeedLocalUserProfile(ctx); err != nil {
+		t.Fatalf("SeedLocalUserProfile: %v", err)
+	}
+
+	got, err := store.Get(ctx, userprofile.LocalUserID)
+	if err != nil {
+		t.Fatalf("Get profile: %v", err)
+	}
+	if got.DisplayName != "Existing" || got.Timezone != "America/Los_Angeles" {
+		t.Fatalf("existing profile should not be overwritten, got %#v", got)
 	}
 }
 

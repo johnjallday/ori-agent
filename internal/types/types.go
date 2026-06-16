@@ -165,6 +165,7 @@ type AppState struct {
 	AssistantProgress *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
 	UserName          string             `json:"user_name,omitempty"`          // Optional user-provided display name
 	AssistantName     string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding
+	Timezone          string             `json:"timezone,omitempty"`           // User's preferred IANA timezone
 	Version           string             `json:"version"`
 	Theme             string             `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
 	MenuBar           *MenuBarSettings   `json:"menubar,omitempty"` // Menu bar app settings

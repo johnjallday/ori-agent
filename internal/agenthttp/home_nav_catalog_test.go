@@ -29,6 +29,7 @@ func TestFindHomeNavEntry(t *testing.T) {
 	cases := map[string]string{
 		"Action Center":   "action-center",
 		"mcp connectors":  "mcp",
+		"my profile":      "profile",
 		"settings":        "settings",
 		"the agents page": "agents",
 	}

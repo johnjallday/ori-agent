@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -26,6 +27,8 @@ type WorkspaceToolProvider struct {
 	workspaceStore workspace.Store
 	fileStore      *workspace.FileStore // Optional: for syncing notes to disk
 	workspaceID    string
+	userStore      userprofile.UserStore
+	userProvider   userprofile.UserProvider
 
 	// taskID, when set, marks this chat as scoped to a single task and
 	// enables the current_task / task_runs tools.
@@ -69,6 +72,14 @@ func (p *WorkspaceToolProvider) SetFileStore(fs *workspace.FileStore) {
 	p.fileStore = fs
 }
 
+func (p *WorkspaceToolProvider) SetUserProfileDeps(store userprofile.UserStore, provider userprofile.UserProvider) {
+	p.userStore = store
+	if provider == nil {
+		provider = userprofile.LocalUserProvider{}
+	}
+	p.userProvider = provider
+}
+
 // SetTaskID scopes the provider to a single task and enables the
 // current_task / task_runs tools.
 func (p *WorkspaceToolProvider) SetTaskID(taskID string) {
@@ -104,6 +115,9 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	// Workspace memory tools (need folder storage for MEMORY.md)
 	if p.fileStore != nil {
 		tools = append(tools, p.memoryWriteTool(), p.memoryForgetTool())
+	}
+	if p.userStore != nil {
+		tools = append(tools, p.profileSetTool())
 	}
 
 	// Task-scoped tools (only when the chat is bound to a specific task)
