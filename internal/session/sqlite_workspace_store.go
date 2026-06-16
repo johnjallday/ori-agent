@@ -575,6 +575,116 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return workspaces, nil
 }
 
+// ListWorkspacesForScheduling returns every workspace with all orchestration
+// fields EXCEPT chat history (messages_json). The task scheduler scans this once
+// per tick instead of doing a full Get per workspace, avoiding the deserialization
+// of chat history it never reads. Every other column matches GetWorkspace exactly,
+// so the result is identical to a per-workspace Get minus Messages.
+func (s *SQLiteStore) ListWorkspacesForScheduling(ctx context.Context) ([]Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
+			agents, agent_instances, tags, shared_data, status, layout,
+			tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
+			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, version
+		FROM workspaces
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspaces for scheduling: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	workspaces := make([]Workspace, 0)
+	for rows.Next() {
+		var workspace Workspace
+		var parentID, color, description, kind sql.NullString
+		var agentsJSON, agentInstancesJSON, tagsJSON, sharedDataJSON, status, layoutJSON sql.NullString
+		var tasksJSON, attachmentsJSON, foldersJSON, scheduledTasksJSON, storeNodesJSON, workflowsJSON, directoryReferencesJSON sql.NullString
+		var mcpBindingsJSON, agentMCPAccessJSON, skillBindingsJSON, agentSkillAccessJSON, opportunitiesJSON sql.NullString
+		var createdAtRaw, updatedAtRaw any
+
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
+			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
+			&agentsJSON, &agentInstancesJSON, &tagsJSON, &sharedDataJSON, &status, &layoutJSON,
+			&tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
+			&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON, &opportunitiesJSON, &workspace.Version); err != nil {
+			return nil, fmt.Errorf("failed to scan workspace for scheduling: %w", err)
+		}
+		if err := assignWorkspaceTimes(&workspace, createdAtRaw, updatedAtRaw); err != nil {
+			return nil, fmt.Errorf("failed to parse workspace timestamps: %w", err)
+		}
+
+		workspace.Description = description.String
+		workspace.Kind = NormalizeWorkspaceKind(kind.String)
+		workspace.ParentID = parentID.String
+		workspace.Color = color.String
+
+		if agentsJSON.Valid && agentsJSON.String != "" {
+			_ = json.Unmarshal([]byte(agentsJSON.String), &workspace.Agents)
+		}
+		if agentInstancesJSON.Valid && agentInstancesJSON.String != "" {
+			_ = json.Unmarshal([]byte(agentInstancesJSON.String), &workspace.AgentInstances)
+		}
+		if tagsJSON.Valid && tagsJSON.String != "" {
+			_ = json.Unmarshal([]byte(tagsJSON.String), &workspace.Tags)
+		}
+		if sharedDataJSON.Valid && sharedDataJSON.String != "" {
+			_ = json.Unmarshal([]byte(sharedDataJSON.String), &workspace.SharedData)
+		}
+		if status.Valid && status.String != "" {
+			workspace.Status = WorkspaceStatus(status.String)
+		}
+		if layoutJSON.Valid && layoutJSON.String != "" {
+			var layout CanvasLayout
+			if err := json.Unmarshal([]byte(layoutJSON.String), &layout); err == nil {
+				workspace.Layout = &layout
+			}
+		}
+
+		// Raw JSON for orchestration fields the scheduler / conversion needs.
+		// messages_json is intentionally omitted.
+		if tasksJSON.Valid && tasksJSON.String != "" {
+			workspace.TasksJSON = json.RawMessage(tasksJSON.String)
+		}
+		if attachmentsJSON.Valid && attachmentsJSON.String != "" {
+			workspace.AttachmentsJSON = json.RawMessage(attachmentsJSON.String)
+		}
+		if foldersJSON.Valid && foldersJSON.String != "" {
+			workspace.FoldersJSON = json.RawMessage(foldersJSON.String)
+		}
+		if scheduledTasksJSON.Valid && scheduledTasksJSON.String != "" {
+			workspace.ScheduledTasksJSON = json.RawMessage(scheduledTasksJSON.String)
+		}
+		if storeNodesJSON.Valid && storeNodesJSON.String != "" {
+			workspace.StoreNodesJSON = json.RawMessage(storeNodesJSON.String)
+		}
+		if workflowsJSON.Valid && workflowsJSON.String != "" {
+			workspace.WorkflowsJSON = json.RawMessage(workflowsJSON.String)
+		}
+		if directoryReferencesJSON.Valid && directoryReferencesJSON.String != "" {
+			workspace.DirectoryReferencesJSON = json.RawMessage(directoryReferencesJSON.String)
+		}
+		if mcpBindingsJSON.Valid && mcpBindingsJSON.String != "" {
+			workspace.MCPBindingsJSON = json.RawMessage(mcpBindingsJSON.String)
+		}
+		if agentMCPAccessJSON.Valid && agentMCPAccessJSON.String != "" {
+			workspace.AgentMCPAccessJSON = json.RawMessage(agentMCPAccessJSON.String)
+		}
+		if skillBindingsJSON.Valid && skillBindingsJSON.String != "" {
+			workspace.SkillBindingsJSON = json.RawMessage(skillBindingsJSON.String)
+		}
+		if agentSkillAccessJSON.Valid && agentSkillAccessJSON.String != "" {
+			workspace.AgentSkillAccessJSON = json.RawMessage(agentSkillAccessJSON.String)
+		}
+		if opportunitiesJSON.Valid && opportunitiesJSON.String != "" {
+			workspace.OpportunitiesJSON = json.RawMessage(opportunitiesJSON.String)
+		}
+
+		workspaces = append(workspaces, workspace)
+	}
+
+	return workspaces, rows.Err()
+}
+
 // GetWorkspaceTree returns workspaces organized as a tree structure.
 func (s *SQLiteStore) GetWorkspaceTree(ctx context.Context) ([]Workspace, error) {
 	workspaces, err := s.ListWorkspaces(ctx)

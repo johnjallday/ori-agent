@@ -3449,7 +3449,7 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	stats, warnings, err := h.reconcileWorkspacesFromDisk(r.Context())
+	stats, warnings, err := h.reconcileWorkspacesFromDisk(r.Context(), true)
 	if err != nil {
 		logger.Error("Rescan: failed to reconcile workspaces from disk", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to rescan workspaces")
@@ -3493,7 +3493,12 @@ const workspaceRescanCooldown = 30 * time.Second
 // session store so its structure matches the on-disk layout. Returns reconcile
 // stats plus any non-fatal warnings. Safe to call on startup and on demand;
 // concurrent calls are serialized.
-func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (stats workspaceReconcileStats, warnings []string, err error) {
+//
+// reload controls whether the folder store is refreshed from disk first. On-demand
+// rescans pass true so out-of-band changes (git pull, cloud sync) are picked up.
+// The startup caller passes false: NewFileStore has just loaded the cache + index
+// from disk, so an immediate Reload would redo that full scan/parse for nothing.
+func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) (stats workspaceReconcileStats, warnings []string, err error) {
 	if h.workspaceStore == nil {
 		return stats, nil, nil
 	}
@@ -3507,8 +3512,10 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (stats worksp
 	}()
 
 	// Refresh the file-store cache + index from disk; physical layout wins.
-	if err := h.workspaceStore.Reload(); err != nil {
-		return stats, nil, err
+	if reload {
+		if err := h.workspaceStore.Reload(); err != nil {
+			return stats, nil, err
+		}
 	}
 
 	warnings = make([]string, 0)
@@ -3516,7 +3523,14 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context) (stats worksp
 	for id, diskWS := range diskWorkspaces {
 		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
 		if getErr == session.ErrWorkspaceNotFound {
-			converted := session.ConvertAgentWorkspace(diskWS)
+			// CachedWorkspaces returns metadata-only structs (item 2.0); Get reads
+			// the full record so the imported workspace keeps its history and tasks.
+			fullWS, loadErr := h.workspaceStore.Get(id)
+			if loadErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to load %s for import", diskWS.Name))
+				continue
+			}
+			converted := session.ConvertAgentWorkspace(fullWS)
 			if converted == nil {
 				warnings = append(warnings, fmt.Sprintf("Failed to convert %s", diskWS.Name))
 				continue
@@ -3673,11 +3687,15 @@ func (h *Handler) workspaceIDOnDisk(dir string) string {
 // with the on-disk folder layout. Intended for a one-time run at startup so
 // groupings that arrived via git/cloud sync are reflected without a manual
 // rescan. No-op when no folder store is configured.
+//
+// Skips the folder-store reload: at startup NewFileStore has already loaded the
+// cache + index from disk moments earlier, so reloading here would repeat that
+// full scan/parse (the second "Workspace index rebuilt" at boot) for nothing.
 func (h *Handler) ReconcileWorkspacesFromDisk(ctx context.Context) error {
 	if h == nil || h.workspaceStore == nil {
 		return nil
 	}
-	stats, _, err := h.reconcileWorkspacesFromDisk(ctx)
+	stats, _, err := h.reconcileWorkspacesFromDisk(ctx, false)
 	if err != nil {
 		return err
 	}

@@ -101,6 +101,59 @@ func referencedAgentNames(ws *Workspace) []string {
 	return out
 }
 
+// metadataLister is an optional Store capability that returns metadata-only
+// snapshots of every workspace (no chat history / tasks). FileStore satisfies it
+// via its lean cache. The wrapping stores (SyncStore, AgentSnapshotStore) do NOT,
+// so their List()+Get() fallback still covers DB-only workspaces.
+type metadataLister interface {
+	CachedWorkspaces() map[string]*Workspace
+}
+
+// schedulingLister is an optional Store capability returning active workspaces for
+// the task scheduler with chat history omitted (the scheduler never reads it). The
+// SQLite-backed adapter implements it with a lighter query; the wrapping stores
+// forward to it so the scheduler avoids deserializing chat history every tick.
+type schedulingLister interface {
+	ListActiveForScheduling() ([]*Workspace, error)
+}
+
+// ListActiveForScheduling forwards to the wrapped store's scheduling-optimized
+// listing when available, else falls back to the full ListActive.
+func (s *AgentSnapshotStore) ListActiveForScheduling() ([]*Workspace, error) {
+	if sl, ok := s.Store.(schedulingLister); ok {
+		return sl.ListActiveForScheduling()
+	}
+	return s.Store.ListActive()
+}
+
+// eachWorkspaceMeta invokes fn for every workspace. When the store exposes a cheap
+// metadata listing (FileStore's lean cache) it iterates that; otherwise it streams
+// via List()+Get() one workspace at a time. The agent-snapshot routines read only
+// metadata (status, agent references), so the metadata path is sufficient and, now
+// that FileStore.Get reads through to disk, avoids re-reading every workspace.json.
+func eachWorkspaceMeta(workspaces Store, fn func(ws *Workspace)) {
+	if ml, ok := workspaces.(metadataLister); ok {
+		for _, ws := range ml.CachedWorkspaces() {
+			if ws != nil {
+				fn(ws)
+			}
+		}
+		return
+	}
+	ids, err := workspaces.List()
+	if err != nil {
+		logger.Warn("agent snapshot: list workspaces failed", logger.Fields{"error": err.Error()})
+		return
+	}
+	for _, id := range ids {
+		ws, err := workspaces.Get(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		fn(ws)
+	}
+}
+
 // SnapshotAllWorkspaces walks the workspace store once and snapshots referenced
 // agents for every workspace. Intended as a one-shot startup migration so
 // existing workspaces become self-contained after startup.
@@ -112,19 +165,10 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 	if !ok {
 		snapshotter = NewAgentSnapshotStore(workspaces, agents)
 	}
-	ids, err := workspaces.List()
-	if err != nil {
-		logger.Warn("agent snapshot migration: list workspaces failed", logger.Fields{"error": err.Error()})
-		return
-	}
 	migrated := 0
-	for _, id := range ids {
-		ws, err := workspaces.Get(id)
-		if err != nil || ws == nil {
-			continue
-		}
+	eachWorkspaceMeta(workspaces, func(ws *Workspace) {
 		if ws.Status == StatusTrashed {
-			continue
+			return
 		}
 		before := referencedAgentSnapshotCount(workspaces, ws)
 		snapshotter.SnapshotReferencedAgents(ws)
@@ -132,7 +176,7 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 		if after > before {
 			migrated++
 		}
-	}
+	})
 	if migrated > 0 {
 		logger.Info("Workspace agent snapshots migrated", logger.Fields{"workspaces": migrated})
 	}
@@ -165,38 +209,28 @@ func restoreWorkspaceAgentsFiltered(workspaces Store, agents store.Store, allowl
 	if workspaces == nil || agents == nil {
 		return
 	}
-	ids, err := workspaces.List()
-	if err != nil {
-		logger.Warn("workspace agent restore: list workspaces failed", logger.Fields{"error": err.Error()})
-		return
-	}
-
 	restoredWorkspaces := 0
 	restoredAgents := 0
-	for _, id := range ids {
-		if allowlist != nil && !allowlist.Contains(id) {
-			continue
-		}
-		ws, err := workspaces.Get(id)
-		if err != nil || ws == nil {
-			continue
+	eachWorkspaceMeta(workspaces, func(ws *Workspace) {
+		if allowlist != nil && !allowlist.Contains(ws.ID) {
+			return
 		}
 		if ws.Status == StatusTrashed {
-			continue
+			return
 		}
 		registered, err := RestoreWorkspaceAgents(workspaces, ws, agents)
 		if err != nil {
 			logger.Warn("workspace agent restore: restore failed", logger.Fields{
-				"workspace_id": id,
+				"workspace_id": ws.ID,
 				"error":        err.Error(),
 			})
-			continue
+			return
 		}
 		if len(registered) > 0 {
 			restoredWorkspaces++
 			restoredAgents += len(registered)
 		}
-	}
+	})
 
 	if restoredAgents > 0 {
 		logger.Info("Workspace agent snapshots restored", logger.Fields{
@@ -219,12 +253,6 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 	if workspaces == nil || agents == nil {
 		return
 	}
-	ids, err := workspaces.List()
-	if err != nil {
-		logger.Warn("wipe non-allowlisted agents: list workspaces failed", logger.Fields{"error": err.Error()})
-		return
-	}
-
 	// Set of agent names protected because at least one allowlisted workspace
 	// references them.
 	allowedReferencedAgents := make(map[string]struct{})
@@ -233,16 +261,12 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 	// not in allowedReferencedAgents.
 	workspaceManagedAgents := make(map[string]struct{})
 
-	for _, id := range ids {
-		ws, err := workspaces.Get(id)
-		if err != nil || ws == nil {
-			continue
-		}
+	eachWorkspaceMeta(workspaces, func(ws *Workspace) {
 		if ws.Status == StatusTrashed {
-			continue
+			return
 		}
 		referenced := referencedAgentNames(ws)
-		allowed := allowlist != nil && allowlist.Contains(id)
+		allowed := allowlist != nil && allowlist.Contains(ws.ID)
 		for _, name := range referenced {
 			key := strings.ToLower(name)
 			if _, ok, err := workspaces.GetWorkspaceAgent(ws.ID, name); err == nil && ok {
@@ -252,7 +276,7 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 				allowedReferencedAgents[key] = struct{}{}
 			}
 		}
-	}
+	})
 
 	wiped := 0
 	for _, name := range agents.ListAgents() {

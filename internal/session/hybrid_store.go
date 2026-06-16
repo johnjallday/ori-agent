@@ -381,6 +381,12 @@ func (h *hybridStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return h.sqlite.ListWorkspaces(ctx)
 }
 
+// ListWorkspacesForScheduling returns workspaces with all orchestration fields
+// except chat history, for the task scheduler's per-tick scan.
+func (h *hybridStore) ListWorkspacesForScheduling(ctx context.Context) ([]Workspace, error) {
+	return h.sqlite.ListWorkspacesForScheduling(ctx)
+}
+
 // GetWorkspaceTree returns workspaces as a tree.
 func (h *hybridStore) GetWorkspaceTree(ctx context.Context) ([]Workspace, error) {
 	return h.sqlite.GetWorkspaceTree(ctx)

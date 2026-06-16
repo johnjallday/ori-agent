@@ -116,6 +116,39 @@ func (a *WorkspaceStoreAdapter) ListActive() ([]*workspace.Workspace, error) {
 	return active, nil
 }
 
+// ListActiveForScheduling returns active workspaces for the task scheduler with
+// chat history omitted. The scheduler reads only scheduling state (tasks, scheduled
+// tasks, mission fields, status) and routes writes through Update (which re-fetches
+// the full record), so dropping Messages avoids deserializing chat history for every
+// workspace each tick. Falls back to the full ListActive when the backing store does
+// not support the lighter query.
+func (a *WorkspaceStoreAdapter) ListActiveForScheduling() ([]*workspace.Workspace, error) {
+	ctx := context.Background()
+
+	type schedulingStore interface {
+		ListWorkspacesForScheduling(ctx context.Context) ([]Workspace, error)
+	}
+	ss, ok := a.store.(schedulingStore)
+	if !ok {
+		return a.ListActive()
+	}
+
+	workspaces, err := ss.ListWorkspacesForScheduling(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	active := make([]*workspace.Workspace, 0, len(workspaces))
+	for i := range workspaces {
+		ws := workspaces[i]
+		if ws.Status != WorkspaceStatusActive && ws.Status != "" {
+			continue
+		}
+		active = append(active, a.toAgentWorkspace(&ws))
+	}
+	return active, nil
+}
+
 // toSessionWorkspace converts workspace.Workspace to session.Workspace.
 func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Workspace {
 	sessionWS := &Workspace{

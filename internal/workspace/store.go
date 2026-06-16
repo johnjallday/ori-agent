@@ -137,11 +137,11 @@ func NewFileStore(basePath string) (*FileStore, error) {
 		return nil, fmt.Errorf("failed to load workspace cache: %w", err)
 	}
 
-	// Rebuild the index from disk to ensure consistency
-	if store.index != nil {
-		if err := store.index.Rebuild(); err != nil {
-			logger.Warn("Failed to rebuild workspace index", logger.Fields{"error": err.Error()})
-		}
+	// Repopulate the index from the cache loadCache just built. loadCache already
+	// walked and parsed every workspace.json, so feeding the index from the cache
+	// avoids a second full disk scan + JSON parse on every construction.
+	if err := store.rebuildIndexFromCache(); err != nil {
+		logger.Warn("Failed to rebuild workspace index", logger.Fields{"error": err.Error()})
 	}
 
 	return store, nil
@@ -266,7 +266,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 	}
 
 	// Update cache and ID-to-path mapping
-	s.cache[ws.ID] = freshWS
+	s.cacheMeta(freshWS)
 	s.idToPath[ws.ID] = relPath
 
 	// Update the global index
@@ -338,7 +338,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	defer s.mu.Unlock()
 
 	// Store the absolute path for custom locations
-	s.cache[ws.ID] = freshWS
+	s.cacheMeta(freshWS)
 	s.idToPath[ws.ID] = folderPath
 
 	// Register in global index
@@ -439,7 +439,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cache[ws.ID] = freshWS
+	s.cacheMeta(freshWS)
 	s.idToPath[ws.ID] = storedPath
 
 	if s.index != nil {
@@ -590,41 +590,28 @@ func (s *FileStore) BasePath() string {
 	return s.basePath
 }
 
-// Get retrieves a workspace by ID. Returns a deep clone so callers may safely
-// mutate the result without affecting the cache or other concurrent callers.
+// Get retrieves a workspace by ID, reading the full record (including chat history
+// and tasks) from disk. The in-memory cache holds metadata only (item 2.0), so Get
+// reads through to disk for the complete workspace rather than serving heavy fields
+// from a lean cache entry; it refreshes the metadata cache as a side effect. Returns
+// a deep clone so callers may safely mutate the result.
 func (s *FileStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
-
-	// Check cache first
-	if ws, ok := s.cache[id]; ok {
-		s.mu.RUnlock()
-		return cloneWorkspaceForRebind(ws)
-	}
-
-	// Check if we know the slug for this ID
 	slug, ok := s.idToPath[id]
 	s.mu.RUnlock()
-
 	if !ok {
 		return nil, fmt.Errorf("workspace %s not found", id)
 	}
 
-	// Load from disk
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Double-check cache after acquiring write lock
-	if ws, ok := s.cache[id]; ok {
-		return cloneWorkspaceForRebind(ws)
-	}
-
-	folderPath := s.resolveFolder(slug)
-	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
+	configPath := filepath.Join(s.resolveFolder(slug), WorkspaceConfigFile)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Folder was removed externally — clean up mappings
+			// Folder was removed externally — clean up mappings.
+			s.mu.Lock()
 			delete(s.idToPath, id)
+			delete(s.cache, id)
+			s.mu.Unlock()
 			return nil, fmt.Errorf("workspace %s not found", id)
 		}
 		return nil, fmt.Errorf("failed to read workspace file: %w", err)
@@ -640,16 +627,50 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 		ws.FolderSlug = slug
 	}
 
-	// Run migrations if needed
-	if s.migrateIfNeeded(ws, configPath) {
-		// Migration happened — persist it
-		s.persistMigration(ws, configPath)
-	}
-
-	// Update cache
-	s.cache[id] = ws
+	s.mu.Lock()
+	// Normalize in memory so callers see migrated fields, but do not persist here:
+	// Get is a read, and boot loadCache / Reload / Save own writing migrations to
+	// disk. Persisting on every read would rewrite workspace.json on each access.
+	s.migrateIfNeeded(ws, configPath)
+	// Keep the metadata cache fresh; cacheMeta detaches the heavy fields for the
+	// cached copy only, leaving ws intact for the full clone returned below.
+	s.cacheMeta(ws)
+	s.mu.Unlock()
 
 	return cloneWorkspaceForRebind(ws)
+}
+
+// cacheMeta stores a metadata-only copy of ws in the cache, keyed by ws.ID. The
+// FileStore cache exists for listing/graph/metadata only; reads of full records
+// are served from the primary (SQLite) store, so keeping Messages/Tasks resident
+// for every workspace is wasted memory (item 2.0). Best-effort: on the (practically
+// impossible) clone failure it logs and skips, leaving the entry to be lazily
+// reloaded by Get. Callers must hold s.mu.
+func (s *FileStore) cacheMeta(ws *Workspace) {
+	lean, err := metadataCacheCopy(ws)
+	if err != nil {
+		logger.Warn("failed to build metadata cache copy", logger.Fields{"workspace_id": ws.ID, "error": err.Error()})
+		return
+	}
+	s.cache[ws.ID] = lean
+}
+
+// metadataCacheCopy clones ws with the heavy embedded fields (chat history, tasks)
+// dropped. It reuses the JSON round-trip clone (which also resets the embedded
+// lock) but detaches Messages/Tasks first so they are never serialized; the source
+// ws is restored before return and left unchanged.
+func metadataCacheCopy(ws *Workspace) (*Workspace, error) {
+	if ws == nil {
+		return nil, nil
+	}
+	msgs, tasks := ws.Messages, ws.Tasks
+	ws.Messages, ws.Tasks = nil, nil
+	clone, err := cloneWorkspaceForRebind(ws)
+	ws.Messages, ws.Tasks = msgs, tasks
+	if err != nil {
+		return nil, err
+	}
+	return clone, nil
 }
 
 // List returns all workspace IDs from the in-memory cache.
@@ -938,7 +959,7 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 
 	// Update mappings first so persistWorkspaceLocked can find the path
 	s.idToPath[id] = newRelPath
-	s.cache[id] = ws
+	s.cacheMeta(ws)
 
 	// Persist updated workspace.json in new location
 	if err := s.persistWorkspaceLocked(ws); err != nil {
@@ -1052,7 +1073,7 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 	}
 
 	// Register in cache and index
-	s.cache[ws.ID] = ws
+	s.cacheMeta(ws)
 	s.idToPath[ws.ID] = relPath
 
 	if s.index != nil {
@@ -1111,7 +1132,7 @@ func (s *FileStore) importSubWorkspace(folderPath, parentID string) {
 		return
 	}
 
-	s.cache[ws.ID] = ws
+	s.cacheMeta(ws)
 	s.idToPath[ws.ID] = relPath
 
 	if s.index != nil {
@@ -1344,12 +1365,34 @@ func (s *FileStore) Reload() error {
 	if err := s.loadCache(); err != nil {
 		return err
 	}
-	if s.index != nil {
-		if err := s.index.Rebuild(); err != nil {
-			logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
-		}
+	if err := s.rebuildIndexFromCache(); err != nil {
+		logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
 	}
 	return nil
+}
+
+// rebuildIndexFromCache repopulates the index from the in-memory cache, which
+// loadCache has just filled from disk. This avoids a second disk walk + JSON
+// parse versus index.Rebuild (which re-scans disk). It is exact for normal
+// layouts — loadCache and a disk rebuild derive the same id/name/folder_path/
+// parent/updated_at for every workspace — and stays consistent with the cache on
+// pathological duplicate IDs (last-wins). No-op when no index is configured.
+// Callers must hold s.mu (or run single-threaded, as during construction).
+func (s *FileStore) rebuildIndexFromCache() error {
+	if s.index == nil {
+		return nil
+	}
+	entries := make([]IndexEntry, 0, len(s.cache))
+	for id, ws := range s.cache {
+		entries = append(entries, IndexEntry{
+			ID:         id,
+			Name:       ws.Name,
+			FolderPath: s.idToPath[id],
+			ParentID:   ws.ParentID,
+			UpdatedAt:  ws.UpdatedAt,
+		})
+	}
+	return s.index.RebuildFromEntries(entries)
 }
 
 // loadWorkspacesFromDir recursively loads workspaces from a directory. parentID
@@ -1383,7 +1426,9 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 			continue // Not a workspace folder, skip
 		}
 
-		ws, err := FromJSON(data)
+		// Boot parses metadata only: the cache is metadata-only, so building chat
+		// history for every workspace just to drop it is wasted work (item 3.0/C).
+		ws, err := FromJSONMetadata(data)
 		if err != nil {
 			// Quarantine the corrupt file so it isn't silently skipped on
 			// every subsequent boot. The renamed file remains for forensic
@@ -1416,9 +1461,24 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 		// disk or synced from another machine).
 		ws.ParentID = parentID
 
-		// Run migrations
+		// Run migrations. A migration rewrites workspace.json, so re-parse with the
+		// full record (chat history included) before persisting — the metadata-only
+		// ws has no Messages and would otherwise wipe them from disk.
 		if s.migrateIfNeeded(ws, configPath) {
-			s.persistMigration(ws, configPath)
+			if full, ferr := FromJSON(data); ferr == nil {
+				if full.FolderSlug == "" {
+					full.FolderSlug = entry.Name()
+				}
+				full.ParentID = parentID
+				if s.migrateIfNeeded(full, configPath) {
+					s.persistMigration(full, configPath)
+				}
+			} else {
+				logger.Warn("Failed to re-parse workspace for migration persist", logger.Fields{
+					"file":  configPath,
+					"error": ferr.Error(),
+				})
+			}
 		}
 
 		// Compute relative path from basePath
@@ -1427,7 +1487,7 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 			relPath = entry.Name()
 		}
 
-		s.cache[ws.ID] = ws
+		s.cacheMeta(ws)
 		s.idToPath[ws.ID] = relPath
 
 		// Recurse into sub-workspaces directory; the current workspace becomes
