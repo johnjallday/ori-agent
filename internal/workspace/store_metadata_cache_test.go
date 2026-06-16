@@ -65,6 +65,21 @@ func TestFileStore_CacheIsMetadataOnly(t *testing.T) {
 		t.Errorf("cache must remain metadata-only after Get")
 	}
 
+	// Boot (loadCache) parses metadata only, but must NOT wipe chat history from
+	// the on-disk workspace.json.
+	onDiskBytes, err := os.ReadFile(filepath.Join(folder, WorkspaceConfigFile))
+	if err != nil {
+		t.Fatalf("read workspace.json: %v", err)
+	}
+	onDisk, err := FromJSON(onDiskBytes)
+	if err != nil {
+		t.Fatalf("parse on-disk workspace.json: %v", err)
+	}
+	if len(onDisk.Messages) != 2 || len(onDisk.Tasks) != 1 {
+		t.Errorf("boot wiped on-disk history: %d messages / %d tasks (want 2/1)",
+			len(onDisk.Messages), len(onDisk.Tasks))
+	}
+
 	// metadataCacheCopy must not mutate its source.
 	src := newTestWorkspace("ws-2", "Beta")
 	src.Messages = []AgentMessage{{ID: "x"}}

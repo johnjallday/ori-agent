@@ -148,6 +148,42 @@ func FromJSON(data []byte) (*Workspace, error) {
 	return &ws, nil
 }
 
+// discardJSON is a json.Unmarshaler that ignores its input. It lets a decode skip
+// building a heavy field's value while the decoder still scans past it.
+type discardJSON struct{}
+
+func (discardJSON) UnmarshalJSON([]byte) error { return nil }
+
+// FromJSONMetadata decodes a workspace.json like FromJSON but skips building the
+// chat-history slice (Messages). The boot loader uses it because the in-memory
+// cache is metadata-only (item 2.0): allocating every AgentMessage just to drop it
+// is wasted work. Tasks are still decoded — migrations and the task index need them
+// — and all of FromJSON's normalizations run, so the result equals FromJSON minus
+// Messages. The result must NOT be persisted: it would write empty messages to
+// disk. Callers that may rewrite the file re-parse with FromJSON first.
+func FromJSONMetadata(data []byte) (*Workspace, error) {
+	// Embedding Workspace and re-declaring Messages at the outer (shallower) level
+	// shadows Workspace.Messages during unmarshal, so chat history is discarded
+	// instead of decoded. Returning &lite.Workspace avoids copying the struct's lock.
+	lite := &struct {
+		Workspace
+		Messages discardJSON `json:"messages"`
+	}{}
+	if err := json.Unmarshal(data, lite); err != nil {
+		return nil, err
+	}
+	ws := &lite.Workspace
+	ws.Messages = nil
+	ws.MigrateToAgentInstances()
+	ws.NormalizeAgentInstances()
+	ws.MigrateScheduledTasksToTasks()
+	if ws.Folders == nil {
+		ws.Folders = []WorkspaceFolder{}
+	}
+	ws.rebuildTaskIndex()
+	return ws, nil
+}
+
 // MigrateToAgentInstances migrates legacy Agents []string to AgentInstances
 func (w *Workspace) MigrateToAgentInstances() {
 	w.mu.Lock()

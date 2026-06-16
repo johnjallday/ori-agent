@@ -90,6 +90,53 @@ func TestMeasure_FileStoreCacheResidency(t *testing.T) {
 	_ = store.Close()
 }
 
+// TestMeasure_BootParse compares the boot-time parse cost of a heavy workspace.json
+// with FromJSON (full) vs FromJSONMetadata (chat history skipped, item 3.0/C).
+// Skipped by default; run with ORI_MEASURE=1.
+func TestMeasure_BootParse(t *testing.T) {
+	if os.Getenv("ORI_MEASURE") == "" {
+		t.Skip("set ORI_MEASURE=1 to run the boot-parse measurement")
+	}
+
+	const (
+		iterations   = 2000
+		msgsPerWS    = 200
+		contentBytes = 300
+	)
+
+	content := strings.Repeat("x", contentBytes)
+	ws := newTestWorkspace("ws-bench", "Bench")
+	ws.Messages = make([]AgentMessage, msgsPerWS)
+	for j := range ws.Messages {
+		ws.Messages[j] = AgentMessage{ID: fmt.Sprintf("m%d", j), Content: content, Timestamp: time.Now()}
+	}
+	data, err := ws.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	for range iterations {
+		if _, err := FromJSON(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	full := time.Since(start)
+
+	start = time.Now()
+	for range iterations {
+		if _, err := FromJSONMetadata(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta := time.Since(start)
+
+	t.Logf("payload=%s  iterations=%d", humanBytes(int64(len(data))), iterations)
+	t.Logf("FromJSON (full):         %v (%v/parse)", full, full/iterations)
+	t.Logf("FromJSONMetadata (lean): %v (%v/parse)", meta, meta/iterations)
+	t.Logf("speedup: %.2fx", float64(full)/float64(meta))
+}
+
 func dirSizeBytes(t *testing.T, dir string) int64 {
 	t.Helper()
 	var total int64

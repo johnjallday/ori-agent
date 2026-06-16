@@ -1426,7 +1426,9 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 			continue // Not a workspace folder, skip
 		}
 
-		ws, err := FromJSON(data)
+		// Boot parses metadata only: the cache is metadata-only, so building chat
+		// history for every workspace just to drop it is wasted work (item 3.0/C).
+		ws, err := FromJSONMetadata(data)
 		if err != nil {
 			// Quarantine the corrupt file so it isn't silently skipped on
 			// every subsequent boot. The renamed file remains for forensic
@@ -1459,9 +1461,24 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 		// disk or synced from another machine).
 		ws.ParentID = parentID
 
-		// Run migrations
+		// Run migrations. A migration rewrites workspace.json, so re-parse with the
+		// full record (chat history included) before persisting — the metadata-only
+		// ws has no Messages and would otherwise wipe them from disk.
 		if s.migrateIfNeeded(ws, configPath) {
-			s.persistMigration(ws, configPath)
+			if full, ferr := FromJSON(data); ferr == nil {
+				if full.FolderSlug == "" {
+					full.FolderSlug = entry.Name()
+				}
+				full.ParentID = parentID
+				if s.migrateIfNeeded(full, configPath) {
+					s.persistMigration(full, configPath)
+				}
+			} else {
+				logger.Warn("Failed to re-parse workspace for migration persist", logger.Fields{
+					"file":  configPath,
+					"error": ferr.Error(),
+				})
+			}
 		}
 
 		// Compute relative path from basePath
