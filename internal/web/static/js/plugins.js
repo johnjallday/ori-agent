@@ -103,7 +103,7 @@
       const data = await api('POST', '/api/plugins/install', { source, format, confirm: false });
       showTrust(data.trust, async () => {
         await api('POST', '/api/plugins/install', { source, format, confirm: true });
-        pluginCancelInstall();
+        window.pluginCancelInstall();
         byId('pluginSource').value = '';
         loadPlugins();
       });
@@ -133,7 +133,7 @@
       const data = await api('POST', url, { confirm: false });
       const doUpdate = async () => {
         await api('POST', url, { confirm: true });
-        pluginCancelInstall();
+        window.pluginCancelInstall();
         loadPlugins();
       };
       if (data.changed) {
@@ -182,7 +182,7 @@
     try {
       await api('POST', '/api/plugins/marketplaces', { source });
       byId('marketplaceSource').value = '';
-      loadMarketplaces();
+      window.loadMarketplaces();
     } catch (e) {
       alert('Add marketplace failed: ' + e.message);
     }
@@ -193,7 +193,7 @@
       const data = await api('POST', '/api/plugins/marketplaces/install', { marketplace, plugin: pluginName, confirm: false });
       showTrust(data.trust, async () => {
         await api('POST', '/api/plugins/marketplaces/install', { marketplace, plugin: pluginName, confirm: true });
-        pluginCancelInstall();
+        window.pluginCancelInstall();
         loadPlugins();
       });
     } catch (e) {
@@ -203,6 +203,6 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     loadPlugins();
-    loadMarketplaces();
+    window.loadMarketplaces();
   });
 })();
