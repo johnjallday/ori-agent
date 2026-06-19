@@ -64,6 +64,16 @@ func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFun
 	return p, nil
 }
 
+// Preview resolves a source and returns its trust report without installing or
+// registering anything — used to render the disclosure before confirmation.
+func (m *Manager) Preview(source string, prefer SourceFormat) (TrustReport, error) {
+	d, err := Load(source, m.cloneDir, prefer)
+	if err != nil {
+		return TrustReport{}, err
+	}
+	return BuildTrustReport(d), nil
+}
+
 // SetEnabled toggles a plugin's enabled state in the store.
 func (m *Manager) SetEnabled(name string, enabled bool) error {
 	return m.store.SetEnabled(name, enabled)

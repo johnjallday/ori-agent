@@ -145,7 +145,6 @@ workspace_allowlist.json
 agents/*/agent_settings.json
 agents/*/workspace/
 internal/server/agents/
-internal/pluginhttp/
 
 # Session data
 .claude-sessions/
