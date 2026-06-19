@@ -30,7 +30,7 @@ func (stubSkills) RemoveSkill(_, _ string) error     { return nil }
 
 func testHandler(t *testing.T) *Handler {
 	t.Helper()
-	mgr := plugin.NewManager(&stubReg{}, stubSkills{}, plugin.NewStore(t.TempDir()), "")
+	mgr := plugin.NewManager(&stubReg{}, stubSkills{}, t.TempDir(), "")
 	return newHandlerWithManager(mgr)
 }
 

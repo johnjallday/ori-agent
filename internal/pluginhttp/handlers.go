@@ -23,7 +23,7 @@ func NewHandler(config *mcp.ConfigManager, registry *mcp.Registry, skillsDir, pl
 	mgr := plugin.NewManager(
 		newMCPRegistrar(config, registry),
 		newSkillDirInstaller(skillsDir),
-		plugin.NewStore(pluginsDir),
+		pluginsDir,
 		filepath.Join(pluginsDir, "src"),
 	)
 	return newHandlerWithManager(mgr)
@@ -125,4 +125,76 @@ func (h *Handler) SetEnabledHandler(enabled bool) http.HandlerFunc {
 		}
 		orihttp.WriteJSON(w, map[string]any{"name": name, "enabled": enabled})
 	}
+}
+
+// MarketplacesHandler lists (GET) or adds (POST) marketplaces at
+// /api/plugins/marketplaces.
+func (h *Handler) MarketplacesHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		list, err := h.mgr.Marketplaces()
+		if err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{"marketplaces": list})
+	case http.MethodPost:
+		var req struct {
+			Source string `json:"source"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		if req.Source == "" {
+			orihttp.BadRequest(w, "source is required")
+			return
+		}
+		mp, err := h.mgr.AddMarketplace(req.Source)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{"marketplace": mp})
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// MarketplaceInstallHandler installs a plugin from an added marketplace at
+// POST /api/plugins/marketplaces/install. confirm=false returns the trust
+// disclosure; confirm=true installs.
+func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Marketplace string `json:"marketplace"`
+		Plugin      string `json:"plugin"`
+		Format      string `json:"format"`
+		Confirm     bool   `json:"confirm"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if req.Marketplace == "" || req.Plugin == "" {
+		orihttp.BadRequest(w, "marketplace and plugin are required")
+		return
+	}
+	prefer := plugin.SourceFormat(req.Format)
+	if !req.Confirm {
+		report, err := h.mgr.PreviewFromMarketplace(req.Marketplace, req.Plugin, prefer)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{"installed": false, "trust": report})
+		return
+	}
+	installed, err := h.mgr.InstallFromMarketplace(req.Marketplace, req.Plugin, prefer, func(plugin.TrustReport) bool { return true })
+	if err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"installed": true, "plugin": installed})
 }

@@ -54,8 +54,7 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	root := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}
 	sk := &fakeSkills{}
-	store := NewStore(t.TempDir())
-	m := NewManager(reg, sk, store, "")
+	m := NewManager(reg, sk, t.TempDir(), "")
 
 	confirmed := false
 	p, err := m.Install(root, "", func(TrustReport) bool { confirmed = true; return true })
@@ -71,7 +70,7 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	if _, ok := reg.added["reaper/ori-reaper"]; !ok {
 		t.Errorf("server not registered: %v", reg.added)
 	}
-	if list, _ := store.List(); len(list) != 1 {
+	if list, _ := m.List(); len(list) != 1 {
 		t.Errorf("store should have 1 entry, got %d", len(list))
 	}
 
@@ -81,7 +80,7 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	if len(reg.added) != 0 {
 		t.Errorf("server not removed on uninstall: %v", reg.added)
 	}
-	if list, _ := store.List(); len(list) != 0 {
+	if list, _ := m.List(); len(list) != 0 {
 		t.Errorf("store entry not removed, got %d", len(list))
 	}
 }
@@ -90,8 +89,7 @@ func TestManagerInstallDeclinedMakesNoChanges(t *testing.T) {
 	root := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}
 	sk := &fakeSkills{}
-	store := NewStore(t.TempDir())
-	m := NewManager(reg, sk, store, "")
+	m := NewManager(reg, sk, t.TempDir(), "")
 
 	_, err := m.Install(root, "", func(TrustReport) bool { return false })
 	if !errors.Is(err, ErrInstallDeclined) {
@@ -100,7 +98,7 @@ func TestManagerInstallDeclinedMakesNoChanges(t *testing.T) {
 	if len(reg.added) != 0 {
 		t.Error("declined install must register nothing")
 	}
-	if list, _ := store.List(); len(list) != 0 {
+	if list, _ := m.List(); len(list) != 0 {
 		t.Error("declined install must record nothing")
 	}
 }

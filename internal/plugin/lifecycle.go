@@ -14,15 +14,24 @@ var ErrInstallDeclined = errors.New("plugin: installation declined at trust prom
 // adapters over Ori's live MCP and skills managers are wired during server
 // setup (task 4.x).
 type Manager struct {
-	reg      MCPRegistrar
-	skills   SkillInstaller
-	store    *Store
-	cloneDir string
+	reg          MCPRegistrar
+	skills       SkillInstaller
+	store        *Store
+	marketplaces *MarketplaceStore
+	cloneDir     string
 }
 
-// NewManager builds a plugin manager. cloneDir is where git sources are cloned.
-func NewManager(reg MCPRegistrar, skills SkillInstaller, store *Store, cloneDir string) *Manager {
-	return &Manager{reg: reg, skills: skills, store: store, cloneDir: cloneDir}
+// NewManager builds a plugin manager backed by the managed pluginsDir (which
+// holds the installed-plugins registry and marketplace records). cloneDir is
+// where git sources are cloned.
+func NewManager(reg MCPRegistrar, skills SkillInstaller, pluginsDir, cloneDir string) *Manager {
+	return &Manager{
+		reg:          reg,
+		skills:       skills,
+		store:        NewStore(pluginsDir),
+		marketplaces: NewMarketplaceStore(pluginsDir),
+		cloneDir:     cloneDir,
+	}
 }
 
 // Install resolves, discloses, confirms, and registers a plugin. Declining the

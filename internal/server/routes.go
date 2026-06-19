@@ -694,6 +694,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Plugin != nil {
 		mux.HandleFunc("GET /api/plugins", s.Handlers.Plugin.ListHandler)
 		mux.HandleFunc("POST /api/plugins/install", s.Handlers.Plugin.InstallHandler)
+		mux.HandleFunc("GET /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
+		mux.HandleFunc("POST /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
+		mux.HandleFunc("POST /api/plugins/marketplaces/install", s.Handlers.Plugin.MarketplaceInstallHandler)
 		mux.HandleFunc("DELETE /api/plugins/{name}", s.Handlers.Plugin.UninstallHandler)
 		mux.HandleFunc("POST /api/plugins/{name}/enable", s.Handlers.Plugin.SetEnabledHandler(true))
 		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
