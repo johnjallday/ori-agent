@@ -18,12 +18,63 @@ type Marketplace struct {
 	Plugins []MarketplaceEntry `json:"plugins"`
 }
 
-// MarketplaceEntry is one plugin listed in a marketplace. Source may be a path
-// relative to the catalog, an absolute path, or a git URL.
+// MarketplaceEntry is one plugin listed in a marketplace. In real catalogs the
+// "source" is often an object (e.g. {"source":"local","path":"./..."} or
+// {"source":"github","repo":"owner/name"}) rather than a string; UnmarshalJSON
+// normalizes both to a single installable Source (a path relative to the
+// catalog, an absolute path, or a git URL).
 type MarketplaceEntry struct {
 	Name        string `json:"name"`
 	Source      string `json:"source"`
 	Description string `json:"description,omitempty"`
+}
+
+// UnmarshalJSON accepts both the string and object forms of "source".
+func (e *MarketplaceEntry) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Source      json.RawMessage `json:"source"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.Name = raw.Name
+	e.Description = raw.Description
+	e.Source = normalizeEntrySource(raw.Source)
+	return nil
+}
+
+// normalizeEntrySource reduces a marketplace entry's "source" (a string or an
+// object) to one installable source string, or "" if it can't be resolved.
+func normalizeEntrySource(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj struct {
+		Source string `json:"source"`
+		Type   string `json:"type"`
+		Path   string `json:"path"`
+		Repo   string `json:"repo"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	switch {
+	case obj.Path != "":
+		return obj.Path
+	case obj.URL != "":
+		return obj.URL
+	case obj.Repo != "":
+		return "https://github.com/" + obj.Repo + ".git"
+	default:
+		return ""
+	}
 }
 
 // marketplaceManifestPaths are the catalog file locations checked, in order —

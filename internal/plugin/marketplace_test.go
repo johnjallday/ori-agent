@@ -80,3 +80,31 @@ func TestMarketplaceAddAndInstall(t *testing.T) {
 		t.Error("expected error for missing marketplace entry")
 	}
 }
+
+func TestParseMarketplaceObjectSource(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "marketplace.json"), `{
+	  "name": "real",
+	  "plugins": [
+	    {"name": "local-one", "description": "d", "source": {"source": "local", "path": "./plugins/local-one"}},
+	    {"name": "gh-one", "source": {"source": "github", "repo": "acme/gh-one"}}
+	  ]
+	}`)
+	mp, err := ParseMarketplace(dir)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mp.Plugins) != 2 {
+		t.Fatalf("plugins = %+v", mp.Plugins)
+	}
+	byName := map[string]string{}
+	for _, p := range mp.Plugins {
+		byName[p.Name] = p.Source
+	}
+	if byName["local-one"] != "./plugins/local-one" {
+		t.Errorf("local object source = %q, want ./plugins/local-one", byName["local-one"])
+	}
+	if byName["gh-one"] != "https://github.com/acme/gh-one.git" {
+		t.Errorf("github object source = %q", byName["gh-one"])
+	}
+}
