@@ -127,3 +127,37 @@ func TestBuildTrustReport(t *testing.T) {
 		t.Error("disclosure string should not be empty")
 	}
 }
+
+func TestManagerUpdate(t *testing.T) {
+	root := makeClaudeBundle(t)
+	reg := &fakeRegistrar{}
+	sk := &fakeSkills{}
+	m := NewManager(reg, sk, t.TempDir(), "")
+	if _, err := m.Install(root, "", func(TrustReport) bool { return true }); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// A no-change update keeps the server registered and reports no change.
+	if _, changed, err := m.UpdatePreview("reaper"); err != nil || changed {
+		t.Errorf("no-op update preview: changed=%v err=%v", changed, err)
+	}
+	if _, err := m.Update("reaper", func(TrustReport) bool { return true }); err != nil {
+		t.Fatalf("update (no change): %v", err)
+	}
+	if _, ok := reg.added["reaper/ori-reaper"]; !ok {
+		t.Error("server missing after no-op update")
+	}
+
+	// Add a skill to the bundle; update detects the change and records it.
+	writeFile(t, filepath.Join(root, "skills", "extra", "SKILL.md"), "---\nname: extra\n---\n")
+	if _, changed, err := m.UpdatePreview("reaper"); err != nil || !changed {
+		t.Fatalf("expected changed=true after adding a skill: changed=%v err=%v", changed, err)
+	}
+	if _, err := m.Update("reaper", func(TrustReport) bool { return true }); err != nil {
+		t.Fatalf("update (changed): %v", err)
+	}
+	list, _ := m.List()
+	if len(list) != 1 || len(list[0].Skills) != 2 {
+		t.Errorf("expected 2 skills after update, got %+v", list)
+	}
+}

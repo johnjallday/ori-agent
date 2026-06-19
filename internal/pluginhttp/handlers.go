@@ -198,3 +198,39 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 	}
 	orihttp.WriteJSON(w, map[string]any{"installed": true, "plugin": installed})
 }
+
+// UpdateHandler updates a plugin from its recorded source at
+// POST /api/plugins/{name}/update. confirm=false returns the trust disclosure
+// plus whether the registered component set changed; confirm=true updates.
+func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		orihttp.BadRequest(w, "plugin name is required")
+		return
+	}
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if !req.Confirm {
+		report, changed, err := h.mgr.UpdatePreview(name)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, map[string]any{"updated": false, "changed": changed, "trust": report})
+		return
+	}
+	updated, err := h.mgr.Update(name, func(plugin.TrustReport) bool { return true })
+	if err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"updated": true, "plugin": updated})
+}

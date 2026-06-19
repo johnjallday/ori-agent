@@ -82,3 +82,13 @@ func repoName(url string) string {
 	}
 	return url
 }
+
+// pullGit fast-forwards an existing git clone in place (used when updating a
+// plugin installed from a git source).
+func pullGit(dir string) error {
+	cmd := exec.Command("git", "-C", dir, "pull", "--ff-only") // #nosec G204 -- dir is a managed clone path
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("plugin: git pull failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

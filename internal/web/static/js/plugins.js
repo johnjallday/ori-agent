@@ -86,6 +86,7 @@
       '<div class="d-flex gap-2">' +
       '<button class="modern-btn modern-btn-secondary" onclick="pluginToggle(\'' + name + '\', ' + (p.enabled ? 'false' : 'true') + ')">' +
       (p.enabled ? 'Disable' : 'Enable') + '</button>' +
+      '<button class="modern-btn modern-btn-secondary" onclick="pluginUpdate(\'' + name + '\')">Update</button>' +
       '<button class="modern-btn modern-btn-secondary" onclick="pluginUninstall(\'' + name + '\')">Uninstall</button>' +
       '</div>' +
       '</div>'
@@ -124,6 +125,25 @@
       await api('DELETE', '/api/plugins/' + encodeURIComponent(name));
       loadPlugins();
     } catch (e) { alert('Uninstall failed: ' + e.message); }
+  };
+
+  window.pluginUpdate = async function (name) {
+    const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
+    try {
+      const data = await api('POST', url, { confirm: false });
+      const doUpdate = async () => {
+        await api('POST', url, { confirm: true });
+        pluginCancelInstall();
+        loadPlugins();
+      };
+      if (data.changed) {
+        showTrust(data.trust, doUpdate); // re-prompt: the registered components changed
+      } else {
+        await doUpdate();
+      }
+    } catch (e) {
+      alert('Update failed: ' + e.message);
+    }
   };
 
   // ---- marketplaces ----

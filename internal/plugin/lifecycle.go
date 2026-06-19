@@ -115,3 +115,113 @@ func (m *Manager) Uninstall(name string) error {
 	}
 	return m.store.Delete(name)
 }
+
+// UpdatePreview re-resolves an installed plugin from its source and returns the
+// trust report plus whether the set of registered components changed.
+func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
+	existing, ok, err := m.store.Get(name)
+	if err != nil {
+		return TrustReport{}, false, err
+	}
+	if !ok {
+		return TrustReport{}, false, fmt.Errorf("plugin: %q not installed", name)
+	}
+	d, err := m.reload(existing)
+	if err != nil {
+		return TrustReport{}, false, err
+	}
+	return BuildTrustReport(d), componentsChanged(existing, d), nil
+}
+
+// Update reinstalls a plugin from its recorded source (re-pulling git sources),
+// re-running the trust prompt when the registered component set changed.
+func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, error) {
+	existing, ok, err := m.store.Get(name)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	if !ok {
+		return InstalledPlugin{}, fmt.Errorf("plugin: %q not installed", name)
+	}
+	d, err := m.reload(existing)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	if componentsChanged(existing, d) && confirm != nil && !confirm(BuildTrustReport(d)) {
+		return InstalledPlugin{}, ErrInstallDeclined
+	}
+
+	// Reinstall: remove the previously-registered components, then register the
+	// refreshed set.
+	for _, srv := range existing.MCPServers {
+		_ = m.reg.RemoveServer(srv)
+	}
+	for _, sk := range existing.Skills {
+		_ = m.skills.RemoveSkill(name, sk)
+	}
+	res, err := Register(d, m.reg, m.skills)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+
+	updated := InstalledPlugin{
+		Name:        d.Name,
+		Version:     d.Version,
+		Description: d.Description,
+		Source:      existing.Source,
+		Format:      d.SourceFormat,
+		InstallDir:  d.InstallDir,
+		MCPServers:  res.MCPServers,
+		Skills:      res.Skills,
+		Enabled:     existing.Enabled,
+		InstalledAt: existing.InstalledAt,
+	}
+	if err := m.store.Put(updated); err != nil {
+		return InstalledPlugin{}, fmt.Errorf("plugin: record update: %w", err)
+	}
+	return updated, nil
+}
+
+// reload re-resolves a descriptor for an installed plugin, refreshing git clones.
+func (m *Manager) reload(existing InstalledPlugin) (PluginDescriptor, error) {
+	if isGitURL(existing.Source) {
+		if err := pullGit(existing.InstallDir); err != nil {
+			return PluginDescriptor{}, err
+		}
+	}
+	mfst, err := DetectManifest(existing.InstallDir, existing.Format)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
+	return Normalize(mfst, existing.Source)
+}
+
+// componentsChanged reports whether the descriptor's registered component set
+// differs from what the plugin previously registered.
+func componentsChanged(existing InstalledPlugin, d PluginDescriptor) bool {
+	servers := make([]string, 0, len(d.MCPServers))
+	for _, s := range d.MCPServers {
+		servers = append(servers, NamespacedServerName(d.Name, s.Name))
+	}
+	skills := make([]string, 0, len(d.Skills))
+	for _, s := range d.Skills {
+		skills = append(skills, s.Name)
+	}
+	return !sameStringSet(existing.MCPServers, servers) || !sameStringSet(existing.Skills, skills)
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, x := range a {
+		set[x] = true
+	}
+	for _, x := range b {
+		if !set[x] {
+			return false
+		}
+	}
+	return true
+}

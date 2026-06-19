@@ -700,6 +700,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("DELETE /api/plugins/{name}", s.Handlers.Plugin.UninstallHandler)
 		mux.HandleFunc("POST /api/plugins/{name}/enable", s.Handlers.Plugin.SetEnabledHandler(true))
 		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
+		mux.HandleFunc("POST /api/plugins/{name}/update", s.Handlers.Plugin.UpdateHandler)
 	}
 
 	// =============================================================================
