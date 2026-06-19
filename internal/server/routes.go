@@ -44,6 +44,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/skills", s.serveSkills)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
+	mux.HandleFunc("/plugins", s.servePlugins)
 	mux.HandleFunc("/models", s.serveModels)
 	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
 	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support
@@ -685,6 +686,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
 		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
+	}
+
+	// =============================================================================
+	// Plugin Endpoints (Claude Code / Codex-compatible bundles)
+	// =============================================================================
+	if s.Handlers.Plugin != nil {
+		mux.HandleFunc("GET /api/plugins", s.Handlers.Plugin.ListHandler)
+		mux.HandleFunc("POST /api/plugins/install", s.Handlers.Plugin.InstallHandler)
+		mux.HandleFunc("GET /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
+		mux.HandleFunc("POST /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
+		mux.HandleFunc("POST /api/plugins/marketplaces/install", s.Handlers.Plugin.MarketplaceInstallHandler)
+		mux.HandleFunc("DELETE /api/plugins/{name}", s.Handlers.Plugin.UninstallHandler)
+		mux.HandleFunc("POST /api/plugins/{name}/enable", s.Handlers.Plugin.SetEnabledHandler(true))
+		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
+		mux.HandleFunc("POST /api/plugins/{name}/update", s.Handlers.Plugin.UpdateHandler)
 	}
 
 	// =============================================================================

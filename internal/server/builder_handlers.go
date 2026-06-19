@@ -31,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -325,6 +326,12 @@ func (b *ServerBuilder) initializeHandlers() {
 	})
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
+
+	// Plugin installer (Claude Code- and Codex-compatible bundles): wired over the
+	// MCP registry + the personal skills dir; installed plugins live under ./plugins.
+	if b.mcpConfigManager != nil && b.mcpRegistry != nil {
+		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, "plugins")
+	}
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {

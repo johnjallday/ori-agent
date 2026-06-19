@@ -319,6 +319,10 @@ function createServerCard(server) {
     : '<span class="badge bg-secondary ms-2">Disabled globally</span>';
   const toggleLabel = server.enabled ? 'Disable' : 'Enable';
   const toggleClass = server.enabled ? 'modern-btn-secondary' : 'modern-btn-primary';
+  // Plugin-owned servers are namespaced "<plugin>/<server>"; they're read-only
+  // here (manage via the Plugins page), though enable/disable is still allowed.
+  const isPlugin = server.name.includes('/');
+  const pluginBadge = isPlugin ? '<span class="badge bg-info ms-2">Plugin (read-only)</span>' : '';
 
   div.innerHTML = `
     <div class="d-flex justify-content-between align-items-start">
@@ -329,6 +333,7 @@ function createServerCard(server) {
           ${statusBadge}
           ${toolCountBadge}
           ${enabledBadge}
+          ${pluginBadge}
         </div>
       </div>
       <div class="d-flex gap-2">
@@ -343,9 +348,9 @@ function createServerCard(server) {
             Retry
           </button>
         ` : ''}
-        <button class="modern-btn modern-btn-danger modern-btn-sm" onclick="confirmRemoveServer('${server.name}')">
-          Remove
-        </button>
+        ${isPlugin
+          ? '<span class="modern-btn modern-btn-secondary modern-btn-sm disabled" title="Managed by its plugin; uninstall from the Plugins page">Managed by plugin</span>'
+          : `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="confirmRemoveServer('${server.name}')">Remove</button>`}
       </div>
     </div>
   `;

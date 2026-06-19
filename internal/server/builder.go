@@ -35,6 +35,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -150,6 +151,7 @@ type ServerBuilder struct {
 	workspaceHandler       *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
+	pluginHandler          *pluginhttp.Handler
 	locationHandler        *locationhttp.Handler
 	workflowHandler        *workflowhttp.Handler
 	modelCategoryStore     store.ModelCategoryStore
@@ -388,6 +390,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
 	b.server.Handlers.WorkspaceRuns = b.workspaceRunHandler
 	b.server.Handlers.ActionCenter = b.actionCenterHandler
+	b.server.Handlers.Plugin = b.pluginHandler
 	// initializeMissionBridge (which builds the trigger handler) runs before
 	// this facade is rebuilt, so re-attach here — same pattern as ActionCenter.
 	b.server.Handlers.Triggers = b.triggerHandler
