@@ -3419,6 +3419,7 @@ const sessionManager = {
         invitedAgents: 0,
         boundMCPs: 0,
         attachedSkills: 0,
+        addedPlugins: 0,
         failures: []
       };
 
@@ -3457,6 +3458,7 @@ const sessionManager = {
         bootstrapApplyResult.invitedAgents > 0 ||
         bootstrapApplyResult.boundMCPs > 0 ||
         bootstrapApplyResult.attachedSkills > 0 ||
+        bootstrapApplyResult.addedPlugins > 0 ||
         askOriSeedResult.tasksCreated > 0 ||
         askOriSeedResult.notesCreated > 0
       ) {
@@ -3464,6 +3466,7 @@ const sessionManager = {
         if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
         if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
         if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
+        if (bootstrapApplyResult.addedPlugins > 0) summaryParts.push(`${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         const summaryText = summaryParts.join(', ');

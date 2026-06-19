@@ -2815,7 +2815,9 @@ export class WorkspaceDetailPage {
         ? 'data-workspace-intent-review-agent'
         : kind === 'mcp'
           ? 'data-workspace-intent-review-mcp'
-          : 'data-workspace-intent-review-skill';
+          : kind === 'plugin'
+            ? 'data-workspace-intent-review-plugin'
+            : 'data-workspace-intent-review-skill';
     const label =
       kind === 'mcp'
         ? item.action && item.action.indexOf('install') >= 0
@@ -2825,9 +2827,13 @@ export class WorkspaceDetailPage {
           ? item.action && item.action.indexOf('install') >= 0
             ? 'Install + Attach'
             : 'Attach'
-          : item.action === 'create'
-            ? 'Create'
-            : 'Invite';
+          : kind === 'plugin'
+            ? item.action && item.action.indexOf('install') >= 0
+              ? 'Install + Add'
+              : 'Add'
+            : item.action === 'create'
+              ? 'Create'
+              : 'Invite';
     const secondaryChipClass =
       item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
         ? 'source'
@@ -2863,6 +2869,7 @@ export class WorkspaceDetailPage {
       : [];
     const mcps = Array.isArray(plan.mcps) ? plan.mcps : [];
     const skills = Array.isArray(plan.skills) ? plan.skills : [];
+    const plugins = Array.isArray(plan.plugins) ? plan.plugins : [];
 
     const leadMarkup = lead
       ? `
@@ -2913,6 +2920,14 @@ export class WorkspaceDetailPage {
                 : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'
             }
           </div>
+          <div class="workspace-setup-section mt-3">
+            <div class="workspace-setup-label">Workspace Plugins</div>
+            ${
+              plugins.length > 0
+                ? plugins.map(item => this.buildWorkspaceIntentReviewCard(item, 'plugin')).join('')
+                : '<div class="workspace-detail-empty">No plugin recommendations right now.</div>'
+            }
+          </div>
         </div>
         <div class="col-12">
           <div class="workspace-detail-settings-summary-card">
@@ -2927,7 +2942,7 @@ export class WorkspaceDetailPage {
     this.elements.intentReviewPanel.hidden = false;
     this.elements.intentReviewResults
       .querySelectorAll(
-        'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
+        'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill], input[data-workspace-intent-review-plugin]'
       )
       .forEach(input => {
         input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
@@ -2956,6 +2971,11 @@ export class WorkspaceDetailPage {
         'input[data-workspace-intent-review-skill]'
       ) || []
     ).filter(input => input.checked).length;
+    const pluginCount = Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-plugin]'
+      ) || []
+    ).filter(input => input.checked).length;
     const totalAgents =
       (this.workspaceIntentReviewPlan.agents?.some(agent => agent.role === 'lead') ? 1 : 0) +
       optionalAgentCount;
@@ -2963,6 +2983,7 @@ export class WorkspaceDetailPage {
     const parts = [`${totalAgents} agent${totalAgents === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
     if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+    if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
     this.elements.intentReviewMeta.textContent = `Selected for apply: ${parts.join(', ')}.`;
     this.setWorkspaceIntentBusy(false, 'apply');
   }
@@ -3006,10 +3027,24 @@ export class WorkspaceDetailPage {
       if (match) selectedSkills.push(match);
     });
 
+    const selectedPlugins = [];
+    Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-plugin]'
+      ) || []
+    ).forEach(input => {
+      if (!input.checked) return;
+      const match = (this.workspaceIntentReviewPlan.plugins || []).find(
+        item => item.id === input.value
+      );
+      if (match) selectedPlugins.push(match);
+    });
+
     return {
       agents: selectedAgents,
       mcps: selectedMCPs,
       skills: selectedSkills,
+      plugins: selectedPlugins,
       queries: this.workspaceIntentReviewPlan.queries || []
     };
   }
@@ -3176,6 +3211,10 @@ export class WorkspaceDetailPage {
       if (result.attachedSkills > 0)
         summaryParts.push(
           `${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`
+        );
+      if (result.addedPlugins > 0)
+        summaryParts.push(
+          `${result.addedPlugins} plugin${result.addedPlugins === 1 ? '' : 's'} added`
         );
       if (result.failures.length > 0) {
         this.setWorkspaceIntentStatus(

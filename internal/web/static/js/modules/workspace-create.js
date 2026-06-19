@@ -564,6 +564,7 @@ async function createWorkspace() {
       invitedAgents: 0,
       boundMCPs: 0,
       attachedSkills: 0,
+      addedPlugins: 0,
       failures: []
     };
     if (
@@ -631,6 +632,7 @@ async function createWorkspace() {
       if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
       if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
       if (bootstrapApplyResult.attachedSkills > 0) successMessageParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
+      if (bootstrapApplyResult.addedPlugins > 0) successMessageParts.push(`${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`);
       if (seededTaskCount > 0) successMessageParts.push(`${seededTaskCount} starter task${seededTaskCount === 1 ? '' : 's'} added`);
       if (typeof window.showToast === 'function') {
         if (bootstrapApplyResult.failures.length > 0) {
