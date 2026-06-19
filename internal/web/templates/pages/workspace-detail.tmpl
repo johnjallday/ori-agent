@@ -380,6 +380,17 @@
                 </button>
                 <button
                   class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-plugins-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-plugins-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-plugins-pane"
+                  aria-selected="false">
+                  Plugins
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
                   id="workspace-detail-config-mission-tab"
                   data-bs-toggle="tab"
                   data-bs-target="#workspace-detail-config-mission-pane"
@@ -748,6 +759,36 @@
                   </div>
                   <div id="workspace-detail-skills-list" class="workspace-detail-mcp-list">
                     <div class="workspace-detail-empty">Loading workspace skill bindings...</div>
+                  </div>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-plugins-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-plugins-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Workspace Plugins</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Add an installed plugin to this workspace to bind all of its MCP servers and skills at once. Added components are available to this workspace's agents by default.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-refresh-plugins" class="workspace-detail-panel-btn" type="button" title="Refresh installed plugins">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                      </button>
+                      <a id="workspace-detail-browse-plugins" class="workspace-detail-panel-btn" href="/plugins" title="Open the Plugins page to install more">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                        </svg>
+                      </a>
+                    </div>
+                  </div>
+                  <div id="workspace-detail-plugins-list" class="workspace-detail-mcp-list">
+                    <div class="workspace-detail-empty">Loading installed plugins...</div>
                   </div>
                 </div>
                 <div

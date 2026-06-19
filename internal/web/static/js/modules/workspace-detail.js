@@ -9,6 +9,7 @@
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
+import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
@@ -226,6 +227,7 @@ export class WorkspaceDetailPage {
     this.agentSkillsPromises = new Map();
     this.mcpManager = new WorkspaceMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
+    this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
@@ -1020,6 +1022,7 @@ export class WorkspaceDetailPage {
       intentReviewResults: document.getElementById('workspace-detail-intent-review-results'),
       intentReviewMeta: document.getElementById('workspace-detail-intent-review-meta'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
+      pluginsList: document.getElementById('workspace-detail-plugins-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
@@ -1055,6 +1058,7 @@ export class WorkspaceDetailPage {
       refreshSettingsBtn: document.getElementById('workspace-detail-refresh-settings'),
       addSkillBtn: document.getElementById('workspace-detail-add-skill'),
       refreshSkillsBtn: document.getElementById('workspace-detail-refresh-skills'),
+      refreshPluginsBtn: document.getElementById('workspace-detail-refresh-plugins'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
       homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
@@ -1581,6 +1585,7 @@ export class WorkspaceDetailPage {
       await this.loadWorkspace();
     });
     this.skillsManager.bindEvents();
+    this.pluginsManager.bindEvents();
     this.memoryManager.bindEvents();
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
@@ -2137,6 +2142,7 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSettings();
       this.renderWorkspaceSkillBindings();
+      this.renderWorkspacePluginBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
@@ -10764,6 +10770,10 @@ export class WorkspaceDetailPage {
 
   getWorkspaceSkillBindings(options = {}) {
     return this.skillsManager.getWorkspaceSkillBindings(options);
+  }
+
+  renderWorkspacePluginBindings() {
+    return this.pluginsManager.render();
   }
 
   // Planning-config helpers live with the skills manager since they shape the
