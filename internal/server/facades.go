@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -106,6 +107,7 @@ type HandlerFacade struct {
 	Workspace        *workspace.HTTPHandler
 	Usage            *usagehttp.Handler
 	MCP              *mcphttp.Handler
+	Plugin           *pluginhttp.Handler
 	Location         *locationhttp.Handler
 	Workflow         *workflowhttp.Handler
 	ModelCategory    *modelcategoryhttp.Handler
