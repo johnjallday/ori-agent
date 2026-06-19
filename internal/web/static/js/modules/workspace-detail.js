@@ -3818,8 +3818,7 @@ export class WorkspaceDetailPage {
     const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
     const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
 
-    const skillsState = this.getAgentSkillsState(group.name);
-    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+    const skillsMarkup = this.renderAgentWorkspaceSkillChips(group.name);
 
     const mcpServers = this.getEffectiveWorkspaceMCPServerNames(group.name);
     const mcpMarkup =
@@ -3890,81 +3889,22 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  getAgentSkillsState(agentName) {
-    const key = this.normalizeAgentName(agentName);
-    if (!key) return { status: 'idle', skills: [] };
-    return this.agentSkillsCache.get(key) || { status: 'idle', skills: [] };
-  }
-
-  renderAgentSkillsChips(skillsState, profile = null) {
-    const fallbackSkills = [];
-    const fallbackSeen = new Set();
-    const addFallbackSkill = value => {
-      const name = String(value || '').trim();
-      if (!name) return;
-      const key = name.toLowerCase();
-      if (fallbackSeen.has(key)) return;
-      fallbackSeen.add(key);
-      fallbackSkills.push(name);
-    };
-
-    if (Array.isArray(profile?.capabilities)) {
-      profile.capabilities.forEach(addFallbackSkill);
+  // Renders the agent info card's SKILLS chips from the skills that are
+  // effective for this agent *in this workspace* (workspace skill bindings the
+  // agent can use), matching the sibling "MCP Attached" block. This is
+  // intentionally workspace-scoped rather than the agent's global skill catalog
+  // returned by /api/skills.
+  renderAgentWorkspaceSkillChips(agentName) {
+    const skillNames = this.getEffectiveWorkspaceSkillNamesForAgent(agentName);
+    if (skillNames.length === 0) {
+      return '<span class="workspace-detail-agent-info-empty">No workspace skills attached.</span>';
     }
-    if (Array.isArray(profile?.enabledPlugins)) {
-      profile.enabledPlugins.forEach(addFallbackSkill);
-    }
-
-    if (!skillsState || skillsState.status === 'idle' || skillsState.status === 'loading') {
-      if (fallbackSkills.length > 0) {
-        return fallbackSkills
-          .slice(0, 8)
-          .map(
-            skill =>
-              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
-          )
-          .join('');
-      }
-      return '<span class="workspace-detail-agent-info-empty">Loading skills...</span>';
-    }
-
-    if (skillsState.status === 'conflict') {
-      return '<span class="workspace-detail-agent-info-empty">Skill conflicts detected.</span>';
-    }
-
-    if (skillsState.status === 'error') {
-      if (fallbackSkills.length > 0) {
-        return fallbackSkills
-          .slice(0, 8)
-          .map(
-            skill =>
-              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
-          )
-          .join('');
-      }
-      return '<span class="workspace-detail-agent-info-empty">Failed to load skills.</span>';
-    }
-
-    const enabledSkills = Array.isArray(skillsState.skills)
-      ? skillsState.skills.filter(skill => skill.enabled !== false && skill.name)
-      : [];
-
-    if (enabledSkills.length === 0) {
-      return '<span class="workspace-detail-agent-info-empty">No enabled skills.</span>';
-    }
-
-    const visibleSkills = enabledSkills.slice(0, 8);
-    const overflowCount = enabledSkills.length - visibleSkills.length;
-    const chips = visibleSkills
+    return skillNames
       .map(
         skill =>
-          `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill.name)}</span>`
+          `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
       )
       .join('');
-
-    return overflowCount > 0
-      ? `${chips}<span class="workspace-detail-agent-info-chip count">+${overflowCount} more</span>`
-      : chips;
   }
 
   getAgentCardElementByKey(agentKey) {
@@ -3987,9 +3927,7 @@ export class WorkspaceDetailPage {
     const card = this.getAgentCardElementByKey(key);
     if (!card) return false;
 
-    const profile = this.getAgentProfile(agentName);
-    const skillsState = this.getAgentSkillsState(agentName);
-    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+    const skillsMarkup = this.renderAgentWorkspaceSkillChips(agentName);
 
     const skillContainers = card.querySelectorAll(
       '.workspace-detail-agent-skills-list[data-agent-skills-key]'
@@ -4033,11 +3971,9 @@ export class WorkspaceDetailPage {
     } else {
       this.renderAgentGroups();
     }
-    this.ensureAgentSkillsLoaded(agentName);
-  }
-
-  async ensureAgentSkillsLoaded(agentName) {
-    await this.loadAgentSkills(agentName, { refreshUI: true });
+    // The agent info card's SKILLS now renders synchronously from
+    // workspace-effective skill bindings (see renderAgentWorkspaceSkillChips),
+    // so flipping no longer needs to fetch the agent's global skill catalog.
   }
 
   async loadAgentSkills(agentName, options = {}) {
@@ -9881,6 +9817,10 @@ export class WorkspaceDetailPage {
 
   getEffectiveWorkspaceMCPServerNames(agentName) {
     return this.mcpManager.getEffectiveWorkspaceMCPServerNames(agentName);
+  }
+
+  getEffectiveWorkspaceSkillNamesForAgent(agentName) {
+    return this.skillsManager.getEffectiveWorkspaceSkillNamesForAgent(agentName);
   }
 
   getWorkspaceMCPBindings(options = {}) {
