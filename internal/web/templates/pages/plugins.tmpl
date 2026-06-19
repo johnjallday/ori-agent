@@ -58,6 +58,21 @@
           </div>
         </div>
 
+        <!-- Marketplaces -->
+        <div class="modern-card p-4 mb-4">
+          <h2 class="h6 mb-3">Marketplaces</h2>
+          <div class="row g-2 align-items-end mb-3">
+            <div class="col-md-10">
+              <label class="form-label" for="marketplaceSource">Add a marketplace (git URL or local folder)</label>
+              <input type="text" class="form-control" id="marketplaceSource" placeholder="https://github.com/user/marketplace.git or /path/to/catalog">
+            </div>
+            <div class="col-md-2">
+              <button class="modern-btn modern-btn-secondary w-100" onclick="addMarketplace()">Add</button>
+            </div>
+          </div>
+          <div id="marketplaceList"><p class="text-muted mb-0">Loading&hellip;</p></div>
+        </div>
+
         <!-- Installed -->
         <div class="modern-card p-4">
           <div class="d-flex align-items-center justify-content-between mb-3">
