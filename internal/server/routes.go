@@ -44,6 +44,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/skills", s.serveSkills)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
+	mux.HandleFunc("/plugins", s.servePlugins)
 	mux.HandleFunc("/models", s.serveModels)
 	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
 	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support

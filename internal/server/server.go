@@ -301,6 +301,11 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "mcp", data)
 }
 
+func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("plugins")
+	s.renderAndWritePage(w, "plugins", data)
+}
+
 func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("skills")
 	data.Title = "Skills - Ori Agent"
