@@ -954,7 +954,6 @@ function renderDetailTools(data) {
   }
 
   return tools.map((tool, i) => {
-    const title = tool.title || tool.name;
     const params = renderToolParams(tool.inputSchema);
     const collapseId = `toolParams${i}`;
     return `
