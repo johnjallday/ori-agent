@@ -3521,7 +3521,11 @@ export class WorkspaceDetailPage {
     }
 
     const encodedAgentName = encodeURIComponent(normalizedName);
-    if (this.getAgentProfile(normalizedName)) {
+    // Only agents in the global catalog have a real /agents/<name> detail page.
+    // Workspace-local agents (entry/manager agents in config.json) must fall
+    // through to the workspace-local branch below — otherwise their name links
+    // to a 404 /agents/<name> route.
+    if (this.getGlobalAgentProfile(normalizedName)) {
       const title = `Open ${normalizedName} details`;
       return {
         kind: 'global',
@@ -9984,6 +9988,15 @@ export class WorkspaceDetailPage {
     }
 
     return names;
+  }
+
+  // Global agent catalog lookup only (no workspace-local fallback). Used to
+  // decide whether an agent has a real /agents/<name> detail page; workspace-
+  // local agents are stored in config.json and have no global detail route.
+  getGlobalAgentProfile(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return null;
+    return this.agentIndex instanceof Map ? this.agentIndex.get(key) || null : null;
   }
 
   getAgentProfile(agentName) {
