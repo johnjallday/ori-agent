@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/mcp"
@@ -57,6 +58,28 @@ func TestResolveCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Regression: a relative installDir must not cause ${CLAUDE_PLUGIN_ROOT} to be
+// joined twice (the doubled "plugins/src/x/plugins/src/x/bin/..." bug), and the
+// result must be anchored to an absolute path.
+func TestResolveCommand_RelativeInstallDirNotDoubled(t *testing.T) {
+	spec := MCPServerSpec{Command: "${CLAUDE_PLUGIN_ROOT}/bin/reaper-plugin"}
+	installDir := filepath.Join("plugins", "src", "reaper-plugin")
+
+	cmd, _ := resolveCommand(spec, installDir)
+
+	doubled := filepath.Join(installDir, installDir)
+	if strings.Contains(cmd, doubled) {
+		t.Fatalf("command path is doubled: %q", cmd)
+	}
+	wantSuffix := filepath.Join("plugins", "src", "reaper-plugin", "bin", "reaper-plugin")
+	if !strings.HasSuffix(cmd, wantSuffix) {
+		t.Fatalf("command = %q, want suffix %q", cmd, wantSuffix)
+	}
+	if !filepath.IsAbs(cmd) {
+		t.Fatalf("command should be anchored to an absolute path, got %q", cmd)
 	}
 }
 
