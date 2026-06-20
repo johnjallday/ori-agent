@@ -184,6 +184,24 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 
 // reload re-resolves a descriptor for an installed plugin, refreshing git clones.
 func (m *Manager) reload(existing InstalledPlugin) (PluginDescriptor, error) {
+	if g, ok := parseGitSubdir(existing.Source); ok {
+		// Composite git repo + subdirectory. Pinned commits are immutable, so
+		// re-resolving is idempotent; unpinned subdir sources pull for latest.
+		if g.Sha == "" && g.Ref == "" {
+			if err := pullGit(existing.InstallDir); err != nil {
+				return PluginDescriptor{}, err
+			}
+		}
+		root, err := ResolveSource(existing.Source, m.cloneDir)
+		if err != nil {
+			return PluginDescriptor{}, err
+		}
+		mfst, err := DetectManifest(root, existing.Format)
+		if err != nil {
+			return PluginDescriptor{}, err
+		}
+		return Normalize(mfst, existing.Source)
+	}
 	if isGitURL(existing.Source) {
 		if err := pullGit(existing.InstallDir); err != nil {
 			return PluginDescriptor{}, err

@@ -96,6 +96,56 @@ func TestInstallConfirmThenList(t *testing.T) {
 	}
 }
 
+func TestMarketplacesOfficialStatus(t *testing.T) {
+	h := testHandler(t)
+
+	getMarketplaces := func() string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.MarketplacesHandler(rr, httptest.NewRequest(http.MethodGet, "/api/plugins/marketplaces", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET marketplaces: %d %s", rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+
+	// Before adding: official block present, source exposed, added=false.
+	body := getMarketplaces()
+	if !strings.Contains(body, plugin.OfficialMarketplaceSource) {
+		t.Errorf("official source not exposed: %s", body)
+	}
+	if !strings.Contains(body, `"added":false`) {
+		t.Errorf("expected added:false, got %s", body)
+	}
+
+	// Add a local catalog whose name matches the official marketplace name; the
+	// status must flip to added=true (idempotent add keyed by name).
+	catalog := t.TempDir()
+	mustWrite(t, filepath.Join(catalog, "marketplace.json"),
+		`{"name":"`+plugin.OfficialMarketplaceName+`","plugins":[]}`)
+	addBody := `{"source":"` + catalog + `"}`
+	rr := httptest.NewRecorder()
+	h.MarketplacesHandler(rr, httptest.NewRequest(http.MethodPost, "/api/plugins/marketplaces", strings.NewReader(addBody)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST marketplace: %d %s", rr.Code, rr.Body.String())
+	}
+	// Re-add to prove idempotency (no duplicate record).
+	rr = httptest.NewRecorder()
+	h.MarketplacesHandler(rr, httptest.NewRequest(http.MethodPost, "/api/plugins/marketplaces", strings.NewReader(addBody)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("re-add marketplace: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Each added marketplace record carries a "dir" field (the official status
+	// block does not), so this counts records — proving the re-add didn't dupe.
+	if got := strings.Count(getMarketplaces(), `"dir":`); got != 1 {
+		t.Errorf("expected exactly 1 marketplace record, got %d: %s", got, getMarketplaces())
+	}
+	if !strings.Contains(getMarketplaces(), `"added":true`) {
+		t.Errorf("expected added:true after add, got %s", getMarketplaces())
+	}
+}
+
 func TestUninstall(t *testing.T) {
 	h := testHandler(t)
 	if rr := postInstall(t, h, claudeBundle(t), true); rr.Code != http.StatusOK {

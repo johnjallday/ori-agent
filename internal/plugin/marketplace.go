@@ -9,6 +9,16 @@ import (
 	"sync"
 )
 
+const (
+	// OfficialMarketplaceName is the catalog name published by Anthropic's
+	// official, managed plugin directory.
+	OfficialMarketplaceName = "claude-plugins-official"
+	// OfficialMarketplaceSource is the git source for that directory. It is the
+	// single backend-held source the "Add official marketplace" button installs;
+	// the UI never hardcodes the URL.
+	OfficialMarketplaceSource = "https://github.com/anthropics/claude-plugins-official.git"
+)
+
 // Marketplace is a catalog of installable plugins (a marketplace.json),
 // compatible with Claude Code and Codex marketplace layouts.
 type Marketplace struct {
@@ -18,23 +28,44 @@ type Marketplace struct {
 	Plugins []MarketplaceEntry `json:"plugins"`
 }
 
-// MarketplaceEntry is one plugin listed in a marketplace. In real catalogs the
-// "source" is often an object (e.g. {"source":"local","path":"./..."} or
-// {"source":"github","repo":"owner/name"}) rather than a string; UnmarshalJSON
-// normalizes both to a single installable Source (a path relative to the
-// catalog, an absolute path, or a git URL).
-type MarketplaceEntry struct {
-	Name        string `json:"name"`
-	Source      string `json:"source"`
-	Description string `json:"description,omitempty"`
+// MarketplaceAuthor is a catalog entry's author. Catalogs use either a bare
+// string or an object with name/email; both normalize to this.
+type MarketplaceAuthor struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
-// UnmarshalJSON accepts both the string and object forms of "source".
+// MarketplaceEntry is one plugin listed in a marketplace. In real catalogs the
+// "source" is often an object (e.g. {"source":"local","path":"./..."},
+// {"source":"github","repo":"owner/name"}, or a git repo + subdirectory
+// {"source":"git-subdir","url":"...","path":"plugins/x","ref":"v1"}) rather than
+// a string; UnmarshalJSON normalizes all forms to a single installable Source (a
+// path relative to the catalog, an absolute path, a git URL, or a git repo +
+// subdirectory encoded by encodeGitSubdir). The remaining fields are display
+// metadata used by the browse UI (cards, search, and category/tag filtering).
+type MarketplaceEntry struct {
+	Name        string            `json:"name"`
+	Source      string            `json:"source"`
+	Description string            `json:"description,omitempty"`
+	Category    string            `json:"category,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	Keywords    []string          `json:"keywords,omitempty"`
+	Author      MarketplaceAuthor `json:"author,omitzero"`
+	Homepage    string            `json:"homepage,omitempty"`
+}
+
+// UnmarshalJSON accepts both the string and object forms of "source", and the
+// string or object forms of "author". Missing display fields default to empty.
 func (e *MarketplaceEntry) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`
 		Source      json.RawMessage `json:"source"`
+		Category    string          `json:"category"`
+		Tags        []string        `json:"tags"`
+		Keywords    []string        `json:"keywords"`
+		Author      json.RawMessage `json:"author"`
+		Homepage    string          `json:"homepage"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -42,7 +73,28 @@ func (e *MarketplaceEntry) UnmarshalJSON(data []byte) error {
 	e.Name = raw.Name
 	e.Description = raw.Description
 	e.Source = normalizeEntrySource(raw.Source)
+	e.Category = raw.Category
+	e.Tags = raw.Tags
+	e.Keywords = raw.Keywords
+	e.Homepage = raw.Homepage
+	e.Author = parseMarketplaceAuthor(raw.Author)
 	return nil
+}
+
+// parseMarketplaceAuthor accepts the bare-string and object forms of "author".
+func parseMarketplaceAuthor(raw json.RawMessage) MarketplaceAuthor {
+	if len(raw) == 0 {
+		return MarketplaceAuthor{}
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return MarketplaceAuthor{Name: s}
+	}
+	var obj MarketplaceAuthor
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj
+	}
+	return MarketplaceAuthor{}
 }
 
 // normalizeEntrySource reduces a marketplace entry's "source" (a string or an
@@ -61,17 +113,31 @@ func normalizeEntrySource(raw json.RawMessage) string {
 		Path   string `json:"path"`
 		Repo   string `json:"repo"`
 		URL    string `json:"url"`
+		Ref    string `json:"ref"`
+		Sha    string `json:"sha"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
+	gitURL := obj.URL
+	if gitURL == "" && obj.Repo != "" {
+		gitURL = "https://github.com/" + obj.Repo + ".git"
+	}
 	switch {
+	case gitURL != "" && obj.Path != "":
+		// git repo + subdirectory (the "git-subdir"/"url" entry types): clone the
+		// repo and install from the subpath, pinned to ref/sha when present. Must
+		// be checked before the bare-path case — these entries carry both a url
+		// and a path, and the path is relative to the repo, not the catalog dir.
+		return encodeGitSubdir(gitURL, obj.Path, obj.Ref, obj.Sha)
+	case gitURL != "" && (obj.Ref != "" || obj.Sha != ""):
+		// whole-repo plugin pinned to a specific commit
+		return encodeGitSubdir(gitURL, "", obj.Ref, obj.Sha)
+	case gitURL != "":
+		return gitURL
 	case obj.Path != "":
+		// path relative to (or absolute from) the catalog dir
 		return obj.Path
-	case obj.URL != "":
-		return obj.URL
-	case obj.Repo != "":
-		return "https://github.com/" + obj.Repo + ".git"
 	default:
 		return ""
 	}
