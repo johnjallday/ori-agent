@@ -313,6 +313,19 @@
     </div>
   </div>
 
+  <!-- Server Details Modal -->
+  <div class="modal fade" id="serverDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" id="serverDetailsTitle" style="color: var(--text-primary);">Server Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="serverDetailsBody" style="color: var(--text-primary);"></div>
+      </div>
+    </div>
+  </div>
+
   {{template "modals.tmpl" .}}
 
   <style>
@@ -365,9 +378,39 @@
       border-color: var(--primary-color, #6366f1);
       box-shadow: 0 2px 8px rgba(99,102,241,0.12);
     }
+
+    /* Rendered README / instructions markdown inside the details modal */
+    .mcp-markdown {
+      color: var(--text-primary);
+      overflow-wrap: anywhere;
+    }
+    .mcp-markdown img { max-width: 100%; height: auto; }
+    .mcp-markdown pre {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .mcp-markdown code {
+      background: var(--bg-tertiary);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+    .mcp-markdown pre code { background: transparent; padding: 0; }
+    .mcp-markdown table { width: 100%; border-collapse: collapse; }
+    .mcp-markdown th, .mcp-markdown td {
+      border: 1px solid var(--border-color);
+      padding: 0.35rem 0.5rem;
+    }
+    .mcp-markdown a { color: var(--primary-color, #6366f1); }
+    .mcp-markdown h1, .mcp-markdown h2, .mcp-markdown h3 { color: var(--text-primary); }
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Markdown rendering for MCP README / instructions -->
+  <script src="/js/vendor/marked-14.1.4.min.js" integrity="sha384-lqPzN0kmFw9t2syAMwVPM4VbAyqsz/lPyYWbb2Xt6nSPM0WPNrpSWCUBgdcAdgnC"></script>
+  <script src="/js/vendor/dompurify-3.1.6.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"></script>
   <!-- DX Utilities -->
   <script src="/js/utils/logger.js"></script>
   <script src="/js/utils/event-bus.js"></script>

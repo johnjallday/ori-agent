@@ -336,7 +336,10 @@ function createServerCard(server) {
           ${pluginBadge}
         </div>
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap justify-content-end">
+        <button class="modern-btn modern-btn-secondary modern-btn-sm" onclick="viewServerDetails('${encodeURIComponent(server.name)}')">
+          Details
+        </button>
         <button class="modern-btn ${toggleClass} modern-btn-sm" onclick="toggleServerEnabled('${encodeURIComponent(server.name)}', ${server.enabled})">
           ${toggleLabel}
         </button>
@@ -831,6 +834,251 @@ function renderSourcesList(sources) {
       </div>`;
     container.appendChild(row);
   });
+}
+
+// ============================================================
+// SERVER DETAILS — README + tools modal
+// ============================================================
+
+/**
+ * Open the details modal for an installed server and load its README,
+ * native MCP instructions, and live tool list from the backend.
+ */
+async function viewServerDetails(encodedServerName) {
+  const serverName = decodeURIComponent(encodedServerName);
+  const modalEl = document.getElementById('serverDetailsModal');
+  if (!modalEl) return;
+
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  document.getElementById('serverDetailsTitle').textContent = serverName;
+  const body = document.getElementById('serverDetailsBody');
+  body.innerHTML = `
+    <div class="text-center py-5">
+      <div class="spinner-border text-primary" role="status"></div>
+      <p class="mt-3 mb-0 small" style="color: var(--text-secondary);">Loading details…</p>
+    </div>`;
+  modal.show();
+
+  // Opening details does NOT start the server — README/Info load without it.
+  await loadServerDetails(serverName, false);
+}
+
+/**
+ * Fetch and render the details payload. When start is true the backend will
+ * start a stopped server so its live tools/instructions can be read.
+ */
+async function loadServerDetails(serverName, start) {
+  const body = document.getElementById('serverDetailsBody');
+  if (start) {
+    body.innerHTML = `
+      <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-3 mb-0 small" style="color: var(--text-secondary);">Starting server &amp; loading tools…</p>
+      </div>`;
+  }
+
+  try {
+    const url = `/api/mcp/servers/${encodeURIComponent(serverName)}/details${start ? '?start=true' : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    body.innerHTML = renderServerDetails(data);
+    if (start) {
+      loadServers(); // refresh the card list so the status badge reflects the now-running server
+    }
+  } catch (err) {
+    console.error('Failed to load server details:', err);
+    body.innerHTML = `<div class="alert alert-danger">Failed to load details: ${mcpEscapeHtml(err.message)}</div>`;
+  }
+}
+
+/** Explicitly start a server from within the details modal, then reload tools. */
+function startServerDetails(encodedServerName) {
+  loadServerDetails(decodeURIComponent(encodedServerName), true);
+}
+
+/** Build the inner HTML for the details modal (tabbed: Tools / README / Info). */
+function renderServerDetails(data) {
+  const tools = data.tools || [];
+  const hasInstructions = !!(data.instructions && data.instructions.trim());
+
+  return `
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#detailToolsPane" type="button" role="tab">
+          Tools <span class="badge bg-secondary ms-1">${tools.length}</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#detailReadmePane" type="button" role="tab">README</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#detailInfoPane" type="button" role="tab">Info</button>
+      </li>
+    </ul>
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="detailToolsPane" role="tabpanel">
+        ${renderDetailTools(data)}
+      </div>
+      <div class="tab-pane fade" id="detailReadmePane" role="tabpanel">
+        ${renderDetailReadme(data.readme, hasInstructions ? data.instructions : '')}
+      </div>
+      <div class="tab-pane fade" id="detailInfoPane" role="tabpanel">
+        ${renderDetailInfo(data)}
+      </div>
+    </div>`;
+}
+
+/** Render the tools list, each with collapsible parameters. */
+function renderDetailTools(data) {
+  const tools = data.tools || [];
+
+  if (tools.length === 0) {
+    if (data.status !== 'running') {
+      const warning = data.start_error
+        ? `<div class="alert alert-warning">Couldn't start the server: <code>${mcpEscapeHtml(data.start_error)}</code></div>`
+        : '';
+      return `
+        ${warning}
+        <div class="text-center py-4">
+          <p style="color: var(--text-secondary);">
+            This server isn't running. Tools are listed once it starts —
+            but you can read the <strong>README</strong> and <strong>Info</strong> tabs without starting it.
+          </p>
+          <button class="modern-btn modern-btn-primary" onclick="startServerDetails('${encodeURIComponent(data.server)}')">
+            Start server &amp; load tools
+          </button>
+        </div>`;
+    }
+    return '<p class="text-muted">This server is running but reported no tools.</p>';
+  }
+
+  return tools.map((tool, i) => {
+    const params = renderToolParams(tool.inputSchema);
+    const collapseId = `toolParams${i}`;
+    return `
+      <div class="modern-card p-3 mb-2">
+        <div class="d-flex justify-content-between align-items-start">
+          <div class="flex-grow-1">
+            <code style="color: var(--text-primary); font-weight: 600;">${mcpEscapeHtml(tool.name)}</code>
+            ${tool.title && tool.title !== tool.name ? `<span class="ms-2 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.title)}</span>` : ''}
+            ${tool.description ? `<p class="mb-0 mt-1 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.description)}</p>` : ''}
+          </div>
+          ${params ? `
+          <button class="modern-btn modern-btn-secondary modern-btn-sm flex-shrink-0 ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+            Params
+          </button>` : ''}
+        </div>
+        ${params ? `<div class="collapse mt-2" id="${collapseId}">${params}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+/** Render an input-schema's properties as a small parameter list. */
+function renderToolParams(schema) {
+  if (!schema || typeof schema !== 'object') return '';
+  const props = schema.properties || {};
+  const required = new Set(schema.required || []);
+  const names = Object.keys(props);
+  if (names.length === 0) return '<div class="small" style="color: var(--text-secondary);">No parameters.</div>';
+
+  return names.map(name => {
+    const p = props[name] || {};
+    let type = p.type || (Array.isArray(p.enum) ? 'enum' : '');
+    if (Array.isArray(type)) type = type.join(' | ');
+    const reqBadge = required.has(name)
+      ? '<span class="badge bg-danger ms-1" style="font-size:0.65rem;">required</span>'
+      : '';
+    const typeBadge = type
+      ? `<span class="badge bg-secondary ms-1" style="font-size:0.65rem;">${mcpEscapeHtml(type)}</span>`
+      : '';
+    return `
+      <div class="py-1" style="border-bottom: 1px solid var(--border-color);">
+        <code style="color: var(--text-primary);">${mcpEscapeHtml(name)}</code>${typeBadge}${reqBadge}
+        ${p.description ? `<div class="small mt-1" style="color: var(--text-secondary);">${mcpEscapeHtml(p.description)}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+/** Render the README tab: native instructions (if any) + fetched README markdown. */
+function renderDetailReadme(readme, instructions) {
+  let html = '';
+
+  if (instructions && instructions.trim()) {
+    html += `
+      <div class="mb-4">
+        <h6 style="color: var(--text-primary);">Server instructions</h6>
+        <div class="mcp-markdown small">${renderMcpMarkdown(instructions)}</div>
+      </div>`;
+  }
+
+  if (readme && readme.markdown) {
+    const sourceLink = readme.source_url
+      ? `<a href="${mcpEscapeHtml(readme.source_url)}" target="_blank" rel="noopener noreferrer" class="small">View source (${mcpEscapeHtml(readme.source || 'link')})</a>`
+      : '';
+    html += `
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0" style="color: var(--text-primary);">README</h6>
+        ${sourceLink}
+      </div>
+      <div class="mcp-markdown">${renderMcpMarkdown(readme.markdown)}</div>`;
+  } else if (!instructions || !instructions.trim()) {
+    html = '<p class="text-muted">No README or instructions found for this server. It may not publish documentation, or the package homepage is unknown.</p>';
+  }
+
+  return html;
+}
+
+/** Render the Info tab: config summary + server identity. */
+function renderDetailInfo(data) {
+  const info = data.server_info || {};
+  const argsLine = (data.args || []).join(' ');
+  const envKeys = data.env_keys || [];
+  const enabledBadge = data.enabled
+    ? '<span class="badge bg-primary">Enabled globally</span>'
+    : '<span class="badge bg-secondary">Disabled globally</span>';
+
+  const rows = [
+    ['Status', getStatusBadge(data.status || 'stopped')],
+    ['Enabled', enabledBadge],
+    ['Command', `<code style="color: var(--text-primary);">${mcpEscapeHtml(data.command || '')} ${mcpEscapeHtml(argsLine)}</code>`],
+    ['Transport', mcpEscapeHtml(data.transport || 'stdio')],
+  ];
+
+  if (info.name) {
+    rows.push(['Reported name', mcpEscapeHtml(info.title || info.name)]);
+  }
+  if (info.version) {
+    rows.push(['Version', mcpEscapeHtml(info.version)]);
+  }
+  if (envKeys.length > 0) {
+    rows.push(['Environment', envKeys.map(k => `<span class="badge bg-secondary me-1">${mcpEscapeHtml(k)}</span>`).join('')]);
+  }
+
+  return `
+    <table class="table table-sm align-middle mb-0">
+      <tbody>
+        ${rows.map(([label, value]) => `
+          <tr>
+            <th scope="row" class="text-nowrap" style="color: var(--text-secondary); font-weight: 600; width: 140px;">${label}</th>
+            <td style="color: var(--text-primary);">${value}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+/** Render markdown to sanitized HTML using marked + DOMPurify, with a safe fallback. */
+function renderMcpMarkdown(md) {
+  if (!md) return '';
+  try {
+    if (window.marked && window.DOMPurify) {
+      const html = window.marked.parse(md, { breaks: true, gfm: true });
+      return window.DOMPurify.sanitize(html);
+    }
+  } catch (err) {
+    console.error('Markdown render failed:', err);
+  }
+  return `<pre style="white-space: pre-wrap; color: var(--text-primary);">${mcpEscapeHtml(md)}</pre>`;
 }
 
 /** Safely escape HTML to prevent XSS when building innerHTML. */

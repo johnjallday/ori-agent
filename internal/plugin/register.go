@@ -40,6 +40,13 @@ func ToServerConfig(pluginName string, spec MCPServerSpec, installDir string) mc
 // command (plus its cwd) against installDir, because mcp.ServerConfig has no
 // cwd field. Bare PATH commands (e.g. "npx", "uvx") are left untouched.
 func resolveCommand(spec MCPServerSpec, installDir string) (string, []string) {
+	// Track whether the command used ${CLAUDE_PLUGIN_ROOT}: after expansion such
+	// a command is already rooted at installDir, so it must NOT be re-joined to
+	// installDir below — doing so doubles the path (e.g.
+	// "plugins/src/x/plugins/src/x/bin/...") whenever installDir is relative and
+	// thus slips past the IsAbs guard.
+	usedPluginRoot := strings.Contains(spec.Command, claudePluginRootVar)
+
 	cmd := strings.ReplaceAll(spec.Command, claudePluginRootVar, installDir)
 
 	args := make([]string, len(spec.Args))
@@ -47,13 +54,26 @@ func resolveCommand(spec MCPServerSpec, installDir string) (string, []string) {
 		args[i] = strings.ReplaceAll(a, claudePluginRootVar, installDir)
 	}
 
-	if !filepath.IsAbs(cmd) && !looksLikePATHCommand(cmd) {
+	// Only a *bare* relative command (e.g. Codex's relative "command" resolved
+	// against its "cwd") needs joining to installDir. A ${CLAUDE_PLUGIN_ROOT}
+	// command is already rooted by the expansion above.
+	if !usedPluginRoot && !filepath.IsAbs(cmd) && !looksLikePATHCommand(cmd) {
 		base := installDir
 		if strings.TrimSpace(spec.Cwd) != "" {
 			base = filepath.Join(installDir, spec.Cwd)
 		}
 		cmd = filepath.Join(base, cmd)
 	}
+
+	// Anchor a relative path command to an absolute path so it does not depend on
+	// the MCP server process's working directory. PATH commands (npx, uvx) and
+	// already-absolute commands are left untouched.
+	if !looksLikePATHCommand(cmd) && !filepath.IsAbs(cmd) {
+		if abs, err := filepath.Abs(cmd); err == nil {
+			cmd = abs
+		}
+	}
+
 	return cmd, args
 }
 

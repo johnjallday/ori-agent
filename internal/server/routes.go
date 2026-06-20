@@ -375,6 +375,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/mcp/servers/{name}/enable", s.Handlers.MCP.EnableServerHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/disable", s.Handlers.MCP.DisableServerHandler)
 	mux.HandleFunc("GET /api/mcp/servers/{name}/tools", s.Handlers.MCP.GetServerToolsHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/details", s.Handlers.MCP.GetServerDetailsHandler)
 	mux.HandleFunc("GET /api/mcp/servers/{name}/status", s.Handlers.MCP.GetServerStatusHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/test", s.Handlers.MCP.TestConnectionHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/retry", s.Handlers.MCP.RetryConnectionHandler)
