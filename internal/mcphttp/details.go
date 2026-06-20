@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -197,15 +198,27 @@ func stripNpmVersion(pkg string) string {
 	return pkg
 }
 
+// npmPackageNamePattern matches a valid (optionally scoped) npm package name.
+// Restricting to this set keeps untrusted config from injecting anything other
+// than a registry path segment into the README fetch URL.
+var npmPackageNamePattern = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+
 // fetchNpmReadme retrieves the README markdown for an npm package from the public
 // registry. Returns nil on any error or when no README is published.
 func fetchNpmReadme(client *http.Client, pkg string) *readmeInfo {
+	if !npmPackageNamePattern.MatchString(pkg) {
+		return nil
+	}
+
 	escaped := pkg
 	if strings.HasPrefix(pkg, "@") {
 		// Scoped packages must have their slash percent-encoded.
 		escaped = strings.Replace(pkg, "/", "%2f", 1)
 	}
 
+	// #nosec G704 -- the host is a constant literal; only the URL path comes from
+	// pkg, which is validated above against a strict npm-name allowlist (no host,
+	// scheme, or traversal characters can be injected).
 	resp, err := client.Get("https://registry.npmjs.org/" + escaped)
 	if err != nil {
 		logger.Debug("npm README fetch failed", logger.Fields{"package": pkg, "error": err})
