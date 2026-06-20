@@ -3461,12 +3461,27 @@ export class WorkspaceDetailPage {
     }
 
     const safeAgentName = this.escapeHtml(agentName);
-    const safeHref = `/agents/${encodedAgentName}`;
+    const target = this.getAgentDetailTarget(agentName);
+    if (!target.interactive) {
+      const title = target.title || `${agentName} is managed inside this workspace`;
+      return `
+      <span class="workspace-detail-agent-link is-static"
+            title="${this.escapeAttribute(title)}"
+            aria-label="${this.escapeAttribute(target.ariaLabel || title)}">
+        <span class="workspace-detail-agent-link-label">${safeAgentName}</span>
+      </span>
+    `;
+    }
+
+    const safeHref = this.escapeAttribute(target.href);
+    const safeTitle = this.escapeAttribute(target.title || `Open ${agentName} details`);
+    const safeAriaLabel = this.escapeAttribute(target.ariaLabel || target.title || `Open ${agentName} details`);
     return `
       <a href="${safeHref}"
          class="workspace-detail-agent-link"
-         title="Open ${safeAgentName} details"
-         aria-label="Open ${safeAgentName} details"
+         data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+         title="${safeTitle}"
+         aria-label="${safeAriaLabel}"
          onclick="event.stopPropagation();">
         <span class="workspace-detail-agent-link-label">${safeAgentName}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -3474,6 +3489,132 @@ export class WorkspaceDetailPage {
         </svg>
       </a>
     `;
+  }
+
+  buildWorkspaceAgentRecoveryURL(agentName) {
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return '';
+
+    const params = new URLSearchParams();
+    params.set('addAgent', '1');
+    const normalizedName = String(agentName || '').trim();
+    if (normalizedName) {
+      params.set('seedAgentName', normalizedName);
+    }
+    return `/workspaces/${encodeURIComponent(workspaceId)}?${params.toString()}`;
+  }
+
+  getAgentDetailTarget(agentName) {
+    const normalizedName = String(agentName || '').trim();
+    if (!normalizedName) {
+      return {
+        kind: 'none',
+        href: '',
+        interactive: false,
+        title: '',
+        ariaLabel: ''
+      };
+    }
+
+    const encodedAgentName = encodeURIComponent(normalizedName);
+    if (this.getAgentProfile(normalizedName)) {
+      const title = `Open ${normalizedName} details`;
+      return {
+        kind: 'global',
+        href: `/agents/${encodedAgentName}`,
+        interactive: true,
+        title,
+        ariaLabel: title
+      };
+    }
+
+    if (this.hasWorkspaceAgentSnapshot(normalizedName)) {
+      const title = `${normalizedName} is a workspace-local agent. Global agent details are not available.`;
+      return {
+        kind: 'workspace-local',
+        href: '',
+        interactive: false,
+        title,
+        ariaLabel: title
+      };
+    }
+
+    if (this.isWorkspaceEntryAgent(normalizedName)) {
+      const href = this.buildWorkspaceAgentRecoveryURL(normalizedName);
+      if (href) {
+        const title = `Create entry agent ${normalizedName}`;
+        return {
+          kind: 'missing-entry',
+          href,
+          interactive: true,
+          title,
+          ariaLabel: title
+        };
+      }
+    }
+
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (workspaceId) {
+      const title = `Open workspace to repair ${normalizedName}`;
+      return {
+        kind: 'workspace-reference',
+        href: `/workspaces/${encodeURIComponent(workspaceId)}`,
+        interactive: true,
+        title,
+        ariaLabel: title
+      };
+    }
+
+    const title = `${normalizedName} is referenced by this workspace, but no global detail page is available.`;
+    return {
+      kind: 'workspace-reference',
+      href: '',
+      interactive: false,
+      title,
+      ariaLabel: title
+    };
+  }
+
+  renderAgentIdentityLink(group, avatar, rolePresentation, summaryId) {
+    const safeName = this.escapeHtml(group.name);
+    const target = this.getAgentDetailTarget(group.name);
+    const title = target.title || `${group.name} is managed inside this workspace`;
+    const subtitle = rolePresentation?.label || 'Agent';
+
+    if (!target.interactive) {
+      return `
+            <div class="workspace-detail-agent-identity-link is-static"
+                 data-agent-detail-kind="${this.escapeAttribute(target.kind || 'workspace-local')}"
+                 title="${this.escapeAttribute(title)}"
+                 aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
+                 aria-describedby="${summaryId}">
+              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              <span class="workspace-detail-agent-identity-copy">
+                <span class="workspace-detail-agent-name">${safeName}</span>
+                <span class="workspace-detail-agent-subtitle">${this.escapeHtml(subtitle)}</span>
+              </span>
+            </div>
+          `;
+    }
+
+    return `
+            <a href="${this.escapeAttribute(target.href)}"
+               class="workspace-detail-agent-identity-link"
+               data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+               title="${this.escapeAttribute(title)}"
+               aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
+               aria-describedby="${summaryId}"
+               onclick="event.stopPropagation();">
+              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              <span class="workspace-detail-agent-identity-copy">
+                <span class="workspace-detail-agent-name">${safeName}</span>
+                <span class="workspace-detail-agent-subtitle">${this.escapeHtml(subtitle)}</span>
+              </span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+              </svg>
+            </a>
+          `;
   }
 
   getTaskTemplateReference(task) {
@@ -3639,9 +3780,28 @@ export class WorkspaceDetailPage {
   }
 
   isWorkspaceEntryAgent(agentName) {
-    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
-    if (!entryAgentName || !agentName) return false;
-    return this.normalizeAgentName(entryAgentName) === this.normalizeAgentName(agentName);
+    const key = this.normalizeAgentName(agentName);
+    if (!key || !this.workspace) return false;
+
+    const directEntryAgentName = String(this.workspace.entry_agent_name || '').trim();
+    if (directEntryAgentName && this.normalizeAgentName(directEntryAgentName) === key) {
+      return true;
+    }
+
+    const sharedEntryAgentName = String(this.workspace.shared_data?.entry_agent_name || '').trim();
+    if (sharedEntryAgentName && this.normalizeAgentName(sharedEntryAgentName) === key) {
+      return true;
+    }
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      return this.workspace.agent_instances.some(
+        instance =>
+          Boolean(instance?.entry_point || instance?.entryPoint) &&
+          this.normalizeAgentName(instance?.name) === key
+      );
+    }
+
+    return false;
   }
 
   renderWorkspaceAgentRoleBadge(agentName) {
@@ -3971,23 +4131,7 @@ export class WorkspaceDetailPage {
               </span>
             </div>
           `
-          : `
-            <a href="/agents/${encodedAgentName}"
-               class="workspace-detail-agent-identity-link"
-               title="Open ${this.escapeHtml(group.name)} details"
-               aria-label="Open ${this.escapeHtml(group.name)} details"
-               aria-describedby="${summaryId}"
-               onclick="event.stopPropagation();">
-              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
-              <span class="workspace-detail-agent-identity-copy">
-                <span class="workspace-detail-agent-name">${this.escapeHtml(group.name)}</span>
-                <span class="workspace-detail-agent-subtitle">${this.escapeHtml(rolePresentation.label)}</span>
-              </span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
-              </svg>
-            </a>
-          `;
+          : this.renderAgentIdentityLink(group, avatar, rolePresentation, summaryId);
 
         return `
       <section class="workspace-detail-agent-card${flippedClass}${leaderClass}${unassignedClass}" data-agent-name="${this.escapeHtml(group.name)}" data-agent-key="${this.escapeHtml(group.key)}">
@@ -11047,6 +11191,7 @@ export class WorkspaceDetailPage {
     } catch (_err) {
       // Snapshot info is advisory; failure just hides the recovery hint.
     }
+    this.renderAgentGroups();
   }
 
   hasWorkspaceAgentSnapshot(agentName) {
@@ -11129,6 +11274,7 @@ export class WorkspaceDetailPage {
     }
 
     this.renderWorkspaceHealth();
+    this.renderAgentGroups();
 
     return this.agentCatalog;
   }

@@ -4199,10 +4199,10 @@
     }
 
     .workspace-detail-agent-identity-link.is-static {
-      pointer-events: none;
+      cursor: default;
     }
 
-    .workspace-detail-agent-identity-link:hover .workspace-detail-agent-name {
+    .workspace-detail-agent-identity-link:not(.is-static):hover .workspace-detail-agent-name {
       color: #0369a1;
     }
 
@@ -4281,7 +4281,12 @@
       min-width: 0;
     }
 
-    .workspace-detail-agent-link:hover {
+    .workspace-detail-agent-link.is-static {
+      cursor: default;
+      opacity: 0.9;
+    }
+
+    .workspace-detail-agent-link:not(.is-static):hover {
       color: #7dd3fc;
       border-color: rgba(125, 211, 252, 0.45);
     }

@@ -383,7 +383,7 @@ test.describe('API Health', () => {
 });
 
 test.describe('Workspace Agent Character Roster', () => {
-  async function installRosterRoutes(page) {
+  async function installRosterRoutes(page, options = {}) {
     const workspace = {
       id: 'roster-ws',
       name: 'Roster Workspace',
@@ -436,23 +436,25 @@ test.describe('Workspace Agent Character Roster', () => {
       { id: 'task-2', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'waiting_for_choice', description: 'Choose source' },
       { id: 'task-3', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'in_progress', description: 'Read source', parent_task_id: 'task-1' }
     ];
+    const catalogAgents = [
+      ...(options.omitRosterManagerFromCatalog
+        ? []
+        : [{ name: 'Roster Manager', type: 'general', source: 'user', model: 'claude-opus-4', provider: 'anthropic', capabilities: ['files'] }]),
+      { name: 'Research Analyst', type: 'research', source: 'user', model: 'claude-sonnet-4', provider: 'anthropic', allow_web_search: true }
+    ];
+    const snapshotAgents = Array.isArray(options.snapshotAgents) ? options.snapshotAgents : [];
 
     await page.route('**/api/orchestration/workspace?id=roster-ws', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(workspace) });
     });
     await page.route('**/api/workspaces/roster-ws/agent-snapshots', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [] }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: snapshotAgents }) });
     });
     await page.route('**/api/agents/dashboard/list', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          agents: [
-            { name: 'Roster Manager', type: 'general', source: 'user', model: 'claude-opus-4', provider: 'anthropic', capabilities: ['files'] },
-            { name: 'Research Analyst', type: 'research', source: 'user', model: 'claude-sonnet-4', provider: 'anthropic', allow_web_search: true }
-          ]
-        })
+        body: JSON.stringify({ agents: catalogAgents })
       });
     });
     await page.route('**/api/skills?agent=default', async route => {
@@ -523,6 +525,22 @@ test.describe('Workspace Agent Character Roster', () => {
 
     const overflow = await page.locator('#workspace-detail-agents-list').evaluate(el => el.scrollWidth - el.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('does not send workspace-local agents to missing global detail pages', async ({ page }) => {
+    await installRosterRoutes(page, {
+      omitRosterManagerFromCatalog: true,
+      snapshotAgents: ['Roster Manager']
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+
+    const managerIdentity = page.locator(
+      '#workspace-detail-agents-list .workspace-detail-agent-card.is-leader .workspace-detail-agent-identity-link'
+    );
+    await expect(managerIdentity).toContainText('Roster Manager');
+    await expect(managerIdentity).toHaveAttribute('data-agent-detail-kind', 'workspace-local');
+    await expect(managerIdentity).not.toHaveAttribute('href', /\/agents\/Roster%20Manager/);
   });
 });
 

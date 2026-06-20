@@ -332,6 +332,86 @@ test('workspace detail skill summary uses workspace-effective skills', () => {
   assert.doesNotMatch(markup, /Browser<\/span>/);
 });
 
+test('workspace detail links catalog-backed agents to the global detail page', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    entry_agent_name: 'Catalog Manager',
+    agent_instances: [{ name: 'Catalog Manager', role: 'Coordinator', entry_point: true }]
+  };
+  page.agentIndex = new Map([['catalog manager', { name: 'Catalog Manager' }]]);
+  page.workspaceAgentSnapshots = new Set();
+
+  const target = page.getAgentDetailTarget('Catalog Manager');
+  const markup = page.renderAgentIdentityLink(
+    { name: 'Catalog Manager' },
+    page.getAgentAvatarPresentation('Catalog Manager'),
+    { label: 'Coordinator' },
+    'summary-catalog'
+  );
+
+  assert.equal(target.kind, 'global');
+  assert.equal(target.interactive, true);
+  assert.equal(target.href, '/agents/Catalog%20Manager');
+  assert.match(markup, /href="\/agents\/Catalog%20Manager"/);
+  assert.match(markup, /data-agent-detail-kind="global"/);
+});
+
+test('workspace detail keeps snapshot-backed local agents off the global detail route', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    entry_agent_name: 'Local Manager',
+    agent_instances: [{ name: 'Local Manager', role: 'Coordinator', entry_point: true }]
+  };
+  page.agentIndex = new Map();
+  page.workspaceAgentSnapshots = new Set(['local manager']);
+
+  const target = page.getAgentDetailTarget('Local Manager');
+  const markup = page.renderAgentIdentityLink(
+    { name: 'Local Manager' },
+    page.getAgentAvatarPresentation('Local Manager'),
+    { label: 'Coordinator' },
+    'summary-local'
+  );
+
+  assert.equal(target.kind, 'workspace-local');
+  assert.equal(target.interactive, false);
+  assert.equal(target.href, '');
+  assert.match(markup, /workspace-detail-agent-identity-link is-static/);
+  assert.match(markup, /data-agent-detail-kind="workspace-local"/);
+  assert.doesNotMatch(markup, /href="/);
+  assert.doesNotMatch(markup, /\/agents\/Local%20Manager/);
+});
+
+test('workspace detail routes missing entry agents to workspace recovery', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    entry_agent_name: 'Missing Manager',
+    agent_instances: [{ name: 'Missing Manager', role: 'Coordinator', entry_point: true }]
+  };
+  page.agentIndex = new Map();
+  page.workspaceAgentSnapshots = new Set();
+
+  const target = page.getAgentDetailTarget('Missing Manager');
+  const frontMarkup = page.renderAgentIdentityLink(
+    { name: 'Missing Manager' },
+    page.getAgentAvatarPresentation('Missing Manager'),
+    { label: 'Coordinator' },
+    'summary-missing'
+  );
+  const backMarkup = page.renderAgentDetailLink(
+    'Missing Manager',
+    encodeURIComponent('Missing Manager')
+  );
+
+  assert.equal(target.kind, 'missing-entry');
+  assert.equal(target.interactive, true);
+  assert.equal(target.href, '/workspaces/workspace-1?addAgent=1&seedAgentName=Missing+Manager');
+  assert.match(frontMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
+  assert.match(backMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
+  assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
+  assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);
+});
+
 test('workspace detail agent back face does not render agent level copy', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.getEffectiveWorkspaceSkillNamesForAgent = () => ['workspace-planning'];
