@@ -833,6 +833,21 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
+	// Workspace-local agent profiles + in-place model editing.
+	//   GET   /api/workspaces/{id}/agents         -> list profiles (model/provider/type)
+	//   PATCH /api/workspaces/{id}/agents/{name}  -> update model + provider
+	// POST/DELETE fall through to the session handler (add/remove agent).
+	if len(parts) >= 2 && parts[1] == "agents" {
+		if len(parts) == 2 && r.Method == http.MethodGet {
+			s.Handlers.Workspace.ListWorkspaceAgentProfiles(w, r)
+			return true
+		}
+		if len(parts) >= 3 && r.Method == http.MethodPatch {
+			s.Handlers.Workspace.UpdateWorkspaceAgentModel(w, r)
+			return true
+		}
+	}
+
 	if strings.Contains(path, "/tasks") {
 		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
 			s.Handlers.Workspace.ExecuteTaskManually(w, r)

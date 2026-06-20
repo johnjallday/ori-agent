@@ -245,6 +245,10 @@ export class WorkspaceDetailPage {
     this.agentCatalogLoaded = false;
     this.agentCatalogLoadFailed = false;
     this.workspaceAgentSnapshots = new Set();
+    // Workspace-local agent profiles (model/provider/type) keyed by normalized
+    // name. These agents live in the workspace's config.json, not the global
+    // agent catalog, so getAgentProfile() falls back to this map for them.
+    this.workspaceAgentProfiles = new Map();
     this.filesLoaded = false;
     this.filesLoadFailed = false;
     this.workspaceHealthCheckRunning = false;
@@ -9984,8 +9988,16 @@ export class WorkspaceDetailPage {
 
   getAgentProfile(agentName) {
     const key = this.normalizeAgentName(agentName);
-    if (!key || !this.agentIndex) return null;
-    return this.agentIndex.get(key) || null;
+    if (!key) return null;
+    const globalProfile = this.agentIndex instanceof Map ? this.agentIndex.get(key) : null;
+    if (globalProfile) return globalProfile;
+    // Fall back to workspace-local agents (entry/manager agents stored in the
+    // workspace's config.json, not the global agent catalog). This is what lets
+    // their model badge show the real model and become editable.
+    if (this.workspaceAgentProfiles instanceof Map) {
+      return this.workspaceAgentProfiles.get(key) || null;
+    }
+    return null;
   }
 
   async openAgentModelModal(encodedAgentName = '') {
@@ -10015,7 +10027,12 @@ export class WorkspaceDetailPage {
       agentName,
       agentType: String(profile.type || 'general').trim() || 'general',
       currentModel: String(profile.model || '').trim(),
-      currentProvider: String(profile.provider || '').trim()
+      currentProvider: String(profile.provider || '').trim(),
+      // Workspace-local agents persist to the workspace config.json via a
+      // workspace-scoped endpoint, and their model picker is not type-filtered.
+      isWorkspaceAgent:
+        String(profile.source || '').trim().toLowerCase() === 'workspace',
+      workspaceId: this.workspace?.id || ''
     };
 
     if (this.elements.agentModelAgentName) {
@@ -10054,6 +10071,9 @@ export class WorkspaceDetailPage {
         .toLowerCase() || 'general';
     const currentModel = String(editState.currentModel || '').trim();
     const currentProvider = String(editState.currentProvider || '').trim();
+    // Workspace-local agents list every available model (no agent-type filter),
+    // so users can pick any model/provider including local ones (lmstudio, ollama).
+    const skipTypeFilter = Boolean(editState.isWorkspaceAgent);
 
     select.innerHTML = '';
     let hasOptions = false;
@@ -10072,7 +10092,7 @@ export class WorkspaceDetailPage {
         const modelType = String(model?.type || '')
           .trim()
           .toLowerCase();
-        const include = modelType === normalizedType || value === currentModel;
+        const include = skipTypeFilter || modelType === normalizedType || value === currentModel;
         if (!include) return;
 
         const option = document.createElement('option');
@@ -10188,7 +10208,12 @@ export class WorkspaceDetailPage {
     submitBtn.textContent = 'Saving...';
 
     try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(editState.agentName)}`, {
+      // Workspace-local agents persist to the workspace's config.json via the
+      // workspace-scoped endpoint; global agents use the global agent endpoint.
+      const endpoint = editState.isWorkspaceAgent
+        ? `/api/workspaces/${encodeURIComponent(editState.workspaceId)}/agents/${encodeURIComponent(editState.agentName)}`
+        : `/api/agents/${encodeURIComponent(editState.agentName)}`;
+      const response = await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -10202,8 +10227,13 @@ export class WorkspaceDetailPage {
         throw new Error(errorText || 'Failed to update agent model');
       }
 
-      await this.loadAgentCatalog(true);
-      this.renderAgentGroups();
+      if (editState.isWorkspaceAgent) {
+        // Re-read workspace-local profiles (also re-renders the roster).
+        await this.loadWorkspaceAgentSnapshots();
+      } else {
+        await this.loadAgentCatalog(true);
+        this.renderAgentGroups();
+      }
 
       if (window.Toast) {
         window.Toast.success(`Updated ${editState.agentName} to ${model}.`);
@@ -11177,19 +11207,33 @@ export class WorkspaceDetailPage {
 
   async loadWorkspaceAgentSnapshots() {
     this.workspaceAgentSnapshots = new Set();
+    this.workspaceAgentProfiles = new Map();
     const id = this.workspace?.id;
     if (!id) return;
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/agent-snapshots`);
+      // The /agents endpoint returns full profiles (model/provider/type) for
+      // every workspace-local agent that has an on-disk snapshot. We derive both
+      // the advisory snapshot set and the profile map used by getAgentProfile()
+      // from the same response.
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/agents`);
       if (!response.ok) return;
       const data = await response.json();
-      const names = Array.isArray(data?.agents) ? data.agents : [];
-      names.forEach(name => {
-        const trimmed = String(name || '').trim();
-        if (trimmed) this.workspaceAgentSnapshots.add(trimmed.toLowerCase());
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      agents.forEach(agent => {
+        const name = String(agent?.name || '').trim();
+        if (!name) return;
+        const key = this.normalizeAgentName(name);
+        this.workspaceAgentSnapshots.add(key);
+        this.workspaceAgentProfiles.set(key, {
+          name,
+          type: String(agent?.type || '').trim(),
+          model: String(agent?.model || '').trim(),
+          provider: String(agent?.provider || '').trim(),
+          source: String(agent?.source || 'workspace').trim().toLowerCase() || 'workspace'
+        });
       });
     } catch (_err) {
-      // Snapshot info is advisory; failure just hides the recovery hint.
+      // Profile info is advisory; failure just hides the model badge / recovery hint.
     }
     this.renderAgentGroups();
   }

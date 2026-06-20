@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type resolverAgentStoreStub struct {
@@ -920,5 +921,62 @@ func TestResolveEffectiveSkills_NoSkillResolver(t *testing.T) {
 	}
 	if len(resolved.EffectiveSkills) != 0 {
 		t.Fatalf("expected 0 skills when no resolver set, got %d", len(resolved.EffectiveSkills))
+	}
+}
+
+// TestAgentRuntimeResolver_UsesUpdatedWorkspaceLocalModel verifies that the
+// runtime resolver reads a workspace-local agent's model from its config.json
+// (taking priority over the global agent store) and that a model update is
+// picked up on the next resolution — i.e. the PATCH endpoint's change takes
+// effect on the agent's next run with no stale caching.
+func TestAgentRuntimeResolver_UsesUpdatedWorkspaceLocalModel(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-model",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "ReaperDAW Manager", NodeID: "rm-1"},
+		},
+	}
+
+	// Global agent has a different model; the workspace-local config must win.
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"ReaperDAW Manager": {Settings: types.Settings{Model: "global-model", Provider: "openai"}},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+
+	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "ReaperDAW Manager", &agent.Agent{
+		Type:     "orchestration",
+		Settings: types.Settings{Model: "google/gemma-4-e4b", Provider: "lmstudio"},
+	}); err != nil {
+		t.Fatalf("seed workspace agent: %v", err)
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("ReaperDAW Manager", ws.ID, "rm-1")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.Agent.Settings.Model != "google/gemma-4-e4b" || resolved.Agent.Settings.Provider != "lmstudio" {
+		t.Fatalf("expected workspace-local model, got model=%q provider=%q",
+			resolved.Agent.Settings.Model, resolved.Agent.Settings.Provider)
+	}
+
+	// Simulate the PATCH endpoint updating model + provider.
+	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "ReaperDAW Manager", &agent.Agent{
+		Type:     "orchestration",
+		Settings: types.Settings{Model: "claude-opus-4", Provider: "claude"},
+	}); err != nil {
+		t.Fatalf("update workspace agent: %v", err)
+	}
+
+	resolved2, err := resolver.ResolveAgentForWorkspace("ReaperDAW Manager", ws.ID, "rm-1")
+	if err != nil {
+		t.Fatalf("resolve after update: %v", err)
+	}
+	if resolved2.Agent.Settings.Model != "claude-opus-4" || resolved2.Agent.Settings.Provider != "claude" {
+		t.Fatalf("model change did not take effect: model=%q provider=%q",
+			resolved2.Agent.Settings.Model, resolved2.Agent.Settings.Provider)
 	}
 }
