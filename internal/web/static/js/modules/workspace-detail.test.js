@@ -430,3 +430,164 @@ test('workspace detail agent back face does not render agent level copy', () => 
   assert.match(markup, /Role/);
   assert.match(markup, /Lead/);
 });
+
+test('workspace-local agent profile resolves its model and renders an editable badge', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  // Not in the global catalog; only present as a workspace-local profile.
+  page.agentIndex = new Map();
+  page.workspaceAgentProfiles = new Map([
+    [
+      'reaperdaw manager',
+      {
+        name: 'ReaperDAW Manager',
+        type: 'orchestration',
+        model: 'google/gemma-4-e4b',
+        provider: 'lmstudio',
+        source: 'workspace'
+      }
+    ]
+  ]);
+
+  const profile = page.getAgentProfile('ReaperDAW Manager');
+  assert.ok(profile, 'profile resolves from the workspace-local map');
+  assert.equal(profile.model, 'google/gemma-4-e4b');
+  assert.equal(profile.source, 'workspace');
+
+  const presentation = page.getAgentModelPresentation(profile);
+  assert.equal(presentation.empty, false, 'model is set, must not show "Model not set"');
+  assert.match(presentation.label, /gemma-4-e4b/);
+
+  assert.equal(page.agentAllowsModelEditing(profile), true);
+
+  const badge = page.renderAgentModelPowerBadge(
+    'ReaperDAW Manager',
+    profile,
+    encodeURIComponent('ReaperDAW Manager')
+  );
+  assert.match(badge, /<button/);
+  assert.match(badge, /openAgentModelModal/);
+  assert.doesNotMatch(badge, /Model not set/);
+});
+
+test('workspace-local model picker lists every model; global picker filters by type', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.providerCatalog = [
+    {
+      name: 'claude',
+      display_name: 'Claude',
+      models: [
+        { value: 'claude-opus-4', type: 'orchestration', label: 'Opus' },
+        { value: 'claude-haiku', type: 'research', label: 'Haiku' }
+      ]
+    },
+    {
+      name: 'lmstudio',
+      display_name: 'LM Studio',
+      models: [{ value: 'google/gemma-4-e4b', type: 'research', label: 'Gemma' }]
+    }
+  ];
+
+  const makeEl = tag => ({
+    tagName: tag,
+    children: [],
+    attributes: {},
+    _text: '',
+    label: '',
+    value: '',
+    selected: false,
+    disabled: false,
+    set innerHTML(v) {
+      if (v === '') this.children = [];
+      this._html = v;
+    },
+    get innerHTML() {
+      return this._html || '';
+    },
+    set textContent(v) {
+      this._text = String(v || '');
+    },
+    get textContent() {
+      return this._text;
+    },
+    setAttribute(k, v) {
+      this.attributes[k] = v;
+    },
+    getAttribute(k) {
+      return this.attributes[k];
+    },
+    appendChild(c) {
+      this.children.push(c);
+      return c;
+    }
+  });
+
+  const origCreate = global.document.createElement;
+  global.document.createElement = tag => makeEl(tag);
+  try {
+    const select = makeEl('select');
+    page.elements = { agentModelSelect: select, agentModelSubmitBtn: makeEl('button') };
+    const values = () => select.children.flatMap(g => g.children.map(o => o.value));
+
+    // Workspace-local: no type filter, every model from every provider.
+    page.activeAgentModelEdit = {
+      agentType: 'orchestration',
+      currentModel: '',
+      currentProvider: '',
+      isWorkspaceAgent: true
+    };
+    page.populateAgentModelSelect();
+    const wsValues = values();
+    assert.equal(wsValues.length, 3, 'workspace-local lists every model');
+    assert.ok(wsValues.includes('google/gemma-4-e4b'), 'local provider model present');
+    assert.ok(wsValues.includes('claude-haiku'), 'non-matching type present');
+
+    // Global: only models whose type matches the agent type.
+    page.activeAgentModelEdit = {
+      agentType: 'orchestration',
+      currentModel: '',
+      currentProvider: '',
+      isWorkspaceAgent: false
+    };
+    page.populateAgentModelSelect();
+    assert.deepEqual(values(), ['claude-opus-4'], 'global picker keeps only matching type');
+  } finally {
+    global.document.createElement = origCreate;
+  }
+});
+
+test('workspace-local model save posts to the workspace-scoped endpoint', async () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.activeAgentModelEdit = {
+    agentName: 'ReaperDAW Manager',
+    isWorkspaceAgent: true,
+    workspaceId: 'ws-1',
+    currentModel: '',
+    currentProvider: ''
+  };
+  page.elements = {
+    agentModelSelect: { value: 'claude-opus-4', selectedOptions: [{ getAttribute: () => 'claude' }] },
+    agentModelSubmitBtn: { disabled: false, textContent: '' },
+    agentModelModal: null
+  };
+  page.loadWorkspaceAgentSnapshots = async () => {};
+  page.renderAgentGroups = () => {};
+
+  let captured = null;
+  const origFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    captured = { url, opts };
+    return { ok: true, text: async () => '' };
+  };
+  try {
+    await page.submitAgentModelChange();
+  } finally {
+    global.fetch = origFetch;
+  }
+
+  assert.ok(captured, 'fetch was called');
+  assert.equal(captured.url, '/api/workspaces/ws-1/agents/ReaperDAW%20Manager');
+  assert.equal(captured.opts.method, 'PATCH');
+  const body = JSON.parse(captured.opts.body);
+  assert.equal(body.model, 'claude-opus-4');
+  assert.equal(body.llm_provider, 'claude');
+});
