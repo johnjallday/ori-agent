@@ -3649,6 +3649,196 @@ export class WorkspaceDetailPage {
     return '<span class="workspace-detail-agent-role-badge">Entry Agent</span>';
   }
 
+  getAgentGroupRolePresentation(group) {
+    const roles = Array.isArray(group?.roles)
+      ? group.roles
+          .map(role => String(role || '').trim())
+          .filter(Boolean)
+      : [];
+    const uniqueRoles = [];
+    const seen = new Set();
+    roles.forEach(role => {
+      const key = role.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      uniqueRoles.push(role);
+    });
+
+    if (uniqueRoles.length === 0) {
+      return { label: 'Agent', detail: 'Agent', roles: [] };
+    }
+    if (uniqueRoles.length === 1) {
+      return { label: uniqueRoles[0], detail: uniqueRoles[0], roles: uniqueRoles };
+    }
+    return {
+      label: 'Multiple roles',
+      detail: uniqueRoles.join(', '),
+      roles: uniqueRoles
+    };
+  }
+
+  getAgentAvatarPresentation(agentName) {
+    const normalizedName = String(agentName || '').trim();
+    const key = this.normalizeAgentName(normalizedName);
+    const words = normalizedName
+      .split(/[\s._-]+/)
+      .map(part => part.trim())
+      .filter(Boolean);
+    const initials = (words.length > 1 ? `${words[0][0]}${words[words.length - 1][0]}` : words[0]?.slice(0, 2) || 'A')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 2) || 'A';
+
+    let hash = 0;
+    for (let index = 0; index < key.length; index += 1) {
+      hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+    }
+
+    const hue = hash % 360;
+    return {
+      initials,
+      hue,
+      style: `--agent-avatar-hue: ${hue};`,
+      label: `${normalizedName || 'Agent'} avatar`
+    };
+  }
+
+  getAgentModelPresentation(profile) {
+    const model = String(profile?.model || '').trim();
+    if (!model) {
+      return { model: '', tier: '', label: 'Model not set', empty: true };
+    }
+
+    const normalized = model.toLowerCase();
+    let tier = '';
+    if (normalized.includes('opus')) {
+      tier = 'High capacity';
+    } else if (normalized.includes('sonnet')) {
+      tier = 'Balanced';
+    } else if (normalized.includes('haiku')) {
+      tier = 'Fast';
+    }
+
+    return {
+      model,
+      tier,
+      label: tier ? `${model} · ${tier}` : model,
+      empty: false
+    };
+  }
+
+  getAgentRosterStatus(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key || !Array.isArray(this.tasks)) {
+      return { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+    }
+
+    let hasWaiting = false;
+    for (const task of this.tasks) {
+      if (!task) continue;
+      if (this.normalizeAgentName(task.to) !== key) continue;
+
+      const status = String(task.status || '').trim().toLowerCase();
+      if (status === 'in_progress') {
+        return { key: 'working', label: 'Working', detail: 'Task in progress' };
+      }
+      if (status === 'waiting_for_choice') {
+        hasWaiting = true;
+      }
+    }
+
+    if (hasWaiting) {
+      return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
+    }
+    return { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+  }
+
+  getAgentSkillSummary(agentName, limit = 3) {
+    const skillNames = this.getEffectiveWorkspaceSkillNamesForAgent(agentName);
+    const visible = skillNames.slice(0, limit);
+    return {
+      names: skillNames,
+      visible,
+      overflow: Math.max(0, skillNames.length - visible.length),
+      count: skillNames.length,
+      label: `${skillNames.length} skill${skillNames.length === 1 ? '' : 's'}`
+    };
+  }
+
+  renderAgentSkillSummary(agentName) {
+    const summary = this.getAgentSkillSummary(agentName);
+    const key = this.normalizeAgentName(agentName);
+    if (summary.count === 0) {
+      return `<span class="workspace-detail-agent-skill-summary" data-agent-skill-summary-key="${this.escapeHtml(key)}" aria-label="0 skills"><span class="workspace-detail-agent-skill-empty">No skills</span></span>`;
+    }
+
+    const chips = summary.visible
+      .map(skill => `<span class="workspace-detail-agent-skill-chip">${this.escapeHtml(skill)}</span>`)
+      .join('');
+    const overflow =
+      summary.overflow > 0
+        ? `<span class="workspace-detail-agent-skill-chip overflow">+${summary.overflow}</span>`
+        : '';
+    return `
+      <span class="workspace-detail-agent-skill-summary" data-agent-skill-summary-key="${this.escapeHtml(key)}" aria-label="${this.escapeHtml(summary.label)}">
+        ${chips}
+        ${overflow}
+      </span>
+    `;
+  }
+
+  renderAgentRosterStatusChip(status) {
+    const safeKey = this.escapeHtml(status?.key || 'idle');
+    const label = this.escapeHtml(status?.label || 'Idle');
+    return `<span class="workspace-detail-agent-status-chip is-${safeKey}">${label}</span>`;
+  }
+
+  renderAgentRoleClassChip(rolePresentation) {
+    const label = rolePresentation?.label || 'Agent';
+    const title = rolePresentation?.detail || label;
+    return `<span class="workspace-detail-agent-class-chip" title="${this.escapeHtml(title)}">${this.escapeHtml(label)}</span>`;
+  }
+
+  renderAgentModelPowerBadge(agentName, profile, encodedAgentName = '') {
+    const presentation = this.getAgentModelPresentation(profile);
+    const editable = this.agentAllowsModelEditing(profile);
+    const title = presentation.empty ? `Set model for ${agentName}` : `Change model for ${agentName}`;
+    const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${presentation.empty ? ' is-empty' : ''}`;
+    const modelMarkup = presentation.empty
+      ? '<span>Model not set</span>'
+      : `
+        <span class="workspace-detail-agent-model-name">${this.escapeHtml(presentation.model)}</span>
+        ${presentation.tier ? `<span class="workspace-detail-agent-model-tier">${this.escapeHtml(presentation.tier)}</span>` : ''}
+      `;
+
+    if (!editable) {
+      return `<span class="${badgeClass}" title="${this.escapeHtml(presentation.label)}">${modelMarkup}</span>`;
+    }
+
+    return `
+      <button type="button"
+              class="${badgeClass}"
+              title="${this.escapeHtml(title)}"
+              aria-label="${this.escapeHtml(title)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.openAgentModelModal('${encodedAgentName}')">
+        ${modelMarkup}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14.06,9.02L14.98,9.94L5.92,19H5V18.08M17.66,3C17.4,3 17.15,3.1 16.95,3.29L15.13,5.11L18.88,8.86L20.7,7.04C21.09,6.65 21.09,6 20.7,5.63L18.37,3.29C18.17,3.1 17.92,3 17.66,3Z"/>
+        </svg>
+      </button>
+    `;
+  }
+
+  buildAgentCardSummary(group, rolePresentation, modelPresentation, skillSummary, status) {
+    const role = rolePresentation?.detail || rolePresentation?.label || 'Agent';
+    const model = modelPresentation?.label || 'Model not set';
+    const skills = skillSummary?.label || '0 skills';
+    const statusLabel = status?.label || 'Idle';
+    const taskCount = Number(group?.tasks?.length || 0);
+    const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+    return `${role}. ${model}. ${skills}. ${statusLabel}. ${taskLabel}.`;
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -3683,7 +3873,37 @@ export class WorkspaceDetailPage {
         const encodedAgentName = encodeURIComponent(group.name);
         const modelLabel = group.isUnassigned
           ? ''
-          : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
+          : this.renderAgentModelPowerBadge(group.name, agentProfile, encodedAgentName);
+        const rolePresentation = group.isUnassigned
+          ? { label: 'Unassigned', detail: 'Tasks not assigned to an agent', roles: [] }
+          : this.getAgentGroupRolePresentation(group);
+        const modelPresentation = group.isUnassigned
+          ? { label: '', model: '', tier: '', empty: true }
+          : this.getAgentModelPresentation(agentProfile);
+        const skillSummary = group.isUnassigned
+          ? { count: 0, label: '0 skills', visible: [], overflow: 0, names: [] }
+          : this.getAgentSkillSummary(group.name);
+        const status = group.isUnassigned
+          ? { key: 'idle', label: 'Unassigned', detail: 'Tasks awaiting assignment' }
+          : this.getAgentRosterStatus(group.name);
+        const avatar = group.isUnassigned
+          ? { initials: '?', style: '--agent-avatar-hue: 210;', label: 'Unassigned tasks' }
+          : this.getAgentAvatarPresentation(group.name);
+        const summaryId = `agent-card-summary-${String(group.key || 'agent').replace(/[^a-z0-9_-]+/gi, '-')}`;
+        const cardSummary = group.isUnassigned
+          ? `${taskLabel}. Tasks awaiting assignment.`
+          : this.buildAgentCardSummary(
+              group,
+              rolePresentation,
+              modelPresentation,
+              skillSummary,
+              status
+            );
+        const roleClassChip = group.isUnassigned
+          ? ''
+          : this.renderAgentRoleClassChip(rolePresentation);
+        const skillMarkup = group.isUnassigned ? '' : this.renderAgentSkillSummary(group.name);
+        const statusChip = this.renderAgentRosterStatusChip(status);
         const canFlip = !group.isUnassigned;
         const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
         const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
@@ -3735,26 +3955,69 @@ export class WorkspaceDetailPage {
           </svg>
         </button>
       `;
-        const backFace = canFlip ? this.renderAgentBackFace(group, cardMeta, encodedAgentName) : '';
+        const backFace = canFlip
+          ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
+          : '';
         const flippedClass = isFlipped ? ' is-flipped' : '';
+        const leaderClass = !group.isUnassigned && this.isWorkspaceEntryAgent(group.name) ? ' is-leader' : '';
+        const unassignedClass = group.isUnassigned ? ' is-unassigned' : '';
+        const detailLink = group.isUnassigned
+          ? `
+            <div class="workspace-detail-agent-identity-link is-static">
+              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              <span class="workspace-detail-agent-identity-copy">
+                <span class="workspace-detail-agent-name">${this.escapeHtml(group.name)}</span>
+                <span class="workspace-detail-agent-subtitle">Awaiting assignment</span>
+              </span>
+            </div>
+          `
+          : `
+            <a href="/agents/${encodedAgentName}"
+               class="workspace-detail-agent-identity-link"
+               title="Open ${this.escapeHtml(group.name)} details"
+               aria-label="Open ${this.escapeHtml(group.name)} details"
+               aria-describedby="${summaryId}"
+               onclick="event.stopPropagation();">
+              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              <span class="workspace-detail-agent-identity-copy">
+                <span class="workspace-detail-agent-name">${this.escapeHtml(group.name)}</span>
+                <span class="workspace-detail-agent-subtitle">${this.escapeHtml(rolePresentation.label)}</span>
+              </span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+              </svg>
+            </a>
+          `;
 
         return `
-      <section class="workspace-detail-agent-card${flippedClass}" data-agent-name="${this.escapeHtml(group.name)}" data-agent-key="${this.escapeHtml(group.key)}">
+      <section class="workspace-detail-agent-card${flippedClass}${leaderClass}${unassignedClass}" data-agent-name="${this.escapeHtml(group.name)}" data-agent-key="${this.escapeHtml(group.key)}">
         <div class="workspace-detail-agent-card-flipper">
           <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-front">
+            <div id="${summaryId}" class="sr-only">${this.escapeHtml(cardSummary)}</div>
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
-                ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
-                ${roleBadge}
-                ${instanceChip}
-                ${capabilityBadges}
-                ${modelLabel}
+                ${detailLink}
               </div>
               <div class="workspace-detail-agent-card-meta-wrap">
                 <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
                 ${removeButton}
                 ${frontFlipButton}
               </div>
+            </div>
+            <div class="workspace-detail-agent-roster-panel">
+              <div class="workspace-detail-agent-roster-row">
+                ${roleClassChip}
+                ${roleBadge}
+                ${instanceChip}
+                ${statusChip}
+              </div>
+              <div class="workspace-detail-agent-roster-row">
+                ${modelLabel}
+              </div>
+              <div class="workspace-detail-agent-roster-row workspace-detail-agent-skills-row">
+                ${skillMarkup}
+              </div>
+              ${capabilityBadges ? `<div class="workspace-detail-agent-roster-row workspace-detail-agent-capability-row">${capabilityBadges}</div>` : ''}
             </div>
             <div class="workspace-detail-agent-sections">
               <div class="workspace-detail-agent-section">
@@ -3811,12 +4074,9 @@ export class WorkspaceDetailPage {
   }
 
   renderAgentBackFace(group, cardMeta, encodedAgentName) {
-    const profile = this.getAgentProfile(group.name);
-    const levelValue = Number(profile?.evolution?.level ?? profile?.level);
-    const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
-    const stage = String(profile?.evolution?.stage || profile?.stage || '').trim();
-    const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
     const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
+    const rolePresentation = this.getAgentGroupRolePresentation(group);
+    const status = this.getAgentRosterStatus(group.name);
 
     const skillsMarkup = this.renderAgentWorkspaceSkillChips(group.name);
 
@@ -3873,12 +4133,16 @@ export class WorkspaceDetailPage {
         </div>
         <div class="workspace-detail-agent-info-grid">
           <div class="workspace-detail-agent-info-block">
-            <div class="workspace-detail-agent-info-label">Agent Lvl</div>
-            <div class="workspace-detail-agent-info-value">${this.escapeHtml(levelLabel)}</div>
+            <div class="workspace-detail-agent-info-label">Status</div>
+            <div class="workspace-detail-agent-info-value">${this.escapeHtml(status.label)}</div>
           </div>
           <div class="workspace-detail-agent-info-block">
             <div class="workspace-detail-agent-info-label">Skills</div>
             <div class="workspace-detail-agent-chip-list workspace-detail-agent-skills-list" data-agent-skills-key="${this.escapeHtml(group.key)}">${skillsMarkup}</div>
+          </div>
+          <div class="workspace-detail-agent-info-block">
+            <div class="workspace-detail-agent-info-label">Role</div>
+            <div class="workspace-detail-agent-info-value">${this.escapeHtml(rolePresentation.detail)}</div>
           </div>
           <div class="workspace-detail-agent-info-block">
             <div class="workspace-detail-agent-info-label">MCP Attached</div>
@@ -3937,6 +4201,22 @@ export class WorkspaceDetailPage {
       if (container.getAttribute('data-agent-skills-key') === key) {
         container.innerHTML = skillsMarkup;
         updated = true;
+      }
+    });
+
+    const summaryMarkup = this.renderAgentSkillSummary(agentName);
+    const summaryContainers = card.querySelectorAll(
+      '.workspace-detail-agent-skill-summary[data-agent-skill-summary-key]'
+    );
+    summaryContainers.forEach(container => {
+      if (container.getAttribute('data-agent-skill-summary-key') === key) {
+        const wrapper = document.createElement('span');
+        wrapper.innerHTML = summaryMarkup.trim();
+        const replacement = wrapper.firstElementChild;
+        if (replacement) {
+          container.replaceWith(replacement);
+          updated = true;
+        }
       }
     });
 
@@ -4058,14 +4338,15 @@ export class WorkspaceDetailPage {
 
       let group = groupByKey.get(normalized);
       if (!group) {
-        group = {
-          key: normalized,
-          name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
-          isWorkspaceAgent,
-          isUnassigned,
-          instanceCount: 0,
-          tasks: []
-        };
+          group = {
+            key: normalized,
+            name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
+            isWorkspaceAgent,
+            isUnassigned,
+            instanceCount: 0,
+            roles: [],
+            tasks: []
+          };
         groupByKey.set(normalized, group);
         groups.push(group);
       } else if (isWorkspaceAgent) {
@@ -4083,6 +4364,10 @@ export class WorkspaceDetailPage {
         const group = ensureGroup(instance?.name, { isWorkspaceAgent: true, isUnassigned: false });
         if (group) {
           group.instanceCount += 1;
+          const role = String(instance?.role || '').trim();
+          if (role) {
+            group.roles.push(role);
+          }
         }
       });
     } else {

@@ -4075,8 +4075,9 @@
     }
 
     .workspace-detail-agent-grid {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+      align-items: start;
       gap: 0.65rem;
       padding-top: 0.5rem;
     }
@@ -4084,6 +4085,7 @@
     .workspace-detail-agent-card {
       perspective: 1200px;
       position: relative;
+      min-width: 0;
     }
 
     .workspace-detail-agent-card-flipper {
@@ -4102,13 +4104,17 @@
       grid-area: 1 / 1;
       -webkit-backface-visibility: hidden;
       backface-visibility: hidden;
-      border: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-      border-radius: 10px;
-      padding: 0.6rem;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 34%),
+        var(--bg-secondary);
+      border-radius: 8px;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+      padding: 0.7rem;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.65rem;
+      min-width: 0;
     }
 
     .workspace-detail-agent-card-face-front {
@@ -4117,9 +4123,19 @@
 
     .workspace-detail-agent-card-face-back {
       transform: rotateX(180deg);
-      background:
-        radial-gradient(circle at top right, rgba(56, 189, 248, 0.08), transparent 58%),
-        var(--bg-secondary);
+      background: var(--bg-secondary);
+    }
+
+    .workspace-detail-agent-card.is-leader .workspace-detail-agent-card-face {
+      border-color: rgba(245, 158, 11, 0.42);
+      box-shadow:
+        inset 3px 0 0 rgba(245, 158, 11, 0.82),
+        0 10px 24px rgba(15, 23, 42, 0.10);
+    }
+
+    .workspace-detail-agent-card.is-unassigned .workspace-detail-agent-card-face {
+      border-style: dashed;
+      background: var(--bg-primary);
     }
 
     .workspace-detail-agent-card-face-front .workspace-detail-agent-sections {
@@ -4143,8 +4159,7 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 0.75rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      padding-bottom: 0.45rem;
+      min-width: 0;
     }
 
     .workspace-detail-agent-card-title {
@@ -4153,8 +4168,106 @@
       color: var(--text-primary);
       display: flex;
       align-items: center;
-      flex-wrap: wrap;
       gap: 0.35rem;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .workspace-detail-agent-card .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .workspace-detail-agent-identity-link {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.55rem;
+      min-width: 0;
+      width: 100%;
+      color: inherit;
+      text-decoration: none;
+      border-radius: 8px;
+      outline: none;
+    }
+
+    .workspace-detail-agent-identity-link.is-static {
+      pointer-events: none;
+    }
+
+    .workspace-detail-agent-identity-link:hover .workspace-detail-agent-name {
+      color: #0369a1;
+    }
+
+    .workspace-detail-agent-identity-link:focus-visible {
+      outline: 2px solid rgba(14, 165, 233, 0.85);
+      outline-offset: 3px;
+    }
+
+    .workspace-detail-agent-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 1px solid hsla(var(--agent-avatar-hue, 205), 70%, 34%, 0.35);
+      background:
+        linear-gradient(135deg, hsla(var(--agent-avatar-hue, 205), 72%, 42%, 0.88), hsla(var(--agent-avatar-hue, 205), 74%, 28%, 0.94));
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    }
+
+    .workspace-detail-agent-card.is-leader .workspace-detail-agent-avatar {
+      border-color: rgba(245, 158, 11, 0.7);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 0 0 2px rgba(245, 158, 11, 0.12);
+    }
+
+    .workspace-detail-agent-identity-copy {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      gap: 0.12rem;
+    }
+
+    .workspace-detail-agent-name {
+      color: var(--text-primary);
+      font-size: 0.86rem;
+      font-weight: 700;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: color 0.15s ease;
+    }
+
+    .workspace-detail-agent-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.66rem;
+      font-weight: 600;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-agent-identity-link > svg {
+      color: var(--text-secondary);
+      opacity: 0.7;
+      flex-shrink: 0;
     }
 
     .workspace-detail-agent-link {
@@ -4325,19 +4438,151 @@
       line-height: 1.2;
     }
 
+    .workspace-detail-agent-roster-panel {
+      display: grid;
+      gap: 0.45rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-agent-roster-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-agent-skills-row,
+    .workspace-detail-agent-capability-row {
+      align-items: flex-start;
+    }
+
+    .workspace-detail-agent-class-chip,
+    .workspace-detail-agent-status-chip,
+    .workspace-detail-agent-skill-chip,
+    .workspace-detail-agent-skill-empty {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      border-radius: 999px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      line-height: 1.2;
+      padding: 0.12rem 0.42rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-detail-agent-class-chip {
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      background: rgba(59, 130, 246, 0.10);
+      color: #1d4ed8;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-class-chip {
+      color: #93c5fd;
+      border-color: rgba(147, 197, 253, 0.34);
+      background: rgba(59, 130, 246, 0.14);
+    }
+
+    .workspace-detail-agent-status-chip {
+      border: 1px solid rgba(100, 116, 139, 0.28);
+      background: rgba(100, 116, 139, 0.10);
+      color: #475569;
+    }
+
+    .workspace-detail-agent-status-chip.is-working {
+      border-color: rgba(34, 197, 94, 0.34);
+      background: rgba(34, 197, 94, 0.12);
+      color: #15803d;
+    }
+
+    .workspace-detail-agent-status-chip.is-needs-input {
+      border-color: rgba(245, 158, 11, 0.42);
+      background: rgba(245, 158, 11, 0.14);
+      color: #b45309;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-status-chip {
+      color: #cbd5e1;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-status-chip.is-working {
+      color: #86efac;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-status-chip.is-needs-input {
+      color: #fcd34d;
+    }
+
+    .workspace-detail-agent-skill-summary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-agent-skill-chip {
+      max-width: 14rem;
+      border: 1px solid rgba(20, 184, 166, 0.32);
+      background: rgba(20, 184, 166, 0.11);
+      color: #0f766e;
+    }
+
+    .workspace-detail-agent-skill-chip.overflow {
+      border-color: rgba(100, 116, 139, 0.3);
+      background: rgba(100, 116, 139, 0.10);
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-agent-skill-empty {
+      border: 1px dashed rgba(100, 116, 139, 0.28);
+      color: var(--text-secondary);
+      background: transparent;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-skill-chip {
+      color: #5eead4;
+      border-color: rgba(94, 234, 212, 0.32);
+      background: rgba(20, 184, 166, 0.14);
+    }
+
     .workspace-detail-agent-model-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.28rem;
-      border-radius: 999px;
+      flex-wrap: wrap;
+      gap: 0.22rem 0.34rem;
+      max-width: 100%;
+      min-width: 0;
+      border-radius: 8px;
       border: 1px solid rgba(138, 138, 138, 0.25);
       background: rgba(138, 138, 138, 0.10);
       color: var(--text-secondary);
-      font-size: 0.56rem;
+      font-size: 0.62rem;
       font-weight: 600;
       letter-spacing: 0.02em;
-      padding: 0.08rem 0.36rem;
-      line-height: 1.2;
+      padding: 0.24rem 0.44rem;
+      line-height: 1.25;
+    }
+
+    .workspace-detail-agent-model-name,
+    .workspace-detail-agent-model-tier {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-agent-model-name {
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-agent-model-tier {
+      color: var(--text-secondary);
+      font-size: 0.58rem;
+      font-weight: 700;
     }
 
     .workspace-detail-agent-model-badge.is-editable {
@@ -4371,6 +4616,9 @@
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
+      border: 1px solid rgba(245, 158, 11, 0.42);
+      background: rgba(245, 158, 11, 0.13);
+      color: #b45309;
       font-size: 0.56rem;
       font-weight: 700;
       letter-spacing: 0.04em;
@@ -4378,6 +4626,12 @@
       padding: 0.08rem 0.42rem;
       line-height: 1.2;
       white-space: nowrap;
+    }
+
+    [data-bs-theme="dark"] .workspace-detail-agent-role-badge {
+      color: #fcd34d;
+      border-color: rgba(252, 211, 77, 0.36);
+      background: rgba(245, 158, 11, 0.16);
     }
 
 
@@ -4398,14 +4652,14 @@
 
     .workspace-detail-agent-info-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.55rem;
       margin-top: 0.1rem;
     }
 
     .workspace-detail-agent-info-block {
-      background: var(--bg-primary);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(100, 116, 139, 0.06);
+      border: 1px solid rgba(100, 116, 139, 0.14);
       border-radius: 8px;
       padding: 0.55rem;
       display: flex;
@@ -5055,6 +5309,7 @@
          keeps the track shrinkable so the title ellipsis still works. */
       grid-template-columns: minmax(0, 1fr);
       gap: 0.55rem;
+      min-width: 0;
     }
 
     @media (max-width: 900px) {
@@ -5063,11 +5318,38 @@
       }
     }
 
+    @media (max-width: 520px) {
+      .workspace-detail-agent-card-header {
+        flex-direction: column;
+      }
+
+      .workspace-detail-agent-card-meta-wrap {
+        width: 100%;
+        justify-content: space-between;
+        margin-left: 0;
+      }
+
+      .workspace-detail-agent-identity-link {
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+      }
+
+      .workspace-detail-agent-avatar {
+        width: 40px;
+        height: 40px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .workspace-detail-agent-card-flipper,
+      .workspace-detail-agent-card-face-back .workspace-detail-agent-info-grid,
+      .workspace-detail-agent-card-face-front .workspace-detail-agent-sections {
+        transition: none;
+      }
+    }
+
     .workspace-detail-agent-section {
-      background: var(--bg-primary);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 0.5rem;
+      border-top: 1px solid rgba(100, 116, 139, 0.14);
+      padding-top: 0.55rem;
       min-height: 120px;
       /* Grid items default to min-width: auto, which lets a long nowrap task
          title blow the 1fr track wider than the panel and force horizontal
@@ -5095,8 +5377,8 @@
     }
 
     .workspace-detail-agent-section-btn {
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: var(--bg-secondary);
+      border: 1px solid rgba(100, 116, 139, 0.24);
+      background: rgba(100, 116, 139, 0.06);
       color: var(--text-secondary);
       width: 22px;
       height: 22px;
@@ -5112,6 +5394,11 @@
       color: var(--text-primary);
       border-color: var(--primary-color);
       background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.14);
+    }
+
+    .workspace-detail-agent-section-btn:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
     }
 
     .workspace-detail-agent-list {
@@ -6626,12 +6913,15 @@
     .workspace-detail-agent-capabilities {
       display: inline-flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 0.2rem;
+      min-width: 0;
     }
 
     .workspace-detail-capability-chip {
       display: inline-flex;
       align-items: center;
+      max-width: 100%;
       padding: 0.05rem 0.32rem;
       border-radius: 999px;
       font-size: 0.6rem;
@@ -6640,6 +6930,8 @@
       border: 1px solid transparent;
       line-height: 1.2;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .workspace-detail-capability-chip.browser {

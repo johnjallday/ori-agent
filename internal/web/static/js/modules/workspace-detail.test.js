@@ -231,3 +231,122 @@ test('workspace detail renders escaped read-only workspace tags', () => {
   assert.match(list.innerHTML, /title="&lt;script&gt;">&lt;script&gt;<\/span>/);
   assert.match(list.innerHTML, /title="Client &amp; Research">Client &amp; Research<\/span>/);
 });
+
+test('workspace detail aggregates agent group roles for roster cards', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  assert.deepEqual(page.getAgentGroupRolePresentation({ roles: ['Lead', 'lead', '  '] }), {
+    label: 'Lead',
+    detail: 'Lead',
+    roles: ['Lead']
+  });
+
+  assert.deepEqual(page.getAgentGroupRolePresentation({ roles: ['Researcher', 'Writer'] }), {
+    label: 'Multiple roles',
+    detail: 'Researcher, Writer',
+    roles: ['Researcher', 'Writer']
+  });
+
+  assert.deepEqual(page.getAgentGroupRolePresentation({ roles: [] }), {
+    label: 'Agent',
+    detail: 'Agent',
+    roles: []
+  });
+});
+
+test('workspace detail carries agent instance roles into roster groups', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    agent_instances: [
+      { name: 'Manager', role: 'Lead' },
+      { name: 'Manager', role: 'Reviewer' },
+      { name: 'Writer', role: 'Drafting' }
+    ]
+  };
+  page.tasks = [];
+
+  const groups = page.buildAgentGroups();
+  const manager = groups.find(group => group.name === 'Manager');
+  const writer = groups.find(group => group.name === 'Writer');
+
+  assert.equal(manager.instanceCount, 2);
+  assert.deepEqual(manager.roles, ['Lead', 'Reviewer']);
+  assert.deepEqual(writer.roles, ['Drafting']);
+});
+
+test('workspace detail derives roster status from all assigned tasks and subtasks', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.tasks = [
+    { id: 'parent-1', to: 'Manager', status: 'pending' },
+    { id: 'subtask-1', parent_task_id: 'parent-1', to: 'Writer', status: 'waiting_for_choice' },
+    { id: 'subtask-2', parent_task_id: 'parent-1', to: 'Researcher', status: 'in_progress' },
+    { id: 'task-2', to: 'Writer', status: 'in_progress' }
+  ];
+
+  assert.equal(page.getAgentRosterStatus('Researcher').label, 'Working');
+  assert.equal(page.getAgentRosterStatus('Writer').label, 'Working');
+
+  page.tasks = [
+    { id: 'parent-1', to: 'Manager', status: 'pending' },
+    { id: 'subtask-1', parent_task_id: 'parent-1', to: 'Writer', status: 'waiting_for_choice' }
+  ];
+
+  assert.equal(page.getAgentRosterStatus('Writer').label, 'Needs input');
+  assert.equal(page.getAgentRosterStatus('Manager').label, 'Idle');
+});
+
+test('workspace detail generates stable deterministic agent avatars', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  const first = page.getAgentAvatarPresentation('Trip Planning Manager');
+  const second = page.getAgentAvatarPresentation('Trip Planning Manager');
+  const other = page.getAgentAvatarPresentation('Trip Planning Writer');
+
+  assert.equal(first.initials, 'TM');
+  assert.equal(first.hue, second.hue);
+  assert.equal(first.style, second.style);
+  assert.notEqual(first.hue, other.hue);
+});
+
+test('workspace detail skill summary uses workspace-effective skills', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.getEffectiveWorkspaceSkillNamesForAgent = () => [
+    'workspace-planning',
+    'browser:control-in-app-browser',
+    'pdf:pdf',
+    'documents:documents'
+  ];
+
+  const summary = page.getAgentSkillSummary('Manager');
+  const markup = page.renderAgentSkillSummary('Manager');
+
+  assert.equal(summary.count, 4);
+  assert.deepEqual(summary.visible, [
+    'workspace-planning',
+    'browser:control-in-app-browser',
+    'pdf:pdf'
+  ]);
+  assert.equal(summary.overflow, 1);
+  assert.match(markup, /workspace-planning/);
+  assert.match(markup, /\+1/);
+  assert.doesNotMatch(markup, /Browser<\/span>/);
+});
+
+test('workspace detail agent back face does not render agent level copy', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.getEffectiveWorkspaceSkillNamesForAgent = () => ['workspace-planning'];
+  page.getEffectiveWorkspaceMCPServerNames = () => ['filesystem'];
+  page.workspace = { entry_agent_name: 'Manager' };
+
+  const markup = page.renderAgentBackFace(
+    { key: 'manager', name: 'Manager', instanceCount: 1, isWorkspaceAgent: true, roles: ['Lead'] },
+    '1 task',
+    'Manager'
+  );
+
+  assert.doesNotMatch(markup, /Agent Lvl/);
+  assert.doesNotMatch(markup, /Lv /);
+  assert.match(markup, /Status/);
+  assert.match(markup, /Role/);
+  assert.match(markup, /Lead/);
+});
