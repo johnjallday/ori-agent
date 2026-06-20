@@ -26,15 +26,17 @@ type ServerConfig struct {
 
 // Server manages an MCP server process and client
 type Server struct {
-	config ServerConfig
-	client *sdkmcp.Client
-	cmd    *exec.Cmd
-	conn   *sdkmcp.ClientSession
-	tools  []Tool
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.RWMutex
-	status ServerStatus
+	config       ServerConfig
+	client       *sdkmcp.Client
+	cmd          *exec.Cmd
+	conn         *sdkmcp.ClientSession
+	tools        []Tool
+	instructions string                 // server-provided usage hint from the initialize handshake
+	serverInfo   *sdkmcp.Implementation // server name/version reported during initialization
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.RWMutex
+	status       ServerStatus
 }
 
 // ServerStatus represents the current status of a server
@@ -136,6 +138,12 @@ func (s *Server) Start() error {
 	s.client = client
 	s.conn = session
 	s.cmd = cmd
+	// Capture the server's self-reported usage instructions and identity from
+	// the initialize handshake so callers can surface them in the UI.
+	if initRes := session.InitializeResult(); initRes != nil {
+		s.instructions = initRes.Instructions
+		s.serverInfo = initRes.ServerInfo
+	}
 	s.mu.Unlock()
 
 	// Discover tools
@@ -217,6 +225,23 @@ func (s *Server) GetTools() []Tool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.tools
+}
+
+// GetInstructions returns the server-provided usage instructions captured from
+// the MCP initialize handshake. May be empty if the server provided none or is
+// not running.
+func (s *Server) GetInstructions() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.instructions
+}
+
+// GetServerInfo returns the server's reported implementation info (name/title/
+// version) from initialization. Returns nil if the server is not running.
+func (s *Server) GetServerInfo() *sdkmcp.Implementation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.serverInfo
 }
 
 // CallTool calls a tool on the MCP server
