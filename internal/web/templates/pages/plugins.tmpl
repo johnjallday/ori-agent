@@ -58,6 +58,17 @@
           </div>
         </div>
 
+        <!-- Official Claude plugins -->
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex align-items-start justify-content-between">
+            <div>
+              <h2 class="h6 mb-1">Official Claude plugins</h2>
+              <p class="text-muted small mb-0">Browse Anthropic's official, managed plugin directory and install with one click.</p>
+            </div>
+            <button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#officialModal">Browse official plugins</button>
+          </div>
+        </div>
+
         <!-- Marketplaces -->
         <div class="modern-card p-4 mb-4">
           <h2 class="h6 mb-3">Marketplaces</h2>
@@ -82,6 +93,37 @@
           <div id="pluginList"><p class="text-muted mb-0">Loading&hellip;</p></div>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- Official plugins browse modal -->
+  <div class="modal fade" id="officialModal" tabindex="-1" aria-labelledby="officialModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="officialModalLabel">Official Claude plugins</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2 mb-3">
+            <div class="col-md-6">
+              <input type="text" class="form-control" id="officialSearch" placeholder="Search official plugins&hellip;" oninput="officialFilter()">
+            </div>
+            <div class="col-md-3">
+              <select class="form-select" id="officialCategory" onchange="officialFilter()"><option value="">All categories</option></select>
+            </div>
+            <div class="col-md-3">
+              <select class="form-select" id="officialTag" onchange="officialFilter()"><option value="">All tags</option></select>
+            </div>
+          </div>
+          <div id="officialGrid" class="row g-3"></div>
+          <div id="officialEmpty"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" id="officialRefreshBtn">Refresh</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
       </div>
     </div>
   </div>

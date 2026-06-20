@@ -45,7 +45,8 @@
     byId('pluginTrustBody').innerHTML = '';
   };
 
-  function renderTrustBody(t) {
+  function trustHTML(t) {
+    t = t || {};
     const mcp = (t.MCPCommands || []).map((c) => '<li><code>' + esc(c) + '</code></li>').join('');
     const skills = (t.Skills || []).map(esc).join(', ');
     const unsupported = (t.Unsupported || []).map((u) => '<li>' + esc(u.kind) + ': ' + esc(u.detail) + '</li>').join('');
@@ -55,7 +56,11 @@
     if (skills) html += '<div class="small">Skills: ' + esc(skills) + '</div>';
     if (unsupported) html += '<div class="small fw-semibold mt-2">Skipped (not yet supported):</div><ul class="small">' + unsupported + '</ul>';
     if (warnings) html += '<ul class="small mb-0">' + warnings + '</ul>';
-    byId('pluginTrustBody').innerHTML = html || '<div class="small text-muted">Nothing to register.</div>';
+    return html || '<div class="small text-muted">Nothing to register.</div>';
+  }
+
+  function renderTrustBody(t) {
+    byId('pluginTrustBody').innerHTML = trustHTML(t);
   }
 
   // ---- installed plugins ----
@@ -146,19 +151,246 @@
     }
   };
 
-  // ---- marketplaces ----
+  // ---- marketplaces (official browse + user-added) ----
 
+  const officialState = { name: '', source: '', added: false, loaded: false, entries: [], installed: new Set() };
+
+  async function getInstalledNames() {
+    try {
+      const data = await api('GET', '/api/plugins');
+      return new Set(((data && data.plugins) || []).map((p) => p.name));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  // loadMarketplaces drives the user-added list and records the official
+  // marketplace's identity (name/source/added) for the browse modal. The
+  // official catalog itself is loaded lazily when the modal opens, and is never
+  // duplicated in the user-added list.
   window.loadMarketplaces = async function () {
     const el = byId('marketplaceList');
-    if (!el) return;
+    let data;
     try {
-      const data = await api('GET', '/api/plugins/marketplaces');
-      const mps = (data && data.marketplaces) || [];
-      el.innerHTML = mps.length ? mps.map(renderMarketplace).join('') : '<p class="text-muted mb-0">No marketplaces added.</p>';
+      data = await api('GET', '/api/plugins/marketplaces');
     } catch (e) {
-      el.innerHTML = '<p class="text-danger mb-0">Failed to load marketplaces: ' + esc(e.message) + '</p>';
+      if (el) el.innerHTML = '<p class="text-danger mb-0">Failed to load marketplaces: ' + esc(e.message) + '</p>';
+      return;
+    }
+    const official = (data && data.official) || {};
+    officialState.name = official.name || '';
+    officialState.source = official.source || '';
+    officialState.added = !!official.added;
+
+    if (el) {
+      const others = ((data && data.marketplaces) || []).filter((m) => m.name !== officialState.name);
+      el.innerHTML = others.length ? others.map(renderMarketplace).join('') : '<p class="text-muted mb-0">No marketplaces added.</p>';
     }
   };
+
+  // ---- official browse (modal) ----
+
+  function officialGridMessage(html) {
+    const empty = byId('officialEmpty');
+    const grid = byId('officialGrid');
+    if (empty) empty.innerHTML = '';
+    if (grid) grid.innerHTML = html;
+  }
+
+  // ensureOfficialLoaded makes the official catalog browsable on demand: it adds
+  // the official marketplace if it isn't already (a one-time clone), then loads
+  // and renders its entries. Called when the modal opens, so the user never has
+  // to "add" anything — they just browse. Pass force=true to re-read (e.g. after
+  // an install or via Refresh).
+  async function ensureOfficialLoaded(force) {
+    if (officialState.loaded && !force) {
+      await refreshOfficialInstalled();
+      return;
+    }
+    officialGridMessage('<p class="text-muted mb-0">Loading official plugins&hellip;</p>');
+    try {
+      if (!officialState.added) {
+        await api('POST', '/api/plugins/marketplaces', { source: officialState.source });
+        officialState.added = true;
+      }
+      const data = await api('GET', '/api/plugins/marketplaces');
+      const off = ((data && data.marketplaces) || []).find((m) => m.name === officialState.name);
+      officialState.entries = (off && off.plugins) || [];
+      officialState.installed = await getInstalledNames();
+      officialState.loaded = true;
+
+      if (!officialState.entries.length) {
+        officialGridMessage('<p class="text-muted mb-0">The official catalog is empty or could not be read.</p>');
+        return;
+      }
+      populateOfficialFilters();
+      wireOfficialGrid();
+      renderOfficialGrid();
+    } catch (e) {
+      officialGridMessage('<p class="text-danger mb-0">Failed to load the official catalog: ' + esc(e.message) + '</p>');
+    }
+  }
+
+  async function refreshOfficialInstalled() {
+    if (!officialState.loaded) return;
+    officialState.installed = await getInstalledNames();
+    renderOfficialGrid();
+  }
+
+  function fillSelect(sel, allLabel, values) {
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">' + esc(allLabel) + '</option>' +
+      values.map((v) => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+    if (values.indexOf(current) !== -1) sel.value = current;
+  }
+
+  function populateOfficialFilters() {
+    const cats = new Set();
+    const tags = new Set();
+    officialState.entries.forEach((e) => {
+      if (e.category) cats.add(e.category);
+      (e.tags || []).forEach((t) => tags.add(t));
+    });
+    fillSelect(byId('officialCategory'), 'All categories', [...cats].sort());
+    fillSelect(byId('officialTag'), 'All tags', [...tags].sort());
+  }
+
+  function filteredEntries() {
+    const q = ((byId('officialSearch') && byId('officialSearch').value) || '').trim().toLowerCase();
+    const cat = (byId('officialCategory') && byId('officialCategory').value) || '';
+    const tag = (byId('officialTag') && byId('officialTag').value) || '';
+    return officialState.entries.filter((e) => {
+      if (cat && e.category !== cat) return false;
+      if (tag && (e.tags || []).indexOf(tag) === -1) return false;
+      if (q) {
+        const hay = [e.name, e.description, (e.tags || []).join(' '), (e.keywords || []).join(' ')].join(' ').toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  window.officialFilter = function () { renderOfficialGrid(); };
+
+  function renderOfficialGrid() {
+    const grid = byId('officialGrid');
+    if (!grid) return;
+    const items = filteredEntries();
+    grid.innerHTML = items.length
+      ? items.map(renderOfficialCard).join('')
+      : '<p class="text-muted mb-0">No plugins match your filters.</p>';
+  }
+
+  function renderOfficialCard(e) {
+    const installed = officialState.installed.has(e.name);
+    const cat = e.category ? '<span class="badge bg-secondary">' + esc(e.category) + '</span>' : '';
+    const author = e.author && e.author.name ? '<div class="small text-muted">by ' + esc(e.author.name) + '</div>' : '';
+    const tags = (e.tags || []).map((t) => '<span class="badge bg-light text-dark border me-1">' + esc(t) + '</span>').join('');
+    const installBtn = installed
+      ? '<button class="modern-btn modern-btn-secondary" disabled>Installed</button>'
+      : '<button class="modern-btn modern-btn-primary" data-official-install="' + esc(e.name) + '">Install</button>';
+    return (
+      '<div class="col-md-6 col-lg-4">' +
+      '<div class="modern-card h-100 p-3">' +
+      '<div class="d-flex justify-content-between align-items-start gap-2">' +
+      '<div class="fw-semibold">' + esc(e.name) + '</div>' + cat +
+      '</div>' + author +
+      (e.description ? '<div class="small text-muted mt-1">' + esc(e.description) + '</div>' : '') +
+      (tags ? '<div class="mt-2">' + tags + '</div>' : '') +
+      '<div class="d-flex gap-2 mt-3">' +
+      installBtn +
+      '<button class="modern-btn modern-btn-secondary" data-official-details="' + esc(e.name) + '">Details</button>' +
+      '</div>' +
+      '<div class="official-detail small mt-2" data-detail="' + esc(e.name) + '" style="display:none;"></div>' +
+      '</div></div>'
+    );
+  }
+
+  // Delegated click handling survives grid re-renders (the grid element persists;
+  // only its innerHTML changes), so it is wired once.
+  function wireOfficialGrid() {
+    const grid = byId('officialGrid');
+    if (!grid || grid.dataset.wired) return;
+    grid.dataset.wired = '1';
+    grid.addEventListener('click', function (ev) {
+      const inst = ev.target.closest('[data-official-install]');
+      if (inst) { officialInstall(inst.getAttribute('data-official-install')); return; }
+      const conf = ev.target.closest('[data-official-confirm]');
+      if (conf) { officialConfirmInstall(conf.getAttribute('data-official-confirm')); return; }
+      const can = ev.target.closest('[data-official-cancel]');
+      if (can) { const b = detailBox(can.getAttribute('data-official-cancel')); if (b) { b.style.display = 'none'; b.dataset.loaded = ''; } return; }
+      const det = ev.target.closest('[data-official-details]');
+      if (det) { toggleOfficialDetails(det.getAttribute('data-official-details')); }
+    });
+  }
+
+  function detailBox(name) {
+    const sel = (window.CSS && CSS.escape) ? CSS.escape(name) : name;
+    return document.querySelector('.official-detail[data-detail="' + sel + '"]');
+  }
+
+  async function toggleOfficialDetails(name) {
+    const box = detailBox(name);
+    if (!box) return;
+    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    if (box.dataset.loaded) return;
+
+    const e = officialState.entries.find((x) => x.name === name) || {};
+    let meta = '';
+    if (e.author && (e.author.name || e.author.email)) {
+      meta += '<div>Author: ' + esc(e.author.name || '') + (e.author.email ? ' &lt;' + esc(e.author.email) + '&gt;' : '') + '</div>';
+    }
+    if (e.homepage) meta += '<div>Homepage: <a href="' + esc(e.homepage) + '" target="_blank" rel="noopener">' + esc(e.homepage) + '</a></div>';
+    if (e.category) meta += '<div>Category: ' + esc(e.category) + '</div>';
+    box.innerHTML = meta + '<div class="text-muted mt-2">Loading what it will register…</div>';
+
+    try {
+      const data = await api('POST', '/api/plugins/marketplaces/install', { marketplace: officialState.name, plugin: name, confirm: false });
+      box.innerHTML = meta + '<div class="fw-semibold mt-2">This plugin will register:</div>' + trustHTML(data.trust);
+      box.dataset.loaded = '1';
+    } catch (err) {
+      box.innerHTML = meta + '<div class="text-danger mt-2">Could not load details: ' + esc(err.message) + '</div>';
+    }
+  }
+
+  // Install is confirmed inline inside the card, not via the page-level trust
+  // panel — that panel renders behind the open modal and would be unclickable.
+  async function officialInstall(name) {
+    const box = detailBox(name);
+    if (!box) return;
+    box.dataset.loaded = '';
+    box.style.display = 'block';
+    box.innerHTML = '<div class="text-muted">Preparing install&hellip;</div>';
+    try {
+      const data = await api('POST', '/api/plugins/marketplaces/install', { marketplace: officialState.name, plugin: name, confirm: false });
+      box.innerHTML =
+        '<div class="fw-semibold">This plugin will register:</div>' + trustHTML(data.trust) +
+        '<div class="d-flex gap-2 mt-2">' +
+        '<button class="modern-btn modern-btn-primary" data-official-confirm="' + esc(name) + '">Confirm install</button>' +
+        '<button class="modern-btn modern-btn-secondary" data-official-cancel="' + esc(name) + '">Cancel</button>' +
+        '</div>';
+    } catch (e) {
+      box.innerHTML = '<div class="text-danger">Preview failed: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function officialConfirmInstall(name) {
+    const box = detailBox(name);
+    if (box) box.innerHTML = '<div class="text-muted">Installing&hellip;</div>';
+    try {
+      await api('POST', '/api/plugins/marketplaces/install', { marketplace: officialState.name, plugin: name, confirm: true });
+      loadPlugins();
+      window.loadMarketplaces();
+      officialState.installed = await getInstalledNames();
+      renderOfficialGrid(); // card rebuilds showing "Installed"
+    } catch (e) {
+      if (box) box.innerHTML = '<div class="text-danger">Install failed: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  // ---- user-added marketplaces ----
 
   function renderMarketplace(mp) {
     const name = esc(mp.name);
@@ -195,6 +427,8 @@
         await api('POST', '/api/plugins/marketplaces/install', { marketplace, plugin: pluginName, confirm: true });
         window.pluginCancelInstall();
         loadPlugins();
+        window.loadMarketplaces();
+        refreshOfficialInstalled(); // reflect new install in the official modal grid
       });
     } catch (e) {
       alert('Preview failed: ' + e.message);
@@ -204,5 +438,11 @@
   document.addEventListener('DOMContentLoaded', function () {
     loadPlugins();
     window.loadMarketplaces();
+    // Load the official catalog lazily when its modal opens (auto-adds on first
+    // open so the user just browses); the Refresh button re-reads it.
+    const modalEl = byId('officialModal');
+    if (modalEl) modalEl.addEventListener('shown.bs.modal', function () { ensureOfficialLoaded(false); });
+    const refreshBtn = byId('officialRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = function () { ensureOfficialLoaded(true); };
   });
 })();

@@ -9,6 +9,11 @@ Ori's MCP registry and drops its skills into a scanned skills directory.
 ## Installing a plugin
 
 **From the UI** — open **Plugins** in the sidebar:
+- **Browse official Claude plugins** — click **Browse official plugins** to open
+  Anthropic's official, managed directory in a modal (it loads on first open — no
+  setup step), then search/filter the card grid by keyword, category, or tag, open
+  **Details** to see what a plugin registers, and **Install** with one click
+  (confirmed inline in the modal). Already-installed plugins are marked.
 - Paste a **local path** or **git URL** under *Install a plugin*, click **Preview**,
   review what it will register, then **Confirm install**.
 - Or **add a marketplace** (git URL / local folder) and install a listed plugin by name.
@@ -24,10 +29,30 @@ POST /api/plugins/{name}/enable | /disable         # per-workspace binding state
 DELETE /api/plugins/{name}                         # uninstall (removes all components)
 
 # Marketplaces
-GET  /api/plugins/marketplaces
+GET  /api/plugins/marketplaces            # also returns {"official": {name, source, added}}
 POST /api/plugins/marketplaces            {"source": "<path|git>"}
 POST /api/plugins/marketplaces/install    {"marketplace": "...", "plugin": "...", "confirm": true}
 ```
+
+The **official marketplace** is `anthropics/claude-plugins-official`. Its source is
+held server-side and exposed via the `official` block of `GET /api/plugins/marketplaces`
+(with `added` reflecting whether it has been added). The browse modal adds it
+automatically on first open (POSTing that source — a one-time catalog clone), so there
+is no manual "add" step. Adding is idempotent (keyed by catalog name), and the official
+catalog is shown only in the browse modal, never duplicated in the user-added list.
+
+### Marketplace entry sources
+
+A catalog entry's `source` may be a string (a path relative to the catalog, or a git
+URL) or an object. Object forms are normalized to one installable source:
+
+- `{"source":"local","path":"./plugins/x"}` → path relative to the catalog
+- `{"source":"github","repo":"owner/name"}` → `https://github.com/owner/name.git`
+- `{"source":"git-subdir"|"url","url":"…","path":"plugins/x","ref":"v1","sha":"…"}` →
+  a **git repo + subdirectory**: Ori clones the repo, **pins to `sha` (preferred) or
+  `ref`**, and installs from the subpath. Pinned commits are fetched shallowly
+  (`git fetch --depth 1 <pin>`) into a per-commit clone directory so different pins of
+  the same repo don't collide.
 
 ## Trust
 

@@ -137,7 +137,23 @@ func (h *Handler) MarketplacesHandler(w http.ResponseWriter, r *http.Request) {
 			orihttp.InternalError(w, err.Error())
 			return
 		}
-		orihttp.WriteJSON(w, map[string]any{"marketplaces": list})
+		added := false
+		for _, mp := range list {
+			if mp.Name == plugin.OfficialMarketplaceName || mp.Source == plugin.OfficialMarketplaceSource {
+				added = true
+				break
+			}
+		}
+		orihttp.WriteJSON(w, map[string]any{
+			"marketplaces": list,
+			// official tells the UI the backend-held source for the one-click
+			// "Add official marketplace" button, and whether it's already added.
+			"official": map[string]any{
+				"name":   plugin.OfficialMarketplaceName,
+				"source": plugin.OfficialMarketplaceSource,
+				"added":  added,
+			},
+		})
 	case http.MethodPost:
 		var req struct {
 			Source string `json:"source"`
