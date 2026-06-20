@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -227,6 +228,167 @@ func (h *HTTPHandler) ListAgentSnapshots(w http.ResponseWriter, r *http.Request)
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"workspace_id": workspaceID,
 		"agents":       available,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// WorkspaceAgentProfile is the lightweight model/provider view of a
+// workspace-local agent used by the workspace UI to render and edit the agent's
+// LLM model without going through the global agent store. The global agent
+// dashboard list does not include workspace-local agents, so this is what lets
+// the UI show their real model and offer in-place model editing.
+type WorkspaceAgentProfile struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Role     string `json:"role,omitempty"`
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
+	Source   string `json:"source"` // always "workspace"
+}
+
+// ListWorkspaceAgentProfiles handles GET /api/workspaces/:id/agents and returns
+// the model/provider/type for each workspace-local agent that has an on-disk
+// config.json snapshot.
+func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace %s not found", workspaceID))
+		return
+	}
+
+	profiles := make([]WorkspaceAgentProfile, 0)
+	for _, name := range referencedAgentNames(ws) {
+		ag, ok, agErr := h.store.GetWorkspaceAgent(workspaceID, name)
+		if agErr != nil || !ok || ag == nil {
+			continue
+		}
+		profiles = append(profiles, WorkspaceAgentProfile{
+			Name:     name,
+			Type:     ag.Type,
+			Role:     string(ag.Role),
+			Model:    ag.Settings.Model,
+			Provider: ag.Settings.Provider,
+			Source:   "workspace",
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"workspace_id": workspaceID,
+		"agents":       profiles,
+	}); encErr != nil {
+		logger.Error("Failed to encode workspace agent profiles", logger.Fields{"error": encErr})
+	}
+}
+
+// UpdateWorkspaceAgentModelRequest is the body for PATCH
+// /api/workspaces/:id/agents/:name. Only model + provider are editable here; all
+// other agent settings are intentionally left untouched.
+type UpdateWorkspaceAgentModelRequest struct {
+	Model       string `json:"model"`
+	LLMProvider string `json:"llm_provider"`
+}
+
+// UpdateWorkspaceAgentModel handles PATCH /api/workspaces/:id/agents/:name and
+// updates only the model + provider of a workspace-local agent's config.json. It
+// never touches the global agent store: the workspace config.json is the single
+// source of truth for these agents.
+func (h *HTTPHandler) UpdateWorkspaceAgentModel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 || parts[0] == "" {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+
+	agentName, decodeErr := url.PathUnescape(parts[2])
+	if decodeErr != nil {
+		agentName = parts[2]
+	}
+	// Drop any ":instance" suffix — model config is per agent name (slug),
+	// shared by all instances of that agent in the workspace.
+	if idx := strings.Index(agentName, ":"); idx >= 0 {
+		agentName = agentName[:idx]
+	}
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		orihttp.BadRequest(w, "Agent name is required")
+		return
+	}
+
+	var req UpdateWorkspaceAgentModelRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	model := strings.TrimSpace(req.Model)
+	provider := strings.TrimSpace(req.LLMProvider)
+	if model == "" {
+		orihttp.BadRequest(w, "model is required")
+		return
+	}
+	if provider == "" {
+		orihttp.BadRequest(w, "llm_provider is required")
+		return
+	}
+
+	if _, err := h.store.Get(workspaceID); err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace %s not found", workspaceID))
+		return
+	}
+
+	ag, ok, err := h.store.GetWorkspaceAgent(workspaceID, agentName)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to read workspace agent: %v", err))
+		return
+	}
+	if !ok || ag == nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace agent %q not found", agentName))
+		return
+	}
+
+	// Update only model + provider; leave every other field intact.
+	ag.Settings.Model = model
+	ag.Settings.Provider = provider
+
+	if err := h.store.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace agent: %v", err))
+		return
+	}
+
+	logger.Info("Updated workspace agent model", logger.Fields{
+		"workspace_id": workspaceID,
+		"agent":        agentName,
+		"model":        model,
+		"provider":     provider,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"message":  "Agent model updated",
+		"agent":    agentName,
+		"model":    model,
+		"provider": provider,
+		"source":   "workspace",
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

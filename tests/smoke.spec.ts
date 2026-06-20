@@ -382,6 +382,168 @@ test.describe('API Health', () => {
   });
 });
 
+test.describe('Workspace Agent Character Roster', () => {
+  async function installRosterRoutes(page, options = {}) {
+    const workspace = {
+      id: 'roster-ws',
+      name: 'Roster Workspace',
+      description: 'Workspace for roster UI smoke coverage',
+      entry_agent_name: 'Roster Manager',
+      agents: ['Roster Manager', 'Research Analyst'],
+      agent_instances: [
+        {
+          id: 'manager-1',
+          name: 'Roster Manager',
+          instance_number: 1,
+          node_id: 'Roster Manager-node-1',
+          role: 'Coordinator',
+          entry_point: true
+        },
+        {
+          id: 'analyst-1',
+          name: 'Research Analyst',
+          instance_number: 1,
+          node_id: 'Research Analyst-node-1',
+          role: 'Research'
+        },
+        {
+          id: 'analyst-2',
+          name: 'Research Analyst',
+          instance_number: 2,
+          node_id: 'Research Analyst-node-2',
+          role: 'Synthesis'
+        }
+      ],
+      shared_data: {},
+      skill_bindings: [
+        { id: 'skill-planning', skill_name: 'workspace-planning', enabled: true, trusted: true },
+        { id: 'skill-research', skill_name: 'browser:control-in-app-browser', enabled: true, trusted: true }
+      ],
+      agent_skill_access: [
+        { agent_instance_id: 'manager-1', enabled_binding_ids: ['skill-planning'] },
+        { agent_instance_id: 'analyst-1', enabled_binding_ids: ['skill-research'] },
+        { agent_instance_id: 'analyst-2', enabled_binding_ids: ['skill-research'] }
+      ],
+      mcp_bindings: [],
+      agent_mcp_access: [],
+      directory_references: [],
+      attachments: [],
+      tasks: [],
+      status: 'active'
+    };
+    const tasks = [
+      { id: 'task-1', workspace_id: 'roster-ws', to: 'Roster Manager', status: 'pending', description: 'Plan the work' },
+      { id: 'task-2', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'waiting_for_choice', description: 'Choose source' },
+      { id: 'task-3', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'in_progress', description: 'Read source', parent_task_id: 'task-1' }
+    ];
+    const catalogAgents = [
+      ...(options.omitRosterManagerFromCatalog
+        ? []
+        : [{ name: 'Roster Manager', type: 'general', source: 'user', model: 'claude-opus-4', provider: 'anthropic', capabilities: ['files'] }]),
+      { name: 'Research Analyst', type: 'research', source: 'user', model: 'claude-sonnet-4', provider: 'anthropic', allow_web_search: true }
+    ];
+    const snapshotAgents = Array.isArray(options.snapshotAgents) ? options.snapshotAgents : [];
+
+    await page.route('**/api/orchestration/workspace?id=roster-ws', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(workspace) });
+    });
+    await page.route('**/api/workspaces/roster-ws/agent-snapshots', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: snapshotAgents }) });
+    });
+    await page.route('**/api/agents/dashboard/list', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ agents: catalogAgents })
+      });
+    });
+    await page.route('**/api/skills?agent=default', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          skills: [
+            { name: 'workspace-planning', enabled: true },
+            { name: 'browser:control-in-app-browser', enabled: true }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/orchestration/tasks?workspace_id=roster-ws', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks }) });
+    });
+    await page.route('**/api/sessions?folder_id=roster-ws', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: [] }) });
+    });
+    await page.route('**/api/workspaces/roster-ws/notes', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ notes: [] }) });
+    });
+    await page.route('**/api/workspaces/roster-ws', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(workspace) });
+    });
+    await page.route('**/api/workspaces?tree=true', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ workspaces: [workspace], folders: [workspace] }) });
+    });
+    await page.route('**/api/orchestration/workspace/activate?id=roster-ws', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+    });
+    await page.route('**/api/project-templates', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
+    });
+  }
+
+  test('renders truthful character cards without losing roster actions', async ({ page }) => {
+    await installRosterRoutes(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+
+    const cards = page.locator('#workspace-detail-agents-list .workspace-detail-agent-card');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.first()).toHaveClass(/is-leader/);
+    await expect(cards.first().locator('.workspace-detail-agent-avatar')).toHaveText('RM');
+    await expect(cards.first().locator('.workspace-detail-agent-class-chip')).toHaveText('Coordinator');
+    await expect(cards.first().locator('.workspace-detail-agent-status-chip')).toHaveText('Idle');
+    await expect(cards.first().locator('.workspace-detail-agent-skill-summary')).toContainText('workspace-planning');
+    await expect(cards.first().locator('.workspace-detail-agent-model-badge')).toContainText('High capacity');
+    await expect(cards.nth(1).locator('.workspace-detail-agent-class-chip')).toHaveText('Multiple roles');
+    await expect(cards.nth(1).locator('.workspace-detail-agent-status-chip')).toHaveText('Working');
+    await expect(cards.nth(1).locator('.workspace-detail-agent-instance-tag')).toHaveText('2x');
+    await expect(cards.nth(1).locator('.workspace-detail-agent-skill-summary')).toContainText('browser:control-in-app-browser');
+
+    await expect(cards.first().locator('.workspace-detail-agent-identity-link[href="/agents/Roster%20Manager"]')).toBeVisible();
+    await expect(cards.first().locator('.workspace-detail-agent-section-btn')).toBeVisible();
+    await expect(cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-remove-btn')).toBeVisible();
+    await expect(cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-flip-btn')).toBeVisible();
+
+    await cards.first().locator('.workspace-detail-agent-identity-link').focus();
+    await expect(cards.first().locator('.workspace-detail-agent-identity-link')).toBeFocused();
+    await cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-flip-btn').click();
+    await expect(cards.first()).toHaveClass(/is-flipped/);
+    await expect(cards.first()).not.toContainText('Agent Lvl');
+    await expect(cards.first()).toContainText('Role');
+    await expect(cards.first()).toContainText('MCP Attached');
+
+    const overflow = await page.locator('#workspace-detail-agents-list').evaluate(el => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('does not send workspace-local agents to missing global detail pages', async ({ page }) => {
+    await installRosterRoutes(page, {
+      omitRosterManagerFromCatalog: true,
+      snapshotAgents: ['Roster Manager']
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+
+    const managerIdentity = page.locator(
+      '#workspace-detail-agents-list .workspace-detail-agent-card.is-leader .workspace-detail-agent-identity-link'
+    );
+    await expect(managerIdentity).toContainText('Roster Manager');
+    await expect(managerIdentity).toHaveAttribute('data-agent-detail-kind', 'workspace-local');
+    await expect(managerIdentity).not.toHaveAttribute('href', /\/agents\/Roster%20Manager/);
+  });
+});
+
 test.describe('Task Output Contracts', () => {
   test('opens append-to-CSV contract editor from task details', async ({ page, request }) => {
     let workspaceId = '';
