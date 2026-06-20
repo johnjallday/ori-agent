@@ -9,6 +9,7 @@
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
+import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
@@ -226,6 +227,7 @@ export class WorkspaceDetailPage {
     this.agentSkillsPromises = new Map();
     this.mcpManager = new WorkspaceMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
+    this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
@@ -1020,6 +1022,7 @@ export class WorkspaceDetailPage {
       intentReviewResults: document.getElementById('workspace-detail-intent-review-results'),
       intentReviewMeta: document.getElementById('workspace-detail-intent-review-meta'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
+      pluginsList: document.getElementById('workspace-detail-plugins-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
@@ -1055,6 +1058,7 @@ export class WorkspaceDetailPage {
       refreshSettingsBtn: document.getElementById('workspace-detail-refresh-settings'),
       addSkillBtn: document.getElementById('workspace-detail-add-skill'),
       refreshSkillsBtn: document.getElementById('workspace-detail-refresh-skills'),
+      refreshPluginsBtn: document.getElementById('workspace-detail-refresh-plugins'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
       homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
@@ -1581,6 +1585,7 @@ export class WorkspaceDetailPage {
       await this.loadWorkspace();
     });
     this.skillsManager.bindEvents();
+    this.pluginsManager.bindEvents();
     this.memoryManager.bindEvents();
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
@@ -2137,6 +2142,7 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSettings();
       this.renderWorkspaceSkillBindings();
+      this.renderWorkspacePluginBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
@@ -2815,7 +2821,9 @@ export class WorkspaceDetailPage {
         ? 'data-workspace-intent-review-agent'
         : kind === 'mcp'
           ? 'data-workspace-intent-review-mcp'
-          : 'data-workspace-intent-review-skill';
+          : kind === 'plugin'
+            ? 'data-workspace-intent-review-plugin'
+            : 'data-workspace-intent-review-skill';
     const label =
       kind === 'mcp'
         ? item.action && item.action.indexOf('install') >= 0
@@ -2825,9 +2833,13 @@ export class WorkspaceDetailPage {
           ? item.action && item.action.indexOf('install') >= 0
             ? 'Install + Attach'
             : 'Attach'
-          : item.action === 'create'
-            ? 'Create'
-            : 'Invite';
+          : kind === 'plugin'
+            ? item.action && item.action.indexOf('install') >= 0
+              ? 'Install + Add'
+              : 'Add'
+            : item.action === 'create'
+              ? 'Create'
+              : 'Invite';
     const secondaryChipClass =
       item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
         ? 'source'
@@ -2863,6 +2875,7 @@ export class WorkspaceDetailPage {
       : [];
     const mcps = Array.isArray(plan.mcps) ? plan.mcps : [];
     const skills = Array.isArray(plan.skills) ? plan.skills : [];
+    const plugins = Array.isArray(plan.plugins) ? plan.plugins : [];
 
     const leadMarkup = lead
       ? `
@@ -2913,6 +2926,14 @@ export class WorkspaceDetailPage {
                 : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'
             }
           </div>
+          <div class="workspace-setup-section mt-3">
+            <div class="workspace-setup-label">Workspace Plugins</div>
+            ${
+              plugins.length > 0
+                ? plugins.map(item => this.buildWorkspaceIntentReviewCard(item, 'plugin')).join('')
+                : '<div class="workspace-detail-empty">No plugin recommendations right now.</div>'
+            }
+          </div>
         </div>
         <div class="col-12">
           <div class="workspace-detail-settings-summary-card">
@@ -2927,7 +2948,7 @@ export class WorkspaceDetailPage {
     this.elements.intentReviewPanel.hidden = false;
     this.elements.intentReviewResults
       .querySelectorAll(
-        'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
+        'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill], input[data-workspace-intent-review-plugin]'
       )
       .forEach(input => {
         input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
@@ -2956,6 +2977,11 @@ export class WorkspaceDetailPage {
         'input[data-workspace-intent-review-skill]'
       ) || []
     ).filter(input => input.checked).length;
+    const pluginCount = Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-plugin]'
+      ) || []
+    ).filter(input => input.checked).length;
     const totalAgents =
       (this.workspaceIntentReviewPlan.agents?.some(agent => agent.role === 'lead') ? 1 : 0) +
       optionalAgentCount;
@@ -2963,6 +2989,7 @@ export class WorkspaceDetailPage {
     const parts = [`${totalAgents} agent${totalAgents === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
     if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+    if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
     this.elements.intentReviewMeta.textContent = `Selected for apply: ${parts.join(', ')}.`;
     this.setWorkspaceIntentBusy(false, 'apply');
   }
@@ -3006,10 +3033,24 @@ export class WorkspaceDetailPage {
       if (match) selectedSkills.push(match);
     });
 
+    const selectedPlugins = [];
+    Array.from(
+      this.elements.intentReviewResults?.querySelectorAll(
+        'input[data-workspace-intent-review-plugin]'
+      ) || []
+    ).forEach(input => {
+      if (!input.checked) return;
+      const match = (this.workspaceIntentReviewPlan.plugins || []).find(
+        item => item.id === input.value
+      );
+      if (match) selectedPlugins.push(match);
+    });
+
     return {
       agents: selectedAgents,
       mcps: selectedMCPs,
       skills: selectedSkills,
+      plugins: selectedPlugins,
       queries: this.workspaceIntentReviewPlan.queries || []
     };
   }
@@ -3176,6 +3217,10 @@ export class WorkspaceDetailPage {
       if (result.attachedSkills > 0)
         summaryParts.push(
           `${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`
+        );
+      if (result.addedPlugins > 0)
+        summaryParts.push(
+          `${result.addedPlugins} plugin${result.addedPlugins === 1 ? '' : 's'} added`
         );
       if (result.failures.length > 0) {
         this.setWorkspaceIntentStatus(
@@ -3773,8 +3818,7 @@ export class WorkspaceDetailPage {
     const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
     const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
 
-    const skillsState = this.getAgentSkillsState(group.name);
-    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+    const skillsMarkup = this.renderAgentWorkspaceSkillChips(group.name);
 
     const mcpServers = this.getEffectiveWorkspaceMCPServerNames(group.name);
     const mcpMarkup =
@@ -3845,81 +3889,22 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  getAgentSkillsState(agentName) {
-    const key = this.normalizeAgentName(agentName);
-    if (!key) return { status: 'idle', skills: [] };
-    return this.agentSkillsCache.get(key) || { status: 'idle', skills: [] };
-  }
-
-  renderAgentSkillsChips(skillsState, profile = null) {
-    const fallbackSkills = [];
-    const fallbackSeen = new Set();
-    const addFallbackSkill = value => {
-      const name = String(value || '').trim();
-      if (!name) return;
-      const key = name.toLowerCase();
-      if (fallbackSeen.has(key)) return;
-      fallbackSeen.add(key);
-      fallbackSkills.push(name);
-    };
-
-    if (Array.isArray(profile?.capabilities)) {
-      profile.capabilities.forEach(addFallbackSkill);
+  // Renders the agent info card's SKILLS chips from the skills that are
+  // effective for this agent *in this workspace* (workspace skill bindings the
+  // agent can use), matching the sibling "MCP Attached" block. This is
+  // intentionally workspace-scoped rather than the agent's global skill catalog
+  // returned by /api/skills.
+  renderAgentWorkspaceSkillChips(agentName) {
+    const skillNames = this.getEffectiveWorkspaceSkillNamesForAgent(agentName);
+    if (skillNames.length === 0) {
+      return '<span class="workspace-detail-agent-info-empty">No workspace skills attached.</span>';
     }
-    if (Array.isArray(profile?.enabledPlugins)) {
-      profile.enabledPlugins.forEach(addFallbackSkill);
-    }
-
-    if (!skillsState || skillsState.status === 'idle' || skillsState.status === 'loading') {
-      if (fallbackSkills.length > 0) {
-        return fallbackSkills
-          .slice(0, 8)
-          .map(
-            skill =>
-              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
-          )
-          .join('');
-      }
-      return '<span class="workspace-detail-agent-info-empty">Loading skills...</span>';
-    }
-
-    if (skillsState.status === 'conflict') {
-      return '<span class="workspace-detail-agent-info-empty">Skill conflicts detected.</span>';
-    }
-
-    if (skillsState.status === 'error') {
-      if (fallbackSkills.length > 0) {
-        return fallbackSkills
-          .slice(0, 8)
-          .map(
-            skill =>
-              `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
-          )
-          .join('');
-      }
-      return '<span class="workspace-detail-agent-info-empty">Failed to load skills.</span>';
-    }
-
-    const enabledSkills = Array.isArray(skillsState.skills)
-      ? skillsState.skills.filter(skill => skill.enabled !== false && skill.name)
-      : [];
-
-    if (enabledSkills.length === 0) {
-      return '<span class="workspace-detail-agent-info-empty">No enabled skills.</span>';
-    }
-
-    const visibleSkills = enabledSkills.slice(0, 8);
-    const overflowCount = enabledSkills.length - visibleSkills.length;
-    const chips = visibleSkills
+    return skillNames
       .map(
         skill =>
-          `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill.name)}</span>`
+          `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`
       )
       .join('');
-
-    return overflowCount > 0
-      ? `${chips}<span class="workspace-detail-agent-info-chip count">+${overflowCount} more</span>`
-      : chips;
   }
 
   getAgentCardElementByKey(agentKey) {
@@ -3942,9 +3927,7 @@ export class WorkspaceDetailPage {
     const card = this.getAgentCardElementByKey(key);
     if (!card) return false;
 
-    const profile = this.getAgentProfile(agentName);
-    const skillsState = this.getAgentSkillsState(agentName);
-    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+    const skillsMarkup = this.renderAgentWorkspaceSkillChips(agentName);
 
     const skillContainers = card.querySelectorAll(
       '.workspace-detail-agent-skills-list[data-agent-skills-key]'
@@ -3988,11 +3971,9 @@ export class WorkspaceDetailPage {
     } else {
       this.renderAgentGroups();
     }
-    this.ensureAgentSkillsLoaded(agentName);
-  }
-
-  async ensureAgentSkillsLoaded(agentName) {
-    await this.loadAgentSkills(agentName, { refreshUI: true });
+    // The agent info card's SKILLS now renders synchronously from
+    // workspace-effective skill bindings (see renderAgentWorkspaceSkillChips),
+    // so flipping no longer needs to fetch the agent's global skill catalog.
   }
 
   async loadAgentSkills(agentName, options = {}) {
@@ -9838,6 +9819,10 @@ export class WorkspaceDetailPage {
     return this.mcpManager.getEffectiveWorkspaceMCPServerNames(agentName);
   }
 
+  getEffectiveWorkspaceSkillNamesForAgent(agentName) {
+    return this.skillsManager.getEffectiveWorkspaceSkillNamesForAgent(agentName);
+  }
+
   getWorkspaceMCPBindings(options = {}) {
     return this.mcpManager.getWorkspaceMCPBindings(options);
   }
@@ -10725,6 +10710,10 @@ export class WorkspaceDetailPage {
 
   getWorkspaceSkillBindings(options = {}) {
     return this.skillsManager.getWorkspaceSkillBindings(options);
+  }
+
+  renderWorkspacePluginBindings() {
+    return this.pluginsManager.render();
   }
 
   // Planning-config helpers live with the skills manager since they shape the

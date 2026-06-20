@@ -352,6 +352,24 @@
     }
   }
 
+  async function fetchInstalledPlugins() {
+    try {
+      const data = await apiRequest('/api/plugins');
+      return Array.isArray(data?.plugins) ? data.plugins : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async function fetchPluginMarketplaces() {
+    try {
+      const data = await apiRequest('/api/plugins/marketplaces');
+      return Array.isArray(data?.marketplaces) ? data.marketplaces : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
   async function searchMarketplaceSkills(query) {
     try {
       const data = await apiRequest('/api/skills/marketplace/search', {
@@ -734,13 +752,79 @@
       .slice(0, 4);
   }
 
+  function normalizePluginCandidates(installedPlugins, marketplaces, queries) {
+    const candidates = [];
+    const seen = new Set();
+
+    (Array.isArray(installedPlugins) ? installedPlugins : []).forEach((plugin) => {
+      const name = String(plugin?.name || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      const description = String(plugin?.description || '').trim();
+      const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(Boolean);
+      const skills = (Array.isArray(plugin?.skills) ? plugin.skills : []).filter(Boolean);
+      const score = scoreTextAgainstQueries(
+        `${name} ${description} ${mcpServers.join(' ')} ${skills.join(' ')}`,
+        queries
+      );
+      if (score <= 0) return;
+      seen.add(key);
+      candidates.push({
+        id: `plugin-${key.replace(/[^a-z0-9]+/g, '-')}`,
+        name,
+        description,
+        source: 'installed',
+        action: 'attach',
+        selected: false,
+        enabled: plugin?.enabled !== false,
+        mcpServers,
+        skills,
+        score
+      });
+    });
+
+    (Array.isArray(marketplaces) ? marketplaces : []).forEach((marketplace) => {
+      const marketplaceName = String(marketplace?.name || '').trim();
+      (Array.isArray(marketplace?.plugins) ? marketplace.plugins : []).forEach((entry) => {
+        const name = String(entry?.name || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        const description = String(entry?.description || '').trim();
+        const score = scoreTextAgainstQueries(`${name} ${description}`, queries);
+        if (score <= 0) return;
+        seen.add(key);
+        candidates.push({
+          id: `plugin-market-${key.replace(/[^a-z0-9]+/g, '-')}`,
+          name,
+          description: description || `Suggested from the ${marketplaceName || 'plugin'} marketplace.`,
+          source: 'marketplace',
+          action: 'install_attach',
+          selected: false,
+          marketplace: marketplaceName,
+          pluginName: name,
+          mcpServers: [],
+          skills: [],
+          score
+        });
+      });
+    });
+
+    return candidates
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 4);
+  }
+
   async function buildPlan(input) {
     const normalizedInput = normalizeReviewInput(input);
     const queries = deriveSearchQueries(normalizedInput);
-    const [agents, installedSkills, configuredMCPs] = await Promise.all([
+    const [agents, installedSkills, configuredMCPs, installedPlugins, pluginMarketplaces] = await Promise.all([
       fetchAgents(),
       fetchInstalledSkills(),
-      fetchConfiguredMCPServers()
+      fetchConfiguredMCPServers(),
+      fetchInstalledPlugins(),
+      fetchPluginMarketplaces()
     ]);
 
     const marketplaceSkillResults = [];
@@ -763,13 +847,15 @@
     ]).slice(0, 5);
     const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
     const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, goalQueries);
+    const planPlugins = normalizePluginCandidates(installedPlugins, pluginMarketplaces, goalQueries);
 
     return {
       summary: buildPlanSummary(planAgents, planMCPs, planSkills),
       agents: planAgents,
       mcps: planMCPs,
       skills: planSkills,
-      notes: buildPlanNotes(planAgents, planMCPs, planSkills),
+      plugins: planPlugins,
+      notes: buildPlanNotes(planAgents, planMCPs, planSkills, planPlugins),
       queries
     };
   }
@@ -794,7 +880,8 @@
     return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}${suggestionParts.length > 0 ? `. ${suggestionParts.join(', ')} available below` : ''}.`;
   }
 
-  function buildPlanNotes(agents, mcps, skills) {
+  function buildPlanNotes(agents, mcps, skills, plugins) {
+    const pluginList = Array.isArray(plugins) ? plugins : [];
     const notes = [];
     if (agents.some((agent) => agent.action === 'create')) {
       notes.push('New agents will be auto-configured from this workspace description after the workspace is created.');
@@ -808,7 +895,13 @@
     if (skills.length > 0) {
       notes.push('Skill suggestions are optional and will only be attached if selected.');
     }
-    notes.push('Selected MCPs and skills will be shared with every agent Ori adds through this setup.');
+    if (pluginList.some((item) => item.action === 'install_attach')) {
+      notes.push('Marketplace plugin suggestions are installed globally (running their local commands) before their components are added to the workspace.');
+    }
+    if (pluginList.length > 0) {
+      notes.push("Selecting a plugin binds all of its MCP servers and skills to the workspace.");
+    }
+    notes.push('Selected MCPs, skills, and plugin components will be shared with every agent Ori adds through this setup.');
     return notes;
   }
 
@@ -827,11 +920,13 @@
     const extraAgentCount = countSelections('input[data-workspace-bootstrap-agent]');
     const mcpCount = countSelections('input[data-workspace-bootstrap-mcp]');
     const skillCount = countSelections('input[data-workspace-bootstrap-skill]');
+    const pluginCount = countSelections('input[data-workspace-bootstrap-plugin]');
     const agentTotal = leadCount + extraAgentCount;
 
     const parts = [`${agentTotal} agent${agentTotal === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
     if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+    if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
     const unselectedSkillCount = Array.isArray(state.plan.skills)
       ? Math.max(0, state.plan.skills.length - skillCount)
       : 0;
@@ -932,9 +1027,58 @@
     `).join('');
   }
 
+  function renderPluginCards(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return `
+        <div class="workspace-detail-empty">
+          No plugin suggestions yet.
+        </div>
+      `;
+    }
+
+    return items.map((item) => {
+      const isMarketplace = item.action === 'install_attach';
+      const bundleBits = [];
+      if (Array.isArray(item.mcpServers) && item.mcpServers.length > 0) {
+        bundleBits.push(`${item.mcpServers.length} MCP server${item.mcpServers.length === 1 ? '' : 's'}`);
+      }
+      if (Array.isArray(item.skills) && item.skills.length > 0) {
+        bundleBits.push(`${item.skills.length} skill${item.skills.length === 1 ? '' : 's'}`);
+      }
+      const bundleNote = isMarketplace
+        ? 'Installs globally, then adds its MCP servers and skills to this workspace.'
+        : (bundleBits.length > 0
+          ? `Bundles ${bundleBits.join(' and ')} — all added to this workspace.`
+          : "Adds this plugin's components to the workspace.");
+
+      return `
+        <div class="modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
+          <input type="checkbox"
+                 id="${escapeHtml(`workspace-bootstrap-plugin-${item.id}`)}"
+                 data-workspace-bootstrap-plugin="true"
+                 value="${escapeHtml(item.id)}"
+                 ${item.selected ? 'checked' : ''}>
+          <div style="display: block; flex: 1; min-width: 0;">
+            <label for="${escapeHtml(`workspace-bootstrap-plugin-${item.id}`)}" style="display: block; cursor: pointer;">
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)}</span>
+                <span class="workspace-detail-mcp-chip ${isMarketplace ? 'source' : 'status'}">
+                  ${isMarketplace ? 'Install Globally + Add' : 'Add to Workspace'}
+                </span>
+                ${isMarketplace ? '' : '<span class="workspace-detail-mcp-chip local">Local</span>'}
+              </span>
+              <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.description || 'Suggested plugin.')}</span>
+              <span style="display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); opacity: 0.85;">${escapeHtml(bundleNote)}</span>
+            </label>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   function bindRenderedSelectionListeners() {
     document.querySelectorAll(
-      'input[data-workspace-bootstrap-agent], input[data-workspace-bootstrap-mcp], input[data-workspace-bootstrap-skill]'
+      'input[data-workspace-bootstrap-agent], input[data-workspace-bootstrap-mcp], input[data-workspace-bootstrap-skill], input[data-workspace-bootstrap-plugin]'
     ).forEach((input) => {
       input.addEventListener('change', updateRenderedSummary);
     });
@@ -957,6 +1101,10 @@
           <div class="workspace-setup-section">
             <div class="workspace-setup-label">Workspace Skills</div>
             ${renderCapabilityCards(plan.skills, 'skill')}
+          </div>
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Workspace Plugins</div>
+            ${renderPluginCards(plan.plugins)}
           </div>
         </div>
         <div class="workspace-setup-preview">
@@ -1003,10 +1151,18 @@
       if (match) selectedSkills.push(match);
     });
 
+    const selectedPlugins = [];
+    document.querySelectorAll('input[data-workspace-bootstrap-plugin]').forEach((input) => {
+      if (!input.checked) return;
+      const match = (state.plan.plugins || []).find((item) => item.id === input.value);
+      if (match) selectedPlugins.push(match);
+    });
+
     return {
       agents: selectedAgents,
       mcps: selectedMCPs,
       skills: selectedSkills,
+      plugins: selectedPlugins,
       queries: state.plan.queries || []
     };
   }
@@ -1411,6 +1567,87 @@
     }
   }
 
+  function findInstalledPlugin(plugins, candidate) {
+    const candidateName = normalizeText(candidate?.name);
+    return (Array.isArray(plugins) ? plugins : []).find(
+      (plugin) => normalizeText(plugin?.name) === candidateName
+    ) || null;
+  }
+
+  // ensurePluginInstalled returns the installed plugin record (with its
+  // registered mcp_servers + skills), installing it globally from a marketplace
+  // first when the suggestion is not yet installed.
+  async function ensurePluginInstalled(candidate) {
+    if (!candidate) {
+      throw new Error('Plugin candidate missing');
+    }
+
+    const existing = findInstalledPlugin(await fetchInstalledPlugins(), candidate);
+    if (existing) {
+      return existing;
+    }
+
+    if (candidate.action !== 'install_attach') {
+      throw new Error(`Plugin ${candidate.name} is not installed`);
+    }
+    if (!candidate.marketplace || !candidate.pluginName) {
+      throw new Error(`Plugin ${candidate.name} is missing install details`);
+    }
+
+    await apiRequest('/api/plugins/marketplaces/install', {
+      method: 'POST',
+      body: { marketplace: candidate.marketplace, plugin: candidate.pluginName, confirm: true }
+    });
+
+    const installed = findInstalledPlugin(await fetchInstalledPlugins(), candidate);
+    if (!installed) {
+      throw new Error(`Plugin ${candidate.name} was not installed globally`);
+    }
+    return installed;
+  }
+
+  // applyPluginToWorkspace installs/enables a plugin globally, then binds each of
+  // its MCP servers and skills to the workspace (granting access to the same
+  // agents the rest of the setup uses). A plugin's MCP servers and skills are
+  // already registered globally once installed, so they bind through the same
+  // workspace endpoints as standalone MCPs and skills.
+  async function applyPluginToWorkspace(workspaceId, workspaceState, candidate, agentInstanceIds) {
+    const plugin = await ensurePluginInstalled(candidate);
+    const pluginName = String(plugin?.name || candidate.name || '').trim();
+
+    if (plugin.enabled === false && pluginName) {
+      try {
+        await apiRequest(`/api/plugins/${encodeURIComponent(pluginName)}/enable`, { method: 'POST' });
+      } catch (_error) {
+        // Enabling the plugin record is best-effort; binding its components below
+        // enables the underlying MCP servers regardless.
+      }
+    }
+
+    const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(Boolean);
+    for (const serverName of mcpServers) {
+      const bindingId = await ensureWorkspaceMCPBinding(workspaceId, workspaceState, {
+        name: serverName,
+        action: 'bind'
+      });
+      if (bindingId && agentInstanceIds.length > 0) {
+        await grantMCPAccess(workspaceId, workspaceState, bindingId, agentInstanceIds);
+      }
+    }
+
+    const skills = (Array.isArray(plugin?.skills) ? plugin.skills : []).filter(Boolean);
+    for (const skillName of skills) {
+      const bindingId = await ensureWorkspaceSkillBinding(workspaceId, workspaceState, {
+        name: skillName,
+        action: 'attach',
+        trusted: true
+      });
+      if (bindingId && agentInstanceIds.length > 0) {
+        await grantSkillAccess(workspaceId, workspaceState, bindingId, agentInstanceIds);
+      }
+    }
+  }
+
   async function applyPlan(workspaceId) {
     const selectedPlan = getSelectedPlan();
     return applySelectedPlan(workspaceId, selectedPlan, {
@@ -1425,6 +1662,7 @@
         invitedAgents: 0,
         boundMCPs: 0,
         attachedSkills: 0,
+        addedPlugins: 0,
         failures: []
       };
     }
@@ -1442,6 +1680,7 @@
       invitedAgents: 0,
       boundMCPs: 0,
       attachedSkills: 0,
+      addedPlugins: 0,
       failures: []
     };
 
@@ -1503,6 +1742,15 @@
           summary.attachedSkills += 1;
         } catch (error) {
           summary.failures.push(`Skill ${skillCandidate.name}: ${error.message || 'failed to attach'}`);
+        }
+      }
+
+      for (const pluginCandidate of (Array.isArray(selectedPlan.plugins) ? selectedPlan.plugins : [])) {
+        try {
+          await applyPluginToWorkspace(workspaceId, workspaceState, pluginCandidate, agentInstanceIds);
+          summary.addedPlugins += 1;
+        } catch (error) {
+          summary.failures.push(`Plugin ${pluginCandidate.name}: ${error.message || 'failed to add'}`);
         }
       }
 

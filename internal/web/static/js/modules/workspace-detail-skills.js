@@ -283,6 +283,88 @@ export class WorkspaceSkillsManager {
       .filter(Boolean);
   }
 
+  /**
+   * Skill bindings that are effective for an agent in this workspace — the
+   * workspace skill bindings the agent's instances are allowed to use (after
+   * agent_skill_access rules). Mirrors the MCP manager's
+   * getEffectiveWorkspaceMCPBindingsForAgent so the agent info card stays
+   * workspace-scoped rather than showing the agent's global skill catalog.
+   */
+  getEffectiveWorkspaceSkillBindingsForAgent(agentName) {
+    const bindings = this.getWorkspaceSkillBindings();
+    if (bindings.length === 0) {
+      return [];
+    }
+
+    const instanceIds = this.host.getAgentInstanceIdsForName(agentName);
+    if (instanceIds.length === 0) {
+      return bindings;
+    }
+
+    const accessEntries = Array.isArray(this.host.workspace?.agent_skill_access)
+      ? this.host.workspace.agent_skill_access
+      : [];
+
+    const allowedByInstance = instanceIds.map(instanceID => {
+      const entry = accessEntries.find(
+        item => String(item?.agent_instance_id || '').trim() === instanceID
+      );
+      if (!entry) {
+        return bindings;
+      }
+      if (!Array.isArray(entry.enabled_binding_ids) || entry.enabled_binding_ids.length === 0) {
+        return [];
+      }
+
+      const allowedIDs = new Set(
+        entry.enabled_binding_ids
+          .map(value =>
+            String(value || '')
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
+      );
+      return bindings.filter(binding =>
+        allowedIDs.has(
+          String(binding.id || '')
+            .trim()
+            .toLowerCase()
+        )
+      );
+    });
+
+    const merged = [];
+    const seen = new Set();
+    allowedByInstance.flat().forEach(binding => {
+      const key =
+        String(binding?.id || '')
+          .trim()
+          .toLowerCase() ||
+        String(binding?.skillName || '')
+          .trim()
+          .toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(binding);
+    });
+    return merged;
+  }
+
+  getEffectiveWorkspaceSkillNamesForAgent(agentName) {
+    const names = [];
+    const seen = new Set();
+    this.getEffectiveWorkspaceSkillBindingsForAgent(agentName).forEach(binding => {
+      const name = String(binding?.skillName || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(name);
+    });
+    return names;
+  }
+
   async loadAvailableSkills(force = false) {
     if (!force && Array.isArray(this.availableSkills) && this.availableSkills.length > 0) {
       return this.availableSkills;
