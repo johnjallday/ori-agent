@@ -18,6 +18,8 @@ Recent history shows short, imperative commits (“Fix race conditions in locati
 ## Security & Configuration Tips
 Never commit API keys; load them through environment variables or `settings.json` (listed in `.gitignore`). Use `make check-env` to verify keys before running agents. Tool capabilities come from MCP servers and skills configured per workspace; store any secrets they need in environment variables or the vault rather than committing them.
 
+CLI-provider agents (Claude Code, Codex) can run a workspace's MCP + built-in tools natively, but this is **off by default** and gated by a two-level opt-in (`Workspace.AllowNativeMCPCLI` *and* the agent's `Settings.AllowNativeMCPTools`), toggleable from the workspace MCP pane. When enabled, the CLI executes tools itself — outside Ori's per-call confirmation gate — sandboxed to the workspace folder; treat it as a trusted-autonomy setting. Native-MCP runs use a separate, longer timeout (`native_mcp_exec_timeout_seconds`, default 300s).
+
 
 # Rule: Generating a Product Requirements Document (PRD)
 

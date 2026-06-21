@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -53,14 +54,21 @@ type LLMTaskHandler struct {
 	userProfileStore userprofile.UserStore
 	eventBus         *EventBus // Optional event bus for publishing execution events
 	mcpRegistry      mcpRegistry
-	runtimeResolver  *AgentRuntimeResolver
-	workspaceToolsFn WorkspaceToolFactory
-	utilityTools     UtilityToolProvider
+	// nativeMCPExecTimeout bounds a native-MCP CLI task run (which runs its own
+	// multi-tool agent loop). Zero falls back to defaultNativeMCPExecTimeout.
+	nativeMCPExecTimeout time.Duration
+	runtimeResolver      *AgentRuntimeResolver
+	workspaceToolsFn     WorkspaceToolFactory
+	utilityTools         UtilityToolProvider
 }
 
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]toolapi.Tool, error)
 	StartServer(string) error
+	// ListServers returns the runtime server configs (command/args/env) so a
+	// native-MCP provider can be handed the resolved specs for an agent's
+	// servers. Satisfied by *mcp.Registry.
+	ListServers() []mcp.ServerConfig
 }
 
 // UtilityToolProvider exposes native utility tools (time, weather, web search,
@@ -106,6 +114,25 @@ func (h *LLMTaskHandler) SetEventBus(eventBus *EventBus) {
 // SetMCPRegistry enables MCP tool resolution for workspace task execution.
 func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
 	h.mcpRegistry = registry
+}
+
+// defaultNativeMCPExecTimeout is the fallback budget for a native-MCP CLI task
+// run. These runs drive a full multi-tool agent loop inside the CLI, so they
+// routinely exceed the ordinary LLM-call budget (and the 120s auto-task parse
+// timeout). 150s is typically too tight; 300s is the recommended default.
+const defaultNativeMCPExecTimeout = 300 * time.Second
+
+// SetNativeMCPExecTimeout overrides the native-MCP CLI execution timeout
+// (e.g. from configuration). A non-positive value restores the default.
+func (h *LLMTaskHandler) SetNativeMCPExecTimeout(d time.Duration) {
+	h.nativeMCPExecTimeout = d
+}
+
+func (h *LLMTaskHandler) effectiveNativeMCPExecTimeout() time.Duration {
+	if h != nil && h.nativeMCPExecTimeout > 0 {
+		return h.nativeMCPExecTimeout
+	}
+	return defaultNativeMCPExecTimeout
 }
 
 // SetRuntimeResolver configures workspace-aware runtime MCP resolution for task execution.
@@ -248,14 +275,56 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			}))
 		}
 
-		resp, err := provider.Chat(ctx, llm.ChatRequest{
+		chatReq := llm.ChatRequest{
 			Model:           modelName,
 			Messages:        conversation,
 			Temperature:     ag.Settings.Temperature,
 			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
 			Tools:           requestTools,
-		})
+		}
+		// Native-MCP providers (CLI agents) run their own MCP loop instead of
+		// round-tripping tool calls through ori-agent, so hand them the agent's
+		// resolved MCP server specs plus the workspace context they need to key
+		// the persistent config and confine the run. SupportsTools stays false
+		// for these providers, so requestTools is ignored by them. Gated behind
+		// the workspace+agent opt-in (the CLI runs tools without ori's per-tool
+		// confirmation); when not opted in, the provider runs text-only as before.
+		nativeMCPActive := false
+		if providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
+			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
+				chatReq.MCPServers = specs
+				chatReq.WorkspaceID = task.WorkspaceID
+				if h.workspaceStore != nil {
+					chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
+				}
+				nativeMCPActive = true
+			}
+		}
+
+		// Native-MCP CLI runs get their own, longer budget than an ordinary LLM
+		// call. Cancel right after the call (not deferred) to avoid piling up
+		// contexts across tool rounds.
+		callCtx := ctx
+		var cancelCall context.CancelFunc
+		if nativeMCPActive {
+			callCtx, cancelCall = context.WithTimeout(ctx, h.effectiveNativeMCPExecTimeout())
+		}
+		resp, err := provider.Chat(callCtx, chatReq)
+		if cancelCall != nil {
+			cancelCall()
+		}
 		if err != nil {
+			// Surface the raw provider error (CLI stderr/stdout) before it is
+			// replaced by a friendly message, so MCP connection / permission /
+			// timeout failures stay diagnosable.
+			if nativeMCPActive {
+				logger.Warn("Native-MCP CLI task call failed", logger.Fields{
+					"workspace_id": task.WorkspaceID,
+					"agent":        agentName,
+					"provider":     providerName,
+					"error":        err.Error(),
+				})
+			}
 			if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
 				return "", fmt.Errorf("%s", friendlyMsg)
 			}
@@ -935,6 +1004,104 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName str
 	}
 
 	return nil, false
+}
+
+// nativeMCPAllowed reports whether native-MCP CLI execution is permitted for
+// this run: it requires the workspace and the agent to both opt in (the CLI
+// runs tools outside ori-agent's per-tool confirmation gate). Defaults off.
+func (h *LLMTaskHandler) nativeMCPAllowed(workspaceID string, ag *resolvedTaskAgent) bool {
+	if h == nil || ag == nil || !ag.Settings.IsNativeMCPToolsAllowed() {
+		return false
+	}
+	if h.workspaceStore == nil {
+		return false
+	}
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return false
+	}
+	return nativeMCPGateAllowed(ws, ag)
+}
+
+// nativeMCPGateAllowed is the pure opt-in predicate: both the workspace and the
+// agent must allow native-MCP CLI tooling.
+func nativeMCPGateAllowed(ws *Workspace, ag *resolvedTaskAgent) bool {
+	return ws != nil && ws.AllowNativeMCPCLI && ag != nil && ag.Settings.IsNativeMCPToolsAllowed()
+}
+
+// providerSupportsNativeMCP reports whether the provider runs its own MCP loop
+// (CLI agents like Claude Code / Codex). Such providers receive the agent's MCP
+// servers as resolved specs on the request rather than via the internal tool
+// loop.
+func providerSupportsNativeMCP(provider llm.Provider) bool {
+	if provider == nil {
+		return false
+	}
+	return provider.Capabilities().SupportsNativeMCP
+}
+
+// resolveNativeMCPSpecs maps the agent's runtime MCP server names to resolved
+// specs (command/args/env) for native-MCP providers. The CLI-config key uses a
+// CLI-safe alias derived from the runtime name (which contains colons). Returns
+// nil when the registry is unavailable or the agent has no MCP servers.
+func (h *LLMTaskHandler) resolveNativeMCPSpecs(ag *resolvedTaskAgent) []llm.MCPServerSpec {
+	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
+		return nil
+	}
+
+	configByName := make(map[string]mcp.ServerConfig)
+	for _, cfg := range h.mcpRegistry.ListServers() {
+		configByName[cfg.Name] = cfg
+	}
+
+	specs := make([]llm.MCPServerSpec, 0, len(ag.MCPServers))
+	for _, serverName := range ag.MCPServers {
+		name := strings.TrimSpace(serverName)
+		if name == "" {
+			continue
+		}
+		cfg, ok := configByName[name]
+		if !ok || strings.TrimSpace(cfg.Command) == "" {
+			continue
+		}
+		specs = append(specs, llm.MCPServerSpec{
+			Name:    nativeMCPAlias(name),
+			Command: cfg.Command,
+			Args:    append([]string(nil), cfg.Args...),
+			Env:     cfg.Env,
+		})
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	return specs
+}
+
+// nativeMCPAlias derives a CLI-safe MCP-config key from a runtime server name.
+// Runtime names are "ws:{workspaceID}:mcp:{server}:{bindingID}" (colon-bearing);
+// the logical server segment ("{server}") is the stable, CLI-friendly basis.
+// The segment may still contain "/" (e.g. "reaper-plugin/ori-reaper"), so all
+// chars outside [A-Za-z0-9_-] are mapped to "_" to keep the MCP-config key and
+// the resulting "mcp__<key>__<tool>" tool names valid. (Alias rules + dedup are
+// hardened in task 2.2.)
+func nativeMCPAlias(runtimeName string) string {
+	base := runtimeName
+	parts := strings.Split(runtimeName, ":")
+	if len(parts) >= 5 && parts[0] == "ws" && parts[2] == "mcp" {
+		if server := strings.TrimSpace(parts[3]); server != "" {
+			base = server
+		}
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []toolapi.Tool {

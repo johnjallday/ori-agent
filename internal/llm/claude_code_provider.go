@@ -11,7 +11,8 @@ import (
 
 // ClaudeCodeProvider implements the Provider interface using the Claude CLI.
 type ClaudeCodeProvider struct {
-	cliPath string
+	cliPath  string
+	mcpStore *CLIMCPConfigStore
 }
 
 // NewClaudeCodeProvider creates a new Claude Code provider backed by the Claude CLI.
@@ -21,7 +22,8 @@ func NewClaudeCodeProvider() (*ClaudeCodeProvider, error) {
 		return nil, fmt.Errorf("claude CLI not found: %w", err)
 	}
 	return &ClaudeCodeProvider{
-		cliPath: cliPath,
+		cliPath:  cliPath,
+		mcpStore: NewCLIMCPConfigStore(),
 	}, nil
 }
 
@@ -39,6 +41,7 @@ func (p *ClaudeCodeProvider) Type() ProviderType {
 func (p *ClaudeCodeProvider) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
 		SupportsTools:          false,
+		SupportsNativeMCP:      true,
 		SupportsStreaming:      false,
 		SupportsSystemPrompt:   true,
 		SupportsTemperature:    false,
@@ -65,7 +68,11 @@ func (p *ClaudeCodeProvider) DefaultModels() []string {
 // Chat sends a chat request via the Claude CLI.
 func (p *ClaudeCodeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runClaudeExec(ctx, req.Model, prompt, nil)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := p.runClaudeExec(ctx, req.Model, prompt, nil, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +91,11 @@ func (p *ClaudeCodeProvider) StreamChat(ctx context.Context, req ChatRequest) (S
 // ChatWithStructuredOutput sends a chat request with a JSON schema using the Claude CLI.
 func (p *ClaudeCodeProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runClaudeExec(ctx, req.Model, prompt, req.Schema)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := p.runClaudeExec(ctx, req.Model, prompt, req.Schema, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +104,29 @@ func (p *ClaudeCodeProvider) ChatWithStructuredOutput(ctx context.Context, req S
 		Model:    req.Model,
 		Provider: p.Name(),
 	}, nil
+}
+
+// claudeNativeMCP holds the resolved native-MCP execution context for a run.
+type claudeNativeMCP struct {
+	ConfigPath   string // path passed to --mcp-config
+	WorkspaceDir string // working dir / --add-dir scope (may be empty)
+}
+
+// prepareNativeMCP ensures the per-workspace Claude MCP config exists for the
+// given specs and returns the run context. Returns nil when there are no MCP
+// servers (text-only run) — leaving the existing behavior untouched.
+func (p *ClaudeCodeProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*claudeNativeMCP, error) {
+	if len(specs) == 0 || p.mcpStore == nil {
+		return nil, nil
+	}
+	configPath, err := p.mcpStore.EnsureClaudeConfig(workspaceID, specs)
+	if err != nil {
+		return nil, fmt.Errorf("prepare claude mcp config: %w", err)
+	}
+	if configPath == "" {
+		return nil, nil
+	}
+	return &claudeNativeMCP{ConfigPath: configPath, WorkspaceDir: workspaceDir}, nil
 }
 
 func buildClaudeCodePrompt(systemPrompt string, messages []Message) string {
@@ -136,15 +170,31 @@ type claudeCLIResponse struct {
 	Errors           []string        `json:"errors"`
 }
 
-func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt string, schema any) (string, error) {
+// buildClaudeArgs assembles the claude CLI args. A non-nil nat selects the
+// native-MCP run (full toolset + --mcp-config, auto-approved, workspace-confined);
+// nil keeps the text-only behavior (--tools "" --permission-mode dontAsk).
+func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]string, error) {
 	args := []string{
 		"--print",
 		"--output-format",
 		"json",
-		"--tools",
-		"",
-		"--permission-mode",
-		"dontAsk",
+	}
+
+	if nat != nil {
+		// Native-MCP run: enable the full toolset plus the workspace's MCP
+		// servers, auto-approve tool calls (headless), and confine writes to the
+		// workspace folder. The CLI runs its own MCP loop and returns the final
+		// text once tools have run.
+		args = append(args,
+			"--permission-mode", "bypassPermissions",
+			"--mcp-config", nat.ConfigPath,
+		)
+		if nat.WorkspaceDir != "" {
+			args = append(args, "--add-dir", nat.WorkspaceDir)
+		}
+	} else {
+		// Text-only run (unchanged): no tools, no MCP.
+		args = append(args, "--tools", "", "--permission-mode", "dontAsk")
 	}
 
 	if model != "" {
@@ -153,13 +203,24 @@ func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt st
 	if schema != nil {
 		payload, err := json.Marshal(schema)
 		if err != nil {
-			return "", fmt.Errorf("claude schema marshal: %w", err)
+			return nil, fmt.Errorf("claude schema marshal: %w", err)
 		}
 		args = append(args, "--json-schema", string(payload))
 	}
 	args = append(args, prompt)
+	return args, nil
+}
+
+func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt string, schema any, nat *claudeNativeMCP) (string, error) {
+	args, err := buildClaudeArgs(model, prompt, schema, nat)
+	if err != nil {
+		return "", err
+	}
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
+	if nat != nil && nat.WorkspaceDir != "" {
+		cmd.Dir = nat.WorkspaceDir
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

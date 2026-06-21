@@ -150,6 +150,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-skills.js',
       'internal/web/static/js/modules/workspace-detail-plugins.js',
       'internal/web/static/js/modules/workspace-detail-memory.js',
+      'internal/web/static/js/modules/workspace-native-mcp.js',
       'internal/web/static/js/modules/workspace-task.js',
       'internal/web/static/js/modules/workspace-task-execution-views.js',
       'internal/web/static/js/modules/workspace-task-result-actions.js',

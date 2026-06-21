@@ -8,6 +8,7 @@
 
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
+import { WorkspaceNativeMCPManager } from './workspace-native-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
@@ -226,6 +227,7 @@ export class WorkspaceDetailPage {
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
     this.mcpManager = new WorkspaceMCPManager(this);
+    this.nativeMCPManager = new WorkspaceNativeMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
     this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
@@ -1516,6 +1518,8 @@ export class WorkspaceDetailPage {
       await this.loadWorkspace();
     });
     this.mcpManager.bindEvents();
+    this.nativeMCPManager.bindEvents();
+    this.nativeMCPManager.load();
 
     // Workspace settings
     this.elements.configToggleBtn?.addEventListener('click', () =>

@@ -263,6 +263,10 @@ type Workspace struct {
 	// ProjectPath is an optional relative path to the associated project code directory.
 	ProjectPath string `json:"project_path,omitempty"`
 
+	// AllowNativeMCPCLI opts the workspace into letting CLI-provider agents run
+	// MCP/built-in tools natively (mirrors workspace.json; persisted column).
+	AllowNativeMCPCLI bool `json:"allow_native_mcp_cli,omitempty"`
+
 	// Tags are normalized labels used for workspace organization and filtering.
 	Tags []string `json:"tags,omitempty"`
 

@@ -15,6 +15,17 @@ type Settings struct {
 	ReasoningEffort string  `json:"reasoning_effort,omitempty"`  // Optional reasoning depth for providers that support it (currently Codex)
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"` // Optional max tokens for responses
 	AllowWebSearch  *bool   `json:"allow_web_search,omitempty"`  // Nil defaults to true for backward compatibility
+	// AllowNativeMCPTools opts a CLI-provider agent (Claude Code / Codex) into
+	// running the workspace's MCP + built-in tools natively, without ori-agent's
+	// per-tool confirmation gate. Security-sensitive, so it defaults OFF (nil or
+	// false). Requires the workspace to also opt in.
+	AllowNativeMCPTools *bool `json:"allow_native_mcp_tools,omitempty"`
+}
+
+// IsNativeMCPToolsAllowed reports whether this agent may run native-MCP CLI
+// tooling. Defaults to false (opt-in security gate); nil means off.
+func (s Settings) IsNativeMCPToolsAllowed() bool {
+	return s.AllowNativeMCPTools != nil && *s.AllowNativeMCPTools
 }
 
 // IsWebSearchAllowed returns whether this agent can use native web tools.

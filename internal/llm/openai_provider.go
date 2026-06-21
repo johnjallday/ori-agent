@@ -162,6 +162,18 @@ type StructuredOutputRequest struct {
 	ReasoningEffort string
 	SchemaName      string
 	Schema          any
+
+	// MCPServers carries resolved MCP server specs for native-MCP providers
+	// (see ChatRequest.MCPServers). Left empty for system-model / parsing calls.
+	MCPServers []MCPServerSpec
+
+	// WorkspaceID keys the persistent per-workspace native-MCP config; set only
+	// alongside MCPServers.
+	WorkspaceID string
+
+	// WorkspaceDir confines a native-MCP CLI run to the workspace folder; set
+	// only alongside MCPServers.
+	WorkspaceDir string
 }
 
 // GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs
