@@ -254,6 +254,11 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+	if b.configManager != nil {
+		if secs := b.configManager.GetNativeMCPExecTimeoutSeconds(); secs > 0 {
+			b.taskHandler.SetNativeMCPExecTimeout(time.Duration(secs) * time.Second)
+		}
+	}
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
 	if b.skillsManager != nil {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))

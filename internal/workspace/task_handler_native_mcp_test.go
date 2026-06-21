@@ -2,10 +2,26 @@ package workspace
 
 import (
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+func TestEffectiveNativeMCPExecTimeout(t *testing.T) {
+	h := &LLMTaskHandler{}
+	if got := h.effectiveNativeMCPExecTimeout(); got != defaultNativeMCPExecTimeout {
+		t.Errorf("unset default = %v, want %v", got, defaultNativeMCPExecTimeout)
+	}
+	h.SetNativeMCPExecTimeout(45 * time.Second)
+	if got := h.effectiveNativeMCPExecTimeout(); got != 45*time.Second {
+		t.Errorf("override = %v, want 45s", got)
+	}
+	h.SetNativeMCPExecTimeout(0) // non-positive restores the default
+	if got := h.effectiveNativeMCPExecTimeout(); got != defaultNativeMCPExecTimeout {
+		t.Errorf("reset = %v, want default", got)
+	}
+}
 
 func nativeMCPAgent(allow bool) *resolvedTaskAgent {
 	return &resolvedTaskAgent{

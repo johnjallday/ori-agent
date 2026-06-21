@@ -54,9 +54,12 @@ type LLMTaskHandler struct {
 	userProfileStore userprofile.UserStore
 	eventBus         *EventBus // Optional event bus for publishing execution events
 	mcpRegistry      mcpRegistry
-	runtimeResolver  *AgentRuntimeResolver
-	workspaceToolsFn WorkspaceToolFactory
-	utilityTools     UtilityToolProvider
+	// nativeMCPExecTimeout bounds a native-MCP CLI task run (which runs its own
+	// multi-tool agent loop). Zero falls back to defaultNativeMCPExecTimeout.
+	nativeMCPExecTimeout time.Duration
+	runtimeResolver      *AgentRuntimeResolver
+	workspaceToolsFn     WorkspaceToolFactory
+	utilityTools         UtilityToolProvider
 }
 
 type mcpRegistry interface {
@@ -111,6 +114,25 @@ func (h *LLMTaskHandler) SetEventBus(eventBus *EventBus) {
 // SetMCPRegistry enables MCP tool resolution for workspace task execution.
 func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
 	h.mcpRegistry = registry
+}
+
+// defaultNativeMCPExecTimeout is the fallback budget for a native-MCP CLI task
+// run. These runs drive a full multi-tool agent loop inside the CLI, so they
+// routinely exceed the ordinary LLM-call budget (and the 120s auto-task parse
+// timeout). 150s is typically too tight; 300s is the recommended default.
+const defaultNativeMCPExecTimeout = 300 * time.Second
+
+// SetNativeMCPExecTimeout overrides the native-MCP CLI execution timeout
+// (e.g. from configuration). A non-positive value restores the default.
+func (h *LLMTaskHandler) SetNativeMCPExecTimeout(d time.Duration) {
+	h.nativeMCPExecTimeout = d
+}
+
+func (h *LLMTaskHandler) effectiveNativeMCPExecTimeout() time.Duration {
+	if h != nil && h.nativeMCPExecTimeout > 0 {
+		return h.nativeMCPExecTimeout
+	}
+	return defaultNativeMCPExecTimeout
 }
 
 // SetRuntimeResolver configures workspace-aware runtime MCP resolution for task execution.
@@ -267,6 +289,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		// for these providers, so requestTools is ignored by them. Gated behind
 		// the workspace+agent opt-in (the CLI runs tools without ori's per-tool
 		// confirmation); when not opted in, the provider runs text-only as before.
+		nativeMCPActive := false
 		if providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
 			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
 				chatReq.MCPServers = specs
@@ -274,10 +297,34 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				if h.workspaceStore != nil {
 					chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
 				}
+				nativeMCPActive = true
 			}
 		}
-		resp, err := provider.Chat(ctx, chatReq)
+
+		// Native-MCP CLI runs get their own, longer budget than an ordinary LLM
+		// call. Cancel right after the call (not deferred) to avoid piling up
+		// contexts across tool rounds.
+		callCtx := ctx
+		var cancelCall context.CancelFunc
+		if nativeMCPActive {
+			callCtx, cancelCall = context.WithTimeout(ctx, h.effectiveNativeMCPExecTimeout())
+		}
+		resp, err := provider.Chat(callCtx, chatReq)
+		if cancelCall != nil {
+			cancelCall()
+		}
 		if err != nil {
+			// Surface the raw provider error (CLI stderr/stdout) before it is
+			// replaced by a friendly message, so MCP connection / permission /
+			// timeout failures stay diagnosable.
+			if nativeMCPActive {
+				logger.Warn("Native-MCP CLI task call failed", logger.Fields{
+					"workspace_id": task.WorkspaceID,
+					"agent":        agentName,
+					"provider":     providerName,
+					"error":        err.Error(),
+				})
+			}
 			if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
 				return "", fmt.Errorf("%s", friendlyMsg)
 			}

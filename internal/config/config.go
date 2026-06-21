@@ -60,6 +60,8 @@ type Settings struct {
 	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
+	NativeMCPExecTimeoutSeconds int `json:"native_mcp_exec_timeout_seconds,omitempty"` // Optional timeout (seconds) for native-MCP CLI task runs; 0 uses the built-in default (300s)
+
 	// Multi-agent orchestration defaults
 	MultiAgentMode      string  `json:"multi_agent_mode,omitempty"`      // auto, force, off
 	MultiAgentThreshold float64 `json:"multi_agent_threshold,omitempty"` // Complexity threshold (0-10)
@@ -1185,6 +1187,14 @@ func (m *Manager) GetSystemModel() (provider, model string) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.settings.SystemProvider, m.settings.SystemModel
+}
+
+// GetNativeMCPExecTimeoutSeconds returns the configured timeout (seconds) for
+// native-MCP CLI task runs. Zero means "use the built-in default".
+func (m *Manager) GetNativeMCPExecTimeoutSeconds() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.NativeMCPExecTimeoutSeconds
 }
 
 // GetMultiAgentDefaults returns the default multi-agent mode and threshold.
