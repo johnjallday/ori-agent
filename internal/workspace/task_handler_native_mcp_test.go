@@ -1,12 +1,113 @@
 package workspace
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// fakeNativeProvider is a tool-less native-MCP provider that captures the
+// request it receives so tests can assert the wiring.
+type fakeNativeProvider struct {
+	caps   llm.ProviderCapabilities
+	gotReq llm.ChatRequest
+	called bool
+}
+
+func (p *fakeNativeProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	p.gotReq = req
+	p.called = true
+	return &llm.ChatResponse{Content: "done"}, nil
+}
+func (p *fakeNativeProvider) StreamChat(context.Context, llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, nil
+}
+func (p *fakeNativeProvider) Name() string                            { return "codex" }
+func (p *fakeNativeProvider) Type() llm.ProviderType                  { return llm.ProviderTypeCloud }
+func (p *fakeNativeProvider) Capabilities() llm.ProviderCapabilities  { return p.caps }
+func (p *fakeNativeProvider) ValidateConfig(llm.ProviderConfig) error { return nil }
+func (p *fakeNativeProvider) DefaultModels() []string                 { return nil }
+
+type stubNativeRegistry struct{ servers []mcp.ServerConfig }
+
+func (s *stubNativeRegistry) GetToolsForServer(string) ([]toolapi.Tool, error) { return nil, nil }
+func (s *stubNativeRegistry) StartServer(string) error                         { return nil }
+func (s *stubNativeRegistry) ListServers() []mcp.ServerConfig                  { return s.servers }
+
+// TestExecuteTaskConversation_NativeMCPWiring proves the end-to-end path:
+// gate (workspace+agent opted in) -> resolve runtime servers -> populate the
+// request handed to the native-MCP provider, with the CLI-safe alias.
+func TestExecuteTaskConversation_NativeMCPWiring(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(&Workspace{ID: "ws-x", Name: "X", Status: StatusActive, AllowNativeMCPCLI: true}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	runtime := "ws:ws-x:mcp:reaper-plugin/ori-reaper:b1"
+	reg := &stubNativeRegistry{servers: []mcp.ServerConfig{{
+		Name:    runtime,
+		Command: "/abs/reaper-plugin",
+		Args:    []string{"--stdio"},
+		Env:     map[string]string{"REAPER_WEB_REMOTE_PORT": "2307"},
+	}}}
+	h := &LLMTaskHandler{workspaceStore: store, mcpRegistry: reg}
+
+	prov := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	ag := nativeMCPAgent(true)
+	ag.MCPServers = []string{runtime}
+
+	out, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+		Task{WorkspaceID: "ws-x"}, []llm.Message{llm.NewUserMessage("create project")}, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "done" || !prov.called {
+		t.Fatalf("provider not exercised: out=%q called=%v", out, prov.called)
+	}
+	if len(prov.gotReq.MCPServers) != 1 {
+		t.Fatalf("MCPServers=%+v, want 1 (gate+resolve should populate it)", prov.gotReq.MCPServers)
+	}
+	spec := prov.gotReq.MCPServers[0]
+	if spec.Name != "reaper-plugin_ori-reaper" || spec.Command != "/abs/reaper-plugin" {
+		t.Errorf("resolved spec wrong: %+v", spec)
+	}
+	if spec.Env["REAPER_WEB_REMOTE_PORT"] != "2307" {
+		t.Errorf("env not forwarded: %+v", spec.Env)
+	}
+	if prov.gotReq.WorkspaceID != "ws-x" {
+		t.Errorf("WorkspaceID=%q, want ws-x", prov.gotReq.WorkspaceID)
+	}
+}
+
+// TestExecuteTaskConversation_NativeMCPGatedOff confirms that with the agent
+// opted out (even though the workspace is opted in), the provider receives no
+// MCP servers and runs text-only.
+func TestExecuteTaskConversation_NativeMCPGatedOff(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(&Workspace{ID: "ws-y", Status: StatusActive, AllowNativeMCPCLI: true}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	runtime := "ws:ws-y:mcp:reaper-plugin/ori-reaper:b1"
+	reg := &stubNativeRegistry{servers: []mcp.ServerConfig{{Name: runtime, Command: "/abs/x"}}}
+	h := &LLMTaskHandler{workspaceStore: store, mcpRegistry: reg}
+
+	prov := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	ag := nativeMCPAgent(false) // agent NOT opted in
+	ag.MCPServers = []string{runtime}
+
+	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+		Task{WorkspaceID: "ws-y"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(prov.gotReq.MCPServers) != 0 {
+		t.Errorf("gate off must hand no MCP servers, got %+v", prov.gotReq.MCPServers)
+	}
+}
 
 func TestEffectiveNativeMCPExecTimeout(t *testing.T) {
 	h := &LLMTaskHandler{}
