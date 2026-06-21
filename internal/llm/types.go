@@ -33,6 +33,15 @@ type ChatRequest struct {
 	// populated only for agent task execution — never for system-model / parsing
 	// calls.
 	MCPServers []MCPServerSpec
+
+	// WorkspaceID keys the persistent per-workspace native-MCP config. Set only
+	// alongside MCPServers (native-MCP task execution).
+	WorkspaceID string
+
+	// WorkspaceDir is the workspace folder a native-MCP CLI run is confined to
+	// (working directory + sandbox scope). Optional; empty leaves the run
+	// unconfined. Set only alongside MCPServers.
+	WorkspaceDir string
 }
 
 // MCPServerSpec is a resolved MCP server definition handed to a native-MCP

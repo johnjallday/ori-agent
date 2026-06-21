@@ -262,10 +262,17 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		}
 		// Native-MCP providers (CLI agents) run their own MCP loop instead of
 		// round-tripping tool calls through ori-agent, so hand them the agent's
-		// resolved MCP server specs. SupportsTools stays false for these
-		// providers, so requestTools is ignored by them.
+		// resolved MCP server specs plus the workspace context they need to key
+		// the persistent config and confine the run. SupportsTools stays false
+		// for these providers, so requestTools is ignored by them.
 		if providerSupportsNativeMCP(provider) {
-			chatReq.MCPServers = h.resolveNativeMCPSpecs(ag)
+			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
+				chatReq.MCPServers = specs
+				chatReq.WorkspaceID = task.WorkspaceID
+				if h.workspaceStore != nil {
+					chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
+				}
+			}
 		}
 		resp, err := provider.Chat(ctx, chatReq)
 		if err != nil {
