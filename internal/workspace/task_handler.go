@@ -264,8 +264,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		// round-tripping tool calls through ori-agent, so hand them the agent's
 		// resolved MCP server specs plus the workspace context they need to key
 		// the persistent config and confine the run. SupportsTools stays false
-		// for these providers, so requestTools is ignored by them.
-		if providerSupportsNativeMCP(provider) {
+		// for these providers, so requestTools is ignored by them. Gated behind
+		// the workspace+agent opt-in (the CLI runs tools without ori's per-tool
+		// confirmation); when not opted in, the provider runs text-only as before.
+		if providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
 			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
 				chatReq.MCPServers = specs
 				chatReq.WorkspaceID = task.WorkspaceID
@@ -955,6 +957,29 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName str
 	}
 
 	return nil, false
+}
+
+// nativeMCPAllowed reports whether native-MCP CLI execution is permitted for
+// this run: it requires the workspace and the agent to both opt in (the CLI
+// runs tools outside ori-agent's per-tool confirmation gate). Defaults off.
+func (h *LLMTaskHandler) nativeMCPAllowed(workspaceID string, ag *resolvedTaskAgent) bool {
+	if h == nil || ag == nil || !ag.Settings.IsNativeMCPToolsAllowed() {
+		return false
+	}
+	if h.workspaceStore == nil {
+		return false
+	}
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return false
+	}
+	return nativeMCPGateAllowed(ws, ag)
+}
+
+// nativeMCPGateAllowed is the pure opt-in predicate: both the workspace and the
+// agent must allow native-MCP CLI tooling.
+func nativeMCPGateAllowed(ws *Workspace, ag *resolvedTaskAgent) bool {
+	return ws != nil && ws.AllowNativeMCPCLI && ag != nil && ag.Settings.IsNativeMCPToolsAllowed()
 }
 
 // providerSupportsNativeMCP reports whether the provider runs its own MCP loop

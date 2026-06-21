@@ -120,6 +120,11 @@ type Workspace struct {
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
 	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
+	// AllowNativeMCPCLI opts this workspace into letting CLI-provider agents
+	// (Claude Code / Codex) run the workspace's MCP + built-in tools natively,
+	// outside ori-agent's per-tool confirmation gate. Security-sensitive, so it
+	// defaults OFF; an agent must also opt in (Settings.AllowNativeMCPTools).
+	AllowNativeMCPCLI bool `json:"allow_native_mcp_cli,omitempty"`
 
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
