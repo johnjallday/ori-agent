@@ -179,11 +179,53 @@ func TestRunCodexExecDeadlineWrapsContextError(t *testing.T) {
 
 	_, err := provider.runCodexExec(ctx, "gpt-test", "return json", "medium", map[string]any{
 		"type": "object",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected deadline error")
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected error to wrap context deadline exceeded, got %v", err)
+	}
+}
+
+func TestBuildCodexArgs_TextOnlyUnchanged(t *testing.T) {
+	args := buildCodexArgs("gpt-5.5", "medium", "/tmp/schema.json", "/tmp/out.txt", nil)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--sandbox read-only") {
+		t.Errorf("text-only must stay read-only: %q", joined)
+	}
+	for _, bad := range []string{"--profile", "workspace-write", "approval_policy"} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("text-only must not contain %q: %q", bad, joined)
+		}
+	}
+	if !strings.Contains(joined, "--output-schema /tmp/schema.json") {
+		t.Errorf("schema flag missing: %q", joined)
+	}
+	if args[len(args)-1] != "-" {
+		t.Errorf("last arg must be '-', got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildCodexArgs_NativeMCP(t *testing.T) {
+	nat := &codexNativeMCP{ProfileName: "ori-ws-abc", WorkspaceDir: "/ws/files"}
+	args := buildCodexArgs("gpt-5.5", "high", "/tmp/schema.json", "/tmp/out.txt", nat)
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--sandbox workspace-write",
+		`approval_policy="never"`,
+		"--profile ori-ws-abc",
+		"--output-schema /tmp/schema.json", // structured output coexists with MCP
+		"--model gpt-5.5",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("native args missing %q in %q", want, joined)
+		}
+	}
+	if strings.Contains(joined, "read-only") {
+		t.Errorf("native run must not be read-only: %q", joined)
+	}
+	if args[len(args)-1] != "-" {
+		t.Errorf("last arg must be '-', got %q", args[len(args)-1])
 	}
 }

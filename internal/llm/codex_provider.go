@@ -16,7 +16,8 @@ import (
 
 // CodexProvider implements the Provider interface using the Codex CLI.
 type CodexProvider struct {
-	cliPath string
+	cliPath  string
+	mcpStore *CLIMCPConfigStore
 }
 
 // NewCodexProvider creates a new Codex provider backed by the Codex CLI.
@@ -26,7 +27,8 @@ func NewCodexProvider() (*CodexProvider, error) {
 		return nil, fmt.Errorf("codex CLI not found: %w", err)
 	}
 	return &CodexProvider{
-		cliPath: cliPath,
+		cliPath:  cliPath,
+		mcpStore: NewCLIMCPConfigStore(),
 	}, nil
 }
 
@@ -44,6 +46,7 @@ func (p *CodexProvider) Type() ProviderType {
 func (p *CodexProvider) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
 		SupportsTools:          false,
+		SupportsNativeMCP:      true,
 		SupportsStreaming:      false,
 		SupportsSystemPrompt:   true,
 		SupportsTemperature:    false,
@@ -74,7 +77,11 @@ func (p *CodexProvider) DefaultModels() []string {
 // Chat sends a chat request via the Codex CLI.
 func (p *CodexProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, nil)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, nil, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +100,11 @@ func (p *CodexProvider) StreamChat(ctx context.Context, req ChatRequest) (Stream
 // ChatWithStructuredOutput sends a chat request with a JSON schema using Codex CLI.
 func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, req.Schema)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, req.Schema, nat)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +113,29 @@ func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req Struct
 		Model:    req.Model,
 		Provider: p.Name(),
 	}, nil
+}
+
+// codexNativeMCP holds the resolved native-MCP execution context for a run.
+type codexNativeMCP struct {
+	ProfileName  string // codex --profile name (per-workspace profile)
+	WorkspaceDir string // working dir / workspace-write sandbox scope (may be empty)
+}
+
+// prepareNativeMCP ensures the per-workspace codex profile exists for the given
+// specs and returns the run context. Returns nil when there are no MCP servers
+// (text-only run), leaving the existing read-only behavior untouched.
+func (p *CodexProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*codexNativeMCP, error) {
+	if len(specs) == 0 || p.mcpStore == nil {
+		return nil, nil
+	}
+	profileName, err := p.mcpStore.EnsureCodexProfile(workspaceID, specs, DefaultCLIAgentPosture())
+	if err != nil {
+		return nil, fmt.Errorf("prepare codex mcp profile: %w", err)
+	}
+	if profileName == "" {
+		return nil, nil
+	}
+	return &codexNativeMCP{ProfileName: profileName, WorkspaceDir: workspaceDir}, nil
 }
 
 func buildCodexPrompt(systemPrompt string, messages []Message) string {
@@ -138,7 +172,44 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema any) (string, error) {
+// buildCodexArgs assembles the codex exec args. A non-nil nat selects the
+// native-MCP run (workspace-write sandbox, auto-approved, per-workspace
+// --profile supplying the MCP servers); nil keeps the read-only text-only run.
+func buildCodexArgs(model, reasoningEffort, schemaPath, outPath string, nat *codexNativeMCP) []string {
+	args := []string{
+		"exec",
+		"-c",
+		`model_reasoning_effort="` + normalizeCodexReasoningEffort(reasoningEffort) + `"`,
+		"--color",
+		"never",
+	}
+
+	if nat != nil {
+		// Native-MCP run: workspace-scoped sandbox, auto-approved (headless), and
+		// the per-workspace profile supplies mcp_servers. Codex runs its own MCP
+		// loop and returns the final text once tools have run.
+		args = append(args,
+			"--sandbox", "workspace-write",
+			"-c", `approval_policy="never"`,
+			"--profile", nat.ProfileName,
+		)
+	} else {
+		// Text-only run (unchanged): read-only, no MCP.
+		args = append(args, "--sandbox", "read-only")
+	}
+
+	args = append(args, "--skip-git-repo-check", "--output-last-message", outPath)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if schemaPath != "" {
+		args = append(args, "--output-schema", schemaPath)
+	}
+	args = append(args, "-")
+	return args
+}
+
+func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema any, nat *codexNativeMCP) (string, error) {
 	var schemaPath string
 	if schema != nil {
 		tmpSchema, err := os.CreateTemp("", "codex-schema-*.json")
@@ -170,27 +241,12 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 	_ = tmpOut.Close()
 	defer func() { _ = os.Remove(tmpOutPath) }()
 
-	args := []string{
-		"exec",
-		"-c",
-		`model_reasoning_effort="` + normalizeCodexReasoningEffort(reasoningEffort) + `"`,
-		"--color",
-		"never",
-		"--sandbox",
-		"read-only",
-		"--skip-git-repo-check",
-		"--output-last-message",
-		tmpOutPath,
-	}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	if schemaPath != "" {
-		args = append(args, "--output-schema", schemaPath)
-	}
-	args = append(args, "-")
+	args := buildCodexArgs(model, reasoningEffort, schemaPath, tmpOutPath, nat)
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
+	if nat != nil && nat.WorkspaceDir != "" {
+		cmd.Dir = nat.WorkspaceDir
+	}
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
