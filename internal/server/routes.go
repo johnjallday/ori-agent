@@ -752,6 +752,13 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
 
+	// Native-MCP CLI tooling opt-in (workspace + per-agent). Gates whether a
+	// CLI-provider agent may run workspace MCP/built-in tools natively. See
+	// internal/workspace/http_handlers_native_mcp.go.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.GetNativeMCPSettings)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPWorkspace)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPAgent)
+
 	// Action Center — cross-workspace triage of mission opportunities.
 	if s.Handlers.ActionCenter != nil {
 		mux.HandleFunc("GET /api/action-center/opportunities", s.Handlers.ActionCenter.List)

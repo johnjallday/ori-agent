@@ -730,6 +730,22 @@
                   <div id="workspace-detail-mcp-list" class="workspace-detail-mcp-list">
                     <div class="workspace-detail-empty">Loading workspace MCP bindings...</div>
                   </div>
+                  <div id="workspace-detail-native-mcp" class="workspace-detail-native-mcp d-none">
+                    <div class="workspace-detail-native-mcp-head">
+                      <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-native-mcp-ws-toggle">
+                        <label class="form-check-label" for="workspace-detail-native-mcp-ws-toggle">
+                          Run MCP tools natively in CLI agents
+                        </label>
+                      </div>
+                      <p class="workspace-detail-native-mcp-disclosure">
+                        Lets Claude Code / Codex agents run this workspace's MCP and built-in
+                        tools themselves — <strong>without Ori's per-call confirmation</strong>,
+                        sandboxed to the workspace folder. Each agent must also be enabled below.
+                      </p>
+                    </div>
+                    <div id="workspace-detail-native-mcp-agents" class="workspace-detail-native-mcp-agents"></div>
+                  </div>
                 </div>
                 <div
                   class="tab-pane fade workspace-detail-config-pane"

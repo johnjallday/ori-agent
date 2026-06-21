@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 28
+const schemaVersion = 29
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -121,6 +121,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration027NoteTags(ctx)
 	case 28:
 		return db.migration028Users(ctx)
+	case 29:
+		return db.migration029WorkspaceNativeMCPOptIn(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1200,6 +1202,25 @@ func (db *DB) migration026WorkspaceTags(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN tags TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace tags column: %w", err)
+	}
+	return nil
+}
+
+// migration029WorkspaceNativeMCPOptIn stores the per-workspace opt-in that lets
+// CLI-provider agents run MCP/built-in tools natively (mirrors workspace.json's
+// allow_native_mcp_cli into SQLite so the primary store round-trips it).
+func (db *DB) migration029WorkspaceNativeMCPOptIn(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN allow_native_mcp_cli INTEGER NOT NULL DEFAULT 0
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace allow_native_mcp_cli column: %w", err)
 	}
 	return nil
 }

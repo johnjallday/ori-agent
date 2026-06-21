@@ -6522,3 +6522,31 @@ body.task-modal-open {
   width: 18px;
   text-align: center;
 }
+
+/* Native-MCP CLI opt-in panel (workspace detail → MCP pane) */
+.workspace-detail-native-mcp {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--bs-border-color, #2a2a2a);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.workspace-detail-native-mcp-disclosure {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--bs-secondary-color, #9aa0a6);
+}
+.workspace-detail-native-mcp-agents {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workspace-detail-native-mcp-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
