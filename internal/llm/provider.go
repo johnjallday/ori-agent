@@ -71,7 +71,15 @@ const (
 // ProviderCapabilities describes what a provider supports
 type ProviderCapabilities struct {
 	// SupportsTools indicates if the provider supports function/tool calling
+	// via ori-agent's internal tool loop (tool defs in, tool calls out).
 	SupportsTools bool
+
+	// SupportsNativeMCP indicates the provider runs its own MCP loop (e.g. a CLI
+	// agent given ChatRequest.MCPServers connects to those servers and executes
+	// tool calls itself). This is independent of SupportsTools: native-MCP
+	// providers keep SupportsTools=false because they do not round-trip tool
+	// calls through ori-agent. Defaults false (only the CLI providers set it).
+	SupportsNativeMCP bool
 
 	// SupportsStreaming indicates if the provider supports streaming responses
 	SupportsStreaming bool

@@ -26,6 +26,30 @@ type ChatRequest struct {
 	// ReasoningEffort controls reasoning depth for providers that support it
 	// (e.g., Codex: low, medium, high, xhigh).
 	ReasoningEffort string
+
+	// MCPServers carries resolved MCP server specs to expose to providers that
+	// run their own native MCP loop (see ProviderCapabilities.SupportsNativeMCP).
+	// Providers that use ori-agent's internal tool loop ignore this field. It is
+	// populated only for agent task execution — never for system-model / parsing
+	// calls.
+	MCPServers []MCPServerSpec
+}
+
+// MCPServerSpec is a resolved MCP server definition handed to a native-MCP
+// provider (Claude Code / Codex) so its CLI can connect to the server directly.
+type MCPServerSpec struct {
+	// Name is the logical server name used as the MCP-config key (CLI-safe;
+	// e.g. "ori-reaper", not the colon-bearing runtime name).
+	Name string
+
+	// Command is the absolute executable to launch the stdio MCP server.
+	Command string
+
+	// Args are the command arguments.
+	Args []string
+
+	// Env are environment variables passed to the server process.
+	Env map[string]string
 }
 
 // ChatResponse represents a unified response format from all providers

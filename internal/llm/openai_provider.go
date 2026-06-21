@@ -162,6 +162,10 @@ type StructuredOutputRequest struct {
 	ReasoningEffort string
 	SchemaName      string
 	Schema          any
+
+	// MCPServers carries resolved MCP server specs for native-MCP providers
+	// (see ChatRequest.MCPServers). Left empty for system-model / parsing calls.
+	MCPServers []MCPServerSpec
 }
 
 // GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs

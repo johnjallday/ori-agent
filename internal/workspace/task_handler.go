@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -61,6 +62,10 @@ type LLMTaskHandler struct {
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]toolapi.Tool, error)
 	StartServer(string) error
+	// ListServers returns the runtime server configs (command/args/env) so a
+	// native-MCP provider can be handed the resolved specs for an agent's
+	// servers. Satisfied by *mcp.Registry.
+	ListServers() []mcp.ServerConfig
 }
 
 // UtilityToolProvider exposes native utility tools (time, weather, web search,
@@ -248,13 +253,21 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			}))
 		}
 
-		resp, err := provider.Chat(ctx, llm.ChatRequest{
+		chatReq := llm.ChatRequest{
 			Model:           modelName,
 			Messages:        conversation,
 			Temperature:     ag.Settings.Temperature,
 			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
 			Tools:           requestTools,
-		})
+		}
+		// Native-MCP providers (CLI agents) run their own MCP loop instead of
+		// round-tripping tool calls through ori-agent, so hand them the agent's
+		// resolved MCP server specs. SupportsTools stays false for these
+		// providers, so requestTools is ignored by them.
+		if providerSupportsNativeMCP(provider) {
+			chatReq.MCPServers = h.resolveNativeMCPSpecs(ag)
+		}
+		resp, err := provider.Chat(ctx, chatReq)
 		if err != nil {
 			if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
 				return "", fmt.Errorf("%s", friendlyMsg)
@@ -935,6 +948,81 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName str
 	}
 
 	return nil, false
+}
+
+// providerSupportsNativeMCP reports whether the provider runs its own MCP loop
+// (CLI agents like Claude Code / Codex). Such providers receive the agent's MCP
+// servers as resolved specs on the request rather than via the internal tool
+// loop.
+func providerSupportsNativeMCP(provider llm.Provider) bool {
+	if provider == nil {
+		return false
+	}
+	return provider.Capabilities().SupportsNativeMCP
+}
+
+// resolveNativeMCPSpecs maps the agent's runtime MCP server names to resolved
+// specs (command/args/env) for native-MCP providers. The CLI-config key uses a
+// CLI-safe alias derived from the runtime name (which contains colons). Returns
+// nil when the registry is unavailable or the agent has no MCP servers.
+func (h *LLMTaskHandler) resolveNativeMCPSpecs(ag *resolvedTaskAgent) []llm.MCPServerSpec {
+	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
+		return nil
+	}
+
+	configByName := make(map[string]mcp.ServerConfig)
+	for _, cfg := range h.mcpRegistry.ListServers() {
+		configByName[cfg.Name] = cfg
+	}
+
+	specs := make([]llm.MCPServerSpec, 0, len(ag.MCPServers))
+	for _, serverName := range ag.MCPServers {
+		name := strings.TrimSpace(serverName)
+		if name == "" {
+			continue
+		}
+		cfg, ok := configByName[name]
+		if !ok || strings.TrimSpace(cfg.Command) == "" {
+			continue
+		}
+		specs = append(specs, llm.MCPServerSpec{
+			Name:    nativeMCPAlias(name),
+			Command: cfg.Command,
+			Args:    append([]string(nil), cfg.Args...),
+			Env:     cfg.Env,
+		})
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	return specs
+}
+
+// nativeMCPAlias derives a CLI-safe MCP-config key from a runtime server name.
+// Runtime names are "ws:{workspaceID}:mcp:{server}:{bindingID}" (colon-bearing);
+// the logical server segment ("{server}") is the stable, CLI-friendly basis.
+// The segment may still contain "/" (e.g. "reaper-plugin/ori-reaper"), so all
+// chars outside [A-Za-z0-9_-] are mapped to "_" to keep the MCP-config key and
+// the resulting "mcp__<key>__<tool>" tool names valid. (Alias rules + dedup are
+// hardened in task 2.2.)
+func nativeMCPAlias(runtimeName string) string {
+	base := runtimeName
+	parts := strings.Split(runtimeName, ":")
+	if len(parts) >= 5 && parts[0] == "ws" && parts[2] == "mcp" {
+		if server := strings.TrimSpace(parts[3]); server != "" {
+			base = server
+		}
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []toolapi.Tool {
