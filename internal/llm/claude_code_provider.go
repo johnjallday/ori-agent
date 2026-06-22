@@ -112,21 +112,24 @@ type claudeNativeMCP struct {
 	WorkspaceDir string // working dir / --add-dir scope (may be empty)
 }
 
-// prepareNativeMCP ensures the per-workspace Claude MCP config exists for the
-// given specs and returns the run context. Returns nil when there are no MCP
-// servers (text-only run) — leaving the existing behavior untouched.
+// prepareNativeMCP resolves the elevated execution context. A non-empty
+// workspaceID means the agent is opted in (gate passed), so the run gets the
+// full toolset (auto-approved, confined to the workspace) even when there are
+// no MCP servers — a skill-only agent acts via the CLI's own tools (Bash/Read/
+// Write). The per-workspace --mcp-config is added only when MCP servers exist.
 func (p *ClaudeCodeProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*claudeNativeMCP, error) {
-	if len(specs) == 0 || p.mcpStore == nil {
+	if strings.TrimSpace(workspaceID) == "" {
 		return nil, nil
 	}
-	configPath, err := p.mcpStore.EnsureClaudeConfig(workspaceID, specs)
-	if err != nil {
-		return nil, fmt.Errorf("prepare claude mcp config: %w", err)
+	nat := &claudeNativeMCP{WorkspaceDir: workspaceDir}
+	if len(specs) > 0 && p.mcpStore != nil {
+		configPath, err := p.mcpStore.EnsureClaudeConfig(workspaceID, specs)
+		if err != nil {
+			return nil, fmt.Errorf("prepare claude mcp config: %w", err)
+		}
+		nat.ConfigPath = configPath
 	}
-	if configPath == "" {
-		return nil, nil
-	}
-	return &claudeNativeMCP{ConfigPath: configPath, WorkspaceDir: workspaceDir}, nil
+	return nat, nil
 }
 
 func buildClaudeCodePrompt(systemPrompt string, messages []Message) string {
@@ -181,14 +184,14 @@ func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]
 	}
 
 	if nat != nil {
-		// Native-MCP run: enable the full toolset plus the workspace's MCP
-		// servers, auto-approve tool calls (headless), and confine writes to the
-		// workspace folder. The CLI runs its own MCP loop and returns the final
-		// text once tools have run.
-		args = append(args,
-			"--permission-mode", "bypassPermissions",
-			"--mcp-config", nat.ConfigPath,
-		)
+		// Elevated run: enable the full toolset, auto-approve tool calls
+		// (headless), and confine writes to the workspace folder. A
+		// per-workspace --mcp-config is added only when MCP servers were resolved
+		// (a skill-only agent acts via the CLI's own tools).
+		args = append(args, "--permission-mode", "bypassPermissions")
+		if strings.TrimSpace(nat.ConfigPath) != "" {
+			args = append(args, "--mcp-config", nat.ConfigPath)
+		}
 		if nat.WorkspaceDir != "" {
 			args = append(args, "--add-dir", nat.WorkspaceDir)
 		}

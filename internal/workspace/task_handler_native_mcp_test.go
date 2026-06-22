@@ -109,6 +109,34 @@ func TestExecuteTaskConversation_NativeMCPGatedOff(t *testing.T) {
 	}
 }
 
+// TestExecuteTaskConversation_SkillOnlyElevated confirms a skill-only agent
+// (opted in, NO MCP servers bound) still gets the elevated posture: WorkspaceID/
+// WorkspaceDir are set so the provider runs workspace-write + network, even
+// though no MCP servers are handed over.
+func TestExecuteTaskConversation_SkillOnlyElevated(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(&Workspace{ID: "ws-s", Status: StatusActive, AllowNativeMCPCLI: true}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	reg := &stubNativeRegistry{} // no MCP servers registered
+	h := &LLMTaskHandler{workspaceStore: store, mcpRegistry: reg}
+
+	prov := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	ag := nativeMCPAgent(true) // opted in
+	ag.MCPServers = nil        // skill-only: no MCP servers bound
+
+	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+		Task{WorkspaceID: "ws-s"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if prov.gotReq.WorkspaceID != "ws-s" {
+		t.Errorf("elevated posture must set WorkspaceID even with no MCP servers, got %q", prov.gotReq.WorkspaceID)
+	}
+	if len(prov.gotReq.MCPServers) != 0 {
+		t.Errorf("skill-only run must carry no MCP servers, got %+v", prov.gotReq.MCPServers)
+	}
+}
+
 func TestEffectiveNativeMCPExecTimeout(t *testing.T) {
 	h := &LLMTaskHandler{}
 	if got := h.effectiveNativeMCPExecTimeout(); got != defaultNativeMCPExecTimeout {

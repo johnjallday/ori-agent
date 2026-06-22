@@ -48,3 +48,26 @@ func TestBuildClaudeArgs_NativeMCP(t *testing.T) {
 		t.Errorf("prompt must be last arg, got %q", args[len(args)-1])
 	}
 }
+
+// TestBuildClaudeArgs_SkillOnlyNoConfig covers a skill-only agent (opted in, no
+// MCP servers): full toolset + bypassPermissions + workspace confinement, but
+// NO --mcp-config.
+func TestBuildClaudeArgs_SkillOnlyNoConfig(t *testing.T) {
+	nat := &claudeNativeMCP{WorkspaceDir: "/ws/files"} // no ConfigPath
+	args, err := buildClaudeArgs("sonnet", "do it", nil, nat)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--permission-mode bypassPermissions", "--add-dir /ws/files"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("skill-only args missing %q in %q", want, joined)
+		}
+	}
+	if strings.Contains(joined, "--mcp-config") {
+		t.Errorf("skill-only run (no MCP) must not pass --mcp-config: %q", joined)
+	}
+	if strings.Contains(joined, "--tools  ") || strings.Contains(joined, "dontAsk") {
+		t.Errorf("elevated run must not be text-only: %q", joined)
+	}
+}

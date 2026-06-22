@@ -214,6 +214,7 @@ func TestBuildCodexArgs_NativeMCP(t *testing.T) {
 	for _, want := range []string{
 		"--sandbox workspace-write",
 		`approval_policy="never"`,
+		"sandbox_workspace_write.network_access=true", // localhost network for Web Remote etc.
 		"--profile ori-ws-abc",
 		"--output-schema /tmp/schema.json", // structured output coexists with MCP
 		"--model gpt-5.5",
@@ -227,5 +228,29 @@ func TestBuildCodexArgs_NativeMCP(t *testing.T) {
 	}
 	if args[len(args)-1] != "-" {
 		t.Errorf("last arg must be '-', got %q", args[len(args)-1])
+	}
+}
+
+// TestBuildCodexArgs_SkillOnlyNoProfile covers a skill-only agent (opted in, no
+// MCP servers): elevated posture (workspace-write + network + auto-approve) but
+// NO --profile.
+func TestBuildCodexArgs_SkillOnlyNoProfile(t *testing.T) {
+	nat := &codexNativeMCP{WorkspaceDir: "/ws/files"} // no ProfileName
+	args := buildCodexArgs("gpt-5.5", "medium", "", "/tmp/out.txt", nat)
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--sandbox workspace-write",
+		`approval_policy="never"`,
+		"sandbox_workspace_write.network_access=true",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("skill-only args missing %q in %q", want, joined)
+		}
+	}
+	if strings.Contains(joined, "--profile") {
+		t.Errorf("skill-only run (no MCP) must not pass --profile: %q", joined)
+	}
+	if strings.Contains(joined, "read-only") {
+		t.Errorf("elevated run must not be read-only: %q", joined)
 	}
 }
