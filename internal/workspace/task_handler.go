@@ -84,7 +84,8 @@ type WorkspaceToolFactory func(workspaceID, agentName string) []toolapi.Tool
 
 type resolvedTaskAgent struct {
 	*agent.Agent
-	MCPServers []string
+	MCPServers      []string
+	EffectiveSkills []ResolvedSkill
 }
 
 const (
@@ -227,6 +228,10 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	// Use a task-specific system prompt that's more conservative about tool use
 	// The agent's system prompt may encourage aggressive tool use which is inappropriate for workspace tasks
 	taskSystemPrompt := h.buildTaskSystemPrompt()
+	// Inject the agent's resolved (enabled + bound) skills so task/orchestration
+	// runs get skill instructions too, matching the chat path. Skill-less agents
+	// add nothing (AppendSkillPromptsFromResolved returns the base unchanged).
+	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
