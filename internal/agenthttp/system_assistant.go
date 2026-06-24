@@ -54,6 +54,7 @@ func ensureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, s
 	if _, exists := st.GetAgent(systemAssistantAgentName); !exists {
 		cfg := &store.CreateAgentConfig{
 			Type:         agent.TypeGeneral,
+			Role:         types.RoleOrchestrator,
 			SystemPrompt: systemAssistantPrompt,
 		}
 		if hasSystemModel {
@@ -78,6 +79,13 @@ func ensureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, s
 	}
 	if ag.Status == "" {
 		ag.Status = types.AgentStatusActive
+		changed = true
+	}
+	// The system assistant is the primary orchestrator; keep its role aligned
+	// with that purpose so orchestration routing and the UI badge agree with
+	// the "System orchestrator" description.
+	if ag.Role != types.RoleOrchestrator {
+		ag.Role = types.RoleOrchestrator
 		changed = true
 	}
 	if strings.TrimSpace(ag.Settings.SystemPrompt) == "" {
