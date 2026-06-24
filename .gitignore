@@ -55,6 +55,8 @@ test_plugins/
 local_plugin_registry.json
 plugin_registry_cache.json
 marketplace_cache_*.json
+# Local installed-plugins store (installed.json + downloaded src); machine-local state
+plugins/
 cache/
 tmp/
 temp/
@@ -170,6 +172,10 @@ ori-data/agents/*/agent_settings.json
 # User uploads and custom templates
 uploads/
 workflow_templates/
+
+# Local-only design drafts (kept out of the tracked docs/ tree)
+docs/ORI_MD_SPEC.md
+docs/design/
 
 # Misplaced generated protobuf files
 github.com/
