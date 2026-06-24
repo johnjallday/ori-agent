@@ -101,12 +101,14 @@ func (m *Manager) updateSkillState(agentName, skillName string, updateFn func(*S
 
 	state, exists := registry.Skills[key]
 	if !exists {
-		// Skills are enabled by default unless an agent-level default is defined.
+		// Opt-in model: skills are disabled by default unless an agent-level
+		// ("*") default says otherwise. Seeding disabled keeps side-effect
+		// updates (e.g. trusting a skill) from implicitly enabling it.
 		if defaultState, ok := registry.Skills["*"]; ok {
 			state.Enabled = defaultState.Enabled
 			state.Trusted = defaultState.Trusted
 		} else {
-			state.Enabled = true
+			state.Enabled = false
 		}
 	}
 	updateFn(&state)

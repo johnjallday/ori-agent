@@ -64,7 +64,6 @@ func (m *Manager) CreateSkill(agentName string, input SkillInput) (Skill, error)
 	if err != nil {
 		return Skill{}, err
 	}
-	skill.Enabled = true
 	return skill, nil
 }
 
@@ -87,7 +86,17 @@ func (m *Manager) UpdateSkill(agentName, skillName string, input SkillInput) (Sk
 		return Skill{}, err
 	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	return m.updateSkillAtPath(skillPath, skillDir, skillName, SourceAgent, input)
+	skill, err := m.updateSkillAtPath(skillPath, skillDir, skillName, SourceAgent, input)
+	if err != nil {
+		return Skill{}, err
+	}
+	// Editing content must not change enablement; report the skill's real
+	// per-agent state (opt-in default for skills without explicit state).
+	resolved := []Skill{skill}
+	if stateErr := m.applySkillState(agentName, resolved); stateErr == nil {
+		skill = resolved[0]
+	}
+	return skill, nil
 }
 
 func (m *Manager) UpdateSkillAtPath(source, skillPath, skillName string, input SkillInput) (Skill, error) {
@@ -142,7 +151,8 @@ func (m *Manager) updateSkillAtPath(skillPath, skillDir, skillName, source strin
 	if err != nil {
 		return Skill{}, err
 	}
-	skill.Enabled = true
+	// Editing a skill's content must not change its enabled state; callers with
+	// agent context resolve the real state via applySkillState.
 	return skill, nil
 }
 

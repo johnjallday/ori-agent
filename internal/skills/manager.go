@@ -439,6 +439,8 @@ func (m *Manager) loadSkillWithPrompt(skill Skill) (*Skill, error) {
 
 func (m *Manager) applySkillState(agentName string, skills []Skill) error {
 	if agentName == "" {
+		// No agent context (global catalog / chat slash-command picker):
+		// surface every skill as available rather than per-agent enabled.
 		for i := range skills {
 			if !skills[i].Enabled {
 				skills[i].Enabled = true
@@ -466,9 +468,9 @@ func (m *Manager) applySkillState(agentName string, skills []Skill) error {
 			skills[i].Trusted = defaultState.Trusted
 			continue
 		}
-		if !skills[i].Enabled {
-			skills[i].Enabled = true
-		}
+		// Opt-in model: with no explicit per-skill state and no agent-wide
+		// ("*") default, keep the skill's loaded default. File-based skills load
+		// disabled (zero value); built-in CLI-agent skills load enabled.
 	}
 
 	return nil
