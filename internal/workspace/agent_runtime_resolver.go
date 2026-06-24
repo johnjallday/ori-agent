@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -10,11 +11,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 const synthesizedFilesystemBindingID = "workspace-filesystem"
 const synthesizedWorkspaceSettingsSkillBindingPrefix = "workspace-settings-"
+
+var ErrAgentPaused = errors.New("agent is paused")
 
 type runtimeMCPRegistry interface {
 	UpsertServer(config mcp.ServerConfig) error
@@ -121,6 +125,9 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	}
 	if baseAgent == nil {
 		return nil, fmt.Errorf("agent %s not found", agentName)
+	}
+	if baseAgent.Status == types.AgentStatusDisabled {
+		return nil, fmt.Errorf("%w: %s", ErrAgentPaused, agentName)
 	}
 
 	clonedAgent := cloneRuntimeAgent(baseAgent)

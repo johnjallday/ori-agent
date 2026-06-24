@@ -2953,12 +2953,12 @@ textarea.form-control:focus {
 }
 
 .dashboard-progress-card .progress,
-#assistantProgressWidget .progress {
+.sidebar-assistant-progress .progress {
   background: rgba(92, 92, 94, 0.2) !important;
 }
 
 .dashboard-progress-card .progress-bar,
-#assistantProgressWidget .progress-bar {
+.sidebar-assistant-progress .progress-bar {
   background: linear-gradient(90deg, #1F6B4E 0%, #2A8762 100%) !important;
 }
 

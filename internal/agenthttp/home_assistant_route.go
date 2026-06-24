@@ -534,7 +534,13 @@ func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssi
 		if !ok || baseAgent == nil {
 			continue
 		}
+		if baseAgent.Status == types.AgentStatusDisabled {
+			continue
+		}
 		ag := h.resolveAgentForContext(name, baseAgent, routeContext)
+		if ag == nil || ag.Status == types.AgentStatusDisabled {
+			continue
+		}
 
 		candidate := scoreAgentForIntent(name, current, ag, intent, prompt)
 		if isBetterMatch(candidate, best, current) {
@@ -561,6 +567,9 @@ func (h *HomeAssistantRouteHandler) resolveAgentForContext(
 	}
 
 	resolved, err := h.RuntimeResolver.ResolveAgentForWorkspace(agentName, routeContext.WorkspaceID, "")
+	if errors.Is(err, workspace.ErrAgentPaused) {
+		return nil
+	}
 	if err != nil || resolved == nil || resolved.Agent == nil {
 		return &resolvedRouteAgent{Agent: baseAgent}
 	}

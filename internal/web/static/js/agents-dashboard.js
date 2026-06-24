@@ -199,8 +199,8 @@ function applyFiltersAndRender() {
   });
 
   if (dashboardFilteredAgents.length === 0) {
-    renderSummary({ needsAttention: 0, ready: 0, paused: 0, total: 0 });
-    renderHealthMessage(0, 0);
+    renderSummary({ needsAttention: 0, ready: 0, disabled: 0, total: 0 });
+    renderHealthMessage(0, 0, 0);
     showEmptyState({
       searchTerm: rawSearchTerm,
       hasAgents: dashboardAgents.length > 0
@@ -209,17 +209,17 @@ function applyFiltersAndRender() {
   }
 
   const buckets = createBuckets(dashboardFilteredAgents);
+  const disabledCount = buckets.ready.filter((agent) => String(agent?.status || '') === 'disabled').length;
   renderSummary({
     needsAttention: buckets.needsAttention.length,
-    ready: buckets.ready.length,
-    paused: buckets.paused.length,
+    ready: buckets.ready.length - disabledCount,
+    disabled: disabledCount,
     total: dashboardFilteredAgents.length
   });
 
-  renderHealthMessage(buckets.needsAttention.length, dashboardFilteredAgents.length);
+  renderHealthMessage(buckets.needsAttention.length, dashboardFilteredAgents.length, disabledCount);
   renderBucket('bucketNeedsAttention', buckets.needsAttention, 'No issues detected');
-  renderBucket('bucketReady', buckets.ready, 'No ready agents');
-  renderBucket('bucketPaused', buckets.paused, 'No paused agents');
+  renderBucket('bucketReady', buckets.ready, 'No agents');
   updateBucketCounters(buckets);
   showBoard();
 }
@@ -227,8 +227,7 @@ function applyFiltersAndRender() {
 function createBuckets(agents) {
   const buckets = {
     needsAttention: [],
-    ready: [],
-    paused: []
+    ready: []
   };
 
   const sortedAgents = [...agents].sort((a, b) => {
@@ -245,11 +244,6 @@ function createBuckets(agents) {
       return;
     }
 
-    if (health.kind === 'paused') {
-      buckets.paused.push(agent);
-      return;
-    }
-
     buckets.ready.push(agent);
   });
 
@@ -259,7 +253,7 @@ function createBuckets(agents) {
 function renderSummary(summary) {
   const countNeedsAttention = document.getElementById('countNeedsAttention');
   const countReady = document.getElementById('countReady');
-  const countPaused = document.getElementById('countPaused');
+  const countDisabled = document.getElementById('countDisabled');
   const countTotal = document.getElementById('countTotal');
 
   if (countNeedsAttention) {
@@ -270,8 +264,8 @@ function renderSummary(summary) {
     countReady.textContent = String(summary.ready);
   }
 
-  if (countPaused) {
-    countPaused.textContent = String(summary.paused);
+  if (countDisabled) {
+    countDisabled.textContent = String(summary.disabled);
   }
 
   if (countTotal) {
@@ -279,7 +273,7 @@ function renderSummary(summary) {
   }
 }
 
-function renderHealthMessage(needsAttentionCount, totalCount) {
+function renderHealthMessage(needsAttentionCount, totalCount, disabledCount) {
   const healthMessage = document.getElementById('healthMessage');
   if (!healthMessage) {
     return;
@@ -300,6 +294,12 @@ function renderHealthMessage(needsAttentionCount, totalCount) {
     return;
   }
 
+  if (disabledCount > 0) {
+    healthMessage.classList.add('warn');
+    healthMessage.textContent = `${disabledCount} agent${disabledCount === 1 ? ' is' : 's are'} disabled. Turn Enabled on to make ${disabledCount === 1 ? 'it' : 'them'} available for chats and routing.`;
+    return;
+  }
+
   healthMessage.classList.remove('warn');
   healthMessage.textContent = 'All agents look healthy and ready to chat.';
 }
@@ -307,8 +307,7 @@ function renderHealthMessage(needsAttentionCount, totalCount) {
 function updateBucketCounters(buckets) {
   const map = [
     ['bucketNeedsAttentionCount', buckets.needsAttention.length],
-    ['bucketReadyCount', buckets.ready.length],
-    ['bucketPausedCount', buckets.paused.length]
+    ['bucketReadyCount', buckets.ready.length]
   ];
 
   map.forEach(([id, value]) => {
@@ -348,14 +347,18 @@ function createAgentCard(agent) {
   const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
   const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
   const health = getHealthState(agent);
+  const isDisabled = health.kind === 'disabled';
   const chatDisabled = health.kind === 'needs-setup';
-  const primaryAction = chatDisabled ? 'setup' : 'chat';
+  const primaryAction = chatDisabled ? 'setup' : (isDisabled ? 'disabled' : 'chat');
   const primaryLabel = chatDisabled ? 'Setup' : 'Chat';
-  const pauseLabel = health.kind === 'paused' ? 'Resume' : 'Pause';
+  const primaryDisabledAttr = isDisabled
+    ? 'disabled title="Turn Enabled on before starting a chat."'
+    : '';
+  const enabledCheckedAttr = isDisabled ? '' : 'checked';
   const isSystemAgent = isSystemAssistantAgentName(name);
   const deleteDisabledAttr = isSystemAgent
-    ? 'disabled title="System assistant cannot be deleted."'
-    : '';
+    ? 'disabled title="System assistant cannot be deleted." aria-disabled="true"'
+    : 'title="Delete agent"';
 
   card.innerHTML = `
     <div class="ops-card-top">
@@ -368,12 +371,22 @@ function createAgentCard(agent) {
         <p class="ops-agent-purpose" title="${safeEscapeHtml(description)}">${safeEscapeHtml(description)}</p>
         <div class="ops-agent-time">Last active: ${safeEscapeHtml(formatDate(agent?.statistics?.last_active || ''))}</div>
       </div>
+      <div class="ops-card-controls">
+        <label class="ops-enable-toggle" title="Allow this agent to start chats and receive routing">
+          <span class="ops-enable-toggle-text">Enabled</span>
+          <input data-action="enabled" type="checkbox" ${enabledCheckedAttr} aria-label="Enable ${safeEscapeHtml(name)}">
+          <span class="ops-enable-switch" aria-hidden="true"></span>
+        </label>
+        <button class="ops-icon-btn danger" data-action="delete" type="button" aria-label="Delete agent" ${deleteDisabledAttr}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="ops-card-actions">
-      <button class="ops-action-btn primary" data-action="primary" type="button">${safeEscapeHtml(primaryLabel)}</button>
+      <button class="ops-action-btn primary" data-action="primary" type="button" ${primaryDisabledAttr}>${safeEscapeHtml(primaryLabel)}</button>
       <button class="ops-action-btn" data-action="details" type="button" aria-haspopup="dialog" aria-controls="agentDrawer">Details</button>
-      <button class="ops-action-btn" data-action="pause" type="button">${safeEscapeHtml(pauseLabel)}</button>
-      <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
     </div>
     <div class="config-only">
       <div>Type: ${safeEscapeHtml(typeLabel)}</div>
@@ -385,7 +398,7 @@ function createAgentCard(agent) {
 
   const primaryButton = card.querySelector('[data-action="primary"]');
   const detailsButton = card.querySelector('[data-action="details"]');
-  const pauseButton = card.querySelector('[data-action="pause"]');
+  const enabledToggle = card.querySelector('[data-action="enabled"]');
   const deleteButton = card.querySelector('[data-action="delete"]');
 
   if (primaryButton) {
@@ -396,6 +409,10 @@ function createAgentCard(agent) {
     primaryButton.addEventListener('click', async () => {
       if (primaryAction === 'setup') {
         openAgentEditor(name);
+        return;
+      }
+      if (primaryAction === 'disabled') {
+        notifyError(`Agent "${name}" is disabled. Turn Enabled on before starting a chat.`);
         return;
       }
 
@@ -410,9 +427,9 @@ function createAgentCard(agent) {
     });
   }
 
-  if (pauseButton) {
-    pauseButton.addEventListener('click', async () => {
-      await togglePauseAgent(name, pauseButton);
+  if (enabledToggle) {
+    enabledToggle.addEventListener('change', async () => {
+      await toggleAgentEnabled(name, enabledToggle);
     });
   }
 
@@ -431,7 +448,7 @@ function createAgentCard(agent) {
 }
 
 function openAgentEditor(agentName) {
-  window.location.href = `/agents-edit.html?name=${encodeURIComponent(agentName)}`;
+  window.location.href = `/agents/${encodeURIComponent(agentName)}`;
 }
 
 async function openChatWithAgent(agentName, button) {
@@ -443,17 +460,12 @@ async function openChatWithAgent(agentName, button) {
 
   try {
     const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
-    let resumedAgent = false;
     if (String(agent?.status || '') === 'disabled') {
-      await updateAgentStatus(agentName, 'active');
-      resumedAgent = true;
+      notifyError(`Agent "${agentName}" is disabled. Turn Enabled on before starting a chat.`);
+      return;
     }
 
     await showChatSessionModalForAgent(agentName);
-
-    if (resumedAgent) {
-      await loadAgents();
-    }
   } catch (error) {
     console.error('Failed to open chat with agent:', error);
     notifyError(error.message || `Failed to open chat with ${agentName}`);
@@ -503,32 +515,30 @@ async function showChatSessionModalForAgent(agentName) {
   }
 }
 
-async function togglePauseAgent(agentName, button) {
+async function toggleAgentEnabled(agentName, toggle) {
   const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
   if (!agent) {
     return;
   }
 
-  const currentlyPaused = String(agent?.status || '') === 'disabled';
-  const nextStatus = currentlyPaused ? 'active' : 'disabled';
-  const originalText = button.textContent;
+  const shouldEnable = Boolean(toggle.checked);
+  const nextStatus = shouldEnable ? 'active' : 'disabled';
 
-  button.disabled = true;
-  button.textContent = currentlyPaused ? 'Resuming…' : 'Pausing…';
+  toggle.disabled = true;
 
   try {
     await updateAgentStatus(agentName, nextStatus);
-    notifySuccess(`Agent "${agentName}" ${currentlyPaused ? 'resumed' : 'paused'}.`);
+    notifySuccess(`Agent "${agentName}" ${shouldEnable ? 'enabled' : 'disabled'}.`);
     await loadAgents();
 
     if (selectedAgentName === agentName) {
       await openAgentDrawer(agentName);
     }
   } catch (error) {
-    console.error('Failed to toggle pause status:', error);
+    console.error('Failed to toggle enabled status:', error);
     notifyError(error.message || `Failed to update ${agentName}`);
-    button.disabled = false;
-    button.textContent = originalText;
+    toggle.checked = !shouldEnable;
+    toggle.disabled = false;
   }
 }
 
@@ -570,10 +580,12 @@ async function deleteAgentFromDashboard(agentName, button) {
     return;
   }
 
-  const originalText = button?.textContent || 'Delete';
+  const originalLabel = button?.getAttribute('aria-label') || 'Delete agent';
+  const originalTitle = button?.getAttribute('title') || '';
   if (button) {
     button.disabled = true;
-    button.textContent = 'Deleting…';
+    button.setAttribute('aria-label', 'Deleting agent');
+    button.setAttribute('title', 'Deleting agent');
   }
 
   try {
@@ -599,7 +611,12 @@ async function deleteAgentFromDashboard(agentName, button) {
   } finally {
     if (button && button.isConnected) {
       button.disabled = false;
-      button.textContent = originalText;
+      button.setAttribute('aria-label', originalLabel);
+      if (originalTitle) {
+        button.setAttribute('title', originalTitle);
+      } else {
+        button.removeAttribute('title');
+      }
     }
   }
 }
@@ -865,12 +882,12 @@ function getHealthState(agent) {
     return { kind: 'error', label: 'Error' };
   }
 
-  if (!String(agent?.model || '').trim()) {
-    return { kind: 'needs-setup', label: 'Needs Setup' };
+  if (status === 'disabled') {
+    return { kind: 'disabled', label: 'Disabled' };
   }
 
-  if (status === 'disabled') {
-    return { kind: 'paused', label: 'Paused' };
+  if (!String(agent?.model || '').trim()) {
+    return { kind: 'needs-setup', label: 'Needs Setup' };
   }
 
   if (status === 'active') {
@@ -1044,17 +1061,12 @@ function clearDashboardSearch() {
 window.closeAgentDrawer = closeAgentDrawer;
 
 function syncDrawerActionLinks(agentName) {
-  const detailLink = document.getElementById('drawerOpenFullLink');
   const editLink = document.getElementById('drawerEditLink');
-
-  if (detailLink) {
-    detailLink.href = agentName ? `/agents/${encodeURIComponent(agentName)}` : '/agents';
-  }
 
   if (editLink) {
     editLink.href = agentName
-      ? `/agents-edit.html?name=${encodeURIComponent(agentName)}`
-      : '/agents-edit.html';
+      ? `/agents/${encodeURIComponent(agentName)}`
+      : '/agents';
   }
 }
 

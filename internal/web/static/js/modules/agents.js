@@ -11,6 +11,7 @@ let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
+const SYSTEM_ASSISTANT_AGENT_NAME = 'Ori';
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 const agentCreationCapabilityState = {
   mcpServers: [],
@@ -1421,6 +1422,10 @@ function displayAgents(agents, currentAgent) {
     if (nameA === currentAgent) return -1;
     if (nameB === currentAgent) return 1;
 
+    // Keep the system assistant visible because it owns the merged progress UI.
+    if (isSystemAssistantAgentName(nameA)) return -1;
+    if (isSystemAssistantAgentName(nameB)) return 1;
+
     // Then sort alphabetically
     return nameA.localeCompare(nameB);
   });
@@ -1491,6 +1496,10 @@ function renderAgents() {
   // Setup accordion listeners after rendering
   setupAccordionListeners();
 
+  if (typeof EventBus !== 'undefined') {
+    EventBus.emit('agents:rendered', { count: agentsToShow.length });
+  }
+
   // Load settings for the current agent accordion when it's expanded
   agentsToShow.forEach(agent => {
     const agentName = typeof agent === 'string' ? agent : agent.name;
@@ -1521,6 +1530,14 @@ function getAgentName(agent) {
 
 function getAgentType(agent) {
   return typeof agent === 'string' ? 'tool-calling' : (agent?.type || 'tool-calling');
+}
+
+function getAgentStatus(agent) {
+  return typeof agent === 'string' ? '' : String(agent?.status || '').trim();
+}
+
+function isSystemAssistantAgentName(agentName) {
+  return String(agentName || '').trim().toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase();
 }
 
 function normalizeAgentEvolution(agent) {
@@ -1571,12 +1588,33 @@ function renderAgentEvolutionSummary(evolution) {
   `;
 }
 
+function renderAssistantProgressSlot() {
+  if (!window.oriFeatures?.evolutionEnabled) {
+    return '';
+  }
+
+  return `
+    <div class="sidebar-assistant-progress d-none" data-assistant-progress-widget aria-live="polite">
+      <div class="sidebar-assistant-progress-meta">
+        <span class="sidebar-assistant-rank-badge badge" data-assistant-rank-badge>Novice</span>
+        <span class="sidebar-assistant-level" data-assistant-level-value>Level 0</span>
+        <span class="sidebar-assistant-xp" data-assistant-xp-value>0 XP</span>
+      </div>
+      <div class="progress">
+        <div class="progress-bar" data-assistant-xp-progress-bar role="progressbar" style="width: 0%;" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+    </div>
+  `;
+}
+
 // Create agent element with accordion
 function createAgentElement(agent, currentAgent) {
   const agentName = getAgentName(agent);
   const agentType = getAgentType(agent);
   const evolution = normalizeAgentEvolution(agent);
   const isCurrentAgent = agentName === currentAgent;
+  const isSystemAssistant = isSystemAssistantAgentName(agentName);
+  const isDisabled = getAgentStatus(agent) === 'disabled';
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
 
   // Format type label
@@ -1598,7 +1636,23 @@ function createAgentElement(agent, currentAgent) {
   const safeAgentNameJs = escapeJs(agentName);
   const safeAgentNameAttr = escapeAttr(agentName);
   const safeTypeLabel = escapeHtml(typeLabel);
-  const evolutionSummary = renderAgentEvolutionSummary(evolution);
+  const evolutionSummary = isSystemAssistant ? renderAssistantProgressSlot() : renderAgentEvolutionSummary(evolution);
+  const disabledBadge = isDisabled
+    ? '<span class="badge" style="background: rgba(234, 179, 8, 0.16); color: #ca8a04; font-size: 0.62rem;">Disabled</span>'
+    : '';
+  const newChatAction = isDisabled
+    ? `<span class="modern-btn modern-btn-secondary px-2 py-1 disabled" title="Enable this agent before starting a chat" aria-disabled="true" style="font-size: 0.75rem; cursor: not-allowed; opacity: 0.55;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;" aria-hidden="true">
+          <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+        </svg>
+        Disabled
+      </span>`
+    : `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); newChatWithAgent('${safeAgentNameJs}')" title="Start new chat with this agent" style="font-size: 0.75rem; cursor: pointer;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;" aria-hidden="true">
+          <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+        </svg>
+        New Chat
+      </span>`;
 
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
@@ -1613,16 +1667,12 @@ function createAgentElement(agent, currentAgent) {
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
             <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
+            ${disabledBadge}
             ${evolutionSummary}
           </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
-          <span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); newChatWithAgent('${safeAgentNameJs}')" title="Start new chat with this agent" style="font-size: 0.75rem; cursor: pointer;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;">
-              <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
-            </svg>
-            New Chat
-          </span>
+          ${newChatAction}
           <span class="sidebar-agent-delete" onclick="event.stopPropagation(); deleteAgent('${safeAgentNameJs}')" title="Delete agent" role="button" tabindex="0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>

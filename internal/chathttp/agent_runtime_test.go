@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -117,6 +119,27 @@ func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalType(t *testing.T
 	}
 	if resolved.Type != "general" {
 		t.Fatalf("expected workspace entry agent to keep original type 'general', got %q", resolved.Type)
+	}
+}
+
+func TestResolveEffectiveAgent_RejectsPausedAgent(t *testing.T) {
+	st := newPreflightStore("Paused Agent", &agent.Agent{Status: types.AgentStatusDisabled})
+	h := NewHandler(st, nil)
+
+	resolved, err := h.resolveEffectiveAgent("Paused Agent", normalizedChatRouteContext{})
+	if !errors.Is(err, errAgentPaused) {
+		t.Fatalf("expected errAgentPaused, got resolved=%v err=%v", resolved, err)
+	}
+}
+
+func TestResolveEffectiveAgent_DoesNotFallbackWhenWorkspaceAgentIsPaused(t *testing.T) {
+	st := newPreflightStore("Workspace Agent", &agent.Agent{})
+	h := NewHandler(st, nil)
+	h.SetRuntimeResolver(&stubChatRuntimeResolver{err: workspace.ErrAgentPaused})
+
+	resolved, err := h.resolveEffectiveAgent("Workspace Agent", normalizedChatRouteContext{WorkspaceID: "workspace-1"})
+	if !errors.Is(err, errAgentPaused) {
+		t.Fatalf("expected errAgentPaused, got resolved=%v err=%v", resolved, err)
 	}
 }
 

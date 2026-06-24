@@ -1128,13 +1128,14 @@ const sessionManager = {
     if (!agentSelect) return;
 
     const normalizedAgents = Array.isArray(agents) ? agents : [];
-    if (normalizedAgents.length === 0) {
+    const availableAgents = normalizedAgents.filter((agent) => String(agent?.status || '') !== 'disabled');
+    if (availableAgents.length === 0) {
       agentSelect.innerHTML = `<option value="">${this.escapeHtml(emptyLabel)}</option>`;
       agentSelect.disabled = true;
       return;
     }
 
-    agentSelect.innerHTML = normalizedAgents
+    agentSelect.innerHTML = availableAgents
       .map((agent) => `<option value="${this.escapeHtml(agent.name)}">${this.escapeHtml(agent.name)}</option>`)
       .join('');
     agentSelect.disabled = false;
@@ -1587,7 +1588,8 @@ const sessionManager = {
       result.push({
         name,
         model: isString ? '' : String(agent?.model || '').trim(),
-        description: isString ? '' : String(agent?.description || '').trim()
+        description: isString ? '' : String(agent?.description || '').trim(),
+        status: isString ? '' : String(agent?.status || '').trim()
       });
     });
 
@@ -1741,7 +1743,10 @@ const sessionManager = {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create session');
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.message || errorBody?.error || 'Failed to create session');
+      }
 
       const data = await response.json();
       if (data.session) {
@@ -1889,7 +1894,10 @@ const sessionManager = {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create session');
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.message || errorBody?.error || 'Failed to create session');
+      }
 
       const data = await response.json();
       if (data.session) {

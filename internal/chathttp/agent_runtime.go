@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,8 +11,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+var errAgentPaused = errors.New("agent is paused")
 
 type chatRuntimeResolver interface {
 	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
@@ -42,6 +46,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		if !ok || baseAgent == nil {
 			return nil, fmt.Errorf("agent '%s' not found", agentName)
 		}
+		if isAgentPaused(baseAgent) {
+			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
+		}
 		baseAgent = cloneAgentForChat(baseAgent)
 		result := &resolvedChatAgent{Agent: baseAgent}
 		h.attachWorkspaceTools(result, agentName, routeCtx)
@@ -50,6 +57,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 
 	resolved, err := h.runtimeResolver.ResolveAgentForWorkspace(agentName, routeCtx.WorkspaceID, "")
 	if resolved != nil && resolved.Agent != nil {
+		if isAgentPaused(resolved.Agent) {
+			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
+		}
 		result := &resolvedChatAgent{
 			Agent:      cloneAgentForChat(resolved.Agent),
 			MCPServers: append([]string{}, resolved.MCPServers...),
@@ -62,6 +72,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	}
 
 	if err != nil {
+		if errors.Is(err, workspace.ErrAgentPaused) {
+			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
+		}
 		logger.Warn("Failed to resolve workspace runtime MCP configuration for chat; falling back to base agent", logger.Fields{
 			"agent":        agentName,
 			"workspace_id": routeCtx.WorkspaceID,
@@ -72,11 +85,18 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	if !ok || baseAgent == nil {
 		return nil, fmt.Errorf("agent '%s' not found", agentName)
 	}
+	if isAgentPaused(baseAgent) {
+		return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
+	}
 	baseAgent = cloneAgentForChat(baseAgent)
 
 	result := &resolvedChatAgent{Agent: baseAgent}
 	h.attachWorkspaceTools(result, agentName, routeCtx)
 	return result, nil
+}
+
+func isAgentPaused(ag *agent.Agent) bool {
+	return ag != nil && ag.Status == types.AgentStatusDisabled
 }
 
 // attachWorkspaceTools adds workspace-scoped tools to a resolved agent when

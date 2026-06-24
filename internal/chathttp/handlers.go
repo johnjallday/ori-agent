@@ -1118,6 +1118,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
 		if err != nil {
+			if errors.Is(err, errAgentPaused) {
+				orihttp.Conflict(w, fmt.Sprintf("Agent %q is disabled. Turn Enabled on before starting a chat or running tools.", current))
+				return
+			}
 			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 			return
 		}
@@ -1182,6 +1186,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
 	if err != nil {
+		if errors.Is(err, errAgentPaused) {
+			orihttp.Conflict(w, fmt.Sprintf("Agent %q is disabled. Turn Enabled on before sending messages.", current))
+			return
+		}
 		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 		return
 	}
