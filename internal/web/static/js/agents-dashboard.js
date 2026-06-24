@@ -359,6 +359,15 @@ function createAgentCard(agent) {
   const deleteDisabledAttr = isSystemAgent
     ? 'disabled title="System assistant cannot be deleted." aria-disabled="true"'
     : 'title="Delete agent"';
+  const enableToggleDisabledAttr = isSystemAgent
+    ? 'disabled aria-disabled="true"'
+    : '';
+  const enableToggleTitle = isSystemAgent
+    ? 'The system assistant is always available and cannot be disabled.'
+    : 'Allow this agent to start chats and receive routing';
+  const systemBadge = isSystemAgent
+    ? '<span class="ops-system-pill" title="Primary system assistant — always available for chat and routing.">System · Primary</span>'
+    : '';
 
   card.innerHTML = `
     <div class="ops-card-top">
@@ -367,14 +376,15 @@ function createAgentCard(agent) {
         <div class="ops-agent-name-row">
           <h4 class="ops-agent-name" title="${safeEscapeHtml(name)}">${safeEscapeHtml(name)}</h4>
           <span class="ops-health-pill ${safeEscapeHtml(health.kind)}">${safeEscapeHtml(health.label)}</span>
+          ${systemBadge}
         </div>
         <p class="ops-agent-purpose" title="${safeEscapeHtml(description)}">${safeEscapeHtml(description)}</p>
         <div class="ops-agent-time">Last active: ${safeEscapeHtml(formatDate(agent?.statistics?.last_active || ''))}</div>
       </div>
       <div class="ops-card-controls">
-        <label class="ops-enable-toggle" title="Allow this agent to start chats and receive routing">
+        <label class="ops-enable-toggle" title="${safeEscapeHtml(enableToggleTitle)}">
           <span class="ops-enable-toggle-text">Enabled</span>
-          <input data-action="enabled" type="checkbox" ${enabledCheckedAttr} aria-label="Enable ${safeEscapeHtml(name)}">
+          <input data-action="enabled" type="checkbox" ${enabledCheckedAttr} ${enableToggleDisabledAttr} aria-label="Enable ${safeEscapeHtml(name)}">
           <span class="ops-enable-switch" aria-hidden="true"></span>
         </label>
         <button class="ops-icon-btn danger" data-action="delete" type="button" aria-label="Delete agent" ${deleteDisabledAttr}>

@@ -446,6 +446,12 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// The system assistant must always remain available for routing and chat.
+	if isSystemAssistantAgent(agentName) && req.Status == string(types.AgentStatusDisabled) {
+		orihttp.BadRequest(w, "system assistant cannot be disabled")
+		return
+	}
+
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
 		if h.cliAgentRegistry != nil {
