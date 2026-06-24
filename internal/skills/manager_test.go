@@ -182,7 +182,7 @@ func TestListSkills_PersonalSkillDuplicateDoesNotOverrideLocal(t *testing.T) {
 	}
 }
 
-func TestListSkills_DefaultEnabledWithoutRegistry(t *testing.T) {
+func TestListSkills_DefaultDisabledWithoutRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentStorePath := filepath.Join(tmpDir, "agents.json")
 	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
@@ -200,8 +200,8 @@ func TestListSkills_DefaultEnabledWithoutRegistry(t *testing.T) {
 	if len(skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(skills))
 	}
-	if !skills[0].Enabled {
-		t.Fatalf("expected skill to default enabled when no registry is present")
+	if skills[0].Enabled {
+		t.Fatalf("expected skill to default disabled when no registry is present (opt-in model)")
 	}
 }
 
@@ -309,10 +309,15 @@ func TestListEnabledSkillsWithPrompts(t *testing.T) {
 	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "skill-a"), "skill-a", "Skill A", "Prompt A content")
 	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "skill-b"), "skill-b", "Skill B", "Prompt B content")
 
-	// Disable skill-b via registry
+	// Enable skill-a explicitly and disable skill-b via registry. Under the
+	// opt-in default a skill with no registry entry is disabled, so skill-a
+	// needs an explicit enabled entry to be returned.
 	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
 	registry := map[string]any{
 		"skills": map[string]any{
+			"skill-a": map[string]any{
+				"enabled": true,
+			},
 			"skill-b": map[string]any{
 				"enabled": false,
 			},

@@ -287,6 +287,13 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Creating a skill is an explicit opt-in: enable it for this agent so it is
+	// active immediately regardless of which create path (CLI scaffold or local
+	// fallback) produced it. The global default for other skills stays disabled.
+	if enableErr := h.manager.SetSkillEnabled(agentName, name, true); enableErr == nil {
+		skill.Enabled = true
+	}
+
 	orihttp.Created(w, skill)
 }
 

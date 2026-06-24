@@ -652,7 +652,7 @@ func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error)
 	}
 	for _, folder := range ws.Folders {
 		clean := sanitizeWorkspaceRelativePath(folder.Path)
-		if clean == "" {
+		if clean == "" || isHiddenWorkspacePath(clean) {
 			continue
 		}
 		managedFolders[clean] = folder
@@ -687,6 +687,12 @@ func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error)
 			}
 			clean := sanitizeWorkspaceRelativePath(rel)
 			if clean == "" {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if isHiddenWorkspacePath(clean) {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
@@ -736,7 +742,7 @@ func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error)
 			continue
 		}
 		relativePath := extractAttachmentRelativePath(ws.ID, attachment.File)
-		if relativePath == "" {
+		if relativePath == "" || isHiddenWorkspacePath(relativePath) {
 			continue
 		}
 		ensureWorkspaceFileTreeAncestors(items, managedFolders, relativePath)
