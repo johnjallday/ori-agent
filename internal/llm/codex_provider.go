@@ -115,27 +115,31 @@ func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req Struct
 	}, nil
 }
 
-// codexNativeMCP holds the resolved native-MCP execution context for a run.
+// codexNativeMCP holds the resolved elevated-posture execution context for a run.
 type codexNativeMCP struct {
-	ProfileName  string // codex --profile name (per-workspace profile)
+	ProfileName  string // codex --profile name (per-workspace MCP profile; empty when no MCP servers)
 	WorkspaceDir string // working dir / workspace-write sandbox scope (may be empty)
 }
 
-// prepareNativeMCP ensures the per-workspace codex profile exists for the given
-// specs and returns the run context. Returns nil when there are no MCP servers
-// (text-only run), leaving the existing read-only behavior untouched.
+// prepareNativeMCP resolves the elevated execution context. A non-empty
+// workspaceID means the agent is opted in (gate passed), so the run gets the
+// elevated posture (workspace-write + localhost network + auto-approve) even
+// when there are no MCP servers — a skill-only agent that drives tooling via the
+// CLI's own shell still needs to write files and reach localhost. The
+// per-workspace --profile is generated only when MCP servers are present.
 func (p *CodexProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*codexNativeMCP, error) {
-	if len(specs) == 0 || p.mcpStore == nil {
+	if strings.TrimSpace(workspaceID) == "" {
 		return nil, nil
 	}
-	profileName, err := p.mcpStore.EnsureCodexProfile(workspaceID, specs, DefaultCLIAgentPosture())
-	if err != nil {
-		return nil, fmt.Errorf("prepare codex mcp profile: %w", err)
+	nat := &codexNativeMCP{WorkspaceDir: workspaceDir}
+	if len(specs) > 0 && p.mcpStore != nil {
+		profileName, err := p.mcpStore.EnsureCodexProfile(workspaceID, specs, DefaultCLIAgentPosture())
+		if err != nil {
+			return nil, fmt.Errorf("prepare codex mcp profile: %w", err)
+		}
+		nat.ProfileName = profileName
 	}
-	if profileName == "" {
-		return nil, nil
-	}
-	return &codexNativeMCP{ProfileName: profileName, WorkspaceDir: workspaceDir}, nil
+	return nat, nil
 }
 
 func buildCodexPrompt(systemPrompt string, messages []Message) string {
@@ -185,14 +189,18 @@ func buildCodexArgs(model, reasoningEffort, schemaPath, outPath string, nat *cod
 	}
 
 	if nat != nil {
-		// Native-MCP run: workspace-scoped sandbox, auto-approved (headless), and
-		// the per-workspace profile supplies mcp_servers. Codex runs its own MCP
-		// loop and returns the final text once tools have run.
+		// Elevated run: workspace-scoped writable sandbox, auto-approved
+		// (headless), with localhost/network access so the agent can drive local
+		// services (e.g. REAPER's Web Remote) via its own shell. A per-workspace
+		// --profile is added only when MCP servers were resolved.
 		args = append(args,
 			"--sandbox", "workspace-write",
 			"-c", `approval_policy="never"`,
-			"--profile", nat.ProfileName,
+			"-c", "sandbox_workspace_write.network_access=true",
 		)
+		if strings.TrimSpace(nat.ProfileName) != "" {
+			args = append(args, "--profile", nat.ProfileName)
+		}
 	} else {
 		// Text-only run (unchanged): read-only, no MCP.
 		args = append(args, "--sandbox", "read-only")

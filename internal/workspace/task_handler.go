@@ -84,7 +84,8 @@ type WorkspaceToolFactory func(workspaceID, agentName string) []toolapi.Tool
 
 type resolvedTaskAgent struct {
 	*agent.Agent
-	MCPServers []string
+	MCPServers      []string
+	EffectiveSkills []ResolvedSkill
 }
 
 const (
@@ -227,6 +228,10 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	// Use a task-specific system prompt that's more conservative about tool use
 	// The agent's system prompt may encourage aggressive tool use which is inappropriate for workspace tasks
 	taskSystemPrompt := h.buildTaskSystemPrompt()
+	// Inject the agent's resolved (enabled + bound) skills so task/orchestration
+	// runs get skill instructions too, matching the chat path. Skill-less agents
+	// add nothing (AppendSkillPromptsFromResolved returns the base unchanged).
+	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
@@ -282,23 +287,24 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
 			Tools:           requestTools,
 		}
-		// Native-MCP providers (CLI agents) run their own MCP loop instead of
-		// round-tripping tool calls through ori-agent, so hand them the agent's
-		// resolved MCP server specs plus the workspace context they need to key
-		// the persistent config and confine the run. SupportsTools stays false
-		// for these providers, so requestTools is ignored by them. Gated behind
-		// the workspace+agent opt-in (the CLI runs tools without ori's per-tool
-		// confirmation); when not opted in, the provider runs text-only as before.
+		// CLI agents (Claude Code / Codex), once opted in, run with an elevated
+		// sandboxed posture: workspace-write filesystem + localhost network +
+		// auto-approved tools, confined to the workspace folder. This applies
+		// whether the agent acts via bound MCP servers OR via skills + the CLI's
+		// own shell (e.g. driving REAPER's Web Remote over localhost) — so the
+		// posture is gated on the opt-in, not on whether MCP servers are bound.
+		// SupportsTools stays false for these providers (requestTools ignored).
 		nativeMCPActive := false
 		if providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
+			chatReq.WorkspaceID = task.WorkspaceID
+			if h.workspaceStore != nil {
+				chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
+			}
+			// MCP servers are optional — a skill-only agent has none.
 			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
 				chatReq.MCPServers = specs
-				chatReq.WorkspaceID = task.WorkspaceID
-				if h.workspaceStore != nil {
-					chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
-				}
-				nativeMCPActive = true
 			}
+			nativeMCPActive = true
 		}
 
 		// Native-MCP CLI runs get their own, longer budget than an ordinary LLM
