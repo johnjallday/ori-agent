@@ -1614,7 +1614,7 @@ function createAgentElement(agent, currentAgent) {
   const evolution = normalizeAgentEvolution(agent);
   const isCurrentAgent = agentName === currentAgent;
   const isSystemAssistant = isSystemAssistantAgentName(agentName);
-  const isPaused = getAgentStatus(agent) === 'disabled';
+  const isDisabled = getAgentStatus(agent) === 'disabled';
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
 
   // Format type label
@@ -1637,15 +1637,15 @@ function createAgentElement(agent, currentAgent) {
   const safeAgentNameAttr = escapeAttr(agentName);
   const safeTypeLabel = escapeHtml(typeLabel);
   const evolutionSummary = isSystemAssistant ? renderAssistantProgressSlot() : renderAgentEvolutionSummary(evolution);
-  const pausedBadge = isPaused
-    ? '<span class="badge" style="background: rgba(234, 179, 8, 0.16); color: #ca8a04; font-size: 0.62rem;">Paused</span>'
+  const disabledBadge = isDisabled
+    ? '<span class="badge" style="background: rgba(234, 179, 8, 0.16); color: #ca8a04; font-size: 0.62rem;">Disabled</span>'
     : '';
-  const newChatAction = isPaused
-    ? `<span class="modern-btn modern-btn-secondary px-2 py-1 disabled" title="Resume this agent before starting a chat" aria-disabled="true" style="font-size: 0.75rem; cursor: not-allowed; opacity: 0.55;">
+  const newChatAction = isDisabled
+    ? `<span class="modern-btn modern-btn-secondary px-2 py-1 disabled" title="Enable this agent before starting a chat" aria-disabled="true" style="font-size: 0.75rem; cursor: not-allowed; opacity: 0.55;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;" aria-hidden="true">
           <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
         </svg>
-        Paused
+        Disabled
       </span>`
     : `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); newChatWithAgent('${safeAgentNameJs}')" title="Start new chat with this agent" style="font-size: 0.75rem; cursor: pointer;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;" aria-hidden="true">
@@ -1667,7 +1667,7 @@ function createAgentElement(agent, currentAgent) {
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
             <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
-            ${pausedBadge}
+            ${disabledBadge}
             ${evolutionSummary}
           </div>
         </div>

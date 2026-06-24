@@ -168,7 +168,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		agentName := strings.TrimSpace(req.AgentName)
 		if agentName != "" {
 			if ag, ok := h.agentStore.GetAgent(agentName); ok && ag != nil && ag.Status == types.AgentStatusDisabled {
-				_ = orihttp.RespondConflict(w, "Agent is paused. Resume it before starting a new session.")
+				_ = orihttp.RespondConflict(w, "Agent is disabled. Turn Enabled on before starting a new session.")
 				return
 			}
 		}

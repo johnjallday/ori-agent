@@ -896,6 +896,8 @@
 
     .ops-mode-btn:focus-visible,
     .ops-action-btn:focus-visible,
+    .ops-icon-btn:focus-visible,
+    .ops-enable-toggle:focus-within,
     .ops-drawer-tab:focus-visible,
     .ops-drawer-close:focus-visible,
     .empty-state-clear-btn:focus-visible {
@@ -952,7 +954,7 @@
 
     .ops-board {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
         gap: 14px;
     }
 
@@ -1004,10 +1006,6 @@
         background: color-mix(in srgb, #16a34a 10%, var(--bg-primary));
     }
 
-    .ops-column-paused .ops-column-header {
-        background: color-mix(in srgb, #64748b 14%, var(--bg-primary));
-    }
-
     .ops-list {
         padding: 10px;
         display: flex;
@@ -1054,6 +1052,16 @@
         display: flex;
         gap: 10px;
         align-items: flex-start;
+        min-width: 0;
+    }
+
+    .ops-card-controls {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-shrink: 0;
     }
 
     .ops-agent-avatar {
@@ -1097,6 +1105,7 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.3px;
+        flex-shrink: 0;
     }
 
     .ops-health-pill.healthy {
@@ -1109,7 +1118,7 @@
         background: #dbeafe;
     }
 
-    .ops-health-pill.paused {
+    .ops-health-pill.disabled {
         color: #334155;
         background: #e2e8f0;
     }
@@ -1134,7 +1143,7 @@
         background: rgba(59, 130, 246, 0.2);
     }
 
-    [data-bs-theme="dark"] .ops-health-pill.paused {
+    [data-bs-theme="dark"] .ops-health-pill.disabled {
         color: #cbd5e1;
         background: rgba(138, 138, 138, 0.25);
     }
@@ -1203,6 +1212,104 @@
 
     .ops-action-btn:disabled {
         opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .ops-icon-btn {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .ops-icon-btn.danger {
+        color: #dc2626;
+        background: color-mix(in srgb, #ef4444 10%, var(--bg-primary));
+        border-color: color-mix(in srgb, #ef4444 34%, var(--border-color));
+    }
+
+    .ops-icon-btn:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .ops-icon-btn.danger:hover {
+        color: #b91c1c;
+        background: color-mix(in srgb, #ef4444 18%, var(--bg-primary));
+    }
+
+    .ops-icon-btn:disabled {
+        opacity: 0.58;
+        cursor: not-allowed;
+    }
+
+    .ops-enable-toggle {
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: 6px 8px;
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    .ops-enable-toggle input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .ops-enable-switch {
+        width: 34px;
+        height: 20px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--text-muted) 34%, var(--bg-tertiary));
+        border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+        position: relative;
+        flex-shrink: 0;
+        transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .ops-enable-switch::after {
+        content: "";
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        left: 2px;
+        top: 2px;
+        background: var(--bg-primary);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+        transition: transform 0.2s ease;
+    }
+
+    .ops-enable-toggle input:checked + .ops-enable-switch {
+        background: color-mix(in srgb, var(--primary-color) 78%, #16a34a);
+        border-color: color-mix(in srgb, var(--primary-color) 70%, var(--border-color));
+    }
+
+    .ops-enable-toggle input:checked + .ops-enable-switch::after {
+        transform: translateX(14px);
+    }
+
+    .ops-enable-toggle:has(input:disabled) {
+        opacity: 0.58;
         cursor: not-allowed;
     }
 
@@ -1431,6 +1538,9 @@
         .agent-card,
         .source-filter-btn,
         .ops-mode-btn,
+        .ops-icon-btn,
+        .ops-enable-switch,
+        .ops-enable-switch::after,
         .ops-agent-card,
         .ops-drawer {
             transition: none !important;
@@ -1490,8 +1600,8 @@
                     <span id="countReady" class="ops-summary-value">0</span>
                 </div>
                 <div class="ops-summary-chip">
-                    <span class="ops-summary-label">Paused</span>
-                    <span id="countPaused" class="ops-summary-value">0</span>
+                    <span class="ops-summary-label">Disabled</span>
+                    <span id="countDisabled" class="ops-summary-value">0</span>
                 </div>
                 <div class="ops-summary-chip">
                     <span class="ops-summary-label">Total</span>
@@ -1516,18 +1626,10 @@
 
                 <section class="ops-column ops-column-ready">
                     <header class="ops-column-header">
-                        <h3>Ready</h3>
+                        <h3>Agents</h3>
                         <span id="bucketReadyCount" class="ops-column-count">0</span>
                     </header>
                     <div id="bucketReady" class="ops-list"></div>
-                </section>
-
-                <section class="ops-column ops-column-paused">
-                    <header class="ops-column-header">
-                        <h3>Paused</h3>
-                        <span id="bucketPausedCount" class="ops-column-count">0</span>
-                    </header>
-                    <div id="bucketPaused" class="ops-list"></div>
                 </section>
             </div>
 
