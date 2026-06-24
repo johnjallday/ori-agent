@@ -45,13 +45,13 @@
             </div>
           </div>
 
-          <!-- Trust disclosure (shown after preview) -->
+          <!-- Trust disclosure (shown after preview; reused for update re-confirmation) -->
           <div id="pluginTrust" class="mt-3" style="display:none;">
             <div class="modern-card p-3" style="border:1px solid var(--border-color);">
-              <h3 class="h6 mb-2">This plugin will register:</h3>
+              <h3 class="h6 mb-2" id="pluginTrustTitle">This plugin will register:</h3>
               <div id="pluginTrustBody"></div>
               <div class="mt-3 d-flex gap-2">
-                <button class="modern-btn modern-btn-primary" onclick="pluginConfirmInstall()">Confirm install</button>
+                <button class="modern-btn modern-btn-primary" id="pluginTrustConfirm" onclick="pluginConfirmInstall()">Confirm install</button>
                 <button class="modern-btn modern-btn-secondary" onclick="pluginCancelInstall()">Cancel</button>
               </div>
             </div>
@@ -139,6 +139,7 @@
   <script src="/js/app.js"></script>
   <script src="/js/modules/sidebar.js"></script>
   <script src="/js/modules/themeManager.js"></script>
+  <script src="/js/modules/toast.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       themeManager.initialize();

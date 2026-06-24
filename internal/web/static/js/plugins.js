@@ -22,27 +22,65 @@
     return data;
   }
 
+  // notify surfaces feedback via the shared Toast module when present, falling
+  // back to alert() for errors so failures are never swallowed. Success/info
+  // messages stay silent if Toast is unavailable (no nagging alerts).
+  function notify(message, type) {
+    type = type || 'info';
+    if (window.Toast && typeof window.Toast[type] === 'function') {
+      window.Toast[type](message);
+    } else if (window.Toast && typeof window.Toast.show === 'function') {
+      window.Toast.show(message, type);
+    } else if (type === 'error' || type === 'warning') {
+      alert(message);
+    }
+  }
+
+  // Last-loaded installed plugins, kept so actions can read prior state (e.g.
+  // the version before an update) without an extra round-trip.
+  let installedCache = [];
+
   // ---- shared trust disclosure (used by source-install and marketplace-install) ----
 
   let pendingConfirm = null;
 
-  function showTrust(report, onConfirm) {
+  const DEFAULT_TRUST_TITLE = 'This plugin will register:';
+  const DEFAULT_TRUST_CONFIRM = 'Confirm install';
+
+  // showTrust reveals the shared disclosure panel. opts lets callers retitle it
+  // for context (e.g. an update re-confirmation, which is triggered from the
+  // installed-plugins list far below) and scrolls it into view so the prompt
+  // isn't missed.
+  function showTrust(report, onConfirm, opts) {
+    opts = opts || {};
+    const titleEl = byId('pluginTrustTitle');
+    const confirmEl = byId('pluginTrustConfirm');
+    if (titleEl) titleEl.textContent = opts.title || DEFAULT_TRUST_TITLE;
+    if (confirmEl) confirmEl.textContent = opts.confirmLabel || DEFAULT_TRUST_CONFIRM;
     renderTrustBody(report || {});
     pendingConfirm = onConfirm;
-    byId('pluginTrust').style.display = 'block';
+    const panel = byId('pluginTrust');
+    panel.style.display = 'block';
+    if (typeof panel.scrollIntoView === 'function') {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   window.pluginConfirmInstall = async function () {
     if (!pendingConfirm) return;
     const fn = pendingConfirm;
     pendingConfirm = null;
-    try { await fn(); } catch (e) { alert('Install failed: ' + e.message); }
+    try { await fn(); } catch (e) { notify('Action failed: ' + e.message, 'error'); }
   };
 
   window.pluginCancelInstall = function () {
     pendingConfirm = null;
     byId('pluginTrust').style.display = 'none';
     byId('pluginTrustBody').innerHTML = '';
+    const titleEl = byId('pluginTrustTitle');
+    const confirmEl = byId('pluginTrustConfirm');
+    if (titleEl) titleEl.textContent = DEFAULT_TRUST_TITLE;
+    if (confirmEl) confirmEl.textContent = DEFAULT_TRUST_CONFIRM;
   };
 
   function trustHTML(t) {
@@ -70,6 +108,7 @@
     try {
       const data = await api('GET', '/api/plugins');
       const plugins = (data && data.plugins) || [];
+      installedCache = plugins;
       list.innerHTML = plugins.length ? plugins.map(renderPlugin).join('') : '<p class="text-muted mb-0">No plugins installed yet.</p>';
     } catch (e) {
       list.innerHTML = '<p class="text-danger mb-0">Failed to load plugins: ' + esc(e.message) + '</p>';
@@ -103,17 +142,18 @@
   window.pluginPreview = async function () {
     const source = byId('pluginSource').value.trim();
     const format = byId('pluginFormat').value;
-    if (!source) { alert('Enter a plugin source.'); return; }
+    if (!source) { notify('Enter a plugin source.', 'warning'); return; }
     try {
       const data = await api('POST', '/api/plugins/install', { source, format, confirm: false });
       showTrust(data.trust, async () => {
-        await api('POST', '/api/plugins/install', { source, format, confirm: true });
+        const res = await api('POST', '/api/plugins/install', { source, format, confirm: true });
         window.pluginCancelInstall();
         byId('pluginSource').value = '';
         loadPlugins();
+        notify('Installed ' + ((res && res.plugin && res.plugin.name) || source), 'success');
       });
     } catch (e) {
-      alert('Preview failed: ' + e.message);
+      notify('Preview failed: ' + e.message, 'error');
     }
   };
 
@@ -121,7 +161,8 @@
     try {
       await api('POST', '/api/plugins/' + encodeURIComponent(name) + (enable ? '/enable' : '/disable'));
       loadPlugins();
-    } catch (e) { alert('Failed: ' + e.message); }
+      notify(name + (enable ? ' enabled' : ' disabled'), 'success');
+    } catch (e) { notify('Failed: ' + e.message, 'error'); }
   };
 
   window.pluginUninstall = async function (name) {
@@ -129,25 +170,42 @@
     try {
       await api('DELETE', '/api/plugins/' + encodeURIComponent(name));
       loadPlugins();
-    } catch (e) { alert('Uninstall failed: ' + e.message); }
+      notify('Uninstalled ' + name, 'success');
+    } catch (e) { notify('Uninstall failed: ' + e.message, 'error'); }
   };
 
   window.pluginUpdate = async function (name) {
     const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
+    const prev = installedCache.find((p) => p.name === name);
+    const oldVersion = (prev && prev.version) || '';
     try {
       const data = await api('POST', url, { confirm: false });
       const doUpdate = async () => {
-        await api('POST', url, { confirm: true });
+        const res = await api('POST', url, { confirm: true });
         window.pluginCancelInstall();
         loadPlugins();
+        const newVersion = (res && res.plugin && res.plugin.version) || '';
+        if (newVersion && oldVersion && newVersion !== oldVersion) {
+          notify('Updated ' + name + ' to ' + newVersion, 'success');
+        } else if (data.changed) {
+          notify('Updated ' + name + ' — registered components changed', 'success');
+        } else {
+          notify(name + ' is already up to date', 'info');
+        }
       };
       if (data.changed) {
-        showTrust(data.trust, doUpdate); // re-prompt: the registered components changed
+        // The component set changed, so re-disclose and re-confirm. Title it for
+        // the update (the panel lives in the install card, far from the Update
+        // button) so the prompt is unmistakable.
+        showTrust(data.trust, doUpdate, {
+          title: 'Update ' + name + ' — this will now register:',
+          confirmLabel: 'Confirm update'
+        });
       } else {
         await doUpdate();
       }
     } catch (e) {
-      alert('Update failed: ' + e.message);
+      notify('Update failed: ' + e.message, 'error');
     }
   };
 
@@ -410,13 +468,14 @@
 
   window.addMarketplace = async function () {
     const source = byId('marketplaceSource').value.trim();
-    if (!source) { alert('Enter a marketplace source.'); return; }
+    if (!source) { notify('Enter a marketplace source.', 'warning'); return; }
     try {
       await api('POST', '/api/plugins/marketplaces', { source });
       byId('marketplaceSource').value = '';
       window.loadMarketplaces();
+      notify('Marketplace added', 'success');
     } catch (e) {
-      alert('Add marketplace failed: ' + e.message);
+      notify('Add marketplace failed: ' + e.message, 'error');
     }
   };
 
@@ -429,9 +488,10 @@
         loadPlugins();
         window.loadMarketplaces();
         refreshOfficialInstalled(); // reflect new install in the official modal grid
+        notify('Installed ' + pluginName, 'success');
       });
     } catch (e) {
-      alert('Preview failed: ' + e.message);
+      notify('Preview failed: ' + e.message, 'error');
     }
   };
 
