@@ -45,3 +45,22 @@ func TestRenderWorkspaceDetailGroupScaffold(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("agents-detail", TemplateData{Title: "Agent Detail - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(agents-detail) failed: %v", err)
+	}
+
+	if !strings.Contains(html, `data-sidebar-default="hidden"`) {
+		t.Fatalf("rendered agents-detail page should default the sidebar to hidden")
+	}
+	if strings.Contains(html, `data-sidebar-default="visible"`) {
+		t.Fatalf("rendered agents-detail page should not default the sidebar to visible")
+	}
+}
