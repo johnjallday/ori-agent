@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,11 +254,12 @@ func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("agents")
-	data.Title = "Edit Agent - Ori Agent"
-	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
-	s.renderAndWritePage(w, "agents-edit", data)
+	agentName := strings.TrimSpace(r.URL.Query().Get("name"))
+	if agentName == "" {
+		http.Redirect(w, r, "/agents", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/agents/"+url.PathEscape(agentName), http.StatusFound)
 }
 
 func (s *Server) serveAgentsCreate(w http.ResponseWriter, r *http.Request) {

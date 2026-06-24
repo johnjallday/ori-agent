@@ -50,6 +50,104 @@
       box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
     }
 
+    .agent-profile-modal-grid {
+      display: grid;
+      grid-template-columns: minmax(180px, 240px) 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .agent-profile-avatar-panel {
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      background: var(--bg-secondary);
+    }
+
+    .agent-profile-avatar-preview {
+      width: 96px;
+      height: 96px;
+      border-radius: 16px;
+      border: 2px dashed var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: var(--bg-primary);
+      margin-bottom: 12px;
+    }
+
+    .agent-profile-avatar-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    .agent-profile-drop-zone {
+      border: 2px dashed var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+      cursor: pointer;
+      background: var(--bg-primary);
+      transition: border-color 0.2s ease, background-color 0.2s ease;
+    }
+
+    .agent-profile-drop-zone:hover,
+    .agent-profile-drop-zone.is-dragover {
+      border-color: var(--primary-color);
+      background: var(--bg-tertiary);
+    }
+
+    .agent-profile-tags-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 44px;
+      padding: 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+    }
+
+    .agent-profile-tag-input {
+      min-width: 140px;
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .agent-profile-tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--primary-color-light);
+      color: var(--primary-color);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .agent-profile-tag-remove {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    @media (max-width: 767px) {
+      .agent-profile-modal-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .setup-health-banner {
       border-left: 4px solid var(--warning-color);
       background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 84%, transparent), var(--bg-primary));
@@ -381,25 +479,18 @@
                 <h1 id="agentName" style="font-size: 28px; margin: 0 0 8px 0; color: var(--text-primary);">Loading...</h1>
                 <div class="d-flex align-items-start gap-2">
                   <p id="agentDescription" class="agent-description-large flex-grow-1" style="color: var(--text-secondary); margin: 0;">Loading description...</p>
-                  <button id="editDescriptionBtn" class="btn btn-sm btn-link p-1" onclick="toggleDescriptionEditMode()" title="Edit description" style="color: var(--text-secondary);">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
-                    </svg>
-                  </button>
-                </div>
-                <div id="descriptionEditForm" style="display: none; margin-top: 8px;">
-                  <textarea id="editDescription" class="form-control" rows="2" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 14px;"></textarea>
-                  <div class="d-flex gap-2 mt-2">
-                    <button id="saveDescriptionBtn" class="modern-btn modern-btn-primary btn-sm" onclick="saveDescriptionChanges()">Save</button>
-                    <button class="modern-btn modern-btn-secondary btn-sm" onclick="toggleDescriptionEditMode()">Cancel</button>
-                  </div>
-                  <div id="descriptionEditStatus" class="small mt-1" style="color: var(--text-secondary);"></div>
                 </div>
                 <div class="d-flex align-items-center gap-2 mt-2">
                   <span id="agentType" class="badge bg-secondary" style="font-size: 12px;">Type</span>
                 </div>
               </div>
               <div class="d-flex gap-2">
+                <button id="editProfileButton" class="modern-btn modern-btn-primary" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
+                    <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                  </svg>
+                  Edit Profile
+                </button>
                 <button id="deleteButton" class="modern-btn modern-btn-secondary" style="background: rgba(239, 68, 68, 0.1); color: var(--danger-color); border-color: rgba(239, 68, 68, 0.2);">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -706,6 +797,81 @@
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="confirmDeleteBtn" class="modern-btn" style="background: var(--danger-color); color: white;">Delete Agent</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile Editor Modal -->
+  <div class="modal fade" id="profileEditModal" tabindex="-1" aria-labelledby="profileEditTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <div>
+            <h5 class="modal-title" id="profileEditTitle" style="color: var(--text-primary); margin: 0;">Edit Agent Profile</h5>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Identity, avatar, favorite status, and tags.</div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="agent-profile-modal-grid">
+            <div class="agent-profile-avatar-panel">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 600;">Avatar Image</label>
+              <div id="profileAvatarImagePreview" class="agent-profile-avatar-preview">
+                <span id="profileAvatarPlaceholder" style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 8px;">No Image</span>
+                <img id="profileAvatarImg" src="" alt="Agent avatar preview">
+              </div>
+              <div id="profileAvatarDropZone" class="agent-profile-drop-zone" role="button" tabindex="0" aria-describedby="profileAvatarHelp">
+                <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">Drop an image here</div>
+                <label for="profileAvatarFileInput" class="modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; cursor: pointer;">Choose File</label>
+                <input type="file" id="profileAvatarFileInput" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" style="display: none;">
+              </div>
+              <div id="profileAvatarActions" style="margin-top: 10px; display: none;">
+                <button type="button" id="profileRemoveAvatarBtn" class="modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; color: var(--danger-color);">Remove Image</button>
+              </div>
+              <div id="profileAvatarHelp" class="form-helper" style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">PNG, JPG, GIF, or WebP. Max 5 MB.</div>
+              <div id="profileAvatarUploadStatus" aria-live="polite" style="margin-top: 8px; font-size: 13px;"></div>
+            </div>
+
+            <div>
+              <div class="row g-3">
+                <div class="col-12">
+                  <label for="profileAgentNameInput" class="form-label" style="color: var(--text-primary);">Name</label>
+                  <input type="text" id="profileAgentNameInput" name="agent_name" class="form-control" autocomplete="off" spellcheck="false" placeholder="Agent name…" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                </div>
+                <div class="col-12">
+                  <label for="profileDescriptionInput" class="form-label" style="color: var(--text-primary);">Description</label>
+                  <textarea id="profileDescriptionInput" name="description" class="form-control" rows="4" placeholder="Describe the agent's purpose…" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); resize: vertical;"></textarea>
+                </div>
+                <div class="col-sm-6">
+                  <label for="profileAvatarColorInput" class="form-label" style="color: var(--text-primary);">Avatar Color</label>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="profileAvatarColorPreview" aria-hidden="true" style="width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--border-color); background: #4f46e5;"></span>
+                    <input type="color" id="profileAvatarColorInput" name="avatar_color" class="form-control form-control-color" value="#4f46e5" autocomplete="off" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                  </div>
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label" for="profileFavoriteToggle" style="color: var(--text-primary);">Favorite</label>
+                  <div class="form-check" style="padding-top: 6px;">
+                    <input class="form-check-input" type="checkbox" id="profileFavoriteToggle" name="favorite">
+                    <label class="form-check-label" for="profileFavoriteToggle" style="color: var(--text-primary);">Mark as favorite</label>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <label for="profileTagsInput" class="form-label" style="color: var(--text-primary);">Tags</label>
+                  <div id="profileTagsContainer" class="agent-profile-tags-container">
+                    <input type="text" id="profileTagsInput" name="tags" class="agent-profile-tag-input" autocomplete="off" spellcheck="false" placeholder="Add tags…">
+                  </div>
+                  <div class="form-helper" style="color: var(--text-muted); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
+                </div>
+              </div>
+              <div id="profileEditStatus" aria-live="polite" class="small mt-3" style="color: var(--text-secondary);"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="profileSaveBtn" class="modern-btn modern-btn-primary">Save Profile</button>
         </div>
       </div>
     </div>

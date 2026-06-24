@@ -431,7 +431,7 @@ function createAgentCard(agent) {
 }
 
 function openAgentEditor(agentName) {
-  window.location.href = `/agents-edit.html?name=${encodeURIComponent(agentName)}`;
+  window.location.href = `/agents/${encodeURIComponent(agentName)}`;
 }
 
 async function openChatWithAgent(agentName, button) {
@@ -1044,17 +1044,12 @@ function clearDashboardSearch() {
 window.closeAgentDrawer = closeAgentDrawer;
 
 function syncDrawerActionLinks(agentName) {
-  const detailLink = document.getElementById('drawerOpenFullLink');
   const editLink = document.getElementById('drawerEditLink');
-
-  if (detailLink) {
-    detailLink.href = agentName ? `/agents/${encodeURIComponent(agentName)}` : '/agents';
-  }
 
   if (editLink) {
     editLink.href = agentName
-      ? `/agents-edit.html?name=${encodeURIComponent(agentName)}`
-      : '/agents-edit.html';
+      ? `/agents/${encodeURIComponent(agentName)}`
+      : '/agents';
   }
 }
 

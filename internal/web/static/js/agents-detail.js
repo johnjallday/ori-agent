@@ -4,11 +4,12 @@ let currentAgent = null;
 let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
-let isEditingDescription = false;
 let availableProviders = []; // Cache for available providers and models from API
 let currentAgentSkills = [];
 let globalMCPServers = [];
 let globalMCPStats = {};
+let profileSelectedTags = [];
+let profileAvatarImage = null;
 
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
@@ -547,6 +548,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.requestAnimationFrame(updateEditReasoningVisibility);
   });
   document.getElementById('editModel')?.addEventListener('change', updateEditReasoningVisibility);
+  setupProfileEditor();
 
   const pluginPanel = document.getElementById('pluginManagerPanel');
   if (pluginPanel) {
@@ -619,19 +621,7 @@ function renderAgentDetails() {
 
   hideMissingAgentState();
 
-  // Header
-  const avatar = document.getElementById('agentAvatar');
-  if (avatar) {
-    // Check for custom avatar image
-    if (currentAgent.metadata?.avatar_image) {
-      avatar.innerHTML = `<img src="/avatars/${escapeHtml(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
-      avatar.style.background = 'transparent';
-      avatar.style.overflow = 'hidden';
-    } else {
-      avatar.style.background = getAgentColor(currentAgent);
-      avatar.textContent = getAgentInitials(currentAgent.name);
-    }
-  }
+  renderCurrentAgentAvatar();
 
   const nameEl = document.getElementById('agentName');
   if (nameEl) nameEl.textContent = currentAgent.name;
@@ -733,12 +723,432 @@ function renderAgentDetails() {
   if (grid) grid.style.display = 'grid';
 
   // Keep edit form in sync with latest data
+  populateProfileForm();
   populateConfigForm();
   setConfigEditMode(isEditingConfig);
   populatePromptForm();
   setPromptEditMode(isEditingPrompt);
-  populateDescriptionForm();
-  setDescriptionEditMode(isEditingDescription);
+}
+
+function renderCurrentAgentAvatar() {
+  const avatar = document.getElementById('agentAvatar');
+  if (!avatar || !currentAgent) return;
+
+  if (currentAgent.metadata?.avatar_image) {
+    avatar.innerHTML = `<img src="${getAvatarURL(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
+    avatar.style.background = 'transparent';
+    avatar.style.overflow = 'hidden';
+    return;
+  }
+
+  avatar.innerHTML = '';
+  avatar.style.background = getAgentColor(currentAgent);
+  avatar.style.overflow = '';
+  avatar.textContent = getAgentInitials(currentAgent.name);
+}
+
+function getAvatarURL(filename) {
+  return `/avatars/${encodeURIComponent(String(filename || ''))}`;
+}
+
+function setupProfileEditor() {
+  const editButton = document.getElementById('editProfileButton');
+  const saveButton = document.getElementById('profileSaveBtn');
+  const colorInput = document.getElementById('profileAvatarColorInput');
+  const tagsInput = document.getElementById('profileTagsInput');
+  const tagsContainer = document.getElementById('profileTagsContainer');
+  const fileInput = document.getElementById('profileAvatarFileInput');
+  const dropZone = document.getElementById('profileAvatarDropZone');
+  const removeAvatarButton = document.getElementById('profileRemoveAvatarBtn');
+  const modalElement = document.getElementById('profileEditModal');
+
+  editButton?.addEventListener('click', openProfileEditor);
+  saveButton?.addEventListener('click', saveProfileChanges);
+  colorInput?.addEventListener('input', () => updateProfileColorPreview(colorInput.value));
+  fileInput?.addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadProfileAvatarFile(file);
+    }
+  });
+  removeAvatarButton?.addEventListener('click', removeProfileAvatar);
+  tagsContainer?.addEventListener('click', () => tagsInput?.focus());
+  tagsInput?.addEventListener('keydown', (event) => {
+    const value = tagsInput.value.trim();
+    if (event.key === 'Enter' && value) {
+      event.preventDefault();
+      addProfileTag(value);
+      tagsInput.value = '';
+    } else if (event.key === 'Backspace' && !tagsInput.value && profileSelectedTags.length > 0) {
+      removeProfileTag(profileSelectedTags[profileSelectedTags.length - 1]);
+    }
+  });
+
+  if (dropZone) {
+    dropZone.addEventListener('click', () => fileInput?.click());
+    dropZone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        fileInput?.click();
+      }
+    });
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropZone.classList.add('is-dragover');
+    });
+    dropZone.addEventListener('dragleave', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropZone.classList.remove('is-dragover');
+    });
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropZone.classList.remove('is-dragover');
+      const file = event.dataTransfer?.files?.[0];
+      if (file) {
+        uploadProfileAvatarFile(file);
+      }
+    });
+  }
+
+  modalElement?.addEventListener('shown.bs.modal', () => {
+    document.getElementById('profileAgentNameInput')?.focus();
+  });
+}
+
+function openProfileEditor() {
+  if (!currentAgent) return;
+  populateProfileForm();
+  const modalElement = document.getElementById('profileEditModal');
+  if (!modalElement || typeof bootstrap === 'undefined') return;
+  bootstrap.Modal.getOrCreateInstance(modalElement).show();
+}
+
+function populateProfileForm() {
+  if (!currentAgent) return;
+
+  const metadata = currentAgent.metadata || {};
+  const nameInput = document.getElementById('profileAgentNameInput');
+  const descriptionInput = document.getElementById('profileDescriptionInput');
+  const colorInput = document.getElementById('profileAvatarColorInput');
+  const favoriteToggle = document.getElementById('profileFavoriteToggle');
+
+  profileSelectedTags = Array.isArray(metadata.tags) ? metadata.tags.slice() : [];
+  profileAvatarImage = metadata.avatar_image || null;
+
+  if (nameInput) {
+    nameInput.value = currentAgent.name || '';
+    nameInput.disabled = String(currentAgent.name || '').trim().toLowerCase() === 'ori';
+  }
+  if (descriptionInput) {
+    descriptionInput.value = metadata.description || '';
+  }
+  if (colorInput) {
+    colorInput.value = metadata.avatar_color || '#4f46e5';
+    updateProfileColorPreview(colorInput.value);
+  }
+  if (favoriteToggle) {
+    favoriteToggle.checked = Boolean(metadata.favorite);
+  }
+
+  renderProfileTags();
+  updateProfileAvatarPreview();
+  setProfileStatus('');
+  setProfileSavingState(false);
+}
+
+function updateProfileColorPreview(color) {
+  const preview = document.getElementById('profileAvatarColorPreview');
+  if (preview) {
+    preview.style.background = color || '#4f46e5';
+  }
+}
+
+function renderProfileTags() {
+  const container = document.getElementById('profileTagsContainer');
+  const input = document.getElementById('profileTagsInput');
+  if (!container || !input) return;
+
+  container.querySelectorAll('.agent-profile-tag-chip').forEach((chip) => chip.remove());
+  profileSelectedTags.forEach((tag) => {
+    const chip = document.createElement('span');
+    chip.className = 'agent-profile-tag-chip';
+
+    const label = document.createElement('span');
+    label.textContent = tag;
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'agent-profile-tag-remove';
+    remove.setAttribute('aria-label', `Remove ${tag}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => removeProfileTag(tag));
+
+    chip.appendChild(label);
+    chip.appendChild(remove);
+    container.insertBefore(chip, input);
+  });
+}
+
+function addProfileTag(tag) {
+  const normalized = String(tag || '').trim();
+  if (!normalized || profileSelectedTags.includes(normalized)) return;
+  profileSelectedTags.push(normalized);
+  renderProfileTags();
+}
+
+function removeProfileTag(tag) {
+  profileSelectedTags = profileSelectedTags.filter((item) => item !== tag);
+  renderProfileTags();
+}
+
+function updateProfileAvatarPreview() {
+  const img = document.getElementById('profileAvatarImg');
+  const placeholder = document.getElementById('profileAvatarPlaceholder');
+  const actions = document.getElementById('profileAvatarActions');
+  const preview = document.getElementById('profileAvatarImagePreview');
+
+  if (profileAvatarImage) {
+    if (img) {
+      img.src = getAvatarURL(profileAvatarImage);
+      img.style.display = 'block';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    if (actions) {
+      actions.style.display = 'block';
+    }
+    if (preview) {
+      preview.style.borderStyle = 'solid';
+    }
+    return;
+  }
+
+  if (img) {
+    img.src = '';
+    img.style.display = 'none';
+  }
+  if (placeholder) {
+    placeholder.style.display = 'block';
+  }
+  if (actions) {
+    actions.style.display = 'none';
+  }
+  if (preview) {
+    preview.style.borderStyle = 'dashed';
+  }
+}
+
+function previewProfileAvatarFile(file) {
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = document.getElementById('profileAvatarImg');
+    const placeholder = document.getElementById('profileAvatarPlaceholder');
+    if (img) {
+      img.src = event.target.result;
+      img.style.display = 'block';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadProfileAvatarFile(file) {
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    setProfileAvatarStatus('Invalid file type. Use PNG, JPG, GIF, or WebP.', 'error');
+    return;
+  }
+
+  const maxSize = 5 * 1024 * 1024;
+  if (file.size > maxSize) {
+    setProfileAvatarStatus('File too large. Maximum size is 5 MB.', 'error');
+    return;
+  }
+
+  previewProfileAvatarFile(file);
+
+  const formData = new FormData();
+  formData.append('avatar', file);
+
+  try {
+    setProfileAvatarStatus('Uploading...');
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(await readResponseError(response, 'Failed to upload avatar'));
+    }
+
+    const data = await response.json();
+    profileAvatarImage = data.avatar_url?.replace('/avatars/', '') || null;
+    currentAgent.metadata = currentAgent.metadata || {};
+    currentAgent.metadata.avatar_image = profileAvatarImage;
+    setProfileAvatarStatus('Avatar uploaded successfully.', 'success');
+    updateProfileAvatarPreview();
+    renderCurrentAgentAvatar();
+  } catch (error) {
+    console.error('Error uploading avatar:', error);
+    setProfileAvatarStatus(error.message || 'Failed to upload avatar', 'error');
+    updateProfileAvatarPreview();
+  }
+}
+
+async function removeProfileAvatar() {
+  if (!profileAvatarImage) return;
+
+  try {
+    setProfileAvatarStatus('Removing...');
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+      method: 'DELETE'
+    });
+
+    if (!response.ok) {
+      throw new Error(await readResponseError(response, 'Failed to remove avatar'));
+    }
+
+    profileAvatarImage = null;
+    currentAgent.metadata = currentAgent.metadata || {};
+    currentAgent.metadata.avatar_image = '';
+    setProfileAvatarStatus('Avatar removed.', 'success');
+    updateProfileAvatarPreview();
+    renderCurrentAgentAvatar();
+  } catch (error) {
+    console.error('Error removing avatar:', error);
+    setProfileAvatarStatus(error.message || 'Failed to remove avatar', 'error');
+  }
+}
+
+function setProfileAvatarStatus(message, type = 'info') {
+  const status = document.getElementById('profileAvatarUploadStatus');
+  if (!status) return;
+
+  status.textContent = message || '';
+  if (type === 'error') {
+    status.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    status.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    status.style.color = 'var(--text-secondary)';
+  }
+
+  if (message && type !== 'error') {
+    window.setTimeout(() => {
+      if (status.textContent === message) {
+        status.textContent = '';
+      }
+    }, 3000);
+  }
+}
+
+async function saveProfileChanges() {
+  if (!currentAgent) return;
+
+  const nameInput = document.getElementById('profileAgentNameInput');
+  const descriptionInput = document.getElementById('profileDescriptionInput');
+  const colorInput = document.getElementById('profileAvatarColorInput');
+  const favoriteToggle = document.getElementById('profileFavoriteToggle');
+  const newName = String(nameInput?.value || '').trim();
+
+  if (!newName) {
+    setProfileStatus('Name is required.', 'error');
+    nameInput?.focus();
+    return;
+  }
+
+  const payload = {
+    name: newName,
+    description: String(descriptionInput?.value || '').trim(),
+    avatar_color: colorInput?.value || '#4f46e5',
+    tags: profileSelectedTags,
+    favorite: Boolean(favoriteToggle?.checked)
+  };
+
+  try {
+    setProfileSavingState(true);
+    setProfileStatus('Saving profile...');
+
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(await readResponseError(response, 'Failed to save profile'));
+    }
+
+    const data = await response.json().catch(() => ({}));
+    const updatedName = data.name || newName || agentName;
+    const nameChanged = updatedName !== agentName;
+    agentName = updatedName;
+
+    if (nameChanged) {
+      window.history.replaceState({}, '', `/agents/${encodeURIComponent(updatedName)}`);
+      const skillsPageLink = document.getElementById('openSkillsPageLink');
+      if (skillsPageLink) {
+        skillsPageLink.href = `/skills?agent=${encodeURIComponent(updatedName)}`;
+      }
+    }
+
+    await refreshAgentDetails();
+    setProfileStatus('Profile updated successfully.', 'success');
+
+    const modalElement = document.getElementById('profileEditModal');
+    const modal = modalElement && typeof bootstrap !== 'undefined'
+      ? bootstrap.Modal.getInstance(modalElement)
+      : null;
+    modal?.hide();
+    showToast('Agent profile updated.', 'success');
+  } catch (error) {
+    console.error('Failed to save profile:', error);
+    setProfileStatus(error.message || 'Failed to save profile', 'error');
+  } finally {
+    setProfileSavingState(false);
+  }
+}
+
+function setProfileSavingState(isSaving) {
+  const saveButton = document.getElementById('profileSaveBtn');
+  if (!saveButton) return;
+
+  saveButton.disabled = isSaving;
+  saveButton.innerHTML = isSaving
+    ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...'
+    : 'Save Profile';
+}
+
+function setProfileStatus(message, type = 'info') {
+  const status = document.getElementById('profileEditStatus');
+  if (!status) return;
+
+  status.textContent = message || '';
+  if (!message) return;
+
+  if (type === 'error') {
+    status.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    status.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    status.style.color = 'var(--text-secondary)';
+  }
+}
+
+async function readResponseError(response, fallback) {
+  try {
+    const data = await response.clone().json();
+    return data?.error || data?.message || fallback;
+  } catch {
+    const text = await response.text().catch(() => '');
+    return text || fallback;
+  }
 }
 
 function setConfigEditMode(enabled) {
@@ -1002,100 +1412,6 @@ function setPromptSavingState(isSaving) {
 
 function setPromptStatus(message, type = 'info') {
   const statusEl = document.getElementById('promptEditStatus');
-  if (!statusEl) return;
-  statusEl.textContent = message || '';
-  if (!message) return;
-
-  if (type === 'error') {
-    statusEl.style.color = 'var(--danger-color)';
-  } else if (type === 'success') {
-    statusEl.style.color = 'var(--success-color, #22c55e)';
-  } else {
-    statusEl.style.color = 'var(--text-secondary)';
-  }
-}
-
-// Description editing functions
-function setDescriptionEditMode(enabled) {
-  const display = document.getElementById('agentDescription');
-  const form = document.getElementById('descriptionEditForm');
-  const editBtn = document.getElementById('editDescriptionBtn');
-
-  isEditingDescription = enabled;
-
-  if (display) display.style.display = enabled ? 'none' : 'block';
-  if (form) form.style.display = enabled ? 'block' : 'none';
-  if (editBtn) editBtn.style.display = enabled ? 'none' : 'inline-flex';
-
-  if (enabled) {
-    populateDescriptionForm();
-    setDescriptionStatus('');
-  }
-}
-
-function toggleDescriptionEditMode() {
-  if (isEditingDescription) {
-    setDescriptionEditMode(false);
-    setDescriptionStatus('');
-    populateDescriptionForm();
-  } else {
-    setDescriptionEditMode(true);
-  }
-}
-
-function populateDescriptionForm() {
-  if (!currentAgent) return;
-  const descInput = document.getElementById('editDescription');
-  if (descInput) descInput.value = currentAgent.metadata?.description || '';
-}
-
-async function saveDescriptionChanges() {
-  if (!currentAgent) return;
-  const descInput = document.getElementById('editDescription');
-  const description = descInput ? descInput.value.trim() : '';
-
-  try {
-    setDescriptionSavingState(true);
-    setDescriptionStatus('Saving description...');
-
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ description: description })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to save description');
-    }
-
-    await refreshAgentDetails();
-    setDescriptionStatus('Description updated successfully.', 'success');
-    setDescriptionEditMode(false);
-  } catch (error) {
-    console.error('Failed to save description:', error);
-    setDescriptionStatus(error.message || 'Failed to save description', 'error');
-  } finally {
-    setDescriptionSavingState(false);
-  }
-}
-
-function setDescriptionSavingState(isSaving) {
-  const saveBtn = document.getElementById('saveDescriptionBtn');
-  if (saveBtn) {
-    saveBtn.disabled = isSaving;
-    if (isSaving) {
-      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
-    } else {
-      saveBtn.innerHTML = 'Save';
-    }
-  }
-}
-
-function setDescriptionStatus(message, type = 'info') {
-  const statusEl = document.getElementById('descriptionEditStatus');
   if (!statusEl) return;
   statusEl.textContent = message || '';
   if (!message) return;
@@ -1478,13 +1794,16 @@ function setupPluginConfigButtons() {
 // Render tags
 function renderTags() {
   const container = document.getElementById('tagsList');
+  const section = document.getElementById('tagsSection');
+  if (!container) return;
   const tags = currentAgent.metadata?.tags || [];
 
   if (tags.length === 0) {
-    document.getElementById('tagsSection').style.display = 'none';
+    if (section) section.style.display = 'none';
     return;
   }
 
+  if (section) section.style.display = 'block';
   container.innerHTML = '';
   tags.forEach(tag => {
     const tagEl = document.createElement('span');
