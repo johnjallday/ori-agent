@@ -3,6 +3,7 @@
 
 const sidebarLog = Logger.withContext('Sidebar');
 const ASSISTANT_XP_PER_LEVEL = 100;
+let latestAssistantProgress = null;
 
 function isEvolutionEnabled() {
   return Boolean(window.oriFeatures?.evolutionEnabled);
@@ -28,36 +29,55 @@ function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value || 0));
 }
 
+function getAssistantProgressWidgets() {
+  return Array.from(document.querySelectorAll('[data-assistant-progress-widget]'));
+}
+
+function hideAssistantProgressWidgets() {
+  getAssistantProgressWidgets().forEach((widget) => {
+    widget.classList.add('d-none');
+  });
+}
+
 function renderAssistantProgress(progress) {
-  const widget = document.getElementById('assistantProgressWidget');
-  const rankBadge = document.getElementById('assistantRankBadge');
-  const levelValue = document.getElementById('assistantLevelValue');
-  const xpValue = document.getElementById('assistantXpValue');
-  const progressBar = document.getElementById('assistantXpProgressBar');
-  if (!widget || !rankBadge || !levelValue || !xpValue || !progressBar) {
+  const widgets = getAssistantProgressWidgets();
+  const normalized = normalizeAssistantProgress(progress);
+  latestAssistantProgress = normalized;
+
+  if (widgets.length === 0) {
     return;
   }
 
-  const normalized = normalizeAssistantProgress(progress);
   const progressWithinLevel = normalized.experience % ASSISTANT_XP_PER_LEVEL;
   const progressPercent = Math.min(100, Math.max(0, Math.round((progressWithinLevel / ASSISTANT_XP_PER_LEVEL) * 100)));
 
-  rankBadge.textContent = toTitleCase(normalized.rank);
-  levelValue.textContent = `Assistant Level ${normalized.level}`;
-  xpValue.textContent = `${formatNumber(normalized.experience)} XP`;
-  progressBar.style.width = `${progressPercent}%`;
-  progressBar.setAttribute('aria-valuenow', String(progressPercent));
+  widgets.forEach((widget) => {
+    const rankBadge = widget.querySelector('[data-assistant-rank-badge]');
+    const levelValue = widget.querySelector('[data-assistant-level-value]');
+    const xpValue = widget.querySelector('[data-assistant-xp-value]');
+    const progressBar = widget.querySelector('[data-assistant-xp-progress-bar]');
 
-  widget.classList.remove('d-none');
+    if (!rankBadge || !levelValue || !xpValue || !progressBar) {
+      return;
+    }
+
+    rankBadge.textContent = toTitleCase(normalized.rank);
+    levelValue.textContent = `Level ${normalized.level}`;
+    xpValue.textContent = `${formatNumber(normalized.experience)} XP`;
+    progressBar.style.width = `${progressPercent}%`;
+    progressBar.setAttribute('aria-valuenow', String(progressPercent));
+
+    widget.classList.remove('d-none');
+  });
 }
 
 async function loadAssistantProgressForSidebar() {
-  const widget = document.getElementById('assistantProgressWidget');
-  if (!widget) {
+  if (!document.getElementById('agentsList')) {
     return;
   }
   if (!isEvolutionEnabled()) {
-    widget.classList.add('d-none');
+    latestAssistantProgress = null;
+    hideAssistantProgressWidgets();
     return;
   }
   if (typeof API === 'undefined' || typeof API.get !== 'function') {
@@ -67,14 +87,28 @@ async function loadAssistantProgressForSidebar() {
   try {
     const data = await API.get('/api/evolution/assistant');
     if (!data?.assistant) {
-      widget.classList.add('d-none');
+      latestAssistantProgress = null;
+      hideAssistantProgressWidgets();
       return;
     }
     renderAssistantProgress(data.assistant);
   } catch (error) {
     sidebarLog.debug('Assistant progression unavailable', { error: error?.message || error });
-    widget.classList.add('d-none');
+    latestAssistantProgress = null;
+    hideAssistantProgressWidgets();
   }
+}
+
+if (typeof EventBus !== 'undefined') {
+  EventBus.on('agents:rendered', () => {
+    if (!isEvolutionEnabled()) {
+      hideAssistantProgressWidgets();
+      return;
+    }
+    if (latestAssistantProgress) {
+      renderAssistantProgress(latestAssistantProgress);
+    }
+  }, 'sidebar');
 }
 
 // Main sidebar setup function that coordinates all modules

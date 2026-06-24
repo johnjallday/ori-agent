@@ -11,6 +11,7 @@ let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
+const SYSTEM_ASSISTANT_AGENT_NAME = 'Ori';
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 const agentCreationCapabilityState = {
   mcpServers: [],
@@ -1421,6 +1422,10 @@ function displayAgents(agents, currentAgent) {
     if (nameA === currentAgent) return -1;
     if (nameB === currentAgent) return 1;
 
+    // Keep the system assistant visible because it owns the merged progress UI.
+    if (isSystemAssistantAgentName(nameA)) return -1;
+    if (isSystemAssistantAgentName(nameB)) return 1;
+
     // Then sort alphabetically
     return nameA.localeCompare(nameB);
   });
@@ -1491,6 +1496,10 @@ function renderAgents() {
   // Setup accordion listeners after rendering
   setupAccordionListeners();
 
+  if (typeof EventBus !== 'undefined') {
+    EventBus.emit('agents:rendered', { count: agentsToShow.length });
+  }
+
   // Load settings for the current agent accordion when it's expanded
   agentsToShow.forEach(agent => {
     const agentName = typeof agent === 'string' ? agent : agent.name;
@@ -1521,6 +1530,10 @@ function getAgentName(agent) {
 
 function getAgentType(agent) {
   return typeof agent === 'string' ? 'tool-calling' : (agent?.type || 'tool-calling');
+}
+
+function isSystemAssistantAgentName(agentName) {
+  return String(agentName || '').trim().toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase();
 }
 
 function normalizeAgentEvolution(agent) {
@@ -1571,12 +1584,32 @@ function renderAgentEvolutionSummary(evolution) {
   `;
 }
 
+function renderAssistantProgressSlot() {
+  if (!window.oriFeatures?.evolutionEnabled) {
+    return '';
+  }
+
+  return `
+    <div class="sidebar-assistant-progress d-none" data-assistant-progress-widget aria-live="polite">
+      <div class="sidebar-assistant-progress-meta">
+        <span class="sidebar-assistant-rank-badge badge" data-assistant-rank-badge>Novice</span>
+        <span class="sidebar-assistant-level" data-assistant-level-value>Level 0</span>
+        <span class="sidebar-assistant-xp" data-assistant-xp-value>0 XP</span>
+      </div>
+      <div class="progress">
+        <div class="progress-bar" data-assistant-xp-progress-bar role="progressbar" style="width: 0%;" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+    </div>
+  `;
+}
+
 // Create agent element with accordion
 function createAgentElement(agent, currentAgent) {
   const agentName = getAgentName(agent);
   const agentType = getAgentType(agent);
   const evolution = normalizeAgentEvolution(agent);
   const isCurrentAgent = agentName === currentAgent;
+  const isSystemAssistant = isSystemAssistantAgentName(agentName);
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
 
   // Format type label
@@ -1598,7 +1631,7 @@ function createAgentElement(agent, currentAgent) {
   const safeAgentNameJs = escapeJs(agentName);
   const safeAgentNameAttr = escapeAttr(agentName);
   const safeTypeLabel = escapeHtml(typeLabel);
-  const evolutionSummary = renderAgentEvolutionSummary(evolution);
+  const evolutionSummary = isSystemAssistant ? renderAssistantProgressSlot() : renderAgentEvolutionSummary(evolution);
 
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
