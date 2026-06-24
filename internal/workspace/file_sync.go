@@ -323,15 +323,23 @@ func shouldIndexWorkspaceDiskFile(relativePath string, info os.FileInfo) bool {
 		return false
 	}
 	clean := sanitizeWorkspaceRelativePath(relativePath)
+	if clean == "" || isHiddenWorkspacePath(clean) {
+		return false
+	}
+	return true
+}
+
+func isHiddenWorkspacePath(relativePath string) bool {
+	clean := sanitizeWorkspaceRelativePath(relativePath)
 	if clean == "" {
 		return false
 	}
 	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
-		if part == "" || strings.HasPrefix(part, ".") {
-			return false
+		if strings.HasPrefix(part, ".") {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // snapshotWorkspaceDiskFiles returns the regular files under filesPath keyed by
@@ -349,15 +357,21 @@ func snapshotWorkspaceDiskFiles(filesPath string) (map[string]os.FileInfo, error
 			}
 			return nil
 		}
-		if entry.IsDir() {
-			return nil
-		}
 		rel, relErr := filepath.Rel(filesPath, p)
 		if relErr != nil {
 			return relErr
 		}
 		clean := sanitizeWorkspaceRelativePath(rel)
 		if clean == "" {
+			return nil
+		}
+		if isHiddenWorkspacePath(clean) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
 			return nil
 		}
 		info, infoErr := entry.Info()

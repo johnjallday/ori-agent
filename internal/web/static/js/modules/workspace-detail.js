@@ -13471,6 +13471,8 @@ export class WorkspaceDetailPage {
     this.renderWorkspaceHealth();
 
     try {
+      await this.syncWorkspaceFilesFromDisk();
+
       const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
@@ -13500,6 +13502,22 @@ export class WorkspaceDetailPage {
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
+    }
+  }
+
+  async syncWorkspaceFilesFromDisk() {
+    if (!this.workspaceId) return;
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files/tree`,
+        { cache: 'no-store' }
+      );
+      if (!response.ok) {
+        console.warn('Workspace file sync failed:', response.status);
+      }
+    } catch (error) {
+      console.warn('Workspace file sync failed:', error);
     }
   }
 

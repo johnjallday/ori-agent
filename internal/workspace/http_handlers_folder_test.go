@@ -50,6 +50,58 @@ func TestHTTPHandlerCreateWorkspaceFolderAndFileTree(t *testing.T) {
 	assertFileInfo(t, files, "loose.txt", false)
 }
 
+func TestGetWorkspaceFilesTreeIndexesRPPAndOmitsHiddenFiles(t *testing.T) {
+	store, ws, handler := newFolderHandlerTest(t, "ws-tree-rpp-hidden", "Tree RPP Hidden")
+	filesPath := store.GetFilesPath(ws.ID)
+	if err := os.WriteFile(filepath.Join(filesPath, ".DS_Store"), []byte("hidden"), 0644); err != nil {
+		t.Fatalf("WriteFile .DS_Store: %v", err)
+	}
+	hiddenChild := filepath.Join(filesPath, ".cache", "data.json")
+	if err := os.MkdirAll(filepath.Dir(hiddenChild), 0755); err != nil {
+		t.Fatalf("MkdirAll hidden child: %v", err)
+	}
+	if err := os.WriteFile(hiddenChild, []byte("{}"), 0644); err != nil {
+		t.Fatalf("WriteFile hidden child: %v", err)
+	}
+	rppPath := filepath.Join(filesPath, "House Test.RPP")
+	if err := os.WriteFile(rppPath, []byte("<REAPER_PROJECT 0.1 \"7.0\" 1690000000\n>"), 0644); err != nil {
+		t.Fatalf("WriteFile RPP: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
+	rr := httptest.NewRecorder()
+	handler.GetWorkspaceFilesTree(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	files := decodeFileTreeResponse(t, rr.Body.Bytes())
+	rpp := findFileInfo(files, "House Test.RPP")
+	if rpp == nil {
+		t.Fatalf("expected RPP file in tree, got %#v", files)
+	}
+	if rpp.AttachmentID == "" {
+		t.Fatalf("expected RPP file to be indexed as an attachment, got %#v", rpp)
+	}
+	if findFileInfo(files, ".DS_Store") != nil {
+		t.Fatalf("expected .DS_Store to be omitted from tree")
+	}
+	if findFileInfo(files, ".cache") != nil || findFileInfo(files, filepath.Join(".cache", "data.json")) != nil {
+		t.Fatalf("expected hidden directory entries to be omitted from tree, got %#v", files)
+	}
+
+	stored, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Get workspace: %v", err)
+	}
+	if len(stored.Attachments) != 1 {
+		t.Fatalf("expected exactly one indexed attachment, got %#v", stored.Attachments)
+	}
+	if stored.Attachments[0].File == nil || stored.Attachments[0].File.RelativePath != "House Test.RPP" {
+		t.Fatalf("expected indexed RPP attachment, got %#v", stored.Attachments[0].File)
+	}
+}
+
 func TestHTTPHandlerCreateWorkspaceFolderRejectsTraversalAndFileCollision(t *testing.T) {
 	store, ws, handler := newFolderHandlerTest(t, "ws-folder-invalid", "Folder Invalid")
 
