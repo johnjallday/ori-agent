@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -162,6 +163,15 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(req.AgentName) == "" && strings.TrimSpace(req.FolderID) != "" {
 		req.AgentName = h.defaultSessionAgentNameForWorkspace(r.Context(), req.FolderID)
+	}
+	if h.agentStore != nil {
+		agentName := strings.TrimSpace(req.AgentName)
+		if agentName != "" {
+			if ag, ok := h.agentStore.GetAgent(agentName); ok && ag != nil && ag.Status == types.AgentStatusDisabled {
+				_ = orihttp.RespondConflict(w, "Agent is paused. Resume it before starting a new session.")
+				return
+			}
+		}
 	}
 
 	sess := &session.Session{

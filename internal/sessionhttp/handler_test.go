@@ -110,6 +110,32 @@ func TestHandler_CreateSessionWithoutAgent(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateSessionRejectsPausedAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("paused-agent", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	if err := handler.agentStore.UpdateAgent("paused-agent", func(ag *agent.Agent) error {
+		ag.Status = types.AgentStatusDisabled
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateAgent() error = %v", err)
+	}
+
+	body := `{"title": "Paused Session", "agent_name": "paused-agent"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleSessions(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("Expected status 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

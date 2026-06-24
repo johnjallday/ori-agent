@@ -22,6 +22,7 @@ type agentListEntry struct {
 	Source      string `json:"source"`
 	Scope       string `json:"scope,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	Status      string `json:"status,omitempty"`
 }
 
 // TestListAgents_AnnotatesWorkspaceEntryAgents verifies that GET /api/agents
@@ -101,6 +102,9 @@ func TestListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 	}
 	if regular.WorkspaceID != "" {
 		t.Errorf("expected Regular Agent to have empty workspace_id, got %q", regular.WorkspaceID)
+	}
+	if regular.Status != string(types.AgentStatusActive) {
+		t.Errorf("expected Regular Agent status=%q, got %q", types.AgentStatusActive, regular.Status)
 	}
 
 	entry, ok := byName["Workspace Manager"]

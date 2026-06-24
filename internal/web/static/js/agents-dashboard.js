@@ -348,10 +348,14 @@ function createAgentCard(agent) {
   const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
   const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
   const health = getHealthState(agent);
+  const isPaused = health.kind === 'paused';
   const chatDisabled = health.kind === 'needs-setup';
-  const primaryAction = chatDisabled ? 'setup' : 'chat';
-  const primaryLabel = chatDisabled ? 'Setup' : 'Chat';
+  const primaryAction = chatDisabled ? 'setup' : (isPaused ? 'paused' : 'chat');
+  const primaryLabel = chatDisabled ? 'Setup' : (isPaused ? 'Paused' : 'Chat');
   const pauseLabel = health.kind === 'paused' ? 'Resume' : 'Pause';
+  const primaryDisabledAttr = isPaused
+    ? 'disabled title="Resume this agent before starting a chat."'
+    : '';
   const isSystemAgent = isSystemAssistantAgentName(name);
   const deleteDisabledAttr = isSystemAgent
     ? 'disabled title="System assistant cannot be deleted."'
@@ -370,7 +374,7 @@ function createAgentCard(agent) {
       </div>
     </div>
     <div class="ops-card-actions">
-      <button class="ops-action-btn primary" data-action="primary" type="button">${safeEscapeHtml(primaryLabel)}</button>
+      <button class="ops-action-btn primary" data-action="primary" type="button" ${primaryDisabledAttr}>${safeEscapeHtml(primaryLabel)}</button>
       <button class="ops-action-btn" data-action="details" type="button" aria-haspopup="dialog" aria-controls="agentDrawer">Details</button>
       <button class="ops-action-btn" data-action="pause" type="button">${safeEscapeHtml(pauseLabel)}</button>
       <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
@@ -396,6 +400,10 @@ function createAgentCard(agent) {
     primaryButton.addEventListener('click', async () => {
       if (primaryAction === 'setup') {
         openAgentEditor(name);
+        return;
+      }
+      if (primaryAction === 'paused') {
+        notifyError(`Agent "${name}" is paused. Resume it before starting a chat.`);
         return;
       }
 
@@ -443,17 +451,12 @@ async function openChatWithAgent(agentName, button) {
 
   try {
     const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
-    let resumedAgent = false;
     if (String(agent?.status || '') === 'disabled') {
-      await updateAgentStatus(agentName, 'active');
-      resumedAgent = true;
+      notifyError(`Agent "${agentName}" is paused. Resume it before starting a chat.`);
+      return;
     }
 
     await showChatSessionModalForAgent(agentName);
-
-    if (resumedAgent) {
-      await loadAgents();
-    }
   } catch (error) {
     console.error('Failed to open chat with agent:', error);
     notifyError(error.message || `Failed to open chat with ${agentName}`);

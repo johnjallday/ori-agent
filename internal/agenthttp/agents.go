@@ -135,6 +135,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"type":              agent.Type,
 				"role":              agent.Role,
 				"capabilities":      agent.Capabilities,
+				"status":            agent.Status,
 				"model":             agent.Settings.Model,
 				"temperature":       agent.Settings.Temperature,
 				"provider":          agent.Settings.Provider,
@@ -164,6 +165,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Source      string                `json:"source"`
 			Scope       string                `json:"scope,omitempty"`
 			WorkspaceID string                `json:"workspace_id,omitempty"`
+			Status      types.AgentStatus     `json:"status,omitempty"`
 			Evolution   *types.AgentEvolution `json:"evolution,omitempty"`
 		}
 		annotate := func(info AgentInfo) AgentInfo {
@@ -181,6 +183,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					Name:      name,
 					Type:      agent.Type,
 					Source:    "user",
+					Status:    agent.Status,
 					Evolution: cloneAgentEvolution(agent),
 				}))
 			} else {
@@ -203,6 +206,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					Name:   cliAgentDisplayName(info.Backend),
 					Type:   "research",
 					Source: "cli",
+					Status: getCLIAgentOperationalStatus(info.Backend),
 				})
 			}
 		}
@@ -654,6 +658,7 @@ func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
 		"available_models":   models,
 		"temperature":        0.0,
 		"provider":           backend,
+		"status":             getCLIAgentOperationalStatus(backend),
 		"max_context_window": caps.MaxContextWindow,
 		"source":             "cli",
 	}, true

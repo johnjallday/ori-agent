@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -161,13 +162,17 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			if len(info.Models) > 0 {
 				defaultModel = info.Models[0]
 			}
+			status := getCLIAgentOperationalStatus(info.Backend)
+			if statusFilter != "" && string(status) != statusFilter {
+				continue
+			}
 			agents = append(agents, AgentListItem{
 				Name:         cliAgentDisplayName(info.Backend),
 				Type:         "research",
 				Role:         types.RoleCLIAgent,
 				Source:       "cli",
 				Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
-				Status:       types.AgentStatusActive,
+				Status:       status,
 				Model:        defaultModel,
 			})
 		}
@@ -197,6 +202,9 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		if len(parts) > 0 {
 			agentName = parts[0]
 		}
+	}
+	if decodedName, err := url.PathUnescape(agentName); err == nil {
+		agentName = decodedName
 	}
 
 	// Also check query parameter as fallback
@@ -229,7 +237,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 						Type:         "research",
 						Role:         types.RoleCLIAgent,
 						Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
-						Status:       types.AgentStatusActive,
+						Status:       getCLIAgentOperationalStatus(backend),
 						Model:        defaultModel,
 						Provider:     backend,
 					}
@@ -408,6 +416,9 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 			agentName = parts[0]
 		}
 	}
+	if decodedName, err := url.PathUnescape(agentName); err == nil {
+		agentName = decodedName
+	}
 
 	if agentName == "" {
 		orihttp.BadRequest(w, "Agent name is required")
@@ -437,6 +448,32 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
+		if h.cliAgentRegistry != nil {
+			backend := cliAgentBackendFromName(agentName)
+			if backend != "" && h.cliAgentRegistry.IsAvailable(backend) {
+				oldStatus := string(getCLIAgentOperationalStatus(backend))
+				setCLIAgentOperationalStatus(backend, types.AgentStatus(req.Status))
+
+				if h.ActivityLogger != nil {
+					details := map[string]any{
+						"old_status": oldStatus,
+						"new_status": req.Status,
+						"source":     "cli",
+					}
+					if err := h.ActivityLogger.LogActivity(cliAgentDisplayName(backend), types.ActivityEventStatusChanged, details, ""); err != nil {
+						logger.Error("Failed to log CLI status change activity", logger.Fields{"status": err})
+					}
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				orihttp.WriteJSON(w, map[string]any{
+					"success": true,
+					"message": "Agent status updated successfully",
+					"status":  req.Status,
+				})
+				return
+			}
+		}
 		orihttp.NotFound(w, "Agent not found")
 		// Store old status for logging
 		return
