@@ -901,194 +901,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Separate image files from text files for proper API handling
-	var imageFiles []UploadedFile
-	var textFiles []UploadedFile
-	for _, file := range req.Files {
-		if isImageMimeType(file.Type) {
-			imageFiles = append(imageFiles, file)
-		} else {
-			textFiles = append(textFiles, file)
-		}
-	}
+	// Separate image files from text files for proper API handling.
+	imageFiles, textFiles := partitionUploadedFiles(req.Files)
 
-	// For text files, prepend their content to the question as before
-	if len(textFiles) > 0 {
-		var filesContext strings.Builder
-		filesContext.WriteString("Here are the uploaded documents:\n\n")
+	// For text files, prepend their content to the question.
+	q = buildQuestionWithUploadedFiles(q, textFiles)
 
-		for _, file := range textFiles {
-			fileText := file.Content
-			if isParseableDocument(file.Name) {
-				parsedText, err := parseUploadedFileText(file)
-				if err != nil {
-					logger.Warn("Failed to extract text from uploaded file", logger.Fields{
-						"name":  file.Name,
-						"type":  file.Type,
-						"error": err.Error(),
-					})
-					fileText = fmt.Sprintf("[Unable to extract text from %s]", file.Name)
-				} else if strings.TrimSpace(parsedText) == "" {
-					fileText = fmt.Sprintf("[No extractable text found in %s]", file.Name)
-				} else {
-					fileText = parsedText
-				}
-			}
-
-			filesContext.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Name))
-			filesContext.WriteString(fileText)
-			filesContext.WriteString("\n\n")
-		}
-
-		filesContext.WriteString("User's question about the documents:\n")
-		filesContext.WriteString(q)
-
-		q = filesContext.String()
-	}
-
-	// Handle special commands
-	if q == "/help" {
-		h.commandHandler.HandleHelp(w, r)
-		return
-	}
-	if q == "/agent" {
-		h.commandHandler.HandleAgentStatus(w, r, executionAgent)
-		return
-	}
-	if q == "/agents" {
-		h.commandHandler.HandleAgentsList(w, r)
-		return
-	}
-	if q == "/tools" {
-		h.commandHandler.HandleToolsList(w, r, executionAgent)
-		return
-	}
-	if q == "/skills" {
-		h.commandHandler.HandleSkillsList(w, r, executionAgent)
-		return
-	}
-	if q == "/exit" {
-		h.commandHandler.HandleExit(w, r)
-		return
-	}
-	if q == "/version" {
-		h.commandHandler.HandleVersion(w, r)
-		return
-	}
-	if strings.HasPrefix(q, "/switch") {
-		// Parse the agent name from the command
-		parts := strings.Fields(q)
-		var agentName string
-		if len(parts) > 1 {
-			agentName = parts[1]
-		}
-		h.commandHandler.HandleSwitch(w, r, agentName)
-		return
-	}
-	if strings.HasPrefix(q, "/workspace") {
-		// Parse args after "/workspace"
-		args := strings.TrimPrefix(q, "/workspace")
-		h.commandHandler.HandleWorkspace(w, r, args)
-		return
-	}
-	if strings.HasPrefix(q, "/openapp") {
-		appName := strings.TrimSpace(strings.TrimPrefix(q, "/openapp"))
-		h.commandHandler.HandleOpenApp(w, r, appName)
+	// Handle slash commands that route directly to the command handler.
+	if h.dispatchSlashCommand(w, r, q, executionAgent) {
 		return
 	}
 
-	var invokedSkill *skillInvocation
-	if strings.HasPrefix(q, "/skill") {
-		if h.skillsManager == nil {
-			orihttp.WriteJSON(w, map[string]any{
-				"response": "❌ Skills are not enabled.",
-			})
-			return
-		}
-		name, args, err := parseSkillCommand(q)
-		if err != nil {
-			orihttp.WriteJSON(w, map[string]any{
-				"response": fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/skill <name> <args>`", err),
-			})
-			return
-		}
-		skill, found, err := h.skillsManager.GetSkill(executionAgent.Name, name)
-		if err != nil {
-			var conflicts *skills.SkillConflictError
-			if errors.As(err, &conflicts) {
-				orihttp.WriteJSON(w, map[string]any{
-					"response":  "❌ Duplicate skill names detected. Resolve conflicts in your skills folders before running skills.",
-					"conflicts": conflicts.Conflicts,
-				})
-				return
-			}
-			orihttp.InternalError(w, err.Error())
-			return
-		}
-		if !found {
-			writeJSONResponse(w, attachDependencyResolution(map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' not found. Use /skills to list available skills.", name),
-			}, buildSkillDependencyResolution(name, dependencyTypeSkillMissing)))
-			return
-		}
-		if len(skill.ValidationErrors) > 0 {
-			orihttp.WriteJSON(w, map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' has validation errors: %s", skill.Name, strings.Join(skill.ValidationErrors, "; ")),
-			})
-			return
-		}
-		if !skill.Enabled {
-			writeJSONResponse(w, attachDependencyResolution(map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
-			return
-		}
-		if skill.HasScripts && !skill.Trusted {
-			writeJSONResponse(w, attachDependencyResolution(map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
-			return
-		}
-		invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: true}
-	}
-
-	if invokedSkill == nil {
-		if name, args, ok := parseImplicitSkillCommand(q); ok && h.skillsManager != nil {
-			skill, found, err := h.skillsManager.GetSkill(executionAgent.Name, name)
-			if err != nil {
-				var conflicts *skills.SkillConflictError
-				if errors.As(err, &conflicts) {
-					orihttp.WriteJSON(w, map[string]any{
-						"response":  "❌ Duplicate skill names detected. Resolve conflicts in your skills folders before running skills.",
-						"conflicts": conflicts.Conflicts,
-					})
-					return
-				}
-				orihttp.InternalError(w, err.Error())
-				return
-			}
-			if found {
-				if len(skill.ValidationErrors) > 0 {
-					orihttp.WriteJSON(w, map[string]any{
-						"response": fmt.Sprintf("❌ Skill '%s' has validation errors: %s", skill.Name, strings.Join(skill.ValidationErrors, "; ")),
-					})
-					return
-				}
-				if !skill.Enabled {
-					writeJSONResponse(w, attachDependencyResolution(map[string]any{
-						"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
-					return
-				}
-				if skill.HasScripts && !skill.Trusted {
-					writeJSONResponse(w, attachDependencyResolution(map[string]any{
-						"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
-					return
-				}
-				invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: false}
-			}
-		}
+	// Resolve an explicit ("/skill ...") or implicit skill invocation.
+	invokedSkill, done := h.resolveInvokedSkill(w, q, executionAgent)
+	if done {
+		return
 	}
 	if strings.HasPrefix(q, "/tool ") {
 		// Direct tool execution - bypass LLM decision-making
