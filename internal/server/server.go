@@ -533,10 +533,22 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	// Prevent browsers from caching embedded static assets during local dev.
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
+	// Embedded assets are immutable for the life of the process and only change
+	// when the binary is rebuilt. Allow the browser to cache them but always
+	// revalidate against a content-hash ETag, so we serve cheap 304s instead of
+	// re-downloading (and re-parsing) megabytes of JS/CSS on every page load,
+	// while never risking a stale asset after an update.
+	etag := staticETag(path, content)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+
+	if match := r.Header.Get("If-None-Match"); match != "" {
+		if match == "*" || strings.Contains(match, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+
 	orihttp.WriteBytes(w, content)
 }
 
