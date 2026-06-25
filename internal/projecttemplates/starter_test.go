@@ -30,6 +30,9 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if len(templates[0].Tags) != 2 || templates[0].Tags[0] != "music" || templates[0].Tags[1] != "reaper" {
 		t.Errorf("reaper starter tags not applied: %+v", templates[0].Tags)
 	}
+	if !templates[0].HasOnboarding() {
+		t.Error("reaper starter should carry template onboarding")
+	}
 	if len(templates[1].Tags) != 1 || templates[1].Tags[0] != "writing" {
 		t.Errorf("writing starter tags not applied: %+v", templates[1].Tags)
 	}
