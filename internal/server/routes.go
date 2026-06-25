@@ -233,7 +233,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	updateHandler := updatehttp.NewHandler(s.Integration.UpdateManager)
 	mux.HandleFunc("/api/updates/check", updateHandler.CheckUpdatesHandler)
 	mux.HandleFunc("/api/updates/releases", updateHandler.ListReleasesHandler)
-	mux.HandleFunc("/api/updates/download", updateHandler.DownloadUpdateHandler)
 	mux.HandleFunc("/api/updates/version", updateHandler.GetVersionHandler)
 
 	// =============================================================================

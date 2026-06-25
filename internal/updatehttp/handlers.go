@@ -3,7 +3,6 @@ package updatehttp
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -72,57 +71,6 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orihttp.WriteJSON(w, response)
-}
-
-func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	var request struct {
-		Version     string `json:"version"`
-		AutoRestart bool   `json:"autoRestart"`
-	}
-
-	if !orihttp.ParseJSONBody(w, r, &request) {
-		return
-	}
-
-	if request.Version == "" {
-		orihttp.BadRequest(w, "Version is required")
-		return
-	}
-
-	filePath, err := h.updateManager.DownloadUpdate(request.Version)
-	if err != nil {
-		logger.Error("Error downloading update", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to download update")
-		return
-	}
-
-	message := "Update downloaded successfully. Please restart ori-agent to use the new version."
-	if request.AutoRestart {
-		message = "Update downloaded successfully. Restarting application..."
-	}
-
-	response := map[string]any{
-		"success":     true,
-		"version":     request.Version,
-		"filePath":    filePath,
-		"message":     message,
-		"autoRestart": request.AutoRestart,
-	}
-
-	orihttp.WriteJSON(w, response)
-
-	if request.AutoRestart {
-		go func() {
-			// Wait a bit to ensure response is sent
-			time.Sleep(1 * time.Second)
-			h.updateManager.RestartApplication()
-		}()
-	}
 }
 
 // GetVersionHandler handles GET /api/updates/version
