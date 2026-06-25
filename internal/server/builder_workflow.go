@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/templateonboarding"
+	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
@@ -139,6 +140,11 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		b.workspaceFileStore = fileStore
 		b.templateOnboardingStore = templateonboarding.NewStore(fileStore)
 		b.templateOnboardingService = templateonboarding.NewService(b.templateOnboardingStore)
+		b.templateOnboardingHTTPHandler = templateonboardinghttp.NewHandler(
+			b.templateOnboardingStore,
+			templateonboardinghttp.NewWorkspaceStoreEntryAgentResolver(b.sessionStore),
+		)
+		b.templateOnboardingHTTPHandler.SetExtractionDeps(b.llmFactory, b.configManager)
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
 			b.sessionHandler.SetTemplateOnboardingService(b.templateOnboardingService)

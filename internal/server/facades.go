@@ -34,6 +34,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
@@ -97,42 +98,43 @@ type UISystemFacade struct {
 
 // HandlerFacade manages all HTTP handlers (API endpoints)
 type HandlerFacade struct {
-	ActivityLogger   *agenthttp.ActivityLogger
-	Settings         *settingshttp.Handler
-	Chat             *chathttp.Handler
-	Onboarding       *onboardinghttp.Handler
-	Device           *devicehttp.Handler
-	Orchestration    *orchestrationhttp.Handler
-	AutoTask         *orchestrationhttp.AutoTaskHandler
-	Workspace        *workspace.HTTPHandler
-	Usage            *usagehttp.Handler
-	MCP              *mcphttp.Handler
-	Plugin           *pluginhttp.Handler
-	Location         *locationhttp.Handler
-	Workflow         *workflowhttp.Handler
-	ModelCategory    *modelcategoryhttp.Handler
-	AutoCategorize   *modelcategoryhttp.AutoCategorizeHandler
-	Reset            *settingshttp.ResetHandler
-	AutoConfig       *agenthttp.AutoConfigHandler
-	SmartOnboarding  *onboardinghttp.SmartOnboardingHandler
-	Speech           *speechhttp.Handler
-	Session          *sessionhttp.Handler
-	AutoClassify     *sessionhttp.AutoClassifyHandler
-	SmartInput       *sessionhttp.SmartInputHandler
-	Note             *notehttp.Handler
-	SessionFiles     *fileshttp.Handler
-	Review           *reviewhttp.Handler
-	Evolution        *evolutionhttp.Handler
-	Vault            *vaulthttp.Handler
-	ExternalAgents   *externalagentshttp.Handler
-	Skills           *skillshttp.Handler
-	CLIAgents        *cliagenthttp.Handler
-	CLIAgentRegistry *cliagent.CLIAgentRegistry
-	WorkspaceRuns    *workspacerun.Handler
-	ActionCenter     *actioncenterhttp.Handler
-	Triggers         *triggerhttp.Handler
-	WorkspaceMemory  *memoryhttp.Handler
-	User             *userhttp.Handler
+	ActivityLogger     *agenthttp.ActivityLogger
+	Settings           *settingshttp.Handler
+	Chat               *chathttp.Handler
+	Onboarding         *onboardinghttp.Handler
+	Device             *devicehttp.Handler
+	Orchestration      *orchestrationhttp.Handler
+	AutoTask           *orchestrationhttp.AutoTaskHandler
+	Workspace          *workspace.HTTPHandler
+	Usage              *usagehttp.Handler
+	MCP                *mcphttp.Handler
+	Plugin             *pluginhttp.Handler
+	Location           *locationhttp.Handler
+	Workflow           *workflowhttp.Handler
+	ModelCategory      *modelcategoryhttp.Handler
+	AutoCategorize     *modelcategoryhttp.AutoCategorizeHandler
+	Reset              *settingshttp.ResetHandler
+	AutoConfig         *agenthttp.AutoConfigHandler
+	SmartOnboarding    *onboardinghttp.SmartOnboardingHandler
+	Speech             *speechhttp.Handler
+	Session            *sessionhttp.Handler
+	AutoClassify       *sessionhttp.AutoClassifyHandler
+	SmartInput         *sessionhttp.SmartInputHandler
+	Note               *notehttp.Handler
+	SessionFiles       *fileshttp.Handler
+	Review             *reviewhttp.Handler
+	Evolution          *evolutionhttp.Handler
+	Vault              *vaulthttp.Handler
+	ExternalAgents     *externalagentshttp.Handler
+	Skills             *skillshttp.Handler
+	CLIAgents          *cliagenthttp.Handler
+	CLIAgentRegistry   *cliagent.CLIAgentRegistry
+	WorkspaceRuns      *workspacerun.Handler
+	ActionCenter       *actioncenterhttp.Handler
+	Triggers           *triggerhttp.Handler
+	WorkspaceMemory    *memoryhttp.Handler
+	User               *userhttp.Handler
+	TemplateOnboarding *templateonboardinghttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

@@ -591,6 +591,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
+		if s.Handlers.TemplateOnboarding != nil {
+			s.Handlers.TemplateOnboarding.RegisterRoutes(mux)
+		}
 
 		// Project template library (used by the workspace creation flow)
 		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
