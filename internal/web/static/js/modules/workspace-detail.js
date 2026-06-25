@@ -234,7 +234,7 @@ export class WorkspaceDetailPage {
     this.memoryManager = new WorkspaceMemoryManager(this);
     this.templateOnboardingPanel = new TemplateOnboardingPanel({
       workspaceId: this.workspaceId,
-      mount: document.getElementById('workspace-template-onboarding'),
+      mountId: 'workspace-template-onboarding',
       onRefresh: () => this.loadWorkspace()
     });
     this.workspaceSettings = null;

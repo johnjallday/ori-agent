@@ -23,9 +23,10 @@ const STATUS_META = {
 };
 
 export class TemplateOnboardingPanel {
-  constructor({ workspaceId, mount, onRefresh } = {}) {
+  constructor({ workspaceId, mount, mountId, onRefresh } = {}) {
     this.workspaceId = String(workspaceId || '').trim();
     this.mount = mount || null;
+    this.mountId = mountId || null;
     this.onRefresh = typeof onRefresh === 'function' ? onRefresh : null;
     this.session = null;
     this.patchTimer = null;
@@ -37,6 +38,10 @@ export class TemplateOnboardingPanel {
   }
 
   async init() {
+    if (!this.mount && this.mountId &&
+        typeof document !== 'undefined' && typeof document.getElementById === 'function') {
+      this.mount = document.getElementById(this.mountId);
+    }
     if (!this.workspaceId || !this.mount) return;
     window.addEventListener('ori:workspace-assistant-message', this.assistantListener);
     await this.load();
