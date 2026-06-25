@@ -9205,11 +9205,7 @@
   <!-- Theme Manager (load early) -->
   <script defer src="/js/modules/themeManager.js"></script>
 
-  <!-- Utils -->
-  <script defer src="/js/utils/logger.js"></script>
-  <script defer src="/js/utils/event-bus.js"></script>
-  <script defer src="/js/utils/api-client.js"></script>
-  <script defer src="/js/utils/dom-utils.js"></script>
+  {{template "scripts-dx-utils.tmpl" .}}
 
   <!-- Core Modules -->
   <script defer src="/js/modules/resizer.js"></script>

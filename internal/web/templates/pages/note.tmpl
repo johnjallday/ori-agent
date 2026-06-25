@@ -193,10 +193,7 @@
   <script defer src="/js/vendor/marked-14.1.4.min.js"></script>
   <script defer src="/js/vendor/dompurify-3.1.6.min.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
-  <script defer src="/js/utils/logger.js"></script>
-  <script defer src="/js/utils/event-bus.js"></script>
-  <script defer src="/js/utils/api-client.js"></script>
-  <script defer src="/js/utils/dom-utils.js"></script>
+  {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/modules/toast.js"></script>
   <script type="module" src="/js/modules/note-editor.js"></script>
   <script type="module" src="/js/modules/note-toc.js"></script>
@@ -209,11 +206,7 @@
   <script type="module" src="/js/modules/note-ai-assist.js"></script>
   <script type="module" src="/js/modules/search-palette.js"></script>
   <script type="module" src="/js/modules/note-page.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      themeManager.initialize();
-    });
-  </script>
+  {{template "theme-init.tmpl" .}}
 </body>
 </html>
 {{end}}
