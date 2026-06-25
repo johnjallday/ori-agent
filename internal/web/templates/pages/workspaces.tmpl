@@ -37,16 +37,8 @@
   <script defer src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
   <!-- Theme Manager - must load before other modules -->
   <script defer src="/js/modules/themeManager.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      themeManager.initialize();
-    });
-  </script>
-  <!-- DX Utilities -->
-  <script defer src="/js/utils/logger.js"></script>
-  <script defer src="/js/utils/event-bus.js"></script>
-  <script defer src="/js/utils/api-client.js"></script>
-  <script defer src="/js/utils/dom-utils.js"></script>
+  {{template "theme-init.tmpl" .}}
+  {{template "scripts-dx-utils.tmpl" .}}
   <!-- Sidebar modules -->
   <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/settings.js"></script>

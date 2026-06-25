@@ -70,6 +70,8 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	templatePaths := []string{
 		"templates/layout/base.tmpl",
 		"templates/layout/head.tmpl",
+		"templates/layout/scripts-dx-utils.tmpl",
+		"templates/layout/theme-init.tmpl",
 		"templates/components/sidebar.tmpl",
 		"templates/components/workspace-hub.tmpl",
 		"templates/components/support-chat.tmpl",
