@@ -175,21 +175,8 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.completionRunner.Complete(r.Context(), session, entryAgentName)
-	if err != nil {
-		_ = orihttp.RespondInternalError(w, "failed to complete template onboarding")
-		return
-	}
-	if _, err := session.StartCompletion(); err != nil {
-		respondStateError(w, err)
-		return
-	}
-	if _, err := session.MarkSucceeded(result); err != nil {
-		respondStateError(w, err)
-		return
-	}
-	if err := h.store.Save(r.Context(), session); err != nil {
-		_ = orihttp.RespondInternalError(w, "failed to save template onboarding session")
+	if _, err := h.completionRunner.Complete(r.Context(), session, entryAgentName); err != nil {
+		respondExecutionError(w, err)
 		return
 	}
 	orihttp.WriteJSON(w, h.statusResponse(session, entryAgentName))
@@ -216,21 +203,8 @@ func (h *Handler) Retry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.completionRunner.Complete(r.Context(), session, entryAgentName)
-	if err != nil {
-		_ = orihttp.RespondInternalError(w, "failed to retry template onboarding")
-		return
-	}
-	if _, err := session.Retry(); err != nil {
-		respondStateError(w, err)
-		return
-	}
-	if _, err := session.MarkSucceeded(result); err != nil {
-		respondStateError(w, err)
-		return
-	}
-	if err := h.store.Save(r.Context(), session); err != nil {
-		_ = orihttp.RespondInternalError(w, "failed to save template onboarding session")
+	if _, err := h.completionRunner.Complete(r.Context(), session, entryAgentName); err != nil {
+		respondExecutionError(w, err)
 		return
 	}
 	orihttp.WriteJSON(w, h.statusResponse(session, entryAgentName))
@@ -738,5 +712,18 @@ func respondStateError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondConflict(w, err.Error())
 	default:
 		_ = orihttp.RespondInternalError(w, "template onboarding state transition failed")
+	}
+}
+
+func respondExecutionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, templateonboarding.ErrTerminalSession),
+		errors.Is(err, templateonboarding.ErrCompletionNotReady),
+		errors.Is(err, templateonboarding.ErrSessionRunning),
+		errors.Is(err, templateonboarding.ErrSessionMissingInput),
+		errors.Is(err, templateonboarding.ErrInvalidTransition):
+		_ = orihttp.RespondConflict(w, err.Error())
+	default:
+		_ = orihttp.RespondInternalError(w, "failed to complete template onboarding")
 	}
 }

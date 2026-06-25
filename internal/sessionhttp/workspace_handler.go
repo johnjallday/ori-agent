@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -391,7 +392,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				if wantsProject {
 					onboardingHandled := false
 					if templateResolved && h.templateOnboarding != nil && resolvedTemplate.HasOnboarding() {
-						summary, handled, err := h.templateOnboarding.ResolveAndStart(r.Context(), ws, resolvedTemplate)
+						summary, handled, err := h.templateOnboarding.ResolveAndStart(r.Context(), ws, resolvedTemplate, templateonboarding.StartOptions{
+							TemplateID:   req.TemplateID,
+							TemplatePath: resolvedTemplate.Path,
+							ProjectName:  req.ProjectName,
+						})
 						onboardingHandled = handled
 						if summary != nil {
 							onboardingSummary = summary

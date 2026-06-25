@@ -273,6 +273,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	if b.skillsManager != nil {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
+	b.runtimeResolver = runtimeResolver
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {
@@ -306,6 +307,20 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
+
+	if b.templateOnboardingHTTPHandler != nil && b.templateOnboardingStore != nil {
+		var memoryAppender templateonboarding.MemoryAppender
+		if b.workspaceFileStore != nil {
+			memoryAppender = workspace.NewMemoryStore(b.workspaceFileStore)
+		}
+		b.templateOnboardingHTTPHandler.SetCompletionRunner(templateonboarding.NewExecutor(
+			b.templateOnboardingStore,
+			templateonboarding.WithProjectInstantiator(b.sessionHandler),
+			templateonboarding.WithTaskHandler(taskExecutionHandler),
+			templateonboarding.WithRuntimeResolver(runtimeResolver),
+			templateonboarding.WithMemoryAppender(memoryAppender),
+		))
+	}
 
 	b.taskScheduler = workspace.NewTaskScheduler(b.workspaceStore, workspace.SchedulerConfig{
 		PollInterval:  1 * time.Minute,

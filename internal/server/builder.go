@@ -120,6 +120,7 @@ type ServerBuilder struct {
 	workspaceStore           workspace.Store
 	workspaceFileStore       *workspace.FileStore
 	workspaceAllowlist       *workspace.Allowlist
+	runtimeResolver          *workspace.AgentRuntimeResolver
 	taskHandler              *workspace.LLMTaskHandler
 	orchestrationTaskHandler *workspace.LLMTaskHandler
 	runBackedTaskHandler     workspace.TaskHandler

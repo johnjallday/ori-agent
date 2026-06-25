@@ -48,6 +48,10 @@ type ActionResult struct {
 // later edits to template.json cannot alter an in-flight onboarding.
 type Session struct {
 	WorkspaceID  string         `json:"workspace_id"`
+	TemplateID   string         `json:"template_id,omitempty"`
+	TemplatePath string         `json:"template_path,omitempty"`
+	ProjectName  string         `json:"project_name,omitempty"`
+	ProjectPath  string         `json:"project_path,omitempty"`
 	Spec         OnboardingSpec `json:"spec"`
 	Values       map[string]any `json:"values,omitempty"`
 	Status       Status         `json:"status"`

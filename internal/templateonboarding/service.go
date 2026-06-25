@@ -31,6 +31,14 @@ type Service struct {
 	store *Store
 }
 
+// StartOptions carries the template metadata needed when completion later
+// instantiates the skeleton after intake has finished.
+type StartOptions struct {
+	TemplateID   string
+	TemplatePath string
+	ProjectName  string
+}
+
 // NewService creates a template-onboarding service.
 func NewService(store *Store) *Service {
 	return &Service{store: store}
@@ -41,7 +49,7 @@ func NewService(store *Store) *Service {
 // keep the existing immediate-instantiation path. For valid onboarding specs it
 // persists a new session and returns handled=true; callers should then skip
 // immediate project instantiation.
-func (s *Service) ResolveAndStart(ctx context.Context, ws *sessionmodel.Workspace, tpl projecttemplates.Template) (*Summary, bool, error) {
+func (s *Service) ResolveAndStart(ctx context.Context, ws *sessionmodel.Workspace, tpl projecttemplates.Template, opts ...StartOptions) (*Summary, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, fmt.Errorf("%w: template onboarding store is required", ErrInvalidSession)
 	}
@@ -68,6 +76,11 @@ func (s *Service) ResolveAndStart(ctx context.Context, ws *sessionmodel.Workspac
 	session, err := NewSession(ws.ID, spec, status)
 	if err != nil {
 		return nil, true, err
+	}
+	if len(opts) > 0 {
+		session.TemplateID = strings.TrimSpace(opts[0].TemplateID)
+		session.TemplatePath = strings.TrimSpace(opts[0].TemplatePath)
+		session.ProjectName = strings.TrimSpace(opts[0].ProjectName)
 	}
 	if err := s.store.Save(ctx, session); err != nil {
 		return NewSummary(session, entryAgentName), true, err
