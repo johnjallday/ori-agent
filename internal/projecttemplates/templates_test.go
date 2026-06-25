@@ -71,6 +71,39 @@ func TestListLibraryMalformedManifestFallsBack(t *testing.T) {
 	}
 }
 
+func TestListLibraryPreservesOnboardingRawAndToleratesGarbage(t *testing.T) {
+	dir := t.TempDir()
+	// Valid onboarding block: preserved verbatim, display metadata intact.
+	writeFile(t, filepath.Join(dir, "withonb", ManifestFileName),
+		`{"name":"With","onboarding":{"version":"1","completion":{"type":"none"}}}`)
+	// Garbage onboarding (a string, not an object): this package must NOT
+	// interpret it — the template still lists with its display name, and the raw
+	// bytes are carried for templateonboarding to reject later.
+	writeFile(t, filepath.Join(dir, "badonb", ManifestFileName),
+		`{"name":"Bad","onboarding":"not-an-object"}`)
+	// No onboarding key at all.
+	writeFile(t, filepath.Join(dir, "plain", "seed.txt"), "x")
+
+	templates, err := ListLibrary(dir)
+	if err != nil {
+		t.Fatalf("ListLibrary: %v", err)
+	}
+	byID := map[string]Template{}
+	for _, tpl := range templates {
+		byID[tpl.ID] = tpl
+	}
+
+	if got := byID["withonb"]; got.Name != "With" || !got.HasOnboarding() {
+		t.Errorf("withonb: expected display name + onboarding present, got %+v", got)
+	}
+	if got := byID["badonb"]; got.Name != "Bad" || !got.HasOnboarding() {
+		t.Errorf("badonb: garbage onboarding must still list with display name + raw bytes, got %+v", got)
+	}
+	if got := byID["plain"]; got.Name != "plain" || got.HasOnboarding() {
+		t.Errorf("plain: expected no onboarding, got %+v", got)
+	}
+}
+
 func TestFindLibraryTemplate(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "good", "a.txt"), "x")

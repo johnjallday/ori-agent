@@ -244,6 +244,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var resolvedTemplate projecttemplates.Template
+	templateResolved := false
+	var templateResolveErr error
+	if wantsProject {
+		resolvedTemplate, templateResolveErr = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
+		templateResolved = templateResolveErr == nil
+	}
+
 	ws := &session.Workspace{
 		Name:        req.Name,
 		Kind:        kind,
@@ -254,10 +262,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		ProjectPath: req.ProjectPath,
 		Tags:        requestedTags,
 	}
-	if wantsProject {
-		if tpl, tplErr := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath); tplErr == nil {
-			ws.Tags = agentworkspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
-		}
+	if templateResolved {
+		ws.Tags = agentworkspace.MergeWorkspaceTags(ws.Tags, resolvedTemplate.Tags)
 	}
 	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
 		ws.FolderSlug = agentworkspace.Slugify(requestedSlug)
@@ -306,6 +312,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Groups get the same executable scaffolding as real workspaces, scoped to
 	// their own content directories so member sub-workspaces stay hidden.
 	projectWarning := ""
+	var onboardingSummary any
 	if wantsProject {
 		// Default/fallback message for every path below that does not reach
 		// (or does not succeed in) instantiateWorkspaceProject: workspaceStore
@@ -382,13 +389,35 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
 				if wantsProject {
-					// Non-fatal by design: a failed instantiation must not fail
-					// workspace creation. The warning is surfaced to the user.
-					if err := h.instantiateWorkspaceProject(r.Context(), ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
-						projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
-						logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
-					} else {
-						projectWarning = ""
+					onboardingHandled := false
+					if templateResolved && h.templateOnboarding != nil && resolvedTemplate.HasOnboarding() {
+						summary, handled, err := h.templateOnboarding.ResolveAndStart(r.Context(), ws, resolvedTemplate)
+						onboardingHandled = handled
+						if summary != nil {
+							onboardingSummary = summary
+						}
+						if handled {
+							projectWarning = ""
+							if err != nil {
+								projectWarning = fmt.Sprintf("workspace was created, but template onboarding could not start: %v", err)
+								logger.Warn("Template onboarding session creation failed", logger.Fields{"id": ws.ID, "template": resolvedTemplate.ID, "error": err})
+							} else {
+								logger.Info("Template onboarding session created", logger.Fields{"id": ws.ID, "template": resolvedTemplate.ID})
+							}
+						}
+					}
+					if !onboardingHandled {
+						// Non-fatal by design: a failed instantiation must not fail
+						// workspace creation. The warning is surfaced to the user.
+						if err := h.instantiateWorkspaceProject(r.Context(), ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+							if templateResolveErr != nil {
+								err = templateResolveErr
+							}
+							projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
+							logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
+						} else {
+							projectWarning = ""
+						}
 					}
 				}
 			}
@@ -403,6 +432,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if projectWarning != "" {
 		response["project_warning"] = projectWarning
+	}
+	if onboardingSummary != nil {
+		response["onboarding"] = onboardingSummary
 	}
 	_ = orihttp.RespondCreated(w, response)
 }

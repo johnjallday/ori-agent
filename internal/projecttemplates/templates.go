@@ -6,6 +6,7 @@
 package projecttemplates
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,14 +29,30 @@ type Template struct {
 	Tags        []string `json:"tags,omitempty"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
+	// Onboarding is the verbatim `onboarding` block from template.json, if any.
+	// This package only carries the bytes; the templateonboarding package parses
+	// and validates them at workspace-creation time. Excluded from API JSON.
+	Onboarding json.RawMessage `json:"-"`
+}
+
+// HasOnboarding reports whether the template carries a non-empty onboarding
+// block. It does not validate the block — ParseSpec/Validate in the
+// templateonboarding package do that.
+func (t Template) HasOnboarding() bool {
+	s := bytes.TrimSpace(t.Onboarding)
+	return len(s) > 0 && !bytes.Equal(s, []byte("null"))
 }
 
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
-// by design: the manifest must stay metadata-only.
+// by design. Display fields (name/description/tags) are metadata only; the
+// optional onboarding block is preserved verbatim as raw JSON and parsed by the
+// templateonboarding package at workspace-creation time. This package never
+// interprets it, so the file-copy engine stays domain-blind.
 type manifest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Tags        []string        `json:"tags,omitempty"`
+	Onboarding  json.RawMessage `json:"onboarding,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -69,6 +86,7 @@ func newTemplate(path string) Template {
 	}
 	t.Description = strings.TrimSpace(m.Description)
 	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
+	t.Onboarding = m.Onboarding
 	return t
 }
 

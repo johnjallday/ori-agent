@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
@@ -136,8 +137,11 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 
 		b.workspaceFileStore = fileStore
+		b.templateOnboardingStore = templateonboarding.NewStore(fileStore)
+		b.templateOnboardingService = templateonboarding.NewService(b.templateOnboardingStore)
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
+			b.sessionHandler.SetTemplateOnboardingService(b.templateOnboardingService)
 			// Disk is the source of truth for grouping: reconcile the session
 			// store's structure with the on-disk layout once at startup so
 			// groups that arrived via git/cloud sync show up without a manual
