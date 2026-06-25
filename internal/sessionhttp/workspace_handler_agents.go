@@ -113,6 +113,11 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		logger.Warn("Failed to sync workspace.json after adding workspace agent", logger.Fields{"id": workspaceID, "error": err})
 	}
 
+	onboardingSummary, _, onboardingErr := h.resumeTemplateOnboardingForEntryAgent(r.Context(), workspace)
+	if onboardingErr != nil {
+		logger.Warn("Failed to resume template onboarding after adding workspace agent", logger.Fields{"id": workspaceID, "error": onboardingErr})
+	}
+
 	logger.Info("Agent added to workspace", logger.Fields{
 		"workspace_id":    workspaceID,
 		"agent_name":      req.AgentName,
@@ -120,11 +125,15 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		"instance_number": instanceNumber,
 	})
 
-	_ = orihttp.RespondCreated(w, map[string]any{
+	response := map[string]any{
 		"success":        true,
 		"agent_instance": newInstance,
 		"workspace":      workspace,
-	})
+	}
+	if onboardingSummary != nil {
+		response["onboarding"] = onboardingSummary
+	}
+	_ = orihttp.RespondCreated(w, response)
 }
 
 // removeWorkspaceAgent handles DELETE /api/workspaces/{id}/agents/{name}.

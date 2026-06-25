@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/templateonboarding"
+	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -54,6 +59,85 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 	return handler, baseDir, events, cleanup
 }
 
+func writeOnboardingTemplate(t *testing.T, libDir string) {
+	t.Helper()
+	tplDir := filepath.Join(libDir, "onboarding-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n>\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Onboarding Template",
+		"tags":["reaper"],
+		"onboarding":{
+			"version":"1",
+			"fields":[
+				{"id":"bpm","label":"BPM","type":"number","default":120},
+				{"id":"song_name","label":"Song name","type":"string","required":true}
+			],
+			"completion":{"type":"none","instantiate_skeleton":true}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeOnboardingActionTemplate(t *testing.T, libDir string) {
+	t.Helper()
+	tplDir := filepath.Join(libDir, "onboarding-action")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n  TEMPO 120 4 4\n>\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Onboarding Action",
+		"tags":["reaper"],
+		"onboarding":{
+			"version":"1",
+			"fields":[
+				{"id":"bpm","label":"BPM","type":"number","default":120,"required":true,"validation":{"min":40,"max":240}},
+				{"id":"key","label":"Key","type":"enum","default":"C major","required":true,"options":["C major","A minor"]},
+				{"id":"song_name","label":"Song name","type":"string","required":true}
+			],
+			"completion":{
+				"type":"task",
+				"ref":"reaper-session-setup",
+				"instructions":"Create ${fields.song_name} at ${fields.bpm} BPM in ${fields.key}.",
+				"skill_refs":["reaper-session-setup"],
+				"inputs":{"bpm":"${fields.bpm}","key":"${fields.key}","song_name":"${fields.song_name}"},
+				"instantiate_skeleton":true
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMalformedOnboardingTemplate(t *testing.T, libDir string) {
+	t.Helper()
+	tplDir := filepath.Join(libDir, "malformed-onboarding")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n>\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Malformed Onboarding",
+		"tags":["reaper"],
+		"onboarding":{"version":"999","completion":{"type":"none","instantiate_skeleton":true}}
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func postCreateWorkspace(t *testing.T, handler *Handler, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
@@ -78,6 +162,9 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	}
 	if warning, present := resp["project_warning"]; present {
 		t.Fatalf("unexpected project_warning: %v", warning)
+	}
+	if onboarding, present := resp["onboarding"]; present {
+		t.Fatalf("unexpected onboarding response for non-onboarding template: %v", onboarding)
 	}
 
 	folder, ok := resp["folder"].(map[string]any)
@@ -157,6 +244,297 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("project.created event not published")
 	}
+}
+
+func TestCreateWorkspaceWithOnboardingTemplateDefersProject(t *testing.T) {
+	handler, baseDir, events, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	libDir := handler.templatesRootResolver()
+	writeOnboardingTemplate(t, libDir)
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Onboarding Song","template_id":"onboarding-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if warning, present := resp["project_warning"]; present {
+		t.Fatalf("unexpected project_warning: %v", warning)
+	}
+
+	folder := resp["folder"].(map[string]any)
+	wsID := folder["id"].(string)
+	if got, present := folder["project_path"]; present && got != "" {
+		t.Fatalf("project_path = %v, want empty until onboarding completion", got)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "onboarding-song", "onboarding-song")); !os.IsNotExist(err) {
+		t.Fatalf("project folder should be deferred until completion (err=%v)", err)
+	}
+
+	onboarding, ok := resp["onboarding"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected onboarding summary in response: %#v", resp["onboarding"])
+	}
+	if got := onboarding["status"]; got != string(templateonboarding.StatusPendingEntryAgent) {
+		t.Fatalf("onboarding status = %v, want pending_entry_agent", got)
+	}
+	fields, ok := onboarding["fields"].([]any)
+	if !ok || len(fields) != 2 {
+		t.Fatalf("onboarding fields = %#v, want 2 fields", onboarding["fields"])
+	}
+
+	store := templateonboarding.NewStore(handler.workspaceStore)
+	session, err := store.Load(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("load onboarding session: %v", err)
+	}
+	if session.Status != templateonboarding.StatusPendingEntryAgent {
+		t.Fatalf("stored onboarding status = %q, want pending_entry_agent", session.Status)
+	}
+	if len(session.Spec.Fields) != 2 || session.Spec.Fields[0].ID != "bpm" {
+		t.Fatalf("stored spec snapshot = %+v", session.Spec)
+	}
+
+	select {
+	case event := <-events:
+		t.Fatalf("project.created should not fire before onboarding completion: %+v", event)
+	default:
+	}
+}
+
+func TestAddingEntryAgentResumesPendingTemplateOnboarding(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	writeOnboardingTemplate(t, handler.templatesRootResolver())
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Agent Later","template_id":"onboarding-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+	store := templateonboarding.NewStore(handler.workspaceStore)
+	session, err := store.Load(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("load onboarding session: %v", err)
+	}
+	if _, err := session.MergeValues(map[string]any{"song_name": "Late Entry"}); err != nil {
+		t.Fatalf("MergeValues: %v", err)
+	}
+	if err := store.Save(context.Background(), session); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/agents", bytes.NewBufferString(`{"agent_name":"Producer"}`))
+	req.Header.Set("Content-Type", "application/json")
+	addW := httptest.NewRecorder()
+	handler.HandleWorkspaces(addW, req)
+	if addW.Code != http.StatusCreated {
+		t.Fatalf("expected add agent 201, got %d: %s", addW.Code, addW.Body.String())
+	}
+	var addResp map[string]any
+	if err := json.Unmarshal(addW.Body.Bytes(), &addResp); err != nil {
+		t.Fatalf("decode add response: %v", err)
+	}
+	onboarding := addResp["onboarding"].(map[string]any)
+	if got := onboarding["status"]; got != string(templateonboarding.StatusCollecting) {
+		t.Fatalf("onboarding status after add = %v, want collecting", got)
+	}
+
+	reloaded, err := store.Load(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("reload onboarding session: %v", err)
+	}
+	if reloaded.Status != templateonboarding.StatusCollecting {
+		t.Fatalf("stored status after add = %q, want collecting", reloaded.Status)
+	}
+	if reloaded.Values["song_name"] != "Late Entry" {
+		t.Fatalf("stored values after add = %#v, want preserved song_name", reloaded.Values)
+	}
+}
+
+func TestTemplateOnboardingCreateValuesCompleteWithStubbedTask(t *testing.T) {
+	handler, baseDir, events, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	writeOnboardingActionTemplate(t, handler.templatesRootResolver())
+	if err := handler.agentStore.CreateAgent("Producer", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Studio Song","template_id":"onboarding-action","entry_agent_name":"Producer"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder := resp["folder"].(map[string]any)
+	wsID := folder["id"].(string)
+	if got, present := folder["project_path"]; present && got != "" {
+		t.Fatalf("project_path = %v, want deferred until completion", got)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "studio-song", "studio-song")); !os.IsNotExist(err) {
+		t.Fatalf("project folder should not exist before completion (err=%v)", err)
+	}
+	onboarding := resp["onboarding"].(map[string]any)
+	if got := onboarding["status"]; got != string(templateonboarding.StatusCollecting) {
+		t.Fatalf("onboarding status = %v, want collecting", got)
+	}
+
+	// Later edits to template.json must not alter the in-flight session's spec.
+	mutatedManifest := `{"name":"Mutated","onboarding":{"version":"999","completion":{"type":"none"}}}`
+	if err := os.WriteFile(filepath.Join(handler.templatesRootResolver(), "onboarding-action", "template.json"), []byte(mutatedManifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	store := templateonboarding.NewStore(handler.workspaceStore)
+	httpHandler := templateonboardinghttp.NewHandler(store, templateonboardinghttp.EntryAgentResolverFunc(func(ctx context.Context, workspaceID string) (string, error) {
+		if workspaceID != wsID {
+			t.Fatalf("entry agent resolver workspaceID = %q, want %q", workspaceID, wsID)
+		}
+		return "Producer", nil
+	}))
+	runner := &stubTaskCompletionRunner{store: store, handler: handler}
+	httpHandler.SetCompletionRunner(runner)
+	mux := http.NewServeMux()
+	httpHandler.RegisterRoutes(mux)
+
+	patch := httptest.NewRecorder()
+	mux.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+wsID+"/template-onboarding/values", bytes.NewBufferString(`{"values":{"bpm":132,"key":"A minor","song_name":"Solar Drift"}}`)))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("PATCH values = %d, want 200: %s", patch.Code, patch.Body.String())
+	}
+	var valuesResp templateonboardinghttp.StatusResponse
+	if err := json.Unmarshal(patch.Body.Bytes(), &valuesResp); err != nil {
+		t.Fatalf("decode values response: %v", err)
+	}
+	if valuesResp.Status != templateonboarding.StatusReadyToComplete {
+		t.Fatalf("status after values = %q, want ready_to_complete", valuesResp.Status)
+	}
+	if len(valuesResp.Fields) != 3 || valuesResp.Fields[0].ID != "bpm" {
+		t.Fatalf("fields came from mutated template, got %+v", valuesResp.Fields)
+	}
+
+	complete := httptest.NewRecorder()
+	mux.ServeHTTP(complete, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/template-onboarding/complete", nil))
+	if complete.Code != http.StatusOK {
+		t.Fatalf("complete = %d, want 200: %s", complete.Code, complete.Body.String())
+	}
+	var completeResp templateonboardinghttp.StatusResponse
+	if err := json.Unmarshal(complete.Body.Bytes(), &completeResp); err != nil {
+		t.Fatalf("decode complete response: %v", err)
+	}
+	if completeResp.Status != templateonboarding.StatusSucceeded {
+		t.Fatalf("complete status = %q, want succeeded", completeResp.Status)
+	}
+	if completeResp.ActionResult == nil || completeResp.ActionResult.RunID != "stub-run-1" || completeResp.ActionResult.ProjectPath != "studio-song" {
+		t.Fatalf("action result = %+v, want stub run and project path", completeResp.ActionResult)
+	}
+	if !runner.called {
+		t.Fatal("stub completion runner was not called")
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "studio-song", "studio-song", "studio-song.rpp")); err != nil {
+		t.Fatalf("expected deferred project seed after completion: %v", err)
+	}
+
+	persisted, err := store.Load(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("load persisted onboarding session: %v", err)
+	}
+	if persisted.Status != templateonboarding.StatusSucceeded {
+		t.Fatalf("persisted status = %q, want succeeded", persisted.Status)
+	}
+	if persisted.Spec.Fields[0].Label != "BPM" || persisted.Spec.Completion.Type != templateonboarding.ActionTask {
+		t.Fatalf("stored spec snapshot changed unexpectedly: %+v", persisted.Spec)
+	}
+	if persisted.Values["song_name"] != "Solar Drift" || persisted.Values["bpm"] != float64(132) {
+		t.Fatalf("persisted values = %#v", persisted.Values)
+	}
+
+	select {
+	case event := <-events:
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "studio-song" {
+			t.Fatalf("unexpected project.created payload: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected project.created event after completion")
+	}
+}
+
+func TestMalformedOnboardingTemplateFallsBackToImmediateInstantiation(t *testing.T) {
+	handler, baseDir, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	writeMalformedOnboardingTemplate(t, handler.templatesRootResolver())
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Broken Onboarding","template_id":"malformed-onboarding"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if warning, present := resp["project_warning"]; present {
+		t.Fatalf("unexpected project_warning: %v", warning)
+	}
+	if onboarding, present := resp["onboarding"]; present {
+		t.Fatalf("malformed onboarding must not create an onboarding response: %v", onboarding)
+	}
+	folder := resp["folder"].(map[string]any)
+	wsID := folder["id"].(string)
+	if got := folder["project_path"]; got != "broken-onboarding" {
+		t.Fatalf("project_path = %v, want immediate instantiation", got)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "broken-onboarding", "broken-onboarding", "broken-onboarding.rpp")); err != nil {
+		t.Fatalf("expected project seed despite malformed onboarding: %v", err)
+	}
+	store := templateonboarding.NewStore(handler.workspaceStore)
+	if _, err := store.Load(context.Background(), wsID); err == nil {
+		t.Fatal("malformed onboarding should not persist a session")
+	}
+}
+
+type stubTaskCompletionRunner struct {
+	store   *templateonboarding.Store
+	handler *Handler
+	called  bool
+}
+
+func (r *stubTaskCompletionRunner) Complete(ctx context.Context, session *templateonboarding.Session, entryAgentName string) (*templateonboarding.ActionResult, error) {
+	if r == nil || r.store == nil || r.handler == nil {
+		return nil, fmt.Errorf("stub completion runner is not configured")
+	}
+	if entryAgentName != "Producer" {
+		return nil, fmt.Errorf("entry agent = %q, want Producer", entryAgentName)
+	}
+	if session.TemplateID != "onboarding-action" || session.TemplatePath == "" {
+		return nil, fmt.Errorf("template metadata missing from session: id=%q path=%q", session.TemplateID, session.TemplatePath)
+	}
+	if session.Spec.Completion.Type != templateonboarding.ActionTask || !session.Spec.Completion.InstantiateSkeleton {
+		return nil, fmt.Errorf("completion = %+v, want task with skeleton", session.Spec.Completion)
+	}
+	if session.Values["song_name"] != "Solar Drift" || session.Values["bpm"] != float64(132) || session.Values["key"] != "A minor" {
+		return nil, fmt.Errorf("values = %#v, want patched onboarding values", session.Values)
+	}
+
+	if _, err := session.StartCompletion(); err != nil {
+		return nil, err
+	}
+	if err := r.store.Save(ctx, session); err != nil {
+		return nil, err
+	}
+	projectPath, err := r.handler.InstantiateProject(ctx, session.WorkspaceID, session.TemplateID, session.TemplatePath, session.ProjectName, session.Values)
+	if err != nil {
+		_, _ = session.MarkFailed(err.Error())
+		_ = r.store.Save(ctx, session)
+		return nil, err
+	}
+	result := &templateonboarding.ActionResult{
+		Result:      "stubbed task completed",
+		RunID:       "stub-run-1",
+		TaskID:      "stub-task-1",
+		ProjectPath: projectPath,
+	}
+	if _, err := session.MarkSucceeded(result); err != nil {
+		return nil, err
+	}
+	if err := r.store.Save(ctx, session); err != nil {
+		return nil, err
+	}
+	r.called = true
+	return result, nil
 }
 
 func TestCreateProjectForExistingWorkspace(t *testing.T) {
@@ -306,6 +684,9 @@ func TestCreateWorkspaceWithoutTemplateUnchanged(t *testing.T) {
 	}
 	if _, present := resp["project_warning"]; present {
 		t.Fatal("project_warning must be absent without a template")
+	}
+	if onboarding, present := resp["onboarding"]; present {
+		t.Fatalf("onboarding must be absent without a template, got %v", onboarding)
 	}
 	folder := resp["folder"].(map[string]any)
 	if got, present := folder["project_path"]; present && got != "" {

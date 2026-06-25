@@ -1699,6 +1699,19 @@
     conversation.scrollTop = conversation.scrollHeight;
     syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
+    try {
+      var routeContext = buildHomeRouteContext();
+      window.dispatchEvent(new CustomEvent('ori:workspace-assistant-message', {
+        detail: {
+          role: role,
+          text: messageText,
+          workspaceId: String(routeContext && routeContext.workspace_id || window.currentWorkspaceId || '').trim(),
+          surface: String(routeContext && routeContext.surface || '')
+        }
+      }));
+    } catch (_) {
+      // Message rendering must not depend on optional workspace listeners.
+    }
     openHomeAssistantThinkingModal();
   }
 

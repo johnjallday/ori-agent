@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -27,6 +28,7 @@ type Handler struct {
 	agentStore            store.Store
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
+	templateOnboarding    *templateonboarding.Service
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -43,6 +45,9 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
+	if ws != nil && h.templateOnboarding == nil {
+		h.templateOnboarding = templateonboarding.NewService(templateonboarding.NewStore(ws))
+	}
 }
 
 // SetWorkspaceRootResolver sets the resolver used to determine the default
@@ -66,6 +71,12 @@ func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 // events.
 func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 	h.eventBus = bus
+}
+
+// SetTemplateOnboardingService sets the service that owns template-authored
+// workspace onboarding sessions.
+func (h *Handler) SetTemplateOnboardingService(service *templateonboarding.Service) {
+	h.templateOnboarding = service
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which

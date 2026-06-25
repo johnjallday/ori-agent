@@ -4,5 +4,72 @@
   "tags": [
     "music",
     "reaper"
-  ]
+  ],
+  "onboarding": {
+    "version": "1",
+    "fields": [
+      {
+        "id": "bpm",
+        "label": "BPM",
+        "type": "number",
+        "default": 120,
+        "required": true,
+        "prompt": "Tempo in beats per minute.",
+        "validation": {
+          "min": 40,
+          "max": 240
+        }
+      },
+      {
+        "id": "key",
+        "label": "Key",
+        "type": "enum",
+        "default": "C major",
+        "required": true,
+        "options": [
+          "C major",
+          "G major",
+          "D major",
+          "A major",
+          "E major",
+          "F major",
+          "A minor",
+          "E minor",
+          "D minor"
+        ],
+        "prompt": "Primary musical key for the song."
+      },
+      {
+        "id": "song_name",
+        "label": "Song name",
+        "type": "string",
+        "required": true,
+        "prompt": "Title to use for the REAPER session.",
+        "validation": {
+          "min": 1,
+          "max": 80
+        }
+      }
+    ],
+    "completion": {
+      "type": "task",
+      "ref": "reaper-session-setup",
+      "instructions": "Create a REAPER song project from this template. Use the scaffolded project as the session home, set the tempo to ${fields.bpm} BPM, use ${fields.key} as the musical key, and name the session ${fields.song_name}.",
+      "skill_refs": [
+        "reaper-session-setup"
+      ],
+      "inputs": {
+        "bpm": "${fields.bpm}",
+        "key": "${fields.key}",
+        "song_name": "${fields.song_name}"
+      },
+      "instantiate_skeleton": true
+    },
+    "dependencies": [
+      {
+        "type": "skill",
+        "ref": "reaper-session-setup"
+      }
+    ]
+  }
 }

@@ -87,6 +87,44 @@ func TestInstantiateSubstitutesNamesAndCopiesBytes(t *testing.T) {
 	}
 }
 
+func TestInstantiateWithFieldsSubstitutesDeclaredFieldTokens(t *testing.T) {
+	date := pinnedDate(t)
+	tplDir := t.TempDir()
+	wsDir := t.TempDir()
+
+	writeFile(t, filepath.Join(tplDir, "{{fields.song_name}}", "{{fields.key}}-{{fields.bpm}}-{{name}}-{{date}}.txt"), "hello")
+
+	rel, err := InstantiateWithFields(tplDir, wsDir, "Song X", map[string]any{
+		"song_name": "Blue Sky!",
+		"key":       "F# Minor",
+		"bpm":       128,
+	})
+	if err != nil {
+		t.Fatalf("InstantiateWithFields: %v", err)
+	}
+	if rel != "song-x" {
+		t.Fatalf("rel = %q, want song-x", rel)
+	}
+
+	want := filepath.Join(wsDir, "song-x", "blue-sky", "f-minor-128-song-x-"+date+".txt")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("field-token file missing: %v", err)
+	}
+}
+
+func TestInstantiateWithFieldsRejectsMissingFieldToken(t *testing.T) {
+	tplDir := t.TempDir()
+	wsDir := t.TempDir()
+	writeFile(t, filepath.Join(tplDir, "{{fields.song_name}}.txt"), "hello")
+
+	if _, err := InstantiateWithFields(tplDir, wsDir, "Song X", nil); err == nil {
+		t.Fatal("expected missing field token error")
+	}
+	if _, err := os.Stat(filepath.Join(wsDir, "song-x")); !os.IsNotExist(err) {
+		t.Errorf("partial project folder left behind (err=%v)", err)
+	}
+}
+
 func TestInstantiatePreservesFileModes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits")
@@ -203,13 +241,13 @@ func TestInstantiateRejectsMissingTemplateAndWorkspace(t *testing.T) {
 }
 
 func TestSubstituteRelPathRejectsTraversal(t *testing.T) {
-	if _, err := substituteRelPath("ok/../../escape.txt", "proj"); err == nil {
+	if _, err := substituteRelPath("ok/../../escape.txt", "proj", nil); err == nil {
 		t.Error("expected traversal rejection")
 	}
-	if _, err := substituteRelPath("..", "proj"); err == nil {
+	if _, err := substituteRelPath("..", "proj", nil); err == nil {
 		t.Error("expected .. rejection")
 	}
-	got, err := substituteRelPath("sub/{{name}}.txt", "proj")
+	got, err := substituteRelPath("sub/{{name}}.txt", "proj", nil)
 	if err != nil {
 		t.Fatalf("valid path rejected: %v", err)
 	}
