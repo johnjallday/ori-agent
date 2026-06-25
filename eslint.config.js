@@ -160,6 +160,7 @@ export default defineConfig([
       'internal/web/static/js/modules/task-result-artifacts.js',
       'internal/web/static/js/modules/tag-input.js',
       'internal/web/static/js/modules/tag-filter-bar.js',
+      'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
     ],
     languageOptions: {

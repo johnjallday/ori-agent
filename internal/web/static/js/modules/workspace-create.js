@@ -624,7 +624,8 @@ async function createWorkspace() {
       window.dispatchEvent(new CustomEvent('ori:workspace-created', {
         detail: {
           workspaceId,
-          workspaceName: result.folder?.name || name || extractFolderNameFromPath(importPath) || ''
+          workspaceName: result.folder?.name || name || extractFolderNameFromPath(importPath) || '',
+          onboarding: result.onboarding || null
         }
       }));
 
@@ -648,7 +649,8 @@ async function createWorkspace() {
         }
       }
       const navigate = () => {
-        window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+        const hash = result.onboarding ? '#template-onboarding' : '';
+        window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}${hash}`;
       };
       if (projectWarning) {
         setTimeout(navigate, 2500);
