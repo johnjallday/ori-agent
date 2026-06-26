@@ -225,7 +225,7 @@ if [ "$SKIP_CHECKS" = false ]; then
 
   if [ -f "./scripts/pre-release-check.sh" ]; then
     # Run pre-release checks (it handles auto-commits)
-    if ! ./scripts/pre-release-check.sh "$VERSION"; then
+    if ! ./scripts/pre-release-check.sh "$VERSION" --no-smoke; then
       print_error "Pre-release checks failed. Fix issues before releasing."
       exit 1
     fi

@@ -278,7 +278,12 @@ run_check "Format Check (gofmt)" "test -z \"\$(gofmt -l . 2>&1 | grep -v '^vendo
     echo "Auto-fixing with gofmt..."
     gofmt -w .
     echo -e "${GREEN}✅ Format issues fixed${NC}"
-    FAILED_CHECKS=("${FAILED_CHECKS[@]/Format Check (gofmt)/}")
+    NEW_FAILED=()
+    for item in "${FAILED_CHECKS[@]}"; do
+      [[ "$item" == "Format Check (gofmt)" ]] && continue
+      NEW_FAILED+=("$item")
+    done
+    FAILED_CHECKS=("${NEW_FAILED[@]}")
     PASSED_CHECKS+=("Format Check (gofmt) [fixed]")
   fi
 }
@@ -311,7 +316,12 @@ if [ -n "$LINT_CMD" ]; then
         if eval "$LINT_CMD" > /dev/null 2>&1; then
           LINT_PASSED=true
           echo -e "${GREEN}✅ Lint errors fixed after $ITERATION iteration(s)${NC}"
-          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
+          NEW_FAILED=()
+          for item in "${FAILED_CHECKS[@]}"; do
+            [[ "$item" == "Lint Check" ]] && continue
+            NEW_FAILED+=("$item")
+          done
+          FAILED_CHECKS=("${NEW_FAILED[@]}")
           PASSED_CHECKS+=("Lint Check [fixed]")
         fi
         ITERATION=$((ITERATION + 1))
