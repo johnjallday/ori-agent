@@ -71,6 +71,9 @@ func TestRenderTemplatesPage(t *testing.T) {
 		`id="tplFileTree"`,
 		`id="tplEditorTextarea"`,
 		`id="tplDirtyModal"`,
+		`id="tplOnbFields"`,
+		`id="tplOnbCompletion"`,
+		`id="tplOnbSaveBtn"`,
 		`/js/modules/templates-page.js`,
 	} {
 		if !strings.Contains(html, want) {

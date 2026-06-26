@@ -611,6 +611,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/files/content", s.handleProjectTemplateFileWrite)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/files/rename", s.handleProjectTemplateFileRename)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}/files", s.handleProjectTemplateFileDelete)
+		// Onboarding intake block authoring
+		mux.HandleFunc("GET /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingGet)
+		mux.HandleFunc("PUT /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingSet)
+		mux.HandleFunc("DELETE /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingDelete)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/tags/usage", s.Handlers.Session.HandleTagUsage)
