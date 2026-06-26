@@ -99,9 +99,11 @@ async function tplRefresh(selectId) {
   // If the selected template changed out from under a loaded Files tree or
   // onboarding editor, drop them so neither tab shows another template's data.
   if ((tplFiles.templateId && tplFiles.templateId !== tplState.selectedId) ||
-      (tplOnb.templateId && tplOnb.templateId !== tplState.selectedId)) {
+      (tplOnb.templateId && tplOnb.templateId !== tplState.selectedId) ||
+      (tplTools.templateId && tplTools.templateId !== tplState.selectedId)) {
     tplFilesReset();
     tplOnbReset();
+    tplToolsReset();
   }
 
   tplSyncFilterTags();
@@ -426,6 +428,7 @@ function tplSelectTemplate(id) {
   tplState.selectedId = id;
   tplFilesReset();
   tplOnbReset();
+  tplToolsReset();
   tplRenderList();
   tplRenderDetail();
 }
@@ -1108,6 +1111,153 @@ function tplOnbHideProblems() {
   if (box) box.hidden = true;
 }
 
+// --- Tools tab: default skills / MCP servers / plugins ---
+
+const tplTools = { templateId: '' };
+
+function tplToolsReset() {
+  tplTools.templateId = '';
+  for (const id of ['tplToolsSkills', 'tplToolsMcp', 'tplToolsPlugins']) {
+    const el = tplEl(id);
+    if (el) el.innerHTML = '';
+  }
+}
+
+function tplToolsEnsure() {
+  if (!tplState.selectedId) return;
+  if (tplTools.templateId === tplState.selectedId) return;
+  void tplToolsLoad();
+}
+
+function tplToolsDeclared() {
+  const tools = (tplSelected() || {}).tools || {};
+  return {
+    skills: tools.skills || [],
+    mcp_servers: tools.mcp_servers || [],
+    plugins: tools.plugins || []
+  };
+}
+
+async function tplToolsLoad() {
+  if (!tplState.selectedId) return;
+  tplTools.templateId = tplState.selectedId;
+  const declared = tplToolsDeclared();
+  await Promise.all([
+    tplToolsRenderSection('tplToolsSkills', '/api/skills', ['skills', 'items'], declared.skills),
+    tplToolsRenderSection('tplToolsMcp', '/api/mcp/servers', ['servers', 'items'], declared.mcp_servers),
+    tplToolsRenderSection('tplToolsPlugins', '/api/plugins', ['plugins', 'items'], declared.plugins)
+  ]);
+}
+
+async function tplToolsRenderSection(containerId, url, listKeys, declaredNames) {
+  const container = tplEl(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+
+  let installed = [];
+  try {
+    const data = await tplFetchJSON(url);
+    installed = tplToolsExtractList(data, listKeys).map(tplToolsItemName).filter(Boolean);
+  } catch (error) {
+    console.warn(`Failed to load ${url}:`, error);
+  }
+
+  const declaredSet = new Set(declaredNames.map((n) => n.toLowerCase()));
+  const seen = new Set();
+  const rows = [];
+  for (const name of installed) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ name, installed: true, checked: declaredSet.has(key) });
+  }
+  // Keep declared names that aren't currently installed rather than dropping them.
+  for (const name of declaredNames) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ name, installed: false, checked: true });
+  }
+
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size: 12px; color: var(--text-secondary);';
+    empty.textContent = 'None available.';
+    container.appendChild(empty);
+    return;
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  for (const row of rows) container.appendChild(tplToolsRow(row));
+}
+
+function tplToolsRow(row) {
+  const label = document.createElement('label');
+  label.className = 'd-flex align-items-center gap-2';
+  label.style.cssText = 'font-size: 13px; color: var(--text-primary); cursor: pointer;';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'form-check-input';
+  cb.checked = row.checked;
+  cb.dataset.name = row.name;
+  label.appendChild(cb);
+  const span = document.createElement('span');
+  span.textContent = row.name;
+  label.appendChild(span);
+  if (!row.installed) {
+    const tag = document.createElement('span');
+    tag.className = 'badge';
+    tag.textContent = 'not installed';
+    tag.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 10px;';
+    label.appendChild(tag);
+  }
+  return label;
+}
+
+function tplToolsExtractList(data, keys) {
+  if (Array.isArray(data)) return data;
+  for (const k of keys) {
+    if (Array.isArray(data && data[k])) return data[k];
+  }
+  return [];
+}
+
+function tplToolsItemName(item) {
+  if (typeof item === 'string') return item.trim();
+  if (!item || typeof item !== 'object') return '';
+  return (item.name || item.id || item.server_name || item.skill_name || '').trim();
+}
+
+function tplToolsCollect(containerId) {
+  const container = tplEl(containerId);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+    .map((cb) => cb.dataset.name)
+    .filter(Boolean);
+}
+
+async function tplToolsSave() {
+  const template = tplSelected();
+  if (!template) return;
+  const body = {
+    skills: tplToolsCollect('tplToolsSkills'),
+    mcp_servers: tplToolsCollect('tplToolsMcp'),
+    plugins: tplToolsCollect('tplToolsPlugins')
+  };
+  try {
+    await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}/tools`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    tplToast('Tools saved.', 'success');
+    await tplRefresh(template.id);
+    tplTools.templateId = '';
+    await tplToolsLoad();
+  } catch (error) {
+    tplToast(error.message || 'Failed to save tools', 'error');
+  }
+}
+
 // --- Init ---
 
 function tplInit() {
@@ -1196,6 +1346,10 @@ function tplInit() {
   tplEl('tplOnbJsonToggle')?.addEventListener('click', tplOnbToggleJson);
   tplEl('tplOnbRemoveBtn')?.addEventListener('click', () => void tplOnbRemove());
   tplEl('tplOnbSaveBtn')?.addEventListener('click', () => void tplOnbSave());
+
+  // Tools tab wiring.
+  tplEl('tplTabTools')?.addEventListener('shown.bs.tab', () => tplToolsEnsure());
+  tplEl('tplToolsSaveBtn')?.addEventListener('click', () => void tplToolsSave());
 
   void tplRefresh();
 }

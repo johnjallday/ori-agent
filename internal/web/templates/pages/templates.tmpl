@@ -108,6 +108,9 @@
                   <li class="nav-item" role="presentation">
                     <button class="nav-link" id="tplTabOnboarding" data-bs-toggle="tab" data-bs-target="#tplOnboardingPane" type="button" role="tab" aria-controls="tplOnboardingPane" aria-selected="false">Onboarding</button>
                   </li>
+                  <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tplTabTools" data-bs-toggle="tab" data-bs-target="#tplToolsPane" type="button" role="tab" aria-controls="tplToolsPane" aria-selected="false">Tools</button>
+                  </li>
                 </ul>
 
                 <div class="tab-content">
@@ -215,6 +218,21 @@
                         <button id="tplOnbSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save onboarding</button>
                       </div>
                     </div>
+                  </div>
+
+                  <!-- Tools: default skills / MCP servers / plugins bound on workspace creation -->
+                  <div class="tab-pane fade" id="tplToolsPane" role="tabpanel" aria-labelledby="tplTabTools">
+                    <div style="font-size: 12px; color: var(--text-secondary);" class="mb-2">
+                      Tools checked here are bound to a workspace when it's created from this template —
+                      applied if present on the machine (missing ones are skipped with a note at creation).
+                    </div>
+                    <h6 class="mb-1" style="color: var(--text-primary);">Skills</h6>
+                    <div id="tplToolsSkills" class="d-flex flex-column gap-1 mb-3"></div>
+                    <h6 class="mb-1" style="color: var(--text-primary);">MCP Servers</h6>
+                    <div id="tplToolsMcp" class="d-flex flex-column gap-1 mb-3"></div>
+                    <h6 class="mb-1" style="color: var(--text-primary);">Plugins</h6>
+                    <div id="tplToolsPlugins" class="d-flex flex-column gap-1 mb-3"></div>
+                    <button id="tplToolsSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save tools</button>
                   </div>
                 </div>
               </div>
