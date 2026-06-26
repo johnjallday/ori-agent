@@ -86,7 +86,7 @@ func TestUpdateManifest(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
 	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Old","description":"old desc","tags":["music","reaper"],"custom_field":42}`)
 
-	tpl, err := UpdateManifest(libDir, "demo", "New Name", "new desc")
+	tpl, err := UpdateManifest(libDir, "demo", "New Name", "new desc", nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestUpdateManifest(t *testing.T) {
 	}
 
 	// Clearing the name falls back to the folder name.
-	tpl, err = UpdateManifest(libDir, "demo", "", "")
+	tpl, err = UpdateManifest(libDir, "demo", "", "", nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(clear): %v", err)
 	}
@@ -116,18 +116,133 @@ func TestUpdateManifest(t *testing.T) {
 	}
 
 	// Unknown template.
-	if _, err := UpdateManifest(libDir, "missing", "x", ""); !errors.Is(err, ErrTemplateNotFound) {
+	if _, err := UpdateManifest(libDir, "missing", "x", "", nil); !errors.Is(err, ErrTemplateNotFound) {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
 
 	// A template with no manifest gains one.
 	writeFile(t, filepath.Join(libDir, "plain", "a.txt"), "x")
-	tpl, err = UpdateManifest(libDir, "plain", "Named Now", "")
+	tpl, err = UpdateManifest(libDir, "plain", "Named Now", "", nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(plain): %v", err)
 	}
 	if tpl.Name != "Named Now" {
 		t.Fatalf("manifest not created: %+v", tpl)
+	}
+}
+
+func TestUpdateManifestTagsTriState(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Demo","tags":["music","reaper"]}`)
+
+	// nil preserves existing tags — the legacy manage modal never sends tags.
+	tpl, err := UpdateManifest(libDir, "demo", "Demo", "", nil)
+	if err != nil {
+		t.Fatalf("UpdateManifest(nil tags): %v", err)
+	}
+	if len(tpl.Tags) != 2 {
+		t.Fatalf("nil tags should preserve existing, got %v", tpl.Tags)
+	}
+
+	// A non-empty slice replaces and normalizes (lowercase/trim/dedupe).
+	newTags := []string{"Synth", "synth", "  Bass  "}
+	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &newTags)
+	if err != nil {
+		t.Fatalf("UpdateManifest(set tags): %v", err)
+	}
+	if len(tpl.Tags) != 2 || tpl.Tags[0] != "synth" || tpl.Tags[1] != "bass" {
+		t.Fatalf("expected normalized [synth bass], got %v", tpl.Tags)
+	}
+
+	// An explicit empty slice clears the key entirely.
+	empty := []string{}
+	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &empty)
+	if err != nil {
+		t.Fatalf("UpdateManifest(clear tags): %v", err)
+	}
+	if len(tpl.Tags) != 0 {
+		t.Fatalf("expected tags cleared, got %v", tpl.Tags)
+	}
+	data, err := os.ReadFile(filepath.Join(libDir, "demo", ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"tags"`) {
+		t.Errorf("tags key should be removed, manifest: %s", data)
+	}
+}
+
+func TestCreateBlank(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+
+	tpl, err := CreateBlank(libDir, "My New Template")
+	if err != nil {
+		t.Fatalf("CreateBlank: %v", err)
+	}
+	if tpl.ID != "my-new-template" || tpl.Name != "My New Template" {
+		t.Fatalf("unexpected template: %+v", tpl)
+	}
+	if _, err := os.Stat(filepath.Join(libDir, "my-new-template", ManifestFileName)); err != nil {
+		t.Errorf("manifest not written: %v", err)
+	}
+
+	// Re-create collides.
+	if _, err := CreateBlank(libDir, "My New Template"); !errors.Is(err, ErrTemplateExists) {
+		t.Errorf("expected ErrTemplateExists, got %v", err)
+	}
+
+	// A blank name is rejected.
+	if _, err := CreateBlank(libDir, "   "); !errors.Is(err, ErrInvalidTemplateName) {
+		t.Errorf("expected ErrInvalidTemplateName for blank name, got %v", err)
+	}
+}
+
+func TestDuplicate(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	writeFile(t, filepath.Join(libDir, "drum-kit", ManifestFileName), `{"name":"Drum Kit","tags":["music"],"onboarding":{"version":"1"}}`)
+	writeFile(t, filepath.Join(libDir, "drum-kit", "{{name}}.rpp"), "seed")
+
+	// Default name → "<source name> copy".
+	dup, err := Duplicate(libDir, "drum-kit", "")
+	if err != nil {
+		t.Fatalf("Duplicate: %v", err)
+	}
+	if dup.ID != "drum-kit-copy" || dup.Name != "Drum Kit copy" {
+		t.Fatalf("unexpected duplicate: %+v", dup)
+	}
+	// Verbatim copy: token filename preserved.
+	if _, err := os.Stat(filepath.Join(libDir, "drum-kit-copy", "{{name}}.rpp")); err != nil {
+		t.Errorf("template file not copied: %v", err)
+	}
+	// Tags and onboarding block carry over.
+	if len(dup.Tags) != 1 || dup.Tags[0] != "music" {
+		t.Errorf("tags not carried, got %v", dup.Tags)
+	}
+	data, err := os.ReadFile(filepath.Join(libDir, "drum-kit-copy", ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"onboarding"`) {
+		t.Errorf("onboarding block not carried: %s", data)
+	}
+
+	// Explicit new name seeds id and display name.
+	dup2, err := Duplicate(libDir, "drum-kit", "Fancy Kit")
+	if err != nil {
+		t.Fatalf("Duplicate(named): %v", err)
+	}
+	if dup2.ID != "fancy-kit" || dup2.Name != "Fancy Kit" {
+		t.Fatalf("unexpected named duplicate: %+v", dup2)
+	}
+
+	// Duplicating the same default name again collides.
+	if _, err := Duplicate(libDir, "drum-kit", ""); !errors.Is(err, ErrTemplateExists) {
+		t.Errorf("expected ErrTemplateExists, got %v", err)
+	}
+
+	// Unknown source.
+	if _, err := Duplicate(libDir, "missing", ""); !errors.Is(err, ErrTemplateNotFound) {
+		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
 }
 

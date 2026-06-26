@@ -42,6 +42,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("/skills", s.serveSkills)
+	mux.HandleFunc("/templates", s.serveTemplates)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
 	mux.HandleFunc("/plugins", s.servePlugins)
@@ -597,8 +598,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 		// Project template library (used by the workspace creation flow)
 		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
+		mux.HandleFunc("POST /api/project-templates", s.handleProjectTemplateCreate)
 		mux.HandleFunc("POST /api/project-templates/import", s.handleProjectTemplateImport)
 		mux.HandleFunc("POST /api/project-templates/reveal", s.handleProjectTemplateReveal)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/duplicate", s.handleProjectTemplateDuplicate)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}", s.handleProjectTemplateUpdate)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}", s.handleProjectTemplateDelete)
 

@@ -56,6 +56,13 @@
         <span>Skills</span>
       </a>
 
+      <a href="/templates" class="sidebar-nav-link {{if eq .CurrentPage "templates"}}active{{end}}" data-title="Templates">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/>
+        </svg>
+        <span>Templates</span>
+      </a>
+
       <a href="/usage" class="sidebar-nav-link {{if eq .CurrentPage "usage"}}active{{end}}" data-title="Usage & Costs">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/>
