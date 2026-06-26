@@ -338,6 +338,17 @@ This project follows a feature branch workflow with squash merging.
 - ❌ "WIP"
 - ❌ "Updates"
 
+**Branch prefix = intent, not size.** A one-line change can be `feature/`; a large change can be `fix/`. Pick the prefix from what you're doing, not how big it is:
+- New UI element/screen/interaction that didn't exist → `feature/`
+- Correcting broken UI (misaligned, overflowing, wrong color, doesn't render) → `fix/`
+- Restructuring UI code with no visible change → `refactor/`
+
+**Batching small UI changes**: a PR has no minimum size — it has a *coherence* requirement. Several small UI changes that share a theme are **one PR, not many**. Don't split a session of tiny tweaks into a PR each.
+- **Same area, mixed work** → one themed PR. Nav-wrap fix + dark-mode contrast fix + a new tooltip, all on the templates page → `fix/templates-ui-polish` (or `feature/` if additions dominate). The scope says "this page's UI"; the prefix says the dominant intent.
+- **Different areas, same kind of work** → a "sweep" PR. Unrelated small visual fixes across the app → `fix/ui-polish` or `chore/ui-polish`.
+- Because we **squash-merge**, the per-commit messages are throwaway (they collapse into the PR title). The **branch/PR prefix is the durable signal** — choose the type that best summarizes the whole bundle (all fixes → `fix/`; polish/maintenance → `chore/`; new UI dominates → `feature/`).
+- **Tell for "split into 2 PRs":** if you can't write one sentence that honestly covers the whole branch, it's two themes — split it.
+
 ## Additional Resources
 
 ### Documentation
