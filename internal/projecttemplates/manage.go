@@ -17,6 +17,10 @@ import (
 // library template.
 var ErrTemplateExists = errors.New("template already exists in the library")
 
+// ErrInvalidTemplateName reports a create/duplicate request whose name is empty
+// or slugifies to nothing usable.
+var ErrInvalidTemplateName = errors.New("template name is invalid")
+
 // ImportFolder copies an arbitrary folder into the library as a new template.
 // The copy is verbatim — no token substitution, since template files may
 // legitimately carry {{name}}/{{date}} in their names — with symlinks skipped.
@@ -68,10 +72,97 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	}
 
 	if strings.TrimSpace(displayName) != "" {
-		if _, err := UpdateManifest(absLib, id, displayName, src.Description); err != nil {
+		if _, err := UpdateManifest(absLib, id, displayName, src.Description, nil); err != nil {
 			_ = os.RemoveAll(dest)
 			return Template{}, err
 		}
+	}
+	return newTemplate(dest), nil
+}
+
+// CreateBlank creates a new, empty library template from a display name: a fresh
+// folder carrying only a minimal template.json (the name). The id is the
+// slugified name; a name that slugifies to nothing is rejected, and a colliding
+// id yields ErrTemplateExists.
+func CreateBlank(libDir, name string) (Template, error) {
+	libDir = strings.TrimSpace(libDir)
+	if libDir == "" {
+		return Template{}, fmt.Errorf("templates library is not configured")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Template{}, fmt.Errorf("%w: name is required", ErrInvalidTemplateName)
+	}
+	// Slugify never returns empty (it falls back to "untitled"), so any non-empty
+	// name yields a usable id.
+	id := workspace.Slugify(name)
+
+	absLib, err := filepath.Abs(libDir)
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to resolve templates directory: %w", err)
+	}
+	absLib = filepath.Clean(absLib)
+	if err := os.MkdirAll(absLib, 0o750); err != nil {
+		return Template{}, fmt.Errorf("failed to create templates directory: %w", err)
+	}
+
+	dest := filepath.Join(absLib, id)
+	if _, err := os.Lstat(dest); err == nil {
+		return Template{}, fmt.Errorf("%w: %q", ErrTemplateExists, id)
+	} else if !os.IsNotExist(err) {
+		return Template{}, fmt.Errorf("failed to inspect %s: %w", dest, err)
+	}
+	if err := os.MkdirAll(dest, 0o750); err != nil {
+		return Template{}, fmt.Errorf("failed to create template folder: %w", err)
+	}
+
+	// Seed a minimal manifest so the display name is explicit from the start.
+	if _, err := UpdateManifest(absLib, id, name, "", nil); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
+	return newTemplate(dest), nil
+}
+
+// Duplicate copies an existing library template into a new one. The copy is
+// verbatim (like ImportFolder), so the source's files, tags, and onboarding
+// block carry over. newName, when empty, defaults to "<source name> copy"; the
+// new id is the slugified result, and a collision yields ErrTemplateExists. The
+// duplicate's manifest display name is always set to the resolved name so the
+// two templates stay distinguishable.
+func Duplicate(libDir, id, newName string) (Template, error) {
+	src, err := FindLibraryTemplate(libDir, id)
+	if err != nil {
+		return Template{}, err
+	}
+
+	absLib, err := filepath.Abs(strings.TrimSpace(libDir))
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to resolve templates directory: %w", err)
+	}
+	absLib = filepath.Clean(absLib)
+
+	basis := strings.TrimSpace(newName)
+	if basis == "" {
+		basis = src.Name + " copy"
+	}
+	newID := workspace.Slugify(basis)
+
+	dest := filepath.Join(absLib, newID)
+	if _, err := os.Lstat(dest); err == nil {
+		return Template{}, fmt.Errorf("%w: %q", ErrTemplateExists, newID)
+	} else if !os.IsNotExist(err) {
+		return Template{}, fmt.Errorf("failed to inspect %s: %w", dest, err)
+	}
+
+	if err := copyFolderVerbatim(src.Path, dest); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
+	// Set the duplicate's display name (tags/onboarding/unknown keys preserved).
+	if _, err := UpdateManifest(absLib, newID, basis, src.Description, nil); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
 	}
 	return newTemplate(dest), nil
 }
@@ -109,8 +200,13 @@ func copyFolderVerbatim(srcRoot, destRoot string) error {
 
 // UpdateManifest writes display metadata into a library template's
 // template.json, preserving any unknown fields a user may have added. Empty
-// values remove the corresponding key (falling back to folder-name display).
-func UpdateManifest(libDir, id, name, description string) (Template, error) {
+// name/description values remove the corresponding key (falling back to
+// folder-name display).
+//
+// tags is tri-state so older callers can't clobber author-set tags: nil
+// preserves whatever the manifest already has, a non-empty slice replaces the
+// tags with the normalized set, and an explicit empty slice clears the key.
+func UpdateManifest(libDir, id, name, description string, tags *[]string) (Template, error) {
 	tpl, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
 		return Template{}, err
@@ -135,6 +231,14 @@ func UpdateManifest(libDir, id, name, description string) (Template, error) {
 	}
 	setOrDelete("name", name)
 	setOrDelete("description", description)
+
+	if tags != nil {
+		if normalized := workspace.NormalizeWorkspaceTags(*tags); len(normalized) > 0 {
+			raw["tags"] = normalized
+		} else {
+			delete(raw, "tags")
+		}
+	}
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {

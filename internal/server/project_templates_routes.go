@@ -59,22 +59,63 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 }
 
 // handleProjectTemplateUpdate serves PUT /api/project-templates/{templateID}:
-// edit a template's display metadata (template.json).
+// edit a template's display metadata (template.json). The optional `tags` field
+// is tri-state: omitted preserves existing tags, an explicit empty array clears
+// them — so the legacy manage modal (which never sends tags) can't wipe them.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name        string    `json:"name"`
+		Description string    `json:"description"`
+		Tags        *[]string `json:"tags"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
-	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description)
+	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "template": tpl})
+}
+
+// handleProjectTemplateCreate serves POST /api/project-templates: create a new,
+// empty template in the library from a display name.
+func (s *Server) handleProjectTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	tpl, err := projecttemplates.CreateBlank(resolveTemplatesRoot(s.Core.ConfigManager), req.Name)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondCreated(w, map[string]any{"success": true, "template": tpl})
+}
+
+// handleProjectTemplateDuplicate serves POST
+// /api/project-templates/{templateID}/duplicate: copy an existing template into a
+// new one. The (optional) `name` seeds the copy's display name and id; send `{}`
+// for a default "<source> copy".
+func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	tpl, err := projecttemplates.Duplicate(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondCreated(w, map[string]any{"success": true, "template": tpl})
 }
 
 // handleProjectTemplateDelete serves DELETE /api/project-templates/{templateID}.
@@ -130,6 +171,8 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, projecttemplates.ErrTemplateNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
+	case errors.Is(err, projecttemplates.ErrInvalidTemplateName):
+		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists):
 		_ = orihttp.RespondConflict(w, err.Error())
 	default:
