@@ -23,6 +23,18 @@ const tplState = {
   nameAction: null // { title, label, confirm, initial, run(name) }
 };
 
+// Files-tab state. `templateId` records which template the loaded tree belongs
+// to (the tree lazy-loads when the Files tab is shown). `dirty` gates navigation.
+const tplFiles = {
+  templateId: '',
+  tree: [],
+  selectedPath: '',
+  loadedContent: '',
+  readOnly: false,
+  dirty: false,
+  pending: null // callback to run once a dirty prompt resolves
+};
+
 function tplToast(message, kind) {
   if (typeof window.showToast === 'function') {
     window.showToast(message, kind || 'info');
@@ -84,6 +96,12 @@ async function tplRefresh(selectId) {
     tplState.selectedId = '';
   }
 
+  // If the selected template changed out from under a loaded tree, drop it so
+  // the Files tab doesn't show another template's files/editor.
+  if (tplFiles.templateId && tplFiles.templateId !== tplState.selectedId) {
+    tplFilesReset();
+  }
+
   tplSyncFilterTags();
   tplRenderList();
   tplRenderDetail();
@@ -140,9 +158,7 @@ function tplBuildRow(template) {
     (template.id === tplState.selectedId ? ' outline: 2px solid var(--accent-color, #6366f1);' : '');
   row.addEventListener('click', () => {
     if (tplState.selectedId === template.id) return;
-    tplState.selectedId = template.id;
-    tplRenderList();
-    tplRenderDetail();
+    tplGuardDirty(() => tplSelectTemplate(template.id));
   });
 
   const title = document.createElement('div');
@@ -396,6 +412,299 @@ async function tplReveal(id) {
   }
 }
 
+// --- Files tab: tree + editor ---
+
+function tplApiBase() {
+  return `/api/project-templates/${encodeURIComponent(tplState.selectedId)}`;
+}
+
+// tplSelectTemplate switches the active template and resets the Files tab so a
+// stale tree/editor never leaks across templates.
+function tplSelectTemplate(id) {
+  tplState.selectedId = id;
+  tplFilesReset();
+  tplRenderList();
+  tplRenderDetail();
+}
+
+function tplFilesReset() {
+  tplFiles.templateId = '';
+  tplFiles.selectedPath = '';
+  tplFiles.loadedContent = '';
+  tplFiles.readOnly = false;
+  tplClearDirty();
+  const editor = tplEl('tplEditor');
+  const empty = tplEl('tplEditorEmpty');
+  if (editor) editor.hidden = true;
+  if (empty) empty.hidden = false;
+}
+
+// tplFilesEnsureTree lazy-loads the tree the first time the Files tab is shown
+// for the selected template.
+function tplFilesEnsureTree() {
+  if (!tplState.selectedId) return;
+  if (tplFiles.templateId === tplState.selectedId) return;
+  void tplFilesLoadTree();
+}
+
+async function tplFilesLoadTree() {
+  const tree = tplEl('tplFileTree');
+  if (!tree || !tplState.selectedId) return;
+  try {
+    const data = await tplFetchJSON(`${tplApiBase()}/files`);
+    tplFiles.templateId = tplState.selectedId;
+    tplFiles.tree = Array.isArray(data.files) ? data.files : [];
+    tplRenderTree();
+  } catch (error) {
+    tree.innerHTML = '';
+    const err = document.createElement('div');
+    err.className = 'text-center py-3';
+    err.style.cssText = 'color: var(--text-secondary); font-size: 13px;';
+    err.textContent = 'Could not load files.';
+    tree.appendChild(err);
+    tplToast(error.message || 'Failed to load files', 'error');
+  }
+}
+
+function tplRenderTree() {
+  const tree = tplEl('tplFileTree');
+  if (!tree) return;
+  const nodes = tplFiles.tree;
+  tree.innerHTML = '';
+  if (nodes.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'text-center py-3';
+    empty.style.cssText = 'color: var(--text-secondary); font-size: 13px;';
+    empty.textContent = 'This template is empty. Use New File or New Folder above.';
+    tree.appendChild(empty);
+    return;
+  }
+  for (const node of nodes) {
+    tree.appendChild(tplBuildTreeRow(node));
+  }
+}
+
+function tplBuildTreeRow(node) {
+  const depth = node.path.split('/').length - 1;
+  const isDir = node.type === 'dir';
+  const name = node.path.split('/').pop();
+
+  const row = document.createElement(isDir ? 'div' : 'button');
+  if (!isDir) row.type = 'button';
+  row.className = 'd-flex align-items-center gap-2 px-2 py-1 text-start w-100';
+  row.style.cssText =
+    `border: none; border-radius: 4px; font-size: 13px; padding-left: ${8 + depth * 16}px !important;` +
+    (isDir ? ' background: transparent; color: var(--text-secondary);' : ' background: var(--bg-secondary); color: var(--text-primary);') +
+    (node.path === tplFiles.selectedPath ? ' outline: 2px solid var(--accent-color, #6366f1);' : '');
+  row.setAttribute('role', 'treeitem');
+
+  const icon = document.createElement('span');
+  icon.textContent = isDir ? '📁' : '📄';
+  icon.style.fontSize = '12px';
+  row.appendChild(icon);
+
+  const label = document.createElement('span');
+  label.textContent = name;
+  label.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+  row.appendChild(label);
+
+  if (node.is_manifest) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = 'metadata';
+    badge.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 9px; font-weight: 500;';
+    row.appendChild(badge);
+  }
+
+  if (!isDir) {
+    row.addEventListener('click', () => {
+      if (node.path === tplFiles.selectedPath) return;
+      tplGuardDirty(() => void tplOpenFile(node.path));
+    });
+  }
+  return row;
+}
+
+async function tplOpenFile(path) {
+  if (!tplState.selectedId) return;
+  try {
+    const res = await fetch(`${tplApiBase()}/files/content?path=${encodeURIComponent(path)}`);
+    if (res.status === 413) {
+      tplEditorShow(path, '', true, 'This file is larger than 512 KB and can’t be edited here. Use Reveal to open the template folder on disk.');
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      tplToast(data.message || `Failed to open file (${res.status})`, 'error');
+      return;
+    }
+    let notice = '';
+    if (data.binary) {
+      notice = 'Binary file — read-only. Use Reveal to open it on disk.';
+    } else if (data.read_only) {
+      notice = 'template.json is managed by the Overview and Onboarding tabs — read-only here.';
+    }
+    tplEditorShow(data.path || path, data.content || '', Boolean(data.read_only), notice);
+  } catch (error) {
+    tplToast(error.message || 'Failed to open file', 'error');
+  }
+}
+
+function tplEditorShow(path, content, readOnly, notice) {
+  tplFiles.selectedPath = path;
+  tplFiles.loadedContent = content;
+  tplFiles.readOnly = readOnly;
+
+  const editor = tplEl('tplEditor');
+  const empty = tplEl('tplEditorEmpty');
+  const pathEl = tplEl('tplEditorPath');
+  const textarea = tplEl('tplEditorTextarea');
+  const noticeEl = tplEl('tplEditorNotice');
+  const saveBtn = tplEl('tplEditorSaveBtn');
+
+  if (empty) empty.hidden = true;
+  if (editor) editor.hidden = false;
+  if (pathEl) pathEl.textContent = path;
+  if (textarea) {
+    textarea.value = content;
+    textarea.readOnly = readOnly;
+  }
+  if (noticeEl) {
+    noticeEl.textContent = notice || '';
+    noticeEl.hidden = !notice;
+  }
+  if (saveBtn) saveBtn.disabled = readOnly;
+  tplClearDirty();
+  tplRenderTree(); // re-render to move the selection highlight to this file
+}
+
+async function tplEditorSave() {
+  const path = tplFiles.selectedPath;
+  const textarea = tplEl('tplEditorTextarea');
+  if (!path || tplFiles.readOnly || !textarea) return false;
+  try {
+    await tplFetchJSON(`${tplApiBase()}/files/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content: textarea.value })
+    });
+    tplFiles.loadedContent = textarea.value;
+    tplClearDirty();
+    tplToast('File saved.', 'success');
+    return true;
+  } catch (error) {
+    tplToast(error.message || 'Failed to save file', 'error');
+    return false;
+  }
+}
+
+function tplMarkDirty() {
+  tplFiles.dirty = true;
+  const ind = tplEl('tplEditorDirty');
+  if (ind) ind.hidden = false;
+}
+
+function tplClearDirty() {
+  tplFiles.dirty = false;
+  const ind = tplEl('tplEditorDirty');
+  if (ind) ind.hidden = true;
+}
+
+// tplGuardDirty runs `proceed` immediately unless the editor has unsaved
+// changes, in which case it opens the save / discard / keep-editing prompt.
+function tplGuardDirty(proceed) {
+  if (!tplFiles.dirty) {
+    proceed();
+    return;
+  }
+  tplFiles.pending = proceed;
+  const fileEl = tplEl('tplDirtyFile');
+  if (fileEl) fileEl.textContent = tplFiles.selectedPath || '(file)';
+  const modalEl = tplEl('tplDirtyModal');
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function tplDirtyResolve(action) {
+  const modalEl = tplEl('tplDirtyModal');
+  const proceed = tplFiles.pending;
+  if (action === 'cancel') {
+    tplFiles.pending = null;
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    return;
+  }
+  if (action === 'save') {
+    const ok = await tplEditorSave();
+    if (!ok) return; // keep the prompt open on save failure
+  }
+  tplClearDirty();
+  tplFiles.pending = null;
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+  if (typeof proceed === 'function') proceed();
+}
+
+function tplFileCreate(type) {
+  if (!tplState.selectedId) return;
+  tplOpenNameModal({
+    title: type === 'dir' ? 'New Folder' : 'New File',
+    label: 'Path (relative to the template)',
+    confirm: 'Create',
+    initial: '',
+    run: async (path) => {
+      if (!path) throw new Error('Please enter a path.');
+      const result = await tplFetchJSON(`${tplApiBase()}/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, type })
+      });
+      await tplFilesLoadTree();
+      const node = result.node || {};
+      if (type === 'file') void tplOpenFile(node.path || path);
+    }
+  });
+}
+
+function tplFileRename() {
+  const path = tplFiles.selectedPath;
+  if (!path) return;
+  tplGuardDirty(() => {
+    tplOpenNameModal({
+      title: 'Rename / Move',
+      label: 'New path (relative to the template)',
+      confirm: 'Rename',
+      initial: path,
+      run: async (to) => {
+        if (!to || to === path) return;
+        const result = await tplFetchJSON(`${tplApiBase()}/files/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: path, to })
+        });
+        await tplFilesLoadTree();
+        const node = result.node || {};
+        void tplOpenFile(node.path || to);
+      }
+    });
+  });
+}
+
+async function tplFileDelete() {
+  const path = tplFiles.selectedPath;
+  if (!path) return;
+  if (!window.confirm(`Delete "${path}" from the template? This cannot be undone from the app.`)) {
+    return;
+  }
+  try {
+    await tplFetchJSON(`${tplApiBase()}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    tplToast(`Deleted "${path}".`, 'success');
+    tplClearDirty();
+    tplFilesReset();
+    tplFiles.templateId = '';
+    await tplFilesLoadTree();
+  } catch (error) {
+    tplToast(error.message || 'Failed to delete', 'error');
+  }
+}
+
 // --- Init ---
 
 function tplInit() {
@@ -432,6 +741,45 @@ function tplInit() {
       void tplRunNameAction();
     }
   });
+
+  // Files tab wiring.
+  tplEl('tplFileNewBtn')?.addEventListener('click', () => tplFileCreate('file'));
+  tplEl('tplFolderNewBtn')?.addEventListener('click', () => tplFileCreate('dir'));
+  tplEl('tplFilesRefreshBtn')?.addEventListener('click', () => {
+    tplFiles.templateId = '';
+    void tplFilesLoadTree();
+  });
+  tplEl('tplFileRenameBtn')?.addEventListener('click', tplFileRename);
+  tplEl('tplFileDeleteBtn')?.addEventListener('click', () => void tplFileDelete());
+  tplEl('tplEditorSaveBtn')?.addEventListener('click', () => void tplEditorSave());
+
+  const textarea = tplEl('tplEditorTextarea');
+  if (textarea) {
+    textarea.addEventListener('input', () => {
+      if (tplFiles.readOnly) return;
+      if (textarea.value === tplFiles.loadedContent) tplClearDirty();
+      else tplMarkDirty();
+    });
+  }
+
+  // Dirty-prompt buttons.
+  tplEl('tplDirtySave')?.addEventListener('click', () => void tplDirtyResolve('save'));
+  tplEl('tplDirtyDiscard')?.addEventListener('click', () => void tplDirtyResolve('discard'));
+  tplEl('tplDirtyCancel')?.addEventListener('click', () => void tplDirtyResolve('cancel'));
+
+  // Lazy-load the tree when the Files tab is shown; guard tab-switch when dirty.
+  const filesTab = tplEl('tplTabFiles');
+  if (filesTab) {
+    filesTab.addEventListener('shown.bs.tab', () => tplFilesEnsureTree());
+    filesTab.addEventListener('hide.bs.tab', (event) => {
+      if (!tplFiles.dirty) return;
+      const target = event.relatedTarget;
+      event.preventDefault();
+      tplGuardDirty(() => {
+        if (target) bootstrap.Tab.getOrCreateInstance(target).show();
+      });
+    });
+  }
 
   void tplRefresh();
 }
