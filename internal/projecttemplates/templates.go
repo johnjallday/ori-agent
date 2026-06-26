@@ -33,6 +33,10 @@ type Template struct {
 	// This package only carries the bytes; the templateonboarding package parses
 	// and validates them at workspace-creation time. Excluded from API JSON.
 	Onboarding json.RawMessage `json:"-"`
+	// Tools are the default skills/MCP servers/plugins a workspace created from
+	// this template binds (apply-if-present). Names only — bound in the
+	// workspace-creation layer, not here.
+	Tools ToolDefaults `json:"tools"`
 }
 
 // HasOnboarding reports whether the template carries a non-empty onboarding
@@ -53,6 +57,7 @@ type manifest struct {
 	Description string          `json:"description"`
 	Tags        []string        `json:"tags,omitempty"`
 	Onboarding  json.RawMessage `json:"onboarding,omitempty"`
+	Tools       *ToolDefaults   `json:"tools,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -87,6 +92,9 @@ func newTemplate(path string) Template {
 	t.Description = strings.TrimSpace(m.Description)
 	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
 	t.Onboarding = m.Onboarding
+	if m.Tools != nil {
+		t.Tools = normalizeToolDefaults(*m.Tools)
+	}
 	return t
 }
 

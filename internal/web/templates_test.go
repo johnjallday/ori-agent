@@ -74,6 +74,10 @@ func TestRenderTemplatesPage(t *testing.T) {
 		`id="tplOnbFields"`,
 		`id="tplOnbCompletion"`,
 		`id="tplOnbSaveBtn"`,
+		`id="tplToolsSkills"`,
+		`id="tplToolsMcp"`,
+		`id="tplToolsPlugins"`,
+		`id="tplToolsSaveBtn"`,
 		`/js/modules/templates-page.js`,
 	} {
 		if !strings.Contains(html, want) {
