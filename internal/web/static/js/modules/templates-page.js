@@ -36,9 +36,14 @@ const tplFiles = {
 };
 
 function tplToast(message, kind) {
-  if (typeof window.showToast === 'function') {
-    window.showToast(message, kind || 'info');
-  } else if (kind === 'error') {
+  const type = kind || 'info';
+  if (typeof window.notifyToast === 'function') {
+    window.notifyToast(message, type);
+  } else if (window.Toast && typeof window.Toast.show === 'function') {
+    window.Toast.show(message, type);
+  } else if (typeof window.showToast === 'function') {
+    window.showToast(message, type);
+  } else if (type === 'error') {
     console.error(message);
   }
 }
