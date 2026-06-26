@@ -1,0 +1,91 @@
+name: Auto Release
+
+# Deterministic, scheduled release gate. Once a day it evaluates `dev` via
+# scripts/release-ready.sh; if release-ready it requests approval (the `release`
+# environment) and then bumps VERSION, fast-forwards dev→main, and pushes a tag —
+# which triggers release.yml (GoReleaser).
+#
+# ── One-time setup (required) ────────────────────────────────────────────────
+#   1. Secret  RELEASE_PAT  — a repo-scoped Personal Access Token. The tag push
+#      must use a PAT, because a tag pushed with the default GITHUB_TOKEN does NOT
+#      trigger release.yml (GitHub blocks recursive workflow triggers).
+#   2. Environment  release  — Settings → Environments → New environment "release",
+#      add yourself as a Required reviewer. That is the one-tap approval gate.
+#      (Without it, the release job runs unattended — i.e. fully autonomous.)
+#   3. Variable  AUTO_RELEASE_HOLD  (optional kill-switch) — set to 1 to halt all
+#      auto-releases without a commit:  gh variable set AUTO_RELEASE_HOLD --body 1
+
+on:
+  schedule:
+    - cron: '0 19 * * *' # ~15:00 America/New_York (EDT). GH cron is UTC w/o DST → 14:00 in winter.
+  workflow_dispatch: # manual "evaluate now"
+    inputs:
+      force:
+        description: 'Release now if CI is green (bypass the cadence threshold)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: Evaluate readiness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+      version: ${{ steps.gate.outputs.version }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run release-ready gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          FORCE_RELEASE: ${{ inputs.force }}
+        run: ./scripts/release-ready.sh
+
+  release:
+    name: Release ${{ needs.evaluate.outputs.version }}
+    needs: evaluate
+    if: needs.evaluate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    environment: release # protected env → required reviewer approves (the gate)
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }} # PAT so the tag push triggers release.yml
+      - name: Tag and release
+        env:
+          VERSION: ${{ needs.evaluate.outputs.version }}
+          SHA: ${{ needs.evaluate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Pin to the exact commit the gate validated (CI-green). If dev advanced
+          # during the approval window, the ff push below is rejected → safe no-op.
+          git checkout "$SHA"
+          echo "$VERSION" > VERSION
+          git add VERSION
+          git commit -m "chore: bump version to $VERSION"
+          git push origin HEAD:dev  # ff over origin/dev; rejected if dev advanced during approval
+          git push origin HEAD:main # fast-forward main; fails safely if main diverged
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION" # → triggers release.yml (GoReleaser)
+      - name: Summary
+        run: echo "🚀 Released ${{ needs.evaluate.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
