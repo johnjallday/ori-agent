@@ -34,6 +34,10 @@ const sessionManager = {
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
 
+  // Create-workspace "Starting point" template currently picked in the modal.
+  // Populated when the modal opens (defaults to the first/Blank template).
+  workspaceTemplate: null,
+
   // Auto mode state
   chatAutoMode: false,
   chatLlmAvailable: false,
@@ -3193,6 +3197,33 @@ const sessionManager = {
       window.WorkspaceBootstrapReview.reset();
     }
     if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+    this.renderWorkspaceTemplateGrid();
+  },
+
+  // Renders the "Starting point" template grid into #folderTemplateGrid and
+  // tracks the picked template on this.workspaceTemplate. Picking a card
+  // pre-fills the name/description only when they are empty (never clobbers
+  // typed input). Behavior-profile wiring is layered on in a later step.
+  renderWorkspaceTemplateGrid() {
+    const grid = document.getElementById('folderTemplateGrid');
+    if (!grid || !window.WorkspaceTemplates || typeof window.WorkspaceTemplates.render !== 'function') {
+      this.workspaceTemplate = null;
+      return;
+    }
+    const nameInput = document.getElementById('folderNameInput');
+    const descriptionInput = document.getElementById('folderDescriptionInput');
+    const initial = window.WorkspaceTemplates.render(grid, {
+      onSelect: (template) => {
+        this.workspaceTemplate = template;
+        if (nameInput && !nameInput.value && template.defaultName) {
+          nameInput.value = template.defaultName;
+        }
+        if (descriptionInput && !descriptionInput.value && template.defaultDescription) {
+          descriptionInput.value = template.defaultDescription;
+        }
+      }
+    });
+    this.workspaceTemplate = initial;
   },
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
