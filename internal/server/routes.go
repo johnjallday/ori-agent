@@ -42,6 +42,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("/skills", s.serveSkills)
+	mux.HandleFunc("/templates", s.serveTemplates)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
 	mux.HandleFunc("/plugins", s.servePlugins)

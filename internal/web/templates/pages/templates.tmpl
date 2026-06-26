@@ -1,0 +1,194 @@
+{{define "templates"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper" id="templatesPage" data-current-agent="{{index .Extra "DefaultAgentName"}}">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div style="min-width: 0;">
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/>
+                </svg>
+                Templates
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">
+                Project templates are folder skeletons copied into a workspace to become its project.
+                A template is just a folder — drop one into the library or create one here.
+              </p>
+              <div class="mt-2 d-flex align-items-baseline gap-2 flex-wrap">
+                <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Library</span>
+                <span id="tplRootPath" style="font-size: 12px; color: var(--text-primary); font-family: var(--font-mono, monospace); overflow-wrap: anywhere;"></span>
+                <a href="/settings#templates" style="font-size: 12px;">Change…</a>
+              </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <button id="tplCreateBtn" class="modern-btn modern-btn-primary btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
+                New Template
+              </button>
+              <button id="tplImportBtn" class="modern-btn modern-btn-secondary btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,3.5L18.5,9H13V3.5M12,19L8,15H10.5V12H13.5V15H16L12,19Z"/></svg>
+                Import Folder…
+              </button>
+              <button id="tplOpenLibraryBtn" class="modern-btn modern-btn-secondary btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>
+                Open Library
+              </button>
+              <button id="tplRefreshBtn" class="modern-btn modern-btn-secondary btn-sm" aria-label="Refresh">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tplError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
+
+        <!-- Master / detail -->
+        <div class="row g-3">
+          <!-- Master list -->
+          <div class="col-12 col-lg-4">
+            <div class="modern-card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0" style="color: var(--text-primary);">Library</h6>
+                <span id="tplCount" class="badge bg-secondary" style="font-size: 12px;">0</span>
+              </div>
+              <input id="tplSearch" type="text" class="modern-input w-100 mb-2" placeholder="Search templates…" aria-label="Search templates">
+              <div id="tplTagFilter" class="mb-2"></div>
+              <div id="tplEmpty" class="text-center py-4" style="font-size: 13px; color: var(--text-secondary);" hidden>
+                No templates yet. Create one above, import a folder, or drop a folder into the library.
+              </div>
+              <div id="tplList" class="d-flex flex-column gap-2" role="list" aria-label="Project templates">
+                <div class="text-center py-3" style="color: var(--text-secondary);">Loading templates…</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detail -->
+          <div class="col-12 col-lg-8">
+            <div class="modern-card p-4">
+              <!-- Empty detail -->
+              <div id="tplDetailEmpty" class="text-center py-5" style="color: var(--text-secondary);">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.4;"><path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/></svg>
+                <div class="mt-2">Select a template to view and edit it.</div>
+              </div>
+
+              <!-- Detail body -->
+              <div id="tplDetail" hidden>
+                <div class="d-flex justify-content-between align-items-start gap-3 mb-3 flex-wrap">
+                  <div style="min-width: 0;">
+                    <h4 id="tplDetailName" class="mb-1" style="color: var(--text-primary); word-break: break-word;">Template</h4>
+                    <code id="tplDetailId" style="font-size: 12px; color: var(--text-secondary);"></code>
+                  </div>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <button id="tplDuplicateBtn" class="modern-btn modern-btn-secondary btn-sm">Duplicate</button>
+                    <button id="tplRevealBtn" class="modern-btn modern-btn-secondary btn-sm">Reveal</button>
+                    <button id="tplDeleteBtn" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;">Delete</button>
+                  </div>
+                </div>
+
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                  <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="tplTabOverview" data-bs-toggle="tab" data-bs-target="#tplOverviewPane" type="button" role="tab" aria-controls="tplOverviewPane" aria-selected="true">Overview</button>
+                  </li>
+                  <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tplTabFiles" data-bs-toggle="tab" data-bs-target="#tplFilesPane" type="button" role="tab" aria-controls="tplFilesPane" aria-selected="false">Files</button>
+                  </li>
+                  <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tplTabOnboarding" data-bs-toggle="tab" data-bs-target="#tplOnboardingPane" type="button" role="tab" aria-controls="tplOnboardingPane" aria-selected="false">Onboarding</button>
+                  </li>
+                </ul>
+
+                <div class="tab-content">
+                  <!-- Overview / metadata -->
+                  <div class="tab-pane fade show active" id="tplOverviewPane" role="tabpanel" aria-labelledby="tplTabOverview">
+                    <div class="mb-3">
+                      <label for="tplEditName" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Display name</label>
+                      <input id="tplEditName" type="text" class="modern-input w-100" maxlength="120" placeholder="Defaults to the folder id">
+                    </div>
+                    <div class="mb-3">
+                      <label for="tplEditDescription" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Description</label>
+                      <textarea id="tplEditDescription" class="form-control" rows="3" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;" placeholder="What is this template for?"></textarea>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Tags</label>
+                      <div id="tplEditTags"></div>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button id="tplSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save changes</button>
+                      <button id="tplResetBtn" class="modern-btn modern-btn-secondary btn-sm">Reset</button>
+                    </div>
+                  </div>
+
+                  <!-- Files (Seam PR 2) -->
+                  <div class="tab-pane fade" id="tplFilesPane" role="tabpanel" aria-labelledby="tplTabFiles">
+                    <div class="text-center py-4" style="color: var(--text-secondary); font-size: 13px;">
+                      In-app file editing is coming soon. For now, use <strong>Reveal</strong> to open the
+                      template folder and edit its files on disk.
+                    </div>
+                  </div>
+
+                  <!-- Onboarding (Seam PR 3) -->
+                  <div class="tab-pane fade" id="tplOnboardingPane" role="tabpanel" aria-labelledby="tplTabOnboarding">
+                    <div class="text-center py-4" style="color: var(--text-secondary); font-size: 13px;">
+                      The onboarding intake editor is coming soon. Onboarding blocks authored in
+                      <code>template.json</code> still run when a workspace is created.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared modals (sidebar add-agent, etc.) -->
+  {{template "modals.tmpl" .}}
+
+  <!-- Name modal: reused for Create and Duplicate -->
+  <div class="modal fade" id="tplNameModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" id="tplNameModalTitle" style="color: var(--text-primary);">New Template</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" style="color: var(--text-primary);">
+          <label for="tplNameModalInput" id="tplNameModalLabel" class="form-label">Template name</label>
+          <input id="tplNameModalInput" type="text" class="modern-input w-100" maxlength="120" placeholder="e.g. REAPER Song">
+          <small class="form-helper">The folder id is derived from the name (lowercase, hyphenated).</small>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="tplNameModalConfirm" class="modern-btn modern-btn-primary">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script defer src="/js/modules/themeManager.js"></script>
+  {{template "scripts-dx-utils.tmpl" .}}
+  <script defer src="/js/modules/toast.js"></script>
+  <script defer src="/js/modules/resizer.js"></script>
+  <script defer src="/js/modules/agents.js"></script>
+  <script defer src="/js/modules/sidebar.js"></script>
+  <script defer src="/js/modules/templates-page.js"></script>
+  {{template "theme-init.tmpl" .}}
+</body>
+</html>
+{{end}}

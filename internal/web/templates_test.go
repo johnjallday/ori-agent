@@ -46,6 +46,41 @@ func TestRenderWorkspaceDetailGroupScaffold(t *testing.T) {
 	}
 }
 
+// TestRenderTemplatesPage confirms the /templates page renders, carries the
+// master/detail scaffold and lifecycle controls, and highlights its sidebar
+// link when CurrentPage is "templates".
+func TestRenderTemplatesPage(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	data := TemplateData{Title: "Templates - Ori Agent", CurrentPage: "templates"}
+	html, err := r.RenderTemplate("templates", data)
+	if err != nil {
+		t.Fatalf("RenderTemplate(templates) failed: %v", err)
+	}
+
+	for _, want := range []string{
+		`id="tplList"`,
+		`id="tplCreateBtn"`,
+		`id="tplImportBtn"`,
+		`id="tplDetail"`,
+		`id="tplEditTags"`,
+		`id="tplNameModal"`,
+		`/js/modules/templates-page.js`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered templates page missing %q", want)
+		}
+	}
+
+	// The Templates sidebar link should be marked active for this page.
+	if !strings.Contains(html, `href="/templates" class="sidebar-nav-link active"`) {
+		t.Errorf("templates sidebar link not highlighted as active")
+	}
+}
+
 func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
