@@ -131,6 +131,102 @@ func (s *Server) handleProjectTemplateDelete(w http.ResponseWriter, r *http.Requ
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "trashed": trashed})
 }
 
+// handleProjectTemplateFilesList serves GET
+// /api/project-templates/{templateID}/files: the template's file/folder tree.
+func (s *Server) handleProjectTemplateFilesList(w http.ResponseWriter, r *http.Request) {
+	nodes, err := projecttemplates.ListTree(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"files": nodes})
+}
+
+// handleProjectTemplateFileRead serves GET
+// /api/project-templates/{templateID}/files/content?path=<rel>: one file's
+// contents for the editor (read-only for binary/manifest, 413 if oversized).
+func (s *Server) handleProjectTemplateFileRead(w http.ResponseWriter, r *http.Request) {
+	content, err := projecttemplates.ReadFileContent(
+		resolveTemplatesRoot(s.Core.ConfigManager),
+		r.PathValue("templateID"),
+		r.URL.Query().Get("path"),
+	)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, content)
+}
+
+// handleProjectTemplateFileWrite serves PUT
+// /api/project-templates/{templateID}/files/content: overwrite an existing
+// file's bytes verbatim. The file must already exist (use the create endpoint
+// for new files).
+func (s *Server) handleProjectTemplateFileWrite(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if err := projecttemplates.WriteFileContent(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Content); err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "path": req.Path})
+}
+
+// handleProjectTemplateFileCreate serves POST
+// /api/project-templates/{templateID}/files: create a new file or folder
+// ({"path": ..., "type": "file"|"dir"}).
+func (s *Server) handleProjectTemplateFileCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+		Type string `json:"type"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	node, err := projecttemplates.CreateEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Type)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondCreated(w, map[string]any{"success": true, "node": node})
+}
+
+// handleProjectTemplateFileRename serves POST
+// /api/project-templates/{templateID}/files/rename: move a file or folder
+// ({"from": ..., "to": ...}); the destination must not already exist.
+func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	node, err := projecttemplates.RenameEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.From, req.To)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "node": node})
+}
+
+// handleProjectTemplateFileDelete serves DELETE
+// /api/project-templates/{templateID}/files?path=<rel>: remove a file or folder
+// (recursive for folders).
+func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if err := projecttemplates.DeleteEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), path); err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "path": path})
+}
+
 // handleProjectTemplateReveal serves POST /api/project-templates/reveal:
 // open the library root ({} or empty id) or reveal one template ({"id": ...})
 // in the OS file manager. Local-first only, like workspace file open.
@@ -169,12 +265,14 @@ func (s *Server) handleProjectTemplateReveal(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, projecttemplates.ErrTemplateNotFound):
+	case errors.Is(err, projecttemplates.ErrTemplateNotFound), errors.Is(err, projecttemplates.ErrFileNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrInvalidTemplateName):
+	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath):
 		_ = orihttp.RespondBadRequest(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrTemplateExists):
+	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())
+	case errors.Is(err, projecttemplates.ErrFileTooLarge):
+		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
 	default:
 		// Non-sentinel errors here are filesystem/server faults (copy
 		// failures, unreadable library dir), not bad client input.
