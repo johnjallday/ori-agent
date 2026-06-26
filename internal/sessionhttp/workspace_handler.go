@@ -424,6 +424,26 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 							projectWarning = ""
 						}
 					}
+
+					// Bind the template's declared default tools (skills / MCP /
+					// plugins) onto the workspace, independent of onboarding. Tools
+					// not present on the machine are skipped and noted; never fatal.
+					if templateResolved && !resolvedTemplate.Tools.IsEmpty() && h.applyTemplateTools != nil {
+						// The applier binds through the read store and persists itself.
+						applied, missing := h.applyTemplateTools(ws.ID, resolvedTemplate.Tools)
+						if len(applied) > 0 {
+							logger.Info("Applied template default tools", logger.Fields{"id": ws.ID, "applied": applied})
+						}
+						if len(missing) > 0 {
+							logger.Info("Template default tools not found (skipped)", logger.Fields{"id": ws.ID, "missing": missing})
+							warn := fmt.Sprintf("some template tools were not found and were skipped: %s", strings.Join(missing, ", "))
+							if projectWarning == "" {
+								projectWarning = warn
+							} else {
+								projectWarning = projectWarning + "; " + warn
+							}
+						}
+					}
 				}
 			}
 		}

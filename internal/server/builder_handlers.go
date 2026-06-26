@@ -332,6 +332,13 @@ func (b *ServerBuilder) initializeHandlers() {
 	if b.mcpConfigManager != nil && b.mcpRegistry != nil {
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, "plugins")
 	}
+
+	// Let workspaces created from a template bind its declared default tools
+	// (skills / MCP servers / plugins) at creation, applying only what is present.
+	// The applier reads the SyncStore + MCP config lazily at request time.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
+	}
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {

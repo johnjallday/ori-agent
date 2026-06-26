@@ -12,6 +12,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/templateonboarding"
@@ -29,6 +30,11 @@ type Handler struct {
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
 	templateOnboarding    *templateonboarding.Service
+	// applyTemplateTools binds a template's declared default tools onto a newly
+	// created workspace (apply-if-present), returning the applied and skipped
+	// names. Injected by the server, which holds the tool registries and binds
+	// through the same store the binding endpoints read from.
+	applyTemplateTools func(workspaceID string, tools projecttemplates.ToolDefaults) (applied, missing []string)
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -59,6 +65,13 @@ func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
 // SetAgentStore sets the agent store used for workspace entry-agent provisioning.
 func (h *Handler) SetAgentStore(agentStore store.Store) {
 	h.agentStore = agentStore
+}
+
+// SetTemplateToolApplier injects the function that binds a template's declared
+// default tools (skills / MCP servers / plugins) onto a freshly created
+// workspace. The server supplies it because the tool registries live there.
+func (h *Handler) SetTemplateToolApplier(fn func(workspaceID string, tools projecttemplates.ToolDefaults) (applied, missing []string)) {
+	h.applyTemplateTools = fn
 }
 
 // SetTemplatesRootResolver sets the resolver used to locate the project

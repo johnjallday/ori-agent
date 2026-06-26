@@ -300,6 +300,24 @@ func (s *Server) handleProjectTemplateOnboardingDelete(w http.ResponseWriter, r 
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "present": false})
 }
 
+// handleProjectTemplateToolsSet serves PUT
+// /api/project-templates/{templateID}/tools: set the template's default tool
+// bindings (skills / MCP servers / plugins), referenced by name. The names are
+// applied (if present on the machine) when a workspace is created from the
+// template; reading them is covered by the list endpoint's Template.Tools.
+func (s *Server) handleProjectTemplateToolsSet(w http.ResponseWriter, r *http.Request) {
+	var req projecttemplates.ToolDefaults
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	tpl, err := projecttemplates.SetTools(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req)
+	if err != nil {
+		s.respondProjectTemplateError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "template": tpl})
+}
+
 // handleProjectTemplateReveal serves POST /api/project-templates/reveal:
 // open the library root ({} or empty id) or reveal one template ({"id": ...})
 // in the OS file manager. Local-first only, like workspace file open.

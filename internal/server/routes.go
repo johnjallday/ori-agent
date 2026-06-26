@@ -615,6 +615,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingGet)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingSet)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingDelete)
+		// Default tool bindings (skills / MCP servers / plugins), applied if present at creation
+		mux.HandleFunc("PUT /api/project-templates/{templateID}/tools", s.handleProjectTemplateToolsSet)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/tags/usage", s.Handlers.Session.HandleTagUsage)
