@@ -604,6 +604,13 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/{templateID}/duplicate", s.handleProjectTemplateDuplicate)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}", s.handleProjectTemplateUpdate)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}", s.handleProjectTemplateDelete)
+		// In-app file authoring (path-jailed to the template folder)
+		mux.HandleFunc("GET /api/project-templates/{templateID}/files", s.handleProjectTemplateFilesList)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/files", s.handleProjectTemplateFileCreate)
+		mux.HandleFunc("GET /api/project-templates/{templateID}/files/content", s.handleProjectTemplateFileRead)
+		mux.HandleFunc("PUT /api/project-templates/{templateID}/files/content", s.handleProjectTemplateFileWrite)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/files/rename", s.handleProjectTemplateFileRename)
+		mux.HandleFunc("DELETE /api/project-templates/{templateID}/files", s.handleProjectTemplateFileDelete)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/tags/usage", s.Handlers.Session.HandleTagUsage)
