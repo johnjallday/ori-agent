@@ -3010,11 +3010,7 @@ const sessionManager = {
 
     const createBtn = document.getElementById('createFolderBtn');
     if (createBtn && !this.isCreatingFolder) {
-      if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
-        window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
-      } else {
-        createBtn.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
-      }
+      createBtn.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
     }
 
     if (!this.importModeEnabled) {
@@ -3204,9 +3200,6 @@ const sessionManager = {
     this.setImportBrowseLoading(false);
     this.setImportModeEnabled(false);
     this.clearImportDuplicateWarning();
-    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
-      window.WorkspaceBootstrapReview.reset();
-    }
     if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
     // Reset Agent behavior: clear any manual override and collapse the Advanced
     // disclosure before re-rendering the grid (which re-applies the default).
@@ -3366,12 +3359,6 @@ const sessionManager = {
       return;
     }
 
-    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.ensureReviewed === 'function') {
-      const reviewOutcome = await window.WorkspaceBootstrapReview.ensureReviewed();
-      if (!reviewOutcome.ready) {
-        return;
-      }
-    }
     const parentId = parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
     const originalCreateLabel = createBtn ? createBtn.textContent : '';
@@ -3517,7 +3504,9 @@ const sessionManager = {
           console.warn('Failed to parse Assistant seed task:', error);
         }
       }
-      let bootstrapApplyResult = {
+      // Add-ons (MCPs/skills/plugins) are no longer applied at create time —
+      // the user adds them later via the workspace-page "Find tools" panel.
+      const bootstrapApplyResult = {
         invitedAgents: 0,
         boundMCPs: 0,
         attachedSkills: 0,
@@ -3567,13 +3556,6 @@ const sessionManager = {
         }
       }
 
-      if (
-        createdWorkspaceId &&
-        window.WorkspaceBootstrapReview &&
-        typeof window.WorkspaceBootstrapReview.applyPlan === 'function'
-      ) {
-        bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(createdWorkspaceId);
-      }
 
       if (
         bootstrapApplyResult.invitedAgents > 0 ||
