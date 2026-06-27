@@ -34,6 +34,13 @@ const sessionManager = {
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
 
+  // Create-workspace "Starting point" template currently picked in the modal.
+  // Populated when the modal opens (defaults to the first/Blank template).
+  workspaceTemplate: null,
+  // True once the user manually changes "Agent behavior", so selecting a
+  // Starting point no longer overwrites their choice. Reset on modal open.
+  behaviorOverridden: false,
+
   // Auto mode state
   chatAutoMode: false,
   chatLlmAvailable: false,
@@ -209,6 +216,13 @@ const sessionManager = {
 
     // Create folder button
     document.getElementById('createFolderBtn')?.addEventListener('click', () => this.createFolder());
+
+    // Agent behavior (formerly "Workspace preset"): a manual change marks the
+    // value as overridden so picking a Starting point won't clobber it.
+    document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
+      this.behaviorOverridden = true;
+      this.updateBehaviorHint();
+    });
 
     const importToggle = document.getElementById('folderImportToggle');
     importToggle?.addEventListener('change', (event) => {
@@ -3162,6 +3176,7 @@ const sessionManager = {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
       if (descriptionInput) descriptionInput.value = '';
+      if (descriptionInput) descriptionInput.dataset.autofillDescription = '';
       if (primaryGoalInput) primaryGoalInput.value = '';
       if (systemsInput) systemsInput.value = '';
       if (contextInput) contextInput.value = '';
@@ -3193,6 +3208,81 @@ const sessionManager = {
       window.WorkspaceBootstrapReview.reset();
     }
     if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
+    // Reset Agent behavior: clear any manual override and collapse the Advanced
+    // disclosure before re-rendering the grid (which re-applies the default).
+    this.behaviorOverridden = false;
+    const advancedDisclosure = document.getElementById('folderAdvancedDisclosure');
+    if (advancedDisclosure) advancedDisclosure.open = false;
+    this.renderWorkspaceTemplateGrid();
+  },
+
+  // Fills a create-modal input from a template default while tracking the
+  // filled value in a dataset attribute. This lets a later Starting-point
+  // switch replace a value the modal auto-filled, while never clobbering input
+  // the user typed themselves. An empty value (e.g. Blank) clears a previously
+  // auto-filled field but leaves typed input alone.
+  prefillTemplateValue(input, value, autofillAttr) {
+    if (!input) return;
+    const next = value || '';
+    const prevAuto = input.dataset[autofillAttr] || '';
+    if (input.value === '' || input.value === prevAuto) {
+      input.value = next;
+      input.dataset[autofillAttr] = next;
+    }
+  },
+
+  // Renders the "Starting point" template grid into #folderTemplateGrid and
+  // tracks the picked template on this.workspaceTemplate. Picking a card
+  // pre-fills the name/description (replacing earlier auto-filled values, never
+  // typed input). Behavior-profile wiring is layered on in a later step.
+  renderWorkspaceTemplateGrid() {
+    const grid = document.getElementById('folderTemplateGrid');
+    if (!grid || !window.WorkspaceTemplates || typeof window.WorkspaceTemplates.render !== 'function') {
+      this.workspaceTemplate = null;
+      return;
+    }
+    const nameInput = document.getElementById('folderNameInput');
+    const descriptionInput = document.getElementById('folderDescriptionInput');
+    const initial = window.WorkspaceTemplates.render(grid, {
+      onSelect: (template) => {
+        this.workspaceTemplate = template;
+        this.prefillTemplateValue(nameInput, template.defaultName, 'autofillName');
+        this.prefillTemplateValue(descriptionInput, template.defaultDescription, 'autofillDescription');
+        this.applyTemplateBehavior(template);
+      }
+    });
+    this.workspaceTemplate = initial;
+    // Seed the Agent behavior default from the initially-selected (Blank)
+    // template and sync the collapsed hint.
+    this.applyTemplateBehavior(initial);
+  },
+
+  // Friendly label for an Agent behavior profile value.
+  behaviorProfileLabel(profile) {
+    switch (profile) {
+      case 'research': return 'Research';
+      case 'software_project': return 'Software Project';
+      case 'general':
+      default: return 'General';
+    }
+  },
+
+  // Refreshes the collapsed "Agent behavior: X" hint from the select value.
+  updateBehaviorHint() {
+    const hint = document.getElementById('folderBehaviorHint');
+    if (!hint) return;
+    const profile = document.getElementById('folderPresetSelect')?.value || 'general';
+    hint.textContent = `Agent behavior: ${this.behaviorProfileLabel(profile)}`;
+  },
+
+  // Applies a Starting point template's default Agent behavior to the select,
+  // unless the user has manually overridden it. Always refreshes the hint.
+  applyTemplateBehavior(template) {
+    const select = document.getElementById('folderPresetSelect');
+    if (select && !this.behaviorOverridden && template && template.behaviorProfile) {
+      select.value = template.behaviorProfile;
+    }
+    this.updateBehaviorHint();
   },
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
@@ -3306,6 +3396,10 @@ const sessionManager = {
           context: workspaceBootstrap.context
         };
       }
+      // Agent behavior profile (mapped from the Starting point or manually
+      // overridden). Sent for both create and import; the backend maps it via
+      // workspacesettings.ProfileDefaults.
+      payload.workspace_preset = document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
       const buildSlugConflictMessage = (conflict) => {
         const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
         const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
@@ -3454,6 +3548,25 @@ const sessionManager = {
         }
       }
 
+      // Seed starter tasks from the picked Starting point template (best-effort,
+      // non-fatal — the workspace already exists). Blank seeds nothing.
+      let seededStarterTasks = 0;
+      if (
+        createdWorkspaceId &&
+        this.workspaceTemplate &&
+        window.WorkspaceTemplates &&
+        typeof window.WorkspaceTemplates.seedStarterTasks === 'function'
+      ) {
+        try {
+          seededStarterTasks = await window.WorkspaceTemplates.seedStarterTasks(
+            createdWorkspaceId,
+            this.workspaceTemplate
+          );
+        } catch (error) {
+          console.warn('Failed to seed starter tasks:', error);
+        }
+      }
+
       if (
         createdWorkspaceId &&
         window.WorkspaceBootstrapReview &&
@@ -3468,7 +3581,8 @@ const sessionManager = {
         bootstrapApplyResult.attachedSkills > 0 ||
         bootstrapApplyResult.addedPlugins > 0 ||
         askOriSeedResult.tasksCreated > 0 ||
-        askOriSeedResult.notesCreated > 0
+        askOriSeedResult.notesCreated > 0 ||
+        seededStarterTasks > 0
       ) {
         const summaryParts = [];
         if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
@@ -3477,6 +3591,7 @@ const sessionManager = {
         if (bootstrapApplyResult.addedPlugins > 0) summaryParts.push(`${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
+        if (seededStarterTasks > 0) summaryParts.push(`${seededStarterTasks} starter task${seededStarterTasks === 1 ? '' : 's'} added`);
         const summaryText = summaryParts.join(', ');
         if (
           askOriSeedResult.errors.length > 0 ||
@@ -7928,6 +8043,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       sessionManager.openNoteEditor(openNoteId);
+    }
+  } catch (_) { /* non-fatal */ }
+
+  // ?create=1 opens the Create Workspace modal after navigation (home-page
+  // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
+  // history so a refresh doesn't re-open. Previously handled by the now-removed
+  // workspace-create.js on a different (unrouted) page.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === '1') {
+      params.delete('create');
+      const qs = params.toString();
+      const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', cleanUrl);
+      // Defer a frame so init()'s show.bs.modal handler is bound first.
+      requestAnimationFrame(() => sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' }));
     }
   } catch (_) { /* non-fatal */ }
 });

@@ -4,6 +4,8 @@
  * Each template represents a use case for the workspace. On creation, the
  * picked template:
  *   - pre-fills name + description if the user hasn't already typed them,
+ *   - maps to a default "Agent behavior" profile (behaviorProfile) that the
+ *     create modal applies unless the user overrides it,
  *   - records its id in workspace shared_data.template_id (so the backend can
  *     recognise the workspace's purpose later when skill/MCP auto-binding
  *     ships),
@@ -11,13 +13,18 @@
  *     so the user lands in a workspace with concrete examples instead of an
  *     empty list.
  *
+ * `behaviorProfile` must be one of the workspace behavior profiles the backend
+ * understands (general | research | software_project); it is sent as
+ * `workspace_preset` and drives planning/workflow defaults. A dev-time guard
+ * below warns if a template omits it.
+ *
  * Skill / MCP auto-binding is deliberately out of scope for this slice — those
  * paths require the marketplace install flow and should be added in a
  * follow-up. For now, the description text in each template hints at which
  * skills/MCPs the user might want to add manually.
  *
- * Loaded as a non-module global so workspace-create.js (a non-module script)
- * can read it via window.WorkspaceTemplates.
+ * Loaded as a non-module global so the create-modal scripts can read it via
+ * window.WorkspaceTemplates.
  */
 (function () {
   const TEMPLATES = [
@@ -26,6 +33,7 @@
       label: 'Blank',
       icon: '✍',
       description: 'Start from scratch.',
+      behaviorProfile: 'general',
       defaultName: '',
       defaultDescription: '',
       starterTasks: []
@@ -35,6 +43,7 @@
       label: 'Travels',
       icon: '✈',
       description: 'Flights, hotels, trip planning.',
+      behaviorProfile: 'general',
       defaultName: 'Travels',
       defaultDescription:
         'Plans, books, and tracks trips. Help me with flights, hotels, and itineraries. ' +
@@ -53,6 +62,7 @@
       label: 'Daily Briefings',
       icon: '📊',
       description: 'Morning roundup, market summary, news digest.',
+      behaviorProfile: 'general',
       defaultName: 'Daily Briefings',
       defaultDescription:
         'Generates a daily summary of the topics I care about. ' +
@@ -71,6 +81,7 @@
       label: 'Content Production',
       icon: '✏',
       description: 'Brand voice, drafts, scheduled posts.',
+      behaviorProfile: 'general',
       defaultName: 'Content Production',
       defaultDescription:
         'Drafts content (posts, newsletters, copy) in a consistent voice. ' +
@@ -95,6 +106,7 @@
       label: 'Research Project',
       icon: '📚',
       description: 'Synthesis docs, sources, weekly reading.',
+      behaviorProfile: 'research',
       defaultName: 'Research Project',
       defaultDescription:
         'Tracks a research topic over time. Maintains a synthesis doc, a sources index, ' +
@@ -119,6 +131,7 @@
       label: 'Personal Ops',
       icon: '🗓',
       description: 'Daily journal, briefings, follow-ups.',
+      behaviorProfile: 'general',
       defaultName: 'Personal Ops',
       defaultDescription:
         'Personal command center — a daily journal, morning briefing, and inbox follow-ups. ' +
@@ -139,6 +152,22 @@
       ]
     }
   ];
+
+  // Valid workspace behavior profiles the backend understands (sent as
+  // `workspace_preset`). Keep in sync with internal/workspacesettings.
+  const VALID_BEHAVIOR_PROFILES = ['general', 'research', 'software_project'];
+
+  // Dev-time guard: every starting point must declare a valid behaviorProfile
+  // so adding a template forces a behavior decision. Warn loudly rather than
+  // throw — a bad value should not break the create modal.
+  TEMPLATES.forEach((t) => {
+    if (!VALID_BEHAVIOR_PROFILES.includes(t.behaviorProfile)) {
+      console.warn(
+        `[WorkspaceTemplates] template "${t.id}" has missing/invalid behaviorProfile ` +
+        `(${JSON.stringify(t.behaviorProfile)}); expected one of ${VALID_BEHAVIOR_PROFILES.join(', ')}.`
+      );
+    }
+  });
 
   const escape = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -235,6 +264,7 @@
 
   window.WorkspaceTemplates = {
     list: TEMPLATES,
+    validBehaviorProfiles: VALID_BEHAVIOR_PROFILES,
     getById,
     render,
     getSelected,
