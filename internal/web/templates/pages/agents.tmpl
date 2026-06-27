@@ -1490,46 +1490,6 @@
         word-break: break-word;
     }
 
-    /* Claude Code synced (~/.claude) drawer section — read-only mirror. */
-    .ops-claude-actions {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 4px;
-    }
-
-    .ops-claude-readonly {
-        font-size: 11px;
-        color: var(--text-muted);
-    }
-
-    .ops-claude-list {
-        margin: 0;
-        padding-left: 18px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        color: var(--text-primary);
-        font-size: 13px;
-        word-break: break-word;
-    }
-
-    .ops-claude-empty {
-        color: var(--text-muted);
-        font-style: italic;
-    }
-
-    .ops-claude-muted {
-        color: var(--text-muted);
-        font-size: 12px;
-    }
-
-    .ops-claude-path {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 12px;
-    }
-
     .ops-drawer-footer {
         border-top: 1px solid var(--border-color);
         padding: 14px 20px 18px;
@@ -1754,6 +1714,7 @@
     <script defer src="/js/modules/sidebar.js"></script>
     <script defer src="/js/modules/themeManager.js"></script>
     <script defer src="/js/modules/external-agents.js"></script>
+    <script defer src="/js/modules/claude-sync.js"></script>
     {{template "theme-init.tmpl" .}}
     <script defer src="/js/agents-dashboard.js"></script>
 </body>

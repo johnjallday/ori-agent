@@ -94,6 +94,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/index.tmpl",
 		"templates/pages/agents.tmpl",
 		"templates/pages/agents-detail.tmpl",
+		"templates/pages/agents-claude-detail.tmpl",
 		"templates/pages/agents-create.tmpl",
 		"templates/pages/settings.tmpl",
 		"templates/pages/profile.tmpl",
@@ -137,6 +138,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["index"] = tmpl
 	tr.templates["agents"] = tmpl
 	tr.templates["agents-detail"] = tmpl
+	tr.templates["agents-claude-detail"] = tmpl
 	tr.templates["agents-create"] = tmpl
 	tr.templates["settings"] = tmpl
 	tr.templates["profile"] = tmpl
@@ -179,7 +181,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	switch name {
 	case "index":
 		templateName = "base.tmpl"
-	case "settings", "profile", "vault", "workflows", "workspace-canvas", "workspace-detail", "workspace-diagnostics", "workspace-task", "workspace-run", "usage", "mcp", "plugins", "models", "review", "agents-detail", "agents-create", "skills", "templates", "workspaces", "personalize", "note-page", "action-center":
+	case "settings", "profile", "vault", "workflows", "workspace-canvas", "workspace-detail", "workspace-diagnostics", "workspace-task", "workspace-run", "usage", "mcp", "plugins", "models", "review", "agents-detail", "agents-claude-detail", "agents-create", "skills", "templates", "workspaces", "personalize", "note-page", "action-center":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	case "agents":
