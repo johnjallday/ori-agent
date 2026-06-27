@@ -66,7 +66,7 @@ model_reasoning_effort = "high"
 
 func TestGetAll(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
 	w := httptest.NewRecorder()
@@ -109,7 +109,7 @@ func TestGetAll(t *testing.T) {
 
 func TestGetAll_MethodNotAllowed(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/external-agents", nil)
 	w := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestGetAll_MethodNotAllowed(t *testing.T) {
 
 func TestGetClaude(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/claude", nil)
 	w := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestGetClaude(t *testing.T) {
 
 func TestGetCodex(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/codex", nil)
 	w := httptest.NewRecorder()
@@ -175,7 +175,7 @@ func TestGetCodex(t *testing.T) {
 
 func TestRefresh(t *testing.T) {
 	cache, configManager, tmpDir := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	// Verify initial state
 	agents := cache.GetClaudeAgents()
@@ -217,7 +217,7 @@ New agent prompt.
 
 func TestRefresh_MethodNotAllowed(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/refresh", nil)
 	w := httptest.NewRecorder()
@@ -233,7 +233,7 @@ func TestGetAll_Disabled(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
 	configManager.SetExternalAgentsClaudeEnabled(false)
 	configManager.SetExternalAgentsCodexEnabled(false)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
 	w := httptest.NewRecorder()
@@ -268,11 +268,58 @@ func TestGetAll_Disabled(t *testing.T) {
 	}
 }
 
+func TestClaudeEffectiveEnabled_TruthTable(t *testing.T) {
+	cache, configManager, _ := setupTestCache(t)
+	configManager.SetExternalAgentsCodexEnabled(false)
+
+	cases := []struct {
+		name        string
+		enabled     bool
+		disabled    bool
+		cliDetected bool
+		want        bool
+	}{
+		{"unset, no CLI", false, false, false, false},
+		{"unset, CLI detected -> auto-enable", false, false, true, true},
+		{"force-enabled, no CLI", true, false, false, true},
+		{"force-enabled, CLI detected", true, false, true, true},
+		{"opt-out beats CLI detection", false, true, true, false},
+		{"opt-out beats force-enable", true, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configManager.SetExternalAgentsClaudeEnabled(tc.enabled)
+			configManager.SetExternalAgentsClaudeDisabled(tc.disabled)
+			handler := New(cache, configManager, func() bool { return tc.cliDetected })
+
+			req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
+			w := httptest.NewRecorder()
+			handler.GetAll(w, req)
+
+			var data struct {
+				ClaudeEnabled bool                       `json:"claude_enabled"`
+				Claude        *externalagents.ClaudeData `json:"claude"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if data.ClaudeEnabled != tc.want {
+				t.Errorf("claude_enabled = %v, want %v", data.ClaudeEnabled, tc.want)
+			}
+			// Data must only be present when effectively enabled.
+			if (data.Claude != nil) != tc.want {
+				t.Errorf("claude data present = %v, want %v", data.Claude != nil, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetAll_PartialEnabled(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
 	configManager.SetExternalAgentsClaudeEnabled(true)
 	configManager.SetExternalAgentsCodexEnabled(false)
-	handler := New(cache, configManager)
+	handler := New(cache, configManager, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
 	w := httptest.NewRecorder()

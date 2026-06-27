@@ -14,14 +14,30 @@ import (
 type Handler struct {
 	cache         *externalagents.Cache
 	configManager *config.Manager
+	// claudeDetected reports whether the Claude Code CLI is available. It is
+	// evaluated lazily (per request) so it works regardless of init ordering.
+	// May be nil, in which case detection is treated as false.
+	claudeDetected func() bool
 }
 
 // New creates a new Handler with the given cache and config manager.
-func New(cache *externalagents.Cache, configManager *config.Manager) *Handler {
+// claudeDetected reports whether the Claude Code CLI is available (may be nil).
+func New(cache *externalagents.Cache, configManager *config.Manager, claudeDetected func() bool) *Handler {
 	return &Handler{
-		cache:         cache,
-		configManager: configManager,
+		cache:          cache,
+		configManager:  configManager,
+		claudeDetected: claudeDetected,
 	}
+}
+
+// claudeEnabled reports whether Claude Code agent reading is effectively active,
+// honoring the explicit opt-out and auto-enable-on-CLI-detection.
+func (h *Handler) claudeEnabled() bool {
+	detected := false
+	if h.claudeDetected != nil {
+		detected = h.claudeDetected()
+	}
+	return h.configManager.EffectiveExternalAgentsClaudeEnabled(detected)
 }
 
 // GetAll handles GET /api/external-agents
@@ -32,7 +48,7 @@ func (h *Handler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claudeEnabled := h.configManager.GetExternalAgentsClaudeEnabled()
+	claudeEnabled := h.claudeEnabled()
 	codexEnabled := h.configManager.GetExternalAgentsCodexEnabled()
 
 	response := map[string]any{
@@ -59,7 +75,7 @@ func (h *Handler) GetClaude(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.configManager.GetExternalAgentsClaudeEnabled() {
+	if !h.claudeEnabled() {
 		orihttp.WriteJSON(w, map[string]any{
 			"enabled": false,
 			"message": "Claude Code agents are disabled. Enable in Settings.",
@@ -99,7 +115,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claudeEnabled := h.configManager.GetExternalAgentsClaudeEnabled()
+	claudeEnabled := h.claudeEnabled()
 	codexEnabled := h.configManager.GetExternalAgentsCodexEnabled()
 
 	if !claudeEnabled && !codexEnabled {
