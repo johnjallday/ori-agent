@@ -143,11 +143,13 @@
   }
 
   function getCreateButton() {
-    return getElement('createFolderBtn');
+    // The host ("Find tools") panel has no create/commit button — its own
+    // Add-selected button drives apply — so never reach for the modal's button.
+    return state.host ? null : getElement('createFolderBtn');
   }
 
   function getBackButton() {
-    return getElement('folderReviewBackBtn');
+    return state.host ? null : getElement('folderReviewBackBtn');
   }
 
   function getReviewCard() {
@@ -223,6 +225,7 @@
   }
 
   function getCommitActionLabel() {
+    if (state.host) return 'Add selected';
     return isImportEnabled() ? 'Import Folder' : 'Create Workspace';
   }
 
@@ -273,7 +276,7 @@
     const meta = getReviewMeta();
     const content = getReviewContent();
     if (summary) {
-      summary.textContent = 'Ori can review this description, recommend agents, and propose the MCPs and skills the workspace should start with.';
+      summary.textContent = 'Search the marketplaces for tools matching this workspace’s description.';
     }
     if (meta) {
       meta.textContent = '';
@@ -863,58 +866,45 @@
     const planPlugins = normalizePluginCandidates(installedPlugins, pluginMarketplaces, goalQueries);
 
     return {
-      summary: buildPlanSummary(planAgents, planMCPs, planSkills),
+      summary: buildPlanSummary(planMCPs, planSkills, planPlugins),
       agents: planAgents,
       mcps: planMCPs,
       skills: planSkills,
       plugins: planPlugins,
-      notes: buildPlanNotes(planAgents, planMCPs, planSkills, planPlugins),
+      notes: buildPlanNotes(planMCPs, planSkills, planPlugins),
       queries
     };
   }
 
-  function buildPlanSummary(agents, mcps, skills) {
-    const selectedAgents = agents.filter((agent) => agent.selected);
-    const selectedMCPs = mcps.filter((item) => item.selected);
-    const selectedSkills = skills.filter((item) => item.selected);
+  function buildPlanSummary(mcps, skills, plugins) {
     const parts = [];
-    parts.push(`${selectedAgents.length} agent${selectedAgents.length === 1 ? '' : 's'}`);
-    if (selectedMCPs.length > 0) {
-      parts.push(`${selectedMCPs.length} MCP${selectedMCPs.length === 1 ? '' : 's'}`);
-    }
-    if (selectedSkills.length > 0) {
-      parts.push(`${selectedSkills.length} skill${selectedSkills.length === 1 ? '' : 's'}`);
-    }
-    const suggestionParts = [];
-    const unselectedSkills = skills.length - selectedSkills.length;
-    if (unselectedSkills > 0) {
-      suggestionParts.push(`${unselectedSkills} optional skill suggestion${unselectedSkills === 1 ? '' : 's'}`);
-    }
-    return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}${suggestionParts.length > 0 ? `. ${suggestionParts.join(', ')} available below` : ''}.`;
+    const mcpList = Array.isArray(mcps) ? mcps : [];
+    const skillList = Array.isArray(skills) ? skills : [];
+    const pluginList = Array.isArray(plugins) ? plugins : [];
+    if (mcpList.length > 0) parts.push(`${mcpList.length} MCP${mcpList.length === 1 ? '' : 's'}`);
+    if (skillList.length > 0) parts.push(`${skillList.length} skill${skillList.length === 1 ? '' : 's'}`);
+    if (pluginList.length > 0) parts.push(`${pluginList.length} plugin${pluginList.length === 1 ? '' : 's'}`);
+    return `Searched the marketplaces from this workspace’s description and found ${parts.join(', ') || 'no matching tools'}.`;
   }
 
-  function buildPlanNotes(agents, mcps, skills, plugins) {
+  function buildPlanNotes(mcps, skills, plugins) {
+    const mcpList = Array.isArray(mcps) ? mcps : [];
+    const skillList = Array.isArray(skills) ? skills : [];
     const pluginList = Array.isArray(plugins) ? plugins : [];
     const notes = [];
-    if (agents.some((agent) => agent.action === 'create')) {
-      notes.push('New agents will be auto-configured from this workspace description after the workspace is created.');
+    if (mcpList.some((item) => item.action === 'install_bind')) {
+      notes.push('Registry MCP results are installed globally before they are bound to this workspace.');
     }
-    if (mcps.some((item) => item.action === 'install_bind')) {
-      notes.push('Registry MCP suggestions will be installed globally before they are bound to the workspace.');
-    }
-    if (skills.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace skill suggestions require a global install before workspace attachment.');
-    }
-    if (skills.length > 0) {
-      notes.push('Skill suggestions are optional and will only be attached if selected.');
+    if (skillList.some((item) => item.action === 'install_attach')) {
+      notes.push('Marketplace skill results require a global install before they are attached to this workspace.');
     }
     if (pluginList.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace plugin suggestions are installed globally (running their local commands) before their components are added to the workspace.');
+      notes.push('Marketplace plugin results are installed globally (running their local commands) before their components are added to this workspace.');
     }
     if (pluginList.length > 0) {
-      notes.push("Selecting a plugin binds all of its MCP servers and skills to the workspace.");
+      notes.push('Selecting a plugin binds all of its MCP servers and skills to this workspace.');
     }
-    notes.push('Selected MCPs, skills, and plugin components will be shared with every agent Ori adds through this setup.');
+    notes.push('Only the add-ons you select are added, and they are shared with this workspace’s agents.');
     return notes;
   }
 
@@ -929,23 +919,25 @@
     const meta = getReviewMeta();
     if (!state.plan || !summary || !meta) return;
 
-    const leadCount = 1;
-    const extraAgentCount = countSelections('input[data-workspace-bootstrap-agent]');
     const mcpCount = countSelections('input[data-workspace-bootstrap-mcp]');
     const skillCount = countSelections('input[data-workspace-bootstrap-skill]');
     const pluginCount = countSelections('input[data-workspace-bootstrap-plugin]');
-    const agentTotal = leadCount + extraAgentCount;
+    const totalFound = (Array.isArray(state.plan.mcps) ? state.plan.mcps.length : 0)
+      + (Array.isArray(state.plan.skills) ? state.plan.skills.length : 0)
+      + (Array.isArray(state.plan.plugins) ? state.plan.plugins.length : 0);
+    const selectedCount = mcpCount + skillCount + pluginCount;
 
-    const parts = [`${agentTotal} agent${agentTotal === 1 ? '' : 's'}`];
-    if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
-    if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
-    if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
-    const unselectedSkillCount = Array.isArray(state.plan.skills)
-      ? Math.max(0, state.plan.skills.length - skillCount)
-      : 0;
-    summary.textContent = `Ori will create this workspace with ${parts.join(', ')}.`
-      + (unselectedSkillCount > 0 ? ` ${unselectedSkillCount} optional skill suggestion${unselectedSkillCount === 1 ? '' : 's'} available below.` : '');
-    meta.textContent = 'You can adjust the optional invites and capability suggestions below before creating the workspace.';
+    if (totalFound === 0) {
+      summary.textContent = 'No matching tools found. Try editing this workspace’s description, then search again.';
+    } else {
+      const parts = [];
+      if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
+      if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+      if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
+      summary.textContent = `${totalFound} tool${totalFound === 1 ? '' : 's'} found from your description`
+        + (selectedCount > 0 ? ` — ${parts.join(', ')} selected.` : '. Select any to add to this workspace.');
+    }
+    meta.textContent = 'Add-ons are optional — they’re only added when you select them and click Add selected.';
     meta.hidden = false;
   }
 
@@ -1121,7 +1113,7 @@
           </div>
         </div>
         <div class="workspace-setup-preview">
-          <div class="workspace-setup-label">How Ori Will Apply This</div>
+          <div class="workspace-setup-label">What gets added</div>
           <ul class="workspace-setup-preview-list">
             ${plan.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}
           </ul>
@@ -1687,7 +1679,7 @@
     const createBtn = controls.createButton || null;
     if (createBtn) {
       createBtn.disabled = true;
-      createBtn.textContent = 'Applying Setup...';
+      createBtn.textContent = 'Adding…';
     }
     const backBtn = controls.backButton || null;
     if (backBtn) backBtn.disabled = true;
@@ -1907,7 +1899,6 @@
   }
 
   initializeListeners();
-  refreshPrimaryActionLabel();
 
   window.WorkspaceBootstrapReview = {
     ensureReviewed,
