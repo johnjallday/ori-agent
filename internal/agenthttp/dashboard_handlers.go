@@ -23,6 +23,10 @@ type DashboardHandler struct {
 	ActivityLogger   *ActivityLogger
 	cliAgentRegistry *cliagent.CLIAgentRegistry
 	workspaceStore   workspace.Store
+	// claudeSync returns read-only synced ~/.claude data for the Claude Code
+	// agent (or nil when disabled). Injected to keep agenthttp decoupled from
+	// the externalagents package.
+	claudeSync func() any
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -40,6 +44,12 @@ func (h *DashboardHandler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
 // workspace entry agents from the top-level agents list.
 func (h *DashboardHandler) SetWorkspaceStore(s workspace.Store) {
 	h.workspaceStore = s
+}
+
+// SetClaudeSyncProvider wires a provider of read-only ~/.claude data, attached
+// to the Claude Code agent's detail response when available.
+func (h *DashboardHandler) SetClaudeSyncProvider(provider func() any) {
+	h.claudeSync = provider
 }
 
 // AgentListItem represents an agent in the dashboard list view
@@ -76,6 +86,8 @@ type AgentDetailResponse struct {
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
+	// ClaudeSync carries read-only ~/.claude state for the Claude Code agent.
+	ClaudeSync any `json:"claude_sync,omitempty"`
 }
 
 // ListAgentsWithStats handles GET /api/agents/dashboard/list
@@ -240,6 +252,10 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 						Status:       getCLIAgentOperationalStatus(backend),
 						Model:        defaultModel,
 						Provider:     backend,
+					}
+					// Attach read-only synced ~/.claude state for the Claude Code agent.
+					if backend == cliagent.BackendClaude && h.claudeSync != nil {
+						response.ClaudeSync = h.claudeSync()
 					}
 					_ = caps // context window info available via /api/cli-agents
 					w.Header().Set("Content-Type", "application/json")

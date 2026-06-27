@@ -40,6 +40,17 @@ func (h *Handler) claudeEnabled() bool {
 	return h.configManager.EffectiveExternalAgentsClaudeEnabled(detected)
 }
 
+// ClaudeSyncData returns the cached, read-only Claude ~/.claude data when Claude
+// agent reading is effectively enabled, or nil otherwise. The agent-detail
+// endpoints use this to attach synced state to the Claude Code agent without
+// importing the externalagents package.
+func (h *Handler) ClaudeSyncData() any {
+	if !h.claudeEnabled() {
+		return nil
+	}
+	return h.cache.GetClaudeData()
+}
+
 // GetAll handles GET /api/external-agents
 // Returns all external agent data from all sources.
 func (h *Handler) GetAll(w http.ResponseWriter, r *http.Request) {

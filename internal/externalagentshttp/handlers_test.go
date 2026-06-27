@@ -268,6 +268,41 @@ func TestGetAll_Disabled(t *testing.T) {
 	}
 }
 
+func TestClaudeSyncData(t *testing.T) {
+	cache, configManager, _ := setupTestCache(t)
+
+	// Explicit opt-out -> nil even when the CLI is detected.
+	configManager.SetExternalAgentsClaudeEnabled(false)
+	configManager.SetExternalAgentsClaudeDisabled(true)
+	h := New(cache, configManager, func() bool { return true })
+	if h.ClaudeSyncData() != nil {
+		t.Error("expected nil sync data when opted out")
+	}
+
+	// Force-enabled -> returns the cached ClaudeData (with the test agent).
+	configManager.SetExternalAgentsClaudeDisabled(false)
+	configManager.SetExternalAgentsClaudeEnabled(true)
+	h = New(cache, configManager, func() bool { return false })
+	data := h.ClaudeSyncData()
+	if data == nil {
+		t.Fatal("expected sync data when enabled")
+	}
+	cd, ok := data.(*externalagents.ClaudeData)
+	if !ok {
+		t.Fatalf("expected *externalagents.ClaudeData, got %T", data)
+	}
+	if len(cd.Agents) != 1 {
+		t.Errorf("expected 1 claude agent, got %d", len(cd.Agents))
+	}
+
+	// Auto-enable purely via CLI detection -> returns data.
+	configManager.SetExternalAgentsClaudeEnabled(false)
+	h = New(cache, configManager, func() bool { return true })
+	if h.ClaudeSyncData() == nil {
+		t.Error("expected sync data when CLI detected (auto-enable)")
+	}
+}
+
 func TestClaudeEffectiveEnabled_TruthTable(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
 	configManager.SetExternalAgentsCodexEnabled(false)
