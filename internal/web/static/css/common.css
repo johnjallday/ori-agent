@@ -302,6 +302,20 @@ a:focus-visible {
     border-color: rgba(239, 68, 68, 0.65);
 }
 
+/* Built-in agents (system assistant, CLI agents) cannot be deleted. */
+.sidebar-agent-delete.disabled,
+.sidebar-agent-delete.disabled:hover,
+.sidebar-agent-delete.disabled:focus-visible,
+[data-bs-theme="dark"] .sidebar-agent-delete.disabled,
+[data-bs-theme="dark"] .sidebar-agent-delete.disabled:hover,
+[data-bs-theme="dark"] .sidebar-agent-delete.disabled:focus-visible {
+    background: var(--bg-tertiary, rgba(148, 163, 184, 0.12));
+    color: var(--text-muted, #94a3b8);
+    border-color: var(--border-color, rgba(148, 163, 184, 0.35));
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 /* Ghost button - subtle, text-only appearance */
 .modern-btn-ghost {
     background: transparent;
