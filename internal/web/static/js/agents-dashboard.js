@@ -356,8 +356,12 @@ function createAgentCard(agent) {
     : '';
   const enabledCheckedAttr = isDisabled ? '' : 'checked';
   const isSystemAgent = isSystemAssistantAgentName(name);
-  const deleteDisabledAttr = isSystemAgent
-    ? 'disabled title="System assistant cannot be deleted." aria-disabled="true"'
+  const isCLIAgent = isCLIAgentEntry(agent);
+  const deleteBlockedReason = isSystemAgent
+    ? 'System assistant cannot be deleted.'
+    : (isCLIAgent ? 'Built-in CLI agent cannot be deleted.' : '');
+  const deleteDisabledAttr = deleteBlockedReason
+    ? `disabled title="${safeEscapeHtml(deleteBlockedReason)}" aria-disabled="true"`
     : 'title="Delete agent"';
   const enableToggleDisabledAttr = isSystemAgent
     ? 'disabled aria-disabled="true"'
@@ -446,8 +450,8 @@ function createAgentCard(agent) {
   if (deleteButton) {
     deleteButton.setAttribute('type', 'button');
     deleteButton.addEventListener('click', async () => {
-      if (isSystemAgent) {
-        notifyError('System assistant cannot be deleted.');
+      if (deleteBlockedReason) {
+        notifyError(deleteBlockedReason);
         return;
       }
       await deleteAgentFromDashboard(name, deleteButton);
@@ -909,6 +913,14 @@ function getHealthState(agent) {
 
 function isSystemAssistantAgentName(name) {
   return String(name || '').trim().toLowerCase() === 'ori';
+}
+
+// Built-in CLI agents (Claude Code, Codex, Gemini CLI) are projected from the
+// CLI registry, not stored records — the backend rejects deleting them, so the
+// delete control is disabled to match the system assistant.
+function isCLIAgentEntry(agent) {
+  return String(agent?.source || '').trim().toLowerCase() === 'cli'
+    || String(agent?.role || '').trim().toLowerCase() === 'cli_agent';
 }
 
 function getAgentColor(agent) {
