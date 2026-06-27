@@ -20,9 +20,33 @@ type ExternalAgent struct {
 
 // ClaudeSettings represents the global settings from ~/.claude/settings.json.
 type ClaudeSettings struct {
+	Model          string            `json:"model,omitempty"`
 	Permissions    ClaudePermissions `json:"permissions"`
 	EnabledPlugins map[string]bool   `json:"enabledPlugins"`
 	StatusLine     map[string]any    `json:"statusLine,omitempty"`
+}
+
+// ClaudeMCPServer represents an MCP server configured for Claude Code in
+// ~/.claude.json. Env values are intentionally NOT included — only variable
+// names are surfaced, to avoid leaking secrets/API keys to the API/UI.
+type ClaudeMCPServer struct {
+	Name      string   `json:"name"`
+	Transport string   `json:"transport,omitempty"` // from the "type" field, e.g. "stdio", "sse", "http"
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	EnvNames  []string `json:"envNames,omitempty"` // variable names only — never values
+}
+
+// ClaudeRecentProject represents a recently used Claude Code project, read from
+// the "projects" map in ~/.claude.json. Only lightweight last-session metrics
+// are surfaced; no transcript bodies are read.
+type ClaudeRecentProject struct {
+	Path             string  `json:"path"`
+	LastSessionID    string  `json:"lastSessionId,omitempty"`
+	LastCost         float64 `json:"lastCost,omitempty"`
+	LastDuration     int64   `json:"lastDuration,omitempty"`
+	LastLinesAdded   int     `json:"lastLinesAdded,omitempty"`
+	LastLinesRemoved int     `json:"lastLinesRemoved,omitempty"`
 }
 
 // ClaudePermissions represents the permissions configuration in Claude settings.
@@ -64,9 +88,11 @@ type CodexRule struct {
 
 // ClaudeData holds all data read from the Claude Code configuration.
 type ClaudeData struct {
-	Agents   []ExternalAgent `json:"agents"`
-	Settings *ClaudeSettings `json:"settings,omitempty"`
-	Plugins  []ClaudePlugin  `json:"plugins"`
+	Agents         []ExternalAgent       `json:"agents"`
+	Settings       *ClaudeSettings       `json:"settings,omitempty"`
+	Plugins        []ClaudePlugin        `json:"plugins"`
+	MCPServers     []ClaudeMCPServer     `json:"mcpServers"`
+	RecentProjects []ClaudeRecentProject `json:"recentProjects"`
 }
 
 // CodexData holds all data read from the Codex configuration.
@@ -88,6 +114,8 @@ type ClaudeReader interface {
 	ReadAgents() ([]ExternalAgent, error)
 	ReadSettings() (*ClaudeSettings, error)
 	ReadPlugins() ([]ClaudePlugin, error)
+	ReadMCPServers() ([]ClaudeMCPServer, error)
+	ReadRecentProjects(limit int) ([]ClaudeRecentProject, error)
 }
 
 // CodexReader defines the interface for reading Codex data.

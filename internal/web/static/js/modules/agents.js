@@ -1540,6 +1540,14 @@ function isSystemAssistantAgentName(agentName) {
   return String(agentName || '').trim().toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase();
 }
 
+// Built-in CLI agents (Claude Code, Codex, Gemini CLI) are projected from the
+// CLI registry, not stored records; the backend rejects deleting them.
+function isCLIAgentEntry(agent) {
+  if (typeof agent === 'string') return false;
+  return String(agent?.source || '').trim().toLowerCase() === 'cli'
+    || String(agent?.role || '').trim().toLowerCase() === 'cli_agent';
+}
+
 function normalizeAgentEvolution(agent) {
   const evolution = typeof agent === 'string' ? null : agent?.evolution;
   if (!evolution || typeof evolution !== 'object') {
@@ -1654,6 +1662,22 @@ function createAgentElement(agent, currentAgent) {
         New Chat
       </span>`;
 
+  // Built-in agents (system assistant + CLI agents) cannot be deleted; the
+  // backend rejects it, so render the control as a disabled, non-clickable icon.
+  const deleteBlockedReason = isSystemAssistant
+    ? 'System assistant cannot be deleted.'
+    : (isCLIAgentEntry(agent) ? 'Built-in CLI agent cannot be deleted.' : '');
+  const deleteIconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>`;
+  const deleteAction = deleteBlockedReason
+    ? `<span class="sidebar-agent-delete disabled" title="${escapeAttr(deleteBlockedReason)}" role="button" aria-disabled="true" tabindex="-1">
+            ${deleteIconSvg}
+          </span>`
+    : `<span class="sidebar-agent-delete" onclick="event.stopPropagation(); deleteAgent('${safeAgentNameJs}')" title="Delete agent" role="button" tabindex="0">
+            ${deleteIconSvg}
+          </span>`;
+
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
       <button class="d-flex align-items-center justify-content-between p-2 w-100 border-0 accordion-button collapsed"
@@ -1673,11 +1697,7 @@ function createAgentElement(agent, currentAgent) {
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
           ${newChatAction}
-          <span class="sidebar-agent-delete" onclick="event.stopPropagation(); deleteAgent('${safeAgentNameJs}')" title="Delete agent" role="button" tabindex="0">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-          </span>
+          ${deleteAction}
         </div>
       </button>
     </div>

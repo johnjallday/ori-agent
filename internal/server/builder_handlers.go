@@ -223,7 +223,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		logger.Warn("Failed to load external agents cache", logger.Fields{"error": err})
 		// Non-fatal: continue without external agents
 	}
-	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager)
+	// claudeCLIDetected is evaluated lazily so it reflects the CLI registry,
+	// which is created just below (after this handler). By request time the
+	// registry has run AutoDetect.
+	claudeCLIDetected := func() bool {
+		return b.cliAgentRegistry != nil && b.cliAgentRegistry.IsAvailable(cliagent.BackendClaude)
+	}
+	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager, claudeCLIDetected)
 	logger.Info("External agents support initialized", logger.Fields{})
 
 	// Initialize CLI agent adapter (delegatable CLI agents)

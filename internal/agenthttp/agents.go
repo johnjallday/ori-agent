@@ -82,6 +82,10 @@ type Handler struct {
 	cliAgentRegistry *cliagent.CLIAgentRegistry
 	workspaceStore   workspace.Store
 	sessionPurger    SessionPurger
+	// claudeSync returns read-only synced ~/.claude data for the Claude Code
+	// agent (or nil when disabled). Injected so agenthttp stays decoupled from
+	// the externalagents package.
+	claudeSync func() any
 }
 
 func New(state store.Store) *Handler {
@@ -109,6 +113,12 @@ func (h *Handler) SetWorkspaceStore(s workspace.Store) {
 // keep referring to a deleted agent through restored session state.
 func (h *Handler) SetSessionPurger(p SessionPurger) {
 	h.sessionPurger = p
+}
+
+// SetClaudeSyncProvider wires a provider of read-only ~/.claude data, attached
+// to the Claude Code agent's detail response when available.
+func (h *Handler) SetClaudeSyncProvider(provider func() any) {
+	h.claudeSync = provider
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -649,7 +659,7 @@ func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
 	if len(models) > 0 {
 		defaultModel = models[0]
 	}
-	return map[string]any{
+	detail := map[string]any{
 		"name":               cliAgentDisplayName(backend),
 		"type":               "research",
 		"role":               types.RoleCLIAgent,
@@ -661,5 +671,14 @@ func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
 		"status":             getCLIAgentOperationalStatus(backend),
 		"max_context_window": caps.MaxContextWindow,
 		"source":             "cli",
-	}, true
+	}
+
+	// Attach read-only synced ~/.claude state for the Claude Code agent.
+	if backend == cliagent.BackendClaude && h.claudeSync != nil {
+		if data := h.claudeSync(); data != nil {
+			detail["claude_sync"] = data
+		}
+	}
+
+	return detail, true
 }

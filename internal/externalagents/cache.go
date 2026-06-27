@@ -11,16 +11,21 @@ type Cache struct {
 	claudeReader ClaudeReader
 	codexReader  CodexReader
 
-	claudeAgents   []ExternalAgent
-	claudeSettings *ClaudeSettings
-	claudePlugins  []ClaudePlugin
-	codexAgents    []ExternalAgent
-	codexConfig    *CodexConfig
-	codexSkills    []CodexSkill
-	codexRules     []CodexRule
+	claudeAgents         []ExternalAgent
+	claudeSettings       *ClaudeSettings
+	claudePlugins        []ClaudePlugin
+	claudeMCPServers     []ClaudeMCPServer
+	claudeRecentProjects []ClaudeRecentProject
+	codexAgents          []ExternalAgent
+	codexConfig          *CodexConfig
+	codexSkills          []CodexSkill
+	codexRules           []CodexRule
 
 	loaded bool
 }
+
+// claudeRecentProjectsLimit caps how many recent projects the cache loads.
+const claudeRecentProjectsLimit = 5
 
 // NewCache creates a new Cache with the given readers.
 func NewCache(claudeReader ClaudeReader, codexReader CodexReader) *Cache {
@@ -60,6 +65,21 @@ func (c *Cache) loadLocked() error {
 			return err
 		}
 		c.claudePlugins = plugins
+
+		// MCP servers and recent projects come from ~/.claude.json and must fail
+		// independently: a missing or malformed file leaves these sections empty
+		// rather than breaking the rest of the Claude data.
+		if mcpServers, mcpErr := c.claudeReader.ReadMCPServers(); mcpErr == nil {
+			c.claudeMCPServers = mcpServers
+		} else {
+			c.claudeMCPServers = nil
+		}
+
+		if recentProjects, projErr := c.claudeReader.ReadRecentProjects(claudeRecentProjectsLimit); projErr == nil {
+			c.claudeRecentProjects = recentProjects
+		} else {
+			c.claudeRecentProjects = nil
+		}
 	}
 
 	// Read Codex data
@@ -102,6 +122,8 @@ func (c *Cache) Refresh() error {
 	c.claudeAgents = nil
 	c.claudeSettings = nil
 	c.claudePlugins = nil
+	c.claudeMCPServers = nil
+	c.claudeRecentProjects = nil
 	c.codexAgents = nil
 	c.codexConfig = nil
 	c.codexSkills = nil
@@ -130,6 +152,20 @@ func (c *Cache) GetClaudePlugins() []ClaudePlugin {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.claudePlugins
+}
+
+// GetClaudeMCPServers returns cached Claude MCP servers.
+func (c *Cache) GetClaudeMCPServers() []ClaudeMCPServer {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.claudeMCPServers
+}
+
+// GetClaudeRecentProjects returns cached recent Claude projects.
+func (c *Cache) GetClaudeRecentProjects() []ClaudeRecentProject {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.claudeRecentProjects
 }
 
 // GetCodexAgents returns cached Codex agents (skills).
@@ -166,9 +202,11 @@ func (c *Cache) GetClaudeData() *ClaudeData {
 	defer c.mu.RUnlock()
 
 	return &ClaudeData{
-		Agents:   c.claudeAgents,
-		Settings: c.claudeSettings,
-		Plugins:  c.claudePlugins,
+		Agents:         c.claudeAgents,
+		Settings:       c.claudeSettings,
+		Plugins:        c.claudePlugins,
+		MCPServers:     c.claudeMCPServers,
+		RecentProjects: c.claudeRecentProjects,
 	}
 }
 
@@ -192,9 +230,11 @@ func (c *Cache) GetAll() *ExternalAgentsData {
 
 	return &ExternalAgentsData{
 		Claude: &ClaudeData{
-			Agents:   c.claudeAgents,
-			Settings: c.claudeSettings,
-			Plugins:  c.claudePlugins,
+			Agents:         c.claudeAgents,
+			Settings:       c.claudeSettings,
+			Plugins:        c.claudePlugins,
+			MCPServers:     c.claudeMCPServers,
+			RecentProjects: c.claudeRecentProjects,
 		},
 		Codex: &CodexData{
 			Agents: c.codexAgents,

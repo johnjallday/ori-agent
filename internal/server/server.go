@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -251,6 +252,29 @@ func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "agents-detail", data)
+}
+
+// isClaudeCodeAgentName reports whether the given agent name refers to the
+// built-in Claude Code CLI agent and that backend is currently available.
+func (s *Server) isClaudeCodeAgentName(name string) bool {
+	if s.Handlers == nil || s.Handlers.CLIAgentRegistry == nil {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower != "claude code" && lower != cliagent.BackendClaude {
+		return false
+	}
+	return s.Handlers.CLIAgentRegistry.IsAvailable(cliagent.BackendClaude)
+}
+
+// serveClaudeAgentDetail serves the dedicated, read-only Claude Code agent page
+// that mirrors the user's ~/.claude state.
+func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("agents")
+	data.Title = "Claude Code - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "agents-claude-detail", data)
 }
 
 func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
@@ -594,7 +618,16 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	// (not a file request like /agents/{agent-name}/config.json)
 	pathAfterAgents := strings.TrimPrefix(r.URL.Path, "/agents/")
 	if !strings.Contains(pathAfterAgents, "/") && !strings.Contains(pathAfterAgents, ".") && pathAfterAgents != "" {
-		// This is a request for /agents/{agent-name} - serve the agent detail page
+		// This is a request for /agents/{agent-name} - serve the agent detail page.
+		// The Claude Code CLI agent gets its own dedicated read-only page.
+		agentName, err := url.PathUnescape(pathAfterAgents)
+		if err != nil {
+			agentName = pathAfterAgents
+		}
+		if s.isClaudeCodeAgentName(agentName) {
+			s.serveClaudeAgentDetail(w, r)
+			return
+		}
 		s.serveAgentsDetail(w, r)
 		return
 	}

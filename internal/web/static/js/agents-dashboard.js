@@ -356,8 +356,12 @@ function createAgentCard(agent) {
     : '';
   const enabledCheckedAttr = isDisabled ? '' : 'checked';
   const isSystemAgent = isSystemAssistantAgentName(name);
-  const deleteDisabledAttr = isSystemAgent
-    ? 'disabled title="System assistant cannot be deleted." aria-disabled="true"'
+  const isCLIAgent = isCLIAgentEntry(agent);
+  const deleteBlockedReason = isSystemAgent
+    ? 'System assistant cannot be deleted.'
+    : (isCLIAgent ? 'Built-in CLI agent cannot be deleted.' : '');
+  const deleteDisabledAttr = deleteBlockedReason
+    ? `disabled title="${safeEscapeHtml(deleteBlockedReason)}" aria-disabled="true"`
     : 'title="Delete agent"';
   const enableToggleDisabledAttr = isSystemAgent
     ? 'disabled aria-disabled="true"'
@@ -446,8 +450,8 @@ function createAgentCard(agent) {
   if (deleteButton) {
     deleteButton.setAttribute('type', 'button');
     deleteButton.addEventListener('click', async () => {
-      if (isSystemAgent) {
-        notifyError('System assistant cannot be deleted.');
+      if (deleteBlockedReason) {
+        notifyError(deleteBlockedReason);
         return;
       }
       await deleteAgentFromDashboard(name, deleteButton);
@@ -719,7 +723,7 @@ function closeAgentDrawer() {
 
 function setDrawerTab(tabName, options = {}) {
   const { focusPanel = false } = options;
-  const normalized = tabName === 'tools' || tabName === 'advanced' ? tabName : 'overview';
+  const normalized = tabName === 'tools' || tabName === 'advanced' || tabName === 'claude' ? tabName : 'overview';
 
   document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
     const isActive = button.dataset.tab === normalized;
@@ -746,6 +750,7 @@ function setDrawerLoadingState() {
   const overview = document.getElementById('drawerOverviewContent');
   const tools = document.getElementById('drawerToolsContent');
   const advanced = document.getElementById('drawerAdvancedContent');
+  const claude = document.getElementById('drawerClaudeContent');
 
   if (overview) {
     overview.innerHTML = loadingHtml;
@@ -757,6 +762,10 @@ function setDrawerLoadingState() {
 
   if (advanced) {
     advanced.innerHTML = loadingHtml;
+  }
+
+  if (claude) {
+    claude.innerHTML = loadingHtml;
   }
 }
 
@@ -848,6 +857,45 @@ function renderDrawerContent() {
       </div>
     `;
   }
+
+  updateClaudeDrawerTab(detail);
+}
+
+// The Claude Code agent gets an extra "Claude Code" drawer tab mirroring the
+// real ~/.claude state, rendered by the shared ClaudeSync module. The tab is
+// hidden for every other agent.
+function updateClaudeDrawerTab(detail) {
+  const tabBtn = document.getElementById('drawerClaudeTabBtn');
+  const panel = document.getElementById('drawerClaudeTab');
+  const content = document.getElementById('drawerClaudeContent');
+  if (!tabBtn || !panel || !content || !window.ClaudeSync) {
+    return;
+  }
+
+  const isClaude = window.ClaudeSync.isClaudeCodeAgent(detail);
+  tabBtn.hidden = !isClaude;
+
+  if (!isClaude) {
+    // If the now-hidden tab was active (switched agents), fall back to overview.
+    if (panel.classList.contains('active')) {
+      setDrawerTab('overview');
+    }
+    content.innerHTML = '';
+    return;
+  }
+
+  renderClaudeDrawerInto(content, detail);
+}
+
+function renderClaudeDrawerInto(content, detail) {
+  content.innerHTML = window.ClaudeSync.renderHtml(detail?.claude_sync || null);
+  window.ClaudeSync.wireRefresh(content, selectedAgentName, (reloaded, agentName) => {
+    if (selectedAgentName !== agentName) {
+      return;
+    }
+    selectedAgentDetail = reloaded;
+    renderClaudeDrawerInto(content, reloaded);
+  });
 }
 
 async function fetchAgentDetail(agentName) {
@@ -909,6 +957,14 @@ function getHealthState(agent) {
 
 function isSystemAssistantAgentName(name) {
   return String(name || '').trim().toLowerCase() === 'ori';
+}
+
+// Built-in CLI agents (Claude Code, Codex, Gemini CLI) are projected from the
+// CLI registry, not stored records — the backend rejects deleting them, so the
+// delete control is disabled to match the system assistant.
+function isCLIAgentEntry(agent) {
+  return String(agent?.source || '').trim().toLowerCase() === 'cli'
+    || String(agent?.role || '').trim().toLowerCase() === 'cli_agent';
 }
 
 function getAgentColor(agent) {

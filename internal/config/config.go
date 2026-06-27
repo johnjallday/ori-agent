@@ -78,8 +78,9 @@ type Settings struct {
 	Web3ConnectedAt   string `json:"web3_connected_at,omitempty"`   // ISO timestamp of when wallet was connected
 
 	// External agents settings
-	ExternalAgentsClaudeEnabled bool `json:"external_agents_claude_enabled"` // Enable reading agents from Claude Code ~/.claude (default: false)
-	ExternalAgentsCodexEnabled  bool `json:"external_agents_codex_enabled"`  // Enable reading agents from Codex CLI ~/.codex (default: false)
+	ExternalAgentsClaudeEnabled  bool `json:"external_agents_claude_enabled"`            // Force-enable reading from Claude Code ~/.claude (opt-in)
+	ExternalAgentsClaudeDisabled bool `json:"external_agents_claude_disabled,omitempty"` // Explicit opt-out: suppresses auto-enable even when the Claude CLI is detected
+	ExternalAgentsCodexEnabled   bool `json:"external_agents_codex_enabled"`             // Enable reading agents from Codex CLI ~/.codex (default: false)
 
 	// Speech settings
 	SpeechProvider string `json:"speech_provider,omitempty"` // auto, browser, openai, off
@@ -1425,6 +1426,35 @@ func (m *Manager) SetExternalAgentsClaudeEnabled(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settings.ExternalAgentsClaudeEnabled = enabled
+}
+
+// GetExternalAgentsClaudeDisabled returns whether the user explicitly opted out
+// of Claude Code agent reading (overrides auto-enable on CLI detection).
+func (m *Manager) GetExternalAgentsClaudeDisabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.ExternalAgentsClaudeDisabled
+}
+
+// SetExternalAgentsClaudeDisabled updates the explicit Claude opt-out setting.
+func (m *Manager) SetExternalAgentsClaudeDisabled(disabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.ExternalAgentsClaudeDisabled = disabled
+}
+
+// EffectiveExternalAgentsClaudeEnabled reports whether Claude Code agent reading
+// is active, given whether the Claude CLI was detected. Precedence: an explicit
+// opt-out always wins; otherwise the feature is on when force-enabled OR the CLI
+// is detected (auto-enable). A legacy enabled=false simply means "not opted in"
+// and still auto-enables on detection.
+func (m *Manager) EffectiveExternalAgentsClaudeEnabled(cliDetected bool) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.settings.ExternalAgentsClaudeDisabled {
+		return false
+	}
+	return m.settings.ExternalAgentsClaudeEnabled || cliDetected
 }
 
 // GetExternalAgentsCodexEnabled returns whether Codex CLI agents reading is enabled

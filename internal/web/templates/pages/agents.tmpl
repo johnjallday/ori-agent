@@ -1677,6 +1677,7 @@
             <button id="drawerOverviewTabBtn" class="ops-drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawerOverviewTab" data-tab="overview">Overview</button>
             <button id="drawerToolsTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerToolsTab" data-tab="tools" tabindex="-1">Tools</button>
             <button id="drawerAdvancedTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerAdvancedTab" data-tab="advanced" tabindex="-1">Advanced</button>
+            <button id="drawerClaudeTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerClaudeTab" data-tab="claude" tabindex="-1" hidden>Claude Code</button>
         </div>
         <div class="ops-drawer-body">
             <section id="drawerOverviewTab" class="ops-drawer-panel active" role="tabpanel" aria-labelledby="drawerOverviewTabBtn" tabindex="0">
@@ -1687,6 +1688,9 @@
             </section>
             <section id="drawerAdvancedTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerAdvancedTabBtn" tabindex="0" hidden>
                 <div id="drawerAdvancedContent" class="ops-drawer-content"></div>
+            </section>
+            <section id="drawerClaudeTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerClaudeTabBtn" tabindex="0" hidden>
+                <div id="drawerClaudeContent" class="ops-drawer-content"></div>
             </section>
         </div>
         <div class="ops-drawer-footer">
@@ -1710,6 +1714,7 @@
     <script defer src="/js/modules/sidebar.js"></script>
     <script defer src="/js/modules/themeManager.js"></script>
     <script defer src="/js/modules/external-agents.js"></script>
+    <script defer src="/js/modules/claude-sync.js"></script>
     {{template "theme-init.tmpl" .}}
     <script defer src="/js/agents-dashboard.js"></script>
 </body>

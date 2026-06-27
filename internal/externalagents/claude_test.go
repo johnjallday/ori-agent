@@ -1,9 +1,13 @@
 package externalagents
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseFrontmatter(t *testing.T) {
@@ -192,6 +196,204 @@ func TestReadSettings_MissingFile(t *testing.T) {
 	}
 	if settings != nil {
 		t.Error("settings should be nil for missing file")
+	}
+}
+
+func TestReadSettings_Model(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(`{"model":"opus"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewClaudeReader(tmpDir)
+	settings, err := reader.ReadSettings()
+	if err != nil {
+		t.Fatalf("ReadSettings() error = %v", err)
+	}
+	if settings == nil {
+		t.Fatal("settings should not be nil")
+	}
+	if settings.Model != "opus" {
+		t.Errorf("Model = %q, want %q", settings.Model, "opus")
+	}
+}
+
+func TestReadMCPServers(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	claudeJSON := `{
+  "mcpServers": {
+    "ori-reaper": {
+      "type": "stdio",
+      "command": "/usr/local/bin/reaper-plugin",
+      "args": ["serve", "--port", "9000"],
+      "env": { "API_KEY": "super-secret-value", "TOKEN": "another-secret" }
+    },
+    "remote-sse": {
+      "type": "sse"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(claudeJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewClaudeReader(tmpDir)
+	servers, err := reader.ReadMCPServers()
+	if err != nil {
+		t.Fatalf("ReadMCPServers() error = %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(servers))
+	}
+
+	// Servers are sorted by name: "ori-reaper" < "remote-sse".
+	reaper := servers[0]
+	if reaper.Name != "ori-reaper" {
+		t.Errorf("Name = %q, want %q", reaper.Name, "ori-reaper")
+	}
+	if reaper.Transport != "stdio" {
+		t.Errorf("Transport = %q, want %q", reaper.Transport, "stdio")
+	}
+	if reaper.Command != "/usr/local/bin/reaper-plugin" {
+		t.Errorf("Command = %q", reaper.Command)
+	}
+	if len(reaper.Args) != 3 {
+		t.Errorf("expected 3 args, got %d", len(reaper.Args))
+	}
+	if !reflect.DeepEqual(reaper.EnvNames, []string{"API_KEY", "TOKEN"}) {
+		t.Errorf("EnvNames = %v, want [API_KEY TOKEN]", reaper.EnvNames)
+	}
+
+	// Critical: env VALUES must never leak through the serialized result.
+	blob, _ := json.Marshal(servers)
+	for _, secret := range []string{"super-secret-value", "another-secret"} {
+		if strings.Contains(string(blob), secret) {
+			t.Errorf("serialized servers leaked secret %q: %s", secret, blob)
+		}
+	}
+}
+
+func TestReadMCPServers_MissingFile(t *testing.T) {
+	reader := NewClaudeReader(t.TempDir())
+
+	servers, err := reader.ReadMCPServers()
+	if err != nil {
+		t.Fatalf("ReadMCPServers() should not error for missing file, got: %v", err)
+	}
+	if len(servers) != 0 {
+		t.Errorf("expected 0 servers, got %d", len(servers))
+	}
+}
+
+func TestReadRecentProjects(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	claudeJSON := `{
+  "projects": {
+    "/Users/test/old": { "lastSessionId": "s-old", "lastCost": 0.1 },
+    "/Users/test/new": { "lastSessionId": "s-new", "lastCost": 0.2 },
+    "/Users/test/mid": { "lastSessionId": "s-mid", "lastCost": 0.3 }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(claudeJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	mkProjectDir := func(path string, mod time.Time) {
+		dir := filepath.Join(projectsDir, encodeProjectDirName(path))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Now()
+	mkProjectDir("/Users/test/old", base.Add(-2*time.Hour))
+	mkProjectDir("/Users/test/mid", base.Add(-1*time.Hour))
+	mkProjectDir("/Users/test/new", base)
+
+	reader := NewClaudeReader(tmpDir)
+	projects, err := reader.ReadRecentProjects(5)
+	if err != nil {
+		t.Fatalf("ReadRecentProjects() error = %v", err)
+	}
+	if len(projects) != 3 {
+		t.Fatalf("expected 3 projects, got %d", len(projects))
+	}
+
+	wantOrder := []string{"/Users/test/new", "/Users/test/mid", "/Users/test/old"}
+	for i, want := range wantOrder {
+		if projects[i].Path != want {
+			t.Errorf("projects[%d].Path = %q, want %q", i, projects[i].Path, want)
+		}
+	}
+	// Metrics must travel with the project entry.
+	if projects[0].LastSessionID != "s-new" {
+		t.Errorf("LastSessionID = %q, want %q", projects[0].LastSessionID, "s-new")
+	}
+}
+
+func TestReadRecentProjects_LimitAndMissingDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	claudeJSON := `{
+  "projects": {
+    "/p/a": {}, "/p/b": {}, "/p/c": {}, "/p/d": {},
+    "/p/e": {}, "/p/f": {}, "/p/g": {}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(claudeJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	base := time.Now()
+	// a (oldest) ... f (newest) each get a session dir; g gets none.
+	for i, p := range []string{"/p/a", "/p/b", "/p/c", "/p/d", "/p/e", "/p/f"} {
+		dir := filepath.Join(projectsDir, encodeProjectDirName(p))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		mod := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(dir, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reader := NewClaudeReader(tmpDir)
+	projects, err := reader.ReadRecentProjects(5)
+	if err != nil {
+		t.Fatalf("ReadRecentProjects() error = %v", err)
+	}
+	if len(projects) != 5 {
+		t.Fatalf("expected limit of 5, got %d", len(projects))
+	}
+
+	wantTop := []string{"/p/f", "/p/e", "/p/d", "/p/c", "/p/b"}
+	for i, want := range wantTop {
+		if projects[i].Path != want {
+			t.Errorf("projects[%d].Path = %q, want %q", i, projects[i].Path, want)
+		}
+	}
+	for _, p := range projects {
+		if p.Path == "/p/g" {
+			t.Error("/p/g has no session dir and must not appear in the recent top 5")
+		}
+	}
+}
+
+func TestReadRecentProjects_MissingFile(t *testing.T) {
+	reader := NewClaudeReader(t.TempDir())
+
+	projects, err := reader.ReadRecentProjects(5)
+	if err != nil {
+		t.Fatalf("ReadRecentProjects() should not error for missing file, got: %v", err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects, got %d", len(projects))
 	}
 }
 

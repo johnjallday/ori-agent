@@ -1433,8 +1433,9 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 	switch r.Method {
 	case http.MethodGet:
 		orihttp.WriteJSON(w, map[string]bool{
-			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
-			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+			"claude_enabled":  h.configManager.GetExternalAgentsClaudeEnabled(),
+			"claude_disabled": h.configManager.GetExternalAgentsClaudeDisabled(),
+			"codex_enabled":   h.configManager.GetExternalAgentsCodexEnabled(),
 		})
 
 	case http.MethodPost:
@@ -1449,6 +1450,9 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 		// Update only the settings that were provided
 		if req.ClaudeEnabled != nil {
 			h.configManager.SetExternalAgentsClaudeEnabled(*req.ClaudeEnabled)
+			// Toggling off records an explicit opt-out so it overrides
+			// auto-enable-on-CLI-detection; toggling on clears the opt-out.
+			h.configManager.SetExternalAgentsClaudeDisabled(!*req.ClaudeEnabled)
 			if *req.ClaudeEnabled {
 				// Register Claude provider if discovery works
 				apiKey := h.configManager.GetAnthropicAPIKey()
@@ -1474,6 +1478,7 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 
 		orihttp.WriteJSON(w, map[string]any{
 			"claude_enabled":        h.configManager.GetExternalAgentsClaudeEnabled(),
+			"claude_disabled":       h.configManager.GetExternalAgentsClaudeDisabled(),
 			"codex_enabled":         h.configManager.GetExternalAgentsCodexEnabled(),
 			"codex_exchange_status": codexExchangeStatus,
 		})
