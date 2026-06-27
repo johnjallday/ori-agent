@@ -31,7 +31,11 @@
     plan: null,
     planning: false,
     applying: false,
-    initialized: false
+    initialized: false,
+    // When set, the review renders into a host panel (the workspace-page "Find
+    // tools" surface) instead of the create-modal review pane. Shape:
+    // { content, summary, meta, loading, getInput, workspaceId }.
+    host: null
   };
   let cachedSystemModel = null;
   let cachedAutoConfigAvailability = null;
@@ -147,23 +151,23 @@
   }
 
   function getReviewCard() {
-    return getElement('folderBootstrapReviewCard');
+    return state.host ? (state.host.card || null) : getElement('folderBootstrapReviewCard');
   }
 
   function getReviewSummary() {
-    return getElement('folderBootstrapReviewSummary');
+    return state.host ? (state.host.summary || null) : getElement('folderBootstrapReviewSummary');
   }
 
   function getReviewMeta() {
-    return getElement('folderBootstrapReviewMeta');
+    return state.host ? (state.host.meta || null) : getElement('folderBootstrapReviewMeta');
   }
 
   function getReviewLoading() {
-    return getElement('folderBootstrapReviewLoading');
+    return state.host ? (state.host.loading || null) : getElement('folderBootstrapReviewLoading');
   }
 
   function getReviewContent() {
-    return getElement('folderBootstrapReviewContent');
+    return state.host ? (state.host.content || null) : getElement('folderBootstrapReviewContent');
   }
 
   function getModalElement() {
@@ -181,6 +185,15 @@
       importEnabled: isImportEnabled(),
       importPath: getElement('folderImportPathInput')?.value || ''
     });
+  }
+
+  // Input source for the active surface: the host panel's provider when mounted
+  // (workspace-page "Find tools"), otherwise the create-modal fields.
+  function getActiveInput() {
+    if (state.host && typeof state.host.getInput === 'function') {
+      return normalizeReviewInput(state.host.getInput());
+    }
+    return getModalInput();
   }
 
   function computeFingerprint(input) {
@@ -1172,7 +1185,7 @@
       return { ready: false };
     }
 
-    const input = getModalInput();
+    const input = getActiveInput();
     const fingerprint = computeFingerprint(input);
     if (state.reviewedFingerprint && state.reviewedFingerprint === fingerprint && state.plan) {
       return { ready: true, plan: getSelectedPlan() };
@@ -1807,6 +1820,89 @@
     });
   }
 
+  // Mounts the add-on search ("Find tools") into a host container on the
+  // workspace page. Reuses buildPlan / renderPlan / applyPlan, rendering into
+  // the container's own chrome instead of the create-modal review pane.
+  // Returns a controller with search() (run the search on demand) and reset().
+  function mountWorkspaceToolsPanel(container, options = {}) {
+    if (!container) return null;
+    const workspaceId = String(options.workspaceId || '').trim();
+    const getInput = typeof options.getInput === 'function' ? options.getInput : () => ({});
+
+    container.innerHTML = `
+      <div class="workspace-tools-panel">
+        <p class="workspace-tools-summary" data-tools-summary hidden></p>
+        <p class="workspace-tools-meta" data-tools-meta hidden></p>
+        <div class="workspace-tools-loading" data-tools-loading hidden>Searching the marketplaces for tools matching this workspace…</div>
+        <div class="workspace-tools-content" data-tools-content hidden></div>
+        <div class="workspace-tools-actions" data-tools-actions hidden>
+          <button type="button" class="modern-btn modern-btn-primary" data-tools-apply>Add selected</button>
+        </div>
+      </div>
+    `;
+    const summary = container.querySelector('[data-tools-summary]');
+    const meta = container.querySelector('[data-tools-meta]');
+    const loading = container.querySelector('[data-tools-loading]');
+    const content = container.querySelector('[data-tools-content]');
+    const actions = container.querySelector('[data-tools-actions]');
+    const applyBtn = container.querySelector('[data-tools-apply]');
+
+    state.host = { card: container, content, summary, meta, loading, getInput, workspaceId };
+    state.plan = null;
+    state.reviewedFingerprint = '';
+
+    async function search() {
+      if (state.planning) return;
+      state.planning = true;
+      if (summary) summary.hidden = false;
+      if (actions) actions.hidden = true;
+      setReviewLoading(true);
+      try {
+        const plan = await buildPlan(getActiveInput());
+        state.plan = plan;
+        renderPlan(plan);
+        if (actions) actions.hidden = false;
+      } catch (error) {
+        console.error('Find tools search failed:', error);
+        showToast(error.message || 'Failed to search for tools', 'error');
+      } finally {
+        state.planning = false;
+        setReviewLoading(false);
+      }
+    }
+
+    if (applyBtn) {
+      applyBtn.addEventListener('click', async () => {
+        if (state.applying) return;
+        const result = await applyPlan(workspaceId);
+        const parts = [];
+        if (result.boundMCPs) parts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'}`);
+        if (result.attachedSkills) parts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'}`);
+        if (result.addedPlugins) parts.push(`${result.addedPlugins} plugin${result.addedPlugins === 1 ? '' : 's'}`);
+        if (result.invitedAgents) parts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'}`);
+        if (Array.isArray(result.failures) && result.failures.length > 0) {
+          showToast(`Added ${parts.join(', ') || 'nothing'}. ${result.failures[0]}`, 'warning');
+        } else if (parts.length > 0) {
+          showToast(`Added ${parts.join(', ')} to this workspace.`, 'success');
+          if (typeof options.onApplied === 'function') options.onApplied(result);
+        } else {
+          showToast('Select at least one tool to add.', 'info');
+        }
+      });
+    }
+
+    return {
+      search,
+      reset() {
+        if (state.host && state.host.card === container) {
+          state.host = null;
+          state.plan = null;
+          state.reviewedFingerprint = '';
+        }
+      }
+    };
+  }
+
   initializeListeners();
   refreshPrimaryActionLabel();
 
@@ -1815,6 +1911,7 @@
     getSelectedPlan,
     applyPlan,
     applySelectedPlan,
+    mountWorkspaceToolsPanel,
     reviewWorkspaceInput: async (input) => buildPlan(normalizeReviewInput(input)),
     reset,
     markDirty,
