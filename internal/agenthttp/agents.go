@@ -86,6 +86,10 @@ type Handler struct {
 	// agent (or nil when disabled). Injected so agenthttp stays decoupled from
 	// the externalagents package.
 	claudeSync func() any
+	// codexSync returns read-only synced ~/.codex data for the Codex agent (or
+	// nil when disabled). Injected so agenthttp stays decoupled from the
+	// externalagents package.
+	codexSync func() any
 }
 
 func New(state store.Store) *Handler {
@@ -119,6 +123,12 @@ func (h *Handler) SetSessionPurger(p SessionPurger) {
 // to the Claude Code agent's detail response when available.
 func (h *Handler) SetClaudeSyncProvider(provider func() any) {
 	h.claudeSync = provider
+}
+
+// SetCodexSyncProvider wires a provider of read-only ~/.codex data, attached
+// to the Codex agent's detail response when available.
+func (h *Handler) SetCodexSyncProvider(provider func() any) {
+	h.codexSync = provider
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -677,6 +687,12 @@ func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
 	if backend == cliagent.BackendClaude && h.claudeSync != nil {
 		if data := h.claudeSync(); data != nil {
 			detail["claude_sync"] = data
+		}
+	}
+	// Attach read-only synced ~/.codex state for the Codex CLI agent.
+	if backend == cliagent.BackendCodex && h.codexSync != nil {
+		if data := h.codexSync(); data != nil {
+			detail["codex_sync"] = data
 		}
 	}
 

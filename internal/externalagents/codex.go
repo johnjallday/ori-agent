@@ -3,6 +3,7 @@ package externalagents
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -33,12 +34,20 @@ func (r *DefaultCodexReader) getCodexDir() (string, error) {
 
 // codexConfigFile represents the structure of config.toml.
 type codexConfigFile struct {
-	Model                string `toml:"model"`
-	ModelReasoningEffort string `toml:"model_reasoning_effort"`
+	Model                string                        `toml:"model"`
+	ModelReasoningEffort string                        `toml:"model_reasoning_effort"`
+	MCPServers           map[string]codexMCPServerFile `toml:"mcp_servers"`
 }
 
-// ReadConfig reads the configuration from ~/.codex/config.toml.
-func (r *DefaultCodexReader) ReadConfig() (*CodexConfig, error) {
+type codexMCPServerFile struct {
+	Command   string         `toml:"command"`
+	Args      []string       `toml:"args"`
+	Env       map[string]any `toml:"env"`
+	Transport string         `toml:"transport"`
+	URL       string         `toml:"url"`
+}
+
+func (r *DefaultCodexReader) readConfigFile() (*codexConfigFile, error) {
 	codexDir, err := r.getCodexDir()
 	if err != nil {
 		return nil, err
@@ -58,10 +67,76 @@ func (r *DefaultCodexReader) ReadConfig() (*CodexConfig, error) {
 		return nil, err
 	}
 
+	return &config, nil
+}
+
+// ReadConfig reads the configuration from ~/.codex/config.toml.
+func (r *DefaultCodexReader) ReadConfig() (*CodexConfig, error) {
+	config, err := r.readConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, nil
+	}
+
 	return &CodexConfig{
 		Model:                config.Model,
 		ModelReasoningEffort: config.ModelReasoningEffort,
 	}, nil
+}
+
+// ReadMCPServers reads the global MCP servers configured for Codex from
+// ~/.codex/config.toml. Env values are intentionally redacted to variable names.
+func (r *DefaultCodexReader) ReadMCPServers() ([]CodexMCPServer, error) {
+	config, err := r.readConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	if config == nil || len(config.MCPServers) == 0 {
+		return []CodexMCPServer{}, nil
+	}
+
+	names := make([]string, 0, len(config.MCPServers))
+	for name := range config.MCPServers {
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	servers := make([]CodexMCPServer, 0, len(names))
+	for _, name := range names {
+		raw := config.MCPServers[name]
+		envNames := make([]string, 0, len(raw.Env))
+		for envName := range raw.Env {
+			if strings.TrimSpace(envName) != "" {
+				envNames = append(envNames, envName)
+			}
+		}
+		sort.Strings(envNames)
+
+		transport := strings.TrimSpace(raw.Transport)
+		if transport == "" {
+			switch {
+			case strings.TrimSpace(raw.URL) != "":
+				transport = "sse"
+			case strings.TrimSpace(raw.Command) != "":
+				transport = "stdio"
+			}
+		}
+
+		servers = append(servers, CodexMCPServer{
+			Name:      strings.TrimSpace(name),
+			Transport: transport,
+			Command:   raw.Command,
+			Args:      append([]string{}, raw.Args...),
+			URL:       raw.URL,
+			EnvNames:  envNames,
+		})
+	}
+
+	return servers, nil
 }
 
 // ReadSkills reads skill directories from ~/.codex/skills/.

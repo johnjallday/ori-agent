@@ -109,3 +109,26 @@ func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
 		t.Fatalf("rendered agents-detail page should not default the sidebar to visible")
 	}
 }
+
+func TestRenderAgentsCodexDetailPage(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("agents-codex-detail", TemplateData{Title: "Codex - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(agents-codex-detail) failed: %v", err)
+	}
+
+	for _, want := range []string{
+		`id="codexDetailTitle"`,
+		`id="codexSyncContent"`,
+		`/js/modules/codex-sync.js`,
+		`/js/agents-codex-detail.js`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered agents-codex-detail page missing %q", want)
+		}
+	}
+}

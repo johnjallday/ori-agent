@@ -27,6 +27,10 @@ type DashboardHandler struct {
 	// agent (or nil when disabled). Injected to keep agenthttp decoupled from
 	// the externalagents package.
 	claudeSync func() any
+	// codexSync returns read-only synced ~/.codex data for the Codex agent (or
+	// nil when disabled). Injected to keep agenthttp decoupled from the
+	// externalagents package.
+	codexSync func() any
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -50,6 +54,12 @@ func (h *DashboardHandler) SetWorkspaceStore(s workspace.Store) {
 // to the Claude Code agent's detail response when available.
 func (h *DashboardHandler) SetClaudeSyncProvider(provider func() any) {
 	h.claudeSync = provider
+}
+
+// SetCodexSyncProvider wires a provider of read-only ~/.codex data, attached
+// to the Codex agent's detail response when available.
+func (h *DashboardHandler) SetCodexSyncProvider(provider func() any) {
+	h.codexSync = provider
 }
 
 // AgentListItem represents an agent in the dashboard list view
@@ -88,6 +98,8 @@ type AgentDetailResponse struct {
 	AllowWebSearch  bool                   `json:"allow_web_search"`
 	// ClaudeSync carries read-only ~/.claude state for the Claude Code agent.
 	ClaudeSync any `json:"claude_sync,omitempty"`
+	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
+	CodexSync any `json:"codex_sync,omitempty"`
 }
 
 // ListAgentsWithStats handles GET /api/agents/dashboard/list
@@ -256,6 +268,10 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 					// Attach read-only synced ~/.claude state for the Claude Code agent.
 					if backend == cliagent.BackendClaude && h.claudeSync != nil {
 						response.ClaudeSync = h.claudeSync()
+					}
+					// Attach read-only synced ~/.codex state for the Codex CLI agent.
+					if backend == cliagent.BackendCodex && h.codexSync != nil {
+						response.CodexSync = h.codexSync()
 					}
 					_ = caps // context window info available via /api/cli-agents
 					w.Header().Set("Content-Type", "application/json")

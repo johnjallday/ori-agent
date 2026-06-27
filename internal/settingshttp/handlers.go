@@ -1436,6 +1436,7 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 			"claude_enabled":  h.configManager.GetExternalAgentsClaudeEnabled(),
 			"claude_disabled": h.configManager.GetExternalAgentsClaudeDisabled(),
 			"codex_enabled":   h.configManager.GetExternalAgentsCodexEnabled(),
+			"codex_disabled":  h.configManager.GetExternalAgentsCodexDisabled(),
 		})
 
 	case http.MethodPost:
@@ -1469,6 +1470,9 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 			// This toggle controls external Codex agent/skills visibility only.
 			// Codex model-provider availability is handled independently at startup.
 			h.configManager.SetExternalAgentsCodexEnabled(*req.CodexEnabled)
+			// Toggling off records an explicit opt-out so it overrides
+			// auto-enable-on-CLI-detection; toggling on clears the opt-out.
+			h.configManager.SetExternalAgentsCodexDisabled(!*req.CodexEnabled)
 		}
 
 		if err := h.configManager.Save(); err != nil {
@@ -1480,6 +1484,7 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 			"claude_enabled":        h.configManager.GetExternalAgentsClaudeEnabled(),
 			"claude_disabled":       h.configManager.GetExternalAgentsClaudeDisabled(),
 			"codex_enabled":         h.configManager.GetExternalAgentsCodexEnabled(),
+			"codex_disabled":        h.configManager.GetExternalAgentsCodexDisabled(),
 			"codex_exchange_status": codexExchangeStatus,
 		})
 
