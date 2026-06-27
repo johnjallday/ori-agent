@@ -1104,7 +1104,7 @@
     content.innerHTML = `
       <div class="workspace-bootstrap-review-layout">
         <div class="workspace-bootstrap-review-column">
-          ${renderAgentCards(plan.agents)}
+          ${state.host ? '' : renderAgentCards(plan.agents)}
           <div class="workspace-setup-section">
             <div class="workspace-setup-label">Workspace MCPs</div>
             ${renderCapabilityCards(plan.mcps, 'mcp')}
@@ -1138,7 +1138,10 @@
 
     const lead = state.plan.agents.find((agent) => agent.role === 'lead');
     const selectedAgents = [];
-    if (lead) {
+    // The workspace-page "Find tools" panel is add-ons only — entry-agent
+    // creation is the existing post-create prompt's job, so never apply agents
+    // from the panel. (Only the create-modal review, if present, applies agents.)
+    if (lead && !state.host) {
       selectedAgents.push(lead);
     }
 
