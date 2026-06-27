@@ -1,34 +1,38 @@
-/* Shared styling for the read-only Claude Code (~/.claude) synced section.
-   Used by the agent details drawer (agents page) and the dedicated Claude
-   Code agent page. Self-contained class names so it does not depend on any
-   page-specific styles. */
+/* Shared styling for read-only external CLI synced sections. Used by the
+   agent details drawer and dedicated Claude Code / Codex agent pages.
+   Self-contained class names so it does not depend on page-specific styles. */
 
-.claude-sync {
+.claude-sync,
+.codex-sync {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-.claude-sync-actions {
+.claude-sync-actions,
+.codex-sync-actions {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
 }
 
-.claude-sync-readonly {
+.claude-sync-readonly,
+.codex-sync-readonly {
     font-size: 11px;
     color: var(--text-muted);
 }
 
-.claude-sync-card {
+.claude-sync-card,
+.codex-sync-card {
     border: 1px solid var(--border-color);
     border-radius: 10px;
     background: var(--bg-secondary);
     padding: 12px;
 }
 
-.claude-sync-label {
+.claude-sync-label,
+.codex-sync-label {
     display: block;
     font-size: 11px;
     text-transform: uppercase;
@@ -38,13 +42,15 @@
     font-weight: 700;
 }
 
-.claude-sync-value {
+.claude-sync-value,
+.codex-sync-value {
     color: var(--text-primary);
     font-size: 13px;
     word-break: break-word;
 }
 
-.claude-sync-list {
+.claude-sync-list,
+.codex-sync-list {
     margin: 0;
     padding-left: 18px;
     display: flex;
@@ -55,18 +61,21 @@
     word-break: break-word;
 }
 
-.claude-sync-empty {
+.claude-sync-empty,
+.codex-sync-empty {
     color: var(--text-muted);
     font-style: italic;
     font-size: 13px;
 }
 
-.claude-sync-muted {
+.claude-sync-muted,
+.codex-sync-muted {
     color: var(--text-muted);
     font-size: 12px;
 }
 
-.claude-sync-path {
+.claude-sync-path,
+.codex-sync-path {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 12px;
 }

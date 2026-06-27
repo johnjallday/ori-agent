@@ -86,6 +86,18 @@ type CodexRule struct {
 	Path string `json:"path"`
 }
 
+// CodexMCPServer represents an MCP server configured for Codex in
+// ~/.codex/config.toml. Env values are intentionally NOT included — only
+// variable names are surfaced, to avoid leaking secrets/API keys to the API/UI.
+type CodexMCPServer struct {
+	Name      string   `json:"name"`
+	Transport string   `json:"transport,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	URL       string   `json:"url,omitempty"`
+	EnvNames  []string `json:"envNames,omitempty"` // variable names only — never values
+}
+
 // ClaudeData holds all data read from the Claude Code configuration.
 type ClaudeData struct {
 	Agents         []ExternalAgent       `json:"agents"`
@@ -97,10 +109,11 @@ type ClaudeData struct {
 
 // CodexData holds all data read from the Codex configuration.
 type CodexData struct {
-	Agents []ExternalAgent `json:"agents"`
-	Config *CodexConfig    `json:"config,omitempty"`
-	Skills []CodexSkill    `json:"skills"`
-	Rules  []CodexRule     `json:"rules"`
+	Agents     []ExternalAgent  `json:"agents"`
+	Config     *CodexConfig     `json:"config,omitempty"`
+	Skills     []CodexSkill     `json:"skills"`
+	Rules      []CodexRule      `json:"rules"`
+	MCPServers []CodexMCPServer `json:"mcpServers"`
 }
 
 // ExternalAgentsData holds all external agent data from all sources.
@@ -124,4 +137,5 @@ type CodexReader interface {
 	ReadConfig() (*CodexConfig, error)
 	ReadSkills() ([]CodexSkill, error)
 	ReadRules() ([]CodexRule, error)
+	ReadMCPServers() ([]CodexMCPServer, error)
 }

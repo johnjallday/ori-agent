@@ -229,7 +229,10 @@ func (b *ServerBuilder) initializeHandlers() {
 	claudeCLIDetected := func() bool {
 		return b.cliAgentRegistry != nil && b.cliAgentRegistry.IsAvailable(cliagent.BackendClaude)
 	}
-	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager, claudeCLIDetected)
+	codexCLIDetected := func() bool {
+		return b.cliAgentRegistry != nil && b.cliAgentRegistry.IsAvailable(cliagent.BackendCodex)
+	}
+	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager, claudeCLIDetected, codexCLIDetected)
 	logger.Info("External agents support initialized", logger.Fields{})
 
 	// Initialize CLI agent adapter (delegatable CLI agents)

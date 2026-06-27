@@ -1,8 +1,10 @@
 package externalagents
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +72,55 @@ func TestReadConfig_MinimalConfig(t *testing.T) {
 	}
 	if config.ModelReasoningEffort != "" {
 		t.Errorf("ModelReasoningEffort should be empty, got %q", config.ModelReasoningEffort)
+	}
+}
+
+func TestReadCodexMCPServers_RedactsEnvValues(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configContent := `model = "gpt-5.2-codex"
+
+[mcp_servers.local]
+command = "node"
+args = ["server.js"]
+
+[mcp_servers.local.env]
+API_KEY = "secret-value"
+TOKEN = "another-secret"
+
+[mcp_servers.remote]
+transport = "sse"
+url = "https://example.com/sse"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.toml"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewCodexReader(tmpDir)
+	servers, err := reader.ReadMCPServers()
+	if err != nil {
+		t.Fatalf("ReadMCPServers() error = %v", err)
+	}
+
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 MCP servers, got %d", len(servers))
+	}
+	if servers[0].Name != "local" {
+		t.Fatalf("first server = %q, want local", servers[0].Name)
+	}
+	if servers[0].Transport != "stdio" {
+		t.Errorf("local transport = %q, want stdio", servers[0].Transport)
+	}
+	if got := strings.Join(servers[0].EnvNames, ","); got != "API_KEY,TOKEN" {
+		t.Errorf("env names = %q, want API_KEY,TOKEN", got)
+	}
+
+	payload, err := json.Marshal(servers)
+	if err != nil {
+		t.Fatalf("marshal servers: %v", err)
+	}
+	if strings.Contains(string(payload), "secret-value") || strings.Contains(string(payload), "another-secret") {
+		t.Fatalf("MCP env secret value leaked in payload: %s", string(payload))
 	}
 }
 

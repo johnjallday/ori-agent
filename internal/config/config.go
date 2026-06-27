@@ -80,7 +80,8 @@ type Settings struct {
 	// External agents settings
 	ExternalAgentsClaudeEnabled  bool `json:"external_agents_claude_enabled"`            // Force-enable reading from Claude Code ~/.claude (opt-in)
 	ExternalAgentsClaudeDisabled bool `json:"external_agents_claude_disabled,omitempty"` // Explicit opt-out: suppresses auto-enable even when the Claude CLI is detected
-	ExternalAgentsCodexEnabled   bool `json:"external_agents_codex_enabled"`             // Enable reading agents from Codex CLI ~/.codex (default: false)
+	ExternalAgentsCodexEnabled   bool `json:"external_agents_codex_enabled"`             // Force-enable reading from Codex CLI ~/.codex (opt-in)
+	ExternalAgentsCodexDisabled  bool `json:"external_agents_codex_disabled,omitempty"`  // Explicit opt-out: suppresses auto-enable even when the Codex CLI is detected
 
 	// Speech settings
 	SpeechProvider string `json:"speech_provider,omitempty"` // auto, browser, openai, off
@@ -1469,6 +1470,35 @@ func (m *Manager) SetExternalAgentsCodexEnabled(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settings.ExternalAgentsCodexEnabled = enabled
+}
+
+// GetExternalAgentsCodexDisabled returns whether the user explicitly opted out
+// of Codex external agent reading.
+func (m *Manager) GetExternalAgentsCodexDisabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.ExternalAgentsCodexDisabled
+}
+
+// SetExternalAgentsCodexDisabled updates the explicit Codex opt-out setting.
+func (m *Manager) SetExternalAgentsCodexDisabled(disabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.ExternalAgentsCodexDisabled = disabled
+}
+
+// EffectiveExternalAgentsCodexEnabled reports whether Codex agent reading is
+// active, given whether the Codex CLI was detected. Precedence: an explicit
+// opt-out always wins; otherwise the feature is on when force-enabled OR the
+// CLI is detected (auto-enable). A legacy enabled=false simply means "not opted
+// in" and still auto-enables on detection.
+func (m *Manager) EffectiveExternalAgentsCodexEnabled(cliDetected bool) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.settings.ExternalAgentsCodexDisabled {
+		return false
+	}
+	return m.settings.ExternalAgentsCodexEnabled || cliDetected
 }
 
 // validateWeb3Address validates an Ethereum address format

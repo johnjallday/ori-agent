@@ -723,7 +723,7 @@ function closeAgentDrawer() {
 
 function setDrawerTab(tabName, options = {}) {
   const { focusPanel = false } = options;
-  const normalized = tabName === 'tools' || tabName === 'advanced' || tabName === 'claude' ? tabName : 'overview';
+  const normalized = tabName === 'tools' || tabName === 'advanced' || tabName === 'claude' || tabName === 'codex' ? tabName : 'overview';
 
   document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
     const isActive = button.dataset.tab === normalized;
@@ -751,6 +751,7 @@ function setDrawerLoadingState() {
   const tools = document.getElementById('drawerToolsContent');
   const advanced = document.getElementById('drawerAdvancedContent');
   const claude = document.getElementById('drawerClaudeContent');
+  const codex = document.getElementById('drawerCodexContent');
 
   if (overview) {
     overview.innerHTML = loadingHtml;
@@ -766,6 +767,10 @@ function setDrawerLoadingState() {
 
   if (claude) {
     claude.innerHTML = loadingHtml;
+  }
+
+  if (codex) {
+    codex.innerHTML = loadingHtml;
   }
 }
 
@@ -859,6 +864,7 @@ function renderDrawerContent() {
   }
 
   updateClaudeDrawerTab(detail);
+  updateCodexDrawerTab(detail);
 }
 
 // The Claude Code agent gets an extra "Claude Code" drawer tab mirroring the
@@ -895,6 +901,43 @@ function renderClaudeDrawerInto(content, detail) {
     }
     selectedAgentDetail = reloaded;
     renderClaudeDrawerInto(content, reloaded);
+  });
+}
+
+// The Codex agent gets an extra "Codex" drawer tab mirroring the real ~/.codex
+// state, rendered by the shared CodexSync module. The tab is hidden for every
+// other agent.
+function updateCodexDrawerTab(detail) {
+  const tabBtn = document.getElementById('drawerCodexTabBtn');
+  const panel = document.getElementById('drawerCodexTab');
+  const content = document.getElementById('drawerCodexContent');
+  if (!tabBtn || !panel || !content || !window.CodexSync) {
+    return;
+  }
+
+  const isCodex = window.CodexSync.isCodexAgent(detail);
+  tabBtn.hidden = !isCodex;
+
+  if (!isCodex) {
+    // If the now-hidden tab was active (switched agents), fall back to overview.
+    if (panel.classList.contains('active')) {
+      setDrawerTab('overview');
+    }
+    content.innerHTML = '';
+    return;
+  }
+
+  renderCodexDrawerInto(content, detail);
+}
+
+function renderCodexDrawerInto(content, detail) {
+  content.innerHTML = window.CodexSync.renderHtml(detail?.codex_sync || null);
+  window.CodexSync.wireRefresh(content, selectedAgentName, (reloaded, agentName) => {
+    if (selectedAgentName !== agentName) {
+      return;
+    }
+    selectedAgentDetail = reloaded;
+    renderCodexDrawerInto(content, reloaded);
   });
 }
 

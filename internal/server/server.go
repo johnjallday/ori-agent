@@ -267,6 +267,19 @@ func (s *Server) isClaudeCodeAgentName(name string) bool {
 	return s.Handlers.CLIAgentRegistry.IsAvailable(cliagent.BackendClaude)
 }
 
+// isCodexAgentName reports whether the given agent name refers to the built-in
+// Codex CLI agent and that backend is currently available.
+func (s *Server) isCodexAgentName(name string) bool {
+	if s.Handlers == nil || s.Handlers.CLIAgentRegistry == nil {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower != "codex" && lower != cliagent.BackendCodex {
+		return false
+	}
+	return s.Handlers.CLIAgentRegistry.IsAvailable(cliagent.BackendCodex)
+}
+
 // serveClaudeAgentDetail serves the dedicated, read-only Claude Code agent page
 // that mirrors the user's ~/.claude state.
 func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +288,16 @@ func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, r *http.Request) 
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "agents-claude-detail", data)
+}
+
+// serveCodexAgentDetail serves the dedicated, read-only Codex agent page that
+// mirrors the user's ~/.codex state.
+func (s *Server) serveCodexAgentDetail(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("agents")
+	data.Title = "Codex - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "agents-codex-detail", data)
 }
 
 func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
@@ -626,6 +649,10 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.isClaudeCodeAgentName(agentName) {
 			s.serveClaudeAgentDetail(w, r)
+			return
+		}
+		if s.isCodexAgentName(agentName) {
+			s.serveCodexAgentDetail(w, r)
 			return
 		}
 		s.serveAgentsDetail(w, r)

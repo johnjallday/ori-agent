@@ -20,6 +20,7 @@ type Cache struct {
 	codexConfig          *CodexConfig
 	codexSkills          []CodexSkill
 	codexRules           []CodexRule
+	codexMCPServers      []CodexMCPServer
 
 	loaded bool
 }
@@ -107,6 +108,12 @@ func (c *Cache) loadLocked() error {
 			return err
 		}
 		c.codexRules = rules
+
+		mcpServers, err := c.codexReader.ReadMCPServers()
+		if err != nil {
+			return err
+		}
+		c.codexMCPServers = mcpServers
 	}
 
 	c.loaded = true
@@ -128,6 +135,7 @@ func (c *Cache) Refresh() error {
 	c.codexConfig = nil
 	c.codexSkills = nil
 	c.codexRules = nil
+	c.codexMCPServers = nil
 	c.loaded = false
 
 	return c.loadLocked()
@@ -196,6 +204,13 @@ func (c *Cache) GetCodexRules() []CodexRule {
 	return c.codexRules
 }
 
+// GetCodexMCPServers returns cached Codex MCP servers.
+func (c *Cache) GetCodexMCPServers() []CodexMCPServer {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.codexMCPServers
+}
+
 // GetClaudeData returns all cached Claude data.
 func (c *Cache) GetClaudeData() *ClaudeData {
 	c.mu.RLock()
@@ -216,10 +231,11 @@ func (c *Cache) GetCodexData() *CodexData {
 	defer c.mu.RUnlock()
 
 	return &CodexData{
-		Agents: c.codexAgents,
-		Config: c.codexConfig,
-		Skills: c.codexSkills,
-		Rules:  c.codexRules,
+		Agents:     c.codexAgents,
+		Config:     c.codexConfig,
+		Skills:     c.codexSkills,
+		Rules:      c.codexRules,
+		MCPServers: c.codexMCPServers,
 	}
 }
 
@@ -237,10 +253,11 @@ func (c *Cache) GetAll() *ExternalAgentsData {
 			RecentProjects: c.claudeRecentProjects,
 		},
 		Codex: &CodexData{
-			Agents: c.codexAgents,
-			Config: c.codexConfig,
-			Skills: c.codexSkills,
-			Rules:  c.codexRules,
+			Agents:     c.codexAgents,
+			Config:     c.codexConfig,
+			Skills:     c.codexSkills,
+			Rules:      c.codexRules,
+			MCPServers: c.codexMCPServers,
 		},
 	}
 }
