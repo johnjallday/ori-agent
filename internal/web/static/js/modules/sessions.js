@@ -8033,4 +8033,20 @@ document.addEventListener('DOMContentLoaded', () => {
       sessionManager.openNoteEditor(openNoteId);
     }
   } catch (_) { /* non-fatal */ }
+
+  // ?create=1 opens the Create Workspace modal after navigation (home-page
+  // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
+  // history so a refresh doesn't re-open. Previously handled by the now-removed
+  // workspace-create.js on a different (unrouted) page.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === '1') {
+      params.delete('create');
+      const qs = params.toString();
+      const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', cleanUrl);
+      // Defer a frame so init()'s show.bs.modal handler is bound first.
+      requestAnimationFrame(() => sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' }));
+    }
+  } catch (_) { /* non-fatal */ }
 });
