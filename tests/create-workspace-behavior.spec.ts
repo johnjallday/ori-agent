@@ -84,6 +84,32 @@ test('starting point sets Agent behavior; manual override is preserved; reopen r
   await expect(disclosure).toHaveJSProperty('open', false);
 });
 
+test('switching starting points updates auto-filled name, but never typed input', async ({ page }) => {
+  await openCreateModal(page);
+  const name = page.locator('#folderNameInput');
+
+  // First pick fills the name.
+  await cardByLabel(page, 'Travels').click();
+  await expect(name).toHaveValue('Travels');
+
+  // Regression: switching cards must update the auto-filled name (it used to
+  // stick on the first pick because the field was no longer empty).
+  await cardByLabel(page, 'Content Production').click();
+  await expect(name).toHaveValue('Content Production');
+
+  // Typed input is never clobbered by a later card switch.
+  await name.fill('My Custom Name');
+  await cardByLabel(page, 'Research Project').click();
+  await expect(name).toHaveValue('My Custom Name');
+
+  // Blank clears an auto-filled value (clean slate) but leaves typed input.
+  await name.fill('');
+  await cardByLabel(page, 'Travels').click();
+  await expect(name).toHaveValue('Travels');
+  await cardByLabel(page, 'Blank').click();
+  await expect(name).toHaveValue('');
+});
+
 test('createFolder submits workspace_preset for create and import', async ({ page }) => {
   await openCreateModal(page);
 

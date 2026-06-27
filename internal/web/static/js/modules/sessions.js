@@ -3176,6 +3176,7 @@ const sessionManager = {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
       if (descriptionInput) descriptionInput.value = '';
+      if (descriptionInput) descriptionInput.dataset.autofillDescription = '';
       if (primaryGoalInput) primaryGoalInput.value = '';
       if (systemsInput) systemsInput.value = '';
       if (contextInput) contextInput.value = '';
@@ -3215,9 +3216,24 @@ const sessionManager = {
     this.renderWorkspaceTemplateGrid();
   },
 
+  // Fills a create-modal input from a template default while tracking the
+  // filled value in a dataset attribute. This lets a later Starting-point
+  // switch replace a value the modal auto-filled, while never clobbering input
+  // the user typed themselves. An empty value (e.g. Blank) clears a previously
+  // auto-filled field but leaves typed input alone.
+  prefillTemplateValue(input, value, autofillAttr) {
+    if (!input) return;
+    const next = value || '';
+    const prevAuto = input.dataset[autofillAttr] || '';
+    if (input.value === '' || input.value === prevAuto) {
+      input.value = next;
+      input.dataset[autofillAttr] = next;
+    }
+  },
+
   // Renders the "Starting point" template grid into #folderTemplateGrid and
   // tracks the picked template on this.workspaceTemplate. Picking a card
-  // pre-fills the name/description only when they are empty (never clobbers
+  // pre-fills the name/description (replacing earlier auto-filled values, never
   // typed input). Behavior-profile wiring is layered on in a later step.
   renderWorkspaceTemplateGrid() {
     const grid = document.getElementById('folderTemplateGrid');
@@ -3230,12 +3246,8 @@ const sessionManager = {
     const initial = window.WorkspaceTemplates.render(grid, {
       onSelect: (template) => {
         this.workspaceTemplate = template;
-        if (nameInput && !nameInput.value && template.defaultName) {
-          nameInput.value = template.defaultName;
-        }
-        if (descriptionInput && !descriptionInput.value && template.defaultDescription) {
-          descriptionInput.value = template.defaultDescription;
-        }
+        this.prefillTemplateValue(nameInput, template.defaultName, 'autofillName');
+        this.prefillTemplateValue(descriptionInput, template.defaultDescription, 'autofillDescription');
         this.applyTemplateBehavior(template);
       }
     });
