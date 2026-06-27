@@ -1490,6 +1490,46 @@
         word-break: break-word;
     }
 
+    /* Claude Code synced (~/.claude) drawer section — read-only mirror. */
+    .ops-claude-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 4px;
+    }
+
+    .ops-claude-readonly {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .ops-claude-list {
+        margin: 0;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--text-primary);
+        font-size: 13px;
+        word-break: break-word;
+    }
+
+    .ops-claude-empty {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .ops-claude-muted {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    .ops-claude-path {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+    }
+
     .ops-drawer-footer {
         border-top: 1px solid var(--border-color);
         padding: 14px 20px 18px;
@@ -1677,6 +1717,7 @@
             <button id="drawerOverviewTabBtn" class="ops-drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawerOverviewTab" data-tab="overview">Overview</button>
             <button id="drawerToolsTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerToolsTab" data-tab="tools" tabindex="-1">Tools</button>
             <button id="drawerAdvancedTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerAdvancedTab" data-tab="advanced" tabindex="-1">Advanced</button>
+            <button id="drawerClaudeTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerClaudeTab" data-tab="claude" tabindex="-1" hidden>Claude Code</button>
         </div>
         <div class="ops-drawer-body">
             <section id="drawerOverviewTab" class="ops-drawer-panel active" role="tabpanel" aria-labelledby="drawerOverviewTabBtn" tabindex="0">
@@ -1687,6 +1728,9 @@
             </section>
             <section id="drawerAdvancedTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerAdvancedTabBtn" tabindex="0" hidden>
                 <div id="drawerAdvancedContent" class="ops-drawer-content"></div>
+            </section>
+            <section id="drawerClaudeTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerClaudeTabBtn" tabindex="0" hidden>
+                <div id="drawerClaudeContent" class="ops-drawer-content"></div>
             </section>
         </div>
         <div class="ops-drawer-footer">

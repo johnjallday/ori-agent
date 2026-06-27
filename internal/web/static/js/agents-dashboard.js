@@ -723,7 +723,7 @@ function closeAgentDrawer() {
 
 function setDrawerTab(tabName, options = {}) {
   const { focusPanel = false } = options;
-  const normalized = tabName === 'tools' || tabName === 'advanced' ? tabName : 'overview';
+  const normalized = tabName === 'tools' || tabName === 'advanced' || tabName === 'claude' ? tabName : 'overview';
 
   document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
     const isActive = button.dataset.tab === normalized;
@@ -750,6 +750,7 @@ function setDrawerLoadingState() {
   const overview = document.getElementById('drawerOverviewContent');
   const tools = document.getElementById('drawerToolsContent');
   const advanced = document.getElementById('drawerAdvancedContent');
+  const claude = document.getElementById('drawerClaudeContent');
 
   if (overview) {
     overview.innerHTML = loadingHtml;
@@ -761,6 +762,10 @@ function setDrawerLoadingState() {
 
   if (advanced) {
     advanced.innerHTML = loadingHtml;
+  }
+
+  if (claude) {
+    claude.innerHTML = loadingHtml;
   }
 }
 
@@ -852,6 +857,147 @@ function renderDrawerContent() {
       </div>
     `;
   }
+
+  updateClaudeDrawerTab(detail);
+}
+
+// The Claude Code agent gets an extra "Claude Code" drawer tab mirroring the
+// real ~/.claude state. The tab is hidden for every other agent.
+function isClaudeCodeAgentDetail(detail) {
+  const provider = String(detail?.provider || '').toLowerCase();
+  const role = String(detail?.role || '').toLowerCase();
+  return provider === 'claude' && role === 'cli_agent';
+}
+
+function updateClaudeDrawerTab(detail) {
+  const tabBtn = document.getElementById('drawerClaudeTabBtn');
+  const panel = document.getElementById('drawerClaudeTab');
+  const content = document.getElementById('drawerClaudeContent');
+  if (!tabBtn || !panel || !content) {
+    return;
+  }
+
+  const isClaude = isClaudeCodeAgentDetail(detail);
+  tabBtn.hidden = !isClaude;
+
+  if (!isClaude) {
+    // If the now-hidden tab was active (switched agents), fall back to overview.
+    if (panel.classList.contains('active')) {
+      setDrawerTab('overview');
+    }
+    content.innerHTML = '';
+    return;
+  }
+
+  content.innerHTML = renderClaudeSyncHtml(detail?.claude_sync || null);
+  wireClaudeRefreshButton();
+}
+
+function renderClaudeSyncHtml(sync) {
+  const actions = `
+    <div class="ops-claude-actions">
+      <button id="drawerClaudeRefreshBtn" type="button" class="modern-btn modern-btn-secondary ops-claude-refresh">Refresh from ~/.claude</button>
+      <span class="ops-claude-readonly">Read-only mirror of your Claude Code setup</span>
+    </div>`;
+
+  if (!sync) {
+    return `
+      ${actions}
+      <div class="ops-data-card">
+        <span class="ops-data-label">Claude Code sync</span>
+        <div class="ops-data-value ops-claude-empty">Not available. Enable Claude Code agents in Settings, or install the Claude Code CLI — synced details from ~/.claude will appear here.</div>
+      </div>`;
+  }
+
+  const settings = sync.settings || {};
+  const model = settings.model || sync.model || '';
+  const defaultMode = (settings.permissions && settings.permissions.defaultMode) || '';
+
+  const agents = Array.isArray(sync.agents) ? sync.agents : [];
+  const mcpServers = Array.isArray(sync.mcpServers) ? sync.mcpServers : [];
+  const plugins = Array.isArray(sync.plugins) ? sync.plugins : [];
+  const recent = Array.isArray(sync.recentProjects) ? sync.recentProjects : [];
+
+  return `
+    ${actions}
+    <div class="ops-data-card">
+      <span class="ops-data-label">Model &amp; Settings</span>
+      <div class="ops-data-value">
+        <div>Model: ${safeEscapeHtml(model || 'Not configured')}</div>
+        <div>Permission mode: ${safeEscapeHtml(defaultMode || '—')}</div>
+      </div>
+    </div>
+    ${renderClaudeListCard(`Subagents (${agents.length})`, agents, (a) =>
+      `<strong>${safeEscapeHtml(a?.name || 'Unnamed')}</strong>${a?.description ? ' — ' + safeEscapeHtml(a.description) : ''}`,
+      'No subagents found in ~/.claude/agents.')}
+    ${renderClaudeListCard(`MCP Servers (${mcpServers.length})`, mcpServers, (s) =>
+      `<strong>${safeEscapeHtml(s?.name || 'Unnamed')}</strong>${s?.transport ? ` <span class="ops-claude-muted">(${safeEscapeHtml(s.transport)})</span>` : ''}`,
+      'No MCP servers configured.')}
+    ${renderClaudeListCard(`Plugins (${plugins.length})`, plugins, (p) =>
+      safeEscapeHtml(p?.name || 'Unnamed'),
+      'No plugins installed.')}
+    ${renderClaudeListCard(`Recent Projects (${recent.length})`, recent, (p) => {
+      const cost = Number(p?.lastCost || 0);
+      const costStr = cost > 0 ? ` <span class="ops-claude-muted">$${cost.toFixed(4)}</span>` : '';
+      return `<span class="ops-claude-path">${safeEscapeHtml(p?.path || '')}</span>${costStr}`;
+    }, 'No recent projects.')}
+  `;
+}
+
+function renderClaudeListCard(label, items, itemHtml, emptyText) {
+  let body;
+  if (!Array.isArray(items) || items.length === 0) {
+    body = `<div class="ops-data-value ops-claude-empty">${safeEscapeHtml(emptyText)}</div>`;
+  } else {
+    body = `<ul class="ops-claude-list">${items.map((item) => `<li>${itemHtml(item)}</li>`).join('')}</ul>`;
+  }
+  return `
+    <div class="ops-data-card">
+      <span class="ops-data-label">${safeEscapeHtml(label)}</span>
+      ${body}
+    </div>`;
+}
+
+function wireClaudeRefreshButton() {
+  const btn = document.getElementById('drawerClaudeRefreshBtn');
+  if (!btn) {
+    return;
+  }
+
+  btn.addEventListener('click', async () => {
+    const agentName = selectedAgentName;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+
+    try {
+      const resp = await fetch('/api/external-agents/refresh', { method: 'POST' });
+      if (!resp.ok) {
+        throw new Error(`Refresh failed (${resp.status})`);
+      }
+      // Re-fetch the agent detail so the reloaded ~/.claude data is picked up.
+      const detail = await fetchAgentDetail(agentName);
+      if (selectedAgentName !== agentName) {
+        return;
+      }
+      selectedAgentDetail = detail;
+      const content = document.getElementById('drawerClaudeContent');
+      if (content) {
+        content.innerHTML = renderClaudeSyncHtml(detail?.claude_sync || null);
+        wireClaudeRefreshButton();
+      }
+      if (window.Toast) {
+        Toast.success('Claude Code data refreshed.');
+      }
+    } catch (error) {
+      console.error('Claude refresh failed:', error);
+      if (window.Toast) {
+        Toast.error(error?.message || 'Failed to refresh Claude Code data.');
+      }
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
 }
 
 async function fetchAgentDetail(agentName) {
