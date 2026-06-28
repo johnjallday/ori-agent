@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,12 +22,62 @@ import (
 // display metadata only — never behavior — and is excluded from instantiation.
 const ManifestFileName = "template.json"
 
-// Template describes one instantiable folder skeleton.
+// Behavior profiles understood by the workspace-creation flow (sent as
+// workspace_preset). Keep in sync with internal/workspacesettings and the
+// create-modal "Agent behavior" control.
+const (
+	BehaviorProfileGeneral         = "general"
+	BehaviorProfileResearch        = "research"
+	BehaviorProfileSoftwareProject = "software_project"
+)
+
+// ValidBehaviorProfiles is the accepted set of behavior profiles.
+var ValidBehaviorProfiles = []string{
+	BehaviorProfileGeneral,
+	BehaviorProfileResearch,
+	BehaviorProfileSoftwareProject,
+}
+
+// NormalizeBehaviorProfile lowercases and validates a behavior profile,
+// falling back to "general" when empty or unrecognized so a bad manifest value
+// never breaks listing or workspace creation.
+func NormalizeBehaviorProfile(p string) string {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if slices.Contains(ValidBehaviorProfiles, p) {
+		return p
+	}
+	return BehaviorProfileGeneral
+}
+
+// StarterTask is one example task a template seeds into a new workspace. It is
+// data only — seeding happens in the create flow, not this package.
+type StarterTask struct {
+	Description string `json:"description"`
+	Details     string `json:"details,omitempty"`
+}
+
+// Template describes one instantiable folder skeleton (or, when HasSkeleton is
+// false, a metadata-only template that contributes name/behavior/tasks/tools
+// but creates no project folder).
 type Template struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	// Icon is an optional emoji glyph shown on the create-modal picker card.
+	Icon string `json:"icon,omitempty"`
+	// BehaviorProfile is the workspace behavior profile (workspace_preset) a
+	// workspace created from this template defaults to. Always normalized to one
+	// of ValidBehaviorProfiles.
+	BehaviorProfile string `json:"behavior_profile,omitempty"`
+	// StarterTasks are example tasks seeded into a new workspace.
+	StarterTasks []StarterTask `json:"starter_tasks,omitempty"`
+	// Builtin marks a template shipped with the app: read-only in the authoring
+	// UI and grouped as a built-in in the create-modal picker.
+	Builtin bool `json:"builtin"`
+	// HasSkeleton reports whether the template has instantiable files beyond
+	// template.json. A metadata-only template (false) creates no project folder.
+	HasSkeleton bool `json:"has_skeleton"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
 	// Onboarding is the verbatim `onboarding` block from template.json, if any.
@@ -53,11 +104,15 @@ func (t Template) HasOnboarding() bool {
 // templateonboarding package at workspace-creation time. This package never
 // interprets it, so the file-copy engine stays domain-blind.
 type manifest struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Tags        []string        `json:"tags,omitempty"`
-	Onboarding  json.RawMessage `json:"onboarding,omitempty"`
-	Tools       *ToolDefaults   `json:"tools,omitempty"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Tags            []string        `json:"tags,omitempty"`
+	Icon            string          `json:"icon,omitempty"`
+	BehaviorProfile string          `json:"behavior_profile,omitempty"`
+	StarterTasks    []StarterTask   `json:"starter_tasks,omitempty"`
+	Builtin         bool            `json:"builtin,omitempty"`
+	Onboarding      json.RawMessage `json:"onboarding,omitempty"`
+	Tools           *ToolDefaults   `json:"tools,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -91,11 +146,53 @@ func newTemplate(path string) Template {
 	}
 	t.Description = strings.TrimSpace(m.Description)
 	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
+	t.Icon = strings.TrimSpace(m.Icon)
+	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
+	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
+	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
+	t.HasSkeleton = hasSkeletonFiles(t.Path)
 	t.Onboarding = m.Onboarding
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
 	return t
+}
+
+// normalizeStarterTasks trims each task and drops any without a description.
+func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
+	if len(tasks) == 0 {
+		return nil
+	}
+	out := make([]StarterTask, 0, len(tasks))
+	for _, task := range tasks {
+		desc := strings.TrimSpace(task.Description)
+		if desc == "" {
+			continue
+		}
+		out = append(out, StarterTask{Description: desc, Details: strings.TrimSpace(task.Details)})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// hasSkeletonFiles reports whether dir holds any instantiable entry beyond the
+// manifest (template.json). A metadata-only template contains just the
+// manifest. A read error is treated as "no skeleton" so the template still
+// lists as metadata-only rather than failing.
+func hasSkeletonFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Name() == ManifestFileName {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // ListLibrary returns the templates in the library directory: every immediate

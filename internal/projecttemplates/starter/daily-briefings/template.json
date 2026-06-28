@@ -1,0 +1,14 @@
+{
+  "name": "Daily Briefings",
+  "description": "Morning roundup, market summary, news digest. Recommended add-ons: a web search / news MCP, and any data sources you want summarized.",
+  "icon": "📊",
+  "behavior_profile": "general",
+  "builtin": true,
+  "tags": ["briefing"],
+  "starter_tasks": [
+    {
+      "description": "Morning briefing",
+      "details": "Customize the topics (e.g. headlines, market open, calendar conflicts) then schedule this task to run every weekday morning."
+    }
+  ]
+}

@@ -10,10 +10,25 @@
       <div class="modal-body workspace-create-modal-body">
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
-            <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Starting point</label>
-            <div id="folderTemplateGrid" class="workspace-template-grid mb-2" role="radiogroup" aria-label="Workspace template"></div>
-            <div style="margin-top: -2px; margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
-              Pick a starting point to pre-fill the workspace and seed example tasks. You can always edit or delete them after creation.
+            <div class="d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
+              <label style="font-size: 12px; color: var(--text-secondary);">Template</label>
+              <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
+            </div>
+            <div id="templatePicker" role="radiogroup" aria-label="Workspace template">
+              <div id="templateBuiltinGrid" class="workspace-template-grid mb-2"></div>
+              <div id="templateUserSection" hidden>
+                <div class="workspace-template-list-heading">Your templates</div>
+                <div id="templateUserList" class="workspace-template-list mb-2"></div>
+              </div>
+            </div>
+            <div id="projectTemplateDescription" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
+            <div id="projectTemplateEmptyHint" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" hidden></div>
+            <div id="projectNameRow" class="mb-2" hidden>
+              <label for="projectNameInput" style="font-size: 12px; color: var(--text-secondary);">Project name</label>
+              <input type="text" id="projectNameInput" class="modern-input w-100" placeholder="Defaults to the workspace name" autocomplete="off">
+            </div>
+            <div style="margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
+              Pick a template to set up the workspace. Some templates also scaffold a starter project folder; everything is optional and editable after creation.
             </div>
 
             <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
@@ -47,8 +62,19 @@
                   <option value="research">Research</option>
                   <option value="software_project">Software Project</option>
                 </select>
-                <div style="margin-top: -6px; margin-bottom: 2px; font-size: 12px; color: var(--text-secondary);">
-                  Controls how agents in this workspace plan and act — planning depth, whether they write a PRD / task list, and when they ask before destructive actions. Set automatically from your Starting point; change it anytime.
+                <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                  Controls how agents in this workspace plan and act — planning depth, whether they write a PRD / task list, and when they ask before destructive actions. Set automatically from your Template; change it anytime.
+                </div>
+
+                <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Use any folder as a template</label>
+                <div class="d-flex flex-column flex-sm-row gap-2 mb-1">
+                  <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
+                  <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
+                    Choose folder…
+                  </button>
+                </div>
+                <div style="margin-top: -2px; font-size: 12px; color: var(--text-secondary);">
+                  Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
                 </div>
               </div>
             </details>
@@ -95,36 +121,6 @@
             <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
             <div id="folderTagsMount" class="mb-1"></div>
             <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
-
-            <div class="workspace-setup-card mb-2" id="projectTemplateCard">
-              <div class="workspace-setup-header" style="align-items: flex-start; justify-content: space-between;">
-                <div>
-                  <div class="workspace-setup-title">Project (optional)</div>
-                  <p class="workspace-setup-help mb-0">Scaffold a project folder inside this workspace from a template — for example a REAPER song. Agents can read and edit it immediately.</p>
-                </div>
-                <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 12px; white-space: nowrap;">Manage…</button>
-              </div>
-
-              <label for="projectTemplateSelect" style="font-size: 12px; color: var(--text-secondary);">Project template</label>
-              <select id="projectTemplateSelect" class="modern-input w-100 mb-2" aria-label="Project template">
-                <option value="" selected>None</option>
-              </select>
-              <div id="projectTemplateDescription" style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
-              <div id="projectTemplateEmptyHint" style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);" hidden></div>
-
-              <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Or use any folder as a template</label>
-              <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
-                <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
-                <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
-                  Choose folder…
-                </button>
-              </div>
-
-              <div id="projectNameRow" hidden>
-                <label for="projectNameInput" style="font-size: 12px; color: var(--text-secondary);">Project name</label>
-                <input type="text" id="projectNameInput" class="modern-input w-100" placeholder="Defaults to the workspace name" autocomplete="off">
-              </div>
-            </div>
 
             <div class="folder-color-picker">
               <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>

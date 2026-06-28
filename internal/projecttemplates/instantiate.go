@@ -26,6 +26,11 @@ var (
 	// ErrReservedName reports a project name that collides with a reserved
 	// workspace entry.
 	ErrReservedName = errors.New("project name is reserved")
+	// ErrNoSkeleton reports an attempt to instantiate a metadata-only template
+	// (one with no files beyond template.json). The create flow branches on
+	// Template.HasSkeleton and skips instantiation for these, so reaching here
+	// is a caller error rather than a normal path.
+	ErrNoSkeleton = errors.New("template has no skeleton to instantiate")
 )
 
 // reservedProjectNames are workspace-folder entries a project folder must
@@ -111,6 +116,9 @@ func InstantiateWithFields(templatePath, workspaceFolder, projectName string, fi
 	srcInfo, err := os.Stat(templatePath)
 	if err != nil || !srcInfo.IsDir() {
 		return "", fmt.Errorf("%w: %q is not a folder", ErrTemplateNotFound, templatePath)
+	}
+	if !hasSkeletonFiles(templatePath) {
+		return "", fmt.Errorf("%w: %q", ErrNoSkeleton, templatePath)
 	}
 	wsInfo, err := os.Stat(workspaceFolder)
 	if err != nil || !wsInfo.IsDir() {

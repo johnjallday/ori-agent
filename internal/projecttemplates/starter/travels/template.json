@@ -1,0 +1,14 @@
+{
+  "name": "Travels",
+  "description": "Flights, hotels, trip planning. Recommended add-ons: a flight/hotel MCP, a calendar MCP, and a Travel skill.",
+  "icon": "✈",
+  "behavior_profile": "general",
+  "builtin": true,
+  "tags": ["travel"],
+  "starter_tasks": [
+    {
+      "description": "Plan an upcoming trip",
+      "details": "Replace this with destination, dates, budget, and any constraints. The agent will research flights and hotels and propose an itinerary."
+    }
+  ]
+}

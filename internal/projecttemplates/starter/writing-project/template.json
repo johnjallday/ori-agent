@@ -1,6 +1,9 @@
 {
   "name": "Writing Project",
   "description": "An outline plus a chapters folder for long-form writing.",
+  "icon": "📝",
+  "behavior_profile": "general",
+  "builtin": true,
   "tags": [
     "writing"
   ]
