@@ -88,7 +88,9 @@
               <div id="tplDetail" hidden>
                 <div class="d-flex justify-content-between align-items-start gap-3 mb-3 flex-wrap">
                   <div style="min-width: 0;">
-                    <h4 id="tplDetailName" class="mb-1" style="color: var(--text-primary); word-break: break-word;">Template</h4>
+                    <h4 id="tplDetailName" class="mb-1" style="color: var(--text-primary); word-break: break-word;">Template
+                      <span id="tplDetailBuiltinBadge" hidden style="display: inline-block; margin-left: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; vertical-align: middle; border-radius: 999px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);">Built-in · read-only</span>
+                    </h4>
                     <code id="tplDetailId" style="font-size: 12px; color: var(--text-secondary);"></code>
                   </div>
                   <div class="d-flex gap-2 flex-wrap">
@@ -116,6 +118,10 @@
                 <div class="tab-content">
                   <!-- Overview / metadata -->
                   <div class="tab-pane fade show active" id="tplOverviewPane" role="tabpanel" aria-labelledby="tplTabOverview">
+                    <div id="tplReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
+                      This is a built-in template and is read-only.
+                      <button id="tplDuplicateToCustomizeBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Duplicate to customize</button>
+                    </div>
                     <div class="mb-3">
                       <label for="tplEditName" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Display name</label>
                       <input id="tplEditName" type="text" class="modern-input w-100" maxlength="120" placeholder="Defaults to the folder id">
@@ -124,9 +130,28 @@
                       <label for="tplEditDescription" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Description</label>
                       <textarea id="tplEditDescription" class="form-control" rows="3" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;" placeholder="What is this template for?"></textarea>
                     </div>
+                    <div class="row g-3 mb-3">
+                      <div class="col-12 col-sm-4">
+                        <label for="tplEditIcon" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Icon</label>
+                        <input id="tplEditIcon" type="text" class="modern-input w-100" maxlength="8" placeholder="✈" autocomplete="off">
+                      </div>
+                      <div class="col-12 col-sm-8">
+                        <label for="tplEditBehavior" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Agent behavior</label>
+                        <select id="tplEditBehavior" class="modern-input w-100">
+                          <option value="general">General</option>
+                          <option value="research">Research</option>
+                          <option value="software_project">Software Project</option>
+                        </select>
+                      </div>
+                    </div>
                     <div class="mb-3">
                       <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Tags</label>
                       <div id="tplEditTags"></div>
+                    </div>
+                    <div class="mb-3">
+                      <label for="tplEditStarterTasks" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Starter tasks</label>
+                      <textarea id="tplEditStarterTasks" class="form-control" rows="3" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;" placeholder="One task per line. Optional details after a pipe:&#10;Plan an upcoming trip | destination, dates, budget"></textarea>
+                      <div style="margin-top: 4px; font-size: 11px; color: var(--text-secondary);">One task per line; add details after a <code>|</code>. Seeded into the workspace on creation.</div>
                     </div>
                     <div class="d-flex gap-2">
                       <button id="tplSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save changes</button>
