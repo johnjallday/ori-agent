@@ -17,24 +17,48 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListLibrary: %v", err)
 	}
-	ids := make([]string, 0, len(templates))
+	byID := map[string]Template{}
 	for _, tpl := range templates {
-		ids = append(ids, tpl.ID)
+		byID[tpl.ID] = tpl
 	}
-	if len(templates) != 2 || ids[0] != "reaper-song" || ids[1] != "writing-project" {
-		t.Fatalf("unexpected starter set: %v", ids)
+
+	// The two file-scaffold starters and the five metadata-only built-ins all
+	// materialize on a fresh library.
+	for _, id := range []string{
+		"reaper-song", "writing-project",
+		"travels", "daily-briefings", "content-production", "research-project", "personal-ops",
+	} {
+		if _, ok := byID[id]; !ok {
+			t.Fatalf("missing starter %q; got %v", id, templates)
+		}
 	}
-	if templates[0].Name != "Reaper Song" || templates[1].Name != "Writing Project" {
-		t.Errorf("manifest names not applied: %+v", templates)
+
+	// Scaffold starters keep their files, onboarding, and are flagged builtin.
+	reaper := byID["reaper-song"]
+	if reaper.Name != "Reaper Song" || !reaper.Builtin || !reaper.HasSkeleton {
+		t.Errorf("reaper-song: %+v", reaper)
 	}
-	if len(templates[0].Tags) != 2 || templates[0].Tags[0] != "music" || templates[0].Tags[1] != "reaper" {
-		t.Errorf("reaper starter tags not applied: %+v", templates[0].Tags)
+	if len(reaper.Tags) != 2 || reaper.Tags[0] != "music" || reaper.Tags[1] != "reaper" {
+		t.Errorf("reaper starter tags not applied: %+v", reaper.Tags)
 	}
-	if !templates[0].HasOnboarding() {
+	if !reaper.HasOnboarding() {
 		t.Error("reaper starter should carry template onboarding")
 	}
-	if len(templates[1].Tags) != 1 || templates[1].Tags[0] != "writing" {
-		t.Errorf("writing starter tags not applied: %+v", templates[1].Tags)
+	if writing := byID["writing-project"]; !writing.Builtin || !writing.HasSkeleton ||
+		len(writing.Tags) != 1 || writing.Tags[0] != "writing" {
+		t.Errorf("writing-project: %+v", writing)
+	}
+
+	// Metadata-only built-ins: builtin, no skeleton, carrying icon/behavior/tasks.
+	travels := byID["travels"]
+	if !travels.Builtin || travels.HasSkeleton {
+		t.Errorf("travels should be a builtin metadata-only template: %+v", travels)
+	}
+	if travels.Icon == "" || travels.BehaviorProfile != BehaviorProfileGeneral || len(travels.StarterTasks) == 0 {
+		t.Errorf("travels missing unified fields: %+v", travels)
+	}
+	if research := byID["research-project"]; research.BehaviorProfile != BehaviorProfileResearch {
+		t.Errorf("research-project behavior_profile = %q, want research", research.BehaviorProfile)
 	}
 
 	// Seed file with token name plus the dot-file under chapters/ made it out

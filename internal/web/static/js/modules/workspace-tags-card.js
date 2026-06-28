@@ -18,8 +18,6 @@ function wtcElements() {
   return {
     mount: document.getElementById('folderTagsMount'),
     templateHint: document.getElementById('folderTemplateTagsHint'),
-    templateSelect: document.getElementById('projectTemplateSelect'),
-    templatePathInput: document.getElementById('projectTemplatePathInput'),
     modal: document.getElementById('addFolderModal')
   };
 }
@@ -57,41 +55,22 @@ function wtcRenderTemplateTagsHint(tags) {
   els.templateHint.hidden = false;
 }
 
-async function wtcUpdateTemplateTagsHint() {
-  const els = wtcElements();
-  const templateId = els.templateSelect?.value?.trim() || '';
-  if (!templateId) {
-    wtcRenderTemplateTagsHint([]);
-    return;
-  }
-  try {
-    const response = await fetch('/api/project-templates');
-    if (!response.ok) {
-      wtcRenderTemplateTagsHint([]);
-      return;
-    }
-    const payload = await response.json().catch(() => ({}));
-    const templates = Array.isArray(payload?.templates) ? payload.templates : [];
-    const selected = templates.find(tpl => tpl?.id === templateId);
-    wtcRenderTemplateTagsHint(selected?.tags || []);
-  } catch {
-    wtcRenderTemplateTagsHint([]);
-  }
-}
-
 function wtcInit() {
   const els = wtcElements();
   if (!els.mount) return;
   wtcEnsureWidget();
-  els.templateSelect?.addEventListener('change', () => {
-    void wtcUpdateTemplateTagsHint();
+  // The unified Template picker emits its selection (with the template's tags);
+  // show which tags the selected template will contribute automatically.
+  els.modal?.addEventListener('workspace-template-selected', (event) => {
+    const template = event?.detail?.template || null;
+    wtcRenderTemplateTagsHint(Array.isArray(template?.tags) ? template.tags : []);
   });
   // Re-create the widget lazily after late module load and refresh the
   // suggestion pool every time the modal opens.
   els.modal?.addEventListener('show.bs.modal', () => {
     const widget = wtcEnsureWidget();
     void widget?.refreshPool?.();
-    void wtcUpdateTemplateTagsHint();
+    wtcRenderTemplateTagsHint([]);
   });
 }
 

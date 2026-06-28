@@ -1097,6 +1097,55 @@ body.workspace-page .workspace-setup-card {
   line-height: 1.3;
 }
 
+/* User-authored templates: a compact list below the built-in grid. */
+.workspace-template-list-heading {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin: 0.25rem 0;
+}
+
+.workspace-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.workspace-template-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.workspace-template-row:hover {
+  border-color: color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+}
+
+.workspace-template-row.is-selected {
+  border-color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+  box-shadow: 0 0 0 1px var(--primary-color) inset;
+}
+
+.workspace-template-row-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.workspace-template-row-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 /* "Advanced" disclosure in the create-workspace modal (Agent behavior). */
 .workspace-advanced-details {
   border: 1px solid var(--border-color);

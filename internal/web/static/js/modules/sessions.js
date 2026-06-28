@@ -218,10 +218,21 @@ const sessionManager = {
     document.getElementById('createFolderBtn')?.addEventListener('click', () => this.createFolder());
 
     // Agent behavior (formerly "Workspace preset"): a manual change marks the
-    // value as overridden so picking a Starting point won't clobber it.
+    // value as overridden so picking a Template won't clobber it.
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
       this.behaviorOverridden = true;
       this.updateBehaviorHint();
+    });
+
+    // Unified Template picker selection (dispatched by ProjectTemplateCard):
+    // prefill name/description (never clobbering typed input) and apply the
+    // template's Agent-behavior default.
+    document.getElementById('addFolderModal')?.addEventListener('workspace-template-selected', (event) => {
+      const template = event?.detail?.template || null;
+      this.workspaceTemplate = template;
+      this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
+      this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
+      this.applyTemplateBehavior(template);
     });
 
     const importToggle = document.getElementById('folderImportToggle');
@@ -3206,7 +3217,13 @@ const sessionManager = {
     this.behaviorOverridden = false;
     const advancedDisclosure = document.getElementById('folderAdvancedDisclosure');
     if (advancedDisclosure) advancedDisclosure.open = false;
-    this.renderWorkspaceTemplateGrid();
+    // Reset the unified Template picker back to Blank. Its reset emits a
+    // selection event that re-applies the (general) behavior default and clears
+    // any auto-filled name/description. A safety hint update covers the case
+    // where the picker module has not loaded yet.
+    this.workspaceTemplate = null;
+    window.ProjectTemplateCard?.reset?.();
+    this.updateBehaviorHint();
   },
 
   // Fills a create-modal input from a template default while tracking the
@@ -3222,32 +3239,6 @@ const sessionManager = {
       input.value = next;
       input.dataset[autofillAttr] = next;
     }
-  },
-
-  // Renders the "Starting point" template grid into #folderTemplateGrid and
-  // tracks the picked template on this.workspaceTemplate. Picking a card
-  // pre-fills the name/description (replacing earlier auto-filled values, never
-  // typed input). Behavior-profile wiring is layered on in a later step.
-  renderWorkspaceTemplateGrid() {
-    const grid = document.getElementById('folderTemplateGrid');
-    if (!grid || !window.WorkspaceTemplates || typeof window.WorkspaceTemplates.render !== 'function') {
-      this.workspaceTemplate = null;
-      return;
-    }
-    const nameInput = document.getElementById('folderNameInput');
-    const descriptionInput = document.getElementById('folderDescriptionInput');
-    const initial = window.WorkspaceTemplates.render(grid, {
-      onSelect: (template) => {
-        this.workspaceTemplate = template;
-        this.prefillTemplateValue(nameInput, template.defaultName, 'autofillName');
-        this.prefillTemplateValue(descriptionInput, template.defaultDescription, 'autofillDescription');
-        this.applyTemplateBehavior(template);
-      }
-    });
-    this.workspaceTemplate = initial;
-    // Seed the Agent behavior default from the initially-selected (Blank)
-    // template and sync the collapsed hint.
-    this.applyTemplateBehavior(initial);
   },
 
   // Friendly label for an Agent behavior profile value.
@@ -3268,12 +3259,14 @@ const sessionManager = {
     hint.textContent = `Agent behavior: ${this.behaviorProfileLabel(profile)}`;
   },
 
-  // Applies a Starting point template's default Agent behavior to the select,
-  // unless the user has manually overridden it. Always refreshes the hint.
+  // Applies a Template's default Agent behavior to the select, unless the user
+  // has manually overridden it. Always refreshes the hint. Accepts the API
+  // shape (behavior_profile); tolerates the legacy camelCase too.
   applyTemplateBehavior(template) {
     const select = document.getElementById('folderPresetSelect');
-    if (select && !this.behaviorOverridden && template && template.behaviorProfile) {
-      select.value = template.behaviorProfile;
+    const profile = template && (template.behavior_profile || template.behaviorProfile);
+    if (select && !this.behaviorOverridden && profile) {
+      select.value = profile;
     }
     this.updateBehaviorHint();
   },
@@ -3330,6 +3323,13 @@ const sessionManager = {
   // Create folder
   async createFolder() {
     if (this.isCreatingFolder) return;
+
+    // Snapshot the picked template's starter tasks now: the post-create
+    // ProjectTemplateCard.reset() re-selects Blank and emits a selection event
+    // that would otherwise clobber this.workspaceTemplate before we seed.
+    const starterTasksToSeed = Array.isArray(this.workspaceTemplate?.starter_tasks)
+      ? this.workspaceTemplate.starter_tasks.slice()
+      : [];
 
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -3537,22 +3537,22 @@ const sessionManager = {
         }
       }
 
-      // Seed starter tasks from the picked Starting point template (best-effort,
-      // non-fatal — the workspace already exists). Blank seeds nothing.
+      // Seed starter tasks from the picked Template (best-effort, non-fatal —
+      // the workspace already exists). Blank / templates without starter tasks
+      // seed nothing. Tasks come from the unified /api/project-templates data.
       let seededStarterTasks = 0;
-      if (
-        createdWorkspaceId &&
-        this.workspaceTemplate &&
-        window.WorkspaceTemplates &&
-        typeof window.WorkspaceTemplates.seedStarterTasks === 'function'
-      ) {
-        try {
-          seededStarterTasks = await window.WorkspaceTemplates.seedStarterTasks(
-            createdWorkspaceId,
-            this.workspaceTemplate
-          );
-        } catch (error) {
-          console.warn('Failed to seed starter tasks:', error);
+      if (createdWorkspaceId && starterTasksToSeed.length > 0) {
+        for (const task of starterTasksToSeed) {
+          if (!task || !task.description) continue;
+          try {
+            await this.createWorkspaceSeedTask(createdWorkspaceId, {
+              description: task.description,
+              details: task.details || ''
+            });
+            seededStarterTasks += 1;
+          } catch (error) {
+            console.warn('Failed to seed starter task:', task.description, error);
+          }
         }
       }
 

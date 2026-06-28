@@ -1,0 +1,18 @@
+{
+  "name": "Content Production",
+  "description": "Brand voice, drafts, scheduled posts. Recommended add-ons: a style-guide note, a publishing-tool MCP, and a Brand Voice skill.",
+  "icon": "✏",
+  "behavior_profile": "general",
+  "builtin": true,
+  "tags": ["content"],
+  "starter_tasks": [
+    {
+      "description": "Draft a style guide",
+      "details": "Replace with your brand voice rules: tone, words to avoid, target audience. The agent uses this as ground truth for every draft."
+    },
+    {
+      "description": "Draft this week's posts",
+      "details": "List the topics, then ask the agent to draft each in the brand voice. Schedule this task weekly once the style guide is settled."
+    }
+  ]
+}

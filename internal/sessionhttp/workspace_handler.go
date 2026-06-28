@@ -273,7 +273,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		ws.OrderIndex = *req.OrderIndex
 	}
 	if kind != session.WorkspaceKindGroup {
-		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
+		// Behavior profile: the request value wins; when absent, fall back to the
+		// selected template's behavior_profile so a template_id carries its
+		// behavior even when the caller (e.g. an API client) omits the preset.
+		preset := strings.TrimSpace(req.WorkspacePreset)
+		if preset == "" && templateResolved {
+			preset = resolvedTemplate.BehaviorProfile
+		}
+		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(preset))
 	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		if ws.SharedData == nil {
@@ -412,16 +419,25 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 					if !onboardingHandled {
-						// Non-fatal by design: a failed instantiation must not fail
-						// workspace creation. The warning is surfaced to the user.
-						if err := h.instantiateWorkspaceProject(r.Context(), ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
-							if templateResolveErr != nil {
-								err = templateResolveErr
-							}
-							projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
-							logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
-						} else {
+						switch {
+						case templateResolved && !resolvedTemplate.HasSkeleton:
+							// Metadata-only template (no files): there is no project to
+							// scaffold by design. Its behavior/tools/starter-tasks still
+							// apply; skip instantiation without surfacing a warning.
 							projectWarning = ""
+							logger.Info("Metadata-only template: skipping project scaffold", logger.Fields{"id": ws.ID, "template": resolvedTemplate.ID})
+						default:
+							// Non-fatal by design: a failed instantiation must not fail
+							// workspace creation. The warning is surfaced to the user.
+							if err := h.instantiateWorkspaceProject(r.Context(), ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+								if templateResolveErr != nil {
+									err = templateResolveErr
+								}
+								projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
+								logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
+							} else {
+								projectWarning = ""
+							}
 						}
 					}
 

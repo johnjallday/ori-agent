@@ -149,7 +149,7 @@ func newTemplate(path string) Template {
 	t.Icon = strings.TrimSpace(m.Icon)
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
-	t.Builtin = m.Builtin
+	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
 	t.Onboarding = m.Onboarding
 	if m.Tools != nil {

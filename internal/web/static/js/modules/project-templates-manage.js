@@ -300,17 +300,36 @@ async function ptmSettingsSave(value) {
   }
 }
 
-// --- Create-workspace "Project (optional)" card ---
-// The markup ships in create-workspace-modal.tmpl, which appears on several
-// pages driven by different modules (sessions.js on the live hub/home,
-// workspace-create.js on the legacy hub). The card binds its own behavior
-// here so it works wherever the markup exists; host modules only merge
-// getPayloadFields() into their create payload.
+// --- Create-workspace unified Template picker ---
+// The markup ships in create-workspace-modal.tmpl (live on sessions.js). The
+// picker renders built-in templates as a card grid plus user-authored
+// templates as a compact list, all one selection. Host modules merge
+// getPayloadFields() into their create payload, read getSelectedTemplate() for
+// name/description prefill + starter-task seeding, and listen for the
+// 'workspace-template-selected' event dispatched on #addFolderModal to apply
+// the behavior default.
+
+// The synthetic "Blank" entry maps to no template (no template_id submitted).
+const PTC_BLANK = {
+  id: '',
+  name: '',
+  description: '',
+  icon: '✍',
+  label: 'Blank',
+  behavior_profile: 'general',
+  starter_tasks: [],
+  has_skeleton: false,
+  blank: true
+};
+
+let ptcSelected = PTC_BLANK;
 
 function ptcElements() {
   return {
-    card: document.getElementById('projectTemplateCard'),
-    select: document.getElementById('projectTemplateSelect'),
+    picker: document.getElementById('templatePicker'),
+    grid: document.getElementById('templateBuiltinGrid'),
+    userSection: document.getElementById('templateUserSection'),
+    userList: document.getElementById('templateUserList'),
     description: document.getElementById('projectTemplateDescription'),
     emptyHint: document.getElementById('projectTemplateEmptyHint'),
     pathInput: document.getElementById('projectTemplatePathInput'),
@@ -325,12 +344,13 @@ function ptcElements() {
 function ptcGetPayloadFields() {
   const els = ptcElements();
   const fields = {};
-  const templateId = els.select?.value?.trim() || '';
   const templatePath = els.pathInput?.value?.trim() || '';
-  if (templateId) {
-    fields.template_id = templateId;
-  } else if (templatePath) {
+  const templateId = ptcSelected && !ptcSelected.blank ? String(ptcSelected.id || '').trim() : '';
+  if (templatePath) {
+    // The ad-hoc folder (Advanced) overrides the picked template.
     fields.template_path = templatePath;
+  } else if (templateId) {
+    fields.template_id = templateId;
   }
   const projectName = els.nameInput?.value?.trim() || '';
   if ((fields.template_id || fields.template_path) && projectName) {
@@ -339,69 +359,168 @@ function ptcGetPayloadFields() {
   return fields;
 }
 
+// getSelectedTemplate returns the picked template (or the Blank sentinel) so the
+// host can prefill name/description, apply the behavior default, and seed the
+// template's starter tasks after creation.
+function ptcGetSelectedTemplate() {
+  return ptcSelected;
+}
+
+function ptcEmitSelection() {
+  const modal = document.getElementById('addFolderModal');
+  modal?.dispatchEvent(new CustomEvent('workspace-template-selected', {
+    detail: { template: ptcSelected }
+  }));
+}
+
+function ptcMarkSelectedAcross(selectedEl) {
+  const els = ptcElements();
+  [els.grid, els.userList].forEach((container) => {
+    container?.querySelectorAll('.workspace-template-card, .workspace-template-row').forEach((el) => {
+      const on = el === selectedEl;
+      el.classList.toggle('is-selected', on);
+      el.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  });
+}
+
+function ptcSelect(template, cardEl) {
+  ptcSelected = template || PTC_BLANK;
+  const els = ptcElements();
+  ptcMarkSelectedAcross(cardEl);
+  // Picking a library template clears the ad-hoc folder (mutually exclusive);
+  // selecting Blank keeps a typed path so it can act as the override.
+  if (els.pathInput && !ptcSelected.blank) els.pathInput.value = '';
+  ptcUpdateUI();
+  ptcEmitSelection();
+}
+
+function ptcCard(template) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'workspace-template-card';
+  card.setAttribute('role', 'radio');
+  card.setAttribute('aria-checked', 'false');
+  card.dataset.templateId = template.id || '';
+  const icon = document.createElement('span');
+  icon.className = 'workspace-template-card-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = template.icon || '📁';
+  const label = document.createElement('span');
+  label.className = 'workspace-template-card-label';
+  label.textContent = template.label || template.name || template.id;
+  card.append(icon, label);
+  const descText = template.description || '';
+  if (descText) {
+    const desc = document.createElement('span');
+    desc.className = 'workspace-template-card-desc';
+    desc.textContent = descText;
+    card.append(desc);
+  }
+  card.addEventListener('click', () => ptcSelect(template, card));
+  return card;
+}
+
+function ptcRow(template) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'workspace-template-row';
+  row.setAttribute('role', 'radio');
+  row.setAttribute('aria-checked', 'false');
+  row.dataset.templateId = template.id || '';
+  const icon = document.createElement('span');
+  icon.className = 'workspace-template-row-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = template.icon || '📁';
+  const label = document.createElement('span');
+  label.className = 'workspace-template-row-label';
+  label.textContent = template.name || template.id;
+  row.append(icon, label);
+  row.addEventListener('click', () => ptcSelect(template, row));
+  return row;
+}
+
 function ptcUpdateUI() {
   const els = ptcElements();
   if (els.description) {
-    const selected = els.select?.selectedOptions?.[0];
-    const text = selected?.dataset?.description || '';
-    els.description.textContent = text;
-    els.description.hidden = !text;
+    // Built-in cards show their own description; only surface the hint for a
+    // selected user template (compact rows show name only).
+    const showDesc = Boolean(ptcSelected && !ptcSelected.blank && !ptcSelected.builtin && ptcSelected.description);
+    els.description.textContent = showDesc ? ptcSelected.description : '';
+    els.description.hidden = !showDesc;
   }
   if (els.nameRow) {
-    const active = Boolean(els.select?.value?.trim() || els.pathInput?.value?.trim());
-    els.nameRow.hidden = !active;
+    const hasPath = Boolean(els.pathInput?.value?.trim());
+    const scaffolds = Boolean(ptcSelected && !ptcSelected.blank && ptcSelected.has_skeleton);
+    els.nameRow.hidden = !(scaffolds || hasPath);
   }
+}
+
+function ptcBlankCard() {
+  return ptcElements().grid?.querySelector('.workspace-template-card[data-template-id=""]') || null;
 }
 
 function ptcReset() {
   const els = ptcElements();
-  if (els.select) els.select.value = '';
   if (els.pathInput) els.pathInput.value = '';
   if (els.nameInput) els.nameInput.value = '';
-  ptcUpdateUI();
+  ptcSelect(PTC_BLANK, ptcBlankCard());
 }
 
 function ptcSyncImportVisibility() {
   const els = ptcElements();
-  if (!els.card) return;
-  // Project templates scaffold a new project; they don't apply when
-  // importing an existing folder as the workspace.
   const importMode = Boolean(els.importToggle?.checked);
-  els.card.hidden = importMode;
+  // Templates scaffold/seed a new workspace; they don't apply when importing an
+  // existing folder as the workspace itself.
+  if (els.picker) els.picker.hidden = importMode;
+  if (importMode) {
+    if (els.nameRow) els.nameRow.hidden = true;
+    if (els.description) els.description.hidden = true;
+  }
 }
 
 async function ptcPopulate() {
   const els = ptcElements();
-  if (!els.select) return;
+  if (!els.grid) return;
 
-  els.select.innerHTML = '<option value="" selected>None</option>';
+  els.grid.innerHTML = '';
+  if (els.userList) els.userList.innerHTML = '';
+  if (els.userSection) els.userSection.hidden = true;
   if (els.emptyHint) els.emptyHint.hidden = true;
+
+  // Blank is always the first built-in card and the default selection.
+  const blankCard = ptcCard({ ...PTC_BLANK });
+  els.grid.appendChild(blankCard);
 
   try {
     const data = await ptmFetchJSON('/api/project-templates');
     const templates = Array.isArray(data.templates) ? data.templates : [];
-    for (const template of templates) {
-      if (!template || !template.id) continue;
-      const option = document.createElement('option');
-      option.value = template.id;
-      option.textContent = template.name || template.id;
-      option.dataset.description = template.description || '';
-      els.select.appendChild(option);
+    const builtins = templates.filter((t) => t && t.id && t.builtin);
+    const userTemplates = templates.filter((t) => t && t.id && !t.builtin);
+
+    for (const template of builtins) {
+      els.grid.appendChild(ptcCard(template));
     }
-    if (templates.length === 0 && els.emptyHint) {
+    if (userTemplates.length > 0 && els.userList && els.userSection) {
+      for (const template of userTemplates) {
+        els.userList.appendChild(ptcRow(template));
+      }
+      els.userSection.hidden = false;
+    } else if (builtins.length === 0 && els.emptyHint) {
       els.emptyHint.textContent = data.templates_root
-        ? `No templates yet. Drop a template folder into ${data.templates_root} to add one, or use any folder below.`
-        : 'No templates yet. Use any folder below as a template.';
+        ? `No templates yet. Drop a template folder into ${data.templates_root} to add one, or use any folder in Advanced.`
+        : 'No templates yet. Use any folder in Advanced as a template.';
       els.emptyHint.hidden = false;
     }
   } catch (error) {
     console.error('Failed to load project templates:', error);
     if (els.emptyHint) {
-      els.emptyHint.textContent = 'Could not load the template library. You can still use any folder below as a template.';
+      els.emptyHint.textContent = 'Could not load the template library. You can still use any folder in Advanced as a template.';
       els.emptyHint.hidden = false;
     }
   }
-  ptcUpdateUI();
+
+  ptcSelect(PTC_BLANK, blankCard);
 }
 
 async function ptcBrowse() {
@@ -415,8 +534,10 @@ async function ptcBrowse() {
       body: JSON.stringify({ title: 'Select a Template Folder' })
     });
     if (picked.selected && picked.path) {
+      // The ad-hoc folder overrides the picked template: deselect cards (Blank
+      // keeps the typed path) and let getPayloadFields prefer template_path.
+      ptcSelect(PTC_BLANK, ptcBlankCard());
       els.pathInput.value = picked.path;
-      if (els.select) els.select.value = '';
       ptcUpdateUI();
     }
   } catch (error) {
@@ -428,18 +549,15 @@ async function ptcBrowse() {
 
 function ptcInit() {
   const els = ptcElements();
-  if (!els.card) return;
+  if (!els.picker) return;
 
-  if (els.select) {
-    els.select.addEventListener('change', () => {
-      // Library pick and ad-hoc folder are mutually exclusive.
-      if (els.select.value && els.pathInput) els.pathInput.value = '';
-      ptcUpdateUI();
-    });
-  }
   if (els.pathInput) {
     els.pathInput.addEventListener('input', () => {
-      if (els.pathInput.value.trim() && els.select) els.select.value = '';
+      // A typed path overrides the card selection without re-prefilling fields.
+      if (els.pathInput.value.trim()) {
+        ptcSelected = PTC_BLANK;
+        ptcMarkSelectedAcross(ptcBlankCard());
+      }
       ptcUpdateUI();
     });
   }
@@ -455,13 +573,11 @@ function ptcInit() {
     els.importToggle.addEventListener('change', ptcSyncImportVisibility);
   }
 
-  // Reset and (re)load the library every time the create modal opens,
-  // whichever module opened it. Runs after the host module's own show
-  // handler, so import-mode state is already settled.
+  // (Re)load the library every time the create modal opens, whichever module
+  // opened it. Runs after the host module's own show handler.
   const createModal = document.getElementById('addFolderModal');
   if (createModal) {
     createModal.addEventListener('show.bs.modal', () => {
-      ptcReset();
       ptcSyncImportVisibility();
       void ptcPopulate();
     });
@@ -472,7 +588,8 @@ function ptcInit() {
 window.ProjectTemplateCard = {
   populate: ptcPopulate,
   reset: ptcReset,
-  getPayloadFields: ptcGetPayloadFields
+  getPayloadFields: ptcGetPayloadFields,
+  getSelectedTemplate: ptcGetSelectedTemplate
 };
 
 function ptmInitListeners() {

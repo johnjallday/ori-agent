@@ -2,6 +2,7 @@ package projecttemplates
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,6 +18,42 @@ import (
 var starterFS embed.FS
 
 const starterRoot = "starter"
+
+// builtinStarterIDs is the set of shipped starter ids whose embedded manifest
+// declares "builtin": true. Derived from starterFS so the embedded templates
+// stay the single source of truth for what ships built-in.
+var builtinStarterIDs = func() map[string]struct{} {
+	ids := map[string]struct{}{}
+	entries, err := starterFS.ReadDir(starterRoot)
+	if err != nil {
+		return ids
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		data, err := starterFS.ReadFile(path.Join(starterRoot, entry.Name(), ManifestFileName))
+		if err != nil {
+			continue
+		}
+		var m struct {
+			Builtin bool `json:"builtin"`
+		}
+		if json.Unmarshal(data, &m) == nil && m.Builtin {
+			ids[entry.Name()] = struct{}{}
+		}
+	}
+	return ids
+}()
+
+// IsBuiltinStarterID reports whether id is a shipped built-in starter template.
+// It lets the listing layer mark a shipped template as built-in even on installs
+// whose on-disk copy predates the builtin flag (EnsureLibrary never overwrites
+// an existing folder, so an old reaper-song/writing-project won't carry it).
+func IsBuiltinStarterID(id string) bool {
+	_, ok := builtinStarterIDs[id]
+	return ok
+}
 
 // EnsureLibrary creates the templates library directory if missing and
 // materializes each starter template whose folder is absent. A folder that
