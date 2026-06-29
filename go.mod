@@ -5,7 +5,7 @@ go 1.25.11
 require (
 	fyne.io/fyne/v2 v2.7.4
 	github.com/BurntSushi/toml v1.6.0
-	github.com/anthropics/anthropic-sdk-go v1.51.0
+	github.com/anthropics/anthropic-sdk-go v1.52.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getlantern/systray v1.2.2
 	github.com/google/uuid v1.6.0
@@ -94,7 +94,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.73.5 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
