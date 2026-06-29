@@ -1135,6 +1135,7 @@ export class WorkspaceDetailPage {
         'workspace-detail-task-confirm-step-mode-input'
       ),
       taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
+      taskConfirmCloseBtn: document.getElementById('workspace-detail-task-confirm-close'),
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
       // Project template modal
@@ -4573,14 +4574,6 @@ export class WorkspaceDetailPage {
     }
   }
 
-  markEntryAgentPromptDismissed() {
-    try {
-      window.sessionStorage?.setItem(this.getEntryAgentPromptDismissalStorageKey(), '1');
-    } catch (_error) {
-      // Ignore storage errors; this only prevents repeated prompts in the same tab.
-    }
-  }
-
   shouldPromptForMissingEntryAgent() {
     const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
     if (entryAgentName) {
@@ -4635,12 +4628,15 @@ export class WorkspaceDetailPage {
 
     const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
     const entryAgentDefaults = this.buildWorkspaceEntryAgentDefaults();
-    const confirmed = await this.showTaskConfirmDialog({
+    // An entry agent is required for the workspace to operate, so this prompt is
+    // mandatory: there is no "create later" escape and it resolves only when the
+    // user proceeds to create one.
+    await this.showTaskConfirmDialog({
       eyebrow: 'Workspace Setup',
       title: 'Create an entry agent for this workspace?',
       message: `"${workspaceName}" cannot function until it has an entry agent.`,
       confirmLabel: 'Create Entry Agent',
-      cancelLabel: 'Not Now',
+      mandatory: true,
       metaItems: [workspaceName, entryAgentDefaults.seedName, 'No entry agent'],
       details: [
         'The entry agent is required for this workspace to operate normally.',
@@ -4649,17 +4645,6 @@ export class WorkspaceDetailPage {
         'You can rename or replace it later.'
       ]
     });
-
-    if (!confirmed) {
-      this.markEntryAgentPromptDismissed();
-      if (window.Toast) {
-        window.Toast.warning(
-          `"${workspaceName}" cannot function until you create an entry agent.`,
-          { title: 'Entry Agent Required' }
-        );
-      }
-      return;
-    }
 
     this.clearEntryAgentPromptDismissal();
     this.openWorkspaceEntryAgentCreateFlow();
@@ -4730,6 +4715,10 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.taskConfirmCancelBtn) {
       this.elements.taskConfirmCancelBtn.textContent = 'Cancel';
+      this.elements.taskConfirmCancelBtn.classList.remove('d-none');
+    }
+    if (this.elements.taskConfirmCloseBtn) {
+      this.elements.taskConfirmCloseBtn.classList.remove('d-none');
     }
     if (this.elements.taskConfirmConfirmBtn) {
       this.elements.taskConfirmConfirmBtn.textContent = 'Continue';
@@ -4856,8 +4845,26 @@ export class WorkspaceDetailPage {
     this.elements.taskConfirmSequence.classList.remove('d-none');
   }
 
-  getTaskConfirmModalInstance() {
+  getTaskConfirmModalInstance(options = null) {
     if (!this.elements.taskConfirmModal || !window.bootstrap) return null;
+
+    // Bootstrap locks backdrop/keyboard at construction, so when a caller asks
+    // for a different dismissibility mode than the active instance, dispose and
+    // rebuild it. A mandatory dialog uses a static backdrop and ignores Escape.
+    if (options && typeof options.mandatory === 'boolean') {
+      if (this.taskConfirmModalMandatory !== options.mandatory) {
+        const existing = bootstrap.Modal.getInstance(this.elements.taskConfirmModal);
+        if (existing) existing.dispose();
+        this.taskConfirmModalMandatory = options.mandatory;
+        return new bootstrap.Modal(
+          this.elements.taskConfirmModal,
+          options.mandatory
+            ? { backdrop: 'static', keyboard: false }
+            : { backdrop: true, keyboard: true }
+        );
+      }
+    }
+
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
       ? bootstrap.Modal.getOrCreateInstance(this.elements.taskConfirmModal)
       : bootstrap.Modal.getInstance(this.elements.taskConfirmModal) ||
@@ -4917,6 +4924,9 @@ export class WorkspaceDetailPage {
     const sequenceItems = this.normalizeTaskConfirmSequenceItems(options?.sequenceItems);
     const allowStepThrough = options?.allowStepThrough === true;
     const defaultStepThrough = options?.defaultStepThrough === true;
+    // A mandatory dialog has no escape hatch: no cancel/close button, and the
+    // backdrop/Escape are disabled. The promise can only resolve via confirm.
+    const mandatory = options?.mandatory === true;
 
     if (!this.elements.taskConfirmModal || !window.bootstrap) {
       const fallbackSequence =
@@ -4950,6 +4960,10 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.taskConfirmCancelBtn) {
       this.elements.taskConfirmCancelBtn.textContent = cancelLabel || 'Cancel';
+      this.elements.taskConfirmCancelBtn.classList.toggle('d-none', mandatory);
+    }
+    if (this.elements.taskConfirmCloseBtn) {
+      this.elements.taskConfirmCloseBtn.classList.toggle('d-none', mandatory);
     }
     if (this.elements.taskConfirmConfirmBtn) {
       this.elements.taskConfirmConfirmBtn.textContent = confirmLabel || 'Continue';
@@ -4962,7 +4976,7 @@ export class WorkspaceDetailPage {
 
     return new Promise(resolve => {
       this.pendingTaskConfirm = { resolve, resolved: false };
-      const modal = this.getTaskConfirmModalInstance();
+      const modal = this.getTaskConfirmModalInstance({ mandatory });
       modal?.show();
       window.setTimeout(() => {
         this.elements.taskConfirmConfirmBtn?.focus();
