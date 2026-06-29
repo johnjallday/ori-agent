@@ -294,6 +294,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// chat-ready immediately. Concrete workspaces are created without an entry
 	// agent; the UI prompts the user to create one with their choice of
 	// model/provider.
+	entryAgentSet := false
 	if req.EntryAgentName != "" {
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
@@ -303,10 +304,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		if entryAgentName != "" {
 			setWorkspaceEntryAgent(ws, entryAgentName)
+			entryAgentSet = true
 		}
 	} else if kind == session.WorkspaceKindGroup {
 		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
+			entryAgentSet = true
 		}
 	}
 
@@ -463,6 +466,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	// Completeness/ordering backstop: when the workspace was created with an
+	// entry agent (an explicit one, or a group's auto-created manager), claim any
+	// tasks that already exist on the folder workspace. The common flow seeds
+	// starter tasks from the client after this response — where default-on-create
+	// assigns them to the coordinator directly — so this is a no-op there and the
+	// safety net for create-time/import-style seeds.
+	if entryAgentSet {
+		h.claimUnassignedTasksForEntryAgentLogged(ws.ID)
 	}
 
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})

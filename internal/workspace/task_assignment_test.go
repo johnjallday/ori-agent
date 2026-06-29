@@ -54,3 +54,14 @@ func TestIsValidTaskAssignmentMode(t *testing.T) {
 		t.Error("IsValidTaskAssignmentMode accepted an invalid value")
 	}
 }
+
+func TestEntryAgentDefaultModeIsValid(t *testing.T) {
+	if !IsValidTaskAssignmentMode(TaskAssignmentModeEntryAgentDefault) {
+		t.Fatalf("IsValidTaskAssignmentMode(%q) = false, want true", TaskAssignmentModeEntryAgentDefault)
+	}
+	// The sweep attributes claimed tasks to the system sentinel, distinct from
+	// the manual sentinel, so audits can tell a claim from a user assignment.
+	if TaskAssignedBySystem == TaskAssignedByManual {
+		t.Fatal("TaskAssignedBySystem must differ from TaskAssignedByManual")
+	}
+}

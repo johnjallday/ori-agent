@@ -17,10 +17,21 @@ const (
 	// TaskAssignmentModeLegacyUnknown — provenance could not be determined; backfilled
 	// onto tasks that predate assignment provenance during migration.
 	TaskAssignmentModeLegacyUnknown TaskAssignmentMode = "legacy_unknown"
+	// TaskAssignmentModeEntryAgentDefault — assigned to the workspace coordinator
+	// (entry agent) because the task was created or seeded without an explicit
+	// assignee, or claimed by the coordinator once it became available. Distinct
+	// from a deliberate manual or coordinator-planned assignment.
+	TaskAssignmentModeEntryAgentDefault TaskAssignmentMode = "entry_agent_default"
 )
 
 // TaskAssignedByManual is the sentinel AssignedBy value for user-driven assignments.
 const TaskAssignedByManual = "manual"
+
+// TaskAssignedBySystem is the sentinel AssignedBy value for assignments the system
+// made on the coordinator's behalf without the coordinator actively choosing —
+// e.g. the claim sweep that hands pre-existing unassigned tasks to a newly
+// available entry agent.
+const TaskAssignedBySystem = "system"
 
 // IsValidTaskAssignmentMode reports whether mode is one of the known values.
 func IsValidTaskAssignmentMode(mode TaskAssignmentMode) bool {
@@ -28,7 +39,8 @@ func IsValidTaskAssignmentMode(mode TaskAssignmentMode) bool {
 	case TaskAssignmentModeStaticPlan,
 		TaskAssignmentModeManual,
 		TaskAssignmentModeDynamicDelegation,
-		TaskAssignmentModeLegacyUnknown:
+		TaskAssignmentModeLegacyUnknown,
+		TaskAssignmentModeEntryAgentDefault:
 		return true
 	}
 	return false

@@ -83,7 +83,11 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		CreatedAt:      time.Now(),
 	}
 
-	// Add to workspace
+	// Add to workspace. Capture the prior agent count first: adding the first
+	// agent to an otherwise-agentless workspace makes it the coordinator (via the
+	// single-agent default), which is when pre-existing unassigned tasks should
+	// be claimed.
+	firstAgentAdded := len(workspace.AgentInstances) == 0
 	workspace.AgentInstances = append(workspace.AgentInstances, newInstance)
 
 	// Also add to legacy agents array for backward compatibility
@@ -113,6 +117,15 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		logger.Warn("Failed to sync workspace.json after adding workspace agent", logger.Fields{"id": workspaceID, "error": err})
 	}
 
+	// When this add established the workspace's coordinator (its first agent),
+	// claim any tasks that were created before a coordinator existed (e.g.
+	// template starter tasks) so they are owned, not orphaned. Runs after the
+	// folder-store sync above so the sweep resolves the now-coordinator agent.
+	tasksClaimed := 0
+	if firstAgentAdded {
+		tasksClaimed = h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
+	}
+
 	onboardingSummary, _, onboardingErr := h.resumeTemplateOnboardingForEntryAgent(r.Context(), workspace)
 	if onboardingErr != nil {
 		logger.Warn("Failed to resume template onboarding after adding workspace agent", logger.Fields{"id": workspaceID, "error": onboardingErr})
@@ -132,6 +145,9 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	}
 	if onboardingSummary != nil {
 		response["onboarding"] = onboardingSummary
+	}
+	if tasksClaimed > 0 {
+		response["tasks_claimed"] = tasksClaimed
 	}
 	_ = orihttp.RespondCreated(w, response)
 }
@@ -252,6 +268,12 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 	}
 	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
 		logger.Warn("Failed to sync workspace.json after removing workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
+
+	// If removing the entry agent promoted a different member to coordinator,
+	// hand any now-unassigned tasks to the new entry agent.
+	if entryAgentRemoved && len(newInstances) > 0 {
+		h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
 	}
 
 	logger.Info("Agent removed from workspace", logger.Fields{

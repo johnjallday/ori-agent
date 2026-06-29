@@ -162,6 +162,10 @@ func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, descript
 			Status:      workspace.TaskStatusPending,
 			Priority:    3,
 		}
+		// Default the unassigned task to the workspace coordinator (entry agent)
+		// when one can be resolved, so assistant-created work is owned, not
+		// orphaned in the Unassigned column.
+		ws.ApplyEntryAgentDefault(&task)
 		if addErr := ws.AddTask(task); addErr != nil {
 			return addErr
 		}

@@ -209,6 +209,13 @@ func (th *TaskHandler) HandleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
+	// Default any parent/subtask left without an explicit assignee to the
+	// workspace coordinator (entry agent); a no-op for tasks that already name
+	// one, so deliberate workflow assignments are preserved (FR15).
+	for i := range tasks {
+		ws.ApplyEntryAgentDefault(&tasks[i])
+	}
+
 	if err := ws.AddTasks(tasks); err != nil {
 		if respondTaskGraphError(w, err, "Failed to create workflow") {
 			return

@@ -126,10 +126,15 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		task.OutputContract = task.OutputSpec.Contract
 	}
 
-	// The workspace task HTTP API is the manual (user-driven) path, so stamp
-	// manual assignment provenance. Membership is validated by the shared
-	// assignment service — assigning to a non-member workspace agent is rejected.
-	if err := workspace.ApplyTaskAssignment(&task, TaskAssignment{
+	// The workspace task HTTP API is the manual (user-driven) path. An explicit
+	// assignee is stamped manual; an omitted (empty/"unassigned") assignee
+	// defaults to the workspace coordinator (entry agent) when one can be
+	// resolved, otherwise it stays unassigned to be claimed later. Membership is
+	// validated by the shared assignment service — assigning to a non-member
+	// workspace agent is rejected.
+	if taskAssigneeIsDefaultable(req.To) {
+		workspace.ApplyEntryAgentDefault(&task)
+	} else if err := workspace.ApplyTaskAssignment(&task, TaskAssignment{
 		AgentName:  req.To,
 		Mode:       TaskAssignmentModeManual,
 		AssignedBy: TaskAssignedByManual,
