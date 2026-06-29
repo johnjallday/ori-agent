@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -324,6 +326,14 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		task.OutputContract = task.OutputSpec.Contract
 	}
 
+	// Default an otherwise-unassigned task to the workspace coordinator (entry
+	// agent) so created work is owned and routable instead of orphaned. No-op
+	// when the request named an assignee or no coordinator can be resolved. Runs
+	// before the scheduled-task validation below so a coordinator-defaulted
+	// schedule is not rejected as unassigned (FR8), and before provenance
+	// reconciliation so the entry_agent_default stamp it writes is preserved.
+	defaultedToEntryAgent := ws.ApplyEntryAgentDefault(&task)
+
 	// Validate: scheduled tasks must be assigned to an agent
 	if task.ScheduleEnabled && task.Schedule != nil {
 		if task.To == "" || task.To == "unassigned" {
@@ -348,9 +358,23 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Record assignment provenance. This endpoint serves both manual creates and
 	// coordinator-planned (auto-parse) creates, so honor explicit, valid
-	// provenance from the request and default to manual otherwise.
-	task.AssignmentMode, task.AssignedBy, task.AssignmentReason = resolveCreateTaskProvenance(
-		req.AssignmentMode, req.AssignedBy, req.AssignmentReason)
+	// provenance from the request and default to manual otherwise. When the task
+	// was defaulted to the entry agent above and the request carried no explicit
+	// provenance, keep the entry_agent_default stamp instead of overwriting it
+	// back to manual (FR9a).
+	reqMode := workspace.TaskAssignmentMode(strings.TrimSpace(req.AssignmentMode))
+	hasExplicitProvenance := workspace.IsValidTaskAssignmentMode(reqMode) && reqMode != workspace.TaskAssignmentModeLegacyUnknown
+	if hasExplicitProvenance || !defaultedToEntryAgent {
+		task.AssignmentMode, task.AssignedBy, task.AssignmentReason = resolveCreateTaskProvenance(
+			req.AssignmentMode, req.AssignedBy, req.AssignmentReason)
+	}
+
+	// Pre-assign the ID so the created task can be located unambiguously after
+	// save; matching on the request's To no longer works once defaulting may
+	// have changed it (FR9).
+	if task.ID == "" {
+		task.ID = uuid.New().String()
+	}
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
@@ -369,18 +393,10 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get the task we just added (it now has an ID)
-	// Find the most recently added task with matching properties
-	var createdTask *workspace.Task
-	for i := len(ws.Tasks) - 1; i >= 0; i-- {
-		if ws.Tasks[i].Description == req.Description && ws.Tasks[i].From == req.From && ws.Tasks[i].To == req.To {
-			createdTask = &ws.Tasks[i]
-			break
-		}
-	}
-
-	if createdTask == nil {
-		logger.Error("Could not find created task", logger.Fields{})
+	// Get the task we just added by its pre-assigned ID.
+	createdTask, err := ws.GetTask(task.ID)
+	if err != nil || createdTask == nil {
+		logger.Error("Could not find created task", logger.Fields{"task_id": task.ID, "error": err})
 		orihttp.InternalError(w, "Task created but could not be retrieved")
 		return
 	}

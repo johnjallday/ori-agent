@@ -485,6 +485,10 @@ func applyMarkdownItemsToWorkspace(ws *Workspace, items []taskMarkdownItem, warn
 			}
 			task.CompletedAt = &now
 		}
+		// Default to the workspace coordinator (entry agent) when the markdown
+		// line named no assignee; a no-op when the line specified one, so
+		// markdown-declared assignees are preserved.
+		ws.ApplyEntryAgentDefault(&task)
 		if err := ws.AddTask(task); err != nil {
 			*warnings = append(*warnings, fmt.Sprintf("failed to add task from line %d: %v", item.LineIndex+1, err))
 			continue
