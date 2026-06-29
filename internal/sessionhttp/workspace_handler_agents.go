@@ -98,8 +98,10 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		workspace.Agents = append(workspace.Agents, req.AgentName)
 	}
 
+	entryAgentJustSet := false
 	if strings.TrimSpace(currentWorkspaceEntryAgentName(workspace)) == "" {
 		setWorkspaceEntryAgent(workspace, req.AgentName)
+		entryAgentJustSet = true
 	}
 
 	workspace.UpdatedAt = time.Now()
@@ -111,6 +113,15 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	}
 	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
 		logger.Warn("Failed to sync workspace.json after adding workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
+
+	// When this add established the workspace's entry agent, claim any tasks that
+	// were created before a coordinator existed (e.g. template starter tasks) so
+	// they are owned, not orphaned. Runs after the folder-store sync above so the
+	// sweep resolves the just-set coordinator.
+	tasksClaimed := 0
+	if entryAgentJustSet {
+		tasksClaimed = h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
 	}
 
 	onboardingSummary, _, onboardingErr := h.resumeTemplateOnboardingForEntryAgent(r.Context(), workspace)
@@ -132,6 +143,9 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	}
 	if onboardingSummary != nil {
 		response["onboarding"] = onboardingSummary
+	}
+	if tasksClaimed > 0 {
+		response["tasks_claimed"] = tasksClaimed
 	}
 	_ = orihttp.RespondCreated(w, response)
 }
@@ -252,6 +266,12 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 	}
 	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
 		logger.Warn("Failed to sync workspace.json after removing workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
+
+	// If removing the entry agent promoted a different member to coordinator,
+	// hand any now-unassigned tasks to the new entry agent.
+	if entryAgentRemoved && len(newInstances) > 0 {
+		h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
 	}
 
 	logger.Info("Agent removed from workspace", logger.Fields{

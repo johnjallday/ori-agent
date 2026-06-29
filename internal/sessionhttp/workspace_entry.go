@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,59 @@ import (
 )
 
 const workspaceEntryAgentNameKey = "entry_agent_name"
+
+// errNoTasksClaimed is an internal sentinel returned from the claim sweep's
+// Update closure to skip the otherwise-unconditional folder-store Save (and its
+// task-markdown rewrite) when there is nothing to claim. The caller treats it as
+// success.
+var errNoTasksClaimed = errors.New("no unassigned tasks to claim")
+
+// claimUnassignedTasksForEntryAgent hands every currently-unassigned task in the
+// workspace to its resolved coordinator (entry agent). Tasks live in the folder
+// store, so the sweep runs inside workspaceStore.Update for lost-update safety.
+// It is best-effort and self-gating: it returns 0 when there is no folder
+// workspace, no resolvable coordinator, or no unassigned task.
+//
+// Call it after the workspace's entry-agent state has been synced to the folder
+// store, so the coordinator it resolves reflects the just-applied change.
+func (h *Handler) claimUnassignedTasksForEntryAgent(workspaceID string) (int, error) {
+	if h == nil || h.workspaceStore == nil {
+		return 0, nil
+	}
+	id := strings.TrimSpace(workspaceID)
+	if id == "" {
+		return 0, nil
+	}
+
+	claimed := 0
+	err := h.workspaceStore.Update(id, func(ws *agentworkspace.Workspace) error {
+		claimed = ws.ClaimUnassignedTasksForCoordinator()
+		if claimed == 0 {
+			return errNoTasksClaimed
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errNoTasksClaimed) {
+		return 0, err
+	}
+	return claimed, nil
+}
+
+// claimUnassignedTasksForEntryAgentLogged runs the claim sweep as a best-effort
+// side effect of an entry-agent lifecycle change, logging the outcome and
+// returning the number of tasks claimed (0 on failure, so a failed sweep is
+// never reported as success). Callers may surface the count in their response.
+func (h *Handler) claimUnassignedTasksForEntryAgentLogged(workspaceID string) int {
+	claimed, err := h.claimUnassignedTasksForEntryAgent(workspaceID)
+	if err != nil {
+		logger.Warn("Failed to claim unassigned tasks for entry agent", logger.Fields{"workspace_id": workspaceID, "error": err})
+		return 0
+	}
+	if claimed > 0 {
+		logger.Info("Claimed unassigned tasks for entry agent", logger.Fields{"workspace_id": workspaceID, "claimed": claimed})
+	}
+	return claimed
+}
 
 func workspaceHasAgentName(workspace *session.Workspace, agentName string) bool {
 	if workspace == nil {
