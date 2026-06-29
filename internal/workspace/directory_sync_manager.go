@@ -54,8 +54,9 @@ type DirectorySyncManager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu      sync.RWMutex
-	watched map[string]directoryWatchTarget
+	mu                sync.RWMutex
+	watched           map[string]directoryWatchTarget
+	workspaceAccessed map[string]time.Time
 
 	started bool
 	startMu sync.Mutex
@@ -88,13 +89,14 @@ func NewDirectorySyncManager(store Store, eventBus *EventBus, config DirectorySy
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &DirectorySyncManager{
-		store:    store,
-		eventBus: eventBus,
-		watcher:  watcher,
-		config:   config,
-		ctx:      ctx,
-		cancel:   cancel,
-		watched:  make(map[string]directoryWatchTarget),
+		store:             store,
+		eventBus:          eventBus,
+		watcher:           watcher,
+		config:            config,
+		ctx:               ctx,
+		cancel:            cancel,
+		watched:           make(map[string]directoryWatchTarget),
+		workspaceAccessed: make(map[string]time.Time),
 	}, nil
 }
 
@@ -197,7 +199,7 @@ func (m *DirectorySyncManager) handleWatchEvent(evt filewatcher.WatchEvent) {
 func (m *DirectorySyncManager) syncWatchedDirectories() {
 	workspaceIDs := m.watchedWorkspaceIDs()
 	for _, workspaceID := range workspaceIDs {
-		if _, err := m.WatchWorkspace(workspaceID); err != nil {
+		if _, err := m.watchWorkspace(workspaceID, false); err != nil {
 			logger.Debug("Directory sync: failed to refresh watched workspace", logger.Fields{
 				"workspace_id": workspaceID,
 				"error":        err,
@@ -227,6 +229,10 @@ func (m *DirectorySyncManager) watchedWorkspaceIDs() []string {
 
 // WatchWorkspace starts or refreshes watches only for the requested workspace.
 func (m *DirectorySyncManager) WatchWorkspace(workspaceID string) (DirectorySyncWatchResult, error) {
+	return m.watchWorkspace(workspaceID, true)
+}
+
+func (m *DirectorySyncManager) watchWorkspace(workspaceID string, touchAccess bool) (DirectorySyncWatchResult, error) {
 	result := DirectorySyncWatchResult{WorkspaceID: workspaceID}
 	if strings.TrimSpace(workspaceID) == "" {
 		return result, nil
@@ -268,6 +274,9 @@ func (m *DirectorySyncManager) WatchWorkspace(workspaceID string) (DirectorySync
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if touchAccess {
+		m.workspaceAccessed[workspaceID] = time.Now()
+	}
 
 	// Remove stale watchers for this workspace only.
 	for watchKey, existing := range m.watched {
@@ -295,6 +304,9 @@ func (m *DirectorySyncManager) WatchWorkspace(workspaceID string) (DirectorySync
 			continue
 		}
 		if m.config.MaxWatchedDirectories > 0 && len(m.watched) >= m.config.MaxWatchedDirectories {
+			m.evictLeastRecentlyUsedWorkspaceLocked(workspaceID)
+		}
+		if m.config.MaxWatchedDirectories > 0 && len(m.watched) >= m.config.MaxWatchedDirectories {
 			result.SkippedOverLimit++
 			continue
 		}
@@ -317,7 +329,10 @@ func (m *DirectorySyncManager) WatchWorkspace(workspaceID string) (DirectorySync
 func (m *DirectorySyncManager) unwatchWorkspace(workspaceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.unwatchWorkspaceLocked(workspaceID)
+}
 
+func (m *DirectorySyncManager) unwatchWorkspaceLocked(workspaceID string) {
 	for watchKey, existing := range m.watched {
 		if existing.WorkspaceID != workspaceID {
 			continue
@@ -332,6 +347,32 @@ func (m *DirectorySyncManager) unwatchWorkspace(workspaceID string) {
 		}
 		delete(m.watched, watchKey)
 	}
+	delete(m.workspaceAccessed, workspaceID)
+}
+
+func (m *DirectorySyncManager) evictLeastRecentlyUsedWorkspaceLocked(protectedWorkspaceID string) bool {
+	var candidate string
+	var candidateLastAccessed time.Time
+	for _, target := range m.watched {
+		if target.WorkspaceID == "" || target.WorkspaceID == protectedWorkspaceID {
+			continue
+		}
+		lastAccessed := m.workspaceAccessed[target.WorkspaceID]
+		if candidate == "" || lastAccessed.Before(candidateLastAccessed) {
+			candidate = target.WorkspaceID
+			candidateLastAccessed = lastAccessed
+		}
+	}
+	if candidate == "" {
+		return false
+	}
+
+	logger.Info("Directory sync: evicting least recently used workspace watches", logger.Fields{
+		"workspace_id": candidate,
+		"protected":    protectedWorkspaceID,
+	})
+	m.unwatchWorkspaceLocked(candidate)
+	return true
 }
 
 func buildDirectoryWatchKey(workspaceID, directoryID string) string {

@@ -253,3 +253,70 @@ func TestDirectorySyncManagerRespectsWatchLimit(t *testing.T) {
 		t.Fatalf("expected one watched directory, got %d", len(manager.watched))
 	}
 }
+
+func TestDirectorySyncManagerEvictsLeastRecentlyUsedWorkspaceAtLimit(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	wsA := &Workspace{
+		ID:     "ws-lru-a",
+		Name:   "LRU A",
+		Status: StatusActive,
+		DirectoryReferences: []DirectoryReference{
+			{ID: "dir-a", WorkspaceID: "ws-lru-a", Name: "A", Path: dirA},
+		},
+	}
+	wsB := &Workspace{
+		ID:     "ws-lru-b",
+		Name:   "LRU B",
+		Status: StatusActive,
+		DirectoryReferences: []DirectoryReference{
+			{ID: "dir-b", WorkspaceID: "ws-lru-b", Name: "B", Path: dirB},
+		},
+	}
+
+	store := &directorySyncTestStore{
+		workspaces: map[string]*Workspace{
+			wsA.ID: wsA,
+			wsB.ID: wsB,
+		},
+	}
+
+	cfg := DefaultDirectorySyncConfig()
+	cfg.MaxWatchedDirectories = 1
+	manager, err := NewDirectorySyncManager(store, DefaultEventBus(), cfg)
+	if err != nil {
+		t.Fatalf("failed to create directory sync manager: %v", err)
+	}
+	defer func() { _ = manager.watcher.Close() }()
+
+	if result, err := manager.WatchWorkspace(wsA.ID); err != nil {
+		t.Fatalf("WatchWorkspace A: %v", err)
+	} else if result.Watched != 1 || result.SkippedOverLimit != 0 {
+		t.Fatalf("expected workspace A to be watched, got %+v", result)
+	}
+	firstAccessed := manager.workspaceAccessed[wsA.ID]
+	time.Sleep(time.Millisecond)
+
+	if _, err := manager.watchWorkspace(wsA.ID, false); err != nil {
+		t.Fatalf("refresh workspace A: %v", err)
+	}
+	if refreshedAccessed := manager.workspaceAccessed[wsA.ID]; !refreshedAccessed.Equal(firstAccessed) {
+		t.Fatalf("refresh should not update LRU access time: before=%s after=%s", firstAccessed, refreshedAccessed)
+	}
+
+	if result, err := manager.WatchWorkspace(wsB.ID); err != nil {
+		t.Fatalf("WatchWorkspace B: %v", err)
+	} else if result.Watched != 1 || result.SkippedOverLimit != 0 {
+		t.Fatalf("expected workspace B to evict A and be watched, got %+v", result)
+	}
+
+	if len(manager.watched) != 1 {
+		t.Fatalf("expected one watched directory after eviction, got %d", len(manager.watched))
+	}
+	if _, ok := manager.watched[buildDirectoryWatchKey(wsB.ID, "dir-b")]; !ok {
+		t.Fatalf("expected workspace B watch to remain, got %+v", manager.watched)
+	}
+	if _, ok := manager.watched[buildDirectoryWatchKey(wsA.ID, "dir-a")]; ok {
+		t.Fatalf("expected workspace A watch to be evicted, got %+v", manager.watched)
+	}
+}
