@@ -114,6 +114,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // EnableServerHandler enables an MCP server globally so it is available to workspaces.
+// Enabling a server does not start its process; workspace/tool use starts it lazily.
 // POST /api/mcp/servers/{name}/enable
 func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	serverName := r.PathValue("name")
@@ -142,38 +143,10 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var startErrMsg string
-
-	// Check current server status
-	status, err := h.registry.GetServerStatus(serverName)
-	if err != nil {
-		logger.Warn("Failed to get MCP server status after enable", logger.Fields{"server": serverName, "err": err})
-	} else {
-		// If server is in error state or stopped, try to start/restart it
-
-		switch status {
-		case mcp.StatusError, mcp.StatusStopped:
-			// Stop first if in error state to clean up.
-			if status == mcp.StatusError {
-				_ = h.registry.StopServer(serverName)
-			}
-
-			if err := h.registry.StartServer(serverName); err != nil {
-				startErrMsg = err.Error()
-				logger.Warn("Enabled MCP server globally but failed to start it", logger.Fields{"server": serverName, "err": err})
-			}
-		case mcp.StatusRunning:
-			logger.Debug("MCP server is already running", logger.Fields{"server": serverName})
-		default:
-			logger.Debug("MCP server is in state", logger.Fields{"server": serverName, "status": status})
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"status":      "success",
-		"scope":       "global",
-		"start_error": startErrMsg,
+		"status": "success",
+		"scope":  "global",
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

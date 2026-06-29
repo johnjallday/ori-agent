@@ -376,12 +376,8 @@ async function toggleServerEnabled(encodedServerName, currentlyEnabled) {
       return;
     }
 
-    const result = await response.json();
-    if (!currentlyEnabled && result.start_error) {
-      showToast(`${serverName} enabled globally, but startup failed: ${result.start_error}`, 'warning');
-    } else {
-      showToast(`${serverName} ${currentlyEnabled ? 'disabled' : 'enabled'} globally`, 'success');
-    }
+    await response.json();
+    showToast(`${serverName} ${currentlyEnabled ? 'disabled' : 'enabled'} globally`, 'success');
 
     loadServers();
   } catch (error) {
