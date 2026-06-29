@@ -3410,8 +3410,9 @@ const sessionManager = {
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       } else {
         if (window.ProjectTemplateCard) {
-          // Optional project scaffolding from the "Project (optional)" card
-          // (template_id/template_path + project_name).
+          // Optional project scaffolding from the template picker
+          // (template_id/template_path). The scaffolded project folder name
+          // defaults to the workspace name server-side.
           Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
         }
         if (window.WorkspaceTagsCard) {

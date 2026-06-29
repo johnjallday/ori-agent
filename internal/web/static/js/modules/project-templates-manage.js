@@ -333,8 +333,6 @@ function ptcElements() {
     description: document.getElementById('projectTemplateDescription'),
     emptyHint: document.getElementById('projectTemplateEmptyHint'),
     pathInput: document.getElementById('projectTemplatePathInput'),
-    nameRow: document.getElementById('projectNameRow'),
-    nameInput: document.getElementById('projectNameInput'),
     browseBtn: document.getElementById('projectTemplateBrowseBtn'),
     manageLink: document.getElementById('projectTemplateManageLink'),
     importToggle: document.getElementById('folderImportToggle')
@@ -351,10 +349,6 @@ function ptcGetPayloadFields() {
     fields.template_path = templatePath;
   } else if (templateId) {
     fields.template_id = templateId;
-  }
-  const projectName = els.nameInput?.value?.trim() || '';
-  if ((fields.template_id || fields.template_path) && projectName) {
-    fields.project_name = projectName;
   }
   return fields;
 }
@@ -449,11 +443,6 @@ function ptcUpdateUI() {
     els.description.textContent = showDesc ? ptcSelected.description : '';
     els.description.hidden = !showDesc;
   }
-  if (els.nameRow) {
-    const hasPath = Boolean(els.pathInput?.value?.trim());
-    const scaffolds = Boolean(ptcSelected && !ptcSelected.blank && ptcSelected.has_skeleton);
-    els.nameRow.hidden = !(scaffolds || hasPath);
-  }
 }
 
 function ptcBlankCard() {
@@ -463,7 +452,6 @@ function ptcBlankCard() {
 function ptcReset() {
   const els = ptcElements();
   if (els.pathInput) els.pathInput.value = '';
-  if (els.nameInput) els.nameInput.value = '';
   ptcSelect(PTC_BLANK, ptcBlankCard());
 }
 
@@ -474,7 +462,6 @@ function ptcSyncImportVisibility() {
   // existing folder as the workspace itself.
   if (els.picker) els.picker.hidden = importMode;
   if (importMode) {
-    if (els.nameRow) els.nameRow.hidden = true;
     if (els.description) els.description.hidden = true;
   }
 }
