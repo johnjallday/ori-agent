@@ -379,7 +379,11 @@ func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task Col
 	}
 
 	// Use first agent as coordinator
-	coordinatorAgent := ws.Agents[0]
+	agentNames := ws.AgentNames()
+	if len(agentNames) == 0 {
+		return nil, fmt.Errorf("no agents available in workspace")
+	}
+	coordinatorAgent := agentNames[0]
 
 	// Delegate research task
 	delegateTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
@@ -417,7 +421,11 @@ func (o *Orchestrator) executeParallelWorkflow(ws *workspace.Workspace, task Col
 	taskIDs := make([]string, 0)
 
 	// Use first agent as coordinator
-	coordinatorAgent := ws.Agents[0]
+	agentNames := ws.AgentNames()
+	if len(agentNames) == 0 {
+		return nil, fmt.Errorf("no agents available in workspace")
+	}
+	coordinatorAgent := agentNames[0]
 
 	// Delegate subtasks to each agent
 	for i, agentName := range agents {

@@ -22,6 +22,7 @@ type WorkspaceHandler struct {
 	eventBus       *workspace.EventBus
 	sessionStore   SessionStore
 	fileWatcher    *filewatcher.Watcher // optional, for workspace directory watching
+	directorySync  *workspace.DirectorySyncManager
 }
 
 // NewWorkspaceHandler creates a new workspace handler
@@ -37,6 +38,10 @@ func NewWorkspaceHandler(agentStore store.Store, workspaceStore workspace.Store,
 // SetFileWatcher sets the optional file watcher for workspace directory watching.
 func (wh *WorkspaceHandler) SetFileWatcher(fw *filewatcher.Watcher) {
 	wh.fileWatcher = fw
+}
+
+func (wh *WorkspaceHandler) SetDirectorySync(sync *workspace.DirectorySyncManager) {
+	wh.directorySync = sync
 }
 
 // WorkspaceHandler handles workspace CRUD operations
@@ -84,7 +89,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"description":                           ws.Description,
 			"tags":                                  append([]string(nil), ws.Tags...),
 			"entry_agent_name":                      ws.EntryAgentName(),
-			"agents":                                ws.Agents,
+			"agents":                                ws.AgentNames(),
 			"agent_instances":                       ws.AgentInstances,
 			"shared_data":                           ws.SharedData,
 			"messages":                              ws.Messages,
@@ -441,7 +446,7 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 		"success": true,
 		"message": "Agent added successfully",
 		"agent":   req.AgentName,
-		"agents":  ws.Agents,
+		"agents":  ws.AgentNames(),
 	})
 }
 
@@ -502,7 +507,7 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 		"success": true,
 		"message": "Agent removed successfully",
 		"agent":   agentName,
-		"agents":  ws.Agents,
+		"agents":  ws.AgentNames(),
 	})
 }
 
@@ -604,15 +609,25 @@ func (wh *WorkspaceHandler) ActivateHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	watched := 0
-	if wh.fileWatcher != nil && len(ws.DirectoryReferences) > 0 {
+	result := workspace.DirectorySyncWatchResult{WorkspaceID: wsID, TotalDirectories: len(ws.DirectoryReferences)}
+	if wh.directorySync != nil {
+		var err error
+		result, err = wh.directorySync.WatchWorkspace(wsID)
+		if err != nil {
+			logger.Warn("Failed to watch activated workspace directories", logger.Fields{
+				"workspace_id": wsID,
+				"error":        err,
+			})
+		}
+	} else if wh.fileWatcher != nil && len(ws.DirectoryReferences) > 0 {
 		for _, dir := range ws.DirectoryReferences {
 			if dir.Path == "" {
 				continue
 			}
 			watchKey := fmt.Sprintf("workspace:%s:dir:%s", wsID, dir.ID)
 			if wh.fileWatcher.IsWatching(watchKey) {
-				watched++
+				result.AlreadyWatching++
+				result.Watched++
 				continue
 			}
 			if err := wh.fileWatcher.Watch(watchKey, dir.Path); err != nil {
@@ -623,20 +638,27 @@ func (wh *WorkspaceHandler) ActivateHandler(w http.ResponseWriter, r *http.Reque
 					"error":        err,
 				})
 			} else {
-				watched++
+				result.Watched++
 			}
 		}
 	}
 
 	logger.Info("Workspace activated", logger.Fields{
 		"workspace_id":        wsID,
-		"directories_watched": watched,
-		"total_directories":   len(ws.DirectoryReferences),
+		"directories_watched": result.Watched,
+		"already_watching":    result.AlreadyWatching,
+		"skipped_invalid":     result.SkippedInvalid,
+		"skipped_over_limit":  result.SkippedOverLimit,
+		"total_directories":   result.TotalDirectories,
 	})
 
 	orihttp.WriteJSON(w, map[string]any{
 		"success":             true,
 		"workspace_id":        wsID,
-		"directories_watched": watched,
+		"directories_watched": result.Watched,
+		"already_watching":    result.AlreadyWatching,
+		"skipped_invalid":     result.SkippedInvalid,
+		"skipped_over_limit":  result.SkippedOverLimit,
+		"total_directories":   result.TotalDirectories,
 	})
 }

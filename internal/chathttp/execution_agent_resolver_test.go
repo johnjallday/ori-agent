@@ -59,7 +59,6 @@ func newWorkspaceWithEntryAgent(entryAgent string) *workspace.Workspace {
 		AgentInstances: []workspace.AgentInstance{
 			{Name: entryAgent, EntryPoint: true},
 		},
-		Agents: []string{entryAgent},
 	}
 }
 

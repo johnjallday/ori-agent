@@ -428,9 +428,6 @@ func workspaceAgentNames(ws *workspace.Workspace) []string {
 	for _, inst := range ws.AgentInstances {
 		add(inst.Name)
 	}
-	for _, name := range ws.Agents {
-		add(name)
-	}
 	return names
 }
 
@@ -501,10 +498,7 @@ func isGroupWorkspace(ws *workspace.Workspace) bool {
 }
 
 func workspaceAgentCount(ws *workspace.Workspace) int {
-	if len(ws.AgentInstances) > 0 {
-		return len(ws.AgentInstances)
-	}
-	return len(ws.Agents)
+	return len(ws.AgentNames())
 }
 
 func homeTaskAssignee(t workspace.Task) string {

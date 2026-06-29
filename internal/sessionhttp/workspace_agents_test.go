@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -85,7 +87,6 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 	ws := &session.Workspace{
 		ID:             "workspace-1",
 		Name:           "Agent Cleanup",
-		Agents:         []string{"Writer", "Reviewer"},
 		AgentInstances: []session.AgentInstance{writerOne, writerTwo, reviewer},
 		SharedData: map[string]any{
 			"entry_agent_name": "Writer",
@@ -136,9 +137,6 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 	}
 	if got := currentWorkspaceEntryAgentName(updated); got != "Reviewer" {
 		t.Fatalf("expected entry agent to promote to Reviewer, got %q", got)
-	}
-	if len(updated.Agents) != 1 || updated.Agents[0] != "Reviewer" {
-		t.Fatalf("expected legacy agents to contain only reviewer, got %#v", updated.Agents)
 	}
 
 	if updated.Layout == nil {
@@ -217,12 +215,10 @@ func TestHandleWorkspaceAgents_AddSyncsWorkspaceJSON(t *testing.T) {
 	if folderWS.AgentInstances[0].Name != "Writer" {
 		t.Fatalf("expected Writer in workspace.json, got %#v", folderWS.AgentInstances[0])
 	}
-	if len(folderWS.Agents) != 1 || folderWS.Agents[0] != "Writer" {
-		t.Fatalf("expected legacy agents to contain Writer in workspace.json, got %#v", folderWS.Agents)
-	}
 	if got := folderWS.EntryAgentName(); got != "Writer" {
 		t.Fatalf("expected entry agent Writer in workspace.json, got %q", got)
 	}
+	assertWorkspaceJSONOmitsLegacyAgents(t, fileStore, workspaceID)
 }
 
 func TestHandleWorkspaceAgents_DeleteSyncsWorkspaceJSON(t *testing.T) {
@@ -274,11 +270,25 @@ func TestHandleWorkspaceAgents_DeleteSyncsWorkspaceJSON(t *testing.T) {
 	if folderWS.AgentInstances[0].Name != "Reviewer" || !folderWS.AgentInstances[0].EntryPoint {
 		t.Fatalf("expected Reviewer to remain as entry point in workspace.json, got %#v", folderWS.AgentInstances[0])
 	}
-	if len(folderWS.Agents) != 1 || folderWS.Agents[0] != "Reviewer" {
-		t.Fatalf("expected legacy agents to contain only Reviewer in workspace.json, got %#v", folderWS.Agents)
-	}
 	if got := folderWS.EntryAgentName(); got != "Reviewer" {
 		t.Fatalf("expected entry agent Reviewer in workspace.json, got %q", got)
+	}
+	assertWorkspaceJSONOmitsLegacyAgents(t, fileStore, workspaceID)
+}
+
+func assertWorkspaceJSONOmitsLegacyAgents(t *testing.T, fileStore *agentworkspace.FileStore, workspaceID string) {
+	t.Helper()
+
+	folderPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile))
+	if err != nil {
+		t.Fatalf("read workspace.json: %v", err)
+	}
+	if bytes.Contains(data, []byte(`"agents"`)) {
+		t.Fatalf("workspace.json should omit legacy agents field: %s", data)
 	}
 }
 
@@ -299,7 +309,6 @@ func TestHandleWorkspaceAgents_DeleteRejectsRemovingLastEntryAgent(t *testing.T)
 	ws := &session.Workspace{
 		ID:             "workspace-last-entry",
 		Name:           "Trip Planning",
-		Agents:         []string{"Trip Planning Manager"},
 		AgentInstances: []session.AgentInstance{manager},
 		SharedData: map[string]any{
 			"entry_agent_name": "Trip Planning Manager",
@@ -360,7 +369,6 @@ func TestHandleWorkspaceAgents_DeleteSupportsNameInstanceIdentifier(t *testing.T
 	ws := &session.Workspace{
 		ID:             "workspace-instance-delete",
 		Name:           "Instance Delete",
-		Agents:         []string{"Writer", "Reviewer"},
 		AgentInstances: []session.AgentInstance{writerOne, writerTwo, reviewer},
 		SharedData: map[string]any{
 			"entry_agent_name": "Writer",
@@ -425,7 +433,6 @@ func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 	ws := &session.Workspace{
 		ID:        "workspace-detail",
 		Name:      "Workspace Detail",
-		Agents:    []string{"Writer"},
 		Status:    session.WorkspaceStatusActive,
 		TasksJSON: tasksJSON,
 		AgentInstances: []session.AgentInstance{

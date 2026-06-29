@@ -74,7 +74,6 @@ func TestAutoTaskAgentContextScopesToWorkspaceEntryAgent(t *testing.T) {
 		AgentInstances: []workspace.AgentInstance{
 			{Name: "test123 Manager", EntryPoint: true, Role: "Workspace Manager"},
 		},
-		Agents: []string{"test123 Manager"},
 	}
 	handler := &AutoTaskHandler{
 		agentStore: &autoTaskAgentStore{
@@ -117,7 +116,6 @@ func TestAutoTaskAgentContextNoDefaultWhenCoordinatorMissing(t *testing.T) {
 			{Name: "Writer"},
 			{Name: "Researcher"},
 		},
-		Agents: []string{"Writer", "Researcher"},
 	}
 	handler := &AutoTaskHandler{
 		workspaceStore: &autoTaskWorkspaceStore{

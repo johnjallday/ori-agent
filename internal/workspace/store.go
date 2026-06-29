@@ -568,9 +568,6 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 	if len(target.AgentInstances) == 0 && len(existing.AgentInstances) > 0 {
 		target.AgentInstances = append([]AgentInstance(nil), existing.AgentInstances...)
 	}
-	if len(target.Agents) == 0 && len(existing.Agents) > 0 {
-		target.Agents = append([]string(nil), existing.Agents...)
-	}
 	target.PlannerDecision = existing.PlannerDecision
 	target.PendingPlan = existing.PendingPlan
 
@@ -1315,8 +1312,7 @@ func (s *FileStore) getNestingDepth(id string) int {
 
 // migrateIfNeeded checks if the workspace needs migration and returns true if so.
 func (s *FileStore) migrateIfNeeded(ws *Workspace, _ string) bool {
-	// If migration created AgentInstances
-	needsPersist := len(ws.AgentInstances) > 0 && len(ws.Agents) > 0
+	needsPersist := false
 
 	// If scheduled tasks were migrated to task schedules
 	if len(ws.ScheduledTasks) > 0 {

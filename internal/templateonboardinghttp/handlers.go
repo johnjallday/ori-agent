@@ -676,11 +676,6 @@ func EntryAgentNameFromWorkspace(workspace *session.Workspace) string {
 			return name
 		}
 	}
-	for _, name := range workspace.Agents {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			return trimmed
-		}
-	}
 	return ""
 }
 
@@ -691,11 +686,6 @@ func workspaceHasAgentName(workspace *session.Workspace, agentName string) bool 
 	}
 	for _, inst := range workspace.AgentInstances {
 		if strings.EqualFold(strings.TrimSpace(inst.Name), target) {
-			return true
-		}
-	}
-	for _, name := range workspace.Agents {
-		if strings.EqualFold(strings.TrimSpace(name), target) {
 			return true
 		}
 	}

@@ -83,7 +83,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Debug("CreateTask - Workspace and agents", logger.Fields{"workspace_id": workspaceID, "agents": workspace.Agents})
+	logger.Debug("CreateTask - Workspace and agents", logger.Fields{"workspace_id": workspaceID, "agents": workspace.AgentNames()})
 	logger.Debug("CreateTask - Request routing", logger.Fields{"from": req.From, "to": req.To})
 
 	outputSpec, outputSpecErrors := NormalizeTaskOutputSpec(req.OutputSpec)

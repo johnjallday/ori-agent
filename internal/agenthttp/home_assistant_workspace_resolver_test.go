@@ -10,11 +10,11 @@ import (
 
 func newHomeWorkspaceResolverTestWorkspace(id, name, description string, agents ...string) *workspace.Workspace {
 	return &workspace.Workspace{
-		ID:          id,
-		Name:        name,
-		Description: description,
-		Agents:      agents,
-		Status:      workspace.StatusActive,
+		ID:             id,
+		Name:           name,
+		Description:    description,
+		AgentInstances: workspace.AgentInstancesFromNames(agents...),
+		Status:         workspace.StatusActive,
 		SharedData: map[string]any{
 			"workspace_bootstrap": map[string]any{
 				"goal":         description,

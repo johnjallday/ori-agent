@@ -90,18 +90,6 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	firstAgentAdded := len(workspace.AgentInstances) == 0
 	workspace.AgentInstances = append(workspace.AgentInstances, newInstance)
 
-	// Also add to legacy agents array for backward compatibility
-	found := false
-	for _, a := range workspace.Agents {
-		if a == req.AgentName {
-			found = true
-			break
-		}
-	}
-	if !found {
-		workspace.Agents = append(workspace.Agents, req.AgentName)
-	}
-
 	if strings.TrimSpace(currentWorkspaceEntryAgentName(workspace)) == "" {
 		setWorkspaceEntryAgent(workspace, req.AgentName)
 	}
@@ -196,16 +184,6 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		}
 	}
 
-	if !removed && strings.TrimSpace(agentIdentifier) != "" {
-		for _, name := range workspace.Agents {
-			if name == agentIdentifier {
-				removed = true
-				removedNames[agentIdentifier] = struct{}{}
-				break
-			}
-		}
-	}
-
 	if !removed {
 		_ = orihttp.RespondNotFound(w, "Agent not found in workspace")
 		return
@@ -225,27 +203,6 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 	}
 
 	workspace.AgentInstances = newInstances
-
-	// Update legacy agents array - remove names that no longer have active instances.
-	if len(removedNames) > 0 {
-		remainingNames := make(map[string]struct{}, len(workspace.AgentInstances))
-		for _, inst := range workspace.AgentInstances {
-			if name := strings.TrimSpace(inst.Name); name != "" {
-				remainingNames[name] = struct{}{}
-			}
-		}
-
-		newAgents := make([]string, 0, len(workspace.Agents))
-		for _, name := range workspace.Agents {
-			if _, wasRemoved := removedNames[name]; wasRemoved {
-				if _, stillPresent := remainingNames[name]; !stillPresent {
-					continue
-				}
-			}
-			newAgents = append(newAgents, name)
-		}
-		workspace.Agents = newAgents
-	}
 
 	if entryAgentRemoved && len(newInstances) > 0 {
 		setWorkspaceEntryAgent(workspace, newInstances[0].Name)
@@ -340,7 +297,6 @@ func buildWorkspaceAnalyticsView(workspace *session.Workspace) *agentworkspace.W
 		Description: workspace.Description,
 		FolderSlug:  workspace.FolderSlug,
 		ProjectPath: workspace.ProjectPath,
-		Agents:      append([]string{}, workspace.Agents...),
 		SharedData:  workspace.SharedData,
 		Status:      agentworkspace.WorkspaceStatus(workspace.Status),
 		CreatedAt:   workspace.CreatedAt,

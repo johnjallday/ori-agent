@@ -22,10 +22,10 @@ func TestStoreUpdate_NoLostUpdatesUnderConcurrency(t *testing.T) {
 	const incrementsPerTask = 50
 
 	ws := &Workspace{
-		ID:     "ws-update-race",
-		Name:   "Update Race",
-		Status: StatusActive,
-		Agents: []string{"alice"},
+		ID:             "ws-update-race",
+		Name:           "Update Race",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("alice"),
 	}
 	for i := 0; i < numTasks; i++ {
 		ws.Tasks = append(ws.Tasks, Task{
@@ -83,10 +83,10 @@ func TestStoreUpdate_SerializesPerWorkspace(t *testing.T) {
 
 	store := NewInMemoryStore()
 	ws := &Workspace{
-		ID:     "ws-serialize",
-		Name:   "Serialize",
-		Status: StatusActive,
-		Agents: []string{"alice"},
+		ID:             "ws-serialize",
+		Name:           "Serialize",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("alice"),
 		Tasks: []Task{{
 			ID:          "task-1",
 			WorkspaceID: "ws-serialize",
@@ -160,10 +160,10 @@ func TestStoreUpdate_DistinctWorkspacesRunInParallel(t *testing.T) {
 	store := NewInMemoryStore()
 	for _, id := range []string{"ws-a", "ws-b"} {
 		ws := &Workspace{
-			ID:     id,
-			Name:   id,
-			Status: StatusActive,
-			Agents: []string{"alice"},
+			ID:             id,
+			Name:           id,
+			Status:         StatusActive,
+			AgentInstances: AgentInstancesFromNames("alice"),
 			Tasks: []Task{{
 				ID:          "t",
 				WorkspaceID: id,

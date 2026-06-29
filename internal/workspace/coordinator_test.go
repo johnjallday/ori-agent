@@ -16,7 +16,6 @@ func memberWorkspace(names ...string) *Workspace {
 		insts = append(insts, AgentInstance{Name: n, NodeID: n + "-node-1"})
 	}
 	ws.AgentInstances = insts
-	ws.Agents = append([]string(nil), names...)
 	return ws
 }
 

@@ -16,11 +16,11 @@ func TestHTTPHandler_ListWorkspaceAgentProfiles(t *testing.T) {
 	handler := NewHTTPHandler(store, nil, nil)
 
 	ws := &Workspace{
-		ID:         "ws-prof",
-		Name:       "Profiles",
-		Status:     StatusActive,
-		Agents:     []string{"Manager", "Helper"},
-		SharedData: map[string]any{"entry_agent_name": "Manager"},
+		ID:             "ws-prof",
+		Name:           "Profiles",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager", "Helper"),
+		SharedData:     map[string]any{"entry_agent_name": "Manager"},
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save: %v", err)
@@ -82,11 +82,11 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel(t *testing.T) {
 	handler := NewHTTPHandler(store, nil, nil)
 
 	ws := &Workspace{
-		ID:         "ws-upd",
-		Name:       "Update",
-		Status:     StatusActive,
-		Agents:     []string{"ReaperDAW Manager"},
-		SharedData: map[string]any{"entry_agent_name": "ReaperDAW Manager"},
+		ID:             "ws-upd",
+		Name:           "Update",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("ReaperDAW Manager"),
+		SharedData:     map[string]any{"entry_agent_name": "ReaperDAW Manager"},
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save: %v", err)
@@ -135,11 +135,11 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel_Validation(t *testing.T) {
 	handler := NewHTTPHandler(store, nil, nil)
 
 	ws := &Workspace{
-		ID:         "ws-val",
-		Name:       "Val",
-		Status:     StatusActive,
-		Agents:     []string{"Manager"},
-		SharedData: map[string]any{"entry_agent_name": "Manager"},
+		ID:             "ws-val",
+		Name:           "Val",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager"),
+		SharedData:     map[string]any{"entry_agent_name": "Manager"},
 	}
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save: %v", err)

@@ -23,7 +23,6 @@ func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
-		Agents: []string{"Manager"},
 		AgentInstances: []AgentInstance{
 			{ID: "i-1", Name: "Manager", NodeID: "manager-node-1", EntryPoint: true},
 		},
@@ -48,10 +47,10 @@ func TestAgentSnapshotStore_NoGlobalAgentSkipsSnapshot(t *testing.T) {
 	store := NewAgentSnapshotStore(primary, agents)
 
 	ws := &Workspace{
-		ID:     "ws-2",
-		Name:   "Empty",
-		Status: StatusActive,
-		Agents: []string{"Ghost"},
+		ID:             "ws-2",
+		Name:           "Empty",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Ghost"),
 	}
 
 	if err := store.Save(ws); err != nil {
@@ -76,7 +75,7 @@ func TestSnapshotAllWorkspaces_HealsExistingWorkspaces(t *testing.T) {
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
-		Agents: []string{"Manager"},
+		AgentInstances: AgentInstancesFromNames("Manager"),
 	}
 	if err := primary.Save(ws); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -109,10 +108,10 @@ func TestAgentSnapshotStore_SyncStoreWritesSnapshotToDisk(t *testing.T) {
 	store := NewAgentSnapshotStore(sync, agents)
 
 	ws := &Workspace{
-		ID:     "ws-disk",
-		Name:   "Disk",
-		Status: StatusActive,
-		Agents: []string{"Manager"},
+		ID:             "ws-disk",
+		Name:           "Disk",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager"),
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
@@ -138,9 +137,9 @@ func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 		t.Fatalf("seed snapshot: %v", err)
 	}
 	ws := &Workspace{
-		ID:     "ws-imported",
-		Name:   "Imported",
-		Agents: []string{"Manager"},
+		ID:             "ws-imported",
+		Name:           "Imported",
+		AgentInstances: AgentInstancesFromNames("Manager"),
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},
@@ -173,7 +172,6 @@ func TestRestoreAllWorkspaceAgents_RestoresSnapshotsFromLoadedFileStore(t *testi
 		ID:         "ws-pollen",
 		Name:       "Pollen",
 		FolderSlug: "pollen",
-		Agents:     []string{"Pollen Manager"},
 		SharedData: map[string]any{
 			"entry_agent_name": "Pollen Manager",
 		},
@@ -219,9 +217,9 @@ func TestRestoreWorkspaceAgents_DoesNotOverwriteExistingGlobal(t *testing.T) {
 		t.Fatalf("seed snapshot: %v", err)
 	}
 	ws := &Workspace{
-		ID:     "ws-x",
-		Name:   "X",
-		Agents: []string{"Manager"},
+		ID:             "ws-x",
+		Name:           "X",
+		AgentInstances: AgentInstancesFromNames("Manager"),
 	}
 	if err := primary.Save(ws); err != nil {
 		t.Fatalf("save: %v", err)
@@ -257,16 +255,16 @@ func TestRestoreAllowlistedWorkspaceAgents_OnlyRestoresAllowlisted(t *testing.T)
 		t.Fatalf("seed deny snapshot: %v", err)
 	}
 	if err := primary.Save(&Workspace{
-		ID:     "ws-allow",
-		Name:   "Allow",
-		Agents: []string{"AllowedManager"},
+		ID:             "ws-allow",
+		Name:           "Allow",
+		AgentInstances: AgentInstancesFromNames("AllowedManager"),
 	}); err != nil {
 		t.Fatalf("save allow ws: %v", err)
 	}
 	if err := primary.Save(&Workspace{
-		ID:     "ws-deny",
-		Name:   "Deny",
-		Agents: []string{"DeniedManager"},
+		ID:             "ws-deny",
+		Name:           "Deny",
+		AgentInstances: AgentInstancesFromNames("DeniedManager"),
 	}); err != nil {
 		t.Fatalf("save deny ws: %v", err)
 	}
@@ -293,7 +291,7 @@ func TestRestoreAllowlistedWorkspaceAgents_NilAllowlistRestoresNothing(t *testin
 	if err := primary.SaveWorkspaceAgent("ws-x", "Manager", managerAg); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := primary.Save(&Workspace{ID: "ws-x", Agents: []string{"Manager"}}); err != nil {
+	if err := primary.Save(&Workspace{ID: "ws-x", AgentInstances: AgentInstancesFromNames("Manager")}); err != nil {
 		t.Fatalf("save ws: %v", err)
 	}
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
@@ -315,10 +313,10 @@ func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(
 	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", &agent.Agent{}); err != nil {
 		t.Fatalf("seed deny snapshot: %v", err)
 	}
-	if err := primary.Save(&Workspace{ID: "ws-allow", Agents: []string{"AllowedManager"}}); err != nil {
+	if err := primary.Save(&Workspace{ID: "ws-allow", AgentInstances: AgentInstancesFromNames("AllowedManager")}); err != nil {
 		t.Fatalf("save allow ws: %v", err)
 	}
-	if err := primary.Save(&Workspace{ID: "ws-deny", Agents: []string{"DeniedManager"}}); err != nil {
+	if err := primary.Save(&Workspace{ID: "ws-deny", AgentInstances: AgentInstancesFromNames("DeniedManager")}); err != nil {
 		t.Fatalf("save deny ws: %v", err)
 	}
 
@@ -363,10 +361,10 @@ func TestWipeNonAllowlistedAgentSnapshots_KeepsAgentReferencedByOneAllowlistedWo
 	if err := primary.SaveWorkspaceAgent("ws-deny", "Manager", &agent.Agent{}); err != nil {
 		t.Fatalf("seed deny: %v", err)
 	}
-	if err := primary.Save(&Workspace{ID: "ws-allow", Agents: []string{"Manager"}}); err != nil {
+	if err := primary.Save(&Workspace{ID: "ws-allow", AgentInstances: AgentInstancesFromNames("Manager")}); err != nil {
 		t.Fatalf("save allow: %v", err)
 	}
-	if err := primary.Save(&Workspace{ID: "ws-deny", Agents: []string{"Manager"}}); err != nil {
+	if err := primary.Save(&Workspace{ID: "ws-deny", AgentInstances: AgentInstancesFromNames("Manager")}); err != nil {
 		t.Fatalf("save deny: %v", err)
 	}
 
@@ -387,9 +385,10 @@ func TestWipeNonAllowlistedAgentSnapshots_KeepsAgentReferencedByOneAllowlistedWo
 
 func TestReferencedAgentNames_Dedupes(t *testing.T) {
 	ws := &Workspace{
-		Agents: []string{"Manager", "manager", "Helper"},
 		AgentInstances: []AgentInstance{
 			{Name: "Manager"},
+			{Name: "manager"},
+			{Name: "Helper"},
 			{Name: " Other "},
 		},
 		SharedData: map[string]any{

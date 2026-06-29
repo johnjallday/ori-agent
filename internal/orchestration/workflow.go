@@ -46,7 +46,11 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 	logger.Debug("📚 Phase 1: Research", logger.Fields{})
 
 	// Use first agent in workspace as coordinator
-	coordinatorAgent := ws.Agents[0]
+	agentNames := ws.AgentNames()
+	if len(agentNames) == 0 {
+		return nil, fmt.Errorf("no agents available in workspace")
+	}
+	coordinatorAgent := agentNames[0]
 
 	researchTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,

@@ -99,8 +99,7 @@ type Workspace struct {
 	OwnerUserID          string                      `json:"owner_user_id,omitempty"`   // User profile owner for background task context
 	ParentID             string                      `json:"parent_id,omitempty"`       // ID of parent workspace (empty for root-level); cached/diagnostic — physical folder location is authoritative
 	OrderIndex           int                         `json:"order_index,omitempty"`     // Manual ordering within a parent workspace (portable; persisted to workspace.json)
-	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
-	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
+	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // Stable agent instances with persistent IDs
 	SharedData           map[string]any              `json:"shared_data"`
 	Messages             []AgentMessage              `json:"messages"`
 	Tasks                []Task                      `json:"tasks"`

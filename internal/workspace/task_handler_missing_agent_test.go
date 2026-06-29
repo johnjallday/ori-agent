@@ -10,9 +10,8 @@ import (
 
 func TestResolveExecutionAgent_UsesWorkspaceSnapshotWhenGlobalMissing(t *testing.T) {
 	ws := &Workspace{
-		ID:     "ws-local-agent",
-		Name:   "Imported",
-		Agents: []string{"Imported Manager"},
+		ID:   "ws-local-agent",
+		Name: "Imported",
 		AgentInstances: []AgentInstance{
 			{
 				ID:         "inst-1",
@@ -52,9 +51,8 @@ func TestResolveExecutionAgent_UsesWorkspaceSnapshotWhenGlobalMissing(t *testing
 
 func TestResolveExecutionAgent_DoesNotReportMissingWhenWorkspaceSnapshotExists(t *testing.T) {
 	ws := &Workspace{
-		ID:     "ws-runtime-error",
-		Name:   "Runtime Error",
-		Agents: []string{"Runtime Manager"},
+		ID:   "ws-runtime-error",
+		Name: "Runtime Error",
 		AgentInstances: []AgentInstance{
 			{
 				ID:         "inst-1",
@@ -104,9 +102,8 @@ func TestResolveExecutionAgent_DoesNotReportMissingWhenWorkspaceSnapshotExists(t
 
 func TestResolveExecutionAgent_BlocksWhenWorkspaceAgentDefinitionIsMissing(t *testing.T) {
 	ws := &Workspace{
-		ID:     "ws-missing-agent",
-		Name:   "west new york",
-		Agents: []string{"west new york Manager"},
+		ID:   "ws-missing-agent",
+		Name: "west new york",
 		AgentInstances: []AgentInstance{
 			{
 				ID:         "inst-1",

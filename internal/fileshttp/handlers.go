@@ -473,17 +473,16 @@ func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
 	// Listen for events
 	ctx := r.Context()
 	if h.watcher != nil {
+		sub := h.watcher.Subscribe(sessionID, 32)
+		defer sub.Close()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case event, ok := <-h.watcher.Events():
+			case event, ok := <-sub.Events():
 				if !ok {
 					return
-				}
-				// Only send events for this session
-				if event.SessionID != sessionID {
-					continue
 				}
 				data, _ := json.Marshal(event)
 				_, _ = fmt.Fprintf(w, "event: file_change\ndata: %s\n\n", data)

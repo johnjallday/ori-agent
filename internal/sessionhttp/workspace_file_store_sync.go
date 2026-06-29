@@ -55,7 +55,6 @@ func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	target.Description = source.Description
 	target.ProjectPath = source.ProjectPath
 	target.Tags = append([]string(nil), source.Tags...)
-	target.Agents = append([]string(nil), source.Agents...)
 	target.AgentInstances = append([]agentworkspace.AgentInstance(nil), source.AgentInstances...)
 	target.SharedData = source.SharedData
 	target.Messages = source.Messages

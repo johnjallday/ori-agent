@@ -14,10 +14,10 @@ func TestHTTPHandler_ListAgentSnapshots(t *testing.T) {
 	handler := NewHTTPHandler(store, nil, nil)
 
 	ws := &Workspace{
-		ID:     "ws-snap",
-		Name:   "Snap",
-		Status: StatusActive,
-		Agents: []string{"Manager", "Helper"},
+		ID:             "ws-snap",
+		Name:           "Snap",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager", "Helper"),
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},

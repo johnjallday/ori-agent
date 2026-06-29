@@ -1,63 +1,44 @@
 package server
 
 import (
-	"errors"
-	"reflect"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/mcp"
 )
 
-type fakeMCPStarter struct {
-	statuses  map[string]mcp.ServerStatus
-	statusErr map[string]error
-	startErr  map[string]error
-	started   []string
-	stopped   []string
-}
+func TestInitializeMCPRegistersEnabledServersWithoutStarting(t *testing.T) {
+	t.Setenv(disableExternalMCPImportEnv, "true")
+	t.Chdir(t.TempDir())
 
-func (f *fakeMCPStarter) GetServerStatus(name string) (mcp.ServerStatus, error) {
-	if err, ok := f.statusErr[name]; ok {
-		return mcp.StatusStopped, err
+	cfg := mcp.GlobalConfig{
+		Servers: []mcp.ServerConfig{
+			{
+				Name:      "broken",
+				Command:   "definitely-not-a-real-command-for-mcp-test",
+				Transport: "stdio",
+				Enabled:   true,
+			},
+		},
 	}
-	status, ok := f.statuses[name]
-	if !ok {
-		return mcp.StatusStopped, errors.New("missing server")
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
 	}
-	return status, nil
-}
+	if err := os.WriteFile("mcp_registry.json", data, 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
 
-func (f *fakeMCPStarter) StartServer(name string) error {
-	f.started = append(f.started, name)
-	if err, ok := f.startErr[name]; ok {
-		return err
-	}
-	if f.statuses == nil {
-		f.statuses = map[string]mcp.ServerStatus{}
-	}
-	f.statuses[name] = mcp.StatusRunning
-	return nil
-}
+	builder := &ServerBuilder{}
+	builder.initializeMCP()
 
-func (f *fakeMCPStarter) StopServer(name string) error {
-	f.stopped = append(f.stopped, name)
-	if f.statuses != nil {
-		f.statuses[name] = mcp.StatusStopped
+	status, err := builder.mcpRegistry.GetServerStatus("broken")
+	if err != nil {
+		t.Fatalf("expected broken server to be registered: %v", err)
 	}
-	return nil
-}
-
-func TestCollectEnabledMCPServerNames(t *testing.T) {
-	got := collectEnabledMCPServerNames([]mcp.ServerConfig{
-		{Name: "filesystem", Enabled: true},
-		{Name: "ori-reaper", Enabled: true},
-		{Name: "ori-reaper", Enabled: true},
-		{Name: "sqlite", Enabled: false},
-		{Name: "", Enabled: true},
-	})
-	want := []string{"filesystem", "ori-reaper"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("expected enabled server names %v, got %v", want, got)
+	if status != mcp.StatusStopped {
+		t.Fatalf("expected globally enabled server to remain stopped until lazy use, got %s", status)
 	}
 }
 
@@ -89,50 +70,4 @@ func TestExternalMCPImportEnabled(t *testing.T) {
 			t.Fatal("expected invalid env values to preserve default enabled behavior")
 		}
 	})
-}
-
-func TestStartEnabledMCPServers(t *testing.T) {
-	starter := &fakeMCPStarter{
-		statuses: map[string]mcp.ServerStatus{
-			"running":    mcp.StatusRunning,
-			"starting":   mcp.StatusStarting,
-			"restarting": mcp.StatusRestarting,
-			"stopped":    mcp.StatusStopped,
-			"erroring":   mcp.StatusError,
-			"broken":     mcp.StatusStopped,
-		},
-		statusErr: map[string]error{
-			"missing": errors.New("not found"),
-		},
-		startErr: map[string]error{
-			"broken": errors.New("failed to start"),
-		},
-	}
-
-	started, failed := startEnabledMCPServers(starter, []string{
-		"running",
-		"starting",
-		"restarting",
-		"stopped",
-		"erroring",
-		"missing",
-		"broken",
-	})
-
-	if started != 2 {
-		t.Fatalf("expected 2 servers to start successfully, got %d", started)
-	}
-	if failed != 2 {
-		t.Fatalf("expected 2 servers to fail startup, got %d", failed)
-	}
-
-	wantStarted := []string{"stopped", "erroring", "broken"}
-	if !reflect.DeepEqual(starter.started, wantStarted) {
-		t.Fatalf("expected start calls %v, got %v", wantStarted, starter.started)
-	}
-
-	wantStopped := []string{"erroring"}
-	if !reflect.DeepEqual(starter.stopped, wantStopped) {
-		t.Fatalf("expected stop calls %v, got %v", wantStopped, starter.stopped)
-	}
 }

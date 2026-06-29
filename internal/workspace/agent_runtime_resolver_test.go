@@ -661,7 +661,6 @@ func TestResolveAgentForWorkspace_MissingEntryAgentReturnsError(t *testing.T) {
 		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
 		},
-		Agents: []string{"Workspace Manager"},
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
 		},
@@ -692,7 +691,6 @@ func TestResolveAgentForWorkspace_UsesWorkspaceLocalSnapshotWhenGlobalMissing(t 
 		SharedData: map[string]any{
 			"entry_agent_name": "Woodworking Manager",
 		},
-		Agents: []string{"Woodworking Manager"},
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Woodworking Manager", NodeID: "woodworking-manager-1", EntryPoint: true},
 		},
@@ -725,9 +723,8 @@ func TestResolveAgentForWorkspace_UsesWorkspaceLocalSnapshotWhenGlobalMissing(t 
 
 func TestResolveAgentForWorkspace_LocalSnapshotPreferredOverGlobal(t *testing.T) {
 	ws := &Workspace{
-		ID:     "ws-precedence",
-		Name:   "Precedence",
-		Agents: []string{"Manager"},
+		ID:   "ws-precedence",
+		Name: "Precedence",
 		SharedData: map[string]any{
 			"entry_agent_name": "Manager",
 		},

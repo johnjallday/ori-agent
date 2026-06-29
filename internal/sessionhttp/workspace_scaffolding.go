@@ -108,7 +108,6 @@ func (h *Handler) provisionWorkspaceScaffolding(ctx context.Context, ws *session
 
 	// Resync workspace.json to include the directory reference and MCP binding
 	folderWS.SharedData = ws.SharedData
-	folderWS.Agents = append([]string{}, ws.Agents...)
 	folderWS.AgentInstances = toWorkspaceAgentInstances(ws.AgentInstances)
 	folderWS.DirectoryReferences = []agentworkspace.DirectoryReference{
 		{

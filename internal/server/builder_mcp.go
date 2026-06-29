@@ -63,21 +63,6 @@ func (b *ServerBuilder) initializeMCP() {
 		}
 	}
 
-	enabledServers := collectEnabledMCPServerNames(mcpGlobalConfig.Servers)
-	startedCount, failedCount := startEnabledMCPServers(b.mcpRegistry, enabledServers)
-	if failedCount > 0 {
-		logger.Warn("some enabled MCP servers failed to start during startup", logger.Fields{
-			"enabled_server_count": len(enabledServers),
-			"started_count":        startedCount,
-			"failed_count":         failedCount,
-		})
-	} else if verbose && startedCount > 0 {
-		logger.Info("started enabled MCP servers during startup", logger.Fields{
-			"enabled_server_count": len(enabledServers),
-			"started_count":        startedCount,
-		})
-	}
-
 	if verbose {
 		logger.Debug("MCP system initialized", logger.Fields{"server_count": len(mcpGlobalConfig.Servers)})
 	}
@@ -96,64 +81,3 @@ func externalMCPImportEnabled() bool {
 
 	return !disabled
 }
-
-func collectEnabledMCPServerNames(servers []mcp.ServerConfig) []string {
-	serverNames := make([]string, 0, len(servers))
-	seen := make(map[string]struct{}, len(servers))
-	for _, server := range servers {
-		if server.Name == "" || !server.Enabled {
-			continue
-		}
-		if _, ok := seen[server.Name]; ok {
-			continue
-		}
-		seen[server.Name] = struct{}{}
-		serverNames = append(serverNames, server.Name)
-	}
-
-	return serverNames
-}
-
-type mcpRegistryStarter interface {
-	GetServerStatus(name string) (mcp.ServerStatus, error)
-	StartServer(name string) error
-	StopServer(name string) error
-}
-
-func startEnabledMCPServers(registry mcpRegistryStarter, serverNames []string) (startedCount int, failedCount int) {
-	if registry == nil || len(serverNames) == 0 {
-		return 0, 0
-	}
-
-	for _, serverName := range serverNames {
-		status, err := registry.GetServerStatus(serverName)
-		if err != nil {
-			failedCount++
-			logger.Warn("failed to read MCP server status during startup", logger.Fields{"server": serverName, "err": err})
-			continue
-		}
-
-		switch status {
-		case mcp.StatusRunning, mcp.StatusStarting, mcp.StatusRestarting:
-			continue
-		case mcp.StatusError:
-			if err := registry.StopServer(serverName); err != nil {
-				logger.Warn("failed to stop errored MCP server before startup retry", logger.Fields{"server": serverName, "err": err})
-			}
-		}
-
-		if err := registry.StartServer(serverName); err != nil {
-			failedCount++
-			logger.Warn("failed to start enabled MCP server during startup", logger.Fields{
-				"server": serverName,
-				"err":    err,
-			})
-			continue
-		}
-		startedCount++
-	}
-
-	return startedCount, failedCount
-}
-
-var _ mcpRegistryStarter = (*mcp.Registry)(nil)

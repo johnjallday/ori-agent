@@ -45,14 +45,18 @@ func TestEnableServerHandler_EnablesServerGlobally(t *testing.T) {
 	}
 
 	var payload struct {
-		Status string `json:"status"`
-		Scope  string `json:"scope"`
+		Status     string `json:"status"`
+		Scope      string `json:"scope"`
+		StartError string `json:"start_error"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v body=%s", err, rr.Body.String())
 	}
 	if payload.Status != "success" || payload.Scope != "global" {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload.StartError != "" {
+		t.Fatalf("global enable should not start the MCP process, got start_error=%q", payload.StartError)
 	}
 }
 

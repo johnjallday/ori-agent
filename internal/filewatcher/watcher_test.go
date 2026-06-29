@@ -3,9 +3,19 @@ package filewatcher
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
+
+func testWatcherConfig() WatcherConfig {
+	return WatcherConfig{
+		DebounceDuration: 10 * time.Millisecond,
+		EventBufferSize:  10,
+	}
+}
 
 func TestNewWatcher(t *testing.T) {
 	w, err := NewWatcher(DefaultWatcherConfig())
@@ -85,6 +95,109 @@ func TestWatcher_UnwatchSharedPath(t *testing.T) {
 	if w.IsWatching("session-1") || w.IsWatching("session-2") {
 		t.Error("no sessions should remain watched")
 	}
+}
+
+func TestWatcher_RefCountsSharedPath(t *testing.T) {
+	w, err := NewWatcher(DefaultWatcherConfig())
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	tmpDir := t.TempDir()
+	cleanPath := filepath.Clean(tmpDir)
+
+	if err := w.Watch("session-1", tmpDir); err != nil {
+		t.Fatalf("watch session-1: %v", err)
+	}
+	if err := w.Watch("session-2", tmpDir); err != nil {
+		t.Fatalf("watch session-2: %v", err)
+	}
+
+	if got := w.pathRefs[cleanPath]; got != 2 {
+		t.Fatalf("path refcount = %d, want 2", got)
+	}
+	if err := w.Unwatch("session-1"); err != nil {
+		t.Fatalf("unwatch session-1: %v", err)
+	}
+	if got := w.pathRefs[cleanPath]; got != 1 {
+		t.Fatalf("path refcount after first unwatch = %d, want 1", got)
+	}
+	if err := w.Unwatch("session-2"); err != nil {
+		t.Fatalf("unwatch session-2: %v", err)
+	}
+	if _, ok := w.pathRefs[cleanPath]; ok {
+		t.Fatal("path refcount should be removed after final unwatch")
+	}
+}
+
+func TestWatcher_WatchIDsForPathUsesLongestPrefix(t *testing.T) {
+	w, err := NewWatcher(DefaultWatcherConfig())
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0755); err != nil {
+		t.Fatalf("mkdir child: %v", err)
+	}
+
+	if err := w.Watch("parent", parent); err != nil {
+		t.Fatalf("watch parent: %v", err)
+	}
+	if err := w.Watch("child", child); err != nil {
+		t.Fatalf("watch child: %v", err)
+	}
+	if got := w.watchIDsForPath(filepath.Join(child, "file.txt")); !reflect.DeepEqual(got, []string{"child"}) {
+		t.Fatalf("watchIDsForPath nested file = %v, want [child]", got)
+	}
+	if got := w.watchIDsForPath(filepath.Join(parent, "sibling.txt")); !reflect.DeepEqual(got, []string{"parent"}) {
+		t.Fatalf("watchIDsForPath parent file = %v, want [parent]", got)
+	}
+}
+
+func TestWatcher_SubscribeFanoutForSharedPath(t *testing.T) {
+	w, err := NewWatcher(testWatcherConfig())
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+	w.Start()
+
+	tmpDir := t.TempDir()
+	if err := w.Watch("session-1", tmpDir); err != nil {
+		t.Fatalf("watch session-1: %v", err)
+	}
+	if err := w.Watch("session-2", tmpDir); err != nil {
+		t.Fatalf("watch session-2: %v", err)
+	}
+
+	sub1 := w.Subscribe("session-1", 1)
+	defer sub1.Close()
+	sub2 := w.Subscribe("session-2", 1)
+	defer sub2.Close()
+
+	filePath := filepath.Join(tmpDir, "fanout.txt")
+	w.handleFSEvent(fsnotify.Event{Name: filePath, Op: fsnotify.Write})
+
+	assertSubscriptionEvent := func(name string, ch <-chan WatchEvent, wantSession string) {
+		t.Helper()
+		select {
+		case event := <-ch:
+			if event.SessionID != wantSession {
+				t.Fatalf("%s session = %q, want %q", name, event.SessionID, wantSession)
+			}
+			if event.FilePath != filePath {
+				t.Fatalf("%s file path = %q, want %q", name, event.FilePath, filePath)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timeout waiting for %s event", name)
+		}
+	}
+	assertSubscriptionEvent("session-1", sub1.Events(), "session-1")
+	assertSubscriptionEvent("session-2", sub2.Events(), "session-2")
 }
 
 func TestWatcher_UnwatchDeletedFolder(t *testing.T) {

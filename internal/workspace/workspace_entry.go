@@ -48,13 +48,6 @@ func (w *Workspace) entryAgentNameLocked() string {
 		}
 	}
 
-	for _, agentName := range w.Agents {
-		name := strings.TrimSpace(agentName)
-		if name != "" {
-			return name
-		}
-	}
-
 	return ""
 }
 

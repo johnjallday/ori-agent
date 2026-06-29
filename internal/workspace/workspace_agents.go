@@ -32,6 +32,53 @@ func buildAgentInstance(agentName string) AgentInstance {
 	}
 }
 
+// AgentInstancesFromNames builds agent instances for the given profile names.
+func AgentInstancesFromNames(agentNames ...string) []AgentInstance {
+	instances := make([]AgentInstance, 0, len(agentNames))
+	seen := make(map[string]struct{}, len(agentNames))
+	for _, agentName := range agentNames {
+		trimmedName := strings.TrimSpace(agentName)
+		if trimmedName == "" {
+			continue
+		}
+		key := normalizeAgentNameKey(trimmedName)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		instances = append(instances, buildAgentInstance(trimmedName))
+	}
+	return instances
+}
+
+func (w *Workspace) agentNamesLocked() []string {
+	names := make([]string, 0, len(w.AgentInstances))
+	seen := make(map[string]struct{}, len(w.AgentInstances))
+	for _, inst := range w.AgentInstances {
+		name := strings.TrimSpace(inst.Name)
+		if name == "" {
+			continue
+		}
+		key := normalizeAgentNameKey(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+// AgentNames returns the distinct agent profile names in this workspace.
+func (w *Workspace) AgentNames() []string {
+	if w == nil {
+		return nil
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.agentNamesLocked()
+}
+
 // AddAgent adds a new agent instance to the workspace
 func (w *Workspace) AddAgent(agentName string) error {
 	w.mu.Lock()
@@ -50,9 +97,6 @@ func (w *Workspace) AddAgent(agentName string) error {
 	instance := buildAgentInstance(trimmedName)
 	w.AgentInstances = append(w.AgentInstances, instance)
 
-	// Also update legacy Agents array for backward compatibility
-	w.Agents = append(w.Agents, trimmedName)
-
 	if currentEntryAgent == "" {
 		if err := w.setEntryAgentNameLocked(trimmedName); err != nil {
 			return err
@@ -70,56 +114,51 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 
 	currentEntryAgent := w.entryAgentNameLocked()
 
-	for i, agent := range w.Agents {
-		if normalizeAgentNameKey(agent) == normalizeAgentNameKey(agentName) {
-			if normalizeAgentNameKey(agent) == normalizeAgentNameKey(currentEntryAgent) && len(w.Agents) == 1 {
-				return ErrWorkspaceEntryAgentRequired
-			}
+	foundIndex := -1
+	var removedInstance AgentInstance
+	for i, inst := range w.AgentInstances {
+		if normalizeAgentNameKey(inst.Name) == normalizeAgentNameKey(agentName) {
+			foundIndex = i
+			removedInstance = inst
+			break
+		}
+	}
+	if foundIndex == -1 {
+		return fmt.Errorf("agent %s not found in workspace", agentName)
+	}
+	if normalizeAgentNameKey(removedInstance.Name) == normalizeAgentNameKey(currentEntryAgent) && len(w.AgentInstances) == 1 {
+		return ErrWorkspaceEntryAgentRequired
+	}
 
-			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
+	w.AgentInstances = append(w.AgentInstances[:foundIndex], w.AgentInstances[foundIndex+1:]...)
 
-			// Clean up tasks assigned to this agent
-			for j := range w.Tasks {
-				if w.Tasks[j].To == agentName {
-					// Unassign tasks that were assigned to this agent
-					w.Tasks[j].To = "unassigned"
-					w.Tasks[j].AssignedNodeID = ""
-				}
-				if w.Tasks[j].From == agentName {
-					// Clear from field for tasks created by this agent
-					w.Tasks[j].From = ""
-				}
-			}
-
-			// Clean up canvas layout agent positions for this agent
-			if w.Layout != nil && w.Layout.AgentPositions != nil {
-				// Remove all agent node positions for this agent name
-				for nodeID := range w.Layout.AgentPositions {
-					// Check if this position belongs to the removed agent
-					// NodeID format: "agentname-node-#"
-					if len(nodeID) > len(agentName) && nodeID[:len(agentName)] == agentName {
-						delete(w.Layout.AgentPositions, nodeID)
-					}
-				}
-			}
-
-			switch {
-			case normalizeAgentNameKey(agent) == normalizeAgentNameKey(currentEntryAgent) && len(w.Agents) > 0:
-				if err := w.setEntryAgentNameLocked(w.Agents[0]); err != nil {
-					return err
-				}
-			case currentEntryAgent != "" && w.hasAgent(currentEntryAgent):
-				if err := w.setEntryAgentNameLocked(currentEntryAgent); err != nil {
-					return err
-				}
-			default:
-				w.UpdatedAt = time.Now()
-			}
-			return nil
+	for j := range w.Tasks {
+		if normalizeAgentNameKey(w.Tasks[j].To) == normalizeAgentNameKey(removedInstance.Name) {
+			w.Tasks[j].To = "unassigned"
+			w.Tasks[j].AssignedNodeID = ""
+		}
+		if normalizeAgentNameKey(w.Tasks[j].From) == normalizeAgentNameKey(removedInstance.Name) {
+			w.Tasks[j].From = ""
 		}
 	}
 
-	return fmt.Errorf("agent %s not found in workspace", agentName)
+	if w.Layout != nil && w.Layout.AgentPositions != nil {
+		delete(w.Layout.AgentPositions, removedInstance.NodeID)
+	}
+
+	switch {
+	case normalizeAgentNameKey(removedInstance.Name) == normalizeAgentNameKey(currentEntryAgent) && len(w.AgentInstances) > 0:
+		if err := w.setEntryAgentNameLocked(w.AgentInstances[0].Name); err != nil {
+			return err
+		}
+	case currentEntryAgent != "" && w.hasAgent(currentEntryAgent):
+		if err := w.setEntryAgentNameLocked(currentEntryAgent); err != nil {
+			return err
+		}
+	default:
+		w.UpdatedAt = time.Now()
+	}
+	return nil
 }
 
 // RemoveAgentInstance removes a specific agent instance by its stable ID or NodeID
@@ -150,14 +189,6 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 
 	// Remove from AgentInstances
 	w.AgentInstances = append(w.AgentInstances[:foundIndex], w.AgentInstances[foundIndex+1:]...)
-
-	// Also remove from legacy Agents array (first occurrence of this name)
-	for i, agent := range w.Agents {
-		if agent == removedInstance.Name {
-			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
-			break
-		}
-	}
 
 	// Unassign tasks that were specifically assigned to this agent instance
 	for j := range w.Tasks {
@@ -196,11 +227,6 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 
 // hasAgent checks if an agent is part of the workspace (NOT thread-safe, caller must hold lock)
 func (w *Workspace) hasAgent(agentName string) bool {
-	for _, agent := range w.Agents {
-		if normalizeAgentNameKey(agent) == normalizeAgentNameKey(agentName) {
-			return true
-		}
-	}
 	for _, inst := range w.AgentInstances {
 		if normalizeAgentNameKey(inst.Name) == normalizeAgentNameKey(agentName) {
 			return true
@@ -228,7 +254,6 @@ func (w *Workspace) SyncAgentsFromTasks() int {
 		if task.To != "" && task.To != "unassigned" && !w.hasAgent(task.To) {
 			instance := buildAgentInstance(task.To)
 			w.AgentInstances = append(w.AgentInstances, instance)
-			w.Agents = append(w.Agents, strings.TrimSpace(task.To))
 			w.UpdatedAt = time.Now()
 			added++
 
@@ -312,27 +337,6 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 		instanceIDMap[inst.ID] = canonical.ID
 		keptByName[key] = canonical
 		normalizedInstances = append(normalizedInstances, canonical)
-	}
-
-	normalizedAgents := make([]string, 0, len(normalizedInstances))
-	seenAgents := make(map[string]struct{}, len(normalizedInstances))
-	for _, inst := range normalizedInstances {
-		key := normalizeAgentNameKey(inst.Name)
-		if _, exists := seenAgents[key]; exists {
-			continue
-		}
-		seenAgents[key] = struct{}{}
-		normalizedAgents = append(normalizedAgents, inst.Name)
-	}
-	if len(normalizedAgents) != len(w.Agents) {
-		changed = true
-	} else {
-		for i := range normalizedAgents {
-			if normalizeAgentNameKey(normalizedAgents[i]) != normalizeAgentNameKey(w.Agents[i]) {
-				changed = true
-				break
-			}
-		}
 	}
 
 	if len(normalizedInstances) != len(w.AgentInstances) {
@@ -489,7 +493,6 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 
 	if changed {
 		w.AgentInstances = normalizedInstances
-		w.Agents = normalizedAgents
 		w.UpdatedAt = time.Now()
 	}
 

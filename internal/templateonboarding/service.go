@@ -160,11 +160,6 @@ func selectedEntryAgentName(ws *sessionmodel.Workspace) string {
 			return name
 		}
 	}
-	for _, name := range ws.Agents {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			return trimmed
-		}
-	}
 	return ""
 }
 
@@ -175,11 +170,6 @@ func sessionWorkspaceHasAgentName(ws *sessionmodel.Workspace, agentName string) 
 	}
 	for _, inst := range ws.AgentInstances {
 		if strings.EqualFold(strings.TrimSpace(inst.Name), target) {
-			return true
-		}
-	}
-	for _, name := range ws.Agents {
-		if strings.EqualFold(strings.TrimSpace(name), target) {
 			return true
 		}
 	}
