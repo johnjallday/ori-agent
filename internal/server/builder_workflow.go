@@ -217,6 +217,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
+	// Give the session handler the primary store for task mutations (the
+	// entry-agent claim sweep) so claimed tasks are written through the same
+	// store orchestration reads from, not just the raw folder store.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetWorkspaceTaskStore(ws)
+	}
+
 	return nil
 }
 

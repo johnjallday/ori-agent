@@ -4,10 +4,10 @@
 
 Autonomous AI workspaces — guardrailed by policy, running **local-first** on your machine.
 
-![Version](https://img.shields.io/badge/Version-v0.0.79-blue)
+![Version](https://img.shields.io/github/v/release/johnjallday/ori-agent?label=Version&color=blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
-![Go](https://img.shields.io/badge/Go-1.25.11-00add8)
+![Go](https://img.shields.io/github/go-mod/go-version/johnjallday/ori-agent?label=Go&color=00add8)
 
 <p align="center">
   <img src="docs/images/hero.png" alt="Ori Agent — autonomous AI workspaces dashboard" width="820" />

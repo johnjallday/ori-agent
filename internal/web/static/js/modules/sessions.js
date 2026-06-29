@@ -3287,9 +3287,8 @@ const sessionManager = {
       payload.schedule = taskConfig.schedule;
       payload.schedule_enabled = Boolean(taskConfig.schedule_enabled);
       payload.schedule_name = taskConfig.schedule_name || '';
-      if (!payload.to) {
-        payload.to = 'ori';
-      }
+      // No hard-coded assignee fallback: the backend defaults an unassigned task
+      // to the workspace coordinator (entry agent) before schedule validation.
     }
 
     const response = await fetch('/api/orchestration/tasks', {

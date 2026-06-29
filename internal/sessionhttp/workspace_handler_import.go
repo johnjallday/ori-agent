@@ -324,6 +324,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// A supplied entry agent owns any tasks the imported folder carried that were
+	// created before a coordinator existed. No-op when none was supplied/resolved.
+	h.claimUnassignedTasksForEntryAgentLogged(workspace.ID)
+
 	logger.Info("Workspace imported from folder", logger.Fields{
 		"workspace_id": workspace.ID,
 		"name":         workspaceName,
@@ -454,6 +458,11 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		if err := adapter.Save(item); err != nil {
 			return nil, warning, fmt.Errorf("sync imported workspace %s: %w", item.ID, err)
 		}
+
+		// Imported folders can carry tasks created before this machine knew the
+		// workspace's entry agent; claim any unassigned ones for the coordinator
+		// resolved from the just-saved folder workspace. No-op without one.
+		h.claimUnassignedTasksForEntryAgentLogged(item.ID)
 
 		sessionWorkspace, err := h.store.GetWorkspace(ctx, item.ID)
 		if err != nil {

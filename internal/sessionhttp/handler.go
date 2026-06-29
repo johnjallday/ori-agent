@@ -22,8 +22,13 @@ import (
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	store                 session.HybridStore
-	workspaceStore        *workspace.FileStore // optional folder-based workspace store
+	store          session.HybridStore
+	workspaceStore *workspace.FileStore // optional folder-based workspace store
+	// workspaceTaskStore is the primary (SyncStore-wrapped) workspace store used
+	// for task mutations such as the entry-agent claim sweep. It must be the same
+	// store orchestration reads from (SQLite primary + disk write-through), not
+	// the raw folder store, or task changes won't be visible to task reads.
+	workspaceTaskStore    workspace.Store
 	workspaceRootResolver func() string
 	templatesRootResolver func() string // resolves the project templates library directory
 	agentStore            store.Store
@@ -54,6 +59,13 @@ func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	if ws != nil && h.templateOnboarding == nil {
 		h.templateOnboarding = templateonboarding.NewService(templateonboarding.NewStore(ws))
 	}
+}
+
+// SetWorkspaceTaskStore sets the primary workspace store used for task
+// mutations (e.g. the entry-agent claim sweep). Pass the same SyncStore-wrapped
+// store orchestration uses so claimed tasks are visible to task reads.
+func (h *Handler) SetWorkspaceTaskStore(ws workspace.Store) {
+	h.workspaceTaskStore = ws
 }
 
 // SetWorkspaceRootResolver sets the resolver used to determine the default

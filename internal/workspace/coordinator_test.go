@@ -252,3 +252,182 @@ func TestUpdateTaskReassignmentStampsManualProvenance(t *testing.T) {
 		t.Fatalf("reassignment did not stamp manual provenance: %+v", resp.Task)
 	}
 }
+
+// --- entry-agent default + claim sweep (1.2 / 1.3) ---
+
+func TestApplyEntryAgentDefault(t *testing.T) {
+	t.Run("explicit entry agent claims unassigned task", func(t *testing.T) {
+		ws := memberWorkspace("Manager", "Writer")
+		ws.SharedData = map[string]any{sharedDataEntryAgentNameKey: "Manager"}
+		task := &Task{ID: "t1"}
+		if !ws.ApplyEntryAgentDefault(task) {
+			t.Fatal("ApplyEntryAgentDefault() = false, want true")
+		}
+		if task.To != "Manager" || task.AssignmentMode != TaskAssignmentModeEntryAgentDefault || task.AssignedBy != "Manager" {
+			t.Fatalf("unexpected provenance: %+v", task)
+		}
+	})
+
+	t.Run("single-agent default claims unassigned task", func(t *testing.T) {
+		ws := memberWorkspace("Solo")
+		task := &Task{ID: "t1"}
+		if !ws.ApplyEntryAgentDefault(task) || task.To != "Solo" ||
+			task.AssignmentMode != TaskAssignmentModeEntryAgentDefault {
+			t.Fatalf("single-agent default not applied: %+v", task)
+		}
+	})
+
+	t.Run("unassigned sentinel is defaultable", func(t *testing.T) {
+		ws := memberWorkspace("Solo")
+		task := &Task{ID: "t1", To: "unassigned"}
+		if !ws.ApplyEntryAgentDefault(task) || task.To != "Solo" {
+			t.Fatalf("sentinel not defaulted: %+v", task)
+		}
+	})
+
+	t.Run("missing coordinator leaves task untouched", func(t *testing.T) {
+		ws := memberWorkspace("Writer", "Researcher") // multi-agent, no entry agent
+		task := &Task{ID: "t1"}
+		if ws.ApplyEntryAgentDefault(task) {
+			t.Fatal("ApplyEntryAgentDefault() = true, want false when no coordinator")
+		}
+		if task.To != "" || task.AssignmentMode != "" {
+			t.Fatalf("task should be untouched: %+v", task)
+		}
+	})
+
+	t.Run("explicit assignee preserved", func(t *testing.T) {
+		ws := memberWorkspace("Manager", "Writer")
+		ws.SharedData = map[string]any{sharedDataEntryAgentNameKey: "Manager"}
+		task := &Task{ID: "t1", To: "Writer", AssignmentMode: TaskAssignmentModeManual, AssignedBy: TaskAssignedByManual}
+		if ws.ApplyEntryAgentDefault(task) {
+			t.Fatal("ApplyEntryAgentDefault() = true, want false for an explicit assignee")
+		}
+		if task.To != "Writer" || task.AssignmentMode != TaskAssignmentModeManual {
+			t.Fatalf("explicit assignee changed: %+v", task)
+		}
+	})
+
+	t.Run("nil task is a no-op", func(t *testing.T) {
+		ws := memberWorkspace("Solo")
+		if ws.ApplyEntryAgentDefault(nil) {
+			t.Fatal("ApplyEntryAgentDefault(nil) = true, want false")
+		}
+	})
+}
+
+func TestClaimUnassignedTasksForCoordinator(t *testing.T) {
+	t.Run("claims only unassigned, preserves assigned", func(t *testing.T) {
+		ws := memberWorkspace("Manager", "Writer")
+		ws.SharedData = map[string]any{sharedDataEntryAgentNameKey: "Manager"}
+		ws.Tasks = []Task{
+			{ID: "a"},                   // unassigned -> claimed
+			{ID: "b", To: "unassigned"}, // sentinel -> claimed
+			{ID: "c", To: "Writer", AssignmentMode: TaskAssignmentModeManual},     // manual -> preserved
+			{ID: "d", To: "Writer", AssignmentMode: TaskAssignmentModeStaticPlan}, // delegated -> preserved
+		}
+
+		if claimed := ws.ClaimUnassignedTasksForCoordinator(); claimed != 2 {
+			t.Fatalf("claimed = %d, want 2", claimed)
+		}
+		if ws.Tasks[0].To != "Manager" || ws.Tasks[0].AssignmentMode != TaskAssignmentModeEntryAgentDefault ||
+			ws.Tasks[0].AssignedBy != TaskAssignedBySystem {
+			t.Fatalf("task a not claimed by system: %+v", ws.Tasks[0])
+		}
+		if ws.Tasks[1].To != "Manager" {
+			t.Fatalf("sentinel task b not claimed: %+v", ws.Tasks[1])
+		}
+		if ws.Tasks[2].To != "Writer" || ws.Tasks[2].AssignmentMode != TaskAssignmentModeManual {
+			t.Fatalf("manual task c changed: %+v", ws.Tasks[2])
+		}
+		if ws.Tasks[3].To != "Writer" || ws.Tasks[3].AssignmentMode != TaskAssignmentModeStaticPlan {
+			t.Fatalf("delegated task d changed: %+v", ws.Tasks[3])
+		}
+	})
+
+	t.Run("no coordinator is a no-op", func(t *testing.T) {
+		ws := memberWorkspace("Writer", "Researcher") // multi-agent, no entry agent
+		ws.Tasks = []Task{{ID: "a"}, {ID: "b"}}
+		if claimed := ws.ClaimUnassignedTasksForCoordinator(); claimed != 0 {
+			t.Fatalf("claimed = %d, want 0 with no coordinator", claimed)
+		}
+		if ws.Tasks[0].To != "" {
+			t.Fatalf("task changed despite no coordinator: %+v", ws.Tasks[0])
+		}
+	})
+}
+
+// TestCreateTaskDefaultsToEntryAgentCoordinator covers the workspace task HTTP
+// API (CreateTask) defaulting an omitted assignee to the coordinator (4.5).
+func TestCreateTaskDefaultsToEntryAgentCoordinator(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	handler := NewHTTPHandler(store, nil, nil)
+
+	ws := memberWorkspace("Solo") // single-agent default coordinator
+	ws.ID = "ws-default"
+	ws.Name = "Default"
+	ws.Status = StatusActive
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-default/tasks",
+		strings.NewReader(`{"description":"do it"}`)) // no "to"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.CreateTask(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp taskProvenanceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task.To != "Solo" || resp.Task.AssignmentMode != string(TaskAssignmentModeEntryAgentDefault) {
+		t.Fatalf("task not defaulted to coordinator: %+v", resp.Task)
+	}
+}
+
+// TestClaimSweepThroughStoreUpdate exercises the claim sweep over the
+// lost-update-safe Store.Update path and verifies it persists (4.6).
+func TestClaimSweepThroughStoreUpdate(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ws := memberWorkspace("Manager", "Writer")
+	ws.SharedData = map[string]any{sharedDataEntryAgentNameKey: "Manager"}
+	ws.ID = "ws-sweep"
+	ws.Name = "Sweep"
+	ws.Status = StatusActive
+	ws.Tasks = []Task{{ID: "a", WorkspaceID: "ws-sweep", Description: "orphan", Status: TaskStatusPending}}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	claimed := 0
+	if err := store.Update("ws-sweep", func(fresh *Workspace) error {
+		claimed = fresh.ClaimUnassignedTasksForCoordinator()
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if claimed != 1 {
+		t.Fatalf("claimed = %d, want 1", claimed)
+	}
+
+	reloaded, err := store.Get("ws-sweep")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if reloaded.Tasks[0].To != "Manager" || reloaded.Tasks[0].AssignmentMode != TaskAssignmentModeEntryAgentDefault {
+		t.Fatalf("claim not persisted: %+v", reloaded.Tasks[0])
+	}
+}
