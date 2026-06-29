@@ -9,13 +9,14 @@ func (w *Workspace) GetSummary() map[string]any {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	agentNames := w.agentNamesLocked()
 	return map[string]any{
 		"id":            w.ID,
 		"name":          w.Name,
 		"description":   w.Description,
 		"tags":          append([]string(nil), w.Tags...),
-		"agents":        w.Agents,
-		"agent_count":   len(w.Agents),
+		"agents":        agentNames,
+		"agent_count":   len(agentNames),
 		"message_count": len(w.Messages),
 		"task_count":    len(w.Tasks),
 		"status":        w.Status,
@@ -32,7 +33,7 @@ func (w *Workspace) GetAgentStats() map[string]AgentStats {
 	stats := make(map[string]AgentStats)
 
 	// Initialize stats for all agents
-	for _, agentName := range w.Agents {
+	for _, agentName := range w.agentNamesLocked() {
 		stats[agentName] = AgentStats{
 			Name:         agentName,
 			Status:       "idle",
@@ -111,7 +112,7 @@ func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
 
 	progress := WorkspaceProgress{
 		TotalTasks:  len(w.Tasks),
-		TotalAgents: len(w.Agents),
+		TotalAgents: len(w.agentNamesLocked()),
 	}
 
 	if progress.TotalTasks == 0 {
@@ -202,7 +203,7 @@ func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
 	stats := make(map[string]AgentStats)
 
 	// Initialize stats for all agents
-	for _, agentName := range w.Agents {
+	for _, agentName := range w.agentNamesLocked() {
 		stats[agentName] = AgentStats{
 			Name:            agentName,
 			Status:          "idle",

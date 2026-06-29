@@ -112,7 +112,8 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Created workspace: (ID: ) with agents", logger.Fields{"workspace_id": workspace.Name, "id": workspace.ID, "agents": workspace.Agents})
+	agentNames := workspace.AgentNames()
+	logger.Info("Created workspace: (ID: ) with agents", logger.Fields{"workspace_id": workspace.Name, "id": workspace.ID, "agents": agentNames})
 
 	// Return created workspace
 	w.Header().Set("Content-Type", "application/json")
@@ -120,7 +121,7 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"id":               workspace.ID,
 		"name":             workspace.Name,
-		"agents":           workspace.Agents,
+		"agents":           agentNames,
 		"agent_instances":  workspace.AgentInstances,
 		"entry_agent_name": workspace.EntryAgentName(),
 		"status":           workspace.Status,
@@ -168,7 +169,7 @@ func (h *HTTPHandler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		"name":                 workspace.Name,
 		"description":          workspace.Description,
 		"entry_agent_name":     workspace.EntryAgentName(),
-		"agents":               workspace.Agents,
+		"agents":               workspace.AgentNames(),
 		"agent_instances":      workspace.AgentInstances, // NEW: Stable agent instances
 		"agent_stats":          agentStats,
 		"workspace_progress":   workspaceProgress,
@@ -219,7 +220,7 @@ func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			"name":             workspace.Name,
 			"description":      workspace.Description,
 			"entry_agent_name": workspace.EntryAgentName(),
-			"agents":           workspace.Agents,
+			"agents":           workspace.AgentNames(),
 			"status":           workspace.Status,
 			"created_at":       workspace.CreatedAt,
 			"task_count":       len(workspace.Tasks),

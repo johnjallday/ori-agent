@@ -92,9 +92,6 @@ func referencedAgentNames(ws *Workspace) []string {
 		out = append(out, trimmed)
 	}
 	add(ws.EntryAgentName())
-	for _, name := range ws.Agents {
-		add(name)
-	}
 	for _, inst := range ws.AgentInstances {
 		add(inst.Name)
 	}

@@ -457,13 +457,6 @@ func buildTaskPromptAgentSummary(ws *Workspace) taskPromptAgentSummary {
 			names = append(names, name)
 		}
 	}
-	if len(names) == 0 {
-		for _, item := range ws.Agents {
-			if name := sanitizeTaskPromptText(item, taskPromptTextLimit); name != "" {
-				names = append(names, name)
-			}
-		}
-	}
 	sort.Strings(names)
 	if len(names) == 0 {
 		return taskPromptAgentSummary{Label: "none"}

@@ -496,8 +496,9 @@ func buildWorkspaceAgentSummary(ws *workspace.Workspace) workspaceAgentSummary {
 		}
 	}
 
-	names := make([]string, 0, len(ws.Agents))
-	for _, name := range ws.Agents {
+	agentNames := ws.AgentNames()
+	names := make([]string, 0, len(agentNames))
+	for _, name := range agentNames {
 		if cleaned := sanitizeWorkspaceSnapshotText(name, workspaceSnapshotTextLimit); cleaned != "" {
 			names = append(names, cleaned)
 		}

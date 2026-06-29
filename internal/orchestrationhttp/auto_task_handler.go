@@ -716,12 +716,11 @@ func workspaceAutoTaskAgentNames(ws *workspace.Workspace) []string {
 		return nil
 	}
 
-	names := make([]string, 0, len(ws.AgentInstances)+len(ws.Agents)+1)
+	names := make([]string, 0, len(ws.AgentInstances)+1)
 	names = append(names, ws.EntryAgentName())
 	for _, inst := range ws.AgentInstances {
 		names = append(names, inst.Name)
 	}
-	names = append(names, ws.Agents...)
 
 	return uniqueAutoTaskAgentNames(names...)
 }

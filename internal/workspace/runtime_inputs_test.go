@@ -17,10 +17,10 @@ func TestBuildRuntimeInputs_DoesNotMutateContext(t *testing.T) {
 	t.Parallel()
 
 	ws := &Workspace{
-		ID:     "ws-runtime",
-		Name:   "Runtime Inputs",
-		Status: StatusActive,
-		Agents: []string{"alice"},
+		ID:             "ws-runtime",
+		Name:           "Runtime Inputs",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("alice"),
 	}
 	upstream := Task{
 		ID:          "upstream",
@@ -83,9 +83,9 @@ func TestBuildRuntimeInputs_NilForEmptyInputs(t *testing.T) {
 	t.Parallel()
 
 	ws := &Workspace{
-		ID:     "ws-empty",
-		Status: StatusActive,
-		Agents: []string{"alice"},
+		ID:             "ws-empty",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("alice"),
 	}
 	ws.Tasks = []Task{{
 		ID:          "t",

@@ -170,11 +170,8 @@ func (o *Orchestrator) ResumePendingPlan(ctx context.Context, workspaceID string
 }
 
 func primaryAgent(ws *workspace.Workspace) string {
-	if len(ws.AgentInstances) > 0 {
-		return ws.AgentInstances[0].Name
-	}
-	if len(ws.Agents) > 0 {
-		return ws.Agents[0]
+	if agentNames := ws.AgentNames(); len(agentNames) > 0 {
+		return agentNames[0]
 	}
 	return ""
 }

@@ -33,12 +33,6 @@ func workspaceHasAgentName(workspace *session.Workspace, agentName string) bool 
 		}
 	}
 
-	for _, name := range workspace.Agents {
-		if strings.EqualFold(strings.TrimSpace(name), target) {
-			return true
-		}
-	}
-
 	return false
 }
 
@@ -64,12 +58,6 @@ func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 	for _, inst := range workspace.AgentInstances {
 		if name := strings.TrimSpace(inst.Name); name != "" {
 			return name
-		}
-	}
-
-	for _, name := range workspace.Agents {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			return trimmed
 		}
 	}
 
@@ -109,7 +97,6 @@ func setWorkspaceEntryAgent(workspace *session.Workspace, agentName string) {
 	}
 
 	workspace.SharedData[workspaceEntryAgentNameKey] = trimmed
-	ensureLegacyWorkspaceAgentName(workspace, trimmed)
 
 	found := false
 	for i := range workspace.AgentInstances {
@@ -131,20 +118,6 @@ func setWorkspaceEntryAgent(workspace *session.Workspace, agentName string) {
 			CreatedAt:      time.Now(),
 		})
 	}
-}
-
-func ensureLegacyWorkspaceAgentName(workspace *session.Workspace, agentName string) {
-	trimmed := strings.TrimSpace(agentName)
-	if workspace == nil || trimmed == "" {
-		return
-	}
-
-	for _, existing := range workspace.Agents {
-		if strings.EqualFold(strings.TrimSpace(existing), trimmed) {
-			return
-		}
-	}
-	workspace.Agents = append(workspace.Agents, trimmed)
 }
 
 func canonicalWorkspaceEntryNodeID(agentName string) string {

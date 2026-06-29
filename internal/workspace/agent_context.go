@@ -136,7 +136,7 @@ func (ac *AgentContext) GetWorkspaceSummary() (string, error) {
 		}
 		sb.WriteString(fmt.Sprintf("   - **ID**: `%s`\n", ws.ID))
 		sb.WriteString(fmt.Sprintf("   - **Status**: %s\n", ws.Status))
-		sb.WriteString(fmt.Sprintf("   - **Agents**: %s\n", strings.Join(ws.Agents, ", ")))
+		sb.WriteString(fmt.Sprintf("   - **Agents**: %s\n", strings.Join(ws.AgentNames(), ", ")))
 
 		// Count tasks
 		stats := ws.GetTaskStats()

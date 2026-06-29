@@ -58,9 +58,8 @@ func (w *Workspace) resolveCoordinatorLocked() (string, CoordinatorSource) {
 	return "", CoordinatorSourceMissing
 }
 
-// runnableAgentNamesLocked returns the distinct agent names in the workspace,
-// preferring AgentInstances and falling back to the legacy Agents slice. The
-// caller must hold at least a read lock.
+// runnableAgentNamesLocked returns the distinct agent names in the workspace.
+// The caller must hold at least a read lock.
 func (w *Workspace) runnableAgentNamesLocked() []string {
 	seen := make(map[string]struct{})
 	var names []string
@@ -78,9 +77,6 @@ func (w *Workspace) runnableAgentNamesLocked() []string {
 	}
 	for _, inst := range w.AgentInstances {
 		add(inst.Name)
-	}
-	for _, name := range w.Agents {
-		add(name)
 	}
 	return names
 }

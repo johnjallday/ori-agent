@@ -619,14 +619,6 @@ func writeAgentTaskViews(folder string, ws *Workspace) error {
 			}
 		}
 	}
-	for _, name := range ws.Agents {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			if _, ok := byAgent[name]; !ok {
-				byAgent[name] = nil
-			}
-		}
-	}
 	for agentName, tasks := range byAgent {
 		dir, err := workspaceAgentDir(folder, agentName)
 		if err != nil {

@@ -19,7 +19,6 @@ func delegationWorkspace(id string, names ...string) *workspace.Workspace {
 		ID:             id,
 		Status:         workspace.StatusActive,
 		AgentInstances: insts,
-		Agents:         append([]string(nil), names...),
 	}
 }
 

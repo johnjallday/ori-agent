@@ -165,7 +165,6 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		OrderIndex:        ws.OrderIndex,
 		CreatedAt:         ws.CreatedAt,
 		UpdatedAt:         ws.UpdatedAt,
-		Agents:            ws.Agents,
 		SharedData:        ws.SharedData,
 		Status:            WorkspaceStatus(ws.Status),
 		Version:           ws.Version,
@@ -305,7 +304,6 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		OrderIndex:        ws.OrderIndex,
 		CreatedAt:         ws.CreatedAt,
 		UpdatedAt:         ws.UpdatedAt,
-		Agents:            ws.Agents,
 		SharedData:        ws.SharedData,
 		Status:            workspace.WorkspaceStatus(ws.Status),
 		Version:           ws.Version,
@@ -638,13 +636,17 @@ func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description stri
 		ID:          generateID(),
 		Name:        name,
 		Description: description,
-		Agents:      agents,
 		Status:      workspace.StatusActive,
 		SharedData:  make(map[string]any),
 		Messages:    []workspace.AgentMessage{},
 		Tasks:       []workspace.Task{},
 		CreatedAt:   now,
 		UpdatedAt:   now,
+	}
+	for _, agentName := range agents {
+		if err := ws.AddAgent(agentName); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := a.Save(ws); err != nil {

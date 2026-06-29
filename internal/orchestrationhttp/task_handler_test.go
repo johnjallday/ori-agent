@@ -430,7 +430,7 @@ func TestTasksPathHandler_PromoteTaskResult(t *testing.T) {
 		t.Fatalf("expected source task, parent, and 2 subtasks, got %d tasks", len(savedWS.Tasks))
 	}
 	if !savedWS.HasAgent("Ori") || !savedWS.HasAgent("researcher") {
-		t.Fatalf("expected promotion to ensure task assignees exist, got agents=%v instances=%#v", savedWS.Agents, savedWS.AgentInstances)
+		t.Fatalf("expected promotion to ensure task assignees exist, got agents=%v instances=%#v", savedWS.AgentNames(), savedWS.AgentInstances)
 	}
 }
 

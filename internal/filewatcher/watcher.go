@@ -109,9 +109,9 @@ func (w *Watcher) Watch(sessionID, path string) error {
 
 	w.sessions[sessionID] = path
 
-	logger.Info("Started watching session folder", logger.Fields{
-		"session_id": sessionID,
-		"path":       path,
+	logger.Info("Started watching filesystem path", logger.Fields{
+		"watch_id": sessionID,
+		"path":     path,
 	})
 
 	return nil
@@ -160,9 +160,9 @@ func (w *Watcher) Unwatch(sessionID string) error {
 		}
 	}
 
-	logger.Info("Stopped watching session folder", logger.Fields{
-		"session_id": sessionID,
-		"path":       path,
+	logger.Info("Stopped watching filesystem path", logger.Fields{
+		"watch_id": sessionID,
+		"path":     path,
 	})
 
 	return nil

@@ -395,7 +395,7 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 	// Check agent availability
 
 	requiredAgents := workflow.GetAgentNames()
-	missingAgents := h.workflowManager.CheckAgentAvailability(workflow, ws.Agents)
+	missingAgents := h.workflowManager.CheckAgentAvailability(workflow, ws.AgentNames())
 
 	response := CheckAgentsResponse{
 		Available:      len(missingAgents) == 0,

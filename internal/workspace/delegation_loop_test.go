@@ -39,8 +39,7 @@ func loopWorkspace(subtasks ...Task) *Workspace {
 			{Name: "Manager", NodeID: "manager-node-1", EntryPoint: true},
 			{Name: "Writer", NodeID: "writer-node-1"},
 		},
-		Agents: []string{"Manager", "Writer"},
-		Tasks:  subtasks,
+		Tasks: subtasks,
 	}
 }
 

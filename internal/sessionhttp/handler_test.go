@@ -146,9 +146,8 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 
 	now := time.Now()
 	ws := &session.Workspace{
-		ID:     "workspace-spain",
-		Name:   "Spain",
-		Agents: []string{"Spain Manager"},
+		ID:   "workspace-spain",
+		Name: "Spain",
 		AgentInstances: []session.AgentInstance{
 			{
 				ID:             "spain-manager-1",
@@ -196,9 +195,8 @@ func TestHandler_CreateSessionInWorkspaceWithMissingEntryAgent_NoAutoCreation(t 
 
 	now := time.Now()
 	ws := &session.Workspace{
-		ID:     "workspace-stale-entry",
-		Name:   "Spain",
-		Agents: []string{"Workspace Manager"},
+		ID:   "workspace-stale-entry",
+		Name: "Spain",
 		AgentInstances: []session.AgentInstance{
 			{
 				ID:             "workspace-manager-1",
@@ -289,9 +287,8 @@ func TestHandler_CreateSessionInWorkspacePreservesExplicitAgent(t *testing.T) {
 
 	now := time.Now()
 	ws := &session.Workspace{
-		ID:     "workspace-explicit",
-		Name:   "Spain",
-		Agents: []string{"Spain Manager"},
+		ID:   "workspace-explicit",
+		Name: "Spain",
 		AgentInstances: []session.AgentInstance{
 			{
 				ID:             "spain-manager-1",

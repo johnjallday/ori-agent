@@ -78,7 +78,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 	// Step 1: Analyze the mission and break it down into tasks. analyzeMission
 	// resolves the LLM's dependency hints (1-based indices into the task
 	// array) into Task.InputTaskIDs against the freshly minted task UUIDs.
-	tasks, err := o.analyzeMission(ctx, mission, workspace.Agents)
+	tasks, err := o.analyzeMission(ctx, mission, workspace.AgentNames())
 	if err != nil {
 		return fmt.Errorf("failed to analyze mission: %w", err)
 	}

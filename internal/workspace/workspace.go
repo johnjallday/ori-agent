@@ -12,11 +12,10 @@ import (
 // NewWorkspace creates a new workspace
 func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 	now := time.Now()
-	return &Workspace{
+	ws := &Workspace{
 		ID:          uuid.New().String(),
 		Name:        params.Name,
 		Description: params.Description,
-		Agents:      params.Agents,
 		SharedData:  params.InitialData,
 		Messages:    []AgentMessage{},
 		Tasks:       []Task{},
@@ -26,6 +25,10 @@ func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 		UpdatedAt:   now,
 		taskIndex:   make(map[string]int),
 	}
+	for _, agentName := range params.Agents {
+		_ = ws.AddAgent(agentName)
+	}
+	return ws
 }
 
 // AddMessage adds a message to the workspace
@@ -138,7 +141,6 @@ func FromJSON(data []byte) (*Workspace, error) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
 	}
-	ws.MigrateToAgentInstances()      // Auto-migrate legacy agent format
 	ws.NormalizeAgentInstances()      // Collapse duplicate agent instances to one per profile
 	ws.MigrateScheduledTasksToTasks() // Auto-migrate legacy scheduled tasks
 	if ws.Folders == nil {
@@ -174,7 +176,6 @@ func FromJSONMetadata(data []byte) (*Workspace, error) {
 	}
 	ws := &lite.Workspace
 	ws.Messages = nil
-	ws.MigrateToAgentInstances()
 	ws.NormalizeAgentInstances()
 	ws.MigrateScheduledTasksToTasks()
 	if ws.Folders == nil {
@@ -182,36 +183,6 @@ func FromJSONMetadata(data []byte) (*Workspace, error) {
 	}
 	ws.rebuildTaskIndex()
 	return ws, nil
-}
-
-// MigrateToAgentInstances migrates legacy Agents []string to AgentInstances
-func (w *Workspace) MigrateToAgentInstances() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	// Skip if already migrated or no legacy agents
-	if len(w.AgentInstances) > 0 || len(w.Agents) == 0 {
-		return
-	}
-
-	// Count instances of each agent type to assign instance numbers
-	instanceCounts := make(map[string]int)
-
-	for _, agentName := range w.Agents {
-		instanceCounts[agentName]++
-		instanceNumber := instanceCounts[agentName]
-
-		instance := AgentInstance{
-			ID:             uuid.New().String(),
-			Name:           agentName,
-			InstanceNumber: instanceNumber,
-			NodeID:         fmt.Sprintf("%s-node-%d", agentName, instanceNumber),
-			CreatedAt:      time.Now(),
-		}
-		w.AgentInstances = append(w.AgentInstances, instance)
-	}
-
-	logger.Debug("Migrated workspace : legacy agents -> agent instances", logger.Fields{"workspace_id": w.ID, "agents)": len(w.Agents), "agentinstances)": len(w.AgentInstances)})
 }
 
 // MigrateScheduledTasksToTasks migrates legacy ScheduledTasks to Tasks with Schedule fields

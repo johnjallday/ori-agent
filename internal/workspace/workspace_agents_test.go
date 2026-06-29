@@ -26,8 +26,8 @@ func TestWorkspaceAddAgentRejectsDuplicateName(t *testing.T) {
 		t.Fatalf("expected canonical node id Writer-node-1, got %q", got)
 	}
 
-	if got := ws.Agents; !reflect.DeepEqual(got, []string{"Writer"}) {
-		t.Fatalf("expected Agents to contain one Writer entry, got %#v", got)
+	if got := ws.AgentNames(); !reflect.DeepEqual(got, []string{"Writer"}) {
+		t.Fatalf("expected AgentNames to contain one Writer entry, got %#v", got)
 	}
 }
 
@@ -48,8 +48,7 @@ func TestWorkspaceAddAgentSetsFirstEntryAgent(t *testing.T) {
 
 func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 	ws := &Workspace{
-		ID:     "ws-1",
-		Agents: []string{"Writer", "Writer", "Reviewer"},
+		ID: "ws-1",
 		AgentInstances: []AgentInstance{
 			{ID: "writer-1", Name: "Writer", InstanceNumber: 2, NodeID: "Writer-node-2"},
 			{ID: "writer-2", Name: "Writer", InstanceNumber: 3, NodeID: "Writer-node-3"},
@@ -103,8 +102,8 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 		t.Fatalf("expected Writer node id Writer-node-1, got %q", writer.NodeID)
 	}
 
-	if got := ws.Agents; !reflect.DeepEqual(got, []string{"Writer", "Reviewer"}) {
-		t.Fatalf("expected deduped Agents list, got %#v", got)
+	if got := ws.AgentNames(); !reflect.DeepEqual(got, []string{"Writer", "Reviewer"}) {
+		t.Fatalf("expected deduped agent names, got %#v", got)
 	}
 
 	if ws.Tasks[0].AssignedNodeID != "Writer-node-1" {
@@ -157,7 +156,6 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 
 func TestWorkspaceEntryAgentNameUsesConfiguredEntryAgent(t *testing.T) {
 	ws := &Workspace{
-		Agents: []string{"Trip Planning Manager", "Trip Planner"},
 		AgentInstances: []AgentInstance{
 			{Name: "Trip Planning Manager", NodeID: "trip-manager-node", EntryPoint: true},
 			{Name: "Trip Planner", NodeID: "trip-planner-node"},
@@ -180,7 +178,6 @@ func TestWorkspaceEntryAgentNameUsesConfiguredEntryAgent(t *testing.T) {
 
 func TestWorkspaceEntryAgentNameFallsBackToEntryPointInstance(t *testing.T) {
 	ws := &Workspace{
-		Agents: []string{"Music Project Manager", "DAW Agent"},
 		AgentInstances: []AgentInstance{
 			{Name: "Music Project Manager", NodeID: "manager-node", EntryPoint: true},
 			{Name: "DAW Agent", NodeID: "daw-node"},
@@ -194,7 +191,6 @@ func TestWorkspaceEntryAgentNameFallsBackToEntryPointInstance(t *testing.T) {
 
 func TestNormalizeAgentInstancesPreservesEntryPointMetadata(t *testing.T) {
 	ws := &Workspace{
-		Agents: []string{"Portfolio Manager", "Portfolio Manager"},
 		AgentInstances: []AgentInstance{
 			{ID: "manager-1", Name: "Portfolio Manager", InstanceNumber: 1, NodeID: "Portfolio Manager-node-1"},
 			{ID: "manager-2", Name: "Portfolio Manager", InstanceNumber: 2, NodeID: "Portfolio Manager-node-2", Role: "Manager", Description: "Primary entry point", EntryPoint: true},

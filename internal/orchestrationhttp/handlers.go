@@ -39,8 +39,9 @@ type HandlerConfig struct {
 	TemplateManager     *templates.TemplateManager
 	NotificationService *workspace.NotificationService
 	TaskHandler         workspace.TaskHandler
-	SessionStore        SessionStore         // For fetching sessions and session tasks
-	FileWatcher         *filewatcher.Watcher // For workspace directory watching
+	SessionStore        SessionStore                    // For fetching sessions and session tasks
+	FileWatcher         *filewatcher.Watcher            // Deprecated fallback for workspace directory watching
+	DirectorySync       *workspace.DirectorySyncManager // Lazy workspace directory watching
 }
 
 // SessionStore interface for fetching session data
@@ -94,6 +95,7 @@ type Handler struct {
 	notificationService *workspace.NotificationService
 	taskHandler         workspace.TaskHandler
 	fileWatcher         *filewatcher.Watcher
+	directorySync       *workspace.DirectorySyncManager
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -134,6 +136,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		notificationService: cfg.NotificationService,
 		taskHandler:         cfg.TaskHandler,
 		fileWatcher:         cfg.FileWatcher,
+		directorySync:       cfg.DirectorySync,
 	}
 
 	// Initialize all sub-handlers
@@ -148,6 +151,9 @@ func (h *Handler) initializeSubHandlers() {
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, h.eventBus, h.sessionStore)
 	if h.fileWatcher != nil {
 		h.workspaceHandler.SetFileWatcher(h.fileWatcher)
+	}
+	if h.directorySync != nil {
+		h.workspaceHandler.SetDirectorySync(h.directorySync)
 	}
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)

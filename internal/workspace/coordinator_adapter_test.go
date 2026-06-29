@@ -39,8 +39,7 @@ func adapterWorkspace() *Workspace {
 			{Name: "Manager", NodeID: "manager-node-1", EntryPoint: true},
 			{Name: "Writer", NodeID: "writer-node-1"},
 		},
-		Agents: []string{"Manager", "Writer"},
-		Tasks:  []Task{{ID: "f1", WorkspaceID: "ws", Description: "do x", Status: TaskStatusFailed}},
+		Tasks: []Task{{ID: "f1", WorkspaceID: "ws", Description: "do x", Status: TaskStatusFailed}},
 	}
 }
 

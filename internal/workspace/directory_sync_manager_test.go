@@ -120,8 +120,11 @@ func TestDirectorySyncManagerEmitsWorkspaceUpdatedEvent(t *testing.T) {
 	manager.Start()
 	defer manager.Stop()
 
-	// Let initial watcher registration complete.
-	time.Sleep(150 * time.Millisecond)
+	if result, err := manager.WatchWorkspace(ws.ID); err != nil {
+		t.Fatalf("WatchWorkspace: %v", err)
+	} else if result.Watched != 1 {
+		t.Fatalf("expected 1 watched directory, got %+v", result)
+	}
 
 	targetFile := filepath.Join(dir, "sync-event.txt")
 	if err := os.WriteFile(targetFile, []byte("hello sync"), 0644); err != nil {
@@ -169,9 +172,84 @@ func TestDirectorySyncManagerSkipsTrashedWorkspace(t *testing.T) {
 	}
 	defer func() { _ = manager.watcher.Close() }()
 
-	manager.syncWatchedDirectories()
+	if result, err := manager.WatchWorkspace(ws.ID); err != nil {
+		t.Fatalf("WatchWorkspace: %v", err)
+	} else if result.Watched != 0 {
+		t.Fatalf("expected no watched directories for trashed workspace, got %+v", result)
+	}
 
 	if len(manager.watched) != 0 {
 		t.Fatalf("expected no watched directories for trashed workspace, got %d", len(manager.watched))
+	}
+}
+
+func TestDirectorySyncManagerStartsIdle(t *testing.T) {
+	dir := t.TempDir()
+	ws := &Workspace{
+		ID:     "ws-idle-sync",
+		Name:   "Idle Sync",
+		Status: StatusActive,
+		DirectoryReferences: []DirectoryReference{{
+			ID:          "dir-idle",
+			WorkspaceID: "ws-idle-sync",
+			Name:        "Repo",
+			Path:        dir,
+		}},
+	}
+
+	store := &directorySyncTestStore{
+		workspaces: map[string]*Workspace{ws.ID: ws},
+	}
+
+	cfg := DefaultDirectorySyncConfig()
+	cfg.PollInterval = 20 * time.Millisecond
+	manager, err := NewDirectorySyncManager(store, DefaultEventBus(), cfg)
+	if err != nil {
+		t.Fatalf("failed to create directory sync manager: %v", err)
+	}
+	manager.Start()
+	defer manager.Stop()
+
+	time.Sleep(80 * time.Millisecond)
+
+	if len(manager.watched) != 0 {
+		t.Fatalf("expected manager to start idle, got %d watched directories", len(manager.watched))
+	}
+}
+
+func TestDirectorySyncManagerRespectsWatchLimit(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	ws := &Workspace{
+		ID:     "ws-limit-sync",
+		Name:   "Limit Sync",
+		Status: StatusActive,
+		DirectoryReferences: []DirectoryReference{
+			{ID: "dir-a", WorkspaceID: "ws-limit-sync", Name: "A", Path: dirA},
+			{ID: "dir-b", WorkspaceID: "ws-limit-sync", Name: "B", Path: dirB},
+		},
+	}
+
+	store := &directorySyncTestStore{
+		workspaces: map[string]*Workspace{ws.ID: ws},
+	}
+
+	cfg := DefaultDirectorySyncConfig()
+	cfg.MaxWatchedDirectories = 1
+	manager, err := NewDirectorySyncManager(store, DefaultEventBus(), cfg)
+	if err != nil {
+		t.Fatalf("failed to create directory sync manager: %v", err)
+	}
+	defer func() { _ = manager.watcher.Close() }()
+
+	result, err := manager.WatchWorkspace(ws.ID)
+	if err != nil {
+		t.Fatalf("WatchWorkspace: %v", err)
+	}
+	if result.Watched != 1 || result.SkippedOverLimit != 1 {
+		t.Fatalf("expected one watch and one limit skip, got %+v", result)
+	}
+	if len(manager.watched) != 1 {
+		t.Fatalf("expected one watched directory, got %d", len(manager.watched))
 	}
 }

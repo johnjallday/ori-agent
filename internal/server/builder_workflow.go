@@ -369,6 +369,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		TaskHandler:         taskHandler,
 		SessionStore:        sessionStoreAdapter,
 		FileWatcher:         b.sessionFilesWatcher,
+		DirectorySync:       b.directorySyncManager,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
 	})
 	if err != nil {

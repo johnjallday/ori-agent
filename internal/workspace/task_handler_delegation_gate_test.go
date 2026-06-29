@@ -8,7 +8,6 @@ func delegationPolicyWorkspace(id string, policy AutonomyPolicy) *Workspace {
 		Status:         StatusActive,
 		AutonomyPolicy: policy,
 		AgentInstances: []AgentInstance{{Name: "Writer", NodeID: "writer-node-1"}},
-		Agents:         []string{"Writer"},
 	}
 }
 

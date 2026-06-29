@@ -95,7 +95,6 @@ func TestResolveCoordinator(t *testing.T) {
 // must report "missing" rather than silently picking the first agent.
 func TestResolveCoordinatorDoesNotFallBackToFirstAgent(t *testing.T) {
 	ws := &Workspace{
-		Agents: []string{"Alpha", "Beta"},
 		AgentInstances: []AgentInstance{
 			{Name: "Alpha", NodeID: "alpha-node-1"},
 			{Name: "Beta", NodeID: "beta-node-1"},

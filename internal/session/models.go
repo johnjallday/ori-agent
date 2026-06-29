@@ -301,10 +301,6 @@ type Workspace struct {
 	// Orchestration Fields (for unified workspace functionality)
 	// ==========================================================================
 
-	// Agents is a list of agent names participating in this workspace.
-	// Deprecated: Use AgentInstances for new code.
-	Agents []string `json:"agents,omitempty"`
-
 	// AgentInstances contains stable agent instances with persistent IDs.
 	AgentInstances []AgentInstance `json:"agent_instances,omitempty"`
 
