@@ -1,6 +1,15 @@
 # Project Templates
 
-Project templates let a workspace start with a ready-made **project folder** — a Reaper song, a writing project, a code scaffold, anything — without Ori containing any domain-specific code. A template is just a folder; instantiating it copies the folder's contents into the workspace and records the result as the workspace's `project_path`.
+A **template** describes how a workspace starts. It is presented as a single **Template** picker in the create-workspace modal (there is no separate "starting point" vs. "project template" choice). One template may carry any combination of:
+
+- a **name/description** prefill,
+- a default **agent behavior** profile (`general` | `research` | `software_project`),
+- **starter tasks** seeded into the new workspace,
+- default **tools** (skills / MCP servers / plugins, applied if present),
+- an **onboarding** intake flow, and
+- a **project folder skeleton** — a Reaper song, a writing project, a code scaffold, anything.
+
+A template that ships a skeleton scaffolds it into the workspace and records the result as the workspace's `project_path`. A **metadata-only** template (no files beyond `template.json`) contributes behavior/tasks/tools but creates no project folder. Either way, Ori contains no domain-specific code: a template is just a folder, and all domain specificity lives in template data.
 
 ## Why this design
 
@@ -18,7 +27,7 @@ The library is a directory of folders. Resolution order:
 2. `ORI_TEMPLATES_DIR` environment variable
 3. `<data dir>/templates` (default; created on startup)
 
-Two starter templates (`reaper-song`, `writing-project`) are materialized on first start — only when absent, so your edits are never overwritten.
+A set of **built-in** templates is materialized on first start — only when absent, so your edits are never overwritten. These are the five metadata-only starting points (`travels`, `daily-briefings`, `content-production`, `research-project`, `personal-ops`) plus the two folder-skeleton starters (`reaper-song`, `writing-project`). Built-ins are flagged `"builtin": true` and are **read-only** in the authoring UI — use **Duplicate to customize** to make an editable copy.
 
 ## Authoring a template
 
@@ -32,7 +41,8 @@ templates/
     assets/
 ```
 
-- `template.json` may set `"name"` and `"description"` for the picker. It carries **metadata only** — no hooks, scripts, or post-create actions, by design.
+- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details" }]`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `onboarding` (intake spec), and `builtin`. Unknown keys are preserved untouched.
+- A folder containing **only** `template.json` is a valid metadata-only template (it scaffolds no files).
 - `{{name}}` becomes the slugified project name; `{{date}}` becomes `YYYY-MM-DD`. Substitution applies to file and folder **names only**; file contents are byte-copied untouched, so binary files are always safe.
 - Symlinks are skipped during instantiation (they would break portability or reach outside the template).
 - Keep templates small: instantiation is synchronous, and seeds are meant to be starting points, not finished projects.
@@ -41,7 +51,7 @@ templates/
 
 Entry points:
 
-- **Workspace creation** — the "Project (optional)" card in the create-workspace modal: pick a library template or any folder on disk ("Choose folder…"), optionally set a project name (defaults to the workspace name).
+- **Workspace creation** — the unified **Template** picker in the create-workspace modal: a card grid of built-ins plus a compact list of your own templates. Selecting one applies its prefill/behavior/tasks/tools and, if it has a skeleton, scaffolds the project (optionally set a project name; defaults to the workspace name). The "use any folder as a template" escape hatch lives under **Advanced**. A metadata-only template skips scaffolding entirely.
 - **Chat** — agents in a workspace can call `workspace_project_templates` and `workspace_create_project`.
 - **API** — `POST /api/workspaces` with `template_id` or `template_path` (+ optional `project_name`); see the [API reference](../api/API_REFERENCE.md#project-templates).
 
@@ -62,11 +72,12 @@ Because `project_path` is relative and stored in `workspace.json` (its canonical
 
 ## Managing the library
 
-The filesystem is the primary management surface — but the app provides a thin veneer over it:
+The filesystem is the primary management surface — but the app provides a full authoring UI over it:
 
-- **Manage modal** (reachable from the create-workspace modal's Project card, the workspace page's project dialog, and Settings → Project Templates): list installed templates, **Import Folder…** (verbatim copy into the library), **Edit** display name/description (writes `template.json`, preserving any extra fields), **Delete** (system Trash when supported), and **Reveal** in the file manager.
-- **Settings → Project Templates**: configure `templates_root` (Browse/Save/Clear, mirroring the workspace and vault directory settings), open the library folder, and launch the manage modal. Changing the directory materializes the library there, including any absent starter templates.
-- Deleting a starter template lasts until the next server start, which re-adds absent starters; edit a starter instead of deleting it if you want it gone-but-different.
+- **`/templates` page** — the dedicated authoring surface. Per template: edit the Overview (name, description, tags, **icon**, **agent behavior**, **starter tasks**), browse/edit Files, configure Onboarding and Tools, **Duplicate**, **Reveal**, and **Delete**. Built-ins show a read-only badge and disable the mutating controls; **Duplicate to customize** makes an editable copy (the copy is never marked built-in). Mutating a built-in is also rejected server-side with `403` (defense in depth), so the read-only guarantee does not depend on the UI.
+- **Manage modal** (reachable from the create-workspace modal and Settings → Project Templates): a lighter list/import/edit/delete/reveal veneer over the same library.
+- **Settings → Project Templates**: configure `templates_root` (Browse/Save/Clear), open the library folder, and launch the authoring page. Changing the directory materializes the library there, including any absent built-ins.
+- Deleting a built-in lasts until the next server start, which re-adds absent built-ins; duplicate-and-edit instead if you want one gone-but-different.
 
 ## Rules and guarantees
 

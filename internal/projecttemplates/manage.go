@@ -72,7 +72,7 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	}
 
 	if strings.TrimSpace(displayName) != "" {
-		if _, err := UpdateManifest(absLib, id, displayName, src.Description, nil); err != nil {
+		if _, err := UpdateManifest(absLib, id, displayName, src.Description, nil, nil); err != nil {
 			_ = os.RemoveAll(dest)
 			return Template{}, err
 		}
@@ -117,7 +117,7 @@ func CreateBlank(libDir, name string) (Template, error) {
 	}
 
 	// Seed a minimal manifest so the display name is explicit from the start.
-	if _, err := UpdateManifest(absLib, id, name, "", nil); err != nil {
+	if _, err := UpdateManifest(absLib, id, name, "", nil, nil); err != nil {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
@@ -159,12 +159,45 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
+	// A duplicate is always an editable user template: never inherit the
+	// source's builtin flag (copyFolderVerbatim copied it verbatim).
+	if err := deleteManifestKeys(dest, "builtin"); err != nil {
+		_ = os.RemoveAll(dest)
+		return Template{}, err
+	}
 	// Set the duplicate's display name (tags/onboarding/unknown keys preserved).
-	if _, err := UpdateManifest(absLib, newID, basis, src.Description, nil); err != nil {
+	if _, err := UpdateManifest(absLib, newID, basis, src.Description, nil, nil); err != nil {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
 	return newTemplate(dest), nil
+}
+
+// deleteManifestKeys removes the given keys from a template folder's
+// template.json, preserving everything else. A missing/malformed manifest is a
+// no-op. dir is a library template folder resolved by the caller; the filename
+// is always the fixed ManifestFileName constant.
+func deleteManifestKeys(dir string, keys ...string) error {
+	manifestPath := filepath.Join(dir, ManifestFileName)
+	data, err := os.ReadFile(manifestPath) // #nosec G304 -- dir is a resolved library template folder; filename is the fixed ManifestFileName constant
+	if err != nil {
+		return nil
+	}
+	raw := map[string]any{}
+	if json.Unmarshal(data, &raw) != nil {
+		return nil
+	}
+	for _, key := range keys {
+		delete(raw, key)
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, append(out, '\n'), 0o640); err != nil { // #nosec G304 -- manifestPath is a resolved library template folder + the fixed ManifestFileName constant
+		return fmt.Errorf("failed to write manifest: %w", err)
+	}
+	return nil
 }
 
 // copyFolderVerbatim copies a directory tree without name substitution,
@@ -198,6 +231,35 @@ func copyFolderVerbatim(srcRoot, destRoot string) error {
 	})
 }
 
+// ErrTemplateReadOnly reports an attempt to mutate a built-in template. The
+// authoring UI and API treat built-ins as read-only; "Duplicate to customize"
+// is the supported way to edit one.
+var ErrTemplateReadOnly = errors.New("template is built-in and read-only")
+
+// EnsureMutable returns ErrTemplateReadOnly when id resolves to a built-in
+// template. Mutating endpoints guard with it so a built-in can never be edited,
+// renamed, file-modified, or deleted in place.
+func EnsureMutable(libDir, id string) error {
+	tpl, err := FindLibraryTemplate(libDir, id)
+	if err != nil {
+		return err
+	}
+	if tpl.Builtin {
+		return fmt.Errorf("%w: %q", ErrTemplateReadOnly, id)
+	}
+	return nil
+}
+
+// ManifestEdit carries the unified-template config fields editable on the
+// /templates page. Each pointer is tri-state: nil preserves the manifest's
+// current value, a set pointer replaces it (empty icon clears the key; empty
+// starter_tasks clears the key; behavior_profile is normalized).
+type ManifestEdit struct {
+	Icon            *string
+	BehaviorProfile *string
+	StarterTasks    *[]StarterTask
+}
+
 // UpdateManifest writes display metadata into a library template's
 // template.json, preserving any unknown fields a user may have added. Empty
 // name/description values remove the corresponding key (falling back to
@@ -206,7 +268,8 @@ func copyFolderVerbatim(srcRoot, destRoot string) error {
 // tags is tri-state so older callers can't clobber author-set tags: nil
 // preserves whatever the manifest already has, a non-empty slice replaces the
 // tags with the normalized set, and an explicit empty slice clears the key.
-func UpdateManifest(libDir, id, name, description string, tags *[]string) (Template, error) {
+// edit is nil for callers that only touch name/description/tags.
+func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *ManifestEdit) (Template, error) {
 	tpl, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
 		return Template{}, err
@@ -237,6 +300,22 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string) (Templ
 			raw["tags"] = normalized
 		} else {
 			delete(raw, "tags")
+		}
+	}
+
+	if edit != nil {
+		if edit.Icon != nil {
+			setOrDelete("icon", *edit.Icon)
+		}
+		if edit.BehaviorProfile != nil {
+			raw["behavior_profile"] = NormalizeBehaviorProfile(*edit.BehaviorProfile)
+		}
+		if edit.StarterTasks != nil {
+			if tasks := normalizeStarterTasks(*edit.StarterTasks); len(tasks) > 0 {
+				raw["starter_tasks"] = tasks
+			} else {
+				delete(raw, "starter_tasks")
+			}
 		}
 	}
 

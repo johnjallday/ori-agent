@@ -172,7 +172,14 @@ function tplBuildRow(template) {
 
   const title = document.createElement('div');
   title.style.cssText = 'color: var(--text-primary); font-size: 14px; font-weight: 600; word-break: break-word;';
-  title.textContent = template.name || template.id;
+  title.textContent = (template.icon ? `${template.icon} ` : '') + (template.name || template.id);
+  if (template.builtin) {
+    const badge = document.createElement('span');
+    badge.className = 'badge ms-1';
+    badge.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; font-size: 9px; vertical-align: middle;';
+    badge.textContent = 'BUILT-IN';
+    title.appendChild(badge);
+  }
   row.appendChild(title);
 
   const id = document.createElement('div');
@@ -260,6 +267,31 @@ function tplRenderDetail() {
   if (idLabel) idLabel.textContent = template.id;
 
   tplResetOverviewFields();
+  tplApplyReadOnly();
+}
+
+// tplStarterTasksToText serializes starter tasks to one-per-line text, with
+// optional details after a pipe.
+function tplStarterTasksToText(tasks) {
+  return (Array.isArray(tasks) ? tasks : [])
+    .map((t) => (t && t.details ? `${t.description} | ${t.details}` : (t ? t.description : '')))
+    .filter(Boolean)
+    .join('\n');
+}
+
+// tplParseStarterTasks parses the textarea back into {description, details}
+// objects: one task per non-empty line, details after the first pipe.
+function tplParseStarterTasks(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return null;
+      const idx = trimmed.indexOf('|');
+      if (idx === -1) return { description: trimmed, details: '' };
+      return { description: trimmed.slice(0, idx).trim(), details: trimmed.slice(idx + 1).trim() };
+    })
+    .filter((t) => t && t.description);
 }
 
 function tplResetOverviewFields() {
@@ -270,6 +302,12 @@ function tplResetOverviewFields() {
   // A name equal to the id is a folder-name fallback, not an explicit name.
   if (nameInput) nameInput.value = template.name && template.name !== template.id ? template.name : '';
   if (descInput) descInput.value = template.description || '';
+  const iconInput = tplEl('tplEditIcon');
+  if (iconInput) iconInput.value = template.icon || '';
+  const behaviorSelect = tplEl('tplEditBehavior');
+  if (behaviorSelect) behaviorSelect.value = template.behavior_profile || 'general';
+  const starterInput = tplEl('tplEditStarterTasks');
+  if (starterInput) starterInput.value = tplStarterTasksToText(template.starter_tasks);
   tplEnsureTagsWidget();
   if (tplState.tagsWidget) tplState.tagsWidget.setTags(template.tags || []);
 }
@@ -279,6 +317,9 @@ async function tplSaveOverview() {
   if (!template) return;
   const nameInput = tplEl('tplEditName');
   const descInput = tplEl('tplEditDescription');
+  const iconInput = tplEl('tplEditIcon');
+  const behaviorSelect = tplEl('tplEditBehavior');
+  const starterInput = tplEl('tplEditStarterTasks');
   const tags = tplState.tagsWidget ? tplState.tagsWidget.getTags() : (template.tags || []);
   try {
     await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
@@ -287,13 +328,42 @@ async function tplSaveOverview() {
       body: JSON.stringify({
         name: nameInput ? nameInput.value.trim() : '',
         description: descInput ? descInput.value.trim() : '',
-        tags
+        tags,
+        icon: iconInput ? iconInput.value.trim() : '',
+        behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
+        starter_tasks: tplParseStarterTasks(starterInput ? starterInput.value : '')
       })
     });
     tplToast('Template saved.', 'success');
     await tplRefresh(template.id);
   } catch (error) {
     tplToast(error.message || 'Failed to save template', 'error');
+  }
+}
+
+// tplApplyReadOnly toggles the built-in badge/notice and disables every
+// mutating control for built-in templates (the backend also rejects mutations).
+function tplApplyReadOnly() {
+  const template = tplSelected();
+  const builtin = Boolean(template && template.builtin);
+  const badge = tplEl('tplDetailBuiltinBadge');
+  if (badge) badge.hidden = !builtin;
+  const notice = tplEl('tplReadOnlyNotice');
+  if (notice) notice.hidden = !builtin;
+  [
+    'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplEditStarterTasks',
+    'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
+    'tplFileNewBtn', 'tplFolderNewBtn', 'tplFileRenameBtn', 'tplFileDeleteBtn', 'tplEditorSaveBtn',
+    'tplOnbSaveBtn', 'tplToolsSaveBtn'
+  ].forEach((id) => {
+    const el = tplEl(id);
+    if (el) el.disabled = builtin;
+  });
+  // The tags widget is a custom component; dim + block interaction for built-ins.
+  const tagsWrap = tplEl('tplEditTags');
+  if (tagsWrap) {
+    tagsWrap.style.pointerEvents = builtin ? 'none' : '';
+    tagsWrap.style.opacity = builtin ? '0.6' : '';
   }
 }
 
@@ -1283,6 +1353,7 @@ function tplInit() {
 
   tplEl('tplSaveBtn')?.addEventListener('click', () => void tplSaveOverview());
   tplEl('tplResetBtn')?.addEventListener('click', tplResetOverviewFields);
+  tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', tplDuplicate);
 
   const search = tplEl('tplSearch');
   if (search) {

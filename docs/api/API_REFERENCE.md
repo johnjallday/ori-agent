@@ -854,13 +854,23 @@ GET /api/project-templates
 ```json
 {
   "templates": [
-    { "id": "reaper-song", "name": "Reaper Song", "description": "A minimal REAPER project..." }
+    {
+      "id": "research-project", "name": "Research Project", "description": "Synthesis docs...",
+      "icon": "📚", "behavior_profile": "research", "builtin": true, "has_skeleton": false,
+      "tags": ["research"],
+      "starter_tasks": [{ "description": "Build the synthesis doc", "details": "..." }],
+      "tools": { "skills": [], "mcp_servers": [], "plugins": [] }
+    },
+    {
+      "id": "reaper-song", "name": "Reaper Song", "description": "A minimal REAPER project...",
+      "icon": "🎵", "behavior_profile": "general", "builtin": true, "has_skeleton": true
+    }
   ],
   "templates_root": "/path/to/templates"
 }
 ```
 
-The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template; an optional `template.json` provides display `name`/`description` metadata only.
+The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template. The optional `template.json` carries declarative metadata: `name`, `description`, `tags`, `icon`, `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks`, `tools`, `onboarding`, and `builtin`. `has_skeleton` is derived (false ⇒ a metadata-only template that scaffolds no project folder). Built-ins (`builtin: true`) are read-only.
 
 **Create a workspace with a project** — `POST /api/workspaces` accepts three additional optional fields:
 
@@ -890,11 +900,15 @@ Responds `201` with `project_path` and the refreshed workspace; `409` when the w
 **Managing the library:**
 
 ```http
+POST   /api/project-templates                 { "name": "Display Name" }   // create a blank (metadata-only) template
 POST   /api/project-templates/import          { "path": "/any/folder", "name": "Display Name" }
-PUT    /api/project-templates/:id             { "name": "...", "description": "..." }   // template.json metadata
+POST   /api/project-templates/:id/duplicate   { "name": "..." }   // editable copy (a built-in's copy is never builtin)
+PUT    /api/project-templates/:id             { "name", "description", "tags", "icon", "behavior_profile", "starter_tasks" }
 DELETE /api/project-templates/:id             → { "success": true, "trashed": true|false }
 POST   /api/project-templates/reveal          { "id": "..." }   // empty id opens the library root (local-first)
 ```
+
+Mutating a built-in template (`PUT`/`DELETE`, file edits, onboarding/tools) is rejected with `403` — duplicate it first. The same `template.json` config (`behavior_profile`, `starter_tasks`, `tools`, `onboarding`) is also editable via the `/templates` page; see [Project Templates](../features/project-templates.md).
 
 Import copies the folder **verbatim** (no token substitution — `{{name}}` in file names is preserved for instantiation time; symlinks skipped). Delete prefers the system Trash; deleted starter templates are re-materialized on the next server start. Metadata updates preserve unknown `template.json` fields.
 

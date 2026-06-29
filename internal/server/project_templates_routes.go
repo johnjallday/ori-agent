@@ -66,20 +66,42 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 // them — so the legacy manage modal (which never sends tags) can't wipe them.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		Tags        *[]string `json:"tags"`
+		Name            string                          `json:"name"`
+		Description     string                          `json:"description"`
+		Tags            *[]string                       `json:"tags"`
+		Icon            *string                         `json:"icon"`
+		BehaviorProfile *string                         `json:"behavior_profile"`
+		StarterTasks    *[]projecttemplates.StarterTask `json:"starter_tasks"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 
-	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags)
+	edit := &projecttemplates.ManifestEdit{
+		Icon:            req.Icon,
+		BehaviorProfile: req.BehaviorProfile,
+		StarterTasks:    req.StarterTasks,
+	}
+	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "template": tpl})
+}
+
+// guardTemplateMutable rejects mutating operations on built-in templates,
+// responding 403 and returning false. Built-ins are read-only; "Duplicate to
+// customize" is the supported way to edit one.
+func (s *Server) guardTemplateMutable(w http.ResponseWriter, templateID string) bool {
+	if err := projecttemplates.EnsureMutable(resolveTemplatesRoot(s.Core.ConfigManager), templateID); err != nil {
+		s.respondProjectTemplateError(w, err)
+		return false
+	}
+	return true
 }
 
 // handleProjectTemplateCreate serves POST /api/project-templates: create a new,
@@ -125,6 +147,9 @@ func (s *Server) handleProjectTemplateDuplicate(w http.ResponseWriter, r *http.R
 // response reports which path was taken. Deleted starter templates reappear
 // on the next server start (materialize-if-absent).
 func (s *Server) handleProjectTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	trashed, err := projecttemplates.Delete(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
@@ -172,6 +197,9 @@ func (s *Server) handleProjectTemplateFileWrite(w http.ResponseWriter, r *http.R
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	if err := projecttemplates.WriteFileContent(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Content); err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -188,6 +216,9 @@ func (s *Server) handleProjectTemplateFileCreate(w http.ResponseWriter, r *http.
 		Type string `json:"type"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
 	node, err := projecttemplates.CreateEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Path, req.Type)
@@ -209,6 +240,9 @@ func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	node, err := projecttemplates.RenameEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.From, req.To)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
@@ -221,6 +255,9 @@ func (s *Server) handleProjectTemplateFileRename(w http.ResponseWriter, r *http.
 // /api/project-templates/{templateID}/files?path=<rel>: remove a file or folder
 // (recursive for folders).
 func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if err := projecttemplates.DeleteEntry(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), path); err != nil {
 		s.respondProjectTemplateError(w, err)
@@ -282,6 +319,9 @@ func (s *Server) handleProjectTemplateOnboardingSet(w http.ResponseWriter, r *ht
 		}
 	}
 
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	tpl, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), body)
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
@@ -293,6 +333,9 @@ func (s *Server) handleProjectTemplateOnboardingSet(w http.ResponseWriter, r *ht
 // handleProjectTemplateOnboardingDelete serves DELETE
 // /api/project-templates/{templateID}/onboarding: remove the onboarding block.
 func (s *Server) handleProjectTemplateOnboardingDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
+		return
+	}
 	if _, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), nil); err != nil {
 		s.respondProjectTemplateError(w, err)
 		return
@@ -308,6 +351,9 @@ func (s *Server) handleProjectTemplateOnboardingDelete(w http.ResponseWriter, r 
 func (s *Server) handleProjectTemplateToolsSet(w http.ResponseWriter, r *http.Request) {
 	var req projecttemplates.ToolDefaults
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
 		return
 	}
 	tpl, err := projecttemplates.SetTools(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req)
@@ -362,6 +408,8 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())
+	case errors.Is(err, projecttemplates.ErrTemplateReadOnly):
+		_ = orihttp.RespondForbidden(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrFileTooLarge):
 		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
 	default:

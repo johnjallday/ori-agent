@@ -86,7 +86,7 @@ func TestUpdateManifest(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
 	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Old","description":"old desc","tags":["music","reaper"],"custom_field":42}`)
 
-	tpl, err := UpdateManifest(libDir, "demo", "New Name", "new desc", nil)
+	tpl, err := UpdateManifest(libDir, "demo", "New Name", "new desc", nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestUpdateManifest(t *testing.T) {
 	}
 
 	// Clearing the name falls back to the folder name.
-	tpl, err = UpdateManifest(libDir, "demo", "", "", nil)
+	tpl, err = UpdateManifest(libDir, "demo", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(clear): %v", err)
 	}
@@ -116,13 +116,13 @@ func TestUpdateManifest(t *testing.T) {
 	}
 
 	// Unknown template.
-	if _, err := UpdateManifest(libDir, "missing", "x", "", nil); !errors.Is(err, ErrTemplateNotFound) {
+	if _, err := UpdateManifest(libDir, "missing", "x", "", nil, nil); !errors.Is(err, ErrTemplateNotFound) {
 		t.Errorf("expected ErrTemplateNotFound, got %v", err)
 	}
 
 	// A template with no manifest gains one.
 	writeFile(t, filepath.Join(libDir, "plain", "a.txt"), "x")
-	tpl, err = UpdateManifest(libDir, "plain", "Named Now", "", nil)
+	tpl, err = UpdateManifest(libDir, "plain", "Named Now", "", nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(plain): %v", err)
 	}
@@ -136,7 +136,7 @@ func TestUpdateManifestTagsTriState(t *testing.T) {
 	writeFile(t, filepath.Join(libDir, "demo", ManifestFileName), `{"name":"Demo","tags":["music","reaper"]}`)
 
 	// nil preserves existing tags — the legacy manage modal never sends tags.
-	tpl, err := UpdateManifest(libDir, "demo", "Demo", "", nil)
+	tpl, err := UpdateManifest(libDir, "demo", "Demo", "", nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(nil tags): %v", err)
 	}
@@ -146,7 +146,7 @@ func TestUpdateManifestTagsTriState(t *testing.T) {
 
 	// A non-empty slice replaces and normalizes (lowercase/trim/dedupe).
 	newTags := []string{"Synth", "synth", "  Bass  "}
-	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &newTags)
+	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &newTags, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(set tags): %v", err)
 	}
@@ -156,7 +156,7 @@ func TestUpdateManifestTagsTriState(t *testing.T) {
 
 	// An explicit empty slice clears the key entirely.
 	empty := []string{}
-	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &empty)
+	tpl, err = UpdateManifest(libDir, "demo", "Demo", "", &empty, nil)
 	if err != nil {
 		t.Fatalf("UpdateManifest(clear tags): %v", err)
 	}
