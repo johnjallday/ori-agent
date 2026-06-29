@@ -24,6 +24,19 @@ const workspaceEntryAgentNameKey = "entry_agent_name"
 // success.
 var errNoTasksClaimed = errors.New("no unassigned tasks to claim")
 
+// taskMutationStore returns the store the claim sweep should write through:
+// the primary (SyncStore-wrapped) store when wired, so changes reach the store
+// orchestration reads from, falling back to the raw folder store (e.g. in tests).
+func (h *Handler) taskMutationStore() agentworkspace.Store {
+	if h.workspaceTaskStore != nil {
+		return h.workspaceTaskStore
+	}
+	if h.workspaceStore != nil {
+		return h.workspaceStore
+	}
+	return nil
+}
+
 // claimUnassignedTasksForEntryAgent hands every currently-unassigned task in the
 // workspace to its resolved coordinator (entry agent). Tasks live in the folder
 // store, so the sweep runs inside workspaceStore.Update for lost-update safety.
@@ -33,7 +46,11 @@ var errNoTasksClaimed = errors.New("no unassigned tasks to claim")
 // Call it after the workspace's entry-agent state has been synced to the folder
 // store, so the coordinator it resolves reflects the just-applied change.
 func (h *Handler) claimUnassignedTasksForEntryAgent(workspaceID string) (int, error) {
-	if h == nil || h.workspaceStore == nil {
+	if h == nil {
+		return 0, nil
+	}
+	store := h.taskMutationStore()
+	if store == nil {
 		return 0, nil
 	}
 	id := strings.TrimSpace(workspaceID)
@@ -42,7 +59,7 @@ func (h *Handler) claimUnassignedTasksForEntryAgent(workspaceID string) (int, er
 	}
 
 	claimed := 0
-	err := h.workspaceStore.Update(id, func(ws *agentworkspace.Workspace) error {
+	err := store.Update(id, func(ws *agentworkspace.Workspace) error {
 		claimed = ws.ClaimUnassignedTasksForCoordinator()
 		if claimed == 0 {
 			return errNoTasksClaimed
