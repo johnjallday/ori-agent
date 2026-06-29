@@ -63,6 +63,85 @@ func stampAssignment(task *Task, agent string, a TaskAssignment) {
 	task.AssignmentReason = strings.TrimSpace(a.Reason)
 }
 
+// taskAssigneeIsDefaultable reports whether a task's current assignee is empty
+// or the "unassigned" sentinel — i.e. eligible for entry-agent defaulting. A
+// task that already names a real assignee is left untouched.
+func taskAssigneeIsDefaultable(to string) bool {
+	t := strings.TrimSpace(to)
+	return t == "" || strings.EqualFold(t, "unassigned")
+}
+
+// ApplyEntryAgentDefault assigns an otherwise-unassigned task to the workspace
+// coordinator (entry agent) at creation time. It returns true only when it made
+// the assignment.
+//
+// It is a no-op when the task already names an assignee, or when no coordinator
+// can be resolved (a multi-agent workspace with no explicit entry agent): such
+// tasks stay unassigned until a coordinator becomes available, at which point
+// ClaimUnassignedTasksForCoordinator picks them up. Assignment funnels through
+// ApplyTaskAssignment, so it never auto-adds an agent — the resolver only ever
+// returns a current workspace member.
+func (w *Workspace) ApplyEntryAgentDefault(task *Task) bool {
+	if w == nil || task == nil {
+		return false
+	}
+	if !taskAssigneeIsDefaultable(task.To) {
+		return false
+	}
+	coordinator, source := w.ResolveCoordinator()
+	if source == CoordinatorSourceMissing || strings.TrimSpace(coordinator) == "" {
+		return false
+	}
+	if err := w.ApplyTaskAssignment(task, TaskAssignment{
+		AgentName:  coordinator,
+		Mode:       TaskAssignmentModeEntryAgentDefault,
+		AssignedBy: coordinator,
+		Reason:     "defaulted to entry agent (coordinator)",
+	}); err != nil {
+		return false
+	}
+	return true
+}
+
+// ClaimUnassignedTasksForCoordinator hands every currently-unassigned task in the
+// workspace to the resolved coordinator, returning the number of tasks claimed.
+// It is the sweep that fixes the timing gap where tasks (e.g. template starter
+// tasks) were created before an entry agent existed.
+//
+// It is a no-op when no coordinator can be resolved, and it never touches a task
+// that already names an assignee, preserving manual assignments and prior
+// delegations. Claimed tasks are stamped TaskAssignmentModeEntryAgentDefault and
+// attributed to TaskAssignedBySystem (the coordinator did not actively choose
+// them), distinguishing a sweep from a create-time default in audits.
+//
+// Callers persist the result; the workspace store's Update closure is the
+// expected caller so the sweep observes an exclusively-held workspace.
+func (w *Workspace) ClaimUnassignedTasksForCoordinator() int {
+	if w == nil {
+		return 0
+	}
+	coordinator, source := w.ResolveCoordinator()
+	if source == CoordinatorSourceMissing || strings.TrimSpace(coordinator) == "" {
+		return 0
+	}
+	claimed := 0
+	for i := range w.Tasks {
+		if !taskAssigneeIsDefaultable(w.Tasks[i].To) {
+			continue
+		}
+		if err := w.ApplyTaskAssignment(&w.Tasks[i], TaskAssignment{
+			AgentName:  coordinator,
+			Mode:       TaskAssignmentModeEntryAgentDefault,
+			AssignedBy: TaskAssignedBySystem,
+			Reason:     "claimed by entry agent (coordinator)",
+		}); err != nil {
+			continue
+		}
+		claimed++
+	}
+	return claimed
+}
+
 // ResolveCoordinatorForAssignment returns the coordinator agent to drive
 // coordinator-owned assignment, or ErrCoordinatorMissing when a multi-agent
 // workspace has no explicit entry agent. The single-agent default is allowed.
