@@ -17,7 +17,6 @@ func soloCoordinatorWorkspace(t *testing.T, store workspace.Store, id string) {
 	t.Helper()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: id})
 	ws.ID = id
-	ws.Agents = []string{"Solo"}
 	ws.AgentInstances = []workspace.AgentInstance{{Name: "Solo", NodeID: "Solo-node-1"}}
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save workspace: %v", err)
@@ -96,7 +95,6 @@ func TestHandleCreateTaskNoCoordinatorStaysUnassigned(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "multi"})
 	ws.ID = "ws-multi"
-	ws.Agents = []string{"Writer", "Researcher"}
 	ws.AgentInstances = []workspace.AgentInstance{
 		{Name: "Writer", NodeID: "Writer-node-1"},
 		{Name: "Researcher", NodeID: "Researcher-node-1"},
