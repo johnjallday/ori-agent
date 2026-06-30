@@ -3657,7 +3657,9 @@ export class WorkspaceDetailPage {
             ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
             : `Remove ${group.name} from workspace`;
         const removeButton =
-          group.isWorkspaceAgent && !group.isUnassigned
+          group.isWorkspaceAgent &&
+          !group.isUnassigned &&
+          !this.isWorkspaceEntryAgent(group.name)
             ? `
         <button type="button"
                 class="workspace-detail-agent-remove-btn"
@@ -3824,7 +3826,9 @@ export class WorkspaceDetailPage {
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
     const removeButton =
-      group.isWorkspaceAgent && !group.isUnassigned
+      group.isWorkspaceAgent &&
+      !group.isUnassigned &&
+      !this.isWorkspaceEntryAgent(group.name)
         ? `
       <button type="button"
               class="workspace-detail-agent-remove-btn"
@@ -5916,6 +5920,13 @@ export class WorkspaceDetailPage {
     const normalizedKey = this.normalizeAgentName(normalizedAgentName);
     if (!normalizedAgentName || !normalizedKey) return;
 
+    if (this.isWorkspaceEntryAgent(normalizedAgentName)) {
+      window.alert(
+        `"${normalizedAgentName}" is the workspace entry agent and can't be removed.`
+      );
+      return;
+    }
+
     const instances = this.getWorkspaceAgentInstances(normalizedAgentName);
     const instanceCount = instances.length > 0 ? instances.length : 1;
     const taskCount = Array.isArray(this.tasks)
@@ -7549,6 +7560,20 @@ export class WorkspaceDetailPage {
     return bestScore >= 3 ? bestName : '';
   }
 
+  agentNameMatchesSpecialistConfig(agentName, config) {
+    const normalized = this.normalizeAgentName(agentName);
+    if (!normalized || !config) return false;
+    // Exact match on the canonical specialist name.
+    if (normalized === this.normalizeAgentName(config.agentName)) return true;
+    // Any domain name token present in the agent name means the agent already
+    // covers this specialty (e.g. "Trip Planner" includes the "trip" token), so
+    // there's no need to create or switch to a near-duplicate specialist.
+    return (config.nameTokens || []).some(token => {
+      const normalizedToken = this.normalizeAgentName(token);
+      return normalizedToken && normalized.includes(normalizedToken);
+    });
+  }
+
   buildAssistSpecialistActionText(action) {
     const agentName = String(action?.agentName || action?.label || '').trim();
     const currentAgent = String(action?.currentAgent || '').trim();
@@ -7655,6 +7680,12 @@ export class WorkspaceDetailPage {
     if (!best?.config) return null;
 
     const config = best.config;
+    // If the task is already assigned to an agent that covers this specialty
+    // (e.g. "Trip Planner" for a travel itinerary), don't propose creating or
+    // switching to a near-duplicate specialist.
+    if (currentAgent && this.agentNameMatchesSpecialistConfig(currentAgent, config)) {
+      return null;
+    }
     const workspaceAgentName = this.findAssistSpecialistAgentName(
       config,
       this.getWorkspaceAgentNames(),
@@ -7674,12 +7705,6 @@ export class WorkspaceDetailPage {
       this.normalizeAgentName(workspaceAgentName) === this.normalizeAgentName(catalogAgent)
         ? workspaceAgentName
         : '';
-    if (
-      catalogAgent &&
-      this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)
-    ) {
-      return null;
-    }
 
     const agentName = workspaceAgent || catalogAgent || config.agentName;
     const kind = workspaceAgent ? 'switch' : catalogAgent ? 'add_and_switch' : 'create';
