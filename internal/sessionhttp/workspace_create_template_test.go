@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -243,6 +244,65 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("project.created event not published")
+	}
+}
+
+func TestCreateWorkspaceSeedsTemplateAgentRoster(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	// A metadata-only template (no skeleton files) that declares an agent roster.
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator","system_prompt":"lead it"},
+			{"name":"Copywriter","type":"general"},
+			{"name":"Designer"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Launch","template_id":"roster-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if warnings, present := resp["agent_warnings"]; present {
+		t.Fatalf("unexpected agent_warnings: %v", warnings)
+	}
+
+	for _, name := range []string{"Campaign Lead", "Copywriter", "Designer"} {
+		if _, ok := handler.agentStore.GetAgent(name); !ok {
+			t.Fatalf("expected agent %q seeded into the agent store", name)
+		}
+	}
+
+	folder, ok := resp["folder"].(map[string]any)
+	if !ok {
+		t.Fatal("expected folder in response")
+	}
+	wsID, _ := folder["id"].(string)
+	if wsID == "" {
+		t.Fatal("missing workspace id in response")
+	}
+
+	sessWS, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	// First declared agent is the entry agent (suppresses the mandatory prompt).
+	if got := currentWorkspaceEntryAgentName(sessWS); got != "Campaign Lead" {
+		t.Fatalf("entry agent = %q, want Campaign Lead", got)
+	}
+	for _, name := range []string{"Campaign Lead", "Copywriter", "Designer"} {
+		if !slices.Contains(sessWS.Agents, name) {
+			t.Fatalf("workspace agents %v missing %q", sessWS.Agents, name)
+		}
 	}
 }
 

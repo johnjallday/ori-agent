@@ -295,6 +295,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// agent; the UI prompts the user to create one with their choice of
 	// model/provider.
 	entryAgentSet := false
+	var agentSeedWarnings []string
 	if req.EntryAgentName != "" {
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
@@ -306,6 +307,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			entryAgentSet = true
 		}
+	} else if templateResolved && resolvedTemplate.HasAgents() {
+		// The template declares an agent roster: seed it (first = entry agent,
+		// rest = specialists). A seeded entry agent suppresses the mandatory
+		// "create an entry agent" prompt; if it fails, the workspace is left
+		// agent-less and the prompt fires as the fallback.
+		seedResult := h.seedTemplateAgents(ws, resolvedTemplate)
+		agentSeedWarnings = seedResult.Warnings
+		entryAgentSet = seedResult.EntrySet
 	} else if kind == session.WorkspaceKindGroup {
 		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
@@ -485,6 +494,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if projectWarning != "" {
 		response["project_warning"] = projectWarning
+	}
+	if len(agentSeedWarnings) > 0 {
+		response["agent_warnings"] = agentSeedWarnings
 	}
 	if onboardingSummary != nil {
 		response["onboarding"] = onboardingSummary
