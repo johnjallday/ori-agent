@@ -299,9 +299,13 @@ func TestCreateWorkspaceSeedsTemplateAgentRoster(t *testing.T) {
 	if got := currentWorkspaceEntryAgentName(sessWS); got != "Campaign Lead" {
 		t.Fatalf("entry agent = %q, want Campaign Lead", got)
 	}
+	instanceNames := make([]string, len(sessWS.AgentInstances))
+	for i, inst := range sessWS.AgentInstances {
+		instanceNames[i] = inst.Name
+	}
 	for _, name := range []string{"Campaign Lead", "Copywriter", "Designer"} {
-		if !slices.Contains(sessWS.Agents, name) {
-			t.Fatalf("workspace agents %v missing %q", sessWS.Agents, name)
+		if !slices.Contains(instanceNames, name) {
+			t.Fatalf("workspace agent instances %v missing %q", instanceNames, name)
 		}
 	}
 }

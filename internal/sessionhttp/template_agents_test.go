@@ -2,7 +2,6 @@ package sessionhttp
 
 import (
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
@@ -17,7 +16,12 @@ func rosterTemplate(specs ...projecttemplates.AgentSpec) projecttemplates.Templa
 }
 
 func wsHasAgent(ws *session.Workspace, name string) bool {
-	return slices.Contains(ws.Agents, name)
+	for _, inst := range ws.AgentInstances {
+		if inst.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSeedTemplateAgents_CreatesRosterAndSetsEntry(t *testing.T) {
@@ -96,8 +100,8 @@ func TestSeedTemplateAgents_EmptyRosterNoop(t *testing.T) {
 	if res.EntrySet || len(res.Warnings) != 0 {
 		t.Fatalf("expected empty no-op, got EntrySet=%v warnings=%v", res.EntrySet, res.Warnings)
 	}
-	if len(ws.Agents) != 0 || currentWorkspaceEntryAgentName(ws) != "" {
-		t.Fatalf("expected no agents seeded, got %v / %q", ws.Agents, currentWorkspaceEntryAgentName(ws))
+	if len(ws.AgentInstances) != 0 || currentWorkspaceEntryAgentName(ws) != "" {
+		t.Fatalf("expected no agents seeded, got %v / %q", ws.AgentInstances, currentWorkspaceEntryAgentName(ws))
 	}
 }
 
@@ -234,7 +238,7 @@ func TestSeedTemplateAgents_EntryFailureFallsBack(t *testing.T) {
 	if len(res.Warnings) != 1 {
 		t.Fatalf("expected one warning, got %v", res.Warnings)
 	}
-	if len(ws.Agents) != 0 || currentWorkspaceEntryAgentName(ws) != "" {
+	if len(ws.AgentInstances) != 0 || currentWorkspaceEntryAgentName(ws) != "" {
 		t.Fatal("expected workspace left agent-less so the prompt fires")
 	}
 }

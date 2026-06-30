@@ -145,9 +145,9 @@ func (h *Handler) bindSeededAgentTools(workspaceID string, created []createdAgen
 	return warnings
 }
 
-// attachWorkspaceSpecialist adds a non-entry agent to the workspace — a fresh
-// AgentInstance plus the legacy Agents entry — mirroring the add-agent endpoint.
-// It is a no-op if an instance for the agent already exists.
+// attachWorkspaceSpecialist adds a non-entry agent to the workspace as a fresh
+// AgentInstance, mirroring the add-agent endpoint. It is a no-op if an instance
+// for the agent already exists.
 func attachWorkspaceSpecialist(ws *session.Workspace, name string) {
 	name = strings.TrimSpace(name)
 	if ws == nil || name == "" {
@@ -165,5 +165,4 @@ func attachWorkspaceSpecialist(ws *session.Workspace, name string) {
 		NodeID:         fmt.Sprintf("%s-1-node-%s", name, uuid.New().String()[:8]),
 		CreatedAt:      time.Now(),
 	})
-	ensureLegacyWorkspaceAgentName(ws, name)
 }
