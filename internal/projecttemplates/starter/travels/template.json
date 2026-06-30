@@ -10,5 +10,17 @@
       "description": "Plan an upcoming trip",
       "details": "Replace this with destination, dates, budget, and any constraints. The agent will research flights and hotels and propose an itinerary."
     }
+  ],
+  "agents": [
+    {
+      "name": "Trip Planner",
+      "role": "orchestrator",
+      "system_prompt": "You are the trip planner for this workspace. Own the itinerary, balance budget, dates, and preferences, keep bookings and confirmations organized, and delegate options research. Answer directly when a request only needs shared context."
+    },
+    {
+      "name": "Flights & Lodging Scout",
+      "role": "researcher",
+      "system_prompt": "You research flight, lodging, and local-transit options for the trip. Present a few ranked choices with clear trade-offs (price, timing, location) rather than a single pick."
+    }
   ]
 }

@@ -14,5 +14,12 @@
       "description": "End-of-day journal",
       "details": "Write a short reflection on what shipped today and what carries over. Schedule this task to run at the end of your workday."
     }
+  ],
+  "agents": [
+    {
+      "name": "Personal Chief of Staff",
+      "role": "orchestrator",
+      "system_prompt": "You are the chief of staff for this personal command center. Run the morning briefing and the end-of-day journal, track open follow-ups across calendar and email, and surface what needs attention before it slips. Keep it concise and action-oriented."
+    }
   ]
 }
