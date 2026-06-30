@@ -113,6 +113,9 @@
                   <li class="nav-item" role="presentation">
                     <button class="nav-link" id="tplTabTools" data-bs-toggle="tab" data-bs-target="#tplToolsPane" type="button" role="tab" aria-controls="tplToolsPane" aria-selected="false">Tools</button>
                   </li>
+                  <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="tplTabAgents" data-bs-toggle="tab" data-bs-target="#tplAgentsPane" type="button" role="tab" aria-controls="tplAgentsPane" aria-selected="false">Agents</button>
+                  </li>
                 </ul>
 
                 <div class="tab-content">
@@ -258,6 +261,24 @@
                     <h6 class="mb-1" style="color: var(--text-primary);">Plugins</h6>
                     <div id="tplToolsPlugins" class="d-flex flex-column gap-1 mb-3"></div>
                     <button id="tplToolsSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save tools</button>
+                  </div>
+
+                  <!-- Agents: roster seeded when a workspace is created from this template -->
+                  <div class="tab-pane fade" id="tplAgentsPane" role="tabpanel" aria-labelledby="tplTabAgents">
+                    <div style="font-size: 12px; color: var(--text-secondary);" class="mb-2">
+                      Agents are created when a workspace is made from this template. The
+                      <strong>first agent is the entry agent</strong> (the one required agent every workspace
+                      needs) — drag an agent to the top to make it the entry agent. The rest are specialist
+                      sub-agents. A name that already exists is reused as-is.
+                    </div>
+                    <div id="tplAgentsEmpty" class="text-center py-3" style="color: var(--text-secondary); font-size: 13px;" hidden>
+                      This template seeds no agents. Workspaces created from it will prompt for an entry agent.
+                    </div>
+                    <div id="tplAgentsList" class="d-flex flex-column gap-2 mb-3"></div>
+                    <div class="d-flex gap-2">
+                      <button id="tplAgentsAddBtn" class="modern-btn modern-btn-secondary btn-sm">Add agent</button>
+                      <button id="tplAgentsSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save agents</button>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -267,6 +267,9 @@ function tplRenderDetail() {
   if (idLabel) idLabel.textContent = template.id;
 
   tplResetOverviewFields();
+  // Reset the agents editor so it reloads for the newly-selected template.
+  tplAgents.templateId = '';
+  tplAgentsLoad();
   tplApplyReadOnly();
 }
 
@@ -354,7 +357,7 @@ function tplApplyReadOnly() {
     'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplEditStarterTasks',
     'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
     'tplFileNewBtn', 'tplFolderNewBtn', 'tplFileRenameBtn', 'tplFileDeleteBtn', 'tplEditorSaveBtn',
-    'tplOnbSaveBtn', 'tplToolsSaveBtn'
+    'tplOnbSaveBtn', 'tplToolsSaveBtn', 'tplAgentsAddBtn', 'tplAgentsSaveBtn'
   ].forEach((id) => {
     const el = tplEl(id);
     if (el) el.disabled = builtin;
@@ -364,6 +367,12 @@ function tplApplyReadOnly() {
   if (tagsWrap) {
     tagsWrap.style.pointerEvents = builtin ? 'none' : '';
     tagsWrap.style.opacity = builtin ? '0.6' : '';
+  }
+  // Agent cards are rendered dynamically; disable their controls + drag for built-ins.
+  const agentsList = tplEl('tplAgentsList');
+  if (agentsList) {
+    agentsList.querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = builtin; });
+    agentsList.querySelectorAll('.tpl-agent-card').forEach((card) => { card.draggable = !builtin; });
   }
 }
 
@@ -1333,6 +1342,232 @@ async function tplToolsSave() {
   }
 }
 
+// --- Agents tab: roster editor ---
+//
+// The working roster lives in the DOM (one card per agent); edits are read back
+// with tplAgentsCollect() before any structural change (add/remove/reorder) so
+// in-progress input is never lost. The first card is the entry agent.
+
+const TPL_AGENT_ROLES = ['', 'orchestrator', 'specialist', 'researcher', 'analyzer', 'synthesizer', 'validator', 'general'];
+const TPL_AGENT_TYPES = ['', 'tool-calling', 'general', 'research'];
+
+const tplAgents = { templateId: '', dragIndex: -1 };
+
+function tplAgentsBlank() {
+  return { name: '', role: '', type: '', model: '', system_prompt: '', tools: { skills: [], mcp_servers: [] } };
+}
+
+function tplAgentsNormalizeList(agents) {
+  return (Array.isArray(agents) ? agents : []).map((a) => ({
+    name: a.name || '',
+    role: a.role || '',
+    type: a.type || '',
+    model: a.model || '',
+    system_prompt: a.system_prompt || '',
+    tools: {
+      skills: (a.tools && Array.isArray(a.tools.skills)) ? a.tools.skills : [],
+      mcp_servers: (a.tools && Array.isArray(a.tools.mcp_servers)) ? a.tools.mcp_servers : []
+    }
+  }));
+}
+
+// tplAgentsLoad seeds the editor from the selected template, but only when the
+// template changes — so re-showing the tab keeps unsaved edits.
+function tplAgentsLoad() {
+  const template = tplSelected();
+  if (!template) return;
+  if (tplAgents.templateId === template.id) return;
+  tplAgents.templateId = template.id;
+  tplAgentsRender(template.agents);
+}
+
+function tplAgentsField(label, input) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mb-2';
+  const lab = document.createElement('label');
+  lab.className = 'form-label';
+  lab.style.cssText = 'color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;';
+  lab.textContent = label;
+  wrap.appendChild(lab);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function tplAgentsCol(label, input) {
+  const col = document.createElement('div');
+  col.className = 'col-6';
+  col.appendChild(tplAgentsField(label, input));
+  return col;
+}
+
+function tplAgentsSelect(cls, values, selected) {
+  const sel = document.createElement('select');
+  sel.className = `modern-input w-100 ${cls}`;
+  values.forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v === '' ? 'Default' : v;
+    if (v === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  return sel;
+}
+
+function tplAgentsInput(cls, value, placeholder) {
+  const i = document.createElement('input');
+  i.type = 'text';
+  i.className = `modern-input w-100 ${cls}`;
+  i.value = value || '';
+  i.placeholder = placeholder || '';
+  return i;
+}
+
+function tplAgentsCard(agent, index) {
+  const card = document.createElement('div');
+  card.className = 'tpl-agent-card';
+  card.dataset.index = String(index);
+  card.draggable = true;
+  card.style.cssText = 'border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: var(--bg-tertiary);';
+
+  const header = document.createElement('div');
+  header.className = 'd-flex align-items-center gap-2 mb-2';
+  const handle = document.createElement('span');
+  handle.textContent = '⠿';
+  handle.title = 'Drag to reorder';
+  handle.style.cssText = 'cursor: grab; color: var(--text-secondary); user-select: none;';
+  header.appendChild(handle);
+  const tag = document.createElement('span');
+  if (index === 0) {
+    tag.className = 'badge';
+    tag.textContent = 'Entry agent';
+    tag.style.cssText = 'background: #22c55e; color: #fff; font-size: 10px;';
+  } else {
+    tag.textContent = 'Specialist';
+    tag.style.cssText = 'font-size: 11px; color: var(--text-secondary);';
+  }
+  header.appendChild(tag);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'modern-btn modern-btn-secondary btn-sm ms-auto';
+  remove.textContent = 'Remove';
+  remove.style.color = '#ef4444';
+  remove.addEventListener('click', () => tplAgentsRemove(index));
+  header.appendChild(remove);
+  card.appendChild(header);
+
+  card.appendChild(tplAgentsField('Name', tplAgentsInput('tpl-agent-name', agent.name, 'Agent name')));
+
+  const rt = document.createElement('div');
+  rt.className = 'row g-2 mb-2';
+  rt.appendChild(tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || '')));
+  rt.appendChild(tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || '')));
+  card.appendChild(rt);
+
+  card.appendChild(tplAgentsField('Model', tplAgentsInput('tpl-agent-model', agent.model, 'Defaults to the workspace model')));
+
+  const prompt = document.createElement('textarea');
+  prompt.className = 'form-control tpl-agent-prompt';
+  prompt.rows = 2;
+  prompt.style.cssText = 'background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
+  prompt.value = agent.system_prompt || '';
+  prompt.placeholder = "This agent's instructions";
+  card.appendChild(tplAgentsField('System prompt', prompt));
+
+  const sm = document.createElement('div');
+  sm.className = 'row g-2';
+  const skillsVal = (agent.tools && agent.tools.skills ? agent.tools.skills : []).join(', ');
+  const mcpVal = (agent.tools && agent.tools.mcp_servers ? agent.tools.mcp_servers : []).join(', ');
+  sm.appendChild(tplAgentsCol('Skills', tplAgentsInput('tpl-agent-skills', skillsVal, 'comma-separated')));
+  sm.appendChild(tplAgentsCol('MCP servers', tplAgentsInput('tpl-agent-mcp', mcpVal, 'comma-separated')));
+  card.appendChild(sm);
+
+  card.addEventListener('dragstart', (event) => {
+    tplAgents.dragIndex = index;
+    card.style.opacity = '0.5';
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => { card.style.opacity = ''; });
+  card.addEventListener('dragover', (event) => event.preventDefault());
+  card.addEventListener('drop', (event) => {
+    event.preventDefault();
+    tplAgentsReorder(tplAgents.dragIndex, index);
+  });
+
+  return card;
+}
+
+function tplAgentsRender(agents) {
+  const list = tplEl('tplAgentsList');
+  const empty = tplEl('tplAgentsEmpty');
+  if (!list) return;
+  const items = tplAgentsNormalizeList(agents);
+  list.innerHTML = '';
+  items.forEach((agent, idx) => list.appendChild(tplAgentsCard(agent, idx)));
+  if (empty) empty.hidden = items.length > 0;
+  tplApplyReadOnly();
+}
+
+function tplAgentsParseNames(value) {
+  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function tplAgentsCollect() {
+  const list = tplEl('tplAgentsList');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('.tpl-agent-card')).map((card) => ({
+    name: (card.querySelector('.tpl-agent-name')?.value || '').trim(),
+    role: card.querySelector('.tpl-agent-role')?.value || '',
+    type: card.querySelector('.tpl-agent-type')?.value || '',
+    model: (card.querySelector('.tpl-agent-model')?.value || '').trim(),
+    system_prompt: (card.querySelector('.tpl-agent-prompt')?.value || '').trim(),
+    tools: {
+      skills: tplAgentsParseNames(card.querySelector('.tpl-agent-skills')?.value),
+      mcp_servers: tplAgentsParseNames(card.querySelector('.tpl-agent-mcp')?.value)
+    }
+  }));
+}
+
+function tplAgentsAdd() {
+  const list = tplAgentsCollect();
+  list.push(tplAgentsBlank());
+  tplAgentsRender(list);
+}
+
+function tplAgentsRemove(index) {
+  const list = tplAgentsCollect();
+  list.splice(index, 1);
+  tplAgentsRender(list);
+}
+
+function tplAgentsReorder(from, to) {
+  tplAgents.dragIndex = -1;
+  if (from < 0 || to < 0 || from === to) return;
+  const list = tplAgentsCollect();
+  if (from >= list.length || to >= list.length) return;
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
+  tplAgentsRender(list);
+}
+
+async function tplAgentsSave() {
+  const template = tplSelected();
+  if (!template) return;
+  const agents = tplAgentsCollect().filter((a) => a.name);
+  try {
+    await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}/agents`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agents })
+    });
+    tplToast('Agents saved.', 'success');
+    tplAgents.templateId = '';
+    await tplRefresh(template.id);
+    tplAgentsLoad();
+  } catch (error) {
+    tplToast(error.message || 'Failed to save agents', 'error');
+  }
+}
+
 // --- Init ---
 
 function tplInit() {
@@ -1426,6 +1661,11 @@ function tplInit() {
   // Tools tab wiring.
   tplEl('tplTabTools')?.addEventListener('shown.bs.tab', () => tplToolsEnsure());
   tplEl('tplToolsSaveBtn')?.addEventListener('click', () => void tplToolsSave());
+
+  // Agents tab wiring.
+  tplEl('tplTabAgents')?.addEventListener('shown.bs.tab', () => tplAgentsLoad());
+  tplEl('tplAgentsAddBtn')?.addEventListener('click', tplAgentsAdd);
+  tplEl('tplAgentsSaveBtn')?.addEventListener('click', () => void tplAgentsSave());
 
   void tplRefresh();
 }

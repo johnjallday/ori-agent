@@ -3473,6 +3473,12 @@ const sessionManager = {
       if (typeof result.project_warning === 'string' && result.project_warning) {
         this.showToast(result.project_warning, 'warning');
       }
+      // Seeded template agents that could not be created surface here (non-fatal).
+      if (Array.isArray(result.agent_warnings)) {
+        result.agent_warnings
+          .filter((msg) => typeof msg === 'string' && msg)
+          .forEach((msg) => this.showToast(msg, 'warning'));
+      }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
       if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
       window.OriTagInput?.clearTagPoolCache?.();
