@@ -1,6 +1,12 @@
 package projecttemplates
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // MaxTemplateAgents caps how many agents a single template may declare. Extra
 // entries beyond the cap are dropped during normalization rather than failing
@@ -63,4 +69,44 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 		return nil
 	}
 	return out
+}
+
+// SetAgents writes (or clears) the `agents` block in a template's template.json,
+// preserving every other key. The roster is normalized first; an empty result
+// clears the key. Like the tools/onboarding writers, this stores agent specs as
+// data and never creates agents.
+func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
+	tpl, err := FindLibraryTemplate(libDir, id)
+	if err != nil {
+		return Template{}, err
+	}
+
+	// manifestPath is the resolved library template's folder (FindLibraryTemplate
+	// rejects ids outside the library) joined with the fixed ManifestFileName.
+	manifestPath := filepath.Join(tpl.Path, ManifestFileName)
+	raw := map[string]any{}
+	if data, err := os.ReadFile(manifestPath); err == nil { // #nosec G304 -- manifestPath is libDir/<validated id>/template.json, not user-controlled
+		_ = json.Unmarshal(data, &raw)
+	}
+
+	if normalized := normalizeAgentSpecs(agents); len(normalized) > 0 {
+		encoded, err := json.Marshal(normalized)
+		if err != nil {
+			return Template{}, fmt.Errorf("failed to encode agents: %w", err)
+		}
+		var v any
+		_ = json.Unmarshal(encoded, &v)
+		raw["agents"] = v
+	} else {
+		delete(raw, "agents")
+	}
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to encode manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, append(data, '\n'), 0o640); err != nil { // #nosec G304 G306 -- manifestPath is libDir/<validated id>/template.json; 0o640 matches the package's manifest-write convention
+		return Template{}, fmt.Errorf("failed to write manifest: %w", err)
+	}
+	return newTemplate(tpl.Path), nil
 }

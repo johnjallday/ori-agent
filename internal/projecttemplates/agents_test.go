@@ -134,3 +134,47 @@ func TestNewTemplate_MalformedManifestDegrades(t *testing.T) {
 		t.Fatal("expected no agents from a malformed manifest")
 	}
 }
+
+func TestSetAgents_RoundTripAndPreservesName(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "demo"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "demo", ManifestFileName), []byte(`{"name":"Demo","description":"keep me"}`), 0o600); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+
+	tpl, err := SetAgents(dir, "demo", []AgentSpec{
+		{Name: "  Lead  ", Role: "orchestrator", SystemPrompt: "run"},
+		{Name: ""}, // dropped
+		{Name: "Writer", Tools: ToolDefaults{Skills: []string{"draft"}}},
+	})
+	if err != nil {
+		t.Fatalf("SetAgents: %v", err)
+	}
+	if len(tpl.Agents) != 2 || tpl.Agents[0].Name != "Lead" || tpl.Agents[1].Name != "Writer" {
+		t.Fatalf("agents not normalized/persisted: %+v", tpl.Agents)
+	}
+	// Other keys are preserved (no clobber of name/description).
+	if tpl.Name != "Demo" || tpl.Description != "keep me" {
+		t.Fatalf("SetAgents clobbered metadata: name=%q desc=%q", tpl.Name, tpl.Description)
+	}
+
+	// Re-read from disk to confirm persistence and order.
+	reread, err := FindLibraryTemplate(dir, "demo")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if len(reread.Agents) != 2 || reread.Agents[0].Name != "Lead" || reread.Agents[1].Tools.Skills[0] != "draft" {
+		t.Fatalf("agents did not persist: %+v", reread.Agents)
+	}
+
+	// An empty roster clears the key but keeps the rest of the manifest.
+	tpl, err = SetAgents(dir, "demo", nil)
+	if err != nil {
+		t.Fatalf("SetAgents(clear): %v", err)
+	}
+	if tpl.HasAgents() || tpl.Name != "Demo" {
+		t.Fatalf("expected agents cleared with metadata intact, got %+v", tpl)
+	}
+}
