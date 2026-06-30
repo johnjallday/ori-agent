@@ -75,6 +75,11 @@ type Template struct {
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
+	// BuiltinVersion is the shipped revision of a built-in's manifest. When the
+	// embedded version exceeds the on-disk copy, EnsureLibrary refreshes the
+	// built-in's template.json so metadata changes (rosters, tags, …) reach
+	// existing installs. Zero/absent for user templates.
+	BuiltinVersion int `json:"builtin_version,omitempty"`
 	// HasSkeleton reports whether the template has instantiable files beyond
 	// template.json. A metadata-only template (false) creates no project folder.
 	HasSkeleton bool `json:"has_skeleton"`
@@ -88,6 +93,11 @@ type Template struct {
 	// this template binds (apply-if-present). Names only — bound in the
 	// workspace-creation layer, not here.
 	Tools ToolDefaults `json:"tools"`
+	// Agents is the roster of agents seeded onto a workspace created from this
+	// template, in declaration order: the first is the workspace entry agent,
+	// the rest are specialist sub-agents. Carried as data only; agents are
+	// created/attached in the workspace-creation layer (see AgentSpec).
+	Agents []AgentSpec `json:"agents,omitempty"`
 }
 
 // HasOnboarding reports whether the template carries a non-empty onboarding
@@ -96,6 +106,11 @@ type Template struct {
 func (t Template) HasOnboarding() bool {
 	s := bytes.TrimSpace(t.Onboarding)
 	return len(s) > 0 && !bytes.Equal(s, []byte("null"))
+}
+
+// HasAgents reports whether the template declares at least one agent to seed.
+func (t Template) HasAgents() bool {
+	return len(t.Agents) > 0
 }
 
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
@@ -111,8 +126,10 @@ type manifest struct {
 	BehaviorProfile string          `json:"behavior_profile,omitempty"`
 	StarterTasks    []StarterTask   `json:"starter_tasks,omitempty"`
 	Builtin         bool            `json:"builtin,omitempty"`
+	BuiltinVersion  int             `json:"builtin_version,omitempty"`
 	Onboarding      json.RawMessage `json:"onboarding,omitempty"`
 	Tools           *ToolDefaults   `json:"tools,omitempty"`
+	Agents          []AgentSpec     `json:"agents,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -150,11 +167,13 @@ func newTemplate(path string) Template {
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
+	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
 	t.Onboarding = m.Onboarding
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
+	t.Agents = normalizeAgentSpecs(m.Agents)
 	return t
 }
 

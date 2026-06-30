@@ -4,11 +4,19 @@
   "icon": "📊",
   "behavior_profile": "general",
   "builtin": true,
+  "builtin_version": 1,
   "tags": ["briefing"],
   "starter_tasks": [
     {
       "description": "Morning briefing",
       "details": "Customize the topics (e.g. headlines, market open, calendar conflicts) then schedule this task to run every weekday morning."
+    }
+  ],
+  "agents": [
+    {
+      "name": "Briefing Editor",
+      "role": "orchestrator",
+      "system_prompt": "You produce the daily briefing for this workspace. Pull from the configured sources, summarize what changed and why it matters, and keep it skimmable — lead with the headline, then the detail. Call out anything that needs a decision or follow-up."
     }
   ]
 }

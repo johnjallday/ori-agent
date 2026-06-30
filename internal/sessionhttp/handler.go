@@ -40,6 +40,11 @@ type Handler struct {
 	// names. Injected by the server, which holds the tool registries and binds
 	// through the same store the binding endpoints read from.
 	applyTemplateTools func(workspaceID string, tools projecttemplates.ToolDefaults) (applied, missing []string)
+	// applyAgentTools binds a seeded template agent's per-agent tools after the
+	// agent and workspace exist: skills are enabled on the agent (apply-if-
+	// present); MCP servers — which have no per-agent scope — bind at the
+	// workspace level. Injected by the server, which holds the skills manager.
+	applyAgentTools func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -84,6 +89,12 @@ func (h *Handler) SetAgentStore(agentStore store.Store) {
 // workspace. The server supplies it because the tool registries live there.
 func (h *Handler) SetTemplateToolApplier(fn func(workspaceID string, tools projecttemplates.ToolDefaults) (applied, missing []string)) {
 	h.applyTemplateTools = fn
+}
+
+// SetAgentToolApplier injects the function that binds a seeded template agent's
+// per-agent tools (skills enabled on the agent; MCP servers on the workspace).
+func (h *Handler) SetAgentToolApplier(fn func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)) {
+	h.applyAgentTools = fn
 }
 
 // SetTemplatesRootResolver sets the resolver used to locate the project

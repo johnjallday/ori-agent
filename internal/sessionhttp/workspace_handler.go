@@ -295,6 +295,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// agent; the UI prompts the user to create one with their choice of
 	// model/provider.
 	entryAgentSet := false
+	var agentSeedWarnings []string
+	var seededAgents []createdAgent
 	if req.EntryAgentName != "" {
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
@@ -306,6 +308,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			entryAgentSet = true
 		}
+	} else if templateResolved && resolvedTemplate.HasAgents() {
+		// The template declares an agent roster: seed it (first = entry agent,
+		// rest = specialists). A seeded entry agent suppresses the mandatory
+		// "create an entry agent" prompt; if it fails, the workspace is left
+		// agent-less and the prompt fires as the fallback.
+		seedResult := h.seedTemplateAgents(ws, resolvedTemplate)
+		agentSeedWarnings = seedResult.Warnings
+		entryAgentSet = seedResult.EntrySet
+		seededAgents = seedResult.Created
 	} else if kind == session.WorkspaceKindGroup {
 		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
@@ -383,6 +394,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
 		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			// Bind per-agent tools for any seeded template agents now that the
+			// workspace is persisted (skills enable on the agent; MCP binds on
+			// the workspace). Apply-if-present and non-fatal.
+			if toolWarnings := h.bindSeededAgentTools(ws.ID, seededAgents); len(toolWarnings) > 0 {
+				agentSeedWarnings = append(agentSeedWarnings, toolWarnings...)
+			}
 			if ws.Kind == session.WorkspaceKindGroup {
 				// Groups physically nest members under sub-workspaces/, so
 				// their linked folder and MCP roots are scoped to the group's
@@ -485,6 +502,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if projectWarning != "" {
 		response["project_warning"] = projectWarning
+	}
+	if len(agentSeedWarnings) > 0 {
+		response["agent_warnings"] = agentSeedWarnings
 	}
 	if onboardingSummary != nil {
 		response["onboarding"] = onboardingSummary

@@ -4,6 +4,7 @@
   "icon": "✏",
   "behavior_profile": "general",
   "builtin": true,
+  "builtin_version": 1,
   "tags": ["content"],
   "starter_tasks": [
     {
@@ -13,6 +14,28 @@
     {
       "description": "Draft this week's posts",
       "details": "List the topics, then ask the agent to draft each in the brand voice. Schedule this task weekly once the style guide is settled."
+    }
+  ],
+  "agents": [
+    {
+      "name": "Content Lead",
+      "role": "orchestrator",
+      "system_prompt": "You are the content lead for this workspace. Hold the brand voice and the content calendar, turn ideas into clear briefs, and delegate drafting, editing, and distribution to the specialist agents. Answer directly when a request only needs shared context."
+    },
+    {
+      "name": "Brand Copywriter",
+      "role": "specialist",
+      "system_prompt": "You draft posts and copy from the brief, strictly in the brand voice defined by the style guide. Match the audience and tone, and flag anything the brief leaves ambiguous instead of guessing."
+    },
+    {
+      "name": "Content Editor",
+      "role": "validator",
+      "system_prompt": "You edit drafts for clarity, accuracy, and brand voice. Tighten the writing, fix errors, and flag anything off-brand or unsupported before it is scheduled."
+    },
+    {
+      "name": "Distribution Planner",
+      "role": "specialist",
+      "system_prompt": "You adapt approved content for each channel and schedule it against the content calendar. Tailor length and format per platform without changing the core message."
     }
   ]
 }
