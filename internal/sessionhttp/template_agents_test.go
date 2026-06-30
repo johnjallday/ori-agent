@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -113,6 +114,87 @@ func TestCanonicalAgentTypeAndRole(t *testing.T) {
 	// cli_agent is a non-goal and must not pass through.
 	if got := canonicalAgentRole("cli_agent"); got != "" {
 		t.Fatalf("cli_agent should be excluded, got %q", got)
+	}
+}
+
+func TestSeedTemplateAgents_TracksCreatedAgentsWithTools(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("Reused", &agentstore.CreateAgentConfig{}); err != nil {
+		t.Fatalf("pre-create: %v", err)
+	}
+
+	ws := &session.Workspace{ID: "ws1", Name: "Campaign"}
+	tpl := rosterTemplate(
+		projecttemplates.AgentSpec{Name: "NewLead", Tools: projecttemplates.ToolDefaults{Skills: []string{"plan"}}},
+		projecttemplates.AgentSpec{Name: "Reused", Tools: projecttemplates.ToolDefaults{Skills: []string{"ignored"}}},
+		projecttemplates.AgentSpec{Name: "NewWriter"}, // no tools
+		projecttemplates.AgentSpec{Name: "NewDesigner", Tools: projecttemplates.ToolDefaults{MCPServers: []string{"drive"}}},
+	)
+
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	// Only newly-created agents that declare tools are tracked for binding:
+	// the reused agent and the tool-less agent are excluded.
+	if len(res.Created) != 2 {
+		t.Fatalf("expected 2 tracked agents, got %d (%+v)", len(res.Created), res.Created)
+	}
+	if res.Created[0].Name != "NewLead" || res.Created[1].Name != "NewDesigner" {
+		t.Fatalf("unexpected tracked agents: %+v", res.Created)
+	}
+	if res.Created[0].Tools.Skills[0] != "plan" {
+		t.Fatalf("tools not carried: %+v", res.Created[0].Tools)
+	}
+}
+
+func TestBindSeededAgentTools(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	var calls []string
+	handler.SetAgentToolApplier(func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) ([]string, []string) {
+		calls = append(calls, agentName)
+		if agentName == "Missing" {
+			return nil, []string{"skill:foo"}
+		}
+		return []string{"skill:ok"}, nil
+	})
+
+	created := []createdAgent{
+		{Name: "Good", Tools: projecttemplates.ToolDefaults{Skills: []string{"ok"}}},
+		{Name: "Missing", Tools: projecttemplates.ToolDefaults{Skills: []string{"foo"}}},
+		{Name: "Empty"}, // no tools -> applier not called
+	}
+
+	warnings := handler.bindSeededAgentTools("ws1", created)
+
+	if len(calls) != 2 || calls[0] != "Good" || calls[1] != "Missing" {
+		t.Fatalf("applier called for %v, want [Good Missing]", calls)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %v", warnings)
+	}
+	if !strings.Contains(warnings[0], "Missing") || !strings.Contains(warnings[0], "skill:foo") {
+		t.Fatalf("warning missing detail: %q", warnings[0])
+	}
+}
+
+func TestBindSeededAgentTools_NoApplierOrEmpty(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	// No applier wired -> no-op.
+	if w := handler.bindSeededAgentTools("ws1", []createdAgent{{Name: "A", Tools: projecttemplates.ToolDefaults{Skills: []string{"x"}}}}); w != nil {
+		t.Fatalf("expected nil warnings without an applier, got %v", w)
+	}
+	// Applier wired but no created agents -> no-op.
+	handler.SetAgentToolApplier(func(string, string, projecttemplates.ToolDefaults) ([]string, []string) {
+		t.Fatal("applier should not be called for an empty roster")
+		return nil, nil
+	})
+	if w := handler.bindSeededAgentTools("ws1", nil); w != nil {
+		t.Fatalf("expected nil warnings for empty created list, got %v", w)
 	}
 }
 

@@ -347,6 +347,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	// The applier reads the SyncStore + MCP config lazily at request time.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
+		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
 	}
 }
 

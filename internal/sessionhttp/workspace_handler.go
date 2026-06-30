@@ -296,6 +296,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// model/provider.
 	entryAgentSet := false
 	var agentSeedWarnings []string
+	var seededAgents []createdAgent
 	if req.EntryAgentName != "" {
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
@@ -315,6 +316,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		seedResult := h.seedTemplateAgents(ws, resolvedTemplate)
 		agentSeedWarnings = seedResult.Warnings
 		entryAgentSet = seedResult.EntrySet
+		seededAgents = seedResult.Created
 	} else if kind == session.WorkspaceKindGroup {
 		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
@@ -392,6 +394,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
 		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			// Bind per-agent tools for any seeded template agents now that the
+			// workspace is persisted (skills enable on the agent; MCP binds on
+			// the workspace). Apply-if-present and non-fatal.
+			if toolWarnings := h.bindSeededAgentTools(ws.ID, seededAgents); len(toolWarnings) > 0 {
+				agentSeedWarnings = append(agentSeedWarnings, toolWarnings...)
+			}
 			if ws.Kind == session.WorkspaceKindGroup {
 				// Groups physically nest members under sub-workspaces/, so
 				// their linked folder and MCP roots are scoped to the group's

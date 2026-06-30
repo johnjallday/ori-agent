@@ -15,10 +15,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
+// createdAgent is a roster entry the seeder newly created (not reused), carried
+// so the post-persist pass can bind its per-agent tools. Reused agents are
+// omitted — their existing tools are left untouched (PRD FR13/FR14).
+type createdAgent struct {
+	Name  string
+	Tools projecttemplates.ToolDefaults
+}
+
 // seedAgentsResult is the outcome of seeding a template's agent roster.
-// Per-agent tool binding for the created agents is a follow-up (PRD FR14); this
-// result will grow to carry the created agents + specs when that lands.
 type seedAgentsResult struct {
+	Created  []createdAgent
 	Warnings []string
 	EntrySet bool
 }
@@ -75,7 +82,8 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 
 	for i, spec := range tpl.Agents {
 		isEntry := i == 0
-		if _, exists := h.agentStore.GetAgent(spec.Name); !exists {
+		_, exists := h.agentStore.GetAgent(spec.Name)
+		if !exists {
 			cfg := &store.CreateAgentConfig{
 				Type:         canonicalAgentType(spec.Type),
 				Role:         types.AgentRole(canonicalAgentRole(spec.Role)),
@@ -104,9 +112,37 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		} else {
 			attachWorkspaceSpecialist(ws, spec.Name)
 		}
+		// Only newly-created agents get the template's per-agent tools; a reused
+		// agent keeps its own (PRD FR14).
+		if !exists && !spec.Tools.IsEmpty() {
+			result.Created = append(result.Created, createdAgent{Name: spec.Name, Tools: spec.Tools})
+		}
 	}
 
 	return result
+}
+
+// bindSeededAgentTools binds per-agent tools for the agents the seeder created,
+// after the workspace is persisted (MCP binding reads the stored workspace).
+// Apply-if-present and non-fatal: a missing skill/server becomes a warning, not
+// a failure. Returns warnings to surface to the user.
+func (h *Handler) bindSeededAgentTools(workspaceID string, created []createdAgent) []string {
+	if h == nil || h.applyAgentTools == nil || len(created) == 0 {
+		return nil
+	}
+	var warnings []string
+	for _, ca := range created {
+		if ca.Tools.IsEmpty() {
+			continue
+		}
+		if _, missing := h.applyAgentTools(workspaceID, ca.Name, ca.Tools); len(missing) > 0 {
+			logger.Info("Some template agent tools were not found (skipped)",
+				logger.Fields{"workspace": workspaceID, "agent": ca.Name, "missing": missing})
+			warnings = append(warnings,
+				fmt.Sprintf("Some tools for agent %q were not found and were skipped: %s", ca.Name, strings.Join(missing, ", ")))
+		}
+	}
+	return warnings
 }
 
 // attachWorkspaceSpecialist adds a non-entry agent to the workspace — a fresh
