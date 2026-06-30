@@ -353,6 +353,8 @@ function tplApplyReadOnly() {
   if (badge) badge.hidden = !builtin;
   const notice = tplEl('tplReadOnlyNotice');
   if (notice) notice.hidden = !builtin;
+  const agentsNotice = tplEl('tplAgentsReadOnlyNotice');
+  if (agentsNotice) agentsNotice.hidden = !builtin;
   [
     'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplEditStarterTasks',
     'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
@@ -1666,6 +1668,7 @@ function tplInit() {
   tplEl('tplTabAgents')?.addEventListener('shown.bs.tab', () => tplAgentsLoad());
   tplEl('tplAgentsAddBtn')?.addEventListener('click', tplAgentsAdd);
   tplEl('tplAgentsSaveBtn')?.addEventListener('click', () => void tplAgentsSave());
+  tplEl('tplAgentsDuplicateBtn')?.addEventListener('click', tplDuplicate);
 
   void tplRefresh();
 }

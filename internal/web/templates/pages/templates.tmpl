@@ -265,6 +265,10 @@
 
                   <!-- Agents: roster seeded when a workspace is created from this template -->
                   <div class="tab-pane fade" id="tplAgentsPane" role="tabpanel" aria-labelledby="tplTabAgents">
+                    <div id="tplAgentsReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
+                      This is a built-in template and is read-only.
+                      <button id="tplAgentsDuplicateBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Duplicate to customize</button>
+                    </div>
                     <div style="font-size: 12px; color: var(--text-secondary);" class="mb-2">
                       Agents are created when a workspace is made from this template. The
                       <strong>first agent is the entry agent</strong> (the one required agent every workspace
