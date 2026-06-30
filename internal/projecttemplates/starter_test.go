@@ -100,6 +100,60 @@ func TestEnsureLibraryNeverOverwritesUserEdits(t *testing.T) {
 	}
 }
 
+func TestEnsureLibraryRefreshesBuiltinManifestOnVersionBump(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "templates")
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	// Simulate an old install: an on-disk built-in with no agents and a stale
+	// builtin_version (the embedded research-project is version >= 1 with a
+	// roster), plus a user-edited seed file that must survive the refresh.
+	wp := filepath.Join(dir, "writing-project")
+	manifestPath := filepath.Join(wp, ManifestFileName)
+	if err := os.WriteFile(manifestPath, []byte(`{"name":"Writing Project","builtin":true,"builtin_version":0}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(wp, "outline.md")
+	if err := os.WriteFile(seed, []byte("user-edited outline"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second EnsureLibrary should refresh the stale manifest (embedded
+	// version > 0) but leave the hand-edited seed file untouched.
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary (refresh): %v", err)
+	}
+
+	refreshed, err := FindLibraryTemplate(dir, "writing-project")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if !refreshed.HasAgents() {
+		t.Error("expected the stale built-in manifest to be refreshed with its shipped roster")
+	}
+	if refreshed.BuiltinVersion < 1 {
+		t.Errorf("expected builtin_version refreshed to the shipped value, got %d", refreshed.BuiltinVersion)
+	}
+	// The hand-edited seed file is preserved (manifest-only refresh).
+	data, err := os.ReadFile(seed)
+	if err != nil || string(data) != "user-edited outline" {
+		t.Errorf("seed file should survive a manifest refresh, got %q err=%v", string(data), err)
+	}
+
+	// A third run is a no-op now that on-disk version matches the embed.
+	stamp, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary (no-op): %v", err)
+	}
+	if again, _ := os.Stat(manifestPath); again.ModTime() != stamp.ModTime() {
+		t.Error("manifest was rewritten when versions already matched")
+	}
+}
+
 func TestStarterInstantiatesEndToEnd(t *testing.T) {
 	// Generality gate (PRD success metric 2): both starters run through the
 	// identical engine path; the music template is in no way special.

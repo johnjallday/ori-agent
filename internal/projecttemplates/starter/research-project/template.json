@@ -4,6 +4,7 @@
   "icon": "📚",
   "behavior_profile": "research",
   "builtin": true,
+  "builtin_version": 1,
   "tags": ["research"],
   "starter_tasks": [
     {

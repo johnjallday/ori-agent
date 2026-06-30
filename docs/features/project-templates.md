@@ -30,6 +30,8 @@ The library is a directory of folders. Resolution order:
 
 A set of **built-in** templates is materialized on first start — only when absent, so your edits are never overwritten. These are the five metadata-only starting points (`travels`, `daily-briefings`, `content-production`, `research-project`, `personal-ops`) plus the two folder-skeleton starters (`reaper-song`, `writing-project`). Built-ins are flagged `"builtin": true` and are **read-only** in the authoring UI — use **Duplicate to customize** to make an editable copy.
 
+**Keeping built-ins current.** Each built-in carries a `builtin_version` (integer). When a release ships a newer version of a built-in's manifest, the next start refreshes that built-in's `template.json` in place so the change (e.g. an updated agent roster) reaches existing installs. **Only the manifest is refreshed** — scaffold seed files and everything else in the folder are left untouched, so hand-edited seed files survive. User templates and duplicates are never affected (they have no `builtin_version` and are not shipped starters).
+
 ## Authoring a template
 
 Drop a folder into the templates directory. That's the whole registration process — it appears in the workspace-creation picker on next load.
@@ -42,7 +44,7 @@ templates/
     assets/
 ```
 
-- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details" }]`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `onboarding` (intake spec), `agents` (agent roster — see below), and `builtin`. Unknown keys are preserved untouched.
+- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details" }]`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `onboarding` (intake spec), `agents` (agent roster — see below), `builtin`, and `builtin_version` (shipped manifest revision for built-ins — see "Keeping built-ins current"). Unknown keys are preserved untouched.
 - A folder containing **only** `template.json` is a valid metadata-only template (it scaffolds no files).
 - `{{name}}` becomes the slugified project name; `{{date}}` becomes `YYYY-MM-DD`. Substitution applies to file and folder **names only**; file contents are byte-copied untouched, so binary files are always safe.
 - Symlinks are skipped during instantiation (they would break portability or reach outside the template).

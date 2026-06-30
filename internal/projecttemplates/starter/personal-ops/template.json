@@ -4,6 +4,7 @@
   "icon": "🗓",
   "behavior_profile": "general",
   "builtin": true,
+  "builtin_version": 1,
   "tags": ["personal"],
   "starter_tasks": [
     {

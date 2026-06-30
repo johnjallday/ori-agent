@@ -56,9 +56,14 @@ func IsBuiltinStarterID(id string) bool {
 }
 
 // EnsureLibrary creates the templates library directory if missing and
-// materializes each starter template whose folder is absent. A folder that
-// already exists is never touched, so user edits (or deletions replaced by
-// their own content) survive restarts.
+// materializes each starter template whose folder is absent. An existing folder
+// is left as-is, with one exception: a shipped built-in whose embedded
+// builtin_version exceeds the on-disk copy has its template.json refreshed in
+// place, so shipped metadata changes (agent rosters, tags, behavior, …) reach
+// existing installs. Only the manifest is refreshed — scaffold seed files and
+// any other folder contents are never touched, so user edits survive. User
+// templates are never in starterFS, so this loop only ever sees shipped
+// starters.
 func EnsureLibrary(dir string) error {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -77,13 +82,21 @@ func EnsureLibrary(dir string) error {
 		if !starter.IsDir() {
 			continue
 		}
-		dest := filepath.Join(dir, starter.Name())
+		name := starter.Name()
+		dest := filepath.Join(dir, name)
 		if _, err := os.Lstat(dest); err == nil {
+			// Folder exists: refresh only a built-in whose shipped manifest is
+			// newer than the on-disk copy; otherwise leave it untouched.
+			if IsBuiltinStarterID(name) && embeddedBuiltinVersion(name) > diskBuiltinVersion(dest) {
+				if err := refreshBuiltinManifest(name, dest); err != nil {
+					return err
+				}
+			}
 			continue
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to inspect %s: %w", dest, err)
 		}
-		if err := materializeStarter(starter.Name(), dest); err != nil {
+		if err := materializeStarter(name, dest); err != nil {
 			// Leave no half-written starter behind: a partial folder would
 			// block re-materialization on the next start.
 			_ = os.RemoveAll(dest)
@@ -91,6 +104,51 @@ func EnsureLibrary(dir string) error {
 		}
 	}
 	return nil
+}
+
+// refreshBuiltinManifest overwrites dest/template.json with the embedded
+// starter's manifest. It propagates shipped metadata changes to an existing
+// install without disturbing scaffold seed files or any other folder contents.
+func refreshBuiltinManifest(name, dest string) error {
+	data, err := starterFS.ReadFile(path.Join(starterRoot, name, ManifestFileName))
+	if err != nil {
+		return fmt.Errorf("failed to read embedded manifest for %s: %w", name, err)
+	}
+	// target is the configured templates dir joined with a shipped starter name
+	// and the fixed ManifestFileName constant — not influenced by user input.
+	target := filepath.Join(dest, ManifestFileName)
+	if err := os.WriteFile(target, data, 0o640); err != nil { // #nosec G304 G306 -- target is templatesDir/<shipped starter>/template.json; 0o640 matches the package manifest-write convention
+		return fmt.Errorf("failed to refresh built-in manifest %s: %w", target, err)
+	}
+	return nil
+}
+
+// embeddedBuiltinVersion returns the builtin_version an embedded starter's
+// manifest declares (0 when absent or unparseable).
+func embeddedBuiltinVersion(name string) int {
+	data, err := starterFS.ReadFile(path.Join(starterRoot, name, ManifestFileName))
+	if err != nil {
+		return 0
+	}
+	return parseBuiltinVersion(data)
+}
+
+// diskBuiltinVersion returns the builtin_version an on-disk template's manifest
+// declares (0 when missing or unparseable).
+func diskBuiltinVersion(dest string) int {
+	data, err := os.ReadFile(filepath.Join(dest, ManifestFileName)) // #nosec G304 -- dest is templatesDir/<shipped starter>; filename is the fixed ManifestFileName constant
+	if err != nil {
+		return 0
+	}
+	return parseBuiltinVersion(data)
+}
+
+func parseBuiltinVersion(data []byte) int {
+	var m struct {
+		BuiltinVersion int `json:"builtin_version"`
+	}
+	_ = json.Unmarshal(data, &m)
+	return m.BuiltinVersion
 }
 
 // materializeStarter copies one embedded starter template to dest.
