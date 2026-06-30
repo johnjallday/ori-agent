@@ -60,6 +60,12 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if research := byID["research-project"]; research.BehaviorProfile != BehaviorProfileResearch {
 		t.Errorf("research-project behavior_profile = %q, want research", research.BehaviorProfile)
 	}
+	// The research-project starter ships an agent roster (entry + specialists).
+	if research := byID["research-project"]; !research.HasAgents() {
+		t.Errorf("research-project should declare an agent roster, got none")
+	} else if len(research.Agents) != 3 || research.Agents[0].Name != "Research Lead" {
+		t.Errorf("research-project roster wrong: %+v", research.Agents)
+	}
 
 	// Seed file with token name plus the dot-file under chapters/ made it out
 	// of the embed (all: prefix) and onto disk.
