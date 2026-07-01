@@ -6,9 +6,9 @@
 # Supports git worktrees - run from either dev or main worktree.
 #
 # Usage:
-#   ./scripts/release.sh [version]
-#   ./scripts/release.sh v1.3.0
-#   ./scripts/release.sh          # Prompts for version interactively
+#   ./scripts/release.sh              # Auto-computes next version (odometer: bumps last segment)
+#   ./scripts/release.sh v0.1.0       # Explicit version for an editorial bump
+#   ./scripts/release.sh --pre-release  # Candidate build (GitHub pre-release, doesn't touch main)
 #
 # Workflow:
 #   1. Validates current branch (dev or main)
@@ -49,6 +49,39 @@ print_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Latest clean release tag (vX.Y.Z), or empty if there are none yet.
+latest_release_tag() {
+  git tag --list --sort=-v:refname 2>/dev/null \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1
+}
+
+# Compute the next release version from the latest release tag.
+# Odometer model: bump only the last segment (v0.0.85 -> v0.0.86), never
+# rolling over. Major/minor are editorial and only move when a version is
+# passed explicitly. Prints nothing if there are no release tags yet.
+compute_next_version() {
+  local latest ver major minor patch
+  latest=$(latest_release_tag)
+  [ -z "$latest" ] && { echo ""; return; }
+  ver="${latest#v}"
+  IFS='.' read -r major minor patch <<< "$ver"
+  echo "v${major}.${minor}.$((patch + 1))"
+}
+
+# Given a clean base version (vX.Y.Z), return the next -rc.N pre-release tag for
+# it, auto-incrementing N past any existing candidates for that base.
+next_prerelease_version() {
+  local base="$1" t n maxn=0
+  while IFS= read -r t; do
+    [ -z "$t" ] && continue
+    n="${t##*-rc.}"
+    if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt "$maxn" ]; then
+      maxn="$n"
+    fi
+  done < <(git tag --list "${base}-rc.*" 2>/dev/null)
+  echo "${base}-rc.$((maxn + 1))"
+}
+
 # Help function
 show_help() {
   echo ""
@@ -60,20 +93,25 @@ show_help() {
   echo "  ./scripts/release.sh [version]"
   echo ""
   echo -e "${BLUE}ARGUMENTS:${NC}"
-  echo "  [version]       Version to release (e.g., v1.3.0 or 1.3.0)"
-  echo "                  If omitted, you will be prompted to enter it"
+  echo "  [version]       Version to release (e.g., v0.1.0 or 0.1.0)"
+  echo "                  If omitted, the next version is auto-computed from the"
+  echo "                  latest release tag (odometer: bumps the last segment)."
+  echo "                  Pass a version explicitly to make an editorial bump."
   echo "                  The 'v' prefix is added automatically if missing"
   echo ""
   echo -e "${BLUE}OPTIONS:${NC}"
   echo "  --help, -h      Show this help message"
   echo "  --dry-run       Run checks but don't create tag or push"
   echo "  --skip-checks   Skip pre-release checks (use with caution)"
+  echo "  --pre-release   Cut a candidate build: tags dev with an -rc.N suffix,"
+  echo "                  publishes a GitHub pre-release (not 'Latest'), and does"
+  echo "                  NOT merge to main. Stable is the default (no flag)."
   echo ""
   echo -e "${BLUE}EXAMPLES:${NC}"
-  echo "  ./scripts/release.sh           # Interactive mode"
-  echo "  ./scripts/release.sh v1.3.0    # Release v1.3.0"
-  echo "  ./scripts/release.sh 1.3.0     # Same as above (v prefix added)"
-  echo "  ./scripts/release.sh --dry-run v1.3.0  # Validate without releasing"
+  echo "  ./scripts/release.sh                   # Auto-compute next version, release (stable)"
+  echo "  ./scripts/release.sh v0.1.0            # Editorial bump to v0.1.0 (stable)"
+  echo "  ./scripts/release.sh --pre-release     # Cut a candidate (v0.0.86-rc.1, not 'Latest')"
+  echo "  ./scripts/release.sh --dry-run         # Auto-compute + validate, no release"
   echo ""
   echo -e "${BLUE}WORKFLOW:${NC}"
   echo "  1. Validates branch (must be on 'dev' or 'main')"
@@ -100,6 +138,7 @@ show_help() {
 VERSION=""
 DRY_RUN=false
 SKIP_CHECKS=false
+PRE_RELEASE=false
 
 for arg in "$@"; do
   case $arg in
@@ -111,6 +150,9 @@ for arg in "$@"; do
       ;;
     --skip-checks)
       SKIP_CHECKS=true
+      ;;
+    --pre-release|--prerelease)
+      PRE_RELEASE=true
       ;;
     *)
       if [ -z "$VERSION" ]; then
@@ -133,17 +175,33 @@ if [ -f "$VERSION_FILE" ]; then
   CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
 fi
 
-# If no version argument provided, prompt the user
+# If no version argument was provided, auto-compute the next version from the
+# latest release tag (odometer: bump the last segment). This makes the version
+# a byproduct of shipping rather than a per-release decision. To make an
+# editorial bump, pass a version explicitly (e.g. v0.1.0 or v1.0.0).
 if [ -z "$VERSION" ]; then
-  if [ -n "$CURRENT_VERSION" ]; then
-    print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
-  fi
-  echo -n "Enter version to release (e.g., v1.3.0): "
-  read -r VERSION
+  print_status "Fetching latest tags to compute next version..."
+  git fetch --tags origin >/dev/null 2>&1 || true
 
-  if [ -z "$VERSION" ]; then
-    print_error "No version provided. Aborting."
-    exit 1
+  SUGGESTED_VERSION=$(compute_next_version)
+
+  if [ -n "$SUGGESTED_VERSION" ]; then
+    VERSION="$SUGGESTED_VERSION"
+    print_status "Latest release tag:  ${YELLOW}$(latest_release_tag)${NC}"
+    print_success "Next version (auto): ${GREEN}${VERSION}${NC}"
+    print_status "Editorial bump? Re-run with a version, e.g. ${BLUE}./scripts/release.sh v0.1.0${NC}"
+  else
+    # No release tags yet — fall back to an interactive prompt.
+    if [ -n "$CURRENT_VERSION" ]; then
+      print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
+    fi
+    echo -n "Enter version to release (e.g., v0.1.0): "
+    read -r VERSION
+
+    if [ -z "$VERSION" ]; then
+      print_error "No version provided. Aborting."
+      exit 1
+    fi
   fi
 fi
 
@@ -153,9 +211,21 @@ if [[ ! "$VERSION" =~ ^v ]]; then
   print_status "Added 'v' prefix: $VERSION"
 fi
 
-# Validate version format
-if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  print_error "Version must be in format vX.Y.Z (e.g., v1.0.1)"
+# For a pre-release (candidate) build, append an auto-incrementing -rc.N suffix
+# to the base version (unless the caller already supplied their own suffix).
+# goreleaser's `prerelease: auto` marks any suffixed tag as a GitHub
+# pre-release, so it never becomes the "Latest" (stable) pin and the in-app
+# updater skips it by default.
+if [ "$PRE_RELEASE" = true ] && [[ "$VERSION" != *-* ]]; then
+  if [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    VERSION="$(next_prerelease_version "$VERSION")"
+    print_status "Pre-release build: ${YELLOW}${VERSION}${NC} (won't move the stable pin)"
+  fi
+fi
+
+# Validate version format (an optional -suffix marks a pre-release)
+if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  print_error "Version must be vX.Y.Z or vX.Y.Z-suffix (e.g., v1.0.1 or v1.0.1-rc.1)"
   exit 1
 fi
 
@@ -196,6 +266,11 @@ if [ -n "$CURRENT_VERSION" ] && [ "$VERSION" != "$CURRENT_VERSION" ]; then
   echo -e "  Current: ${YELLOW}$CURRENT_VERSION${NC} → ${GREEN}$VERSION${NC}"
 fi
 echo -e "  Branch:  ${BLUE}$CURRENT_BRANCH${NC}"
+if [ "$PRE_RELEASE" = true ]; then
+  echo -e "  Channel: ${YELLOW}pre-release${NC} (candidate — won't become 'Latest')"
+else
+  echo -e "  Channel: ${GREEN}stable${NC} (GitHub 'Latest' — the pin the updater follows)"
+fi
 if [ "$DRY_RUN" = true ]; then
   echo -e "  Mode:    ${YELLOW}DRY RUN${NC} (no tag/push)"
 fi
@@ -255,7 +330,16 @@ fi
 # STEP 2: Merge dev to main (if started on dev)
 # ════════════════════════════════════════════════════════════════════
 
-if [ "$STARTED_ON_DEV" = true ]; then
+if [ "$STARTED_ON_DEV" = true ] && [ "$PRE_RELEASE" = true ]; then
+  echo ""
+  echo "════════════════════════════════════════════"
+  echo "STEP 2: Pre-release — tag dev (no merge to main)"
+  echo "════════════════════════════════════════════"
+  echo ""
+  print_status "Pushing dev so the tag points at an origin commit..."
+  git push origin dev
+
+elif [ "$STARTED_ON_DEV" = true ]; then
   echo ""
   echo "════════════════════════════════════════════"
   echo "STEP 2: Merging dev to main"
@@ -340,7 +424,9 @@ echo ""
 
 # Check if VERSION needs updating
 CURRENT_VERSION_NOW=$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]')
-if [ "$CURRENT_VERSION_NOW" != "$VERSION" ]; then
+if [ "$PRE_RELEASE" = true ]; then
+  print_status "Pre-release: leaving the VERSION file and main branch untouched"
+elif [ "$CURRENT_VERSION_NOW" != "$VERSION" ]; then
   print_status "Updating VERSION: $CURRENT_VERSION_NOW → $VERSION"
   echo "$VERSION" > "$VERSION_FILE"
   git add "$VERSION_FILE"
@@ -369,14 +455,18 @@ echo ""
 
 if [ "$DRY_RUN" = true ]; then
   print_warning "DRY RUN: Would create tag $VERSION and push"
-  print_warning "DRY RUN: Would push main branch"
+  if [ "$PRE_RELEASE" = true ]; then
+    print_warning "DRY RUN: Pre-release — would NOT touch main"
+  else
+    print_warning "DRY RUN: Would push main branch"
+  fi
   echo ""
   print_success "Dry run complete - no changes pushed"
   exit 0
 fi
 
-# Push main branch (skip if worktree mode already pushed)
-if [ "${USING_WORKTREES:-false}" = false ]; then
+# Push main branch (skip for pre-releases and when worktree mode already pushed)
+if [ "$PRE_RELEASE" = false ] && [ "${USING_WORKTREES:-false}" = false ]; then
   print_status "Pushing main branch..."
   git push origin main
 fi
@@ -408,12 +498,16 @@ echo ""
 
 print_success "Release $VERSION triggered!"
 echo ""
+if [ "$PRE_RELEASE" = true ]; then
+  print_status "This is a ${YELLOW}pre-release${NC} — GitHub won't mark it 'Latest' and the updater skips it."
+  print_status "To promote to stable, cut a normal release: ${BLUE}./scripts/release.sh${NC}"
+fi
 print_status "GitHub Actions is now building the release."
 print_status "View progress: ${BLUE}gh run list --workflow=release.yml${NC}"
 echo ""
 
-# Offer to sync dev branch
-if [ "$STARTED_ON_DEV" = true ]; then
+# Offer to sync dev branch (stable releases only; pre-releases never touch main)
+if [ "$STARTED_ON_DEV" = true ] && [ "$PRE_RELEASE" = false ]; then
   if [ "${USING_WORKTREES:-false}" = true ]; then
     # Worktree mode: already on dev, just pull/merge
     echo -n "Sync dev with main? [Y/n]: "
