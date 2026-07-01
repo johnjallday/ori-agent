@@ -5,7 +5,7 @@
 #   • there are unreleased commits on dev since the last v* tag
 #   • dev's HEAD commit has green CI (all check-runs completed & successful)
 #   • cadence threshold met: >=N merged PRs since the last release,
-#     OR >=D days since the last release, OR FORCE_RELEASE=true
+#     OR FORCE_RELEASE=true (manual dispatch)
 #   • the kill-switch (AUTO_RELEASE_HOLD) is not set
 #
 # Designed to run in GitHub Actions (.github/workflows/auto-release.yml) on a
@@ -22,7 +22,6 @@ set -euo pipefail
 
 # ── tunables (override via env) ───────────────────────────────────────────────
 MIN_PRS="${RELEASE_MIN_PRS:-5}"          # >= this many merged PRs since last tag → ready
-MIN_DAYS="${RELEASE_MIN_DAYS:-3}"        # >= this many days since last release → ready
 BASE_BRANCH="${RELEASE_BASE_BRANCH:-dev}"
 FORCE_RELEASE="${FORCE_RELEASE:-false}"  # bypass the cadence threshold (CI-green still required)
 
@@ -50,7 +49,7 @@ case "${AUTO_RELEASE_HOLD:-}" in
 esac
 
 # ── 1. last release tag ───────────────────────────────────────────────────────
-LAST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+LAST_TAG="$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
 [ -n "$LAST_TAG" ] || hold "no previous v* tag found"
 LAST_DATE="$(git log -1 --format=%cI "$LAST_TAG" | cut -dT -f1)"
 echo "Last release: $LAST_TAG ($LAST_DATE)"
@@ -91,18 +90,14 @@ NOW_S="$(date +%s)"
 LAST_S="$(date -d "$LAST_DATE" +%s 2>/dev/null || date -j -f %Y-%m-%d "$LAST_DATE" +%s)"
 DAYS_SINCE=$(( (NOW_S - LAST_S) / 86400 ))
 
-if   [ "$FORCE_RELEASE" = "true" ];     then REASON="forced (manual dispatch), CI green"
-elif [ "$PR_COUNT" -ge "$MIN_PRS" ];    then REASON="$PR_COUNT PRs since $LAST_TAG (>=$MIN_PRS)"
-elif [ "$DAYS_SINCE" -ge "$MIN_DAYS" ]; then REASON="$DAYS_SINCE days since $LAST_TAG (>=$MIN_DAYS)"
-else hold "cadence not met: $PR_COUNT PRs / $DAYS_SINCE days since $LAST_TAG (force with manual dispatch)"
+if   [ "$FORCE_RELEASE" = "true" ];  then REASON="forced (manual dispatch), CI green"
+elif [ "$PR_COUNT" -ge "$MIN_PRS" ]; then REASON="$PR_COUNT PRs since $LAST_TAG (>=$MIN_PRS)"
+else hold "cadence not met: $PR_COUNT PRs since $LAST_TAG ($DAYS_SINCE days old; force with manual dispatch)"
 fi
 
-# ── 5. next version (odometer: bump patch, roll at 9; major bump stays manual) ─
+# ── 5. next version (odometer: bump the last segment, no roll — major/minor editorial) ─
 IFS=. read -r MA MI PA <<< "${LAST_TAG#v}"
-PA=$((PA + 1))
-if [ "$PA" -gt 9 ]; then PA=0; MI=$((MI + 1)); fi
-[ "$MI" -le 9 ] || hold "next version would roll a major from $LAST_TAG — bump manually"
-NEXT="v${MA}.${MI}.${PA}"
+NEXT="v${MA}.${MI}.$((PA + 1))"
 
 echo "READY → $NEXT   ($REASON)"
 emit ready true
