@@ -2140,6 +2140,8 @@ export class WorkspaceDetailPage {
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
       await this.membersPanel.syncWorkspace(this.workspace);
+      // Keep the opt-in Command view in sync once data is loaded/refreshed.
+      window.workspaceCommand?.refresh();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
