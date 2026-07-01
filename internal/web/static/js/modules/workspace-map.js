@@ -6,8 +6,8 @@
  * window.OriWorkspaceMap, which workspace-hub.js calls when the "map" view is
  * active.
  *
- * Phase 2 = building tiles + stable auto-layout + group districts + a
- * New-workspace pad. Selection/Overview population + navigation land in Phase 3.
+ * Phase 3 = selecting a tile populates the Overview panel (entry agent, roster,
+ * tasks, tools, skills) and Open Workspace navigates to the detail page.
  */
 (function () {
   'use strict';
@@ -16,6 +16,9 @@
   var CELL_H = 150;
   var PAD = 26;
   var MAX_COLS = 5;
+
+  // Currently-selected workspace id, remembered across re-mounts (data refreshes).
+  var selectedId = '';
 
   // curated, distinct building palettes (picked by stable id hash)
   var PALETTE = [
@@ -60,6 +63,32 @@
       case '': return '';
       default: return String(mode).charAt(0).toUpperCase() + String(mode).slice(1);
     }
+  }
+
+  function findWs(workspaces, id) {
+    if (!id || !Array.isArray(workspaces)) return null;
+    for (var i = 0; i < workspaces.length; i++) {
+      if (workspaces[i] && workspaces[i].id === id) return workspaces[i];
+    }
+    return null;
+  }
+
+  function initials(name) {
+    var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // Default selection = most recently updated workspace (fallback: first present).
+  function pickDefaultSelection(workspaces) {
+    var list = (Array.isArray(workspaces) ? workspaces : []).filter(function (w) { return w && w.id; });
+    if (!list.length) return '';
+    var best = list[0];
+    list.forEach(function (w) {
+      if (String(w.updated_at || '') > String(best.updated_at || '')) best = w;
+    });
+    return best.id;
   }
 
   /**
@@ -275,6 +304,59 @@
     );
   }
 
+  function avatarHTML(name, extraClass) {
+    var pal = paletteFor(name);
+    return '<span class="ws-map-av' + (extraClass ? ' ' + extraClass : '') +
+      '" style="--av:' + pal.key + '" title="' + escapeHtml(name) + '">' +
+      escapeHtml(initials(name)) + '</span>';
+  }
+
+  function overviewBodyHTML(ws) {
+    if (!ws) {
+      return '<div class="ws-map-overview-empty"><span class="ws-big">◈</span>' +
+        'Select a workspace to see its agents, tasks, tools, and skills.</div>';
+    }
+    var pal = paletteFor(ws.id);
+    var mode = opsModeLabel(ws.ops_mode);
+    var entry = String(ws.entry_agent_name || '').trim();
+    var agents = (Array.isArray(ws.agents) ? ws.agents : []).filter(Boolean);
+    var openTasks = Number(ws.open_task_count || 0);
+    var mcp = Number(ws.mcp_count || 0);
+    var skills = Number(ws.skill_count || 0);
+
+    var keeper = entry
+      ? '<div class="ws-map-ov-keeper">' + avatarHTML(entry, 'is-keeper') +
+        '<div><div class="ws-map-ov-keeper-name">' + escapeHtml(entry) + '</div>' +
+        '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
+      : '<span class="ws-map-ov-none">No entry agent</span>';
+
+    var roster = agents.length
+      ? agents.map(function (a) { return avatarHTML(a); }).join('')
+      : '<span class="ws-map-ov-none">No agents yet</span>';
+
+    return (
+      '<div class="ws-map-ov-hero">' +
+      '<span class="ws-map-ov-ic" style="--av:' + pal.key + '">' + escapeHtml(initials(ws.name)) + '</span>' +
+      '<div><div class="ws-map-ov-name">' + escapeHtml(ws.name || 'Workspace') + '</div>' +
+      (mode ? '<div class="ws-map-ov-tag">' + escapeHtml(mode) + '</div>' : '') +
+      '</div></div>' +
+      '<div class="ws-map-ov-label">Entry agent</div>' +
+      '<div class="ws-map-ov-keeperwrap">' + keeper + '</div>' +
+      '<div class="ws-map-ov-label">Agents · ' + agents.length + '</div>' +
+      '<div class="ws-map-ov-roster">' + roster + '</div>' +
+      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tasks</span>' +
+      '<span class="ws-map-ov-v">' + openTasks + ' open</span></div>' +
+      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tools · MCP</span>' +
+      '<span class="ws-map-ov-v">' + mcp + '</span></div>' +
+      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Skills</span>' +
+      '<span class="ws-map-ov-v">' + skills + '</span></div>' +
+      '<div class="ws-map-ov-actions">' +
+      '<button type="button" class="ws-map-ov-open" data-ws-open="' + escapeHtml(ws.id) + '">Open Workspace ▸</button>' +
+      '<button type="button" class="ws-map-ov-cog" data-ws-open="' + escapeHtml(ws.id) + '" aria-label="Open workspace">⚙</button>' +
+      '</div>'
+    );
+  }
+
   function shellHTML(stats, workspaces, selectedId) {
     var canvas = (Array.isArray(workspaces) && workspaces.length > 0)
       ? canvasHTML(workspaces, selectedId).html
@@ -307,11 +389,57 @@
       '<aside class="ws-map-overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
       '<div class="ws-map-overview-body">' +
-      '<div class="ws-map-overview-empty"><span class="ws-big">◈</span>Select a workspace to see its agents, tasks, tools, and skills.</div>' +
+      overviewBodyHTML(findWs(workspaces, selectedId)) +
       '</div>' +
       '</aside>' +
       '</div>'
     );
+  }
+
+  // Reuse the hub's existing create flow for every create affordance.
+  function bindCreate(container) {
+    var els = container.querySelectorAll('[data-ws-map-create]');
+    Array.prototype.forEach.call(els, function (el) {
+      el.addEventListener('click', function () {
+        var hubCreate = document.getElementById('launcherCreateWorkspaceBtn');
+        if (hubCreate) hubCreate.click();
+      });
+    });
+  }
+
+  function bindOverviewActions(container) {
+    var opens = container.querySelectorAll('[data-ws-open]');
+    Array.prototype.forEach.call(opens, function (el) {
+      el.addEventListener('click', function () {
+        var id = el.getAttribute('data-ws-open');
+        if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
+      });
+    });
+  }
+
+  // Update selection in place (no full re-mount) to avoid flicker.
+  function applySelection(container, workspaces, id) {
+    selectedId = id;
+    var tiles = container.querySelectorAll('.ws-map-tile');
+    Array.prototype.forEach.call(tiles, function (el) {
+      el.classList.toggle('is-selected', el.getAttribute('data-ws-id') === id);
+    });
+    var body = container.querySelector('.ws-map-overview-body');
+    if (body) {
+      body.innerHTML = overviewBodyHTML(findWs(workspaces, id));
+      bindOverviewActions(container);
+    }
+  }
+
+  function bindTiles(container, workspaces) {
+    var selectables = container.querySelectorAll(
+      '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
+    );
+    Array.prototype.forEach.call(selectables, function (el) {
+      el.addEventListener('click', function () {
+        applySelection(container, workspaces, el.getAttribute('data-ws-id'));
+      });
+    });
   }
 
   /**
@@ -322,17 +450,16 @@
   function mount(container, state) {
     if (!container) return;
     var workspaces = (state && state.workspaces) || [];
-    var selectedId = (state && state.selectedId) || '';
-    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId);
+    var incoming = (state && state.selectedId) || '';
+    // Keep the current selection if it still exists, else honor an incoming
+    // selection, else fall back to a sensible default.
+    selectedId = findWs(workspaces, selectedId) ? selectedId
+      : (findWs(workspaces, incoming) ? incoming : pickDefaultSelection(workspaces));
 
-    // Reuse the hub's existing create flow for every create affordance.
-    var createEls = container.querySelectorAll('[data-ws-map-create]');
-    Array.prototype.forEach.call(createEls, function (el) {
-      el.addEventListener('click', function () {
-        var hubCreate = document.getElementById('launcherCreateWorkspaceBtn');
-        if (hubCreate) hubCreate.click();
-      });
-    });
+    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId);
+    bindCreate(container);
+    bindTiles(container, workspaces);
+    bindOverviewActions(container);
   }
 
   /** Tear down the map view (called when switching away). */
