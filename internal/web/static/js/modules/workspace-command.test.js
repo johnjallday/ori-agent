@@ -38,3 +38,16 @@ test('opsModeLabel maps workflow modes to friendly labels', () => {
   assert.equal(withMode('plan_then_execute'), 'Autonomous');
   assert.equal(withMode(''), '');
 });
+
+test('computeStats reads counts from the page instance', () => {
+  view.page = {
+    buildAgentGroups: () => [
+      { isWorkspaceAgent: true, isUnassigned: false },
+      { isWorkspaceAgent: true, isUnassigned: false },
+      { isWorkspaceAgent: false, isUnassigned: true } // unassigned bucket, not an agent
+    ],
+    tasks: [{ status: 'pending' }, { status: 'in_progress' }, { status: 'completed' }],
+    workspace: { mcp_bindings: [{}, {}], skill_bindings: [{}] }
+  };
+  assert.deepEqual(view.computeStats(), { agents: 2, openTasks: 2, mcp: 2, skills: 1 });
+});
