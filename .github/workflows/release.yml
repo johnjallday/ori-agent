@@ -105,7 +105,15 @@ jobs:
           hdiutil info | grep -E "^/dev/" | awk '{print $1}' | while read dev; do
             hdiutil detach "$dev" -force 2>/dev/null || true
           done
-          sleep 3
+          # diskimages-help can keep holding the previous DMG's resources for a
+          # while after hdiutil create/detach return, which causes the next
+          # hdiutil create to fail with "Resource busy". Wait for it to clear
+          # instead of a fixed sleep (observed hanging past 3s on CI runners).
+          for i in $(seq 1 30); do
+            pgrep -x diskimages-help >/dev/null 2>&1 || break
+            sleep 1
+          done
+          sleep 2
 
           # Create DMG for Apple Silicon
           ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist || echo "Warning: arm64 DMG creation failed"
@@ -120,6 +128,17 @@ jobs:
           files: dist/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify both DMG architectures were built
+        run: |
+          missing=0
+          for arch in amd64 arm64; do
+            if ! ls dist/*-${arch}.dmg >/dev/null 2>&1; then
+              echo "::error::Missing ${arch} DMG in dist/ — it was not created or failed to build"
+              missing=1
+            fi
+          done
+          exit $missing
 
   # Windows MSI build job
   build-msi:

@@ -297,9 +297,9 @@ for attempt in 1 2 3; do
     echo "❌ hdiutil create failed after 3 attempts" >&2
     exit 1
   fi
-  echo "⚠️  hdiutil create failed (attempt ${attempt}/3); retrying after 10s..." >&2
+  echo "⚠️  hdiutil create failed (attempt ${attempt}/3); retrying after $((attempt * 15))s..." >&2
   rm -f "${DIST_DIR}/${DMG_NAME}"
-  sleep 10
+  sleep $((attempt * 15))
 done
 
 # Clean up
