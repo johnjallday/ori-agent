@@ -22,6 +22,8 @@ func TestComputeMapSummaryFields(t *testing.T) {
 			{Status: TaskStatusPending},
 			{Status: TaskStatusInProgress},
 			{Status: TaskStatusCompleted},
+			{Status: TaskStatusFailed},
+			{Status: TaskStatusTimeout},
 		},
 		SharedData: workspacesettings.Store(map[string]any{}, settings),
 	}
@@ -46,6 +48,9 @@ func TestComputeMapSummaryFields(t *testing.T) {
 	if fields.OpenTaskCount != 2 {
 		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed)", fields.OpenTaskCount)
 	}
+	if fields.NeedsAttentionCount != 2 {
+		t.Errorf("NeedsAttentionCount = %d, want 2 (failed + timeout)", fields.NeedsAttentionCount)
+	}
 	if !fields.Active {
 		t.Error("Active = false, want true (workspace has an in-progress task)")
 	}
@@ -54,8 +59,8 @@ func TestComputeMapSummaryFields(t *testing.T) {
 func TestComputeMapSummaryFieldsNilWorkspace(t *testing.T) {
 	fields := ComputeMapSummaryFields(nil)
 	if fields.AgentNames != nil || fields.EntryAgentName != "" || fields.AgentCount != 0 ||
-		fields.OpenTaskCount != 0 || fields.MCPCount != 0 || fields.SkillCount != 0 ||
-		fields.OpsMode != "" || fields.Active {
+		fields.OpenTaskCount != 0 || fields.NeedsAttentionCount != 0 || fields.MCPCount != 0 ||
+		fields.SkillCount != 0 || fields.OpsMode != "" || fields.Active {
 		t.Errorf("ComputeMapSummaryFields(nil) = %+v, want zero value", fields)
 	}
 }

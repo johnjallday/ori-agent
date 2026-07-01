@@ -60,6 +60,7 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	summary["skill_count"] = fields.SkillCount
 	summary["ops_mode"] = fields.OpsMode
 	summary["open_task_count"] = fields.OpenTaskCount
+	summary["needs_attention_count"] = fields.NeedsAttentionCount
 	summary["active"] = fields.Active
 }
 

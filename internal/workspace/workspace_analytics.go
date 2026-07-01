@@ -33,14 +33,15 @@ func (w *Workspace) GetSummary() map[string]any {
 // callers) and sessionhttp (session.Workspace list/tree callers) so both
 // surfaces derive the same values from one place.
 type MapSummaryFields struct {
-	EntryAgentName string
-	AgentNames     []string
-	AgentCount     int
-	OpenTaskCount  int
-	MCPCount       int
-	SkillCount     int
-	OpsMode        string
-	Active         bool
+	EntryAgentName      string
+	AgentNames          []string
+	AgentCount          int
+	OpenTaskCount       int
+	NeedsAttentionCount int
+	MCPCount            int
+	SkillCount          int
+	OpsMode             string
+	Active              bool
 }
 
 // ComputeMapSummaryFields derives entry agent, roster, tool/skill counts, ops
@@ -70,6 +71,8 @@ func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 		case TaskStatusInProgress:
 			fields.OpenTaskCount++
 			fields.Active = true
+		case TaskStatusFailed, TaskStatusTimeout:
+			fields.NeedsAttentionCount++
 		}
 	}
 

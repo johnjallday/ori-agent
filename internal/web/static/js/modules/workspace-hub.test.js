@@ -391,6 +391,35 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
 });
 
+test('renderLauncherTaskBadge reads counts straight off the workspace object', () => {
+  const { helpers } = loadWorkspaceHub();
+
+  assert.equal(helpers.renderLauncherTaskBadge(null), '');
+  assert.equal(helpers.renderLauncherTaskBadge({ open_task_count: 0 }), '');
+
+  const openOnly = helpers.renderLauncherTaskBadge({ open_task_count: 3, needs_attention_count: 0 });
+  assert.match(openOnly, /class="launcher-task-badge"/);
+  assert.doesNotMatch(openOnly, /is-attention/);
+  assert.match(openOnly, />3</);
+
+  const withAttention = helpers.renderLauncherTaskBadge({ open_task_count: 2, needs_attention_count: 1 });
+  assert.match(withAttention, /class="launcher-task-badge is-attention"/);
+  assert.match(withAttention, /1 need attention/);
+});
+
+test('launcher cards badge sources counts from enriched workspace fields, not a fetched map', () => {
+  const workspaces = [
+    { id: 'workspace-1', kind: 'workspace', name: 'API', open_task_count: 2, needs_attention_count: 1 },
+    { id: 'workspace-2', kind: 'workspace', name: 'UI', open_task_count: 0 }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.match(launcherGrid.innerHTML, /launcher-task-badge is-attention"[^>]*>2</);
+});
+
 test('launcher cards render tag chips with filter and remove controls', () => {
   const workspaces = [
     {

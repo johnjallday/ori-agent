@@ -245,7 +245,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   const undoStack = []; // LIFO of { id, label }
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
-  let launcherTaskBadgeByWorkspace = new Map();
+  let workspaceListRefreshTimer = null;
   let launcherActiveTab = 'workspaces';
   let launcherActiveView = LAUNCHER_VIEW_CARDS;
   let launcherWorkspaceRootState = null;
@@ -343,20 +343,25 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
-  function renderLauncherTaskBadge(workspaceID) {
-    if (!workspaceID) return '';
-    const counts = launcherTaskBadgeByWorkspace.get(workspaceID);
-    if (!counts || counts.open <= 0) return '';
+  // Reads counts straight off the workspace's own enriched summary fields
+  // (agent_count/open_task_count/needs_attention_count etc., populated
+  // server-side by hydrateWorkspaceMetadataInto) rather than a separately
+  // fetched per-workspace task list, so rendering a tile never triggers a
+  // network request.
+  function renderLauncherTaskBadge(workspace) {
+    if (!workspace) return '';
+    const open = Number(workspace.open_task_count) || 0;
+    if (open <= 0) return '';
+    const needsAttention = Number(workspace.needs_attention_count) || 0;
 
-    const titleParts = [`${counts.open} open task${counts.open === 1 ? '' : 's'}`];
-    if (counts.inProgress > 0) titleParts.push(`${counts.inProgress} in progress`);
-    if (counts.needsAttention > 0) titleParts.push(`${counts.needsAttention} need attention`);
+    const titleParts = [`${open} open task${open === 1 ? '' : 's'}`];
+    if (needsAttention > 0) titleParts.push(`${needsAttention} need attention`);
     const title = titleParts.join(' | ');
-    const badgeClass = counts.needsAttention > 0
+    const badgeClass = needsAttention > 0
       ? 'launcher-task-badge is-attention'
       : 'launcher-task-badge';
 
-    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(counts.open))}</span>`;
+    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(open))}</span>`;
   }
 
   function normalizeWorkspaceFolderPath(value) {
@@ -958,7 +963,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const workspaces = (flattened || []).filter((workspace) => workspace && workspace.id);
     if (workspaces.length === 0) {
-      launcherTaskBadgeByWorkspace = new Map();
       updateLauncherOverviewMetrics({
         open: 0,
         pending: 0,
@@ -1137,16 +1141,6 @@ console.log('[workspace-hub.js] FILE LOADED');
       return a.name.localeCompare(b.name);
     });
 
-    launcherTaskBadgeByWorkspace = new Map(
-      workspaceSummaries.map((summary) => [summary.id, {
-        open: summary.open,
-        pending: summary.pending,
-        inProgress: summary.inProgress,
-        needsAttention: summary.needsAttention,
-        scheduled: summary.scheduled
-      }])
-    );
-
     aggregateTasks.sort((a, b) => {
       const statusDiff = statusPriorityForOverview(a.status) - statusPriorityForOverview(b.status);
       if (statusDiff !== 0) return statusDiff;
@@ -1286,6 +1280,42 @@ console.log('[workspace-hub.js] FILE LOADED');
       const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
       void refreshLauncherTaskOverview(flattened);
     }, delayMs);
+  }
+
+  // Cheap alternative to scheduleLauncherOverviewRefresh: a single
+  // /api/workspaces?tree=true refetch keeps Cards/Tree/Map badges (sourced
+  // from each workspace's own enriched summary fields) current after a task
+  // changes, without re-fetching every workspace's task/session list just to
+  // recount them. The heavier overview refresh above stays reserved for the
+  // Summary tab, which needs actual task/session content, not just counts.
+  function scheduleWorkspaceListRefresh(delayMs = 700) {
+    if (workspaceListRefreshTimer) {
+      clearTimeout(workspaceListRefreshTimer);
+    }
+    workspaceListRefreshTimer = setTimeout(() => {
+      workspaceListRefreshTimer = null;
+      void refreshWorkspaceListForBadges();
+    }, delayMs);
+  }
+
+  async function refreshWorkspaceListForBadges() {
+    const state = window.WorkspaceHubState.getState();
+    try {
+      const response = await fetch('/api/workspaces?tree=true');
+      if (!response.ok) throw new Error(`Failed to refresh workspaces (${response.status})`);
+      const data = await response.json();
+      state.workspaces = data.folders || [];
+
+      const flattened = flattenWorkspaces(state.workspaces);
+      state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+
+      populateWorkspaceSelect(flattened);
+      if (hubEl.dataset.state === 'launcher') {
+        renderLauncherActiveView(flattened);
+      }
+    } catch (err) {
+      console.error('Failed to refresh workspace list for badge counts:', err);
+    }
   }
 
   /**
@@ -1497,7 +1527,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       const accentStyle = row.color ? `style="border-color: ${escapeHtml(row.color)}"` : '';
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
-      const taskBadge = renderLauncherTaskBadge(row.id);
+      const taskBadge = renderLauncherTaskBadge(row);
       const folderDisplay = getWorkspaceFolderDisplay(row);
       const parentGroup = row.parent_id ? flattenedMap.get(row.parent_id) : null;
       const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
@@ -3881,9 +3911,14 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
 
-    const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
     setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
-    void refreshLauncherTaskOverview(flattened);
+    // Cards/Tree/Map badges already come from state.workspaces' enriched
+    // fields (no fetch needed); only the Summary tab needs a refresh here,
+    // and only when it's the tab actually being shown.
+    if (launcherActiveTab === 'summary') {
+      const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
+      void refreshLauncherTaskOverview(flattened);
+    }
   }
 
   /**
@@ -4134,7 +4169,12 @@ console.log('[workspace-hub.js] FILE LOADED');
     // Workspace selection via dropdown removed; use launcher cards instead.
 
     if (elements.workspaceBrowseBtn) {
-      elements.workspaceBrowseBtn.addEventListener('click', () => showLauncher());
+      elements.workspaceBrowseBtn.addEventListener('click', () => {
+        showLauncher();
+        // Badge counts may be stale after time spent on a workspace detail
+        // page (task events there don't refresh the hub's launcher state).
+        void refreshWorkspaceListForBadges();
+      });
     }
 
     if (elements.workspaceMoveBtn) {
@@ -4413,7 +4453,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:created', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        scheduleLauncherOverviewRefresh();
+        // Cheap list refetch keeps Cards/Tree/Map badges current; only
+        // re-run the expensive per-workspace fan-out if the Summary tab
+        // (which needs full task content, not just counts) is open.
+        scheduleWorkspaceListRefresh();
+        if (launcherActiveTab === 'summary') {
+          scheduleLauncherOverviewRefresh();
+        }
       }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
@@ -4424,7 +4470,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:updated', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        scheduleLauncherOverviewRefresh();
+        // Cheap list refetch keeps Cards/Tree/Map badges current; only
+        // re-run the expensive per-workspace fan-out if the Summary tab
+        // (which needs full task content, not just counts) is open.
+        scheduleWorkspaceListRefresh();
+        if (launcherActiveTab === 'summary') {
+          scheduleLauncherOverviewRefresh();
+        }
       }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
@@ -4506,6 +4558,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     removeWorkspaceTag,
     renderLauncherCards,
     renderLauncherActiveView,
+    renderLauncherTaskBadge,
     renderLauncherTree,
     renderWorkspaceSummary,
     toggleLauncherTagFilter,

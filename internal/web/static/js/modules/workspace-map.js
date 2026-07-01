@@ -474,6 +474,9 @@
   window.OriWorkspaceMap = {
     mount: mount,
     unmount: unmount,
-    computeLayout: computeMapLayout
+    computeLayout: computeMapLayout,
+    computeStats: computeStats,
+    tileHTML: tileHTML,
+    overviewBodyHTML: overviewBodyHTML
   };
 })();
