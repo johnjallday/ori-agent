@@ -74,6 +74,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/css/", s.serveStaticFile)
 	mux.HandleFunc("/js/", s.serveStaticFile)
 	mux.HandleFunc("/icons/", s.serveStaticFile)
+	mux.HandleFunc("/fonts/", s.serveStaticFile)
 	mux.HandleFunc("/chat-area.html", s.serveStaticFile)
 	mux.HandleFunc("/agents/", s.serveAgentFiles)
 

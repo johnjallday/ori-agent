@@ -1,15 +1,31 @@
 /*
  * workspace-map.css — Workspace Map view ("tactical command-center")
  *
- * Everything is scoped under `.ws-map` (the map view root). The map is an
- * intentional DARK surface regardless of the app's `data-bs-theme`, so its
- * tokens are defined here rather than inherited. Rules must NOT leak into the
- * Cards/Tree views — keep every selector under `.ws-map`.
+ * Everything is scoped under `.ws-map`. The map is an intentional DARK surface
+ * regardless of the app's `data-bs-theme`, so its tokens are defined here.
+ * Rules must NOT leak into Cards/Tree. No ui-refresh.css edits, no `!important`.
  *
- * Rules: no edits to ui-refresh.css, no `!important`.
- *
- * Phase 0.0 = design tokens only. Panels/tiles/overview land in Phase 1–2.
+ * Phase 1 = command-bar + theatre chrome + empty Overview (the shell).
+ * Building tiles / districts / populated Overview land in Phase 2–3.
  */
+
+/* self-hosted fonts (latin subset) — names only used under .ws-map */
+@font-face {
+  font-family: 'Chakra Petch'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/fonts/chakra-petch-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Chakra Petch'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('/fonts/chakra-petch-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/fonts/jetbrains-mono-500.woff2') format('woff2');
+}
 
 .ws-map {
   /* surface */
@@ -26,20 +42,144 @@
   --ws-ink-faint: #4d655d;
 
   /* semantic accents */
-  --ws-faction: #46d39a;       /* active workspace / primary */
+  --ws-faction: #46d39a;
   --ws-faction-deep: #0f3b30;
-  --ws-keeper: #e8b54b;        /* entry agent (locked) */
+  --ws-keeper: #e8b54b;
   --ws-keeper-deep: #3a2c0c;
-  --ws-idle: #4ec5e6;          /* idle status */
-  --ws-working: #46d39a;       /* working status (agent in progress) */
+  --ws-idle: #4ec5e6;
+  --ws-working: #46d39a;
   --ws-alert: #e2654d;
 
   /* geometry */
-  --ws-clip: 14px;             /* panel corner notch */
+  --ws-clip: 14px;
   --ws-clip-sm: 8px;
   --ws-glow: 0 0 0 1px rgba(70, 211, 154, 0.12), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
 
-  /* type (families self-hosted in Phase 1; fall back to system for now) */
-  --ws-font-display: "Chakra Petch", system-ui, sans-serif;
-  --ws-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* type */
+  --ws-font-display: 'Chakra Petch', system-ui, sans-serif;
+  --ws-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  display: block;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  letter-spacing: 0.2px;
+  padding: 4px 2px 8px;
+}
+
+.ws-map[hidden] { display: none; }
+
+.ws-map .ws-mono { font-family: var(--ws-font-mono); }
+.ws-map .ws-tick {
+  font-family: var(--ws-font-mono);
+  font-size: 10.5px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--ws-ink-faint);
+}
+
+/* ---------- command bar ---------- */
+.ws-map-topbar {
+  display: flex; align-items: center; gap: 18px;
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  padding: 14px 18px; margin-bottom: 18px;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: var(--ws-glow);
+}
+.ws-map-crest {
+  width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: radial-gradient(circle at 50% 30%, rgba(70, 211, 154, 0.18), transparent 70%);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  color: var(--ws-faction);
+}
+.ws-map-title { flex: 1 1 auto; min-width: 0; }
+.ws-map-title .ws-kicker { display: flex; align-items: center; gap: 10px; }
+.ws-map-title .ws-kicker .ws-dot {
+  width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg);
+}
+.ws-map-title h2 {
+  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1.5px; text-transform: uppercase; color: #eafff5;
+}
+.ws-map-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
+
+.ws-map-readout { display: flex; gap: 10px; }
+.ws-map-stat {
+  min-width: 82px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.ws-map-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eafff5; line-height: 1; }
+.ws-map-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
+
+.ws-map-create {
+  align-self: stretch; display: flex; align-items: center; gap: 9px; padding: 0 18px;
+  border: 1px solid var(--ws-faction-deep);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.16), rgba(70, 211, 154, 0.04));
+  color: var(--ws-faction); cursor: pointer;
+  font-family: var(--ws-font-display); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  transition: 0.15s;
+}
+.ws-map-create:hover { background: var(--ws-faction); color: #04110c; }
+
+/* ---------- layout ---------- */
+.ws-map-layout { display: grid; grid-template-columns: 1fr 338px; gap: 18px; align-items: start; }
+
+/* theatre panel */
+.ws-map-theatre {
+  position: relative; border: 1px solid var(--ws-line); min-height: 520px; overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 30% 20%, rgba(70, 211, 154, 0.05), transparent 55%),
+    radial-gradient(90% 90% at 85% 90%, rgba(123, 108, 240, 0.05), transparent 55%),
+    linear-gradient(180deg, #0a1213, #070d0e);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: var(--ws-glow);
+}
+.ws-map-theatre::before {
+  content: ""; position: absolute; inset: 0; opacity: 0.55;
+  background-image:
+    linear-gradient(rgba(70, 211, 154, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.045) 1px, transparent 1px);
+  background-size: 38px 38px;
+  -webkit-mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
+  mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
+}
+.ws-map-theatre-tag { position: absolute; top: 14px; left: 16px; z-index: 6; display: flex; align-items: center; gap: 9px; }
+.ws-map-ix {
+  font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-faction);
+  border: 1px solid var(--ws-faction-deep); padding: 2px 6px;
+}
+.ws-map-theatre-tag h3 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #dff5ec; }
+.ws-map-compass {
+  position: absolute; top: 14px; right: 16px; z-index: 6; width: 40px; height: 40px; display: grid; place-items: center;
+  border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
+  font-family: var(--ws-font-mono); font-size: 9px; color: var(--ws-ink-faint);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.ws-map-compass b { color: var(--ws-faction); }
+/* placeholder area for building tiles (Phase 2) */
+.ws-map-canvas { position: absolute; inset: 0; z-index: 5; }
+.ws-map-canvas-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; color: var(--ws-ink-faint); text-transform: uppercase;
+}
+
+/* overview panel */
+.ws-map-overview {
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); position: relative; min-height: 520px;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  box-shadow: var(--ws-glow);
+}
+.ws-map-overview-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--ws-line);
+}
+.ws-map-overview-head h3 {
+  margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #dff5ec; display: inline;
+}
+.ws-map-overview-body { padding: 16px; }
+.ws-map-overview-empty {
+  padding: 40px 16px; text-align: center; font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1px; color: var(--ws-ink-faint);
+}
+.ws-map-overview-empty .ws-big { display: block; font-size: 22px; color: var(--ws-ink-dim); margin-bottom: 10px; }
+
+@media (max-width: 900px) {
+  .ws-map-layout { grid-template-columns: 1fr; }
+  .ws-map-overview { min-height: 0; }
 }

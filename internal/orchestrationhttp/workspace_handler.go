@@ -44,6 +44,36 @@ func (wh *WorkspaceHandler) SetDirectorySync(sync *workspace.DirectorySyncManage
 	wh.directorySync = sync
 }
 
+// addWorkspaceMapFields augments a workspace list summary with the fields the
+// Workspace Map view needs but GetSummary() omits (entry agent, group kind /
+// parent, tool/skill counts, ops mode, open-task count, and a working flag).
+// All keys are additive; Cards/Tree simply ignore them.
+func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
+	if ws == nil || summary == nil {
+		return
+	}
+	summary["entry_agent_name"] = ws.EntryAgentName()
+	summary["kind"] = ws.Kind
+	summary["parent_id"] = ws.ParentID
+	summary["mcp_count"] = len(ws.MCPBindings)
+	summary["skill_count"] = len(ws.SkillBindings)
+	summary["ops_mode"] = workspacesettings.Extract(ws.SharedData).Workflow.Mode
+
+	openTaskCount := 0
+	active := false
+	for _, t := range ws.Tasks {
+		switch t.Status {
+		case workspace.TaskStatusPending:
+			openTaskCount++
+		case workspace.TaskStatusInProgress:
+			openTaskCount++
+			active = true
+		}
+	}
+	summary["open_task_count"] = openTaskCount
+	summary["active"] = active
+}
+
 // WorkspaceHandler handles workspace CRUD operations
 // GET: List all workspaces or get workspace by ID
 // POST: Create new workspace
@@ -173,6 +203,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			continue // Skip workspaces that fail to load
 		}
 		summary := ws.GetSummary()
+		addWorkspaceMapFields(ws, summary)
 
 		// Add session and note counts if session store is available
 		if wh.sessionStore != nil {
