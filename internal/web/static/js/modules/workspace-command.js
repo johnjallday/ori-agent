@@ -144,11 +144,147 @@ export class WorkspaceCommandView {
       '</div>' +
       '</header>' +
       '<div class="ws-cmd-layout">' +
-      '<section class="ws-cmd-garrison"><div class="ws-cmd-soon">Garrison arrives in the next update</div></section>' +
+      '<section class="ws-cmd-garrison">' + this.renderGarrison() + '</section>' +
       '<aside class="ws-cmd-rail"><div class="ws-cmd-soon">Intel · orders · comms arrive soon</div></aside>' +
       '</div>';
 
     const back = this.container.querySelector('[data-ws-cmd-detailed]');
     if (back) back.addEventListener('click', () => this.deactivate());
+    this.bindGarrison();
+  }
+
+  // ---------- garrison (agents as unit cards) ----------
+
+  statusTone(statusKey, statusLabel) {
+    const s = (String(statusKey || '') + ' ' + String(statusLabel || '')).toLowerCase();
+    if (/work|run|busy|active|progress/.test(s)) return 'working';
+    if (/error|fail|blocked/.test(s)) return 'alert';
+    return 'idle';
+  }
+
+  taskTone(status) {
+    switch (String(status || '').toLowerCase()) {
+      case 'in_progress': return 'working';
+      case 'failed': case 'cancelled': return 'alert';
+      case 'completed': case 'done': return 'done';
+      default: return 'pending';
+    }
+  }
+
+  unitCardHTML(group) {
+    const page = this.page;
+    const name = String(group.name || 'Agent');
+    const encoded = encodeURIComponent(name);
+    const keeper = !group.isUnassigned && page.isWorkspaceEntryAgent
+      ? page.isWorkspaceEntryAgent(name) : false;
+
+    const avatar = page.getAgentAvatarPresentation
+      ? page.getAgentAvatarPresentation(name)
+      : { initials: name.slice(0, 2).toUpperCase(), style: '' };
+    const status = !group.isUnassigned && page.getAgentRosterStatus
+      ? page.getAgentRosterStatus(name)
+      : { key: 'idle', label: 'Unassigned' };
+    const tone = this.statusTone(status.key, status.label);
+
+    let modelLabel = '';
+    if (!group.isUnassigned && page.getAgentProfile && page.getAgentModelPresentation) {
+      const m = page.getAgentModelPresentation(page.getAgentProfile(name));
+      modelLabel = m && !m.empty ? m.model : '';
+    }
+    let skillCount = 0;
+    if (!group.isUnassigned && page.getAgentSkillSummary) {
+      const sk = page.getAgentSkillSummary(name);
+      skillCount = (sk && sk.count) || 0;
+    }
+
+    const roleBadge = group.isUnassigned
+      ? '<span class="ws-cmd-badge">Unassigned</span>'
+      : (keeper
+          ? '<span class="ws-cmd-badge is-keeper">★ Keeper</span>'
+          : '<span class="ws-cmd-badge">Field Unit</span>');
+
+    const ctl = group.isUnassigned
+      ? ''
+      : (keeper
+          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>'
+          : '') +
+        '<button type="button" class="ws-cmd-icon-btn" data-cmd-add-task="' + escapeHtml(encoded) +
+        '" title="Add a task for ' + escapeHtml(name) + '" aria-label="Add a task for ' + escapeHtml(name) + '">＋</button>';
+
+    const rows = group.isUnassigned ? '' :
+      '<div class="ws-cmd-unit-rows">' +
+      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Class</span><span class="ws-cmd-rv">' +
+      escapeHtml(modelLabel || '—') + '</span></div>' +
+      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Skills</span><span class="ws-cmd-rv">' +
+      skillCount + '</span></div>' +
+      '</div>';
+
+    return (
+      '<article class="ws-cmd-unit' + (keeper ? ' is-keeper' : '') + '">' +
+      '<div class="ws-cmd-unit-top">' +
+      '<span class="ws-cmd-av" style="' + escapeHtml(avatar.style || '') + '">' + escapeHtml(avatar.initials) + '</span>' +
+      '<div class="ws-cmd-unit-id"><div class="ws-cmd-unit-name">' + escapeHtml(name) + '</div>' +
+      '<div class="ws-cmd-unit-role">' + roleBadge +
+      '<span class="ws-cmd-state"><span class="ws-cmd-led ' + tone + '"></span>' + escapeHtml(status.label || 'Idle') + '</span>' +
+      '</div></div>' +
+      '<div class="ws-cmd-unit-ctl">' + ctl + '</div>' +
+      '</div>' +
+      rows +
+      this.questLogHTML(group, encoded) +
+      '</article>'
+    );
+  }
+
+  questLogHTML(group, encoded) {
+    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const add = group.isUnassigned ? '' :
+      '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' + escapeHtml(encoded) +
+      '" aria-label="Add task">＋</button>';
+    const head = '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Quest Log · ' + tasks.length + '</span>' + add + '</div>';
+    if (!tasks.length) {
+      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">— no orders issued —</div></div>';
+    }
+    const items = tasks.map((t) => {
+      const label = String(t.description || t.name || t.title || 'Task');
+      const tone = this.taskTone(t.status);
+      const statusText = String(t.status || 'pending').replace('_', ' ');
+      return (
+        '<div class="ws-cmd-quest">' +
+        '<span class="ws-cmd-q-glyph">✦</span>' +
+        '<span class="ws-cmd-q-name">' + escapeHtml(label) + '</span>' +
+        '<span class="ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
+        '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' + escapeHtml(String(t.id || '')) +
+        '" title="Deploy" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
+        '</div>'
+      );
+    }).join('');
+    return '<div class="ws-cmd-questlog">' + head + items + '</div>';
+  }
+
+  renderGarrison() {
+    const page = this.page;
+    let groups = [];
+    try { groups = page.buildAgentGroups() || []; } catch (err) { groups = []; }
+    const units = groups.filter((g) => g && (g.isWorkspaceAgent || (g.isUnassigned && (g.tasks || []).length)));
+    if (!units.length) {
+      return '<div class="ws-cmd-soon">No agents garrisoned yet.</div>';
+    }
+    return '<div class="ws-cmd-garrison-grid">' + units.map((g) => this.unitCardHTML(g)).join('') + '</div>';
+  }
+
+  bindGarrison() {
+    const root = this.container && this.container.querySelector('.ws-cmd-garrison');
+    if (!root) return;
+    root.addEventListener('click', (event) => {
+      const addBtn = event.target.closest('[data-cmd-add-task]');
+      if (addBtn && window.workspaceDetail && window.workspaceDetail.showAddTaskModalForAgent) {
+        window.workspaceDetail.showAddTaskModalForAgent(addBtn.getAttribute('data-cmd-add-task'));
+        return;
+      }
+      const runBtn = event.target.closest('[data-cmd-run-task]');
+      if (runBtn && window.workspaceDetail && window.workspaceDetail.executeTask) {
+        window.workspaceDetail.executeTask(runBtn.getAttribute('data-cmd-run-task'));
+      }
+    });
   }
 }
