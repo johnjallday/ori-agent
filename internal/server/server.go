@@ -282,7 +282,7 @@ func (s *Server) isCodexAgentName(name string) bool {
 
 // serveClaudeAgentDetail serves the dedicated, read-only Claude Code agent page
 // that mirrors the user's ~/.claude state.
-func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, _ *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Claude Code - Ori Agent"
 	data.BrandText = "Ori Agent"
@@ -292,7 +292,7 @@ func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, r *http.Request) 
 
 // serveCodexAgentDetail serves the dedicated, read-only Codex agent page that
 // mirrors the user's ~/.codex state.
-func (s *Server) serveCodexAgentDetail(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveCodexAgentDetail(w http.ResponseWriter, _ *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Codex - Ori Agent"
 	data.BrandText = "Ori Agent"

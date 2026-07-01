@@ -400,15 +400,6 @@ func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 	}
 }
 
-// findSessionForPath finds the session ID for a given file path
-func (w *Watcher) findSessionForPath(filePath string) string {
-	watchIDs := w.watchIDsForPath(filePath)
-	if len(watchIDs) == 0 {
-		return ""
-	}
-	return watchIDs[0]
-}
-
 func (w *Watcher) watchIDsForPath(filePath string) []string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()

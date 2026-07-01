@@ -120,7 +120,7 @@ func (s *AgentSnapshotStore) ListActiveForScheduling() ([]*Workspace, error) {
 	if sl, ok := s.Store.(schedulingLister); ok {
 		return sl.ListActiveForScheduling()
 	}
-	return s.Store.ListActive()
+	return s.ListActive()
 }
 
 // eachWorkspaceMeta invokes fn for every workspace. When the store exposes a cheap

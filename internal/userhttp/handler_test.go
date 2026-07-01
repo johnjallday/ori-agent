@@ -12,7 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
-func newTestHandler(t *testing.T) (*Handler, userprofile.UserStore) {
+func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
 	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
 	if err != nil {
@@ -20,11 +20,11 @@ func newTestHandler(t *testing.T) (*Handler, userprofile.UserStore) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	store := userprofile.NewSQLiteStore(db)
-	return NewHandler(store, userprofile.LocalUserProvider{}), store
+	return NewHandler(store, userprofile.LocalUserProvider{})
 }
 
 func TestProfileGetPutRoundTrip(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler := newTestHandler(t)
 
 	body := bytes.NewBufferString(`{
 		"display_name":"Jules",
@@ -65,7 +65,7 @@ func TestProfileGetPutRoundTrip(t *testing.T) {
 }
 
 func TestProfilePutRejectsUnknownPreference(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler := newTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/user/profile", bytes.NewBufferString(`{"preferences":{"tone":"warm"}}`))
 	req.Header.Set("Content-Type", "application/json")
