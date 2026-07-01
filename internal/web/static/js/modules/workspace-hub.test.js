@@ -310,6 +310,15 @@ test('launcher view preference defaults to cards and persists valid values', () 
   assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'tree');
 });
 
+test('launcher view registers the map view and persists it', () => {
+  const { helpers, storage } = loadWorkspaceHub();
+
+  assert.equal(helpers.normalizeLauncherView('map'), 'map');
+  assert.equal(helpers.normalizeLauncherView('MAP'), 'map');
+  assert.equal(helpers.setLauncherViewPreference('map'), 'map');
+  assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'map');
+});
+
 test('launcher tree renders minimal hierarchy with always-available workspace checkboxes', () => {
   const workspaces = [
     {
