@@ -97,11 +97,45 @@
 
 /* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
 .ws-cmd-layout { display: grid; grid-template-columns: 1fr 332px; gap: 18px; align-items: start; }
-.ws-cmd-garrison, .ws-cmd-rail {
+.ws-cmd-garrison {
   border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); min-height: 200px;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
   box-shadow: var(--ws-glow);
 }
+.ws-cmd-rail { display: flex; flex-direction: column; gap: 16px; }
+
+/* rail panels */
+.ws-cmd-panel {
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--ws-line); }
+.ws-cmd-panel-title { display: flex; align-items: center; gap: 9px; }
+.ws-cmd-panel-title h4 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #dff5ec; }
+.ws-cmd-panel-count { font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-ink-faint); }
+.ws-cmd-panel-more {
+  width: 26px; height: 24px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; transition: 0.15s;
+}
+.ws-cmd-panel-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
+.ws-cmd-panel-more:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-panel-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.ws-cmd-rail-empty { padding: 16px 6px; text-align: center; font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-rail-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
+  padding: 8px 9px; border: 1px solid transparent; background: none; color: var(--ws-ink); cursor: pointer; text-decoration: none; transition: 0.13s;
+}
+.ws-cmd-rail-item.is-static { cursor: default; }
+.ws-cmd-rail-item:hover:not(.is-static) { border-color: var(--ws-line-bright); background: var(--ws-bg-2); }
+.ws-cmd-rail-item:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
+.ws-cmd-rail-t { font-size: 13px; color: #eafff5; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-rail-m { font-family: var(--ws-font-mono); font-size: 9.5px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-rail-more {
+  margin-top: 4px; padding: 7px; border: 1px dashed var(--ws-line-bright); background: none; color: var(--ws-ink-dim); cursor: pointer;
+  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-rail-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
 .ws-cmd-soon {
   display: grid; place-items: center; min-height: 200px; padding: 24px;
   font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); text-align: center;

@@ -145,12 +145,13 @@ export class WorkspaceCommandView {
       '</header>' +
       '<div class="ws-cmd-layout">' +
       '<section class="ws-cmd-garrison">' + this.renderGarrison() + '</section>' +
-      '<aside class="ws-cmd-rail"><div class="ws-cmd-soon">Intel · orders · comms arrive soon</div></aside>' +
+      '<aside class="ws-cmd-rail">' + this.renderRail() + '</aside>' +
       '</div>';
 
     const back = this.container.querySelector('[data-ws-cmd-detailed]');
     if (back) back.addEventListener('click', () => this.deactivate());
     this.bindGarrison();
+    this.bindRail();
   }
 
   // ---------- garrison (agents as unit cards) ----------
@@ -284,6 +285,96 @@ export class WorkspaceCommandView {
       const runBtn = event.target.closest('[data-cmd-run-task]');
       if (runBtn && window.workspaceDetail && window.workspaceDetail.executeTask) {
         window.workspaceDetail.executeTask(runBtn.getAttribute('data-cmd-run-task'));
+      }
+    });
+  }
+
+  // ---------- right rail ----------
+
+  railPanelHTML(ix, title, items, count, emptyText) {
+    const body = items.length
+      ? items.join('')
+      : '<div class="ws-cmd-rail-empty">' + escapeHtml(emptyText) + '</div>';
+    return (
+      '<section class="ws-cmd-panel">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><span class="ws-cmd-ix">' + escapeHtml(ix) + '</span>' +
+      '<h4>' + escapeHtml(title) + '</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<button type="button" class="ws-cmd-panel-more" data-ws-cmd-detailed title="Manage in detailed view" aria-label="Manage ' +
+      escapeHtml(title) + ' in the detailed view">▸</button>' +
+      '</div>' +
+      '<div class="ws-cmd-panel-body">' + body + '</div>' +
+      '</section>'
+    );
+  }
+
+  railItems(list, labelOf, opts) {
+    const arr = Array.isArray(list) ? list : [];
+    const shown = arr.slice(0, 5);
+    const attr = opts || {};
+    const items = shown.map((it) => {
+      const label = escapeHtml(labelOf(it));
+      const meta = attr.metaOf ? escapeHtml(attr.metaOf(it)) : '';
+      const inner = '<span class="ws-cmd-rail-t">' + label + '</span>' +
+        (meta ? '<span class="ws-cmd-rail-m">' + meta + '</span>' : '');
+      if (attr.href) {
+        return '<a class="ws-cmd-rail-item" href="' + escapeHtml(attr.href(it)) + '">' + inner + '</a>';
+      }
+      if (attr.action) {
+        return '<button type="button" class="ws-cmd-rail-item" ' + attr.action(it) + '>' + inner + '</button>';
+      }
+      return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
+    });
+    if (arr.length > shown.length) {
+      items.push('<button type="button" class="ws-cmd-rail-more" data-ws-cmd-detailed>+ ' +
+        (arr.length - shown.length) + ' more · detailed view</button>');
+    }
+    return items;
+  }
+
+  renderRail() {
+    const page = this.page || {};
+    const notes = Array.isArray(page.notes) ? page.notes : [];
+    const schedules = Array.isArray(page.schedules) ? page.schedules : [];
+    const sessions = Array.isArray(page.sessions) ? page.sessions : [];
+    const dirs = Array.isArray(page.directories) ? page.directories : [];
+
+    const intel = this.railItems(notes, (n) => n.name || n.title || 'Untitled Note', {
+      href: (n) => '/notes/' + encodeURIComponent(n.id || '')
+    });
+    const orders = this.railItems(schedules, (s) => s.name || s.task_description || 'Unnamed Schedule', {
+      action: (s) => 'data-cmd-schedule="' + escapeHtml(String(s.id || '')) + '"'
+    });
+    const comms = this.railItems(sessions, (s) => s.title || s.name || 'Untitled Session', {
+      action: (s) => 'data-cmd-session="' + escapeHtml(String(s.id || '')) + '"',
+      metaOf: (s) => s.agent_name || ''
+    });
+    const supply = this.railItems(dirs, (d) => d.title || d.name || d.path || 'Unnamed Directory', {
+      metaOf: (d) => d.path || ''
+    });
+
+    return (
+      this.railPanelHTML('INT', 'Intel', intel, notes.length, 'No intel logged yet.') +
+      this.railPanelHTML('ORD', 'Standing Orders', orders, schedules.length, 'No scheduled orders.') +
+      this.railPanelHTML('COM', 'Comms', comms, sessions.length, 'No active sessions.') +
+      this.railPanelHTML('SUP', 'Supply Lines', supply, dirs.length, 'No linked folders.')
+    );
+  }
+
+  bindRail() {
+    const root = this.container && this.container.querySelector('.ws-cmd-rail');
+    if (!root) return;
+    root.addEventListener('click', (event) => {
+      const detailedBtn = event.target.closest('[data-ws-cmd-detailed]');
+      if (detailedBtn) { this.deactivate(); return; }
+      const sess = event.target.closest('[data-cmd-session]');
+      if (sess && window.workspaceDetail && window.workspaceDetail.openSession) {
+        window.workspaceDetail.openSession(sess.getAttribute('data-cmd-session'));
+        return;
+      }
+      const sched = event.target.closest('[data-cmd-schedule]');
+      if (sched && window.workspaceDetail && window.workspaceDetail.openSchedule) {
+        window.workspaceDetail.openSchedule(sched.getAttribute('data-cmd-schedule'));
       }
     });
   }
