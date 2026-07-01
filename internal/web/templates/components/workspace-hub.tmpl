@@ -64,6 +64,12 @@
                 <path d="M3,5H9V7H5V17H9V19H3V5M11,5H21V9H11V5M11,10H21V14H11V10M11,15H21V19H11V15Z"/>
               </svg>
             </button>
+            <!-- Map view — inert scaffolding (Phase 0.0); revealed in Phase 1. -->
+            <button id="launcherViewMap" class="modern-btn modern-btn-secondary hub-view-btn" type="button" role="tab" aria-selected="false" aria-controls="launcherMap" aria-label="Map view" title="Map View" data-launcher-view="map" hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M15,19L9,16.89V5L15,7.11M20.5,3C20.44,3 20.39,3 20.34,3L15,5.1L9,3L3.36,4.9C3.15,4.97 3,5.15 3,5.38V20.5A0.5,0.5 0 0,0 3.5,21C3.55,21 3.61,21 3.66,20.97L9,18.9L15,21L20.64,19.1C20.85,19 21,18.85 21,18.62V3.5A0.5,0.5 0 0,0 20.5,3Z"/>
+              </svg>
+            </button>
           </div>
           <button id="launcherRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-icon" type="button" title="Refresh" aria-label="Refresh workspaces">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -137,6 +143,8 @@
         </div>
         <div id="launcherGrid" class="launcher-grid"></div>
         <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
+        <!-- Map view mount point — inert scaffolding (Phase 0.0); populated by workspace-map.js in Phase 1. -->
+        <div id="launcherMap" class="ws-map" hidden></div>
       </section>
 
       <section id="launcherSummaryPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabSummary" hidden>

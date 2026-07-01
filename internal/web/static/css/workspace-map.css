@@ -1,0 +1,45 @@
+/*
+ * workspace-map.css — Workspace Map view ("tactical command-center")
+ *
+ * Everything is scoped under `.ws-map` (the map view root). The map is an
+ * intentional DARK surface regardless of the app's `data-bs-theme`, so its
+ * tokens are defined here rather than inherited. Rules must NOT leak into the
+ * Cards/Tree views — keep every selector under `.ws-map`.
+ *
+ * Rules: no edits to ui-refresh.css, no `!important`.
+ *
+ * Phase 0.0 = design tokens only. Panels/tiles/overview land in Phase 1–2.
+ */
+
+.ws-map {
+  /* surface */
+  --ws-bg: #070b0c;
+  --ws-bg-2: #0b1113;
+  --ws-panel: #0e1618;
+  --ws-panel-2: #101e1f;
+  --ws-line: #1c2e2c;
+  --ws-line-bright: #28413c;
+
+  /* ink */
+  --ws-ink: #cfe8df;
+  --ws-ink-dim: #7f998f;
+  --ws-ink-faint: #4d655d;
+
+  /* semantic accents */
+  --ws-faction: #46d39a;       /* active workspace / primary */
+  --ws-faction-deep: #0f3b30;
+  --ws-keeper: #e8b54b;        /* entry agent (locked) */
+  --ws-keeper-deep: #3a2c0c;
+  --ws-idle: #4ec5e6;          /* idle status */
+  --ws-working: #46d39a;       /* working status (agent in progress) */
+  --ws-alert: #e2654d;
+
+  /* geometry */
+  --ws-clip: 14px;             /* panel corner notch */
+  --ws-clip-sm: 8px;
+  --ws-glow: 0 0 0 1px rgba(70, 211, 154, 0.12), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+
+  /* type (families self-hosted in Phase 1; fall back to system for now) */
+  --ws-font-display: "Chakra Petch", system-ui, sans-serif;
+  --ws-font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
