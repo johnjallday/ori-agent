@@ -11,6 +11,8 @@
 
     <div class="main-content">
       <div class="container-fluid py-4">
+        <!-- Command view mount point — inert scaffolding (Phase 0.0); populated by workspace-command.js in Phase 1. -->
+        <div id="workspaceCommandView" class="ws-cmd" hidden></div>
         <!-- Workspace Detail View -->
         <div id="workspace-detail-view">
           <!-- Header Card -->
@@ -35,6 +37,13 @@
               </div>
 
               <div class="d-flex align-items-center gap-2">
+                <!-- Command view toggle — inert scaffolding (Phase 0.0); revealed in Phase 1. -->
+                <button id="workspace-command-toggle" type="button" class="modern-btn modern-btn-secondary" aria-pressed="false" title="Switch to Command view" hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M4,5H10V11H4V5M14,5H20V11H14V5M4,13H10V19H4V13M14,13H20V19H14V13Z"/>
+                  </svg>
+                  Command
+                </button>
                 <a id="open-workflows-btn" href="/workflows" class="modern-btn modern-btn-secondary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M7,5A2,2 0 0,0 5,7V10A2,2 0 0,0 7,12H10A2,2 0 0,0 12,10V7A2,2 0 0,0 10,5H7M14,5A2,2 0 0,0 12,7V10A2,2 0 0,0 14,12H17A2,2 0 0,0 19,10V7A2,2 0 0,0 17,5H14M7,12A2,2 0 0,0 5,14V17A2,2 0 0,0 7,19H10A2,2 0 0,0 12,17V14A2,2 0 0,0 10,12H7M13,13H19V15H13V13M13,17H19V19H13V17Z"/>
@@ -9246,6 +9255,7 @@
   <!-- Workspace Detail Page -->
   <script type="module">
     import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
+    import { WorkspaceCommandView } from '/js/modules/workspace-command.js';
 
     function initializeWorkspaceDetailPage() {
       themeManager.initialize();
@@ -9261,6 +9271,9 @@
         const detailPage = new WorkspaceDetailPage(workspaceId);
         window.workspaceDetail = detailPage;
         detailPage.init();
+
+        // Opt-in Command view (inert until Phase 1).
+        window.workspaceCommand = new WorkspaceCommandView(detailPage);
       } else {
         console.error('No workspace ID found in URL');
         window.location.href = '/';

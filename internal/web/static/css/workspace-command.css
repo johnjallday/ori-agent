@@ -1,0 +1,52 @@
+/*
+ * workspace-command.css — Workspace Command view (interior "tactical" reskin)
+ *
+ * Opt-in tactical layout on the workspace detail page, scoped under `.ws-cmd`.
+ * A dark surface regardless of the app's `data-bs-theme`. Mirrors the Map's
+ * `.ws-map` visual system; the self-hosted @font-face declarations are already
+ * provided globally by workspace-map.css, so this file only references them.
+ *
+ * Rules must NOT leak outside `.ws-cmd`. No ui-refresh.css edits, no `!important`.
+ *
+ * Phase 0.0 = design tokens only. Command bar / garrison / rail land in Phase 1-3.
+ */
+
+.ws-cmd {
+  /* surface */
+  --ws-bg: #070b0c;
+  --ws-bg-2: #0b1113;
+  --ws-panel: #0e1618;
+  --ws-panel-2: #101e1f;
+  --ws-line: #1c2e2c;
+  --ws-line-bright: #28413c;
+
+  /* ink */
+  --ws-ink: #cfe8df;
+  --ws-ink-dim: #7f998f;
+  --ws-ink-faint: #4d655d;
+
+  /* semantic accents */
+  --ws-faction: #46d39a;
+  --ws-faction-deep: #0f3b30;
+  --ws-keeper: #e8b54b;
+  --ws-keeper-deep: #3a2c0c;
+  --ws-idle: #4ec5e6;
+  --ws-working: #46d39a;
+  --ws-alert: #e2654d;
+
+  /* geometry */
+  --ws-clip: 14px;
+  --ws-clip-sm: 8px;
+  --ws-glow: 0 0 0 1px rgba(70, 211, 154, 0.12), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+
+  /* type (families vendored globally by workspace-map.css) */
+  --ws-font-display: 'Chakra Petch', system-ui, sans-serif;
+  --ws-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  display: block;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  letter-spacing: 0.2px;
+}
+
+.ws-cmd[hidden] { display: none; }

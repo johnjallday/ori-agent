@@ -162,6 +162,7 @@ export default defineConfig([
       'internal/web/static/js/modules/tag-filter-bar.js',
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
+      'internal/web/static/js/modules/workspace-command.js',
     ],
     languageOptions: {
       sourceType: 'module'
