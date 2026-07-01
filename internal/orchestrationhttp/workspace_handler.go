@@ -52,26 +52,15 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	if ws == nil || summary == nil {
 		return
 	}
-	summary["entry_agent_name"] = ws.EntryAgentName()
+	fields := workspace.ComputeMapSummaryFields(ws)
+	summary["entry_agent_name"] = fields.EntryAgentName
 	summary["kind"] = ws.Kind
 	summary["parent_id"] = ws.ParentID
-	summary["mcp_count"] = len(ws.MCPBindings)
-	summary["skill_count"] = len(ws.SkillBindings)
-	summary["ops_mode"] = workspacesettings.Extract(ws.SharedData).Workflow.Mode
-
-	openTaskCount := 0
-	active := false
-	for _, t := range ws.Tasks {
-		switch t.Status {
-		case workspace.TaskStatusPending:
-			openTaskCount++
-		case workspace.TaskStatusInProgress:
-			openTaskCount++
-			active = true
-		}
-	}
-	summary["open_task_count"] = openTaskCount
-	summary["active"] = active
+	summary["mcp_count"] = fields.MCPCount
+	summary["skill_count"] = fields.SkillCount
+	summary["ops_mode"] = fields.OpsMode
+	summary["open_task_count"] = fields.OpenTaskCount
+	summary["active"] = fields.Active
 }
 
 // WorkspaceHandler handles workspace CRUD operations

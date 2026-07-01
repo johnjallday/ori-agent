@@ -287,6 +287,19 @@ type Workspace struct {
 	// This is denormalized for efficient display.
 	SessionCount int `json:"session_count"`
 
+	// Map-view summary fields: computed at read time from the folder-store
+	// workspace by hydrateWorkspaceMetadataInto (sessionhttp), mirroring
+	// workspace.ComputeMapSummaryFields. No SQLite column backs these; they
+	// are display-only, same precedent as SessionCount above.
+	EntryAgentName string   `json:"entry_agent_name,omitempty"`
+	Agents         []string `json:"agents,omitempty"`
+	AgentCount     int      `json:"agent_count"`
+	OpenTaskCount  int      `json:"open_task_count"`
+	MCPCount       int      `json:"mcp_count"`
+	SkillCount     int      `json:"skill_count"`
+	OpsMode        string   `json:"ops_mode,omitempty"`
+	Active         bool     `json:"active"`
+
 	// CreatedAt is when the workspace was created.
 	CreatedAt time.Time `json:"created_at"`
 

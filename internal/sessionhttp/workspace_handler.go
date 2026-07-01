@@ -983,6 +983,20 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	mergeWorkspaceJSONField(&workspace.AgentMCPAccessJSON, fallback.AgentMCPAccessJSON)
 	mergeWorkspaceJSONField(&workspace.SkillBindingsJSON, fallback.SkillBindingsJSON)
 	mergeWorkspaceJSONField(&workspace.AgentSkillAccessJSON, fallback.AgentSkillAccessJSON)
+
+	// Map-view summary fields (agent roster, task/tool/skill counts, ops mode,
+	// active flag) are always recomputed from the disk workspace rather than
+	// filled-if-empty like the fields above — they're display-only derived
+	// state, not data that could already be populated from another source.
+	mapFields := agentworkspace.ComputeMapSummaryFields(diskWorkspace)
+	workspace.EntryAgentName = mapFields.EntryAgentName
+	workspace.Agents = mapFields.AgentNames
+	workspace.AgentCount = mapFields.AgentCount
+	workspace.OpenTaskCount = mapFields.OpenTaskCount
+	workspace.MCPCount = mapFields.MCPCount
+	workspace.SkillCount = mapFields.SkillCount
+	workspace.OpsMode = mapFields.OpsMode
+	workspace.Active = mapFields.Active
 }
 
 func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) {

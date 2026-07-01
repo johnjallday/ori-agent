@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 // GetSummary returns a summary of the workspace
@@ -23,6 +25,55 @@ func (w *Workspace) GetSummary() map[string]any {
 		"created_at":    w.CreatedAt,
 		"updated_at":    w.UpdatedAt,
 	}
+}
+
+// MapSummaryFields holds the additional display fields the Workspace Map view
+// needs but GetSummary() omits: entry agent, roster, tool/skill counts, ops
+// mode, and open-task/active state. Shared by orchestrationhttp (GetSummary
+// callers) and sessionhttp (session.Workspace list/tree callers) so both
+// surfaces derive the same values from one place.
+type MapSummaryFields struct {
+	EntryAgentName string
+	AgentNames     []string
+	AgentCount     int
+	OpenTaskCount  int
+	MCPCount       int
+	SkillCount     int
+	OpsMode        string
+	Active         bool
+}
+
+// ComputeMapSummaryFields derives entry agent, roster, tool/skill counts, ops
+// mode, and open-task/active state from a workspace in a single locked pass.
+func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
+	if w == nil {
+		return MapSummaryFields{}
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	agentNames := w.agentNamesLocked()
+	fields := MapSummaryFields{
+		EntryAgentName: w.entryAgentNameLocked(),
+		AgentNames:     agentNames,
+		AgentCount:     len(agentNames),
+		MCPCount:       len(w.MCPBindings),
+		SkillCount:     len(w.SkillBindings),
+		OpsMode:        workspacesettings.Extract(w.SharedData).Workflow.Mode,
+	}
+
+	for _, t := range w.Tasks {
+		switch t.Status {
+		case TaskStatusPending:
+			fields.OpenTaskCount++
+		case TaskStatusInProgress:
+			fields.OpenTaskCount++
+			fields.Active = true
+		}
+	}
+
+	return fields
 }
 
 // GetAgentStats returns statistics for all agents in the workspace
