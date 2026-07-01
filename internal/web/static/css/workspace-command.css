@@ -50,3 +50,63 @@
 }
 
 .ws-cmd[hidden] { display: none; }
+
+.ws-cmd .ws-tick {
+  font-family: var(--ws-font-mono); font-size: 10.5px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--ws-ink-faint);
+}
+
+/* ---------- command bar ---------- */
+.ws-cmd-topbar {
+  display: flex; align-items: center; gap: 16px;
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  padding: 14px 18px; margin-bottom: 18px;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-back {
+  align-self: stretch; display: flex; align-items: center; padding: 0 14px; border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer;
+  font-family: var(--ws-font-mono); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; transition: 0.15s;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.ws-cmd-back:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
+.ws-cmd-back:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-crest {
+  width: 50px; height: 50px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 1px solid var(--ws-line-bright); color: var(--ws-faction);
+  background: radial-gradient(circle at 50% 30%, rgba(70, 211, 154, 0.18), transparent 70%);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.ws-cmd-title { flex: 1 1 auto; min-width: 0; }
+.ws-cmd-title .ws-kicker { display: flex; align-items: center; gap: 10px; }
+.ws-cmd-title .ws-dot { width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg); }
+.ws-cmd-title h2 {
+  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; color: #eafff5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-cmd-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
+
+.ws-cmd-readout { display: flex; gap: 10px; flex: 0 0 auto; }
+.ws-cmd-stat {
+  min-width: 84px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eafff5; line-height: 1; }
+.ws-cmd-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
+
+/* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
+.ws-cmd-layout { display: grid; grid-template-columns: 1fr 332px; gap: 18px; align-items: start; }
+.ws-cmd-garrison, .ws-cmd-rail {
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); min-height: 200px;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-soon {
+  display: grid; place-items: center; min-height: 200px; padding: 24px;
+  font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); text-align: center;
+}
+
+@media (max-width: 900px) {
+  .ws-cmd-layout { grid-template-columns: 1fr; }
+}
