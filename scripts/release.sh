@@ -6,9 +6,8 @@
 # Supports git worktrees - run from either dev or main worktree.
 #
 # Usage:
-#   ./scripts/release.sh [version]
-#   ./scripts/release.sh v1.3.0
-#   ./scripts/release.sh          # Prompts for version interactively
+#   ./scripts/release.sh              # Auto-computes next version (odometer: bumps last segment)
+#   ./scripts/release.sh v0.1.0       # Explicit version for an editorial bump
 #
 # Workflow:
 #   1. Validates current branch (dev or main)
@@ -49,6 +48,25 @@ print_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Latest clean release tag (vX.Y.Z), or empty if there are none yet.
+latest_release_tag() {
+  git tag --list --sort=-v:refname 2>/dev/null \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1
+}
+
+# Compute the next release version from the latest release tag.
+# Odometer model: bump only the last segment (v0.0.85 -> v0.0.86), never
+# rolling over. Major/minor are editorial and only move when a version is
+# passed explicitly. Prints nothing if there are no release tags yet.
+compute_next_version() {
+  local latest ver major minor patch
+  latest=$(latest_release_tag)
+  [ -z "$latest" ] && { echo ""; return; }
+  ver="${latest#v}"
+  IFS='.' read -r major minor patch <<< "$ver"
+  echo "v${major}.${minor}.$((patch + 1))"
+}
+
 # Help function
 show_help() {
   echo ""
@@ -60,8 +78,10 @@ show_help() {
   echo "  ./scripts/release.sh [version]"
   echo ""
   echo -e "${BLUE}ARGUMENTS:${NC}"
-  echo "  [version]       Version to release (e.g., v1.3.0 or 1.3.0)"
-  echo "                  If omitted, you will be prompted to enter it"
+  echo "  [version]       Version to release (e.g., v0.1.0 or 0.1.0)"
+  echo "                  If omitted, the next version is auto-computed from the"
+  echo "                  latest release tag (odometer: bumps the last segment)."
+  echo "                  Pass a version explicitly to make an editorial bump."
   echo "                  The 'v' prefix is added automatically if missing"
   echo ""
   echo -e "${BLUE}OPTIONS:${NC}"
@@ -70,10 +90,10 @@ show_help() {
   echo "  --skip-checks   Skip pre-release checks (use with caution)"
   echo ""
   echo -e "${BLUE}EXAMPLES:${NC}"
-  echo "  ./scripts/release.sh           # Interactive mode"
-  echo "  ./scripts/release.sh v1.3.0    # Release v1.3.0"
-  echo "  ./scripts/release.sh 1.3.0     # Same as above (v prefix added)"
-  echo "  ./scripts/release.sh --dry-run v1.3.0  # Validate without releasing"
+  echo "  ./scripts/release.sh                   # Auto-compute next version and release"
+  echo "  ./scripts/release.sh v0.1.0            # Editorial bump to v0.1.0"
+  echo "  ./scripts/release.sh 0.1.0             # Same as above (v prefix added)"
+  echo "  ./scripts/release.sh --dry-run         # Auto-compute + validate, no release"
   echo ""
   echo -e "${BLUE}WORKFLOW:${NC}"
   echo "  1. Validates branch (must be on 'dev' or 'main')"
@@ -133,17 +153,33 @@ if [ -f "$VERSION_FILE" ]; then
   CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
 fi
 
-# If no version argument provided, prompt the user
+# If no version argument was provided, auto-compute the next version from the
+# latest release tag (odometer: bump the last segment). This makes the version
+# a byproduct of shipping rather than a per-release decision. To make an
+# editorial bump, pass a version explicitly (e.g. v0.1.0 or v1.0.0).
 if [ -z "$VERSION" ]; then
-  if [ -n "$CURRENT_VERSION" ]; then
-    print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
-  fi
-  echo -n "Enter version to release (e.g., v1.3.0): "
-  read -r VERSION
+  print_status "Fetching latest tags to compute next version..."
+  git fetch --tags origin >/dev/null 2>&1 || true
 
-  if [ -z "$VERSION" ]; then
-    print_error "No version provided. Aborting."
-    exit 1
+  SUGGESTED_VERSION=$(compute_next_version)
+
+  if [ -n "$SUGGESTED_VERSION" ]; then
+    VERSION="$SUGGESTED_VERSION"
+    print_status "Latest release tag:  ${YELLOW}$(latest_release_tag)${NC}"
+    print_success "Next version (auto): ${GREEN}${VERSION}${NC}"
+    print_status "Editorial bump? Re-run with a version, e.g. ${BLUE}./scripts/release.sh v0.1.0${NC}"
+  else
+    # No release tags yet — fall back to an interactive prompt.
+    if [ -n "$CURRENT_VERSION" ]; then
+      print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
+    fi
+    echo -n "Enter version to release (e.g., v0.1.0): "
+    read -r VERSION
+
+    if [ -z "$VERSION" ]; then
+      print_error "No version provided. Aborting."
+      exit 1
+    fi
   fi
 fi
 
