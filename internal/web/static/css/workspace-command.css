@@ -90,8 +90,11 @@
 .ws-cmd-readout { display: flex; gap: 10px; flex: 0 0 auto; }
 .ws-cmd-stat {
   min-width: 84px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
+  color: inherit; font: inherit; cursor: pointer; transition: 0.15s;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
 }
+.ws-cmd-stat:hover { border-color: var(--ws-line-bright); background: rgba(70, 211, 154, 0.06); }
+.ws-cmd-stat:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eafff5; line-height: 1; }
 .ws-cmd-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
 
@@ -110,6 +113,7 @@
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
   box-shadow: var(--ws-glow);
 }
+.ws-cmd-panel.is-managing { border-color: var(--ws-line-bright); background: linear-gradient(180deg, #102022, #0b1213); }
 .ws-cmd-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--ws-line); }
 .ws-cmd-panel-title { display: flex; align-items: center; gap: 9px; }
 .ws-cmd-panel-title h4 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #dff5ec; }
@@ -121,6 +125,13 @@
 .ws-cmd-panel-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
 .ws-cmd-panel-more:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-panel-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.ws-cmd-panel-actions { padding: 2px 0 8px; border-bottom: 1px solid var(--ws-line); margin-bottom: 5px; }
+.ws-cmd-panel-action {
+  width: 100%; padding: 8px 9px; border: 1px solid var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction); cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-panel-action:hover { background: rgba(70, 211, 154, 0.14); border-color: var(--ws-faction); }
+.ws-cmd-panel-action:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-rail-empty { padding: 16px 6px; text-align: center; font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
 .ws-cmd-rail-item {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
@@ -202,6 +213,75 @@
 .ws-cmd-q-run:hover { background: var(--ws-faction); color: #04110c; }
 .ws-cmd-q-run:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 
+/* ---------- stat manager modal (agents / tasks / mcp / skills) ---------- */
+/* Lives inside the .ws-cmd container so it inherits the tactical tokens, but is
+   position:fixed so it overlays the viewport regardless of scroll position. */
+.ws-cmd-modal {
+  position: fixed; inset: 0; z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.ws-cmd-modal[hidden] { display: none; }
+.ws-cmd-modal-backdrop { position: absolute; inset: 0; background: rgba(3, 7, 8, 0.72); }
+.ws-cmd-modal-panel {
+  position: relative; z-index: 1; width: 100%; max-width: 560px; max-height: 82vh; display: flex; flex-direction: column;
+  border: 1px solid var(--ws-line-bright); background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: var(--ws-glow); outline: none;
+}
+.ws-cmd-modal-panel:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--ws-line); }
+.ws-cmd-modal-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #eafff5; }
+.ws-cmd-modal-count { font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); }
+.ws-cmd-modal-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.ws-cmd-modal-add {
+  padding: 7px 12px; border: 1px solid var(--ws-faction-deep); background: rgba(70, 211, 154, 0.09); color: var(--ws-faction);
+  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.ws-cmd-modal-add:hover { background: rgba(70, 211, 154, 0.16); border-color: var(--ws-faction); }
+.ws-cmd-modal-add:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-close {
+  width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;
+}
+.ws-cmd-modal-close:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); }
+.ws-cmd-modal-close:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-body { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.ws-cmd-modal-empty { padding: 28px 12px; text-align: center; font-family: var(--ws-font-mono); font-size: 11px; letter-spacing: 0.8px; color: var(--ws-ink-faint); }
+.ws-cmd-modal-foot { padding: 11px 14px; border-top: 1px solid var(--ws-line); display: flex; justify-content: flex-end; }
+.ws-cmd-modal-detailed {
+  border: none; background: none; color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono);
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-modal-detailed:hover { color: var(--ws-faction); }
+.ws-cmd-modal-detailed:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+
+/* rows */
+.ws-cmd-mrow { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.22); }
+.ws-cmd-mrow-av {
+  width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; font-family: var(--ws-font-mono);
+  font-weight: 700; font-size: 11px; color: #04110c; background: hsl(var(--agent-avatar-hue, 160) 52% 48%);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.ws-cmd-mrow-main { flex: 1 1 auto; min-width: 0; }
+.ws-cmd-mrow-name { display: flex; align-items: center; gap: 7px; font-size: 14px; color: #eafff5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-mrow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ws-cmd-mchip {
+  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase; padding: 2px 7px;
+  border: 1px solid var(--ws-line-bright); color: var(--ws-ink-dim);
+}
+.ws-cmd-mchip.is-on { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
+.ws-cmd-mchip.is-disabled { color: var(--ws-ink-faint); }
+.ws-cmd-mchip.is-keeper { color: var(--ws-keeper); border-color: rgba(232, 181, 75, 0.4); background: rgba(232, 181, 75, 0.08); }
+.ws-cmd-mrow-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.ws-cmd-mrow-btn {
+  padding: 5px 9px; min-width: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono);
+  font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-mrow-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.07); }
+.ws-cmd-mrow-btn.is-danger:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); background: rgba(226, 101, 77, 0.07); }
+.ws-cmd-mrow-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+
 @media (max-width: 1100px) { .ws-cmd-garrison-grid { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .ws-cmd-layout { grid-template-columns: 1fr; }
@@ -214,4 +294,5 @@
   .ws-cmd-topbar { animation: ws-cmd-rise 0.35s ease both; }
   .ws-cmd-garrison, .ws-cmd-rail { animation: ws-cmd-rise 0.4s ease both; animation-delay: 0.05s; }
   .ws-cmd-led.working { animation: ws-cmd-pulse 1.5s ease-in-out infinite; }
+  .ws-cmd-modal-panel { animation: ws-cmd-rise 0.22s ease both; }
 }

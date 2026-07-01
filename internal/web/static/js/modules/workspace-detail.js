@@ -2985,6 +2985,9 @@ export class WorkspaceDetailPage {
         this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tasks`);
       }
       this.refreshHomeAssistantQuickPrompts();
+      // Keep the opt-in Command view (and its open stat manager) in sync after
+      // task mutations, which reload tasks without a full workspace reload.
+      window.workspaceCommand?.refresh();
     }
   }
 
@@ -10789,6 +10792,10 @@ export class WorkspaceDetailPage {
     return this.skillsManager.openWorkspaceSkillModal(bindingId);
   }
 
+  deleteWorkspaceSkillBinding(bindingId) {
+    return this.skillsManager.deleteWorkspaceSkillBinding(bindingId);
+  }
+
   loadAvailableSkills(force = false) {
     return this.skillsManager.loadAvailableSkills(force);
   }
@@ -11957,6 +11964,68 @@ export class WorkspaceDetailPage {
     };
 
     setTimeout(poll, intervalMs);
+  }
+
+  focusSection(sectionKey) {
+    const key = String(sectionKey || '').toLowerCase();
+    const targets = {
+      agents: 'workspace-detail-agents-panel',
+      tasks: 'workspace-detail-agents-panel',
+      notes: 'workspace-detail-notes-panel',
+      sessions: 'workspace-detail-sessions-panel',
+      folders: 'workspace-detail-directories-panel',
+      schedules: 'workspace-detail-schedules-panel',
+      mcp: 'workspace-detail-config-content',
+      skills: 'workspace-detail-config-content'
+    };
+    const targetId = targets[key];
+    if (!targetId) return;
+
+    if (key === 'agents') {
+      this.setView('list');
+    } else if (key === 'tasks') {
+      this.setView('board');
+    } else if (key === 'mcp' || key === 'skills') {
+      this.setWorkspaceConfigExpanded(true);
+      const tabId =
+        key === 'mcp'
+          ? 'workspace-detail-config-mcp-tab'
+          : 'workspace-detail-config-skills-tab';
+      this.activateWorkspaceConfigTab(tabId);
+    }
+
+    const target = document.getElementById(targetId);
+    if (!target) return;
+
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    this.focusDeepLinkTarget(target);
+  }
+
+  activateWorkspaceConfigTab(tabId) {
+    const tabBtn = document.getElementById(tabId);
+    if (!tabBtn) return;
+
+    if (typeof tabBtn.click === 'function') {
+      tabBtn.click();
+      return;
+    }
+    if (window.bootstrap?.Tab?.getOrCreateInstance) {
+      window.bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+    }
+  }
+
+  focusDeepLinkTarget(target) {
+    if (!target || typeof target.focus !== 'function') return;
+    if (!target.hasAttribute('tabindex')) {
+      target.setAttribute('tabindex', '-1');
+    }
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      target.focus();
+    }
   }
 
   /**
