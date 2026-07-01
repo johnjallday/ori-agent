@@ -6,12 +6,26 @@
  * window.OriWorkspaceMap, which workspace-hub.js calls when the "map" view is
  * active.
  *
- * Phase 1 = the shell: command bar with live counts, theatre chrome, and an
- * empty Overview. Building tiles, districts, and a populated Overview land in
- * Phase 2-3.
+ * Phase 2 = building tiles + stable auto-layout + group districts + a
+ * New-workspace pad. Selection/Overview population + navigation land in Phase 3.
  */
 (function () {
   'use strict';
+
+  var CELL_W = 176;
+  var CELL_H = 150;
+  var PAD = 26;
+  var MAX_COLS = 5;
+
+  // curated, distinct building palettes (picked by stable id hash)
+  var PALETTE = [
+    { key: '#4f9bf0', floor: '#0c2238', top: '#2a5da0', l: '#16365e', r: '#0e2748' }, // blue
+    { key: '#e8b54b', floor: '#332708', top: '#caa23f', l: '#5e4a16', r: '#48380e' }, // gold
+    { key: '#e2864d', floor: '#3a1f08', top: '#c66a34', l: '#6e3a18', r: '#522c12' }, // orange
+    { key: '#7b6cf0', floor: '#241c44', top: '#6457c4', l: '#3a306b', r: '#2b2452' }, // purple
+    { key: '#46d39a', floor: '#0c3326', top: '#2f9d72', l: '#15503c', r: '#0f3d2e' }, // green
+    { key: '#4ec5e6', floor: '#0b2a33', top: '#2f8ba6', l: '#134350', r: '#0d3540' }  // teal
+  ];
 
   function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -19,15 +33,133 @@
     });
   }
 
+  // FNV-1a — stable hash so a workspace keeps its spot across refresh/add/remove.
+  function hashKey(id) {
+    var h = 2166136261;
+    var s = String(id || '');
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
   function isGroup(ws) {
     return String((ws && ws.kind) || '').trim().toLowerCase() === 'group';
   }
 
+  function paletteFor(id) {
+    return PALETTE[hashKey(id) % PALETTE.length];
+  }
+
+  function opsModeLabel(mode) {
+    switch (String(mode || '').trim().toLowerCase()) {
+      case 'guided': return 'Guided';
+      case 'direct': return 'Direct';
+      case 'plan_then_execute': return 'Autonomous';
+      case '': return '';
+      default: return String(mode).charAt(0).toUpperCase() + String(mode).slice(1);
+    }
+  }
+
+  /**
+   * Pure, stable, no-overlap layout. Returns grid-cell coordinates so rendering
+   * can convert them to pixels. Groups cluster into rectangular districts; only
+   * top-level groups form districts (nesting capped — deeper members flatten).
+   * @returns {{tiles: Array, districts: Array, cols: number, rows: number}}
+   */
+  function computeMapLayout(workspaces, options) {
+    var opts = options || {};
+    var maxCols = Math.max(1, opts.maxCols || MAX_COLS);
+    var list = (Array.isArray(workspaces) ? workspaces : []).filter(function (w) {
+      return w && w.id;
+    });
+
+    var byId = {};
+    list.forEach(function (w) { byId[w.id] = w; });
+
+    function parentGroupId(w) {
+      var pid = (w && w.parent_id) || '';
+      return pid && byId[pid] && isGroup(byId[pid]) ? pid : '';
+    }
+    function isTopGroup(w) {
+      return isGroup(w) && parentGroupId(w) === '';
+    }
+
+    var membersByGroup = {};
+    var roots = [];
+    list.forEach(function (w) {
+      var pid = parentGroupId(w);
+      if (pid && isTopGroup(byId[pid])) {
+        (membersByGroup[pid] = membersByGroup[pid] || []).push(w);
+      } else {
+        roots.push(w);
+      }
+    });
+
+    function byHash(a, b) {
+      var ha = hashKey(a.id), hb = hashKey(b.id);
+      if (ha !== hb) return ha - hb;
+      return a.id < b.id ? -1 : 1;
+    }
+    roots.sort(byHash);
+    Object.keys(membersByGroup).forEach(function (g) { membersByGroup[g].sort(byHash); });
+
+    // each root becomes an "island" with a cell footprint
+    var islands = roots.map(function (w) {
+      if (isGroup(w)) {
+        var members = membersByGroup[w.id] || [];
+        var n = Math.max(members.length, 1);
+        var gc = Math.min(maxCols, Math.ceil(Math.sqrt(n)));
+        var gr = Math.ceil(n / gc);
+        return { kind: 'group', ws: w, members: members, w: gc, h: gr };
+      }
+      return { kind: 'ws', ws: w, members: [], w: 1, h: 1 };
+    });
+
+    // shelf-pack islands into a maxCols-wide grid (no overlap, clean rows)
+    var tiles = [];
+    var districts = [];
+    var col = 0, shelfRow = 0, shelfHeight = 0, usedCols = 0, totalRows = 0;
+
+    islands.forEach(function (isl) {
+      var w = Math.min(isl.w, maxCols);
+      if (col + w > maxCols) {
+        shelfRow += shelfHeight;
+        col = 0;
+        shelfHeight = 0;
+      }
+      var baseCol = col, baseRow = shelfRow;
+      if (isl.kind === 'group') {
+        districts.push({ id: isl.ws.id, ws: isl.ws, col: baseCol, row: baseRow, w: w, h: isl.h });
+        isl.members.forEach(function (m, i) {
+          tiles.push({
+            id: m.id, ws: m, groupId: isl.ws.id,
+            col: baseCol + (i % w), row: baseRow + Math.floor(i / w)
+          });
+        });
+      } else {
+        tiles.push({ id: isl.ws.id, ws: isl.ws, groupId: '', col: baseCol, row: baseRow });
+      }
+      col += w;
+      shelfHeight = Math.max(shelfHeight, isl.h);
+      usedCols = Math.max(usedCols, col);
+      totalRows = Math.max(totalRows, shelfRow + isl.h);
+    });
+
+    return {
+      tiles: tiles,
+      districts: districts,
+      cols: Math.max(1, Math.min(maxCols, usedCols)),
+      rows: Math.max(1, totalRows)
+    };
+  }
+
+  // ---------- rendering ----------
+
   function computeStats(workspaces) {
     var list = Array.isArray(workspaces) ? workspaces : [];
-    var agents = 0;
-    var activeTasks = 0;
-    var groups = 0;
+    var agents = 0, activeTasks = 0, groups = 0;
     list.forEach(function (ws) {
       agents += Number((ws && ws.agent_count) || 0);
       activeTasks += Number((ws && ws.open_task_count) || 0);
@@ -37,16 +169,116 @@
   }
 
   function statBox(value, label) {
+    return '<div class="ws-map-stat"><div class="ws-v">' + escapeHtml(value) +
+      '</div><div class="ws-l">' + escapeHtml(label) + '</div></div>';
+  }
+
+  function structSVG(pal) {
     return (
-      '<div class="ws-map-stat"><div class="ws-v">' +
-      escapeHtml(value) +
-      '</div><div class="ws-l">' +
-      escapeHtml(label) +
+      '<svg class="ws-map-struct" width="112" height="92" viewBox="0 0 118 96" aria-hidden="true">' +
+      '<polygon points="59,86 110,60 59,34 8,60" fill="' + pal.floor + '" stroke="' + pal.key + '" stroke-opacity=".5"/>' +
+      '<polygon points="34,54 59,68 59,40 34,26" fill="' + pal.l + '"/>' +
+      '<polygon points="84,54 59,68 59,40 84,26" fill="' + pal.r + '"/>' +
+      '<polygon points="59,26 84,40 59,54 34,40" fill="' + pal.top + '"/>' +
+      '</svg>'
+    );
+  }
+
+  function tileHTML(tile, selectedId) {
+    var ws = tile.ws || {};
+    var pal = paletteFor(ws.id);
+    var active = !!ws.active;
+    var statusText = active ? 'Working' : 'Idle';
+    var agents = Number(ws.agent_count || 0);
+    var openTasks = Number(ws.open_task_count || 0);
+    var mode = opsModeLabel(ws.ops_mode);
+    var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
+    var selected = selectedId && ws.id === selectedId ? ' is-selected' : '';
+    var left = PAD + tile.col * CELL_W;
+    var top = PAD + tile.row * CELL_H;
+    var meta = agents + (agents === 1 ? ' agent' : ' agents') + ' · ' +
+      openTasks + (openTasks === 1 ? ' task' : ' tasks');
+
+    return (
+      '<button type="button" class="ws-map-tile' + selected + '" role="listitem" ' +
+      'data-ws-id="' + escapeHtml(ws.id) + '" ' +
+      'style="left:' + left + 'px;top:' + top + 'px" ' +
+      'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
+      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + '">' +
+      '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
+      escapeHtml(statusText) + '</span>' +
+      (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
+      structSVG(pal) +
+      '<span class="ws-map-tile-name">' + escapeHtml(ws.name || 'Workspace') + '</span>' +
+      (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
+      '<span class="ws-map-tile-meta">' + escapeHtml(meta) + '</span>' +
+      '</button>'
+    );
+  }
+
+  function districtHTML(d) {
+    var ws = d.ws || {};
+    var left = PAD + d.col * CELL_W - 12;
+    var top = PAD + d.row * CELL_H - 6;
+    var width = d.w * CELL_W - 8;
+    var height = d.h * CELL_H - 10;
+    return (
+      '<div class="ws-map-district" data-group-id="' + escapeHtml(ws.id) + '" ' +
+      'style="left:' + left + 'px;top:' + top + 'px;width:' + width + 'px;height:' + height + 'px">' +
+      '<button type="button" class="ws-map-district-tag" data-ws-id="' + escapeHtml(ws.id) + '">▢ ' +
+      escapeHtml(ws.name || 'Group') + ' · Group</button>' +
+      '</div>'
+    );
+  }
+
+  function padHTML(col, row) {
+    var left = PAD + col * CELL_W;
+    var top = PAD + row * CELL_H;
+    return (
+      '<button type="button" class="ws-map-pad" data-ws-map-create ' +
+      'style="left:' + left + 'px;top:' + top + 'px" aria-label="Create a new workspace">' +
+      '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span>' +
+      '</button>'
+    );
+  }
+
+  function canvasHTML(workspaces, selectedId) {
+    var layout = computeMapLayout(workspaces);
+    var parts = [];
+    layout.districts.forEach(function (d) { parts.push(districtHTML(d)); });
+    layout.tiles.forEach(function (t) { parts.push(tileHTML(t, selectedId)); });
+
+    // place the "new workspace" pad in the next free cell on the last shelf
+    var lastRow = 0;
+    layout.tiles.forEach(function (t) { if (t.row > lastRow) lastRow = t.row; });
+    var padCol = 0;
+    layout.tiles.forEach(function (t) { if (t.row === lastRow && t.col >= padCol) padCol = t.col + 1; });
+    if (padCol >= MAX_COLS) { padCol = 0; lastRow += 1; }
+    parts.push(padHTML(padCol, lastRow));
+
+    var height = PAD * 2 + (lastRow + 1) * CELL_H;
+    return {
+      html: '<div class="ws-map-canvas" role="list" aria-label="Workspaces" style="height:' + height + 'px">' +
+        parts.join('') + '</div>',
+      empty: layout.tiles.length === 0
+    };
+  }
+
+  function emptyCanvasHTML() {
+    return (
+      '<div class="ws-map-canvas ws-map-canvas--empty">' +
+      '<div class="ws-map-empty-cluster">' +
+      '<button type="button" class="ws-map-pad ws-map-pad--hero" data-ws-map-create aria-label="Create a new workspace">' +
+      '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span></button>' +
+      '<div class="ws-map-empty-note">No workspaces yet — build your first one.</div>' +
       '</div></div>'
     );
   }
 
-  function shellHTML(stats) {
+  function shellHTML(stats, workspaces, selectedId) {
+    var canvas = (Array.isArray(workspaces) && workspaces.length > 0)
+      ? canvasHTML(workspaces, selectedId).html
+      : emptyCanvasHTML();
     return (
       '<header class="ws-map-topbar">' +
       '<div class="ws-map-crest">' +
@@ -70,7 +302,7 @@
       '<section class="ws-map-theatre">' +
       '<div class="ws-map-theatre-tag"><span class="ws-map-ix">MAP</span><h3>All Workspaces</h3></div>' +
       '<div class="ws-map-compass">N<b>▲</b></div>' +
-      '<div class="ws-map-canvas"><div class="ws-map-canvas-empty">Building tiles arrive in the next update</div></div>' +
+      canvas +
       '</section>' +
       '<aside class="ws-map-overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
@@ -85,21 +317,22 @@
   /**
    * Mount/refresh the map view. Idempotent — safe to call on every re-render.
    * @param {HTMLElement} container - the #launcherMap element.
-   * @param {object} [state] - { workspaces: [...enriched summaries] }.
+   * @param {object} [state] - { workspaces: [...enriched summaries], selectedId }.
    */
   function mount(container, state) {
     if (!container) return;
     var workspaces = (state && state.workspaces) || [];
-    container.innerHTML = shellHTML(computeStats(workspaces));
+    var selectedId = (state && state.selectedId) || '';
+    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId);
 
-    var createBtn = container.querySelector('[data-ws-map-create]');
-    if (createBtn) {
-      createBtn.addEventListener('click', function () {
-        // Reuse the hub's existing create flow.
+    // Reuse the hub's existing create flow for every create affordance.
+    var createEls = container.querySelectorAll('[data-ws-map-create]');
+    Array.prototype.forEach.call(createEls, function (el) {
+      el.addEventListener('click', function () {
         var hubCreate = document.getElementById('launcherCreateWorkspaceBtn');
         if (hubCreate) hubCreate.click();
       });
-    }
+    });
   }
 
   /** Tear down the map view (called when switching away). */
@@ -108,5 +341,9 @@
     container.innerHTML = '';
   }
 
-  window.OriWorkspaceMap = { mount: mount, unmount: unmount };
+  window.OriWorkspaceMap = {
+    mount: mount,
+    unmount: unmount,
+    computeLayout: computeMapLayout
+  };
 })();
