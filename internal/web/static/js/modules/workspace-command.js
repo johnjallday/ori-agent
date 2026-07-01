@@ -17,9 +17,10 @@ function escapeHtml(value) {
   });
 }
 
-function statBox(value, label) {
-  return '<div class="ws-cmd-stat"><div class="ws-v">' + escapeHtml(value) +
-    '</div><div class="ws-l">' + escapeHtml(label) + '</div></div>';
+function statBox(value, label, sectionKey, ariaLabel) {
+  return '<button type="button" class="ws-cmd-stat" data-cmd-section="' + escapeHtml(sectionKey) +
+    '" aria-label="' + escapeHtml(ariaLabel) + '"><div class="ws-v">' + escapeHtml(value) +
+    '</div><div class="ws-l">' + escapeHtml(label) + '</div></button>';
 }
 
 export class WorkspaceCommandView {
@@ -32,6 +33,10 @@ export class WorkspaceCommandView {
     this.detailedView = document.getElementById('workspace-detail-view');
     this.toggleBtn = document.getElementById('workspace-command-toggle');
     this.active = false;
+    this.activeRailSection = '';
+    this.statModalSection = '';
+    this.statModalEl = null;
+    this.statModalTrigger = null;
     this.setup();
   }
 
@@ -63,12 +68,13 @@ export class WorkspaceCommandView {
     this.persist('command');
   }
 
-  deactivate() {
+  deactivate({ persist = true } = {}) {
     this.active = false;
+    this.closeStatModal();
     if (this.container) this.container.hidden = true;
     if (this.detailedView) this.detailedView.hidden = false;
     this.updateToggle();
-    this.persist('detailed');
+    if (persist) this.persist('detailed');
   }
 
   updateToggle() {
@@ -81,6 +87,7 @@ export class WorkspaceCommandView {
   /** Re-render if active — called by the page after its data loads/refreshes. */
   refresh() {
     if (this.active) this.render();
+    else if (this.statModalSection) this.renderStatModalBody();
   }
 
   computeStats() {
@@ -134,13 +141,13 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-title">' +
       '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">Outpost · Command</span></div>' +
       '<h2>' + escapeHtml(name) + '</h2>' +
-      (mode ? '<div class="ws-sub">Ops mode · ' + escapeHtml(mode) + '</div>' : '') +
+      (mode ? '<div class="ws-sub">Workflow · ' + escapeHtml(mode) + '</div>' : '') +
       '</div>' +
       '<div class="ws-cmd-readout">' +
-      statBox(stats.agents, 'Agents') +
-      statBox(stats.openTasks, 'Open Tasks') +
-      statBox(stats.mcp, 'Tools · MCP') +
-      statBox(stats.skills, 'Skills') +
+      statBox(stats.agents, 'Agents', 'agents', 'View agents') +
+      statBox(stats.openTasks, 'Tasks', 'tasks', 'View tasks') +
+      statBox(stats.mcp, 'MCP', 'mcp', 'Open MCP settings') +
+      statBox(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
       '</div>' +
       '</header>' +
       '<div class="ws-cmd-layout">' +
@@ -150,8 +157,418 @@ export class WorkspaceCommandView {
 
     const back = this.container.querySelector('[data-ws-cmd-detailed]');
     if (back) back.addEventListener('click', () => this.deactivate());
+    this.bindReadout();
     this.bindGarrison();
     this.bindRail();
+
+    // The stat manager modal lives inside the .ws-cmd container (so it inherits
+    // the tactical tokens) but survives full re-renders: re-attach + repaint it.
+    if (this.statModalEl && this.container && this.container.appendChild) {
+      this.container.appendChild(this.statModalEl);
+      if (this.statModalSection) this.renderStatModalBody();
+    }
+  }
+
+  bindReadout() {
+    const root = this.container && this.container.querySelector('.ws-cmd-readout');
+    if (!root) return;
+    root.addEventListener('click', (event) => {
+      const sectionBtn = event.target.closest('[data-cmd-section]');
+      if (!sectionBtn) return;
+      this.openStatModal(sectionBtn.getAttribute('data-cmd-section'), sectionBtn);
+    });
+  }
+
+  /** Escape hatch: leave the Command view for the full detailed section. */
+  openDetailedSection(sectionKey) {
+    const section = String(sectionKey || '').trim();
+    if (!section) return;
+    this.deactivate({ persist: false });
+    if (this.page && typeof this.page.focusSection === 'function') {
+      this.page.focusSection(section);
+    }
+  }
+
+  // ---------- stat manager modal (agents / tasks / mcp / skills) ----------
+
+  statSectionMeta(section) {
+    switch (String(section || '')) {
+      case 'agents': return { title: 'Agents', addLabel: '＋ Add Agent' };
+      case 'tasks': return { title: 'Tasks', addLabel: '＋ Add Task' };
+      case 'mcp': return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
+      case 'skills': return { title: 'Skills', addLabel: '＋ Add Skill' };
+      default: return null;
+    }
+  }
+
+  openStatModal(sectionKey, trigger) {
+    const section = String(sectionKey || '').trim();
+    if (!this.statSectionMeta(section)) return;
+    this.statModalSection = section;
+    this.statModalTrigger = trigger || null;
+    const el = this.ensureStatModal();
+    if (!el) return;
+    this.renderStatModalBody();
+    el.hidden = false;
+    const panel = el.querySelector('.ws-cmd-modal-panel');
+    if (panel && typeof panel.focus === 'function') {
+      try { panel.focus({ preventScroll: true }); } catch (err) { panel.focus(); }
+    }
+  }
+
+  closeStatModal() {
+    const trigger = this.statModalTrigger;
+    this.statModalSection = '';
+    this.statModalTrigger = null;
+    if (this.statModalEl) this.statModalEl.hidden = true;
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  ensureStatModal() {
+    if (this.statModalEl) return this.statModalEl;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const el = document.createElement('div');
+    el.className = 'ws-cmd-modal';
+    el.hidden = true;
+    el.innerHTML =
+      '<div class="ws-cmd-modal-backdrop" data-cmd-modal-action="close"></div>' +
+      '<div class="ws-cmd-modal-panel" role="dialog" aria-modal="true" tabindex="-1"></div>';
+    el.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-cmd-modal-action]');
+      if (!btn) return;
+      this.handleStatModalAction(btn.getAttribute('data-cmd-modal-action'), btn.getAttribute('data-cmd-id'));
+    });
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        this.closeStatModal();
+      }
+    });
+    this.statModalEl = el;
+    if (this.container && this.container.appendChild) this.container.appendChild(el);
+    return el;
+  }
+
+  renderStatModalBody() {
+    const el = this.statModalEl;
+    if (!el || typeof el.querySelector !== 'function') return;
+    const panel = el.querySelector('.ws-cmd-modal-panel');
+    if (!panel) return;
+    const meta = this.statSectionMeta(this.statModalSection);
+    if (meta) panel.setAttribute('aria-label', meta.title);
+    panel.innerHTML = this.statModalHTML(this.statModalSection);
+  }
+
+  statModalHTML(section) {
+    const meta = this.statSectionMeta(section);
+    if (!meta) return '';
+    return (
+      '<header class="ws-cmd-modal-head">' +
+      '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
+      '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>' +
+      '<div class="ws-cmd-modal-head-actions">' +
+      '<button type="button" class="ws-cmd-modal-add" data-cmd-modal-action="add">' + escapeHtml(meta.addLabel) + '</button>' +
+      '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
+      '</div>' +
+      '</header>' +
+      '<div class="ws-cmd-modal-body">' + this.statModalRows(section) + '</div>' +
+      '<footer class="ws-cmd-modal-foot">' +
+      '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">Open in detailed view ▸</button>' +
+      '</footer>'
+    );
+  }
+
+  statModalCount(section) {
+    switch (String(section || '')) {
+      case 'agents': return this.agentRowData().length;
+      case 'tasks': return this.taskRowData().length;
+      case 'mcp': return this.mcpRowData().length;
+      case 'skills': return this.skillRowData().length;
+      default: return 0;
+    }
+  }
+
+  statModalRows(section) {
+    switch (String(section || '')) {
+      case 'agents': return this.agentRowsHTML();
+      case 'tasks': return this.taskRowsHTML();
+      case 'mcp': return this.mcpRowsHTML();
+      case 'skills': return this.skillRowsHTML();
+      default: return '';
+    }
+  }
+
+  modalEmptyHTML(text) {
+    return '<div class="ws-cmd-modal-empty">' + escapeHtml(text) + '</div>';
+  }
+
+  agentRowData() {
+    const page = this.page || {};
+    let groups = [];
+    try { groups = page.buildAgentGroups() || []; } catch (err) { groups = []; }
+    return groups.filter((g) => g && g.isWorkspaceAgent && !g.isUnassigned);
+  }
+
+  agentRowsHTML() {
+    const page = this.page || {};
+    const groups = this.agentRowData();
+    if (!groups.length) return this.modalEmptyHTML('No agents yet. Add one to build the roster.');
+    return groups.map((group) => {
+      const name = String(group.name || 'Agent');
+      const encoded = encodeURIComponent(name);
+      const keeper = page.isWorkspaceEntryAgent ? page.isWorkspaceEntryAgent(name) : false;
+      const avatar = page.getAgentAvatarPresentation
+        ? page.getAgentAvatarPresentation(name)
+        : { initials: name.slice(0, 2).toUpperCase(), style: '' };
+      const status = page.getAgentRosterStatus
+        ? page.getAgentRosterStatus(name)
+        : { key: 'idle', label: 'Idle' };
+      const tone = this.statusTone(status.key, status.label);
+      let modelLabel = '';
+      if (page.getAgentProfile && page.getAgentModelPresentation) {
+        const m = page.getAgentModelPresentation(page.getAgentProfile(name));
+        modelLabel = m && !m.empty ? m.model : '';
+      }
+      let skillCount = 0;
+      if (page.getAgentSkillSummary) {
+        const sk = page.getAgentSkillSummary(name);
+        skillCount = (sk && sk.count) || 0;
+      }
+      const chips =
+        (keeper ? '<span class="ws-cmd-mchip is-keeper">★ Entry Agent</span>' : '') +
+        '<span class="ws-cmd-mchip">' + escapeHtml(modelLabel || '—') + '</span>' +
+        '<span class="ws-cmd-mchip">Skills · ' + skillCount + '</span>';
+      const removeCtl = keeper
+        ? '<span class="ws-cmd-lock" title="Entry agent — can\'t be removed">🔒</span>'
+        : '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+          escapeHtml(encoded) + '" title="Remove agent" aria-label="Remove ' + escapeHtml(name) + '">✕</button>';
+      return (
+        '<div class="ws-cmd-mrow">' +
+        '<span class="ws-cmd-mrow-av" style="' + escapeHtml(avatar.style || '') + '">' + escapeHtml(avatar.initials) + '</span>' +
+        '<div class="ws-cmd-mrow-main">' +
+        '<div class="ws-cmd-mrow-name"><span class="ws-cmd-led ' + tone + '"></span>' + escapeHtml(name) + '</div>' +
+        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
+        '</div>' +
+        '<div class="ws-cmd-mrow-actions">' +
+        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
+        escapeHtml(encoded) + '" title="Edit model" aria-label="Edit model for ' + escapeHtml(name) + '">Model</button>' +
+        removeCtl +
+        '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  taskRowData() {
+    const page = this.page || {};
+    return Array.isArray(page.tasks) ? page.tasks : [];
+  }
+
+  taskRowsHTML() {
+    const tasks = this.taskRowData();
+    if (!tasks.length) return this.modalEmptyHTML('No tasks yet. Add one to get started.');
+    return tasks.map((t) => {
+      const id = String(t.id || '');
+      const label = String(t.description || t.name || t.title || 'Task');
+      const assignee = String(t.to || t.agent_name || t.assigned_to || '');
+      const tone = this.taskTone(t.status);
+      const statusText = String(t.status || 'pending').replace('_', ' ');
+      return (
+        '<div class="ws-cmd-mrow">' +
+        '<div class="ws-cmd-mrow-main">' +
+        '<div class="ws-cmd-mrow-name">' + escapeHtml(label) + '</div>' +
+        '<div class="ws-cmd-mrow-chips">' +
+        '<span class="ws-cmd-mchip ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
+        (assignee ? '<span class="ws-cmd-mchip">' + escapeHtml(assignee) + '</span>' : '') +
+        '</div>' +
+        '</div>' +
+        '<div class="ws-cmd-mrow-actions">' +
+        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="run" data-cmd-id="' +
+        escapeHtml(id) + '" title="Run" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
+        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="open" data-cmd-id="' +
+        escapeHtml(id) + '" title="Open" aria-label="Open task ' + escapeHtml(label) + '">↗</button>' +
+        '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+        escapeHtml(id) + '" title="Delete" aria-label="Delete task ' + escapeHtml(label) + '">✕</button>' +
+        '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  mcpRowData() {
+    const page = this.page || {};
+    if (typeof page.getWorkspaceMCPBindings === 'function') {
+      try { return page.getWorkspaceMCPBindings({ includeDisabled: true }) || []; } catch (err) { /* fall through */ }
+    }
+    const ws = page.workspace || {};
+    return Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings : [];
+  }
+
+  mcpRowsHTML() {
+    const bindings = this.mcpRowData();
+    if (!bindings.length) return this.modalEmptyHTML('No MCP servers bound yet.');
+    return bindings.map((b) => {
+      const id = String(b.id || '');
+      const serverName = String(b.serverName || b.server_name || 'unknown');
+      const alias = String(b.alias || '');
+      const isDisabled = b.enabled === false;
+      const isSynth = b.source === 'synthesized';
+      const canRemove = b.source === 'workspace';
+      const chips =
+        '<span class="ws-cmd-mchip ' + (isDisabled ? 'is-disabled' : 'is-on') + '">' +
+        (isDisabled ? 'Disabled' : 'Enabled') + '</span>' +
+        '<span class="ws-cmd-mchip">' + (isSynth ? 'Synthesized' : 'Explicit') + '</span>' +
+        (alias ? '<span class="ws-cmd-mchip">' + escapeHtml(alias) + '</span>' : '');
+      const removeBtn = canRemove
+        ? '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+          escapeHtml(id) + '" title="Remove" aria-label="Remove ' + escapeHtml(serverName) + '">✕</button>'
+        : '';
+      return (
+        '<div class="ws-cmd-mrow">' +
+        '<div class="ws-cmd-mrow-main">' +
+        '<div class="ws-cmd-mrow-name">' + escapeHtml(serverName) + '</div>' +
+        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
+        '</div>' +
+        '<div class="ws-cmd-mrow-actions">' +
+        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
+        escapeHtml(id) + '" title="Edit binding" aria-label="Edit ' + escapeHtml(serverName) + '">Edit</button>' +
+        removeBtn +
+        '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  skillRowData() {
+    const page = this.page || {};
+    if (typeof page.getWorkspaceSkillBindings === 'function') {
+      try { return page.getWorkspaceSkillBindings({ includeDisabled: true }) || []; } catch (err) { /* fall through */ }
+    }
+    const ws = page.workspace || {};
+    return Array.isArray(ws.skill_bindings) ? ws.skill_bindings : [];
+  }
+
+  skillRowsHTML() {
+    const bindings = this.skillRowData();
+    if (!bindings.length) return this.modalEmptyHTML('No skills bound yet.');
+    return bindings.map((b) => {
+      const id = String(b.id || '');
+      const skillName = String(b.skillName || b.skill_name || 'unknown');
+      const isDisabled = b.enabled === false;
+      const isPlanning = b.planningProfile === true;
+      const isTrusted = b.trusted === true;
+      const chips =
+        '<span class="ws-cmd-mchip ' + (isDisabled ? 'is-disabled' : 'is-on') + '">' +
+        (isDisabled ? 'Disabled' : 'Enabled') + '</span>' +
+        (isPlanning ? '<span class="ws-cmd-mchip">Planning</span>' : '') +
+        (isTrusted ? '<span class="ws-cmd-mchip">Trusted</span>' : '');
+      return (
+        '<div class="ws-cmd-mrow">' +
+        '<div class="ws-cmd-mrow-main">' +
+        '<div class="ws-cmd-mrow-name">' + escapeHtml(skillName) + '</div>' +
+        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
+        '</div>' +
+        '<div class="ws-cmd-mrow-actions">' +
+        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
+        escapeHtml(id) + '" title="Edit binding" aria-label="Edit ' + escapeHtml(skillName) + '">Edit</button>' +
+        '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+        escapeHtml(id) + '" title="Remove" aria-label="Remove ' + escapeHtml(skillName) + '">✕</button>' +
+        '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  handleStatModalAction(action, id) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null) || {};
+    const section = this.statModalSection;
+    const a = String(action || '');
+    if (a === 'close') { this.closeStatModal(); return; }
+    if (a === 'detailed') {
+      this.closeStatModal();
+      this.openDetailedSection(section);
+      return;
+    }
+    // Add/Edit hand off to an existing modal, so close ours first (avoids stacked
+    // overlays). Run/Delete stay in place; the page reload triggers refresh().
+    switch (section) {
+      case 'agents':
+        if (a === 'add') { this.closeStatModal(); if (typeof page.openAddAgentModal === 'function') page.openAddAgentModal(); }
+        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openAgentModelModal === 'function') page.openAgentModelModal(id); }
+        else if (a === 'delete') { if (typeof page.removeAgentFromWorkspace === 'function') page.removeAgentFromWorkspace(id); }
+        break;
+      case 'tasks':
+        if (a === 'add') { this.closeStatModal(); if (typeof page.showAddTaskModal === 'function') page.showAddTaskModal(); }
+        else if (a === 'run') { if (typeof page.executeTask === 'function') page.executeTask(id); }
+        else if (a === 'open') { if (typeof page.openTask === 'function') page.openTask(id); }
+        else if (a === 'delete') { if (typeof page.deleteTask === 'function') page.deleteTask(id); }
+        break;
+      case 'mcp':
+        if (a === 'add') { this.closeStatModal(); if (typeof page.openWorkspaceMCPModal === 'function') page.openWorkspaceMCPModal(); }
+        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openWorkspaceMCPModal === 'function') page.openWorkspaceMCPModal(id); }
+        else if (a === 'delete') { if (typeof page.deleteWorkspaceMCPBinding === 'function') page.deleteWorkspaceMCPBinding(id); }
+        break;
+      case 'skills':
+        if (a === 'add') { this.closeStatModal(); if (typeof page.openWorkspaceSkillModal === 'function') page.openWorkspaceSkillModal(); }
+        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openWorkspaceSkillModal === 'function') page.openWorkspaceSkillModal(id); }
+        else if (a === 'delete') { if (typeof page.deleteWorkspaceSkillBinding === 'function') page.deleteWorkspaceSkillBinding(id); }
+        break;
+      default:
+        break;
+    }
+  }
+
+  toggleRailManager(sectionKey) {
+    const section = String(sectionKey || '').trim();
+    if (!section) return;
+    this.activeRailSection = this.activeRailSection === section ? '' : section;
+    this.render();
+  }
+
+  runRailPrimaryAction(sectionKey, triggerButton) {
+    const page = this.page || window.workspaceDetail;
+    switch (String(sectionKey || '')) {
+      case 'notes':
+        if (page && typeof page.showNoteModal === 'function') page.showNoteModal();
+        break;
+      case 'schedules':
+        if (page && typeof page.showSchedulesModal === 'function') page.showSchedulesModal();
+        break;
+      case 'sessions':
+        if (page && typeof page.createNewSession === 'function') page.createNewSession();
+        break;
+      case 'folders':
+        if (page && typeof page.showAddDirectoryModal === 'function') page.showAddDirectoryModal(triggerButton);
+        break;
+      default:
+        break;
+    }
+  }
+
+  openRailItem(sectionKey, id, source) {
+    const page = this.page || window.workspaceDetail;
+    if (!page || !id) return;
+
+    switch (String(sectionKey || '')) {
+      case 'notes': {
+        const note = (Array.isArray(page.notes) ? page.notes : []).find(item => String(item.id || '') === id);
+        if (note && typeof page.showNoteModal === 'function') page.showNoteModal(note);
+        break;
+      }
+      case 'schedules':
+        if (typeof page.openSchedule === 'function') page.openSchedule(id);
+        break;
+      case 'sessions':
+        if (typeof page.openSession === 'function') page.openSession(id);
+        break;
+      case 'folders':
+        if (typeof page.openDirectoryExplorer === 'function') {
+          page.openDirectoryExplorer(id, source || 'reference');
+        }
+        break;
+      default:
+        break;
+    }
   }
 
   // ---------- garrison (agents as unit cards) ----------
@@ -201,8 +618,8 @@ export class WorkspaceCommandView {
     const roleBadge = group.isUnassigned
       ? '<span class="ws-cmd-badge">Unassigned</span>'
       : (keeper
-          ? '<span class="ws-cmd-badge is-keeper">★ Keeper</span>'
-          : '<span class="ws-cmd-badge">Field Unit</span>');
+          ? '<span class="ws-cmd-badge is-keeper">★ Entry Agent</span>'
+          : '');
 
     const ctl = group.isUnassigned
       ? ''
@@ -214,7 +631,7 @@ export class WorkspaceCommandView {
 
     const rows = group.isUnassigned ? '' :
       '<div class="ws-cmd-unit-rows">' +
-      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Class</span><span class="ws-cmd-rv">' +
+      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Model</span><span class="ws-cmd-rv">' +
       escapeHtml(modelLabel || '—') + '</span></div>' +
       '<div class="ws-cmd-row"><span class="ws-cmd-rk">Skills</span><span class="ws-cmd-rv">' +
       skillCount + '</span></div>' +
@@ -241,9 +658,9 @@ export class WorkspaceCommandView {
     const add = group.isUnassigned ? '' :
       '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' + escapeHtml(encoded) +
       '" aria-label="Add task">＋</button>';
-    const head = '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Quest Log · ' + tasks.length + '</span>' + add + '</div>';
+    const head = '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' + tasks.length + '</span>' + add + '</div>';
     if (!tasks.length) {
-      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">— no orders issued —</div></div>';
+      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">— no tasks yet —</div></div>';
     }
     const items = tasks.map((t) => {
       const label = String(t.description || t.name || t.title || 'Task');
@@ -251,11 +668,11 @@ export class WorkspaceCommandView {
       const statusText = String(t.status || 'pending').replace('_', ' ');
       return (
         '<div class="ws-cmd-quest">' +
-        '<span class="ws-cmd-q-glyph">✦</span>' +
+        '<span class="ws-cmd-q-glyph">&bull;</span>' +
         '<span class="ws-cmd-q-name">' + escapeHtml(label) + '</span>' +
         '<span class="ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
         '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' + escapeHtml(String(t.id || '')) +
-        '" title="Deploy" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
+        '" title="Run" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
         '</div>'
       );
     }).join('');
@@ -268,7 +685,7 @@ export class WorkspaceCommandView {
     try { groups = page.buildAgentGroups() || []; } catch (err) { groups = []; }
     const units = groups.filter((g) => g && (g.isWorkspaceAgent || (g.isUnassigned && (g.tasks || []).length)));
     if (!units.length) {
-      return '<div class="ws-cmd-soon">No agents garrisoned yet.</div>';
+      return '<div class="ws-cmd-soon">No agents yet.</div>';
     }
     return '<div class="ws-cmd-garrison-grid">' + units.map((g) => this.unitCardHTML(g)).join('') + '</div>';
   }
@@ -291,27 +708,35 @@ export class WorkspaceCommandView {
 
   // ---------- right rail ----------
 
-  railPanelHTML(ix, title, items, count, emptyText) {
+  railPanelHTML(sectionKey, title, items, count, emptyText, primaryLabel) {
+    const isManaging = this.activeRailSection === sectionKey;
     const body = items.length
       ? items.join('')
       : '<div class="ws-cmd-rail-empty">' + escapeHtml(emptyText) + '</div>';
+    const actions = isManaging
+      ? '<div class="ws-cmd-panel-actions"><button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="' +
+        escapeHtml(sectionKey) + '">' + escapeHtml(primaryLabel) + '</button></div>'
+      : '';
     return (
-      '<section class="ws-cmd-panel">' +
+      '<section class="ws-cmd-panel' + (isManaging ? ' is-managing' : '') + '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><span class="ws-cmd-ix">' + escapeHtml(ix) + '</span>' +
-      '<h4>' + escapeHtml(title) + '</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
-      '<button type="button" class="ws-cmd-panel-more" data-ws-cmd-detailed title="Manage in detailed view" aria-label="Manage ' +
-      escapeHtml(title) + ' in the detailed view">▸</button>' +
+      '<div class="ws-cmd-panel-title"><h4>' + escapeHtml(title) + '</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="' + escapeHtml(sectionKey) +
+      '" aria-expanded="' + (isManaging ? 'true' : 'false') +
+      '" title="' + (isManaging ? 'Close Command manager' : 'Manage in Command view') +
+      '" aria-label="' + (isManaging ? 'Close ' : 'Manage ') +
+      escapeHtml(title) + ' in Command view">' + (isManaging ? '×' : '▸') + '</button>' +
       '</div>' +
-      '<div class="ws-cmd-panel-body">' + body + '</div>' +
+      '<div class="ws-cmd-panel-body">' + actions + body + '</div>' +
       '</section>'
     );
   }
 
   railItems(list, labelOf, opts) {
     const arr = Array.isArray(list) ? list : [];
-    const shown = arr.slice(0, 5);
     const attr = opts || {};
+    const limit = attr.expanded ? arr.length : 5;
+    const shown = arr.slice(0, limit);
     const items = shown.map((it) => {
       const label = escapeHtml(labelOf(it));
       const meta = attr.metaOf ? escapeHtml(attr.metaOf(it)) : '';
@@ -326,8 +751,9 @@ export class WorkspaceCommandView {
       return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
     });
     if (arr.length > shown.length) {
-      items.push('<button type="button" class="ws-cmd-rail-more" data-ws-cmd-detailed>+ ' +
-        (arr.length - shown.length) + ' more · detailed view</button>');
+      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="' +
+        escapeHtml(attr.sectionKey || '') + '">+ ' +
+        (arr.length - shown.length) + ' more</button>');
     }
     return items;
   }
@@ -339,25 +765,40 @@ export class WorkspaceCommandView {
     const sessions = Array.isArray(page.sessions) ? page.sessions : [];
     const dirs = Array.isArray(page.directories) ? page.directories : [];
 
-    const intel = this.railItems(notes, (n) => n.name || n.title || 'Untitled Note', {
-      href: (n) => '/notes/' + encodeURIComponent(n.id || '')
+    const notesExpanded = this.activeRailSection === 'notes';
+    const schedulesExpanded = this.activeRailSection === 'schedules';
+    const sessionsExpanded = this.activeRailSection === 'sessions';
+    const foldersExpanded = this.activeRailSection === 'folders';
+
+    const notesItems = this.railItems(notes, (n) => n.name || n.title || 'Untitled Note', {
+      sectionKey: 'notes',
+      expanded: notesExpanded,
+      action: (n) => 'data-cmd-open-section="notes" data-cmd-item-id="' + escapeHtml(String(n.id || '')) + '"'
     });
-    const orders = this.railItems(schedules, (s) => s.name || s.task_description || 'Unnamed Schedule', {
-      action: (s) => 'data-cmd-schedule="' + escapeHtml(String(s.id || '')) + '"'
+    const scheduleItems = this.railItems(schedules, (s) => s.name || s.task_description || 'Unnamed Schedule', {
+      sectionKey: 'schedules',
+      expanded: schedulesExpanded,
+      action: (s) => 'data-cmd-open-section="schedules" data-cmd-item-id="' + escapeHtml(String(s.id || '')) + '"'
     });
-    const comms = this.railItems(sessions, (s) => s.title || s.name || 'Untitled Session', {
-      action: (s) => 'data-cmd-session="' + escapeHtml(String(s.id || '')) + '"',
+    const sessionItems = this.railItems(sessions, (s) => s.title || s.name || 'Untitled Session', {
+      sectionKey: 'sessions',
+      expanded: sessionsExpanded,
+      action: (s) => 'data-cmd-open-section="sessions" data-cmd-item-id="' + escapeHtml(String(s.id || '')) + '"',
       metaOf: (s) => s.agent_name || ''
     });
-    const supply = this.railItems(dirs, (d) => d.title || d.name || d.path || 'Unnamed Directory', {
+    const folderItems = this.railItems(dirs, (d) => d.title || d.name || d.path || 'Unnamed Directory', {
+      sectionKey: 'folders',
+      expanded: foldersExpanded,
+      action: (d) => 'data-cmd-open-section="folders" data-cmd-item-id="' + escapeHtml(String(d.id || '')) +
+        '" data-cmd-item-source="' + escapeHtml(String(d.source || 'reference')) + '"',
       metaOf: (d) => d.path || ''
     });
 
     return (
-      this.railPanelHTML('INT', 'Intel', intel, notes.length, 'No intel logged yet.') +
-      this.railPanelHTML('ORD', 'Standing Orders', orders, schedules.length, 'No scheduled orders.') +
-      this.railPanelHTML('COM', 'Comms', comms, sessions.length, 'No active sessions.') +
-      this.railPanelHTML('SUP', 'Supply Lines', supply, dirs.length, 'No linked folders.')
+      this.railPanelHTML('notes', 'Notes', notesItems, notes.length, 'No notes yet.', 'New Note') +
+      this.railPanelHTML('schedules', 'Schedules', scheduleItems, schedules.length, 'No schedules yet.', 'Open Schedules') +
+      this.railPanelHTML('sessions', 'Sessions', sessionItems, sessions.length, 'No sessions yet.', 'New Session') +
+      this.railPanelHTML('folders', 'Linked Folders', folderItems, dirs.length, 'No linked folders yet.', 'Link Folder')
     );
   }
 
@@ -365,16 +806,23 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', (event) => {
-      const detailedBtn = event.target.closest('[data-ws-cmd-detailed]');
-      if (detailedBtn) { this.deactivate(); return; }
-      const sess = event.target.closest('[data-cmd-session]');
-      if (sess && window.workspaceDetail && window.workspaceDetail.openSession) {
-        window.workspaceDetail.openSession(sess.getAttribute('data-cmd-session'));
+      const primaryBtn = event.target.closest('[data-cmd-primary-section]');
+      if (primaryBtn) {
+        this.runRailPrimaryAction(primaryBtn.getAttribute('data-cmd-primary-section'), primaryBtn);
         return;
       }
-      const sched = event.target.closest('[data-cmd-schedule]');
-      if (sched && window.workspaceDetail && window.workspaceDetail.openSchedule) {
-        window.workspaceDetail.openSchedule(sched.getAttribute('data-cmd-schedule'));
+      const manageBtn = event.target.closest('[data-cmd-manage-section]');
+      if (manageBtn) {
+        this.toggleRailManager(manageBtn.getAttribute('data-cmd-manage-section'));
+        return;
+      }
+      const itemBtn = event.target.closest('[data-cmd-open-section][data-cmd-item-id]');
+      if (itemBtn) {
+        this.openRailItem(
+          itemBtn.getAttribute('data-cmd-open-section'),
+          itemBtn.getAttribute('data-cmd-item-id'),
+          itemBtn.getAttribute('data-cmd-item-source')
+        );
       }
     });
   }

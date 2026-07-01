@@ -26,6 +26,124 @@ global.document = {
 
 const { WorkspaceDetailPage } = await import('./workspace-detail.js');
 
+function withDocumentElements(elements, fn) {
+  const previousDocument = global.document;
+  global.document = {
+    ...previousDocument,
+    getElementById(id) {
+      return elements[id] || null;
+    }
+  };
+  try {
+    fn();
+  } finally {
+    global.document = previousDocument;
+  }
+}
+
+function makeFocusTarget({ hasTabindex = false } = {}) {
+  const attributes = hasTabindex ? { tabindex: '0' } : {};
+  return {
+    attributes,
+    scrollCalls: [],
+    focusCalls: [],
+    hasAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attributes, name);
+    },
+    setAttribute(name, value) {
+      attributes[name] = value;
+    },
+    scrollIntoView(options) {
+      this.scrollCalls.push(options);
+    },
+    focus(options) {
+      this.focusCalls.push(options);
+    }
+  };
+}
+
+function makeTabButton() {
+  return {
+    clickCount: 0,
+    click() {
+      this.clickCount += 1;
+    }
+  };
+}
+
+test('workspace detail focusSection routes agents and tasks to the correct sub-view', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const target = makeFocusTarget();
+  const selectedViews = [];
+  page.setView = view => selectedViews.push(view);
+
+  withDocumentElements({ 'workspace-detail-agents-panel': target }, () => {
+    page.focusSection('agents');
+    page.focusSection('tasks');
+  });
+
+  assert.deepEqual(selectedViews, ['list', 'board']);
+  assert.deepEqual(target.scrollCalls, [
+    { behavior: 'smooth', block: 'start' },
+    { behavior: 'smooth', block: 'start' }
+  ]);
+  assert.equal(target.attributes.tabindex, '-1');
+  assert.deepEqual(target.focusCalls, [{ preventScroll: true }, { preventScroll: true }]);
+});
+
+test('workspace detail focusSection expands config and activates MCP and Skills tabs', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const target = makeFocusTarget({ hasTabindex: true });
+  const mcpTab = makeTabButton();
+  const skillsTab = makeTabButton();
+  const expanded = [];
+  page.setWorkspaceConfigExpanded = value => expanded.push(value);
+
+  withDocumentElements(
+    {
+      'workspace-detail-config-content': target,
+      'workspace-detail-config-mcp-tab': mcpTab,
+      'workspace-detail-config-skills-tab': skillsTab
+    },
+    () => {
+      page.focusSection('mcp');
+      page.focusSection('skills');
+    }
+  );
+
+  assert.deepEqual(expanded, [true, true]);
+  assert.equal(mcpTab.clickCount, 1);
+  assert.equal(skillsTab.clickCount, 1);
+  assert.equal(target.attributes.tabindex, '0');
+  assert.deepEqual(target.scrollCalls, [
+    { behavior: 'smooth', block: 'start' },
+    { behavior: 'smooth', block: 'start' }
+  ]);
+  assert.deepEqual(target.focusCalls, [{ preventScroll: true }, { preventScroll: true }]);
+});
+
+test('workspace detail focusSection scrolls and focuses section targets', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const target = makeFocusTarget();
+
+  withDocumentElements({ 'workspace-detail-notes-panel': target }, () => {
+    page.focusSection('notes');
+  });
+
+  assert.deepEqual(target.scrollCalls, [{ behavior: 'smooth', block: 'start' }]);
+  assert.equal(target.attributes.tabindex, '-1');
+  assert.deepEqual(target.focusCalls, [{ preventScroll: true }]);
+});
+
+test('workspace detail focusSection tolerates missing targets', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  withDocumentElements({}, () => {
+    assert.doesNotThrow(() => page.focusSection('schedules'));
+    assert.doesNotThrow(() => page.focusSection('unknown'));
+  });
+});
+
 test('workspace detail renders reference URL task indicators', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const indicator = page.renderTaskReferenceURLIndicator({
