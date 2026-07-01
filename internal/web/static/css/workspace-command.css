@@ -206,3 +206,12 @@
 @media (max-width: 900px) {
   .ws-cmd-layout { grid-template-columns: 1fr; }
 }
+
+/* Auto-playing motion is opt-in via the OS "reduce motion" preference. */
+@keyframes ws-cmd-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes ws-cmd-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: no-preference) {
+  .ws-cmd-topbar { animation: ws-cmd-rise 0.35s ease both; }
+  .ws-cmd-garrison, .ws-cmd-rail { animation: ws-cmd-rise 0.4s ease both; animation-delay: 0.05s; }
+  .ws-cmd-led.working { animation: ws-cmd-pulse 1.5s ease-in-out infinite; }
+}

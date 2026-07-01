@@ -11,8 +11,8 @@
 
     <div class="main-content">
       <div class="container-fluid py-4">
-        <!-- Command view mount point — inert scaffolding (Phase 0.0); populated by workspace-command.js in Phase 1. -->
-        <div id="workspaceCommandView" class="ws-cmd" hidden></div>
+        <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
+        <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
         <!-- Workspace Detail View -->
         <div id="workspace-detail-view">
           <!-- Header Card -->
