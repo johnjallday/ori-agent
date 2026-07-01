@@ -213,7 +213,7 @@
     );
   }
 
-  function tileHTML(tile, selectedId) {
+  function tileHTML(tile, selectedId, index) {
     var ws = tile.ws || {};
     var pal = paletteFor(ws.id);
     var active = !!ws.active;
@@ -229,9 +229,9 @@
       openTasks + (openTasks === 1 ? ' task' : ' tasks');
 
     return (
-      '<button type="button" class="ws-map-tile' + selected + '" role="listitem" ' +
+      '<button type="button" class="ws-map-tile' + selected + '" ' +
       'data-ws-id="' + escapeHtml(ws.id) + '" ' +
-      'style="left:' + left + 'px;top:' + top + 'px" ' +
+      'style="left:' + left + 'px;top:' + top + 'px;--i:' + (index || 0) + '" ' +
       'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
       (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + '">' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
@@ -251,10 +251,13 @@
     var top = PAD + d.row * CELL_H - 6;
     var width = d.w * CELL_W - 8;
     var height = d.h * CELL_H - 10;
+    var label = (ws.name || 'Group') + ' group';
     return (
-      '<div class="ws-map-district" data-group-id="' + escapeHtml(ws.id) + '" ' +
+      '<div class="ws-map-district" role="group" aria-label="' + escapeHtml(label) + '" ' +
+      'data-group-id="' + escapeHtml(ws.id) + '" ' +
       'style="left:' + left + 'px;top:' + top + 'px;width:' + width + 'px;height:' + height + 'px">' +
-      '<button type="button" class="ws-map-district-tag" data-ws-id="' + escapeHtml(ws.id) + '">▢ ' +
+      '<button type="button" class="ws-map-district-tag" data-ws-id="' + escapeHtml(ws.id) + '" ' +
+      'aria-label="' + escapeHtml('Open ' + label) + '">▢ ' +
       escapeHtml(ws.name || 'Group') + ' · Group</button>' +
       '</div>'
     );
@@ -275,7 +278,7 @@
     var layout = computeMapLayout(workspaces);
     var parts = [];
     layout.districts.forEach(function (d) { parts.push(districtHTML(d)); });
-    layout.tiles.forEach(function (t) { parts.push(tileHTML(t, selectedId)); });
+    layout.tiles.forEach(function (t, i) { parts.push(tileHTML(t, selectedId, i)); });
 
     // place the "new workspace" pad in the next free cell on the last shelf
     var lastRow = 0;
@@ -287,7 +290,7 @@
 
     var height = PAD * 2 + (lastRow + 1) * CELL_H;
     return {
-      html: '<div class="ws-map-canvas" role="list" aria-label="Workspaces" style="height:' + height + 'px">' +
+      html: '<div class="ws-map-canvas" role="group" aria-label="Workspaces map" style="height:' + height + 'px">' +
         parts.join('') + '</div>',
       empty: layout.tiles.length === 0
     };

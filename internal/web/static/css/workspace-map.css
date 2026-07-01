@@ -173,6 +173,7 @@
   font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; padding: 2px 9px;
 }
 .ws-map-district-tag:hover { background: rgba(232, 134, 77, 0.12); }
+.ws-map-district-tag:focus-visible { outline: 2px solid var(--ws-keeper); outline-offset: 2px; }
 
 /* building tile */
 .ws-map-tile {
@@ -192,8 +193,15 @@
   font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; color: var(--ws-ink-dim);
 }
 .ws-map-led { width: 7px; height: 7px; border-radius: 50%; background: var(--ws-idle); box-shadow: 0 0 7px var(--ws-idle); }
-.ws-map-led.is-working { background: var(--ws-working); box-shadow: 0 0 8px var(--ws-working); animation: ws-map-pulse 1.5s ease-in-out infinite; }
+.ws-map-led.is-working { background: var(--ws-working); box-shadow: 0 0 8px var(--ws-working); }
 @keyframes ws-map-pulse { 50% { opacity: 0.3; } }
+@keyframes ws-map-rise { from { opacity: 0; transform: translateY(10px); } }
+
+/* Auto-playing motion is opt-in via the OS "reduce motion" preference. */
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-tile { animation: ws-map-rise 0.4s ease both; animation-delay: calc(var(--i, 0) * 28ms); }
+  .ws-map-led.is-working { animation: ws-map-pulse 1.5s ease-in-out infinite; }
+}
 .ws-map-tile-crest {
   position: absolute; top: 30px; left: 50%; transform: translateX(-50%); z-index: 4; font-size: 13px; color: #04110c;
   text-shadow: 0 0 3px var(--ws-keeper); pointer-events: none;
