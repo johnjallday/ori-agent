@@ -584,6 +584,8 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 	case strings.HasSuffix(path, ".json"):
 		w.Header().Set("Content-Type", "application/json")
+	case strings.HasSuffix(path, ".woff2"):
+		w.Header().Set("Content-Type", "font/woff2")
 	default:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}

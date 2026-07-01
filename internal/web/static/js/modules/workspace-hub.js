@@ -26,6 +26,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   const LAUNCHER_VIEW_STORAGE_KEY = 'oriWorkspaceHubLauncherView';
   const LAUNCHER_VIEW_CARDS = 'cards';
   const LAUNCHER_VIEW_TREE = 'tree';
+  const LAUNCHER_VIEW_MAP = 'map';
   console.log('[workspace-hub] hubEl exists:', !!hubEl);
   if (!hubEl) return;
 
@@ -104,6 +105,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherTagFilterClear: document.getElementById('launcherTagFilterClear'),
     launcherViewCardsBtn: document.getElementById('launcherViewCards'),
     launcherViewTreeBtn: document.getElementById('launcherViewTree'),
+    launcherViewMapBtn: document.getElementById('launcherViewMap'),
+    launcherMap: document.getElementById('launcherMap'),
+    launcherEmptyState: document.getElementById('launcherEmptyState'),
     launcherWorkspaceRootPath: document.getElementById('launcherWorkspaceRootPath'),
     launcherWorkspaceRootSummary: document.getElementById('launcherWorkspaceRootSummary'),
     launcherWorkspaceRootMeta: document.getElementById('launcherWorkspaceRootMeta'),
@@ -722,9 +726,10 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function normalizeLauncherView(value) {
-    return String(value || '').trim().toLowerCase() === LAUNCHER_VIEW_TREE
-      ? LAUNCHER_VIEW_TREE
-      : LAUNCHER_VIEW_CARDS;
+    const v = String(value || '').trim().toLowerCase();
+    if (v === LAUNCHER_VIEW_TREE) return LAUNCHER_VIEW_TREE;
+    if (v === LAUNCHER_VIEW_MAP) return LAUNCHER_VIEW_MAP;
+    return LAUNCHER_VIEW_CARDS;
   }
 
   function getLauncherViewPreference() {
@@ -764,6 +769,11 @@ console.log('[workspace-hub.js] FILE LOADED');
       const isActive = activeView === LAUNCHER_VIEW_TREE;
       elements.launcherViewTreeBtn.classList.toggle('is-active', isActive);
       elements.launcherViewTreeBtn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+    if (elements.launcherViewMapBtn) {
+      const isActive = activeView === LAUNCHER_VIEW_MAP;
+      elements.launcherViewMapBtn.classList.toggle('is-active', isActive);
+      elements.launcherViewMapBtn.setAttribute('aria-selected', isActive ? 'true' : 'false');
     }
   }
 
@@ -1769,11 +1779,39 @@ console.log('[workspace-hub.js] FILE LOADED');
     const tree = activeTags.size > 0 ? filterWorkspaceTreeByTags(sourceTree, activeTags) : sourceTree;
     const visibleFlattened = activeTags.size > 0 ? flattenWorkspaces(tree) : sourceFlattened;
     updateLauncherViewToggle(launcherActiveView);
+    if (launcherActiveView === LAUNCHER_VIEW_MAP) {
+      setMapContainerActive(true);
+      if (window.OriWorkspaceMap && elements.launcherMap) {
+        window.OriWorkspaceMap.mount(elements.launcherMap, {
+          workspaces: visibleFlattened,
+          tree,
+          selectedId: state.selectedId,
+        });
+      }
+      return;
+    }
+    setMapContainerActive(false);
     if (launcherActiveView === LAUNCHER_VIEW_TREE) {
       renderLauncherTree(visibleFlattened, tree);
       return;
     }
     renderLauncherCards(visibleFlattened, tree);
+  }
+
+  // Toggle visibility between the map container and the cards/tree grid.
+  function setMapContainerActive(active) {
+    if (elements.launcherMap) {
+      elements.launcherMap.hidden = !active;
+    }
+    if (elements.launcherGrid) {
+      elements.launcherGrid.style.display = active ? 'none' : '';
+    }
+    if (active && elements.launcherEmptyState) {
+      elements.launcherEmptyState.style.display = 'none';
+    }
+    if (!active && window.OriWorkspaceMap && elements.launcherMap) {
+      window.OriWorkspaceMap.unmount(elements.launcherMap);
+    }
   }
 
   function rebuildWorkspaceMapFromTree() {
@@ -4234,6 +4272,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherViewTreeBtn) {
       elements.launcherViewTreeBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_TREE));
+    }
+
+    if (elements.launcherViewMapBtn) {
+      elements.launcherViewMapBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_MAP));
     }
 
     if (elements.launcherCancelSelectionBtn) {

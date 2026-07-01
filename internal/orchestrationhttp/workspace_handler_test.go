@@ -8,7 +8,49 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
+
+func TestAddWorkspaceMapFields(t *testing.T) {
+	settings := workspacesettings.DefaultSettings()
+	settings.Workflow.Mode = "direct"
+
+	ws := &workspace.Workspace{
+		Kind:     "group",
+		ParentID: "parent-123",
+		AgentInstances: []workspace.AgentInstance{
+			{Name: "Research Lead", EntryPoint: true},
+			{Name: "Source Scout"},
+		},
+		MCPBindings:   []workspace.WorkspaceMCPBinding{{}, {}},
+		SkillBindings: []workspace.WorkspaceSkillBinding{{}},
+		Tasks: []workspace.Task{
+			{Status: workspace.TaskStatusPending},
+			{Status: workspace.TaskStatusInProgress},
+			{Status: workspace.TaskStatusCompleted},
+		},
+		SharedData: workspacesettings.Store(map[string]any{}, settings),
+	}
+
+	summary := map[string]any{}
+	addWorkspaceMapFields(ws, summary)
+
+	cases := map[string]any{
+		"entry_agent_name": "Research Lead",
+		"kind":             "group",
+		"parent_id":        "parent-123",
+		"mcp_count":        2,
+		"skill_count":      1,
+		"ops_mode":         "direct",
+		"open_task_count":  2, // pending + in_progress, excludes completed
+		"active":           true,
+	}
+	for key, want := range cases {
+		if got := summary[key]; got != want {
+			t.Errorf("summary[%q] = %v (%T), want %v", key, got, got, want)
+		}
+	}
+}
 
 func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	store := workspace.NewInMemoryStore()
