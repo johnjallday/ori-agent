@@ -179,7 +179,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   commandView.render();
 
   assert.match(container.innerHTML, /Workflow · Guided/);
-  assert.match(container.innerHTML, /<div class="ws-l">Tasks<\/div>/);
+  assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">MCP<\/div>/);
   assert.match(container.innerHTML, />Notes<\/h4>/);
   assert.match(container.innerHTML, />Schedules<\/h4>/);
@@ -194,7 +194,12 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
   assert.match(container.innerHTML, /Manage Notes in Command view/);
-  assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Open Tasks|Tools · MCP|Ops mode|Deploy|✦/);
+  // "Open Tasks" is now the deliberate exception: the summary stat chip's
+  // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
+  // reflects the filtered open-task count specifically — the modal title and
+  // per-agent quest-log header stay "Tasks" since those list every task
+  // regardless of status, so "Open Tasks" there would misdescribe them.
+  assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/);
 });
 
 test('stat clicks open the in-place manager modal without leaving Command view', () => {

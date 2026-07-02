@@ -133,10 +133,12 @@ export class WorkspaceCommandView {
     } catch (err) {
       agents = Array.isArray(ws.agent_instances) ? ws.agent_instances.length : 0;
     }
+    // Canonical "open" = pending + in-progress, matching the server-side
+    // open_task_count Map/Cards/Tree all read (see workspace.ComputeMapSummaryFields).
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
     const openTasks = tasks.filter((t) => {
       const s = String((t && t.status) || '').toLowerCase();
-      return s === 'pending' || s === 'in_progress' || s === 'assigned';
+      return s === 'pending' || s === 'in_progress';
     }).length;
     const mcp = Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings.length : 0;
     const skills = Array.isArray(ws.skill_bindings) ? ws.skill_bindings.length : 0;
@@ -177,7 +179,7 @@ export class WorkspaceCommandView {
       '</div>' +
       '<div class="ws-cmd-readout">' +
       statBox(stats.agents, 'Agents', 'agents', 'View agents') +
-      statBox(stats.openTasks, 'Tasks', 'tasks', 'View tasks') +
+      statBox(stats.openTasks, 'Open Tasks', 'tasks', 'View open tasks') +
       statBox(stats.mcp, 'MCP', 'mcp', 'Open MCP settings') +
       statBox(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
       '</div>' +

@@ -96,7 +96,7 @@
 }
 .ws-cmd-stat:hover { border-color: var(--ws-line-bright); background: rgba(70, 211, 154, 0.06); }
 .ws-cmd-stat:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; }
+.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; font-variant-numeric: tabular-nums; }
 .ws-cmd-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
 
 /* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */

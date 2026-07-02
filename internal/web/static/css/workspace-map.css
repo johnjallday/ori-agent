@@ -109,7 +109,7 @@
   min-width: 82px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
 }
-.ws-map-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; }
+.ws-map-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; font-variant-numeric: tabular-nums; }
 .ws-map-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
 
 .ws-map-create {

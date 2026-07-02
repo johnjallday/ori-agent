@@ -3040,6 +3040,19 @@ button.hub-stat[hidden] {
   margin-right: 0.35rem;
 }
 
+/* Canonical "N agents · M open tasks" summary — same shape as the Map tile
+   meta and the Cards summary, so switching views reprojects the same facts. */
+.launcher-tree-meta {
+  flex: 0 0 auto;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-right: 0.35rem;
+}
+
 .launcher-tag-chip--tree {
   min-height: 1.25rem;
   font-size: 0.63rem;
@@ -3626,25 +3639,43 @@ button.hub-stat[hidden] {
 }
 
 .launcher-task-badge {
-  min-width: 1.4rem;
-  height: 1.4rem;
-  padding: 0 0.38rem;
+  min-height: 1.4rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid rgba(31, 107, 78, 0.35);
-  background: rgba(31, 107, 78, 0.16);
-  color: #c7dcff;
+  border: 1px solid rgba(31, 107, 78, 0.32);
+  background: rgba(31, 107, 78, 0.12);
+  color: #155039;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .launcher-task-badge.is-attention {
-  border-color: rgba(239, 68, 68, 0.38);
-  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+/* The badge went from a bare 1-2 digit number to visible "N open" text
+   (task 5.2): the original colors were only ever tuned against the dark
+   card background and were unreadable in light mode. */
+[data-bs-theme="dark"] .launcher-task-badge,
+.dark-mode .launcher-task-badge {
+  border-color: rgba(31, 107, 78, 0.38);
+  background: rgba(31, 107, 78, 0.2);
+  color: #c7dcff;
+}
+
+[data-bs-theme="dark"] .launcher-task-badge.is-attention,
+.dark-mode .launcher-task-badge.is-attention {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.22);
   color: #fca5a5;
 }
 
@@ -3676,15 +3707,44 @@ button.hub-stat[hidden] {
 
 .launcher-card-meta {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem 0.75rem;
   font-size: 0.75rem;
   color: var(--text-muted);
 }
 
-.launcher-card-status {
+/* Idle/Working (task activity) — same vocabulary as the Map LED, replacing
+   the old workspace.Status chip that read "ACTIVE" for nearly every card. */
+.launcher-card-led-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.launcher-card-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.launcher-card-led-status.is-working {
+  color: var(--primary-color);
+}
+
+.launcher-card-led-status.is-working .launcher-card-led {
+  background: var(--primary-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+}
+
+.launcher-card-summary {
+  color: var(--text-muted);
 }
 
 .launcher-empty {

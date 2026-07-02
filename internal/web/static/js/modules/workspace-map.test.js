@@ -130,7 +130,7 @@ test('computeStats sums enriched agent/task counts and counts groups', () => {
   ]);
   assert.equal(stats.workspaces, 3);
   assert.equal(stats.agents, 3);
-  assert.equal(stats.activeTasks, 1);
+  assert.equal(stats.openTasks, 1);
   assert.equal(stats.groups, 1);
 });
 

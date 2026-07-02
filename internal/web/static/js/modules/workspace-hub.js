@@ -343,6 +343,15 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
+  // Canonical "N agents · M open tasks" summary, shared by Cards and Tree
+  // rows so switching views reprojects the same facts instead of changing
+  // the subject (Map already shows the same shape in its tile meta line).
+  function formatWorkspaceSummaryMeta(workspace) {
+    const agents = Number(workspace && workspace.agent_count) || 0;
+    const openTasks = Number(workspace && workspace.open_task_count) || 0;
+    return `${agents} ${agents === 1 ? 'agent' : 'agents'} · ${openTasks} open ${openTasks === 1 ? 'task' : 'tasks'}`;
+  }
+
   // Reads counts straight off the workspace's own enriched summary fields
   // (agent_count/open_task_count/needs_attention_count etc., populated
   // server-side by hydrateWorkspaceMetadataInto) rather than a separately
@@ -361,7 +370,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       ? 'launcher-task-badge is-attention'
       : 'launcher-task-badge';
 
-    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(open))}</span>`;
+    // "N open" rather than a bare number: the count needs a visible unit
+    // label, not just a hover tooltip, to read the same way as the Map/
+    // Command "Open Tasks" stat chips.
+    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(open))} open</span>`;
   }
 
   function normalizeWorkspaceFolderPath(value) {
@@ -1564,8 +1576,12 @@ console.log('[workspace-hub.js] FILE LOADED');
     function renderWorkspaceCard(workspace) {
       const row = flattenedMap.get(workspace.id) || workspace;
       const description = row.description || 'No description yet.';
-      const status = row.status || 'active';
-      const statusLabel = escapeHtml(String(status).replace('_', ' '));
+      // Idle/Working (task activity) replaces the old workspace.Status chip,
+      // which read "ACTIVE" for nearly every workspace regardless of state
+      // and collided with the same word meaning "has a running task"
+      // everywhere else (Map LED, "Open Tasks" stat). Same vocabulary as Map.
+      const isActive = !!row.active;
+      const summaryMeta = formatWorkspaceSummaryMeta(row);
       const accentStyle = row.color ? `style="border-color: ${escapeHtml(row.color)}"` : '';
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
@@ -1623,7 +1639,10 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${tagRow}
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
-            <span class="launcher-card-status status-${escapeHtml(status)}">${statusLabel}</span>
+            <span class="launcher-card-led-status${isActive ? ' is-working' : ''}">
+              <span class="launcher-card-led" aria-hidden="true"></span>${isActive ? 'Working' : 'Idle'}
+            </span>
+            <span class="launcher-card-summary">${escapeHtml(summaryMeta)}</span>
             <span>${row.session_count || 0} sessions</span>
           </div>
         </div>
@@ -1784,6 +1803,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       filterable: true,
       limit: 4
     });
+    // Same canonical summary as Cards/Map; groups aggregate their members'
+    // stats elsewhere (the group header) so this only applies to workspaces.
+    const treeMeta = isGroup ? '' : `<span class="launcher-tree-meta">${escapeHtml(formatWorkspaceSummaryMeta(row))}</span>`;
 
     const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
     const emptyHint = isGroup && children.length === 0
@@ -1802,6 +1824,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${caret}
           ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
           <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
+          ${treeMeta}
           ${tagRow}
           ${deleteButton}
         </div>
@@ -4273,7 +4296,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherWorkspaceRootBrowseBtn) {
       elements.launcherWorkspaceRootBrowseBtn.addEventListener('click', async () => {
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting...');
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting…');
         try {
           await browseLauncherWorkspaceRoot();
         } catch (error) {
@@ -4287,7 +4310,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const handleWorkspaceRootSave = async () => {
       const nextValue = String(elements.launcherWorkspaceRootInput?.value || '').trim();
-      setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving...');
+      setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving…');
       try {
         await saveLauncherWorkspaceRoot(nextValue);
         setLauncherWorkspaceRootEditorOpen(false);
@@ -4319,7 +4342,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           return;
         }
 
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing...');
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing…');
         try {
           await saveLauncherWorkspaceRoot('');
           setLauncherWorkspaceRootEditorOpen(false);

@@ -188,13 +188,13 @@
 
   function computeStats(workspaces) {
     var list = Array.isArray(workspaces) ? workspaces : [];
-    var agents = 0, activeTasks = 0, groups = 0;
+    var agents = 0, openTasks = 0, groups = 0;
     list.forEach(function (ws) {
       agents += Number((ws && ws.agent_count) || 0);
-      activeTasks += Number((ws && ws.open_task_count) || 0);
+      openTasks += Number((ws && ws.open_task_count) || 0);
       if (isGroup(ws)) groups += 1;
     });
-    return { workspaces: list.length, agents: agents, activeTasks: activeTasks, groups: groups };
+    return { workspaces: list.length, agents: agents, openTasks: openTasks, groups: groups };
   }
 
   function statBox(value, label) {
@@ -384,7 +384,7 @@
       '<div class="ws-map-readout">' +
       statBox(stats.workspaces, 'Workspaces') +
       statBox(stats.agents, 'Agents') +
-      statBox(stats.activeTasks, 'Active Tasks') +
+      statBox(stats.openTasks, 'Open Tasks') +
       statBox(stats.groups, 'Groups') +
       '</div>' +
       '<button type="button" class="ws-map-create" data-ws-map-create>⊕ New Workspace</button>' +

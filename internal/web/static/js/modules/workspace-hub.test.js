@@ -444,6 +444,44 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
 });
 
+test('launcher cards show the Idle/Working LED (from enriched active) instead of the workspace.Status chip', () => {
+  const workspaces = [
+    { id: 'workspace-1', kind: 'workspace', name: 'API', status: 'active', active: true, agent_count: 2, open_task_count: 1 },
+    { id: 'workspace-2', kind: 'workspace', name: 'UI', status: 'active', active: false, agent_count: 1, open_task_count: 0 }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.doesNotMatch(launcherGrid.innerHTML, /launcher-card-status/);
+  assert.match(launcherGrid.innerHTML, /launcher-card-led-status is-working"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Working/);
+  assert.match(launcherGrid.innerHTML, /launcher-card-led-status"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Idle/);
+  // Canonical "N agents · M open tasks" summary, same shape as the Map tile meta.
+  assert.match(launcherGrid.innerHTML, /launcher-card-summary">2 agents · 1 open task</);
+  assert.match(launcherGrid.innerHTML, /launcher-card-summary">1 agent · 0 open tasks</);
+});
+
+test('launcher tree rows carry the same canonical summary as Cards, but group rows do not', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', parent_id: 'group-1', agent_count: 3, open_task_count: 2 }]
+    }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherTree(flattened);
+
+  assert.match(launcherGrid.innerHTML, /launcher-tree-meta">3 agents · 2 open tasks</);
+  // Only one tree-meta span should exist — the group row itself gets none.
+  const metaCount = (launcherGrid.innerHTML.match(/launcher-tree-meta"/g) || []).length;
+  assert.equal(metaCount, 1);
+});
+
 test('renderLauncherTaskBadge reads counts straight off the workspace object', () => {
   const { helpers } = loadWorkspaceHub();
 
@@ -453,7 +491,7 @@ test('renderLauncherTaskBadge reads counts straight off the workspace object', (
   const openOnly = helpers.renderLauncherTaskBadge({ open_task_count: 3, needs_attention_count: 0 });
   assert.match(openOnly, /class="launcher-task-badge"/);
   assert.doesNotMatch(openOnly, /is-attention/);
-  assert.match(openOnly, />3</);
+  assert.match(openOnly, />3 open</);
 
   const withAttention = helpers.renderLauncherTaskBadge({ open_task_count: 2, needs_attention_count: 1 });
   assert.match(withAttention, /class="launcher-task-badge is-attention"/);
@@ -470,7 +508,7 @@ test('launcher cards badge sources counts from enriched workspace fields, not a 
 
   helpers.renderLauncherCards(flattened);
 
-  assert.match(launcherGrid.innerHTML, /launcher-task-badge is-attention"[^>]*>2</);
+  assert.match(launcherGrid.innerHTML, /launcher-task-badge is-attention"[^>]*>2 open</);
 });
 
 test('launcher cards render tag chips with filter and remove controls', () => {
