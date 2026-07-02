@@ -22,6 +22,16 @@
   padding-top: 0.75rem;
 }
 
+/* The workspace hub scrolls the document root. Bootstrap Reboot applies
+   :root { scroll-behavior: smooth } under prefers-reduced-motion:no-preference;
+   its rAF-driven animation makes scrolling to the Map view's below-the-fold
+   Overview panel unreliable (wheel/programmatic scrolls fail to land). Instant
+   scrolling lands and holds here, so opt this page out. Scoped via :has() so it
+   only affects the hub, not the rest of the app. */
+html:has(body.home-hub) {
+  scroll-behavior: auto;
+}
+
 .workspace-hub {
   display: flex;
   flex-direction: column;

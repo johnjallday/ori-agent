@@ -101,6 +101,26 @@ test('a member whose parent is missing degrades to a standalone tile', () => {
   assert.equal(layout.tiles[0].groupId, '');
 });
 
+test('computeMaxCols derives the column count from the theatre width', () => {
+  const { computeMaxCols } = loadOriWorkspaceMap();
+  // cells are 176px wide with 26px padding each side (52 total)
+  assert.equal(computeMaxCols(1200), 5); // capped at the desktop max
+  assert.equal(computeMaxCols(930), 4);  // (930-52)/176 = 4.98 -> 4
+  assert.equal(computeMaxCols(700), 3);
+  assert.equal(computeMaxCols(400), 1);
+  assert.equal(computeMaxCols(100), 1);  // never below one column
+  assert.equal(computeMaxCols(0), 5);    // unmeasurable (hidden) -> default
+});
+
+test('narrow column counts wrap tiles into extra rows instead of overflowing', () => {
+  const computeLayout = loadComputeLayout();
+  const five = Array.from({ length: 5 }, (_, i) => ({ id: 'w' + i }));
+  const layout = computeLayout(five, { maxCols: 2 });
+  assert.equal(layout.tiles.length, 5);
+  layout.tiles.forEach((t) => assert.ok(t.col < 2, 'col stays inside the 2-wide grid'));
+  assert.ok(layout.rows >= 3, '5 tiles at 2 cols need at least 3 rows');
+});
+
 test('computeStats sums enriched agent/task counts and counts groups', () => {
   const { computeStats } = loadOriWorkspaceMap();
   const stats = computeStats([
@@ -137,6 +157,17 @@ test('tileHTML LED and entry-agent crest reflect active state and entry_agent_na
   assert.doesNotMatch(idle, /ws-map-tile-crest/);
 });
 
+test('tileHTML advertises select-vs-open affordance via aria-pressed and aria-label', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const unselected = tileHTML({ ws: { id: 'a', name: 'Deep Sea Research' }, col: 0, row: 0 }, '');
+  assert.match(unselected, /aria-pressed="false"/);
+  assert.match(unselected, /Activate to select, double-click to open/);
+
+  const selected = tileHTML({ ws: { id: 'a', name: 'Deep Sea Research' }, col: 0, row: 0 }, 'a');
+  assert.match(selected, /aria-pressed="true"/);
+  assert.match(selected, /Selected — activate to open/);
+});
+
 test('overviewBodyHTML renders entry agent, roster, and tool/skill counts from enriched fields', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({
@@ -157,6 +188,18 @@ test('overviewBodyHTML renders entry agent, roster, and tool/skill counts from e
   assert.match(html, /2 open</);
   assert.match(html, /ws-map-ov-k">Tools · MCP<\/span><span class="ws-map-ov-v">1</);
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
+});
+
+test('overviewBodyHTML puts the primary Open action in the hero row and drops the duplicate cog', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research', entry_agent_name: 'Research Lead', agents: ['Research Lead'] });
+
+  // Open button carries the id the click binding reads, and lives inside the hero row (before the first ov-label).
+  assert.match(html, /class="ws-map-ov-open" data-ws-open="ws-42"/);
+  const heroEnd = html.indexOf('ws-map-ov-label');
+  assert.ok(html.indexOf('ws-map-ov-open') < heroEnd, 'Open button should render in the hero row, above the detail rows');
+  // The redundant settings cog is gone.
+  assert.doesNotMatch(html, /ws-map-ov-cog/);
 });
 
 test('overviewBodyHTML falls back to empty-state copy when a workspace has no entry agent or agents', () => {

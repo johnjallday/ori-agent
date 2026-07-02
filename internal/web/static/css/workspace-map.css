@@ -77,6 +77,9 @@
 /* ---------- command bar ---------- */
 .ws-map-topbar {
   display: flex; align-items: center; gap: 18px;
+  /* Narrow windows: readout + create button wrap below the title instead of
+     overlapping it — the bar has no other width release valve. */
+  flex-wrap: wrap;
   border: 1px solid var(--ws-line);
   background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
   padding: 14px 18px; margin-bottom: 18px;
@@ -100,7 +103,7 @@
 }
 .ws-map-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
 
-.ws-map-readout { display: flex; gap: 10px; }
+.ws-map-readout { display: flex; gap: 10px; flex-wrap: wrap; }
 .ws-map-stat {
   min-width: 82px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
@@ -110,6 +113,7 @@
 
 .ws-map-create {
   align-self: stretch; display: flex; align-items: center; gap: 9px; padding: 0 18px;
+  min-height: 46px; /* keeps its height when flex-wrap puts it on its own row */
   border: 1px solid var(--ws-faction-deep);
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.16), rgba(70, 211, 154, 0.04));
   color: var(--ws-faction); cursor: pointer;
@@ -229,20 +233,32 @@
   border: 1.4px dashed var(--ws-line-bright);
   background: repeating-linear-gradient(45deg, rgba(70, 211, 154, 0.04) 0 8px, transparent 8px 16px);
   clip-path: polygon(50% 4%, 96% 50%, 50% 96%, 4% 50%); transition: 0.15s;
+  /* Tile structs have ~28px of visual headroom above their floor diamond
+     (floor center ≈ 57px down the 92px SVG vs this plate's 30px center);
+     match it so the pad and its label sit on the tiles' baseline grid. */
+  margin-top: 28px;
 }
 .ws-map-pad:hover .ws-map-pad-plate { border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
 .ws-map-pad:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 4px; }
 .ws-map-pad-label {
   margin-top: 6px; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint);
 }
-.ws-map-pad--hero .ws-map-pad-plate { width: 120px; height: 76px; font-size: 30px; }
+.ws-map-pad--hero .ws-map-pad-plate { width: 120px; height: 76px; font-size: 30px; margin-top: 0; }
 .ws-map-pad--hero .ws-map-pad-label { font-size: 11px; }
 
-/* overview panel */
+/* overview panel — sticky so it (and its primary "Open" action) stays on screen
+   beside the map without depending on whole-page scrolling to reach it. The grid
+   parent already sets align-items:start; sticky pins it below the app navbar and
+   caps its height to the viewport, scrolling internally if the roster is long. */
 .ws-map-overview {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); position: relative; min-height: 520px;
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); min-height: 520px;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
   box-shadow: var(--ws-glow);
+  position: sticky;
+  align-self: start;
+  top: calc(var(--navbar-offset, 76px) + 12px);
+  max-height: calc(100vh - var(--navbar-offset, 76px) - 24px);
+  overflow-y: auto;
 }
 .ws-map-overview-head {
   display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--ws-line);
@@ -256,8 +272,10 @@
 }
 .ws-map-overview-empty .ws-big { display: block; font-size: 22px; color: var(--ws-ink-dim); margin-bottom: 10px; }
 
+
 /* populated overview */
 .ws-map-ov-hero { display: flex; gap: 12px; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--ws-line); }
+.ws-map-ov-herometa { flex: 1 1 auto; min-width: 0; }
 .ws-map-ov-ic {
   width: 44px; height: 44px; flex: 0 0 auto; display: grid; place-items: center;
   font-family: var(--ws-font-mono); font-weight: 700; font-size: 13px; color: #04110c;
@@ -294,22 +312,28 @@
 .ws-map-ov-k { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); }
 .ws-map-ov-v { font-family: var(--ws-font-mono); font-size: 12px; color: #dff5ec; }
 
-.ws-map-ov-actions { display: flex; gap: 8px; margin-top: 16px; }
+/* Primary action lives in the hero row (top of the panel) so it stays reachable
+   without scrolling to the bottom. */
 .ws-map-ov-open {
-  flex: 1; text-align: center; padding: 12px; border: 1px solid var(--ws-faction-deep); cursor: pointer;
+  flex: 0 0 auto; align-self: center; text-align: center; padding: 9px 15px; border: 1px solid var(--ws-faction-deep); cursor: pointer;
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.16), rgba(70, 211, 154, 0.04)); color: var(--ws-faction);
-  font-family: var(--ws-font-display); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; transition: 0.15s;
+  font-family: var(--ws-font-display); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; transition: 0.15s; white-space: nowrap;
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 .ws-map-ov-open:hover { background: var(--ws-faction); color: #04110c; }
-.ws-map-ov-cog {
-  width: 46px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
-  color: var(--ws-ink-dim); cursor: pointer; font-size: 15px;
-}
-.ws-map-ov-cog:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-map-ov-open:focus-visible, .ws-map-ov-cog:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-map-ov-open:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 
 @media (max-width: 900px) {
   .ws-map-layout { grid-template-columns: 1fr; }
-  .ws-map-overview { min-height: 0; }
+
+  /* Narrow windows: the overview stays in normal flow, stacked below the map,
+     so plain page scrolling reveals map tiles first and the panel after them.
+     (A fixed bottom-sheet variant was tried and reverted: it occluded the
+     tiles and could never be scrolled out of the way.) */
+  .ws-map-overview {
+    min-height: 0;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
 }
