@@ -44,14 +44,44 @@ export class WorkspaceCommandView {
     if (!this.container || !this.toggleBtn) return;
     this.toggleBtn.hidden = false; // reveal (Phase 1)
     this.toggleBtn.addEventListener('click', () => this.toggle());
+    // The URL wins over localStorage on load; a bare visit (no ?view=) falls
+    // back to the saved preference exactly as before. Bootstrap only reads
+    // the URL — it doesn't rewrite it, so a plain visit stays plain even if
+    // the saved preference is command.
+    const urlView = this.getViewFromURL();
     let pref = '';
     try { pref = localStorage.getItem(STORAGE_KEY) || ''; } catch (err) { pref = ''; }
-    if (pref === 'command') this.activate();
-    else this.deactivate();
+    const initialView = urlView || pref;
+    if (initialView === 'command') this.activate({ syncUrl: false });
+    else this.deactivate({ syncUrl: false });
   }
 
   persist(view) {
     try { localStorage.setItem(STORAGE_KEY, view); } catch (err) { /* storage may be unavailable */ }
+  }
+
+  getViewFromURL() {
+    try {
+      const raw = new URLSearchParams(window.location.search).get('view');
+      return raw === 'command' ? 'command' : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  // Deep-linkable, non-spammy: detailed (the default) drops the param, and
+  // every toggle uses replaceState so switching views never grows history.
+  syncURL(view) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (view === 'command') params.set('view', 'command');
+      else params.delete('view');
+      const query = params.toString();
+      const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+      window.history.replaceState(null, '', nextUrl);
+    } catch (err) {
+      // no-op: history API may be unavailable in some embedding contexts
+    }
   }
 
   toggle() {
@@ -59,22 +89,24 @@ export class WorkspaceCommandView {
     else this.activate();
   }
 
-  activate() {
+  activate({ syncUrl = true } = {}) {
     this.active = true;
     this.render();
     if (this.container) this.container.hidden = false;
     if (this.detailedView) this.detailedView.hidden = true;
     this.updateToggle();
     this.persist('command');
+    if (syncUrl) this.syncURL('command');
   }
 
-  deactivate({ persist = true } = {}) {
+  deactivate({ persist = true, syncUrl = true } = {}) {
     this.active = false;
     this.closeStatModal();
     if (this.container) this.container.hidden = true;
     if (this.detailedView) this.detailedView.hidden = false;
     this.updateToggle();
     if (persist) this.persist('detailed');
+    if (syncUrl) this.syncURL('detailed');
   }
 
   updateToggle() {

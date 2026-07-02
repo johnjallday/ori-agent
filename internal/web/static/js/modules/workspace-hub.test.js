@@ -278,6 +278,7 @@ function loadWorkspaceHub(overrides = {}) {
     localStorage: window.localStorage,
     sessionStorage: window.sessionStorage,
     setTimeout,
+    URLSearchParams,
     window
   };
 
@@ -317,6 +318,58 @@ test('launcher view registers the map view and persists it', () => {
   assert.equal(helpers.normalizeLauncherView('MAP'), 'map');
   assert.equal(helpers.setLauncherViewPreference('map'), 'map');
   assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'map');
+});
+
+test('getLauncherViewFromURL only trusts an explicit, valid ?view= param', () => {
+  const { helpers, window } = loadWorkspaceHub();
+
+  window.location.search = '?view=map';
+  assert.equal(helpers.getLauncherViewFromURL(), 'map');
+
+  window.location.search = '?view=tree';
+  assert.equal(helpers.getLauncherViewFromURL(), 'tree');
+
+  // Garbage should not silently fall back to cards — that would let a typo'd
+  // param mask the user's saved localStorage preference.
+  window.location.search = '?view=bogus';
+  assert.equal(helpers.getLauncherViewFromURL(), null);
+
+  window.location.search = '';
+  assert.equal(helpers.getLauncherViewFromURL(), null);
+});
+
+test('syncLauncherViewToURL omits the param for cards and sets it otherwise, via replaceState', () => {
+  const { helpers, window } = loadWorkspaceHub();
+  window.location.pathname = '/workspaces';
+  window.location.search = '';
+  const calls = [];
+  window.history = { replaceState: (state, title, url) => calls.push(url) };
+
+  helpers.syncLauncherViewToURL('map');
+  assert.deepEqual(calls, ['/workspaces?view=map']);
+
+  window.location.search = '?view=map';
+  helpers.syncLauncherViewToURL('cards');
+  assert.deepEqual(calls, ['/workspaces?view=map', '/workspaces']);
+});
+
+test('setLauncherViewMode syncs the URL for real toggles but not for the initial bootstrap', () => {
+  const { helpers, window } = loadWorkspaceHub();
+  window.location.pathname = '/workspaces';
+  window.location.search = '';
+  const calls = [];
+  window.history = { replaceState: (state, title, url) => calls.push(url) };
+
+  // Bootstrap (initLauncherViewState's call shape): syncUrl:false, render:false.
+  helpers.setLauncherViewMode('map', { persist: false, render: false, syncUrl: false });
+  assert.deepEqual(calls, []);
+
+  // A real toggle-button click uses the defaults and should update the URL.
+  helpers.setLauncherViewMode('tree', { render: false });
+  assert.deepEqual(calls, ['/workspaces?view=tree']);
+
+  helpers.setLauncherViewMode('cards', { render: false });
+  assert.deepEqual(calls, ['/workspaces?view=tree', '/workspaces']);
 });
 
 test('launcher tree renders minimal hierarchy with always-available workspace checkboxes', () => {

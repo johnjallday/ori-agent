@@ -475,3 +475,90 @@ test('default deactivate path still persists detailed preference', () => {
   assert.equal(commandView.container.hidden, true);
   assert.equal(commandView.detailedView.hidden, false);
 });
+
+test('getViewFromURL only trusts an explicit ?view=command param', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = { location: { search: '?view=command' } };
+    assert.equal(commandView.getViewFromURL(), 'command');
+
+    globalThis.window = { location: { search: '?view=detailed' } };
+    assert.equal(commandView.getViewFromURL(), '');
+
+    globalThis.window = { location: { search: '' } };
+    assert.equal(commandView.getViewFromURL(), '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('syncURL sets ?view=command and clears it back to a bare path via replaceState', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const originalWindow = globalThis.window;
+  const replaceStateCalls = [];
+  globalThis.window = {
+    location: { search: '', pathname: '/workspaces/abc' },
+    history: {
+      replaceState(state, title, url) {
+        replaceStateCalls.push(url);
+      }
+    }
+  };
+
+  try {
+    commandView.syncURL('command');
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+
+    globalThis.window.location.search = '?view=command';
+    commandView.syncURL('detailed');
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('activate/deactivate sync the URL by default but bootstrap can opt out', () => {
+  const replaceStateCalls = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: { search: '', pathname: '/workspaces/abc' },
+    history: {
+      replaceState(state, title, url) {
+        replaceStateCalls.push(url);
+      }
+    }
+  };
+  const persisted = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: false,
+    container: { hidden: true },
+    detailedView: { hidden: false },
+    toggleBtn: makeToggleButton(),
+    render() {},
+    persist(value) {
+      persisted.push(value);
+    }
+  });
+
+  try {
+    // Bootstrap path (setup()) passes syncUrl: false — a plain visit must
+    // not gain a ?view= param just because a preference is stored.
+    commandView.activate({ syncUrl: false });
+    assert.deepEqual(replaceStateCalls, []);
+    assert.deepEqual(persisted, ['command']);
+
+    commandView.deactivate({ syncUrl: false });
+    assert.deepEqual(replaceStateCalls, []);
+
+    // Real user toggles (default options) sync the URL via replaceState.
+    commandView.activate();
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+
+    commandView.deactivate();
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

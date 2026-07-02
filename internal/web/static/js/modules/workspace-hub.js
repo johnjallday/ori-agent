@@ -787,13 +787,49 @@ console.log('[workspace-hub.js] FILE LOADED');
     renderLauncherActiveView(flattenWorkspaces(state.workspaces || []));
   }
 
+  // Reads ?view= from the URL, honoring only values normalizeLauncherView
+  // would return unchanged — anything else is silently ignored rather than
+  // falling back to cards (a typo'd param shouldn't override localStorage).
+  function getLauncherViewFromURL() {
+    try {
+      const raw = new URLSearchParams(window.location.search).get('view');
+      if (!raw) return null;
+      const normalized = normalizeLauncherView(raw);
+      return raw.trim().toLowerCase() === normalized ? normalized : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Deep-linkable, non-spammy: cards (the default) has no param at all, and
+  // every toggle uses replaceState so switching views never grows history.
+  function syncLauncherViewToURL(view) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (view === LAUNCHER_VIEW_CARDS) {
+        params.delete('view');
+      } else {
+        params.set('view', view);
+      }
+      const query = params.toString();
+      const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+      window.history.replaceState(null, '', nextUrl);
+    } catch (err) {
+      // no-op: history API may be unavailable in some embedding contexts
+    }
+  }
+
   function setLauncherViewMode(view, options = {}) {
     const shouldPersist = options.persist !== false;
     const shouldRender = options.render !== false;
+    const shouldSyncUrl = options.syncUrl !== false;
     launcherActiveView = shouldPersist
       ? setLauncherViewPreference(view)
       : normalizeLauncherView(view);
     updateLauncherViewToggle(launcherActiveView);
+    if (shouldSyncUrl) {
+      syncLauncherViewToURL(launcherActiveView);
+    }
     if (shouldRender) {
       rerenderLauncherFromState();
     }
@@ -801,7 +837,13 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function initLauncherViewState() {
-    setLauncherViewMode(getLauncherViewPreference(), { persist: false, render: false });
+    // The URL wins over localStorage on load; a bare visit (no ?view=) falls
+    // back to the saved preference exactly as before. Bootstrap only reads
+    // the URL here — it doesn't rewrite it, so a plain /workspaces visit
+    // stays plain even if the saved preference is tree/map.
+    const urlView = getLauncherViewFromURL();
+    const initialView = urlView || getLauncherViewPreference();
+    setLauncherViewMode(initialView, { persist: true, render: false, syncUrl: false });
   }
 
   function navigateToWorkspace(workspaceId) {
@@ -4546,6 +4588,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,
     getLauncherViewPreference,
+    getLauncherViewFromURL,
+    syncLauncherViewToURL,
     bindLauncherTreeKeyboardEvents,
     focusLauncherTreeRow,
     getVisibleLauncherTreeRows,
