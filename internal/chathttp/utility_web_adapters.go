@@ -1216,17 +1216,6 @@ func summarizeText(input string, maxRunes int) string {
 	return truncateRunes(text, maxRunes)
 }
 
-func truncateRunes(input string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(input)
-	if len(runes) <= maxRunes {
-		return input
-	}
-	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a

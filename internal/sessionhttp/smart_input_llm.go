@@ -49,22 +49,7 @@ Guidance:
 		return smartInputHeuristicResult{}, fmt.Errorf("LLM request failed: %w", err)
 	}
 
-	responseText := strings.TrimSpace(resp.Content)
-	if strings.HasPrefix(responseText, "```") {
-		lines := strings.Split(responseText, "\n")
-		var jsonLines []string
-		inJSON := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, "```") {
-				inJSON = !inJSON
-				continue
-			}
-			if inJSON {
-				jsonLines = append(jsonLines, line)
-			}
-		}
-		responseText = strings.Join(jsonLines, "\n")
-	}
+	responseText := llm.StripCodeFence(resp.Content)
 
 	var parsed smartInputLLMResponse
 	if err := json.Unmarshal([]byte(responseText), &parsed); err != nil {

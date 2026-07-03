@@ -156,19 +156,7 @@ func parseCompletionEval(content string) (bool, string, error) {
 
 // stripCodeFences removes markdown code fence wrappers if present.
 func stripCodeFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		// Remove opening fence line
-		if idx := strings.Index(s, "\n"); idx != -1 {
-			s = s[idx+1:]
-		}
-		// Remove closing fence
-		if idx := strings.LastIndex(s, "```"); idx != -1 {
-			s = s[:idx]
-		}
-		s = strings.TrimSpace(s)
-	}
-	return s
+	return llm.StripCodeFence(s)
 }
 
 // truncate limits a string to maxLen characters.

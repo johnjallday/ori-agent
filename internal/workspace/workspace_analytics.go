@@ -79,11 +79,23 @@ func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 	return fields
 }
 
+// busyQueueThreshold is the queued-task count beyond which an agent is
+// reported "busy" regardless of its other activity.
+const busyQueueThreshold = 5
+
 // GetAgentStats returns statistics for all agents in the workspace
 func (w *Workspace) GetAgentStats() map[string]AgentStats {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+	return w.agentStatsLocked()
+}
 
+// agentStatsLocked computes per-agent task statistics. Callers must hold
+// w.mu (read or write). Single implementation shared by GetAgentStats and
+// GetWorkspaceProgress so the status handling cannot drift between them
+// (a previous private copy switched on raw strings and silently missed
+// TaskStatusTimeout).
+func (w *Workspace) agentStatsLocked() map[string]AgentStats {
 	stats := make(map[string]AgentStats)
 
 	// Initialize stats for all agents
@@ -150,7 +162,7 @@ func (w *Workspace) GetAgentStats() map[string]AgentStats {
 
 	// Determine if agent is busy (multiple tasks queued)
 	for agentName, agentStat := range stats {
-		if len(agentStat.QueuedTasks) > 5 {
+		if len(agentStat.QueuedTasks) > busyQueueThreshold {
 			agentStat.Status = "busy"
 			stats[agentName] = agentStat
 		}
@@ -240,7 +252,7 @@ func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
 	}
 
 	// Count active vs idle agents using agent stats
-	agentStats := w.getAgentStatsUnlocked() // Use unlocked version since we already have read lock
+	agentStats := w.agentStatsLocked() // already holding the read lock
 	for _, stats := range agentStats {
 		if stats.Status == "active" || stats.Status == "busy" {
 			progress.ActiveAgents++
@@ -250,88 +262,4 @@ func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
 	}
 
 	return progress
-}
-
-// getAgentStatsUnlocked is the unlocked version of GetAgentStats for internal use
-func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
-	stats := make(map[string]AgentStats)
-
-	// Initialize stats for all agents
-	for _, agentName := range w.agentNamesLocked() {
-		stats[agentName] = AgentStats{
-			Name:            agentName,
-			Status:          "idle",
-			CurrentTasks:    []string{},
-			QueuedTasks:     []string{},
-			CompletedTasks:  0,
-			FailedTasks:     0,
-			TotalExecutions: 0,
-		}
-	}
-
-	// Analyze tasks to populate stats
-	for _, task := range w.Tasks {
-		// Skip unassigned tasks
-		if task.To == "unassigned" || task.To == "" {
-			continue
-		}
-
-		agentStat, exists := stats[task.To]
-		if !exists {
-			continue
-		}
-
-		switch task.Status {
-		case "in_progress":
-			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
-			agentStat.Status = "active"
-			if task.StartedAt != nil {
-				agentStat.LastActive = *task.StartedAt
-			}
-			agentStat.TotalExecutions++
-
-		case "pending", "assigned":
-			agentStat.QueuedTasks = append(agentStat.QueuedTasks, task.ID)
-			// Set status to queued if not already active
-			switch agentStat.Status {
-			case "idle":
-				agentStat.Status = "queued"
-			case "active":
-				agentStat.Status = "busy" // Active with queued tasks
-			}
-
-		case "waiting_for_choice":
-			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
-			if agentStat.Status == "idle" || agentStat.Status == "queued" {
-				agentStat.Status = "waiting"
-			}
-
-		case "completed":
-			agentStat.CompletedTasks++
-			agentStat.TotalExecutions++
-			if task.CompletedAt != nil && !task.CompletedAt.IsZero() && task.CompletedAt.After(agentStat.LastActive) {
-				agentStat.LastActive = *task.CompletedAt
-			}
-
-		case "failed":
-			agentStat.FailedTasks++
-			agentStat.TotalExecutions++
-			agentStat.Status = "error"
-			if task.CompletedAt != nil && !task.CompletedAt.IsZero() && task.CompletedAt.After(agentStat.LastActive) {
-				agentStat.LastActive = *task.CompletedAt
-			}
-		}
-
-		stats[task.To] = agentStat
-	}
-
-	// Determine if agent is busy (multiple tasks queued)
-	for agentName, agentStat := range stats {
-		if len(agentStat.QueuedTasks) > 5 {
-			agentStat.Status = "busy"
-			stats[agentName] = agentStat
-		}
-	}
-
-	return stats
 }

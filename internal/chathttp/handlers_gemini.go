@@ -49,7 +49,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *r
 		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Temperature:  ag.Settings.Temperature,
-		MaxTokens:    4000,
+		MaxTokens:    defaultChatMaxTokens,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
@@ -122,7 +122,7 @@ func (h *Handler) handleGeminiToolCalls(
 					SystemPrompt: systemPrompt,
 					Tools:        tools,
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", nil, err
@@ -139,7 +139,7 @@ func (h *Handler) handleGeminiToolCalls(
 					Messages:     messages,
 					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", err

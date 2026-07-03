@@ -308,22 +308,8 @@ Use "" for category_id if unsure.`, categoryList.String())
 		return nil, fmt.Errorf("LLM returned empty response (finish_reason: %s) - the model may not support this task or the prompt format", resp.FinishReason)
 	}
 
-	// Try to extract JSON if wrapped in markdown code blocks
-	if strings.HasPrefix(responseText, "```") {
-		lines := strings.Split(responseText, "\n")
-		var jsonLines []string
-		inJSON := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, "```") {
-				inJSON = !inJSON
-				continue
-			}
-			if inJSON {
-				jsonLines = append(jsonLines, line)
-			}
-		}
-		responseText = strings.Join(jsonLines, "\n")
-	}
+	// Extract JSON if wrapped in a markdown code fence
+	responseText = llm.StripCodeFence(responseText)
 
 	var aiSuggestions []aiSuggestion
 	if err := json.Unmarshal([]byte(responseText), &aiSuggestions); err != nil {

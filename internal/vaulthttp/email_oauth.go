@@ -3,7 +3,6 @@ package vaulthttp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -333,7 +332,7 @@ func (h *Handler) handleEmailOAuthStart(w http.ResponseWriter, r *http.Request) 
 
 	status, err := h.store.Status(r.Context(), vaultID)
 	if err != nil {
-		writeEmailOAuthPopupResult(w, statusCodeForVaultError(err), emailOAuthPopupPayload{
+		writeEmailOAuthPopupResult(w, vaultErrorStatus(err), emailOAuthPopupPayload{
 			Type:  emailOAuthPopupEventType,
 			Error: err.Error(),
 		})
@@ -356,7 +355,7 @@ func (h *Handler) handleEmailOAuthStart(w http.ResponseWriter, r *http.Request) 
 
 	flow, err := h.buildPendingEmailOAuthFlow(r.Context(), r, provider, vaultID, cfg)
 	if err != nil {
-		writeEmailOAuthPopupResult(w, statusCodeForVaultError(err), emailOAuthPopupPayload{
+		writeEmailOAuthPopupResult(w, vaultErrorStatus(err), emailOAuthPopupPayload{
 			Type:  emailOAuthPopupEventType,
 			Error: err.Error(),
 		})
@@ -422,7 +421,7 @@ func (h *Handler) buildPendingEmailOAuthFlow(ctx context.Context, r *http.Reques
 	if strings.TrimSpace(account.VaultID) != vaultID {
 		return flow, fmt.Errorf("%w: selected email account does not belong to this vault", vault.ErrInvalidEmailAccount)
 	}
-	if normalizeEmailProvider(account.Provider) != normalizeEmailProvider(provider) {
+	if vault.NormalizeEmailProvider(account.Provider) != vault.NormalizeEmailProvider(provider) {
 		return flow, fmt.Errorf("%w: reconnecting an account cannot change providers", vault.ErrInvalidEmailAccount)
 	}
 
@@ -514,7 +513,7 @@ func (h *Handler) handleEmailOAuthCallback(w http.ResponseWriter, r *http.Reques
 
 	account, err := h.persistEmailOAuthAccount(r.Context(), flow, cfg, token)
 	if err != nil {
-		writeEmailOAuthPopupResult(w, statusCodeForVaultError(err), emailOAuthPopupPayload{
+		writeEmailOAuthPopupResult(w, vaultErrorStatus(err), emailOAuthPopupPayload{
 			Type:  emailOAuthPopupEventType,
 			Error: err.Error(),
 		})
@@ -584,19 +583,6 @@ func (h *Handler) persistEmailOAuthAccount(ctx context.Context, flow pendingEmai
 			TokenEndpoint: cfg.tokenURL,
 		},
 	})
-}
-
-func normalizeEmailProvider(provider vault.EmailProvider) vault.EmailProvider {
-	switch strings.ToLower(strings.TrimSpace(string(provider))) {
-	case "gmail":
-		return vault.EmailProviderGmail
-	case "microsoft", "microsoft_mail", "microsoft-mail", "outlook", "outlook_mail", "outlook-mail":
-		return vault.EmailProviderMicrosoft
-	case "imap_smtp", "imap-smtp", "imap", "smtp":
-		return vault.EmailProviderIMAPSMTP
-	default:
-		return vault.EmailProvider(strings.ToLower(strings.TrimSpace(string(provider))))
-	}
 }
 
 func normalizeTags(values []string) []string {
@@ -747,33 +733,6 @@ func writeEmailOAuthPopupResult(w http.ResponseWriter, status int, payload email
 		html.EscapeString(bodyCopy),
 		strings.ReplaceAll(string(data), "</", `<\/`),
 	))
-}
-
-func statusCodeForVaultError(err error) int {
-	switch {
-	case err == nil:
-		return http.StatusOK
-	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, vault.ErrVaultAlreadyExists):
-		return http.StatusConflict
-	case errors.Is(err, vault.ErrPermissionDenied):
-		return http.StatusForbidden
-	case errors.Is(err, vault.ErrVaultPasswordInvalid):
-		return http.StatusUnauthorized
-	case errors.Is(err, vault.ErrVaultLocked):
-		return http.StatusLocked
-	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount):
-		return http.StatusBadRequest
-	case errors.Is(err, vault.ErrImportPasswordInvalid):
-		return http.StatusUnauthorized
-	case errors.Is(err, vault.ErrVaultKeyUnavailable), errors.Is(err, vault.ErrMalformedRecord):
-		return http.StatusInternalServerError
-	case errors.Is(err, vault.ErrSecretStoreUnavailable), errors.Is(err, vault.ErrSecretStoreLocked):
-		return http.StatusServiceUnavailable
-	default:
-		return http.StatusInternalServerError
-	}
 }
 
 func stringPointer(value string) *string {
