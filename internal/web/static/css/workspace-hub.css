@@ -22,6 +22,16 @@
   padding-top: 0.75rem;
 }
 
+/* The workspace hub scrolls the document root. Bootstrap Reboot applies
+   :root { scroll-behavior: smooth } under prefers-reduced-motion:no-preference;
+   its rAF-driven animation makes scrolling to the Map view's below-the-fold
+   Overview panel unreliable (wheel/programmatic scrolls fail to land). Instant
+   scrolling lands and holds here, so opt this page out. Scoped via :has() so it
+   only affects the hub, not the rest of the app. */
+html:has(body.home-hub) {
+  scroll-behavior: auto;
+}
+
 .workspace-hub {
   display: flex;
   flex-direction: column;
@@ -2212,6 +2222,21 @@ button.hub-stat[hidden] {
   flex-wrap: wrap;
 }
 
+/* Map view: the map shell already carries identity, stats, and its own
+   ⊕ New Workspace affordance, so the legacy title/subtitle and the
+   duplicate green Create Workspace button collapse away — leaving one
+   create button in the chrome (the map pad tile) and a slim actions row
+   (Import Folder, view toggle, refresh/rescan/undo). */
+#workspaceHub[data-launcher-view="map"] .launcher-title,
+#workspaceHub[data-launcher-view="map"] .launcher-subtitle,
+#workspaceHub[data-launcher-view="map"] #launcherCreateWorkspaceBtn {
+  display: none;
+}
+
+#workspaceHub[data-launcher-view="map"] .launcher-workspace-root {
+  margin-top: 0;
+}
+
 .launcher-undo-btn {
   position: relative;
 }
@@ -2243,23 +2268,21 @@ button.hub-stat[hidden] {
 }
 
 .launcher-workspace-root {
-  margin-top: 1rem;
-  padding: 1rem 1.05rem;
-  border-radius: 18px;
-  border: 1px solid rgba(92, 92, 94, 0.22);
-  background:
-    radial-gradient(circle at top right, rgba(31, 107, 78, 0.12), transparent 42%),
-    linear-gradient(140deg, rgba(245, 246, 247, 0.97), rgba(201, 204, 209, 0.95));
-  box-shadow:
-    0 14px 28px rgba(79, 55, 32, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  margin-top: 0.85rem;
+}
+
+/* Always-visible one-line summary: badge + truncated path + Edit. The full
+   card (kicker/summary/editor/footer) lives behind .launcher-workspace-root-editor
+   and only appears once Edit is clicked — this panel is persistent config UI
+   that shouldn't consume prime space on every visit. */
+.launcher-workspace-root-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .launcher-workspace-root-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
+  margin-bottom: 0.9rem;
 }
 
 .launcher-workspace-root-kicker {
@@ -2281,8 +2304,7 @@ button.hub-stat[hidden] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2rem;
-  padding: 0.32rem 0.72rem;
+  padding: 0.28rem 0.62rem;
   border-radius: 999px;
   border: 1px solid rgba(92, 92, 94, 0.2);
   background: rgba(255, 252, 247, 0.72);
@@ -2318,17 +2340,14 @@ button.hub-stat[hidden] {
 }
 
 .launcher-workspace-root-path {
-  margin-top: 0.85rem;
-  padding: 0.82rem 0.92rem;
-  border-radius: 14px;
-  background: rgba(255, 252, 247, 0.82);
-  border: 1px solid rgba(92, 92, 94, 0.16);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: "SFMono-Regular", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  color: var(--text-primary);
-  word-break: break-word;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
 }
 
 .launcher-workspace-root-footer {
@@ -2337,19 +2356,12 @@ button.hub-stat[hidden] {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
-  margin-top: 0.75rem;
+  margin-top: 0.9rem;
 }
 
 .launcher-workspace-root-meta {
   font-size: 0.84rem;
   color: var(--text-secondary);
-}
-
-.launcher-workspace-root-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
 }
 
 .launcher-workspace-root-link {
@@ -2366,9 +2378,16 @@ button.hub-stat[hidden] {
 }
 
 .launcher-workspace-root-editor {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid rgba(92, 92, 94, 0.14);
+  margin-top: 0.75rem;
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid rgba(92, 92, 94, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(31, 107, 78, 0.12), transparent 42%),
+    linear-gradient(140deg, rgba(245, 246, 247, 0.97), rgba(201, 204, 209, 0.95));
+  box-shadow:
+    0 14px 28px rgba(79, 55, 32, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
 }
 
 .launcher-workspace-root-editor[hidden] {
@@ -2409,8 +2428,8 @@ button.hub-stat[hidden] {
   padding: 0.08rem 0.34rem;
 }
 
-[data-bs-theme="dark"] .launcher-workspace-root,
-.dark-mode .launcher-workspace-root {
+[data-bs-theme="dark"] .launcher-workspace-root-editor,
+.dark-mode .launcher-workspace-root-editor {
   border: 1px solid rgba(138, 138, 138, 0.18);
   background:
     radial-gradient(circle at top right, rgba(31, 107, 78, 0.14), transparent 42%),
@@ -2466,10 +2485,7 @@ button.hub-stat[hidden] {
 
 [data-bs-theme="dark"] .launcher-workspace-root-path,
 .dark-mode .launcher-workspace-root-path {
-  background: rgba(10, 10, 10, 0.42);
-  border-color: rgba(255, 255, 255, 0.07);
-  box-shadow: none;
-  color: rgba(249, 246, 241, 0.94);
+  color: rgba(214, 214, 214, 0.82);
 }
 
 [data-bs-theme="dark"] .launcher-workspace-root-meta,
@@ -2487,11 +2503,6 @@ button.hub-stat[hidden] {
 .dark-mode .launcher-workspace-root-link:hover,
 .dark-mode .launcher-workspace-root-link:focus-visible {
   color: #3FA275;
-}
-
-[data-bs-theme="dark"] .launcher-workspace-root-editor,
-.dark-mode .launcher-workspace-root-editor {
-  border-top-color: rgba(255, 255, 255, 0.08);
 }
 
 [data-bs-theme="dark"] .launcher-workspace-root-label,
@@ -2756,20 +2767,15 @@ button.hub-stat[hidden] {
 }
 
 @media (max-width: 768px) {
-  .launcher-workspace-root {
+  .launcher-workspace-root-editor {
     padding: 0.95rem;
   }
 
-  .launcher-workspace-root-head,
   .launcher-workspace-root-footer,
   .launcher-workspace-root-editor-row,
   .launcher-workspace-root-editor-actions {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .launcher-workspace-root-actions {
-    width: 100%;
   }
 
   .launcher-workspace-root-input {
@@ -3031,6 +3037,19 @@ button.hub-stat[hidden] {
   flex: 0 0 auto;
   max-width: 12rem;
   overflow: hidden;
+  margin-right: 0.35rem;
+}
+
+/* Canonical "N agents · M open tasks" summary — same shape as the Map tile
+   meta and the Cards summary, so switching views reprojects the same facts. */
+.launcher-tree-meta {
+  flex: 0 0 auto;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-muted);
   margin-right: 0.35rem;
 }
 
@@ -3620,25 +3639,43 @@ button.hub-stat[hidden] {
 }
 
 .launcher-task-badge {
-  min-width: 1.4rem;
-  height: 1.4rem;
-  padding: 0 0.38rem;
+  min-height: 1.4rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid rgba(31, 107, 78, 0.35);
-  background: rgba(31, 107, 78, 0.16);
-  color: #c7dcff;
+  border: 1px solid rgba(31, 107, 78, 0.32);
+  background: rgba(31, 107, 78, 0.12);
+  color: #155039;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .launcher-task-badge.is-attention {
-  border-color: rgba(239, 68, 68, 0.38);
-  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+/* The badge went from a bare 1-2 digit number to visible "N open" text
+   (task 5.2): the original colors were only ever tuned against the dark
+   card background and were unreadable in light mode. */
+[data-bs-theme="dark"] .launcher-task-badge,
+.dark-mode .launcher-task-badge {
+  border-color: rgba(31, 107, 78, 0.38);
+  background: rgba(31, 107, 78, 0.2);
+  color: #c7dcff;
+}
+
+[data-bs-theme="dark"] .launcher-task-badge.is-attention,
+.dark-mode .launcher-task-badge.is-attention {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.22);
   color: #fca5a5;
 }
 
@@ -3670,15 +3707,44 @@ button.hub-stat[hidden] {
 
 .launcher-card-meta {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem 0.75rem;
   font-size: 0.75rem;
   color: var(--text-muted);
 }
 
-.launcher-card-status {
+/* Idle/Working (task activity) — same vocabulary as the Map LED, replacing
+   the old workspace.Status chip that read "ACTIVE" for nearly every card. */
+.launcher-card-led-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.launcher-card-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.launcher-card-led-status.is-working {
+  color: var(--primary-color);
+}
+
+.launcher-card-led-status.is-working .launcher-card-led {
+  background: var(--primary-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+}
+
+.launcher-card-summary {
+  color: var(--text-muted);
 }
 
 .launcher-empty {

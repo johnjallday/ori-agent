@@ -179,7 +179,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   commandView.render();
 
   assert.match(container.innerHTML, /Workflow · Guided/);
-  assert.match(container.innerHTML, /<div class="ws-l">Tasks<\/div>/);
+  assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">MCP<\/div>/);
   assert.match(container.innerHTML, />Notes<\/h4>/);
   assert.match(container.innerHTML, />Schedules<\/h4>/);
@@ -194,7 +194,12 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
   assert.match(container.innerHTML, /Manage Notes in Command view/);
-  assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Open Tasks|Tools · MCP|Ops mode|Deploy|✦/);
+  // "Open Tasks" is now the deliberate exception: the summary stat chip's
+  // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
+  // reflects the filtered open-task count specifically — the modal title and
+  // per-agent quest-log header stay "Tasks" since those list every task
+  // regardless of status, so "Open Tasks" there would misdescribe them.
+  assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/);
 });
 
 test('stat clicks open the in-place manager modal without leaving Command view', () => {
@@ -474,4 +479,91 @@ test('default deactivate path still persists detailed preference', () => {
   assert.deepEqual(persisted, ['detailed']);
   assert.equal(commandView.container.hidden, true);
   assert.equal(commandView.detailedView.hidden, false);
+});
+
+test('getViewFromURL only trusts an explicit ?view=command param', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = { location: { search: '?view=command' } };
+    assert.equal(commandView.getViewFromURL(), 'command');
+
+    globalThis.window = { location: { search: '?view=detailed' } };
+    assert.equal(commandView.getViewFromURL(), '');
+
+    globalThis.window = { location: { search: '' } };
+    assert.equal(commandView.getViewFromURL(), '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('syncURL sets ?view=command and clears it back to a bare path via replaceState', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const originalWindow = globalThis.window;
+  const replaceStateCalls = [];
+  globalThis.window = {
+    location: { search: '', pathname: '/workspaces/abc' },
+    history: {
+      replaceState(state, title, url) {
+        replaceStateCalls.push(url);
+      }
+    }
+  };
+
+  try {
+    commandView.syncURL('command');
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+
+    globalThis.window.location.search = '?view=command';
+    commandView.syncURL('detailed');
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('activate/deactivate sync the URL by default but bootstrap can opt out', () => {
+  const replaceStateCalls = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: { search: '', pathname: '/workspaces/abc' },
+    history: {
+      replaceState(state, title, url) {
+        replaceStateCalls.push(url);
+      }
+    }
+  };
+  const persisted = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: false,
+    container: { hidden: true },
+    detailedView: { hidden: false },
+    toggleBtn: makeToggleButton(),
+    render() {},
+    persist(value) {
+      persisted.push(value);
+    }
+  });
+
+  try {
+    // Bootstrap path (setup()) passes syncUrl: false — a plain visit must
+    // not gain a ?view= param just because a preference is stored.
+    commandView.activate({ syncUrl: false });
+    assert.deepEqual(replaceStateCalls, []);
+    assert.deepEqual(persisted, ['command']);
+
+    commandView.deactivate({ syncUrl: false });
+    assert.deepEqual(replaceStateCalls, []);
+
+    // Real user toggles (default options) sync the URL via replaceState.
+    commandView.activate();
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+
+    commandView.deactivate();
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });

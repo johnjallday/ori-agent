@@ -278,6 +278,7 @@ function loadWorkspaceHub(overrides = {}) {
     localStorage: window.localStorage,
     sessionStorage: window.sessionStorage,
     setTimeout,
+    URLSearchParams,
     window
   };
 
@@ -317,6 +318,58 @@ test('launcher view registers the map view and persists it', () => {
   assert.equal(helpers.normalizeLauncherView('MAP'), 'map');
   assert.equal(helpers.setLauncherViewPreference('map'), 'map');
   assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'map');
+});
+
+test('getLauncherViewFromURL only trusts an explicit, valid ?view= param', () => {
+  const { helpers, window } = loadWorkspaceHub();
+
+  window.location.search = '?view=map';
+  assert.equal(helpers.getLauncherViewFromURL(), 'map');
+
+  window.location.search = '?view=tree';
+  assert.equal(helpers.getLauncherViewFromURL(), 'tree');
+
+  // Garbage should not silently fall back to cards — that would let a typo'd
+  // param mask the user's saved localStorage preference.
+  window.location.search = '?view=bogus';
+  assert.equal(helpers.getLauncherViewFromURL(), null);
+
+  window.location.search = '';
+  assert.equal(helpers.getLauncherViewFromURL(), null);
+});
+
+test('syncLauncherViewToURL omits the param for cards and sets it otherwise, via replaceState', () => {
+  const { helpers, window } = loadWorkspaceHub();
+  window.location.pathname = '/workspaces';
+  window.location.search = '';
+  const calls = [];
+  window.history = { replaceState: (state, title, url) => calls.push(url) };
+
+  helpers.syncLauncherViewToURL('map');
+  assert.deepEqual(calls, ['/workspaces?view=map']);
+
+  window.location.search = '?view=map';
+  helpers.syncLauncherViewToURL('cards');
+  assert.deepEqual(calls, ['/workspaces?view=map', '/workspaces']);
+});
+
+test('setLauncherViewMode syncs the URL for real toggles but not for the initial bootstrap', () => {
+  const { helpers, window } = loadWorkspaceHub();
+  window.location.pathname = '/workspaces';
+  window.location.search = '';
+  const calls = [];
+  window.history = { replaceState: (state, title, url) => calls.push(url) };
+
+  // Bootstrap (initLauncherViewState's call shape): syncUrl:false, render:false.
+  helpers.setLauncherViewMode('map', { persist: false, render: false, syncUrl: false });
+  assert.deepEqual(calls, []);
+
+  // A real toggle-button click uses the defaults and should update the URL.
+  helpers.setLauncherViewMode('tree', { render: false });
+  assert.deepEqual(calls, ['/workspaces?view=tree']);
+
+  helpers.setLauncherViewMode('cards', { render: false });
+  assert.deepEqual(calls, ['/workspaces?view=tree', '/workspaces']);
 });
 
 test('launcher tree renders minimal hierarchy with always-available workspace checkboxes', () => {
@@ -389,6 +442,73 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.match(launcherGrid.innerHTML, /launcher-card-item launcher-group-header has-selection-checkbox/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
+});
+
+test('launcher cards show the Idle/Working LED (from enriched active) instead of the workspace.Status chip', () => {
+  const workspaces = [
+    { id: 'workspace-1', kind: 'workspace', name: 'API', status: 'active', active: true, agent_count: 2, open_task_count: 1 },
+    { id: 'workspace-2', kind: 'workspace', name: 'UI', status: 'active', active: false, agent_count: 1, open_task_count: 0 }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.doesNotMatch(launcherGrid.innerHTML, /launcher-card-status/);
+  assert.match(launcherGrid.innerHTML, /launcher-card-led-status is-working"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Working/);
+  assert.match(launcherGrid.innerHTML, /launcher-card-led-status"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Idle/);
+  // Canonical "N agents · M open tasks" summary, same shape as the Map tile meta.
+  assert.match(launcherGrid.innerHTML, /launcher-card-summary">2 agents · 1 open task</);
+  assert.match(launcherGrid.innerHTML, /launcher-card-summary">1 agent · 0 open tasks</);
+});
+
+test('launcher tree rows carry the same canonical summary as Cards, but group rows do not', () => {
+  const workspaces = [
+    {
+      id: 'group-1',
+      kind: 'group',
+      name: 'Platform',
+      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', parent_id: 'group-1', agent_count: 3, open_task_count: 2 }]
+    }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherTree(flattened);
+
+  assert.match(launcherGrid.innerHTML, /launcher-tree-meta">3 agents · 2 open tasks</);
+  // Only one tree-meta span should exist — the group row itself gets none.
+  const metaCount = (launcherGrid.innerHTML.match(/launcher-tree-meta"/g) || []).length;
+  assert.equal(metaCount, 1);
+});
+
+test('renderLauncherTaskBadge reads counts straight off the workspace object', () => {
+  const { helpers } = loadWorkspaceHub();
+
+  assert.equal(helpers.renderLauncherTaskBadge(null), '');
+  assert.equal(helpers.renderLauncherTaskBadge({ open_task_count: 0 }), '');
+
+  const openOnly = helpers.renderLauncherTaskBadge({ open_task_count: 3, needs_attention_count: 0 });
+  assert.match(openOnly, /class="launcher-task-badge"/);
+  assert.doesNotMatch(openOnly, /is-attention/);
+  assert.match(openOnly, />3 open</);
+
+  const withAttention = helpers.renderLauncherTaskBadge({ open_task_count: 2, needs_attention_count: 1 });
+  assert.match(withAttention, /class="launcher-task-badge is-attention"/);
+  assert.match(withAttention, /1 need attention/);
+});
+
+test('launcher cards badge sources counts from enriched workspace fields, not a fetched map', () => {
+  const workspaces = [
+    { id: 'workspace-1', kind: 'workspace', name: 'API', open_task_count: 2, needs_attention_count: 1 },
+    { id: 'workspace-2', kind: 'workspace', name: 'UI', open_task_count: 0 }
+  ];
+  const flattened = flattenWorkspaces(workspaces);
+  const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
+
+  helpers.renderLauncherCards(flattened);
+
+  assert.match(launcherGrid.innerHTML, /launcher-task-badge is-attention"[^>]*>2 open</);
 });
 
 test('launcher cards render tag chips with filter and remove controls', () => {

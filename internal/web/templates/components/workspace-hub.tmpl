@@ -6,24 +6,18 @@
           <h2 class="launcher-title">Choose a workspace</h2>
           <p class="launcher-subtitle">Start with tasks and schedules, then open chat when needed.</p>
           <div id="launcherWorkspaceRootPanel" class="launcher-workspace-root" aria-live="polite">
-            <div class="launcher-workspace-root-head">
-              <div>
-                <div class="launcher-workspace-root-kicker">Default Workspace Directory</div>
-                <div id="launcherWorkspaceRootSummary" class="launcher-workspace-root-summary">Loading workspace directory...</div>
-              </div>
+            <div class="launcher-workspace-root-collapsed">
               <span id="launcherWorkspaceRootBadge" class="launcher-workspace-root-badge is-loading">Loading</span>
-            </div>
-            <div id="launcherWorkspaceRootPath" class="launcher-workspace-root-path">Fetching current workspace location...</div>
-            <div class="launcher-workspace-root-footer">
-              <span id="launcherWorkspaceRootMeta" class="launcher-workspace-root-meta">New workspaces will be created here.</span>
-              <div class="launcher-workspace-root-actions">
-                <button id="launcherWorkspaceRootEditBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherWorkspaceRootEditor">
-                  Edit
-                </button>
-                <a href="/settings" class="launcher-workspace-root-link">Manage in Settings</a>
-              </div>
+              <span id="launcherWorkspaceRootPath" class="launcher-workspace-root-path" title="">Fetching current workspace location…</span>
+              <button id="launcherWorkspaceRootEditBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherWorkspaceRootEditor">
+                Edit
+              </button>
             </div>
             <div id="launcherWorkspaceRootEditor" class="launcher-workspace-root-editor" hidden>
+              <div class="launcher-workspace-root-head">
+                <div class="launcher-workspace-root-kicker">Default Workspace Directory</div>
+                <div id="launcherWorkspaceRootSummary" class="launcher-workspace-root-summary">Loading workspace directory…</div>
+              </div>
               <label for="launcherWorkspaceRootInput" class="launcher-workspace-root-label">Workspace directory</label>
               <div class="launcher-workspace-root-editor-row">
                 <input id="launcherWorkspaceRootInput" class="modern-input launcher-workspace-root-input" type="text" placeholder="/absolute/path/to/workspaces" autocomplete="off" spellcheck="false">
@@ -31,6 +25,10 @@
               </div>
               <div class="launcher-workspace-root-editor-help">
                 This affects where new workspaces are created. Clearing the custom path falls back to <code>WORKSPACE_DIR</code> or the built-in default.
+              </div>
+              <div class="launcher-workspace-root-footer">
+                <span id="launcherWorkspaceRootMeta" class="launcher-workspace-root-meta">New workspaces will be created here.</span>
+                <a href="/settings" class="launcher-workspace-root-link">Manage in Settings</a>
               </div>
               <div class="launcher-workspace-root-editor-actions">
                 <button id="launcherWorkspaceRootCancelBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Cancel</button>
@@ -154,7 +152,7 @@
               <p class="launcher-overview-subtitle">Track ongoing work, scheduled runs, and open sessions across all workspaces.</p>
             </div>
             <div class="launcher-overview-header-actions">
-              <span class="launcher-overview-updated" id="launcherOverviewUpdatedAt">Loading...</span>
+              <span class="launcher-overview-updated" id="launcherOverviewUpdatedAt">Loading…</span>
               <button id="launcherOverviewToggleBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherOverviewDetails">
                 Show Details
               </button>
@@ -190,25 +188,25 @@
             <div class="launcher-overview-column">
               <h4 class="launcher-overview-column-title">By Workspace</h4>
               <div class="launcher-overview-list" id="launcherOverviewByWorkspace">
-                <div class="hub-loading">Loading overview...</div>
+                <div class="hub-loading">Loading overview…</div>
               </div>
             </div>
             <div class="launcher-overview-column">
               <h4 class="launcher-overview-column-title">Ongoing Tasks</h4>
               <div class="launcher-overview-list" id="launcherOverviewTopTasks">
-                <div class="hub-loading">Loading ongoing tasks...</div>
+                <div class="hub-loading">Loading ongoing tasks…</div>
               </div>
             </div>
             <div class="launcher-overview-column">
               <h4 class="launcher-overview-column-title">Scheduled Tasks</h4>
               <div class="launcher-overview-list" id="launcherOverviewScheduledTasks">
-                <div class="hub-loading">Loading scheduled tasks...</div>
+                <div class="hub-loading">Loading scheduled tasks…</div>
               </div>
             </div>
             <div class="launcher-overview-column">
               <h4 class="launcher-overview-column-title">Open Sessions</h4>
               <div class="launcher-overview-list" id="launcherOverviewOpenSessionsList">
-                <div class="hub-loading">Loading open sessions...</div>
+                <div class="hub-loading">Loading open sessions…</div>
               </div>
             </div>
           </div>
@@ -430,7 +428,7 @@
             <div class="hub-task-filter-chips" id="hubTaskFilterChips" role="group" aria-label="Filter tasks by status"></div>
           </div>
           <div id="hubTasksList" class="hub-task-list">
-            <div class="hub-loading">Loading tasks...</div>
+            <div class="hub-loading">Loading tasks…</div>
           </div>
         </div>
       </div>
@@ -628,14 +626,14 @@
       </div>
       <div class="hub-board-loading" id="hubBoardLoading" hidden>
         <div class="hub-loading-spinner"></div>
-        <span>Loading board...</span>
+        <span>Loading board…</span>
       </div>
     </div>
   </div>
 
   <div class="workspace-hub-loading" id="workspaceHubLoading">
     <div class="hub-loading-spinner"></div>
-    <span>Loading workspace data...</span>
+    <span>Loading workspace data…</span>
   </div>
 
   <!-- Panel expansion backdrop -->
@@ -652,7 +650,7 @@
           <div class="hub-progress-status">
             <div class="hub-loading-spinner" aria-hidden="true"></div>
             <div>
-              <div class="hub-progress-title" id="hubSmartInputProgressHeadline">Working...</div>
+              <div class="hub-progress-title" id="hubSmartInputProgressHeadline">Working…</div>
               <div class="hub-progress-subtitle" id="hubSmartInputProgressMessage">Analyzing your request.</div>
             </div>
           </div>
@@ -796,7 +794,7 @@
           <!-- Upload Progress -->
           <div id="hubFileUploadProgress" class="hub-file-upload-progress" style="display: none;">
             <div class="d-flex justify-content-between align-items-center mb-2">
-              <span style="color: var(--text-primary);">Uploading...</span>
+              <span style="color: var(--text-primary);">Uploading…</span>
               <span id="hubFileUploadPercent" style="color: var(--text-secondary);">0%</span>
             </div>
             <div class="progress">

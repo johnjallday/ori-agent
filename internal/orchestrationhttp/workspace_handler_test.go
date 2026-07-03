@@ -11,6 +11,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
+// TestAddWorkspaceMapFields covers the map-summary keys via addWorkspaceMapFields,
+// which now delegates to workspace.ComputeMapSummaryFields (see
+// TestComputeMapSummaryFields in internal/workspace for the field-derivation
+// logic itself); this test guards the summary-map wiring stays intact.
 func TestAddWorkspaceMapFields(t *testing.T) {
 	settings := workspacesettings.DefaultSettings()
 	settings.Workflow.Mode = "direct"

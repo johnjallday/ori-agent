@@ -28,18 +28,19 @@
 }
 
 .ws-map {
-  /* surface */
-  --ws-bg: #070b0c;
-  --ws-bg-2: #0b1113;
-  --ws-panel: #0e1618;
-  --ws-panel-2: #101e1f;
-  --ws-line: #1c2e2c;
-  --ws-line-bright: #28413c;
+  /* surface — neutral charcoal, matching the app shell's dark theme family
+     (#0A0A0A → #1F2128 → #2A2C33); green stays an ACCENT, not a surface cast */
+  --ws-bg: #0c0d10;
+  --ws-bg-2: #121317;
+  --ws-panel: #16181d;
+  --ws-panel-2: #1a1d23;
+  --ws-line: #262931;
+  --ws-line-bright: #363a45;
 
   /* ink */
-  --ws-ink: #cfe8df;
-  --ws-ink-dim: #7f998f;
-  --ws-ink-faint: #4d655d;
+  --ws-ink: #d6d9de;
+  --ws-ink-dim: #8b909a;
+  --ws-ink-faint: #5a5f6a;
 
   /* semantic accents */
   --ws-faction: #46d39a;
@@ -53,7 +54,7 @@
   /* geometry */
   --ws-clip: 14px;
   --ws-clip-sm: 8px;
-  --ws-glow: 0 0 0 1px rgba(70, 211, 154, 0.12), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+  --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
 
   /* type */
   --ws-font-display: 'Chakra Petch', system-ui, sans-serif;
@@ -77,6 +78,9 @@
 /* ---------- command bar ---------- */
 .ws-map-topbar {
   display: flex; align-items: center; gap: 18px;
+  /* Narrow windows: readout + create button wrap below the title instead of
+     overlapping it — the bar has no other width release valve. */
+  flex-wrap: wrap;
   border: 1px solid var(--ws-line);
   background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
   padding: 14px 18px; margin-bottom: 18px;
@@ -96,20 +100,21 @@
   width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg);
 }
 .ws-map-title h2 {
-  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1.5px; text-transform: uppercase; color: #eafff5;
+  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1.5px; text-transform: uppercase; color: #eef0f3;
 }
 .ws-map-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
 
-.ws-map-readout { display: flex; gap: 10px; }
+.ws-map-readout { display: flex; gap: 10px; flex-wrap: wrap; }
 .ws-map-stat {
   min-width: 82px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
 }
-.ws-map-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eafff5; line-height: 1; }
+.ws-map-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; font-variant-numeric: tabular-nums; }
 .ws-map-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
 
 .ws-map-create {
   align-self: stretch; display: flex; align-items: center; gap: 9px; padding: 0 18px;
+  min-height: 46px; /* keeps its height when flex-wrap puts it on its own row */
   border: 1px solid var(--ws-faction-deep);
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.16), rgba(70, 211, 154, 0.04));
   color: var(--ws-faction); cursor: pointer;
@@ -126,17 +131,17 @@
 .ws-map-theatre {
   position: relative; border: 1px solid var(--ws-line); min-height: 520px; overflow: hidden; padding: 44px 0 10px;
   background:
-    radial-gradient(120% 100% at 30% 20%, rgba(70, 211, 154, 0.05), transparent 55%),
-    radial-gradient(90% 90% at 85% 90%, rgba(123, 108, 240, 0.05), transparent 55%),
-    linear-gradient(180deg, #0a1213, #070d0e);
+    radial-gradient(120% 100% at 30% 20%, rgba(255, 255, 255, 0.025), transparent 55%),
+    radial-gradient(90% 90% at 85% 90%, rgba(123, 108, 240, 0.04), transparent 55%),
+    linear-gradient(180deg, #121419, #0d0e11);
   clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
   box-shadow: var(--ws-glow);
 }
 .ws-map-theatre::before {
   content: ""; position: absolute; inset: 0; opacity: 0.55;
   background-image:
-    linear-gradient(rgba(70, 211, 154, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(70, 211, 154, 0.045) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.038) 1px, transparent 1px);
   background-size: 38px 38px;
   -webkit-mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
   mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
@@ -146,7 +151,7 @@
   font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-faction);
   border: 1px solid var(--ws-faction-deep); padding: 2px 6px;
 }
-.ws-map-theatre-tag h3 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #dff5ec; }
+.ws-map-theatre-tag h3 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #e3e6ea; }
 .ws-map-compass {
   position: absolute; top: 14px; right: 16px; z-index: 6; width: 40px; height: 40px; display: grid; place-items: center;
   border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
@@ -168,7 +173,7 @@
   background: rgba(232, 134, 77, 0.04); border-radius: 16px;
 }
 .ws-map-district-tag {
-  position: absolute; top: -11px; left: 16px; border: 1px solid rgba(232, 134, 77, 0.35); background: #0a1213;
+  position: absolute; top: -11px; left: 16px; border: 1px solid rgba(232, 134, 77, 0.35); background: var(--ws-bg-2);
   color: var(--ws-keeper); cursor: pointer;
   font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; padding: 2px 9px;
 }
@@ -207,7 +212,7 @@
   text-shadow: 0 0 3px var(--ws-keeper); pointer-events: none;
 }
 .ws-map-tile-name {
-  margin-top: 2px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #eafff5;
+  margin-top: 2px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #eef0f3;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-map-tile-type {
@@ -215,7 +220,7 @@
 }
 .ws-map-tile-meta {
   margin-top: 5px; font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-ink-dim);
-  border: 1px solid var(--ws-line); background: rgba(7, 13, 14, 0.85); padding: 3px 9px;
+  border: 1px solid var(--ws-line); background: rgba(13, 14, 17, 0.85); padding: 3px 9px;
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 
@@ -229,26 +234,38 @@
   border: 1.4px dashed var(--ws-line-bright);
   background: repeating-linear-gradient(45deg, rgba(70, 211, 154, 0.04) 0 8px, transparent 8px 16px);
   clip-path: polygon(50% 4%, 96% 50%, 50% 96%, 4% 50%); transition: 0.15s;
+  /* Tile structs have ~28px of visual headroom above their floor diamond
+     (floor center ≈ 57px down the 92px SVG vs this plate's 30px center);
+     match it so the pad and its label sit on the tiles' baseline grid. */
+  margin-top: 28px;
 }
 .ws-map-pad:hover .ws-map-pad-plate { border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
 .ws-map-pad:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 4px; }
 .ws-map-pad-label {
   margin-top: 6px; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint);
 }
-.ws-map-pad--hero .ws-map-pad-plate { width: 120px; height: 76px; font-size: 30px; }
+.ws-map-pad--hero .ws-map-pad-plate { width: 120px; height: 76px; font-size: 30px; margin-top: 0; }
 .ws-map-pad--hero .ws-map-pad-label { font-size: 11px; }
 
-/* overview panel */
+/* overview panel — sticky so it (and its primary "Open" action) stays on screen
+   beside the map without depending on whole-page scrolling to reach it. The grid
+   parent already sets align-items:start; sticky pins it below the app navbar and
+   caps its height to the viewport, scrolling internally if the roster is long. */
 .ws-map-overview {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); position: relative; min-height: 520px;
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014); min-height: 520px;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
   box-shadow: var(--ws-glow);
+  position: sticky;
+  align-self: start;
+  top: calc(var(--navbar-offset, 76px) + 12px);
+  max-height: calc(100vh - var(--navbar-offset, 76px) - 24px);
+  overflow-y: auto;
 }
 .ws-map-overview-head {
   display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--ws-line);
 }
 .ws-map-overview-head h3 {
-  margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #dff5ec; display: inline;
+  margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: #e3e6ea; display: inline;
 }
 .ws-map-overview-body { padding: 16px; }
 .ws-map-overview-empty {
@@ -256,15 +273,17 @@
 }
 .ws-map-overview-empty .ws-big { display: block; font-size: 22px; color: var(--ws-ink-dim); margin-bottom: 10px; }
 
+
 /* populated overview */
 .ws-map-ov-hero { display: flex; gap: 12px; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--ws-line); }
+.ws-map-ov-herometa { flex: 1 1 auto; min-width: 0; }
 .ws-map-ov-ic {
   width: 44px; height: 44px; flex: 0 0 auto; display: grid; place-items: center;
   font-family: var(--ws-font-mono); font-weight: 700; font-size: 13px; color: #04110c;
   background: linear-gradient(150deg, var(--av, var(--ws-faction)), color-mix(in srgb, var(--av, var(--ws-faction)) 55%, #000));
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
-.ws-map-ov-name { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #f1fff8; }
+.ws-map-ov-name { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #f3f5f8; }
 .ws-map-ov-tag { font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 3px; }
 
 .ws-map-ov-label {
@@ -274,7 +293,7 @@
 .ws-map-ov-none { font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); }
 
 .ws-map-ov-keeper { display: flex; align-items: center; gap: 10px; }
-.ws-map-ov-keeper-name { font-size: 13px; color: #eafff5; }
+.ws-map-ov-keeper-name { font-size: 13px; color: #eef0f3; }
 .ws-map-ov-keeper-badge { font-family: var(--ws-font-mono); font-size: 8.5px; letter-spacing: 1px; color: var(--ws-keeper); margin-top: 2px; }
 
 .ws-map-ov-roster { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -292,24 +311,30 @@
 }
 .ws-map-ov-row:first-of-type { border-top: 1px solid var(--ws-line); }
 .ws-map-ov-k { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); }
-.ws-map-ov-v { font-family: var(--ws-font-mono); font-size: 12px; color: #dff5ec; }
+.ws-map-ov-v { font-family: var(--ws-font-mono); font-size: 12px; color: #e3e6ea; }
 
-.ws-map-ov-actions { display: flex; gap: 8px; margin-top: 16px; }
+/* Primary action lives in the hero row (top of the panel) so it stays reachable
+   without scrolling to the bottom. */
 .ws-map-ov-open {
-  flex: 1; text-align: center; padding: 12px; border: 1px solid var(--ws-faction-deep); cursor: pointer;
+  flex: 0 0 auto; align-self: center; text-align: center; padding: 9px 15px; border: 1px solid var(--ws-faction-deep); cursor: pointer;
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.16), rgba(70, 211, 154, 0.04)); color: var(--ws-faction);
-  font-family: var(--ws-font-display); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; transition: 0.15s;
+  font-family: var(--ws-font-display); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; transition: 0.15s; white-space: nowrap;
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 .ws-map-ov-open:hover { background: var(--ws-faction); color: #04110c; }
-.ws-map-ov-cog {
-  width: 46px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
-  color: var(--ws-ink-dim); cursor: pointer; font-size: 15px;
-}
-.ws-map-ov-cog:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-map-ov-open:focus-visible, .ws-map-ov-cog:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-map-ov-open:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 
 @media (max-width: 900px) {
   .ws-map-layout { grid-template-columns: 1fr; }
-  .ws-map-overview { min-height: 0; }
+
+  /* Narrow windows: the overview stays in normal flow, stacked below the map,
+     so plain page scrolling reveals map tiles first and the panel after them.
+     (A fixed bottom-sheet variant was tried and reverted: it occluded the
+     tiles and could never be scrolled out of the way.) */
+  .ws-map-overview {
+    min-height: 0;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
 }

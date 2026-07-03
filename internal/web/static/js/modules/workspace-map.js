@@ -188,13 +188,13 @@
 
   function computeStats(workspaces) {
     var list = Array.isArray(workspaces) ? workspaces : [];
-    var agents = 0, activeTasks = 0, groups = 0;
+    var agents = 0, openTasks = 0, groups = 0;
     list.forEach(function (ws) {
       agents += Number((ws && ws.agent_count) || 0);
-      activeTasks += Number((ws && ws.open_task_count) || 0);
+      openTasks += Number((ws && ws.open_task_count) || 0);
       if (isGroup(ws)) groups += 1;
     });
-    return { workspaces: list.length, agents: agents, activeTasks: activeTasks, groups: groups };
+    return { workspaces: list.length, agents: agents, openTasks: openTasks, groups: groups };
   }
 
   function statBox(value, label) {
@@ -222,18 +222,24 @@
     var openTasks = Number(ws.open_task_count || 0);
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
-    var selected = selectedId && ws.id === selectedId ? ' is-selected' : '';
+    var isSel = selectedId && ws.id === selectedId;
+    var selected = isSel ? ' is-selected' : '';
     var left = PAD + tile.col * CELL_W;
     var top = PAD + tile.row * CELL_H;
     var meta = agents + (agents === 1 ? ' agent' : ' agents') + ' · ' +
       openTasks + (openTasks === 1 ? ' task' : ' tasks');
+    // A single click selects; opening happens on double-click, or on a
+    // click/Enter when the tile is already selected — so the aria-label
+    // advertises the currently-available action.
+    var actionHint = isSel ? '. Selected — activate to open' : '. Activate to select, double-click to open';
 
     return (
       '<button type="button" class="ws-map-tile' + selected + '" ' +
       'data-ws-id="' + escapeHtml(ws.id) + '" ' +
+      'aria-pressed="' + (isSel ? 'true' : 'false') + '" ' +
       'style="left:' + left + 'px;top:' + top + 'px;--i:' + (index || 0) + '" ' +
       'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
-      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + '">' +
+      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + actionHint + '">' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
       escapeHtml(statusText) + '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
@@ -274,8 +280,9 @@
     );
   }
 
-  function canvasHTML(workspaces, selectedId) {
-    var layout = computeMapLayout(workspaces);
+  function canvasHTML(workspaces, selectedId, maxCols) {
+    var cols = Math.max(1, maxCols || MAX_COLS);
+    var layout = computeMapLayout(workspaces, { maxCols: cols });
     var parts = [];
     layout.districts.forEach(function (d) { parts.push(districtHTML(d)); });
     layout.tiles.forEach(function (t, i) { parts.push(tileHTML(t, selectedId, i)); });
@@ -285,7 +292,7 @@
     layout.tiles.forEach(function (t) { if (t.row > lastRow) lastRow = t.row; });
     var padCol = 0;
     layout.tiles.forEach(function (t) { if (t.row === lastRow && t.col >= padCol) padCol = t.col + 1; });
-    if (padCol >= MAX_COLS) { padCol = 0; lastRow += 1; }
+    if (padCol >= cols) { padCol = 0; lastRow += 1; }
     parts.push(padHTML(padCol, lastRow));
 
     var height = PAD * 2 + (lastRow + 1) * CELL_H;
@@ -340,9 +347,12 @@
     return (
       '<div class="ws-map-ov-hero">' +
       '<span class="ws-map-ov-ic" style="--av:' + pal.key + '">' + escapeHtml(initials(ws.name)) + '</span>' +
-      '<div><div class="ws-map-ov-name">' + escapeHtml(ws.name || 'Workspace') + '</div>' +
+      '<div class="ws-map-ov-herometa"><div class="ws-map-ov-name">' + escapeHtml(ws.name || 'Workspace') + '</div>' +
       (mode ? '<div class="ws-map-ov-tag">' + escapeHtml(mode) + '</div>' : '') +
-      '</div></div>' +
+      '</div>' +
+      '<button type="button" class="ws-map-ov-open" data-ws-open="' + escapeHtml(ws.id) +
+      '" aria-label="Open ' + escapeHtml(ws.name || 'workspace') + '">Open ▸</button>' +
+      '</div>' +
       '<div class="ws-map-ov-label">Entry agent</div>' +
       '<div class="ws-map-ov-keeperwrap">' + keeper + '</div>' +
       '<div class="ws-map-ov-label">Agents · ' + agents.length + '</div>' +
@@ -352,17 +362,13 @@
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tools · MCP</span>' +
       '<span class="ws-map-ov-v">' + mcp + '</span></div>' +
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Skills</span>' +
-      '<span class="ws-map-ov-v">' + skills + '</span></div>' +
-      '<div class="ws-map-ov-actions">' +
-      '<button type="button" class="ws-map-ov-open" data-ws-open="' + escapeHtml(ws.id) + '">Open Workspace ▸</button>' +
-      '<button type="button" class="ws-map-ov-cog" data-ws-open="' + escapeHtml(ws.id) + '" aria-label="Open workspace">⚙</button>' +
-      '</div>'
+      '<span class="ws-map-ov-v">' + skills + '</span></div>'
     );
   }
 
-  function shellHTML(stats, workspaces, selectedId) {
+  function shellHTML(stats, workspaces, selectedId, maxCols) {
     var canvas = (Array.isArray(workspaces) && workspaces.length > 0)
-      ? canvasHTML(workspaces, selectedId).html
+      ? canvasHTML(workspaces, selectedId, maxCols).html
       : emptyCanvasHTML();
     return (
       '<header class="ws-map-topbar">' +
@@ -378,7 +384,7 @@
       '<div class="ws-map-readout">' +
       statBox(stats.workspaces, 'Workspaces') +
       statBox(stats.agents, 'Agents') +
-      statBox(stats.activeTasks, 'Active Tasks') +
+      statBox(stats.openTasks, 'Open Tasks') +
       statBox(stats.groups, 'Groups') +
       '</div>' +
       '<button type="button" class="ws-map-create" data-ws-map-create>⊕ New Workspace</button>' +
@@ -389,7 +395,7 @@
       '<div class="ws-map-compass">N<b>▲</b></div>' +
       canvas +
       '</section>' +
-      '<aside class="ws-map-overview">' +
+      '<aside class="ws-map-overview" role="region" aria-label="Workspace overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
       '<div class="ws-map-overview-body">' +
       overviewBodyHTML(findWs(workspaces, selectedId)) +
@@ -397,6 +403,51 @@
       '</aside>' +
       '</div>'
     );
+  }
+
+  // Below this width the layout stacks: theatre full-width, overview in flow
+  // beneath it (no overview column beside the map).
+  function isNarrowViewport() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 900px)').matches;
+  }
+
+  // ---------- responsive columns ----------
+
+  // Grid column count from the theatre's usable width, capped at MAX_COLS so
+  // wide screens keep the compact command-table look. Unknown/zero width
+  // (e.g. measured while hidden) falls back to the cap. The theatre clips
+  // overflow, so tiles MUST wrap into rows that fit — a fixed column count
+  // cuts tiles off on narrow windows with no way to scroll to them.
+  function computeMaxCols(theatreWidth) {
+    if (!theatreWidth || theatreWidth <= 0) return MAX_COLS;
+    return Math.max(1, Math.min(MAX_COLS, Math.floor((theatreWidth - PAD * 2) / CELL_W)));
+  }
+
+  function measureMaxCols(container) {
+    var width = (container && container.clientWidth) || 0;
+    if (width <= 0) return MAX_COLS;
+    // Beside the theatre sits the 338px overview column + 18px grid gap,
+    // except in the stacked narrow layout where the theatre spans full width.
+    var theatre = isNarrowViewport() ? width : width - 338 - 18;
+    return computeMaxCols(theatre);
+  }
+
+  // Re-lay-out when a window resize changes how many columns fit. mount() is
+  // idempotent and preserves the selection, so a plain re-mount is safe.
+  var lastMount = null; // { container, state }
+  var lastMaxCols = 0;
+  var resizeTimer = null;
+  var resizeBound = false;
+  function handleResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      resizeTimer = null;
+      if (!lastMount || !lastMount.container) return;
+      if (!lastMount.container.isConnected || lastMount.container.hidden) return;
+      if (measureMaxCols(lastMount.container) !== lastMaxCols) {
+        mount(lastMount.container, lastMount.state);
+      }
+    }, 150);
   }
 
   // Reuse the hub's existing create flow for every create affordance.
@@ -410,12 +461,15 @@
     });
   }
 
+  function openWorkspace(id) {
+    if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
+  }
+
   function bindOverviewActions(container) {
     var opens = container.querySelectorAll('[data-ws-open]');
     Array.prototype.forEach.call(opens, function (el) {
       el.addEventListener('click', function () {
-        var id = el.getAttribute('data-ws-open');
-        if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
+        openWorkspace(el.getAttribute('data-ws-open'));
       });
     });
   }
@@ -425,7 +479,9 @@
     selectedId = id;
     var tiles = container.querySelectorAll('.ws-map-tile');
     Array.prototype.forEach.call(tiles, function (el) {
-      el.classList.toggle('is-selected', el.getAttribute('data-ws-id') === id);
+      var sel = el.getAttribute('data-ws-id') === id;
+      el.classList.toggle('is-selected', sel);
+      el.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
@@ -439,8 +495,15 @@
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
     Array.prototype.forEach.call(selectables, function (el) {
+      // Single click selects; clicking (or Enter, which fires click on a
+      // button) an already-selected tile opens it. Double-click always opens.
       el.addEventListener('click', function () {
-        applySelection(container, workspaces, el.getAttribute('data-ws-id'));
+        var id = el.getAttribute('data-ws-id');
+        if (id && id === selectedId) { openWorkspace(id); return; }
+        applySelection(container, workspaces, id);
+      });
+      el.addEventListener('dblclick', function () {
+        openWorkspace(el.getAttribute('data-ws-id'));
       });
     });
   }
@@ -459,21 +522,35 @@
     selectedId = findWs(workspaces, selectedId) ? selectedId
       : (findWs(workspaces, incoming) ? incoming : pickDefaultSelection(workspaces));
 
-    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId);
+    var maxCols = measureMaxCols(container);
+    lastMount = { container: container, state: state };
+    lastMaxCols = maxCols;
+
+    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId, maxCols);
     bindCreate(container);
     bindTiles(container, workspaces);
     bindOverviewActions(container);
+
+    if (!resizeBound && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', handleResize);
+      resizeBound = true;
+    }
   }
 
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
     container.innerHTML = '';
+    lastMount = null;
   }
 
   window.OriWorkspaceMap = {
     mount: mount,
     unmount: unmount,
-    computeLayout: computeMapLayout
+    computeLayout: computeMapLayout,
+    computeStats: computeStats,
+    computeMaxCols: computeMaxCols,
+    tileHTML: tileHTML,
+    overviewBodyHTML: overviewBodyHTML
   };
 })();

@@ -245,7 +245,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   const undoStack = []; // LIFO of { id, label }
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
-  let launcherTaskBadgeByWorkspace = new Map();
+  let workspaceListRefreshTimer = null;
   let launcherActiveTab = 'workspaces';
   let launcherActiveView = LAUNCHER_VIEW_CARDS;
   let launcherWorkspaceRootState = null;
@@ -343,20 +343,37 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
-  function renderLauncherTaskBadge(workspaceID) {
-    if (!workspaceID) return '';
-    const counts = launcherTaskBadgeByWorkspace.get(workspaceID);
-    if (!counts || counts.open <= 0) return '';
+  // Canonical "N agents · M open tasks" summary, shared by Cards and Tree
+  // rows so switching views reprojects the same facts instead of changing
+  // the subject (Map already shows the same shape in its tile meta line).
+  function formatWorkspaceSummaryMeta(workspace) {
+    const agents = Number(workspace && workspace.agent_count) || 0;
+    const openTasks = Number(workspace && workspace.open_task_count) || 0;
+    return `${agents} ${agents === 1 ? 'agent' : 'agents'} · ${openTasks} open ${openTasks === 1 ? 'task' : 'tasks'}`;
+  }
 
-    const titleParts = [`${counts.open} open task${counts.open === 1 ? '' : 's'}`];
-    if (counts.inProgress > 0) titleParts.push(`${counts.inProgress} in progress`);
-    if (counts.needsAttention > 0) titleParts.push(`${counts.needsAttention} need attention`);
+  // Reads counts straight off the workspace's own enriched summary fields
+  // (agent_count/open_task_count/needs_attention_count etc., populated
+  // server-side by hydrateWorkspaceMetadataInto) rather than a separately
+  // fetched per-workspace task list, so rendering a tile never triggers a
+  // network request.
+  function renderLauncherTaskBadge(workspace) {
+    if (!workspace) return '';
+    const open = Number(workspace.open_task_count) || 0;
+    if (open <= 0) return '';
+    const needsAttention = Number(workspace.needs_attention_count) || 0;
+
+    const titleParts = [`${open} open task${open === 1 ? '' : 's'}`];
+    if (needsAttention > 0) titleParts.push(`${needsAttention} need attention`);
     const title = titleParts.join(' | ');
-    const badgeClass = counts.needsAttention > 0
+    const badgeClass = needsAttention > 0
       ? 'launcher-task-badge is-attention'
       : 'launcher-task-badge';
 
-    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(counts.open))}</span>`;
+    // "N open" rather than a bare number: the count needs a visible unit
+    // label, not just a hover tooltip, to read the same way as the Map/
+    // Command "Open Tasks" stat chips.
+    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(open))} open</span>`;
   }
 
   function normalizeWorkspaceFolderPath(value) {
@@ -782,13 +799,49 @@ console.log('[workspace-hub.js] FILE LOADED');
     renderLauncherActiveView(flattenWorkspaces(state.workspaces || []));
   }
 
+  // Reads ?view= from the URL, honoring only values normalizeLauncherView
+  // would return unchanged — anything else is silently ignored rather than
+  // falling back to cards (a typo'd param shouldn't override localStorage).
+  function getLauncherViewFromURL() {
+    try {
+      const raw = new URLSearchParams(window.location.search).get('view');
+      if (!raw) return null;
+      const normalized = normalizeLauncherView(raw);
+      return raw.trim().toLowerCase() === normalized ? normalized : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Deep-linkable, non-spammy: cards (the default) has no param at all, and
+  // every toggle uses replaceState so switching views never grows history.
+  function syncLauncherViewToURL(view) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (view === LAUNCHER_VIEW_CARDS) {
+        params.delete('view');
+      } else {
+        params.set('view', view);
+      }
+      const query = params.toString();
+      const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+      window.history.replaceState(null, '', nextUrl);
+    } catch (err) {
+      // no-op: history API may be unavailable in some embedding contexts
+    }
+  }
+
   function setLauncherViewMode(view, options = {}) {
     const shouldPersist = options.persist !== false;
     const shouldRender = options.render !== false;
+    const shouldSyncUrl = options.syncUrl !== false;
     launcherActiveView = shouldPersist
       ? setLauncherViewPreference(view)
       : normalizeLauncherView(view);
     updateLauncherViewToggle(launcherActiveView);
+    if (shouldSyncUrl) {
+      syncLauncherViewToURL(launcherActiveView);
+    }
     if (shouldRender) {
       rerenderLauncherFromState();
     }
@@ -796,7 +849,13 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function initLauncherViewState() {
-    setLauncherViewMode(getLauncherViewPreference(), { persist: false, render: false });
+    // The URL wins over localStorage on load; a bare visit (no ?view=) falls
+    // back to the saved preference exactly as before. Bootstrap only reads
+    // the URL here — it doesn't rewrite it, so a plain /workspaces visit
+    // stays plain even if the saved preference is tree/map.
+    const urlView = getLauncherViewFromURL();
+    const initialView = urlView || getLauncherViewPreference();
+    setLauncherViewMode(initialView, { persist: true, render: false, syncUrl: false });
   }
 
   function navigateToWorkspace(workspaceId) {
@@ -958,7 +1017,6 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const workspaces = (flattened || []).filter((workspace) => workspace && workspace.id);
     if (workspaces.length === 0) {
-      launcherTaskBadgeByWorkspace = new Map();
       updateLauncherOverviewMetrics({
         open: 0,
         pending: 0,
@@ -1137,16 +1195,6 @@ console.log('[workspace-hub.js] FILE LOADED');
       return a.name.localeCompare(b.name);
     });
 
-    launcherTaskBadgeByWorkspace = new Map(
-      workspaceSummaries.map((summary) => [summary.id, {
-        open: summary.open,
-        pending: summary.pending,
-        inProgress: summary.inProgress,
-        needsAttention: summary.needsAttention,
-        scheduled: summary.scheduled
-      }])
-    );
-
     aggregateTasks.sort((a, b) => {
       const statusDiff = statusPriorityForOverview(a.status) - statusPriorityForOverview(b.status);
       if (statusDiff !== 0) return statusDiff;
@@ -1286,6 +1334,42 @@ console.log('[workspace-hub.js] FILE LOADED');
       const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
       void refreshLauncherTaskOverview(flattened);
     }, delayMs);
+  }
+
+  // Cheap alternative to scheduleLauncherOverviewRefresh: a single
+  // /api/workspaces?tree=true refetch keeps Cards/Tree/Map badges (sourced
+  // from each workspace's own enriched summary fields) current after a task
+  // changes, without re-fetching every workspace's task/session list just to
+  // recount them. The heavier overview refresh above stays reserved for the
+  // Summary tab, which needs actual task/session content, not just counts.
+  function scheduleWorkspaceListRefresh(delayMs = 700) {
+    if (workspaceListRefreshTimer) {
+      clearTimeout(workspaceListRefreshTimer);
+    }
+    workspaceListRefreshTimer = setTimeout(() => {
+      workspaceListRefreshTimer = null;
+      void refreshWorkspaceListForBadges();
+    }, delayMs);
+  }
+
+  async function refreshWorkspaceListForBadges() {
+    const state = window.WorkspaceHubState.getState();
+    try {
+      const response = await fetch('/api/workspaces?tree=true');
+      if (!response.ok) throw new Error(`Failed to refresh workspaces (${response.status})`);
+      const data = await response.json();
+      state.workspaces = data.folders || [];
+
+      const flattened = flattenWorkspaces(state.workspaces);
+      state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+
+      populateWorkspaceSelect(flattened);
+      if (hubEl.dataset.state === 'launcher') {
+        renderLauncherActiveView(flattened);
+      }
+    } catch (err) {
+      console.error('Failed to refresh workspace list for badge counts:', err);
+    }
   }
 
   /**
@@ -1492,12 +1576,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     function renderWorkspaceCard(workspace) {
       const row = flattenedMap.get(workspace.id) || workspace;
       const description = row.description || 'No description yet.';
-      const status = row.status || 'active';
-      const statusLabel = escapeHtml(String(status).replace('_', ' '));
+      // Idle/Working (task activity) replaces the old workspace.Status chip,
+      // which read "ACTIVE" for nearly every workspace regardless of state
+      // and collided with the same word meaning "has a running task"
+      // everywhere else (Map LED, "Open Tasks" stat). Same vocabulary as Map.
+      const isActive = !!row.active;
+      const summaryMeta = formatWorkspaceSummaryMeta(row);
       const accentStyle = row.color ? `style="border-color: ${escapeHtml(row.color)}"` : '';
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
-      const taskBadge = renderLauncherTaskBadge(row.id);
+      const taskBadge = renderLauncherTaskBadge(row);
       const folderDisplay = getWorkspaceFolderDisplay(row);
       const parentGroup = row.parent_id ? flattenedMap.get(row.parent_id) : null;
       const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
@@ -1551,7 +1639,10 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${tagRow}
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
-            <span class="launcher-card-status status-${escapeHtml(status)}">${statusLabel}</span>
+            <span class="launcher-card-led-status${isActive ? ' is-working' : ''}">
+              <span class="launcher-card-led" aria-hidden="true"></span>${isActive ? 'Working' : 'Idle'}
+            </span>
+            <span class="launcher-card-summary">${escapeHtml(summaryMeta)}</span>
             <span>${row.session_count || 0} sessions</span>
           </div>
         </div>
@@ -1712,6 +1803,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       filterable: true,
       limit: 4
     });
+    // Same canonical summary as Cards/Map; groups aggregate their members'
+    // stats elsewhere (the group header) so this only applies to workspaces.
+    const treeMeta = isGroup ? '' : `<span class="launcher-tree-meta">${escapeHtml(formatWorkspaceSummaryMeta(row))}</span>`;
 
     const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
     const emptyHint = isGroup && children.length === 0
@@ -1730,6 +1824,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${caret}
           ${renderLauncherTreeIcon(isGroup ? 'group' : 'workspace')}
           <span class="launcher-tree-name" title="${safeName}">${safeName}</span>
+          ${treeMeta}
           ${tagRow}
           ${deleteButton}
         </div>
@@ -3881,9 +3976,14 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
 
-    const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
     setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
-    void refreshLauncherTaskOverview(flattened);
+    // Cards/Tree/Map badges already come from state.workspaces' enriched
+    // fields (no fetch needed); only the Summary tab needs a refresh here,
+    // and only when it's the tab actually being shown.
+    if (launcherActiveTab === 'summary') {
+      const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
+      void refreshLauncherTaskOverview(flattened);
+    }
   }
 
   /**
@@ -4134,7 +4234,12 @@ console.log('[workspace-hub.js] FILE LOADED');
     // Workspace selection via dropdown removed; use launcher cards instead.
 
     if (elements.workspaceBrowseBtn) {
-      elements.workspaceBrowseBtn.addEventListener('click', () => showLauncher());
+      elements.workspaceBrowseBtn.addEventListener('click', () => {
+        showLauncher();
+        // Badge counts may be stale after time spent on a workspace detail
+        // page (task events there don't refresh the hub's launcher state).
+        void refreshWorkspaceListForBadges();
+      });
     }
 
     if (elements.workspaceMoveBtn) {
@@ -4191,7 +4296,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherWorkspaceRootBrowseBtn) {
       elements.launcherWorkspaceRootBrowseBtn.addEventListener('click', async () => {
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting...');
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting…');
         try {
           await browseLauncherWorkspaceRoot();
         } catch (error) {
@@ -4205,7 +4310,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const handleWorkspaceRootSave = async () => {
       const nextValue = String(elements.launcherWorkspaceRootInput?.value || '').trim();
-      setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving...');
+      setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving…');
       try {
         await saveLauncherWorkspaceRoot(nextValue);
         setLauncherWorkspaceRootEditorOpen(false);
@@ -4237,7 +4342,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           return;
         }
 
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing...');
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing…');
         try {
           await saveLauncherWorkspaceRoot('');
           setLauncherWorkspaceRootEditorOpen(false);
@@ -4413,7 +4518,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:created', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        scheduleLauncherOverviewRefresh();
+        // Cheap list refetch keeps Cards/Tree/Map badges current; only
+        // re-run the expensive per-workspace fan-out if the Summary tab
+        // (which needs full task content, not just counts) is open.
+        scheduleWorkspaceListRefresh();
+        if (launcherActiveTab === 'summary') {
+          scheduleLauncherOverviewRefresh();
+        }
       }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
@@ -4424,7 +4535,13 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:updated', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        scheduleLauncherOverviewRefresh();
+        // Cheap list refetch keeps Cards/Tree/Map badges current; only
+        // re-run the expensive per-workspace fan-out if the Summary tab
+        // (which needs full task content, not just counts) is open.
+        scheduleWorkspaceListRefresh();
+        if (launcherActiveTab === 'summary') {
+          scheduleLauncherOverviewRefresh();
+        }
       }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
@@ -4494,6 +4611,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,
     getLauncherViewPreference,
+    getLauncherViewFromURL,
+    syncLauncherViewToURL,
     bindLauncherTreeKeyboardEvents,
     focusLauncherTreeRow,
     getVisibleLauncherTreeRows,
@@ -4506,6 +4625,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     removeWorkspaceTag,
     renderLauncherCards,
     renderLauncherActiveView,
+    renderLauncherTaskBadge,
     renderLauncherTree,
     renderWorkspaceSummary,
     toggleLauncherTagFilter,

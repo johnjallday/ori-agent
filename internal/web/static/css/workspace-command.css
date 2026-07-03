@@ -12,18 +12,19 @@
  */
 
 .ws-cmd {
-  /* surface */
-  --ws-bg: #070b0c;
-  --ws-bg-2: #0b1113;
-  --ws-panel: #0e1618;
-  --ws-panel-2: #101e1f;
-  --ws-line: #1c2e2c;
-  --ws-line-bright: #28413c;
+  /* surface — neutral charcoal, matching the app shell's dark theme family
+     (#0A0A0A → #1F2128 → #2A2C33); green stays an ACCENT, not a surface cast */
+  --ws-bg: #0c0d10;
+  --ws-bg-2: #121317;
+  --ws-panel: #16181d;
+  --ws-panel-2: #1a1d23;
+  --ws-line: #262931;
+  --ws-line-bright: #363a45;
 
   /* ink */
-  --ws-ink: #cfe8df;
-  --ws-ink-dim: #7f998f;
-  --ws-ink-faint: #4d655d;
+  --ws-ink: #d6d9de;
+  --ws-ink-dim: #8b909a;
+  --ws-ink-faint: #5a5f6a;
 
   /* semantic accents */
   --ws-faction: #46d39a;
@@ -37,7 +38,7 @@
   /* geometry */
   --ws-clip: 14px;
   --ws-clip-sm: 8px;
-  --ws-glow: 0 0 0 1px rgba(70, 211, 154, 0.12), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+  --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
 
   /* type (families vendored globally by workspace-map.css) */
   --ws-font-display: 'Chakra Petch', system-ui, sans-serif;
@@ -82,7 +83,7 @@
 .ws-cmd-title .ws-kicker { display: flex; align-items: center; gap: 10px; }
 .ws-cmd-title .ws-dot { width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg); }
 .ws-cmd-title h2 {
-  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; color: #eafff5;
+  margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; color: #eef0f3;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-cmd-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
@@ -95,13 +96,13 @@
 }
 .ws-cmd-stat:hover { border-color: var(--ws-line-bright); background: rgba(70, 211, 154, 0.06); }
 .ws-cmd-stat:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eafff5; line-height: 1; }
+.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; font-variant-numeric: tabular-nums; }
 .ws-cmd-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
 
 /* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
 .ws-cmd-layout { display: grid; grid-template-columns: 1fr 332px; gap: 18px; align-items: start; }
 .ws-cmd-garrison {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213); min-height: 200px;
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014); min-height: 200px;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
   box-shadow: var(--ws-glow);
 }
@@ -109,14 +110,14 @@
 
 /* rail panels */
 .ws-cmd-panel {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0b1213);
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014);
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
   box-shadow: var(--ws-glow);
 }
-.ws-cmd-panel.is-managing { border-color: var(--ws-line-bright); background: linear-gradient(180deg, #102022, #0b1213); }
+.ws-cmd-panel.is-managing { border-color: var(--ws-line-bright); background: linear-gradient(180deg, #1c1f26, #0f1014); }
 .ws-cmd-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--ws-line); }
 .ws-cmd-panel-title { display: flex; align-items: center; gap: 9px; }
-.ws-cmd-panel-title h4 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #dff5ec; }
+.ws-cmd-panel-title h4 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #e3e6ea; }
 .ws-cmd-panel-count { font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-ink-faint); }
 .ws-cmd-panel-more {
   width: 26px; height: 24px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
@@ -140,7 +141,7 @@
 .ws-cmd-rail-item.is-static { cursor: default; }
 .ws-cmd-rail-item:hover:not(.is-static) { border-color: var(--ws-line-bright); background: var(--ws-bg-2); }
 .ws-cmd-rail-item:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
-.ws-cmd-rail-t { font-size: 13px; color: #eafff5; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-rail-t { font-size: 13px; color: #eef0f3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-cmd-rail-m { font-family: var(--ws-font-mono); font-size: 9.5px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
 .ws-cmd-rail-more {
   margin-top: 4px; padding: 7px; border: 1px dashed var(--ws-line-bright); background: none; color: var(--ws-ink-dim); cursor: pointer;
@@ -157,7 +158,7 @@
 .ws-cmd-garrison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
 .ws-cmd-unit {
-  border: 1px solid var(--ws-line); background: linear-gradient(165deg, #0f1a1b, #0b1112); overflow: hidden;
+  border: 1px solid var(--ws-line); background: linear-gradient(165deg, #171a20, #0e0f13); overflow: hidden;
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
 }
 .ws-cmd-unit.is-keeper { border-color: rgba(232, 181, 75, 0.32); }
@@ -169,7 +170,7 @@
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
 .ws-cmd-unit-id { flex: 1 1 auto; min-width: 0; }
-.ws-cmd-unit-name { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: #f1fff8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-unit-name { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: #f3f5f8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-cmd-unit-role { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
 .ws-cmd-badge {
   font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
@@ -194,7 +195,7 @@
 .ws-cmd-unit-rows { padding: 11px 13px; display: flex; flex-direction: column; gap: 8px; }
 .ws-cmd-row { display: flex; justify-content: space-between; align-items: center; }
 .ws-cmd-rk { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ws-ink-faint); }
-.ws-cmd-rv { font-family: var(--ws-font-mono); font-size: 12px; color: #eafff5; }
+.ws-cmd-rv { font-family: var(--ws-font-mono); font-size: 12px; color: #eef0f3; }
 
 .ws-cmd-questlog { margin: 2px 13px 13px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.22); }
 .ws-cmd-ql-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; border-bottom: 1px solid var(--ws-line); }
@@ -203,7 +204,7 @@
 .ws-cmd-quest { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
 .ws-cmd-quest + .ws-cmd-quest { border-top: 1px solid var(--ws-line); }
 .ws-cmd-q-glyph { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--ws-keeper-deep); color: var(--ws-keeper); font-size: 11px; }
-.ws-cmd-q-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eafff5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-q-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-cmd-q-status { font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--ws-line-bright); color: var(--ws-ink-dim); }
 .ws-cmd-q-status.pending { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); }
 .ws-cmd-q-status.working { color: var(--ws-working); border-color: var(--ws-faction-deep); }
@@ -229,7 +230,7 @@
 }
 .ws-cmd-modal-panel:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--ws-line); }
-.ws-cmd-modal-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #eafff5; }
+.ws-cmd-modal-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #eef0f3; }
 .ws-cmd-modal-count { font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); }
 .ws-cmd-modal-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .ws-cmd-modal-add {
@@ -263,7 +264,7 @@
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
 .ws-cmd-mrow-main { flex: 1 1 auto; min-width: 0; }
-.ws-cmd-mrow-name { display: flex; align-items: center; gap: 7px; font-size: 14px; color: #eafff5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-mrow-name { display: flex; align-items: center; gap: 7px; font-size: 14px; color: #eef0f3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-cmd-mrow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .ws-cmd-mchip {
   font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase; padding: 2px 7px;
