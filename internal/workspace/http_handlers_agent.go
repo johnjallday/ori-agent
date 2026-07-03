@@ -177,9 +177,9 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if instanceNumber > 0 {
-		logger.Debug("Removed agent instance from workspace", logger.Fields{"instanceNumber": instanceNumber, "workspaceID": workspaceID, "workspace_id": agentName})
+		logger.Debug("Removed agent instance from workspace", logger.Fields{"instance_number": instanceNumber, "workspace_id": workspaceID, "agent": agentName})
 	} else {
-		logger.Debug("Removed agent from workspace", logger.Fields{"agent": agentName, "workspaceID": workspaceID})
+		logger.Debug("Removed agent from workspace", logger.Fields{"agent": agentName, "workspace_id": workspaceID})
 	}
 
 	// Return success

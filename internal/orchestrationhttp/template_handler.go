@@ -204,7 +204,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	// Execute collaborative task
 	result, err := th.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
 	if err != nil {
-		logger.Error("Failed to execute collaborative task", logger.Fields{"task_id": err})
+		logger.Error("Failed to execute collaborative task", logger.Fields{"error": err})
 		orihttp.InternalError(w, fmt.Sprintf("failed to execute workflow: %v", err))
 		return
 	}

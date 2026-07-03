@@ -31,7 +31,7 @@ type ErrorResponse struct {
 // Usage:
 //
 //	if err := http.RespondJSON(w, http.StatusOK, data); err != nil {
-//		logger.Error("Failed to encode response", logger.Fields{"response": err})
+//		logger.Error("Failed to encode response", logger.Fields{"error": err})
 //	}
 func RespondJSON(w http.ResponseWriter, statusCode int, data any) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -53,7 +53,7 @@ func RespondJSON(w http.ResponseWriter, statusCode int, data any) error {
 // Usage:
 //
 //	if err := http.RespondError(w, http.StatusNotFound, "Agent not found"); err != nil {
-//		logger.Error("Failed to write error response", logger.Fields{"response": err})
+//		logger.Error("Failed to write error response", logger.Fields{"error": err})
 //	}
 func RespondError(w http.ResponseWriter, statusCode int, message string) error {
 	return RespondJSON(w, statusCode, map[string]string{
@@ -66,7 +66,7 @@ func RespondError(w http.ResponseWriter, statusCode int, message string) error {
 // Usage:
 //
 //	if err := http.RespondSuccess(w, data); err != nil {
-//		logger.Error("Failed to encode success response", logger.Fields{"response": err})
+//		logger.Error("Failed to encode success response", logger.Fields{"error": err})
 //	}
 func RespondSuccess(w http.ResponseWriter, data any) error {
 	return RespondJSON(w, http.StatusOK, data)
@@ -78,7 +78,7 @@ func RespondSuccess(w http.ResponseWriter, data any) error {
 // Usage:
 //
 //	if err := http.RespondCreated(w, newAgent); err != nil {
-//		logger.Error("Failed to encode created response", logger.Fields{"response": err})
+//		logger.Error("Failed to encode created response", logger.Fields{"error": err})
 //	}
 func RespondCreated(w http.ResponseWriter, data any) error {
 	return RespondJSON(w, http.StatusCreated, data)

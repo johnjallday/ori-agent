@@ -231,7 +231,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
 
-	logger.Info("📦 Created workspace: (ID: )", logger.Fields{"workspace_id": workspaceName, "id": ws.ID})
+	logger.Info("📦 Created workspace", logger.Fields{"workspace_name": workspaceName, "workspace_id": ws.ID})
 
 	// 2. Identify required agents based on roles
 	agents, err := o.findAgentsByRoles(task.RequiredRoles)
@@ -400,7 +400,7 @@ func (o *Orchestrator) executeResearchWorkflow(ws *workspace.Workspace, task Col
 		return nil, fmt.Errorf("failed to delegate research task: %w", err)
 	}
 
-	logger.Debug("📋 Delegated research to (task: )", logger.Fields{"task_id": researcherAgent, "id": delegateTask.ID})
+	logger.Debug("📋 Delegated research", logger.Fields{"agent": researcherAgent, "task_id": delegateTask.ID})
 
 	// Wait for completion (simplified - in production, this would be event-driven)
 	// For now, we'll return a status indicating the task is in progress
@@ -448,7 +448,7 @@ func (o *Orchestrator) executeParallelWorkflow(ws *workspace.Workspace, task Col
 
 		taskIDs = append(taskIDs, delegateTask.ID)
 		subResults[agentName] = delegateTask.ID
-		logger.Debug("📋 Delegated to (task: )", logger.Fields{"task_id": agentName, "id": delegateTask.ID})
+		logger.Debug("📋 Delegated task", logger.Fields{"agent": agentName, "task_id": delegateTask.ID})
 	}
 
 	return &CollaborativeResult{

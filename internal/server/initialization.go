@@ -147,7 +147,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	})
 	factory.Register("ollama", ollamaProvider)
 	if verbose {
-		logger.Debug("Ollama provider registered (base URL: )", logger.Fields{"ollamaBaseURL": ollamaBaseURL})
+		logger.Debug("Ollama provider registered", logger.Fields{"base_url": ollamaBaseURL})
 	}
 
 	// Register LM Studio provider (OpenAI-compatible local server)
@@ -194,7 +194,7 @@ func resolveAgentStorePath() string {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		logger.Debug("Using agent store", logger.Fields{"agent": agentStorePath})
+		logger.Debug("Using agent store", logger.Fields{"path": agentStorePath})
 	}
 
 	return agentStorePath
@@ -222,7 +222,7 @@ func loadLocationZones(zonesPath string) []location.Zone {
 	}
 
 	if verbose {
-		logger.Debug("📍 Loaded location zones", logger.Fields{"value1": len(zones)})
+		logger.Debug("📍 Loaded location zones", logger.Fields{"zone_count": len(zones)})
 	}
 
 	return zones
@@ -261,7 +261,7 @@ func resolveWorkspaceDir() string {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		logger.Debug("Using workspace directory", logger.Fields{"workspace_id": workspaceDir})
+		logger.Debug("Using workspace directory", logger.Fields{"path": workspaceDir})
 	}
 
 	return workspaceDir

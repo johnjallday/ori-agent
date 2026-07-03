@@ -408,7 +408,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			return "", buildToolOnlyBlockedError(lastToolSummary)
 		}
 
-		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "toolcalls)": len(resp.ToolCalls), "round": round + 1})
+		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "tool_call_count": len(resp.ToolCalls), "round": round + 1})
 		conversationToolCalls := make([]llm.ToolCall, len(resp.ToolCalls))
 		copy(conversationToolCalls, resp.ToolCalls)
 		for index := range conversationToolCalls {

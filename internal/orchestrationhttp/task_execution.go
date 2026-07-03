@@ -206,7 +206,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
-			logger.Error("Failed to reset task status", logger.Fields{"status": err})
+			logger.Error("Failed to reset task status", logger.Fields{"task_id": foundTask.ID, "error": err})
 			orihttp.InternalError(w, "Failed to reset task for rerun")
 			return
 		}
@@ -783,13 +783,13 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	taskForExecution := *task
 	var inputResults []string
 	if len(task.InputTaskIDs) > 0 {
-		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
+		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "input_task_count": len(task.InputTaskIDs), "input_task_ids": task.InputTaskIDs})
 
 		taskForExecution.RuntimeInputs = ws.BuildRuntimeInputs(task)
 
 		if taskForExecution.RuntimeInputs != nil && len(taskForExecution.RuntimeInputs.TaskResults) > 0 {
 			resultsMap := taskForExecution.RuntimeInputs.TaskResults
-			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
+			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": task.ID, "input_result_count": len(resultsMap)})
 
 			for _, inputTaskID := range task.InputTaskIDs {
 				if result, exists := resultsMap[inputTaskID]; exists {

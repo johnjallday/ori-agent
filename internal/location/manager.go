@@ -130,7 +130,7 @@ func (m *Manager) detectAndUpdate() {
 			DetectionMethod:  method,
 		}
 		m.emitLocationChange(event)
-		logger.Debug("Location changed: -> (method: )", logger.Fields{"previousLocation": previousLocation, "zoneName": zoneName, "method": method})
+		logger.Debug("Location changed", logger.Fields{"previous_location": previousLocation, "zone_name": zoneName, "method": method})
 	}
 }
 

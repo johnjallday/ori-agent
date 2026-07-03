@@ -499,7 +499,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 						"source":     "cli",
 					}
 					if err := h.ActivityLogger.LogActivity(cliAgentDisplayName(backend), types.ActivityEventStatusChanged, details, ""); err != nil {
-						logger.Error("Failed to log CLI status change activity", logger.Fields{"status": err})
+						logger.Error("Failed to log CLI status change activity", logger.Fields{"error": err})
 					}
 				}
 
@@ -541,7 +541,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		}
 		if err := h.ActivityLogger.LogActivity(agentName, types.ActivityEventStatusChanged, details, ""); err != nil {
 			// Log error but don't fail the request
-			logger.Error("Failed to log status change activity", logger.Fields{"status": err})
+			logger.Error("Failed to log status change activity", logger.Fields{"error": err})
 		}
 	}
 

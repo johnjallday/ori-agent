@@ -31,7 +31,7 @@ func (b *ServerBuilder) initializeMCP() {
 
 	if err := b.mcpConfigManager.InitializeDefaultServers(); err != nil {
 		if verbose {
-			logger.Error("failed to initialize default MCP servers", logger.Fields{"server": err})
+			logger.Error("failed to initialize default MCP servers", logger.Fields{"error": err})
 		}
 	}
 

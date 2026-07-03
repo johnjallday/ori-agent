@@ -149,7 +149,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Add task to workspace
 	if err := workspace.AddTask(task); err != nil {
-		logger.Error("[DEBUG] CreateTask - AddTask failed", logger.Fields{"task_id": err})
+		logger.Error("CreateTask - AddTask failed", logger.Fields{"task_id": task.ID, "error": err})
 		orihttp.InternalError(w, fmt.Sprintf("Failed to add task: %v", err))
 		return
 	}
@@ -402,7 +402,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Debug("Deleted task from workspace", logger.Fields{"workspace_id": taskID, "workspaceID": workspaceID})
+	logger.Debug("Deleted task from workspace", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -454,7 +454,7 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	logger.Debug("Manually executing task in workspace", logger.Fields{"workspaceID": workspaceID, "workspace_id": taskID})
+	logger.Debug("Manually executing task in workspace", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
 
 	// Execute task asynchronously
 	go func() {

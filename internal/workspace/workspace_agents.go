@@ -221,7 +221,7 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 		w.UpdatedAt = time.Now()
 	}
 
-	logger.Debug("Removed agent instance ( #)", logger.Fields{"instancenumber": removedInstance.InstanceNumber, "agent": removedInstance.ID, "name": removedInstance.Name})
+	logger.Debug("Removed agent instance", logger.Fields{"instance_number": removedInstance.InstanceNumber, "instance_id": removedInstance.ID, "agent_name": removedInstance.Name})
 	return nil
 }
 

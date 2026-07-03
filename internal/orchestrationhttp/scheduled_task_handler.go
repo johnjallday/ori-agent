@@ -183,7 +183,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 
 	// Add to workspace
 	if err := ws.AddScheduledTask(st); err != nil {
-		logger.Error("Failed to add scheduled task", logger.Fields{"task_id": err})
+		logger.Error("Failed to add scheduled task", logger.Fields{"task_id": st.ID, "error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add scheduled task", err)
 		return
 	}
@@ -357,7 +357,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		st.UpdatedAt = time.Now()
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": st.ID, "error": err})
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
@@ -448,7 +448,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		}
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": st.ID, "error": err})
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
@@ -516,7 +516,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		}
 
 		if err := ws.AddTask(task); err != nil {
-			logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": err})
+			logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": task.ID, "error": err})
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to create task", err)
 			return
 		}

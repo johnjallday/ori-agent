@@ -290,11 +290,11 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	// task.Context is intentionally untouched — runtime data lives in
 	// RuntimeInputs so re-runs cannot accumulate stale injection.
 	if len(task.InputTaskIDs) > 0 {
-		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
+		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "input_task_count": len(task.InputTaskIDs), "input_task_ids": task.InputTaskIDs})
 		task.RuntimeInputs = ws.BuildRuntimeInputs(&task)
 
 		if task.RuntimeInputs != nil && len(task.RuntimeInputs.TaskResults) > 0 {
-			logger.Debug("Built runtime inputs for task", logger.Fields{"result": len(task.RuntimeInputs.TaskResults), "id": task.ID})
+			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": task.ID, "input_result_count": len(task.RuntimeInputs.TaskResults)})
 			for taskID, result := range task.RuntimeInputs.TaskResults {
 				preview := result
 				if len(preview) > 100 {

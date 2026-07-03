@@ -130,7 +130,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		name := filepath.Base(path)
 		_, err = tmpl.New(name).Parse(string(content))
 		if err != nil {
-			logger.Error("Error parsing template", logger.Fields{"error": name, "err": err})
+			logger.Error("Error parsing template", logger.Fields{"template": name, "error": err})
 			return err
 		}
 		logger.Debug("Loaded template", logger.Fields{"name": name})
@@ -193,7 +193,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
 	if err != nil {
-		logger.Error("Error executing template", logger.Fields{"error": name, "err": err})
+		logger.Error("Error executing template", logger.Fields{"template": name, "error": err})
 		return "", err
 	}
 
