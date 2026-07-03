@@ -54,7 +54,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to decode file content: " + err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -64,7 +64,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -75,7 +75,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to parse file: " + err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -83,7 +83,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(ParseFileResponse{
 		Text: text,
 	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+		logger.Error("Failed to encode response", logger.Fields{"error": err})
 	}
 }
 

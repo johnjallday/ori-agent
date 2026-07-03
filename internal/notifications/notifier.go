@@ -73,7 +73,7 @@ func (n *Notifier) AddChannel(channel Channel) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.channels = append(n.channels, channel)
-	logger.Debug("Added notification channel", logger.Fields{"name()": channel.Name()})
+	logger.Debug("Added notification channel", logger.Fields{"channel": channel.Name()})
 }
 
 // RemoveChannel removes a notification channel by name
@@ -139,7 +139,7 @@ func (n *Notifier) deliverNotification(notification Notification) {
 	for _, channel := range channels {
 		go func(ch Channel) {
 			if err := ch.Send(notification); err != nil {
-				logger.Error("Failed to send notification via", logger.Fields{"name()": ch.Name(), "err": err})
+				logger.Error("Failed to send notification via channel", logger.Fields{"channel": ch.Name(), "error": err})
 			}
 		}(channel)
 	}
@@ -224,7 +224,7 @@ func (c *LogChannel) Send(notification Notification) error {
 		icon = "ℹ️ "
 	}
 
-	logger.Debug(": -", logger.Fields{"type": notification.Type, "icon": icon, "title": notification.Title, "message": notification.Message})
+	logger.Debug("Console notification", logger.Fields{"type": notification.Type, "icon": icon, "title": notification.Title, "message": notification.Message})
 	return nil
 }
 

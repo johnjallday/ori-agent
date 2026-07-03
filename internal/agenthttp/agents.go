@@ -472,7 +472,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err := h.State.SetAgent(*req.Name, agent); err != nil {
-				logger.Error("Failed to save renamed agent", logger.Fields{"agent": err})
+				logger.Error("Failed to save renamed agent", logger.Fields{"agent": *req.Name, "error": err})
 				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
@@ -482,7 +482,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			newName = *req.Name
 		} else {
 			if err := h.State.SetAgent(agentName, agent); err != nil {
-				logger.Error("Failed to update agent metadata", logger.Fields{"agent": err})
+				logger.Error("Failed to update agent metadata", logger.Fields{"agent": agentName, "error": err})
 				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}

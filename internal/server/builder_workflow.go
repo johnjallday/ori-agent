@@ -548,7 +548,7 @@ func (b *ServerBuilder) initializeTemplateManager() {
 	}
 
 	if verbose {
-		logger.Info("Loaded workflow templates", logger.Fields{"listtemplates())": len(templateManager.ListTemplates())})
+		logger.Info("Loaded workflow templates", logger.Fields{"template_count": len(templateManager.ListTemplates())})
 	}
 
 	b.orchestrationHandler.SetTemplateManager(templateManager)

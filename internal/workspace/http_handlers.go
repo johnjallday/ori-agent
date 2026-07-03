@@ -113,7 +113,7 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentNames := workspace.AgentNames()
-	logger.Info("Created workspace: (ID: ) with agents", logger.Fields{"workspace_id": workspace.Name, "id": workspace.ID, "agents": agentNames})
+	logger.Info("Created workspace", logger.Fields{"workspace_name": workspace.Name, "workspace_id": workspace.ID, "agents": agentNames})
 
 	// Return created workspace
 	w.Header().Set("Content-Type", "application/json")

@@ -64,7 +64,7 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Add to config manager (persists to disk)
 
 	if err := h.configManager.AddServer(serverConfig); err != nil {
-		logger.Error("Failed to add MCP server to config", logger.Fields{"server": err})
+		logger.Error("Failed to add MCP server to config", logger.Fields{"server": serverConfig.Name, "error": err})
 		orihttp.InternalError(w, err.Error())
 		return
 	}
@@ -72,7 +72,7 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Add to registry (runtime)
 
 	if err := h.registry.AddServer(serverConfig); err != nil {
-		logger.Error("Failed to add MCP server to registry", logger.Fields{"server": err})
+		logger.Error("Failed to add MCP server to registry", logger.Fields{"server": serverConfig.Name, "error": err})
 		orihttp.InternalError(w, err.Error())
 		return
 	}
@@ -94,7 +94,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Remove from registry (stops if running)
 	if err := h.registry.RemoveServer(serverName); err != nil {
-		logger.Error("Failed to remove MCP server from registry", logger.Fields{"server": err})
+		logger.Error("Failed to remove MCP server from registry", logger.Fields{"server": serverName, "error": err})
 		orihttp.InternalError(w, err.Error())
 		return
 	}
@@ -102,7 +102,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Remove from config (persists)
 
 	if err := h.configManager.RemoveServer(serverName); err != nil {
-		logger.Error("Failed to remove MCP server from config", logger.Fields{"server": err})
+		logger.Error("Failed to remove MCP server from config", logger.Fields{"server": serverName, "error": err})
 		orihttp.InternalError(w, err.Error())
 		return
 	}

@@ -83,7 +83,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, workspaceID string, m
 		return fmt.Errorf("failed to analyze mission: %w", err)
 	}
 
-	logger.Info("[Orchestrator] Created tasks from mission", logger.Fields{"task_id": len(tasks)})
+	logger.Info("[Orchestrator] Created tasks from mission", logger.Fields{"task_count": len(tasks)})
 
 	// Step 1.5: Topologically sort so AddTask sees dependencies before
 	// dependents (graph validation in AddTask rejects forward references)
@@ -191,7 +191,7 @@ Return your response as a JSON array of tasks in this format:
 	}
 
 	if err := json.Unmarshal([]byte(content), &taskSpecs); err != nil {
-		logger.Error("[Orchestrator] Warning: Failed to parse LLM response as JSON: . Content", logger.Fields{"response": err, "content": content})
+		logger.Error("[Orchestrator] Failed to parse LLM response as JSON", logger.Fields{"error": err, "content": content})
 		// Fallback: create a single task
 		return []Task{
 			{
@@ -319,7 +319,7 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, workspaceID
 // delegated to the LLMTaskHandler wired via SetTaskHandler; the orchestrator
 // owns workspace state, message events, and task lifecycle bookkeeping.
 func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task Task) error {
-	logger.Debug("[Orchestrator] Executing task : (assigned to: )", logger.Fields{"task_id": task.ID, "description": task.Description, "to": task.To})
+	logger.Debug("[Orchestrator] Executing task", logger.Fields{"task_id": task.ID, "description": task.Description, "assigned_to": task.To})
 
 	workspace, err := o.workspaceStore.Get(workspaceID)
 	if err != nil {
@@ -329,11 +329,11 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	// Build runtime inputs for this execution. Persisted task.Context stays
 	// untouched; see Task.RuntimeInputs for the runtime-only data path.
 	if len(task.InputTaskIDs) > 0 {
-		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
+		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "input_task_count": len(task.InputTaskIDs), "input_task_ids": task.InputTaskIDs})
 		task.RuntimeInputs = workspace.BuildRuntimeInputs(&task)
 
 		if task.RuntimeInputs != nil && len(task.RuntimeInputs.TaskResults) > 0 {
-			logger.Debug("Built runtime inputs for task", logger.Fields{"result": len(task.RuntimeInputs.TaskResults), "id": task.ID})
+			logger.Debug("Built runtime inputs for task", logger.Fields{"task_id": task.ID, "input_result_count": len(task.RuntimeInputs.TaskResults)})
 			for taskID, result := range task.RuntimeInputs.TaskResults {
 				preview := result
 				if len(preview) > 100 {

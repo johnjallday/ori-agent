@@ -49,7 +49,7 @@ func (c *Communicator) SendMessage(req MessageRequest) error {
 		return fmt.Errorf("failed to save workspace: %w", err)
 	}
 
-	logger.Debug("✉️ Message sent from to in workspace", logger.Fields{"workspaceid": req.WorkspaceID, "workspace_id": req.From, "to": req.To})
+	logger.Debug("✉️ Message sent", logger.Fields{"workspace_id": req.WorkspaceID, "from": req.From, "to": req.To})
 	return nil
 }
 
@@ -170,10 +170,10 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, err
 			"context":  req.Context,
 		},
 	}); err != nil {
-		logger.Error("Failed to send task message", logger.Fields{"task_id": err})
+		logger.Error("Failed to send task message", logger.Fields{"task_id": addedTask.ID, "error": err})
 	}
 
-	logger.Debug("📋 Task delegated from to", logger.Fields{"description": req.Description, "task_id": addedTask.ID, "from": req.From, "to": req.To})
+	logger.Debug("📋 Task delegated", logger.Fields{"description": req.Description, "task_id": addedTask.ID, "from": req.From, "to": req.To})
 	return addedTask, nil
 }
 
@@ -310,7 +310,7 @@ func (c *Communicator) sendTaskResult(task *workspace.Task, result string, error
 			"duration": duration.String(),
 		},
 	}); err != nil {
-		logger.Error("Failed to send task result", logger.Fields{"task_id": err})
+		logger.Error("Failed to send task result", logger.Fields{"task_id": task.ID, "error": err})
 	}
 }
 
@@ -394,7 +394,7 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 	}
 
 	if removed > 0 {
-		logger.Info("🧹 Cleaned up completed tasks", logger.Fields{"task_id": removed})
+		logger.Info("🧹 Cleaned up completed tasks", logger.Fields{"removed_count": removed})
 	}
 
 	return removed
@@ -407,7 +407,7 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 
 	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces for timeout check", logger.Fields{"duration": err})
+		logger.Error("Failed to list workspaces for timeout check", logger.Fields{"error": err})
 		return timedOut
 	}
 
@@ -430,7 +430,7 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 					task.CompletedAt = &completedAt
 					timedOut = append(timedOut, *task)
 					modified = true
-					logger.Debug("⏰ Task timed out after", logger.Fields{"duration": task.ID, "timeout": task.Timeout})
+					logger.Debug("⏰ Task timed out", logger.Fields{"task_id": task.ID, "timeout": task.Timeout})
 				}
 			}
 		}

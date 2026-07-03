@@ -228,7 +228,7 @@ func (c *Controller) isPortAvailable() bool {
 
 // runServer runs the HTTP server in a goroutine
 func (c *Controller) runServer() {
-	logger.Debug("Starting ori-agent server on port ...", logger.Fields{"server": c.port})
+	logger.Debug("Starting ori-agent server", logger.Fields{"port": c.port})
 
 	// Create server instance
 	srv, err := server.New()
@@ -238,7 +238,7 @@ func (c *Controller) runServer() {
 		c.errorMsg = fmt.Sprintf("Failed to create server: %v", err)
 		c.statusMu.Unlock()
 		c.notifyStatusChange(StatusError)
-		logger.Error("Failed to create server", logger.Fields{"server": err})
+		logger.Error("Failed to create server", logger.Fields{"error": err})
 		return
 	}
 
@@ -258,7 +258,7 @@ func (c *Controller) runServer() {
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusRunning)
 
-	logger.Info("Server running on http://localhost", logger.Fields{"server": c.port})
+	logger.Info("Server running", logger.Fields{"port": c.port})
 
 	// Start HTTP server (blocks until shutdown)
 	if err := httpServer.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {

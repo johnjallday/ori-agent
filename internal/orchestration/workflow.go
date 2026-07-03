@@ -68,7 +68,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 
 	subResults["research_task"] = researchTask.ID
 	subResults["researcher"] = researcherAgent
-	logger.Debug("📋 Research delegated to (task: )", logger.Fields{"task_id": researcherAgent, "id": researchTask.ID})
+	logger.Debug("📋 Research delegated", logger.Fields{"agent": researcherAgent, "task_id": researchTask.ID})
 
 	// Phase 2: Analysis
 	logger.Debug("🔍 Phase 2: Analysis", logger.Fields{})
@@ -90,7 +90,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 	} else {
 		subResults["analysis_task"] = analysisTask.ID
 		subResults["analyzer"] = analyzerAgent
-		logger.Debug("📋 Analysis delegated to (task: )", logger.Fields{"task_id": analyzerAgent, "id": analysisTask.ID})
+		logger.Debug("📋 Analysis delegated", logger.Fields{"agent": analyzerAgent, "task_id": analysisTask.ID})
 	}
 
 	// Phase 3: Synthesis
@@ -114,7 +114,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 	} else {
 		subResults["synthesis_task"] = synthesisTask.ID
 		subResults["synthesizer"] = synthesizerAgent
-		logger.Debug("📋 Synthesis delegated to (task: )", logger.Fields{"task_id": synthesizerAgent, "id": synthesisTask.ID})
+		logger.Debug("📋 Synthesis delegated", logger.Fields{"agent": synthesizerAgent, "task_id": synthesisTask.ID})
 	}
 
 	// Phase 4: Validation (optional)
@@ -138,7 +138,7 @@ func (o *Orchestrator) executeResearchPipeline(ws *workspace.Workspace, task Col
 		} else {
 			subResults["validation_task"] = validationTask.ID
 			subResults["validator"] = validatorAgent
-			logger.Debug("📋 Validation delegated to (task: )", logger.Fields{"task_id": validatorAgent, "id": validationTask.ID})
+			logger.Debug("📋 Validation delegated", logger.Fields{"agent": validatorAgent, "task_id": validationTask.ID})
 		}
 	}
 

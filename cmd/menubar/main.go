@@ -59,7 +59,7 @@ func main() {
 	// Initialize LaunchAgent manager
 	launchAgentMgr, err := menubar.NewLaunchAgentManager()
 	if err != nil {
-		logger.Error("Failed to create LaunchAgent manager", logger.Fields{"agent": err})
+		logger.Error("Failed to create LaunchAgent manager", logger.Fields{"error": err})
 		log.Println("Auto-start feature will be disabled")
 	}
 
@@ -167,14 +167,14 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 				}
 				ctx := context.Background()
 				if err := controller.StartServer(ctx); err != nil {
-					logger.Error("Failed to start server", logger.Fields{"server": err})
+					logger.Error("Failed to start server", logger.Fields{"error": err})
 				}
 
 			case <-stopItem.ClickedCh:
 				log.Println("Stop Server clicked")
 				ctx := context.Background()
 				if err := controller.StopServer(ctx); err != nil {
-					logger.Error("Failed to stop server", logger.Fields{"server": err})
+					logger.Error("Failed to stop server", logger.Fields{"error": err})
 				}
 
 			case <-openBrowserItem.ClickedCh:
@@ -193,7 +193,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 					// Currently checked, so uncheck (disable auto-start)
 					log.Println("Disabling auto-start...")
 					if err := launchAgentMgr.Uninstall(); err != nil {
-						logger.Error("Failed to uninstall LaunchAgent", logger.Fields{"agent": err})
+						logger.Error("Failed to uninstall LaunchAgent", logger.Fields{"error": err})
 					} else {
 						if err := settingsMgr.SetAutoStartEnabled(false); err != nil {
 							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
@@ -205,7 +205,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 					// Currently unchecked, so check (enable auto-start)
 					log.Println("Enabling auto-start...")
 					if err := launchAgentMgr.Install(); err != nil {
-						logger.Error("Failed to install LaunchAgent", logger.Fields{"agent": err})
+						logger.Error("Failed to install LaunchAgent", logger.Fields{"error": err})
 					} else {
 						if err := settingsMgr.SetAutoStartEnabled(true); err != nil {
 							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})

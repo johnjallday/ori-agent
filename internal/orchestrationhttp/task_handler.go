@@ -946,7 +946,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 
 	// Fallback: search all workspaces
 	if err := th.communicator.DeleteTask(taskID); err != nil {
-		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
+		logger.Error("Failed to delete task", logger.Fields{"task_id": taskID, "error": err})
 		orihttp.NotFound(w, err.Error())
 		return
 	}

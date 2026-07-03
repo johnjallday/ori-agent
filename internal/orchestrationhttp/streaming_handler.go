@@ -57,7 +57,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	// Get workflow status from orchestrator
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err != nil {
-		logger.Error("Failed to get workflow status", logger.Fields{"status": err})
+		logger.Error("Failed to get workflow status", logger.Fields{"error": err})
 		orihttp.NotFound(w, err.Error())
 		return
 	}
@@ -211,7 +211,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 			// Send status as JSON
 			data, err := json.Marshal(status)
 			if err != nil {
-				logger.Error("Failed to marshal status", logger.Fields{"status": err})
+				logger.Error("Failed to marshal status", logger.Fields{"error": err})
 				continue
 			}
 
