@@ -360,50 +360,55 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.templateRenderer,
 	)
 
-	// Handler Facade
-	b.server.Handlers = NewHandlerFacade(
-		b.activityLogger,
-		b.settingsHandler,
-		b.chatHandler,
-		b.onboardingHandler,
-		b.deviceHandler,
-		b.orchestrationHandler,
-		b.autoTaskHandler,
-		b.workspaceHandler,
-		b.usageHandler,
-		b.mcpHandler,
-		b.locationHandler,
-		b.workflowHandler,
-		b.modelCategoryHandler,
-		b.autoCategorizeHandler,
-		b.resetHandler,
-		b.autoConfigHandler,
-		b.smartOnboardingHandler,
-		b.speechHandler,
-		b.sessionHandler,
-		b.autoClassifyHandler,
-		b.smartInputHandler,
-		b.noteHandler,
-		b.sessionFilesHandler,
-		b.reviewHandler,
-		b.evolutionHandler,
-		b.vaultHandler,
-		b.externalAgentsHandler,
-		b.skillsHandler,
-		b.userHandler,
-	)
-	b.server.Handlers.CLIAgents = b.cliAgentHandler
-	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
-	b.server.Handlers.WorkspaceRuns = b.workspaceRunHandler
-	b.server.Handlers.ActionCenter = b.actionCenterHandler
-	b.server.Handlers.Plugin = b.pluginHandler
-	// initializeMissionBridge (which builds the trigger handler) runs before
-	// this facade is rebuilt, so re-attach here — same pattern as ActionCenter.
-	b.server.Handlers.Triggers = b.triggerHandler
-	b.server.Handlers.TemplateOnboarding = b.templateOnboardingHTTPHandler
-	if b.workspaceFileStore != nil {
-		b.server.Handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
+	// Handler Facade. Built as a named-field literal rather than a positional
+	// constructor: with ~37 same-shaped handler fields, a swapped pair of
+	// arguments compiles fine but wires the wrong handler — named fields make
+	// that mistake impossible, and late-built handlers (CLI agents, plugin,
+	// triggers, ...) attach in the same place as everything else.
+	handlers := &HandlerFacade{
+		ActivityLogger:   b.activityLogger,
+		Settings:         b.settingsHandler,
+		Chat:             b.chatHandler,
+		Onboarding:       b.onboardingHandler,
+		Device:           b.deviceHandler,
+		Orchestration:    b.orchestrationHandler,
+		AutoTask:         b.autoTaskHandler,
+		Workspace:        b.workspaceHandler,
+		Usage:            b.usageHandler,
+		MCP:              b.mcpHandler,
+		Location:         b.locationHandler,
+		Workflow:         b.workflowHandler,
+		ModelCategory:    b.modelCategoryHandler,
+		AutoCategorize:   b.autoCategorizeHandler,
+		Reset:            b.resetHandler,
+		AutoConfig:       b.autoConfigHandler,
+		SmartOnboarding:  b.smartOnboardingHandler,
+		Speech:           b.speechHandler,
+		Session:          b.sessionHandler,
+		AutoClassify:     b.autoClassifyHandler,
+		SmartInput:       b.smartInputHandler,
+		Note:             b.noteHandler,
+		SessionFiles:     b.sessionFilesHandler,
+		Review:           b.reviewHandler,
+		Evolution:        b.evolutionHandler,
+		Vault:            b.vaultHandler,
+		ExternalAgents:   b.externalAgentsHandler,
+		Skills:           b.skillsHandler,
+		User:             b.userHandler,
+		CLIAgents:        b.cliAgentHandler,
+		CLIAgentRegistry: b.cliAgentRegistry,
+		WorkspaceRuns:    b.workspaceRunHandler,
+		ActionCenter:     b.actionCenterHandler,
+		Plugin:           b.pluginHandler,
+		// initializeMissionBridge (which builds the trigger handler) runs
+		// before this facade is rebuilt, so it must be attached here too.
+		Triggers:           b.triggerHandler,
+		TemplateOnboarding: b.templateOnboardingHTTPHandler,
 	}
+	if b.workspaceFileStore != nil {
+		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
+	}
+	b.server.Handlers = handlers
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).
