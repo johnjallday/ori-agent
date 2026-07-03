@@ -212,10 +212,13 @@ func (s *Server) Restart() error {
 		return fmt.Errorf("failed to stop: %w", err)
 	}
 
-	// Create new context
+	// Create new context; s.ctx/s.cancel are read by Start and the health
+	// check loop, so the swap must happen under the lock.
 	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
 	s.ctx = ctx
 	s.cancel = cancel
+	s.mu.Unlock()
 
 	return s.Start()
 }

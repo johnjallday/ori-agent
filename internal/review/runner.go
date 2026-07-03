@@ -60,11 +60,14 @@ func (r *Runner) StartReview(ctx context.Context, opts ReviewOptions) (string, e
 
 // GetStatus returns the current status of a review job.
 func (r *Runner) GetStatus(ctx context.Context, jobID string) (*ReviewRun, error) {
-	// First check in-memory running jobs
+	// First check in-memory running jobs. Return a snapshot, not the live
+	// pointer: executeReview keeps mutating the tracked run under r.mu, and
+	// callers read the result without holding the lock.
 	r.mu.RLock()
 	if run, ok := r.running[jobID]; ok {
+		snapshot := *run
 		r.mu.RUnlock()
-		return run, nil
+		return &snapshot, nil
 	}
 	r.mu.RUnlock()
 

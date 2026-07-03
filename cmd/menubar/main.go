@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
+	"github.com/johnjallday/ori-agent/internal/version"
 )
 
 func main() {
@@ -221,7 +222,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 
 			case <-aboutItem.ClickedCh:
 				log.Println("About clicked")
-				showNotification("About Ori Agent", "Ori Agent - AI Agent Framework\\nVersion 0.0.13")
+				showNotification("About Ori Agent", fmt.Sprintf("Ori Agent - AI Agent Framework\nVersion %s", version.GetVersion()))
 
 			case <-quitItem.ClickedCh:
 				log.Println("Quit clicked")
@@ -381,7 +382,8 @@ func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr 
 }
 
 func showInputDialog(title, prompt, defaultValue string) (string, error) {
-	script := fmt.Sprintf(`display dialog "%s" default answer "%s" with title "%s"`, prompt, defaultValue, title)
+	script := fmt.Sprintf(`display dialog "%s" default answer "%s" with title "%s"`,
+		escapeAppleScriptString(prompt), escapeAppleScriptString(defaultValue), escapeAppleScriptString(title))
 	cmd := exec.Command("osascript", "-e", script)
 	output, err := cmd.Output()
 	if err != nil {
@@ -404,7 +406,8 @@ func showInputDialog(title, prompt, defaultValue string) (string, error) {
 
 func showNotification(title, message string) {
 	if runtime.GOOS == "darwin" {
-		script := fmt.Sprintf(`display notification "%s" with title "%s"`, message, title)
+		script := fmt.Sprintf(`display notification "%s" with title "%s"`,
+			escapeAppleScriptString(message), escapeAppleScriptString(title))
 		cmd := exec.Command("osascript", "-e", script)
 		if err := cmd.Run(); err != nil {
 			logger.Error("Failed to show notification", logger.Fields{"err": err})
@@ -482,5 +485,8 @@ func confirmStopProcessDialog(port int, summary string) (bool, error) {
 }
 
 func escapeAppleScriptString(value string) string {
+	// Backslashes must be escaped before quotes, or the quote escaping
+	// itself gets double-escaped.
+	value = strings.ReplaceAll(value, "\\", "\\\\")
 	return strings.ReplaceAll(value, "\"", "\\\"")
 }

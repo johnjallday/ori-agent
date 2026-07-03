@@ -826,7 +826,7 @@ func maskUtilityAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
 	}
-	if len(apiKey) < 12 {
+	if len(apiKey) < 20 {
 		return "***"
 	}
 	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]
@@ -838,7 +838,7 @@ func maskAnthropicAPIKey(apiKey string) string {
 		return ""
 	}
 
-	if len(apiKey) < 12 {
+	if len(apiKey) < 24 {
 		return "***"
 	}
 	return apiKey[:8] + "***..." + apiKey[len(apiKey)-4:]
@@ -848,7 +848,7 @@ func maskGeminiAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
 	}
-	if len(apiKey) < 12 {
+	if len(apiKey) < 20 {
 		return "***"
 	}
 	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]
@@ -861,7 +861,7 @@ func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
 	}
-	if len(apiKey) < 12 {
+	if len(apiKey) < 20 {
 		return "***"
 	}
 	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]

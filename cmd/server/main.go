@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -133,7 +135,7 @@ func main() {
 
 	// Start server in background
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()

@@ -1047,7 +1047,9 @@ func (db *DB) migration019WorkspaceRunContext(ctx context.Context) error {
 		`ALTER TABLE workspace_runs ADD COLUMN prepared_context_json TEXT`,
 	}
 	for _, stmt := range statements {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		// Tolerate duplicate columns so a partially-applied migration can
+		// re-run, matching every other ALTER TABLE migration in this file.
+		if _, err := db.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
 			return fmt.Errorf("failed to extend workspace run context schema: %w", err)
 		}
 	}

@@ -89,29 +89,31 @@ func (r *CLIAgentRegistry) List() []CLIAgentInfo {
 	return infos
 }
 
-// newClaudeAdapterFromPath creates a minimal ClaudeCLIAdapter for auto-detection.
+// newClaudeAdapterFromPath creates a ClaudeCLIAdapter for auto-detection.
+// The invoker must be set or the adapter can list models but never execute
+// a step (ExecuteStep rejects a nil invoker).
 func newClaudeAdapterFromPath(cliPath string) *ClaudeCLIAdapter {
 	resolved, err := exec.LookPath(cliPath)
 	if err != nil {
 		resolved = cliPath
 	}
-	return &ClaudeCLIAdapter{cliPath: resolved}
+	return &ClaudeCLIAdapter{cliPath: resolved, invoker: NewCLIInvoker()}
 }
 
-// newCodexAdapterFromPath creates a minimal CodexCLIAdapter for auto-detection.
+// newCodexAdapterFromPath creates a CodexCLIAdapter for auto-detection.
 func newCodexAdapterFromPath(cliPath string) *CodexCLIAdapter {
 	resolved, err := exec.LookPath(cliPath)
 	if err != nil {
 		resolved = cliPath
 	}
-	return &CodexCLIAdapter{cliPath: resolved}
+	return &CodexCLIAdapter{cliPath: resolved, invoker: NewCLIInvoker()}
 }
 
-// newGeminiAdapterFromPath creates a minimal GeminiCLIAdapter for auto-detection.
+// newGeminiAdapterFromPath creates a GeminiCLIAdapter for auto-detection.
 func newGeminiAdapterFromPath(cliPath string) *GeminiCLIAdapter {
 	resolved, err := exec.LookPath(cliPath)
 	if err != nil {
 		resolved = cliPath
 	}
-	return &GeminiCLIAdapter{cliPath: resolved}
+	return &GeminiCLIAdapter{cliPath: resolved, invoker: NewCLIInvoker()}
 }

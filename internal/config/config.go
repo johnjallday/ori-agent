@@ -393,14 +393,16 @@ func TemplatesRootSource(configured string) string {
 
 // Save writes current configuration to file
 func (m *Manager) Save() error {
-	m.mu.RLock()
+	// validate() normalizes (mutates) m.settings, so a write lock is required
+	// here even though Save reads more than it writes.
+	m.mu.Lock()
 	if err := m.validate(); err != nil {
-		m.mu.RUnlock()
+		m.mu.Unlock()
 		return fmt.Errorf("cannot save invalid configuration: %w", err)
 	}
 
 	settingsForDisk := m.settings
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	if m.hasWritableSecretStore() {
 		sanitizeSecretsForDisk(&settingsForDisk)

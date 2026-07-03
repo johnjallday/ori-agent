@@ -346,7 +346,14 @@ func (ct *CostTracker) calculateCost(provider, model string, usage Usage) (float
 func (ct *CostTracker) GetStats(start, end time.Time) UsageStats {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
+	return ct.getStatsLocked(start, end)
+}
 
+// getStatsLocked computes usage statistics for a time range. Callers must
+// hold ct.mu (read or write); it exists so lock-holding methods can reuse
+// the computation without recursively acquiring the RLock, which can
+// deadlock when a writer is queued between the two acquisitions.
+func (ct *CostTracker) getStatsLocked(start, end time.Time) UsageStats {
 	stats := UsageStats{
 		ByProvider:    make(map[string]ProviderStats),
 		ByAgent:       make(map[string]AgentStats),
@@ -438,7 +445,7 @@ func (ct *CostTracker) GetAllTimeStats() UsageStats {
 	start := ct.records[0].Timestamp
 	end := ct.records[len(ct.records)-1].Timestamp
 
-	return ct.GetStats(start, end.Add(time.Second))
+	return ct.getStatsLocked(start, end.Add(time.Second))
 }
 
 // GetTodayStats returns stats for today

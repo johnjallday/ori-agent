@@ -77,9 +77,21 @@ func changedFilesFromArtifacts(artifacts []Artifact) []string {
 			continue
 		}
 		if artifact.Metadata != nil {
-			if values, ok := artifact.Metadata["files"].([]string); ok {
+			// In-memory artifacts carry []string, but after a JSON round-trip
+			// through SQLite the same field decodes as []any — handle both or
+			// persisted runs silently lose their changed-files list.
+			switch values := artifact.Metadata["files"].(type) {
+			case []string:
 				for _, value := range values {
 					if value != "" && !seen[value] {
+						seen[value] = true
+						files = append(files, value)
+					}
+				}
+			case []any:
+				for _, raw := range values {
+					value, ok := raw.(string)
+					if ok && value != "" && !seen[value] {
 						seen[value] = true
 						files = append(files, value)
 					}

@@ -2,6 +2,7 @@
 package cliagenthttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -78,9 +79,12 @@ func (h *Handler) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Launch task in background
+	// Launch task in background. The request context is canceled as soon as
+	// this handler returns, so the background task must not inherit its
+	// cancellation or it dies almost immediately.
+	taskCtx := context.WithoutCancel(r.Context())
 	go func() {
-		result, err := h.executor.Execute(r.Context(), config)
+		result, err := h.executor.Execute(taskCtx, config)
 		if err != nil {
 			result = &cliagent.TaskResult{
 				Status: cliagent.TaskFailed,

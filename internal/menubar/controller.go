@@ -2,8 +2,10 @@ package menubar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -47,7 +49,6 @@ type Controller struct {
 	port        int
 	server      *server.Server
 	httpServer  *server.HTTPServerWrapper // Wrapper for graceful shutdown
-	cancelFunc  context.CancelFunc
 	errorMsg    string
 	statusChan  chan ServerStatus
 	subscribers []func(ServerStatus)
@@ -87,11 +88,8 @@ func (c *Controller) StartServer(ctx context.Context) error {
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusStarting)
 
-	// Create context for server lifecycle
-	_, cancel := context.WithCancel(ctx)
-	c.cancelFunc = cancel
-
-	// Start server in goroutine
+	// Start server in goroutine. Shutdown is driven by httpServer.Shutdown
+	// and server.Shutdown in StopServer, not by context cancellation.
 	go c.runServer()
 
 	// Wait for server to be running (with timeout)
@@ -141,11 +139,6 @@ func (c *Controller) StopServer(ctx context.Context) error {
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusStopping)
 
-	// Cancel the server context
-	if c.cancelFunc != nil {
-		c.cancelFunc()
-	}
-
 	// Wait for shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -166,7 +159,6 @@ func (c *Controller) StopServer(ctx context.Context) error {
 	c.status = StatusStopped
 	c.httpServer = nil
 	c.server = nil
-	c.cancelFunc = nil
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusStopped)
 
@@ -261,7 +253,7 @@ func (c *Controller) runServer() {
 	logger.Info("Server running", logger.Fields{"port": c.port})
 
 	// Start HTTP server (blocks until shutdown)
-	if err := httpServer.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		c.statusMu.Lock()
 		c.status = StatusError
 		c.errorMsg = fmt.Sprintf("Server error: %v", err)

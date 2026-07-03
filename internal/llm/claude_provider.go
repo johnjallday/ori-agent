@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -179,9 +180,23 @@ func (p *ClaudeProvider) convertMessages(messages []Message) []anthropic.Message
 			}
 
 		case RoleAssistant:
-			claudeMessages = append(claudeMessages, anthropic.NewAssistantMessage(
-				anthropic.NewTextBlock(msg.Content),
-			))
+			// Assistant turns must replay tool_use blocks alongside any text:
+			// a later tool_result referencing a tool_use the API never saw is
+			// rejected, which breaks every multi-turn tool conversation.
+			var assistantBlocks []anthropic.ContentBlockParamUnion
+			if msg.Content != "" {
+				assistantBlocks = append(assistantBlocks, anthropic.NewTextBlock(msg.Content))
+			}
+			for _, toolCall := range msg.ToolCalls {
+				input := json.RawMessage(toolCall.Arguments)
+				if len(input) == 0 {
+					input = json.RawMessage("{}")
+				}
+				assistantBlocks = append(assistantBlocks, anthropic.NewToolUseBlock(toolCall.ID, input, toolCall.Name))
+			}
+			if len(assistantBlocks) > 0 {
+				claudeMessages = append(claudeMessages, anthropic.NewAssistantMessage(assistantBlocks...))
+			}
 
 		case RoleTool:
 			// Claude uses tool_result content blocks in user messages
