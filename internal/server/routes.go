@@ -15,11 +15,41 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// registerRoutes registers all HTTP routes for the server.
-// Routes are organized by domain for clarity and maintainability.
+// registerRoutes registers all HTTP routes for the server, delegating to
+// one registration function per domain. Each helper owns exactly the routes
+// (and any locally-constructed handlers) for its domain.
 func registerRoutes(mux *http.ServeMux, s *Server) {
-	caps := s.privateCapabilitiesSnapshot()
+	registerHealthRoutes(mux, s)
+	registerPageRoutes(mux, s)
+	registerStaticAssetRoutes(mux, s)
+	registerAgentRoutes(mux, s)
+	registerSettingsRoutes(mux, s)
+	registerChatRoutes(mux, s)
+	registerUpdateRoutes(mux, s)
+	registerFileParsingRoutes(mux, s)
+	registerOnboardingRoutes(mux, s)
+	registerDeviceRoutes(mux, s)
+	registerUsageRoutes(mux, s)
+	registerModelCategoryRoutes(mux, s)
+	registerLocationRoutes(mux, s)
+	registerMCPRoutes(mux, s)
+	registerOrchestrationRoutes(mux, s)
+	registerSessionRoutes(mux, s)
+	registerReviewRoutes(mux, s)
+	registerCLIAgentRoutes(mux, s)
+	registerWorkspaceRunRoutes(mux, s)
+	registerTriggerRoutes(mux, s)
+	registerWorkspaceMemoryRoutes(mux, s)
+	registerExternalAgentRoutes(mux, s)
+	registerSkillsRoutes(mux, s)
+	registerPluginRoutes(mux, s)
+	registerFolderPickerRoutes(mux, s)
+	registerWorkspaceRuntimeRoutes(mux, s)
+	registerActionCenterRoutes(mux, s)
+}
 
+// registerHealthRoutes registers health check and diagnostics endpoints.
+func registerHealthRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Health Check Endpoint
 	// =============================================================================
@@ -30,7 +60,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 	mux.HandleFunc("/api/diagnostics/ui-smoke-test", s.handleUISmokeTest)
+}
 
+// registerPageRoutes registers HTML page handlers and legacy redirects.
+func registerPageRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Page Handlers (HTML Pages)
 	// =============================================================================
@@ -66,7 +99,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
 	mux.HandleFunc("/personalize", s.servePersonalize)
+}
 
+// registerStaticAssetRoutes registers static files, favicon, and agent/avatar file serving.
+func registerStaticAssetRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Static File Server (CSS, JS, Icons, Assets)
 	// =============================================================================
@@ -88,7 +124,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Agent Avatars (Static File Serving)
 	// =============================================================================
 	mux.HandleFunc("/avatars/", s.serveAvatarFiles)
+}
 
+// registerAgentRoutes registers agent CRUD/dashboard/evolution APIs and home-assistant routing.
+func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Agent API Endpoints
 	// =============================================================================
@@ -197,6 +236,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Home harness inline endpoint: answers app-introspection / app-navigation
 	// prompts using the cross-workspace home snapshot and read-only home tools.
 	mux.HandleFunc("/api/home-assistant/ask", s.newHomeAssistantAskHandler().AskHandler)
+}
+
+// registerSettingsRoutes registers settings, API keys, vault mount, Web3 (capability-gated), and reset.
+func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
+	caps := s.privateCapabilitiesSnapshot()
 
 	// =============================================================================
 	// Settings and Configuration Endpoints
@@ -231,12 +275,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Reset endpoints
 	mux.HandleFunc("/api/reset", s.Handlers.Reset.HandleReset)
 	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
+}
 
+// registerChatRoutes registers the chat endpoint.
+func registerChatRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Chat Endpoint
 	// =============================================================================
 	mux.HandleFunc("/api/chat", s.Handlers.Chat.ChatHandler)
+}
 
+// registerUpdateRoutes registers update-check endpoints.
+func registerUpdateRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Update Management Endpoints
 	// =============================================================================
@@ -244,7 +294,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/updates/check", updateHandler.CheckUpdatesHandler)
 	mux.HandleFunc("/api/updates/releases", updateHandler.ListReleasesHandler)
 	mux.HandleFunc("/api/updates/version", updateHandler.GetVersionHandler)
+}
 
+// registerFileParsingRoutes registers file parse/upload/content endpoints.
+func registerFileParsingRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// File Parsing Endpoint
 	// =============================================================================
@@ -252,7 +305,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/files/parse", fileHandler.ParseFileHandler)
 	mux.HandleFunc("/api/files/upload", fileHandler.UploadFileHandler)
 	mux.HandleFunc("/api/files/content", fileHandler.GetFileHandler)
+}
 
+// registerOnboardingRoutes registers onboarding, smart onboarding, user profile, theme, and notes-behavior preferences.
+func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Onboarding Endpoints
 	// =============================================================================
@@ -288,9 +344,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.Handlers.Onboarding.SetTheme(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
-			// =============================================================================
-			// Device Endpoints
-			// =============================================================================
 		}
 	})
 
@@ -305,14 +358,20 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			orihttp.MethodNotAllowed(w)
 		}
 	})
+}
 
+// registerDeviceRoutes registers device info/capability endpoints.
+func registerDeviceRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/device/info", s.Handlers.Device.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.Handlers.Device.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.Handlers.Device.GetCurrentWiFi)
 	mux.HandleFunc("/api/device/ollama", s.Handlers.Device.GetOllamaStatus)
 	mux.HandleFunc("/api/device/capabilities", s.Handlers.Device.GetCapabilities)
 	mux.HandleFunc("/api/device/detect-hardware", s.Handlers.Device.DetectHardware)
+}
 
+// registerUsageRoutes registers usage and cost tracking endpoints.
+func registerUsageRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints
 	// =============================================================================
@@ -323,7 +382,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/summary", s.Handlers.Usage.GetSummary)
 	mux.HandleFunc("/api/usage/utility", s.Handlers.Usage.GetUtilityMetrics)
 	mux.HandleFunc("/api/usage/pricing", s.Handlers.Usage.GetPricingModels)
+}
 
+// registerModelCategoryRoutes registers model category and auto-categorize endpoints.
+func registerModelCategoryRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Model Category Endpoints
 	// =============================================================================
@@ -348,7 +410,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/models/auto-categorize/availability", s.Handlers.AutoCategorize.CheckAvailabilityHandler)
 		mux.HandleFunc("/api/models/auto-categorize", s.Handlers.AutoCategorize.AutoCategorizeHandler)
 	}
+}
 
+// registerLocationRoutes registers location zone management endpoints.
+func registerLocationRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Location Management Endpoints
 	// =============================================================================
@@ -374,7 +439,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 	mux.HandleFunc("/api/location/override", s.Handlers.Location.SetManualLocation)
+}
 
+// registerMCPRoutes registers MCP server management and registry endpoints.
+func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// MCP (Model Context Protocol) Endpoints
 	// =============================================================================
@@ -396,7 +464,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/mcp/registry-sources", s.Handlers.MCP.AddRegistrySourceHandler)
 	mux.HandleFunc("DELETE /api/mcp/registry-sources/{id}", s.Handlers.MCP.RegistrySourcesItemHandler)
 	mux.HandleFunc("POST /api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
+}
 
+// registerOrchestrationRoutes registers orchestration, custom workflows, notifications, events, and scheduled tasks.
+func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Orchestration Endpoints
 	// =============================================================================
@@ -484,7 +555,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Fall through to other workspace endpoints (handled elsewhere)
 		http.NotFound(w, r)
 	})
+}
 
+// registerSessionRoutes registers sessions, session files, notes, folders, workspaces, project templates, and tags.
+func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Session Management Endpoints (including Session Files)
 	// =============================================================================
@@ -635,7 +709,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/tags/delete", s.Handlers.Session.HandleTagDelete)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
 	}
+}
 
+// registerReviewRoutes registers conversation review endpoints.
+func registerReviewRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Review System API Endpoints
 	// =============================================================================
@@ -646,7 +723,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/review/export", s.Handlers.Review.HandleExport)
 		mux.HandleFunc("/api/review/runs", s.Handlers.Review.HandleRuns)
 	}
+}
 
+// registerCLIAgentRoutes registers CLI agent adapter endpoints.
+func registerCLIAgentRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// CLI Agent Adapter Endpoints
 	// =============================================================================
@@ -655,7 +735,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/cli-agents/tasks", s.Handlers.CLIAgents.HandleCreateTask)
 		mux.HandleFunc("/api/cli-agents/tasks/", s.Handlers.CLIAgents.HandleGetTask)
 	}
+}
 
+// registerWorkspaceRunRoutes registers workspace mission-run endpoints.
+func registerWorkspaceRunRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Workspace Runs API Endpoints
 	// =============================================================================
@@ -669,7 +752,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/artifacts", s.Handlers.WorkspaceRuns.ListArtifacts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/trace", s.Handlers.WorkspaceRuns.ListTrace)
 	}
+}
 
+// registerTriggerRoutes registers event trigger and webhook endpoints.
+func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Event Triggers API Endpoints
 	// =============================================================================
@@ -689,7 +775,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
 	}
+}
 
+// registerWorkspaceMemoryRoutes registers workspace MEMORY.md endpoints.
+func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Workspace Memory (MEMORY.md) Endpoints
 	// =============================================================================
@@ -699,7 +788,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
 	}
+}
 
+// registerExternalAgentRoutes registers external agent (Claude Code / Codex) endpoints.
+func registerExternalAgentRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
@@ -709,7 +801,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/external-agents/codex", s.Handlers.ExternalAgents.GetCodex)
 		mux.HandleFunc("/api/external-agents/refresh", s.Handlers.ExternalAgents.Refresh)
 	}
+}
 
+// registerSkillsRoutes registers skills endpoints.
+func registerSkillsRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Skills Endpoints
 	// =============================================================================
@@ -717,7 +812,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
 		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
 	}
+}
 
+// registerPluginRoutes registers plugin bundle endpoints.
+func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Plugin Endpoints (Claude Code / Codex-compatible bundles)
 	// =============================================================================
@@ -732,13 +830,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
 		mux.HandleFunc("POST /api/plugins/{name}/update", s.Handlers.Plugin.UpdateHandler)
 	}
+}
 
+// registerFolderPickerRoutes registers folder picker launcher endpoints.
+func registerFolderPickerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Folder Picker Launcher
 	// =============================================================================
 	mux.HandleFunc("/api/launch-folder-picker", s.Handlers.Workspace.LaunchFolderPicker)
 	mux.HandleFunc("/api/folder-picker/select-path", s.Handlers.Workspace.SelectFolderPath)
+}
 
+// registerWorkspaceRuntimeRoutes registers workspace runtime subresources: MCP/skill bindings, agent access, mission, native-MCP.
+func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Workspace Runtime API Endpoints
 	// =============================================================================
@@ -787,7 +891,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.GetNativeMCPSettings)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPWorkspace)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPAgent)
+}
 
+// registerActionCenterRoutes registers cross-workspace Action Center triage endpoints.
+func registerActionCenterRoutes(mux *http.ServeMux, s *Server) {
 	// Action Center — cross-workspace triage of mission opportunities.
 	if s.Handlers.ActionCenter != nil {
 		mux.HandleFunc("GET /api/action-center/opportunities", s.Handlers.ActionCenter.List)
@@ -820,17 +927,8 @@ func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 	if s.routeWorkspaceRuntimeRequest(w, r) {
 		return
 	}
-	// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name}).
-	if strings.Contains(path, "/agents") {
-		s.Handlers.Session.HandleWorkspaces(w, r)
-		return
-	}
-	// Handle layout management (GET/PUT /api/workspaces/{id}/layout).
-	if strings.Contains(path, "/layout") {
-		s.Handlers.Session.HandleWorkspaces(w, r)
-		return
-	}
-	// Otherwise, handle as a regular workspace request.
+	// Everything else (workspace CRUD, agent add/remove, layout) is served by
+	// the session workspace handler.
 	s.Handlers.Session.HandleWorkspaces(w, r)
 }
 
@@ -949,31 +1047,19 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		return true
 	}
 
-	if strings.Contains(path, "/canvas/store-nodes") {
-		if strings.HasSuffix(path, "/status") && r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetStoreNodeStatus(w, r)
-		} else if r.Method == http.MethodPost {
-			s.Handlers.Workspace.CreateStoreNode(w, r)
-		} else if r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetStoreNodes(w, r)
-		} else if r.Method == http.MethodPatch {
-			s.Handlers.Workspace.UpdateStoreNode(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.Workspace.DeleteStoreNode(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
 	if strings.Contains(path, "/store-nodes") {
+		// Matches both /store-nodes and its /canvas/store-nodes alias (two
+		// near-identical blocks before this merge). The only historical
+		// difference is preserved: PUT updates are accepted on the plain
+		// surface but were always 405 on the canvas alias.
+		allowPut := !strings.Contains(path, "/canvas/store-nodes")
 		if strings.HasSuffix(path, "/status") && r.Method == http.MethodGet {
 			s.Handlers.Workspace.GetStoreNodeStatus(w, r)
 		} else if r.Method == http.MethodPost {
 			s.Handlers.Workspace.CreateStoreNode(w, r)
 		} else if r.Method == http.MethodGet {
 			s.Handlers.Workspace.GetStoreNodes(w, r)
-		} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
+		} else if r.Method == http.MethodPatch || (allowPut && r.Method == http.MethodPut) {
 			s.Handlers.Workspace.UpdateStoreNode(w, r)
 		} else if r.Method == http.MethodDelete {
 			s.Handlers.Workspace.DeleteStoreNode(w, r)
