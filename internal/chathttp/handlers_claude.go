@@ -78,7 +78,9 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 	}), plannerDecision))
 }
 
-// handleClaudeToolCalls handles tool execution for Claude
+// handleClaudeToolCalls handles tool execution for Claude via the shared
+// provider tool loop. Claude follow-up turns append the follow-up guidance
+// prompt; the other providers use the base system prompt unchanged.
 func (h *Handler) handleClaudeToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
@@ -97,82 +99,20 @@ func (h *Handler) handleClaudeToolCalls(
 	systemPrompt string,
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
-
-	loopResult := h.runBoundedToolLoop(
-		resp.Content,
-		resp.ToolCalls,
-		boundedToolLoopConfig{},
-		boundedToolLoopCallbacks{
-			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
-				assistantMsg := llm.NewAssistantMessage(content)
-				assistantMsg.ToolCalls = toolCalls
-				messages = append(messages, assistantMsg)
-			},
-			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
-				return h.executeToolCallsCommonWithSession(baseCtx, ag, toolCalls, files, sessionID)
-			},
-			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
-				for i, tc := range toolCalls {
-					if i >= len(execResult.Results) {
-						break
-					}
-					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-				}
-			},
-			RequestNextResponse: func() (string, []llm.ToolCall, error) {
-				resp2, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: systemPrompt + "\n\n" + getFollowUpSystemPrompt(),
-					Tools:        tools,
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
-				})
-				if err != nil {
-					return "", nil, err
-				}
-				if resp2 == nil {
-					return "", nil, fmt.Errorf("claude follow-up returned no response")
-				}
-				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag.Agent, userMessage)
-				return resp2.Content, resp2.ToolCalls, nil
-			},
-			RequestFinalResponse: func() (string, error) {
-				resp2, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
-				})
-				if err != nil {
-					return "", err
-				}
-				if resp2 == nil {
-					return "", fmt.Errorf("claude final synthesis returned no response")
-				}
-				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag.Agent, userMessage)
-				return resp2.Content, nil
-			},
-		},
-	)
-
-	finalText := getResponseText(loopResult.FinalContent)
-	if loopResult.HasStructuredResult {
-		finalText = loopResult.FinalContent
-	}
-
-	logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.persistAgent(agentName, ag.Agent)
-
-	// Store assistant response in session
-	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
-
-	writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-		"response":  finalText,
-		"toolCalls": loopResult.ToolCalls,
-	}, chatRouteMetadata{
-		Mode:      routeModeAssistantChat,
-		ToolCount: len(loopResult.ToolCalls),
-	}), loopResult.Receipts), plannerDecision))
+	_ = start
+	h.runProviderToolLoop(w, ctx, baseCtx, providerToolLoopRun{
+		Agent:                ag,
+		AgentName:            agentName,
+		Messages:             messages,
+		InitialResponse:      resp,
+		Tools:                tools,
+		Files:                files,
+		Provider:             provider,
+		SessionID:            sessionID,
+		UserMessage:          userMessage,
+		PlannerDecision:      plannerDecision,
+		ProviderLabel:        "claude",
+		FollowUpSystemPrompt: systemPrompt + "\n\n" + getFollowUpSystemPrompt(),
+		FinalSystemPrompt:    systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
+	})
 }

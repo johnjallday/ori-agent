@@ -194,6 +194,124 @@ func (h *Handler) runBoundedToolLoop(
 	}
 }
 
+// providerToolLoopRun bundles everything runProviderToolLoop needs to finish
+// a chat turn in which the model requested tool calls. Used by the Claude,
+// Gemini, and local-provider handlers, which previously each wired the same
+// callbacks around runBoundedToolLoop by hand. (The OpenAI handler keeps its
+// own wiring: it speaks the OpenAI SDK client, not llm.Provider.)
+type providerToolLoopRun struct {
+	Agent           *resolvedChatAgent
+	AgentName       string
+	Messages        []llm.Message
+	InitialResponse *llm.ChatResponse
+	Tools           []llm.Tool
+	Files           []toolapi.FileAttachment
+	Provider        llm.Provider
+	SessionID       string
+	UserMessage     string
+	PlannerDecision *types.PlannerDecision
+
+	// ProviderLabel is the usage-tracking / error-message name ("claude",
+	// "gemini", or the local provider's name).
+	ProviderLabel string
+	// FollowUpSystemPrompt is the system prompt for follow-up turns inside
+	// the loop; providers differ on whether they append follow-up guidance.
+	FollowUpSystemPrompt string
+	// FinalSystemPrompt is the system prompt for the last-resort synthesis
+	// request when the loop stops without a final answer.
+	FinalSystemPrompt string
+}
+
+// runProviderToolLoop drives the bounded tool loop for a generic
+// llm.Provider and writes the chat response: assistant turns and tool
+// results append to the conversation, follow-up/final-synthesis requests go
+// back to the same provider, and the final text is persisted to the agent,
+// stored in the session, and returned with receipts and route metadata.
+func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx context.Context, run providerToolLoopRun) {
+	start := time.Now()
+	messages := run.Messages
+	ag := run.Agent
+
+	loopResult := h.runBoundedToolLoop(
+		run.InitialResponse.Content,
+		run.InitialResponse.ToolCalls,
+		boundedToolLoopConfig{},
+		boundedToolLoopCallbacks{
+			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
+				assistantMsg := llm.NewAssistantMessage(content)
+				assistantMsg.ToolCalls = toolCalls
+				messages = append(messages, assistantMsg)
+			},
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, toolCalls, run.Files, run.SessionID)
+			},
+			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
+				for i, tc := range toolCalls {
+					if i >= len(execResult.Results) {
+						break
+					}
+					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				resp, err := run.Provider.Chat(ctx, llm.ChatRequest{
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: run.FollowUpSystemPrompt,
+					Tools:        run.Tools,
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    defaultChatMaxTokens,
+				})
+				if err != nil {
+					return "", nil, err
+				}
+				if resp == nil {
+					return "", nil, fmt.Errorf("%s follow-up returned no response", run.ProviderLabel)
+				}
+				h.trackUsageCommon(run.ProviderLabel, ag.Settings.Model, run.AgentName, resp.Usage, ag.Agent, run.UserMessage)
+				return resp.Content, resp.ToolCalls, nil
+			},
+			RequestFinalResponse: func() (string, error) {
+				resp, err := run.Provider.Chat(ctx, llm.ChatRequest{
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: run.FinalSystemPrompt,
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    defaultChatMaxTokens,
+				})
+				if err != nil {
+					return "", err
+				}
+				if resp == nil {
+					return "", fmt.Errorf("%s final synthesis returned no response", run.ProviderLabel)
+				}
+				h.trackUsageCommon(run.ProviderLabel, ag.Settings.Model, run.AgentName, resp.Usage, ag.Agent, run.UserMessage)
+				return resp.Content, nil
+			},
+		},
+	)
+
+	finalText := getResponseText(loopResult.FinalContent)
+	if loopResult.HasStructuredResult {
+		finalText = loopResult.FinalContent
+	}
+
+	logger.Debug("Provider tool loop completed", logger.Fields{
+		"provider": run.ProviderLabel,
+		"duration": time.Since(start),
+	})
+	_ = h.persistAgent(run.AgentName, ag.Agent)
+	h.storeMessageInSession(baseCtx, run.SessionID, "assistant", finalText)
+
+	writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+		"response":  finalText,
+		"toolCalls": loopResult.ToolCalls,
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(loopResult.ToolCalls),
+	}), loopResult.Receipts), run.PlannerDecision))
+}
+
 func tryToolLoopFinalSynthesis(request func() (string, error)) (string, bool) {
 	if request == nil {
 		return "", false
