@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
@@ -75,7 +74,8 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *r
 	}), plannerDecision))
 }
 
-// handleGeminiToolCalls handles tool execution for Gemini.
+// handleGeminiToolCalls handles tool execution for Gemini via the shared
+// provider tool loop.
 func (h *Handler) handleGeminiToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
@@ -93,79 +93,19 @@ func (h *Handler) handleGeminiToolCalls(
 	systemPrompt string,
 ) {
 	logger.Info("Gemini requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
-
-	loopResult := h.runBoundedToolLoop(
-		resp.Content,
-		resp.ToolCalls,
-		boundedToolLoopConfig{},
-		boundedToolLoopCallbacks{
-			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
-				assistantMsg := llm.NewAssistantMessage(content)
-				assistantMsg.ToolCalls = toolCalls
-				messages = append(messages, assistantMsg)
-			},
-			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
-				return h.executeToolCallsCommonWithSession(baseCtx, ag, toolCalls, files, sessionID)
-			},
-			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
-				for i, tc := range toolCalls {
-					if i >= len(execResult.Results) {
-						break
-					}
-					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-				}
-			},
-			RequestNextResponse: func() (string, []llm.ToolCall, error) {
-				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: systemPrompt,
-					Tools:        tools,
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
-				})
-				if err != nil {
-					return "", nil, err
-				}
-				if finalResp == nil {
-					return "", nil, fmt.Errorf("gemini follow-up returned no response")
-				}
-				h.trackUsageCommon("gemini", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
-				return finalResp.Content, finalResp.ToolCalls, nil
-			},
-			RequestFinalResponse: func() (string, error) {
-				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
-				})
-				if err != nil {
-					return "", err
-				}
-				if finalResp == nil {
-					return "", fmt.Errorf("gemini final synthesis returned no response")
-				}
-				h.trackUsageCommon("gemini", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
-				return finalResp.Content, nil
-			},
-		},
-	)
-
-	finalText := getResponseText(loopResult.FinalContent)
-	if loopResult.HasStructuredResult {
-		finalText = loopResult.FinalContent
-	}
-	_ = h.persistAgent(agentName, ag.Agent)
-
-	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
-
-	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-		"response":  finalText,
-		"toolCalls": loopResult.ToolCalls,
-	}, chatRouteMetadata{
-		Mode:      routeModeAssistantChat,
-		ToolCount: len(loopResult.ToolCalls),
-	}), loopResult.Receipts), plannerDecision))
+	h.runProviderToolLoop(w, ctx, baseCtx, providerToolLoopRun{
+		Agent:                ag,
+		AgentName:            agentName,
+		Messages:             messages,
+		InitialResponse:      resp,
+		Tools:                tools,
+		Files:                files,
+		Provider:             provider,
+		SessionID:            sessionID,
+		UserMessage:          userMessage,
+		PlannerDecision:      plannerDecision,
+		ProviderLabel:        "gemini",
+		FollowUpSystemPrompt: systemPrompt,
+		FinalSystemPrompt:    systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
+	})
 }

@@ -805,6 +805,25 @@ type UploadedFile struct {
 }
 
 // ChatHandler handles chat requests
+// chatRequest is the JSON body of POST /api/chat.
+type chatRequest struct {
+	Question             string                `json:"question"`
+	AgentName            string                `json:"agent_name,omitempty"` // Allow specifying target agent
+	Files                []UploadedFile        `json:"files,omitempty"`
+	RouteContext         *chatRouteContext     `json:"route_context,omitempty"`
+	WorkflowResponse     *WorkflowUserResponse `json:"workflow_response,omitempty"`
+	MultiAgentMode       string                `json:"multi_agent_mode,omitempty"`
+	MultiAgentThreshold  float64               `json:"multi_agent_threshold,omitempty"`
+	PlanBeforeAction     bool                  `json:"plan_before_action,omitempty"`
+	ApprovedActionPlanID string                `json:"approved_action_plan_id,omitempty"`
+}
+
+// ChatHandler serves POST /api/chat. It runs the chat turn as a pipeline of
+// stages, most of which can short-circuit by writing a response: parse and
+// resolve the question -> resolve the execution agent -> pre-routing rewrites
+// (slash commands, skills, direct tools) -> workspace routing and agent load
+// -> planning/approval intercepts -> planner orchestration -> tool aggregation
+// -> provider dispatch.
 func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
@@ -815,17 +834,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Question             string                `json:"question"`
-		AgentName            string                `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files                []UploadedFile        `json:"files,omitempty"`
-		RouteContext         *chatRouteContext     `json:"route_context,omitempty"`
-		WorkflowResponse     *WorkflowUserResponse `json:"workflow_response,omitempty"`
-		MultiAgentMode       string                `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold  float64               `json:"multi_agent_threshold,omitempty"`
-		PlanBeforeAction     bool                  `json:"plan_before_action,omitempty"`
-		ApprovedActionPlanID string                `json:"approved_action_plan_id,omitempty"`
-	}
+	var req chatRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
@@ -918,71 +927,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(q, "/tool ") {
-		// Direct tool execution - bypass LLM decision-making
-		cmd, err := parseDirectToolCommand(q)
-		if err != nil {
-			// Return parsing error as response
-			orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
-				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
-				"direct_tool_call": true,
-				"success":          false,
-			}, chatRouteMetadata{
-				Mode: routeModeDirectTool,
-			}))
-			return
-		}
-
-		// Attach files to the command if present
-		if len(req.Files) > 0 {
-			cmd.Files = ConvertUploadedFilesToAttachments(req.Files)
-		}
-
-		// Load agent - use session-bound agent if available
-		current := executionAgent.Name
-		if current == "" {
-			orihttp.InternalError(w, "no agent available for direct tool execution")
-			return
-		}
-		ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
-		if err != nil {
-			if errors.Is(err, errAgentPaused) {
-				orihttp.Conflict(w, fmt.Sprintf("Agent %q is disabled. Turn Enabled on before starting a chat or running tools.", current))
-				return
-			}
-			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
-			return
-		}
-
-		if req.PlanBeforeAction && approvedActionPlanID == "" {
-			plan := buildDirectToolActionPlan(q, cmd)
-			response := attachRouteMetadata(map[string]any{
-				"response":           formatActionPlanMessage(plan),
-				"requires_approval":  true,
-				"approval_type":      "action_plan",
-				"action_plan_id":     plan.ID,
-				"action_plan":        plan,
-				"plan_before_action": true,
-			}, chatRouteMetadata{
-				Mode:   routeModeDirectTool,
-				Reason: "awaiting action plan approval",
-			})
-			writeJSONResponse(w, response)
-			return
-		}
-
-		result := h.executeDirectTool(r.Context(), ag, cmd)
-
-		// Add to conversation history for context
-		ag.Messages = append(ag.Messages, openai.UserMessage(q))
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(result.Result))
-		_ = h.persistAgent(current, ag.Agent)
-
-		// Return formatted response
-		response := formatDirectToolResponse(result)
-		writeJSONResponse(w, response)
+		h.handleDirectToolCommand(w, r, req, q, executionAgent, normalizedRouteContext, approvedActionPlanID)
 		return
 	}
-
 	logger.Debug("Chat question received", logger.Fields{"question": q})
 	// Context with timeout per request (prevents indefinite hang)
 	base := r.Context()
@@ -1025,27 +972,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// full context across page reloads and server restarts.
 	h.rehydrateSessionHistory(r.Context(), sessionID, ag)
 
-	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext, h.workspaceStore, h.sessionStore); planningResp != nil && planningResp.Form != nil {
-		responseText := strings.TrimSpace(planningResp.ResponseText)
-		if responseText == "" {
-			responseText = "Complete the planning step below."
-		}
-
-		ag.Messages = append(ag.Messages, openai.UserMessage(originalQuery))
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-		_ = h.persistAgent(current, ag.Agent)
-
-		h.storeMessageInSession(base, sessionID, "user", originalQuery)
-		h.storeMessageInSession(base, sessionID, "assistant", responseText)
-
-		writeJSONResponse(w, attachRouteMetadata(map[string]any{
-			"response":      responseText,
-			"planning_form": planningResp.Form,
-			"workflow_step": buildWorkflowStepFromPlanningForm(planningResp.Form, sessionID),
-		}, chatRouteMetadata{
-			Mode:   routeModeAssistantChat,
-			Reason: "workspace planning form required",
-		}))
+	if h.maybeHandleWorkspacePlanningForm(w, base, ag, current, originalQuery, sessionID, normalizedRouteContext) {
 		return
 	}
 
@@ -1095,38 +1022,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if invokedSkill != nil && len(invokedSkill.Skill.RequiredMCPServers) > 0 {
-		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
-		if len(missing) > 0 {
-			primaryServer := missing[0]
-			preferenceKey := ""
-			workspaceID := strings.TrimSpace(normalizedRouteContext.WorkspaceID)
-			if workspaceID != "" {
-				preferenceKey = workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, primaryServer)
-			}
-			writeJSONResponse(w, attachDependencyResolution(map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' requires MCP connectors: %s. Bind them from the target workspace.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
-			}, &dependencyResolution{
-				Version:            1,
-				Title:              "Required MCP connectors are not enabled",
-				Summary:            fmt.Sprintf("Enable the required connector for skill \"%s\" before retrying.", invokedSkill.Skill.Name),
-				ReasonCode:         "skill_required_mcp_missing",
-				RecommendedSurface: dependencyResolutionSurfaceModal,
-				RetryContext:       buildDefaultRetryContext(workspaceID != ""),
-				Steps: []dependencyResolutionStep{
-					{
-						ID:           "skill-required-mcp",
-						Type:         dependencyTypeWorkspaceMCP,
-						DisplayName:  primaryServer,
-						Summary:      fmt.Sprintf("Enable %s in the current workspace to run \"%s\".", primaryServer, invokedSkill.Skill.Name),
-						RiskLevel:    "low",
-						Suppressible: workspaceID != "",
-						Actions:      buildSkillRequiredMCPActions(workspaceID, primaryServer, preferenceKey),
-					},
-				},
-			}))
-			return
-		}
+	if h.maybeRejectSkillMissingMCP(w, ag, invokedSkill, normalizedRouteContext) {
+		return
 	}
 
 	sessionQuery := originalQuery
@@ -1141,173 +1038,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
-
-	var plannerDecision *types.PlannerDecision
-
-	// Planner-first orchestration routing
-	if h.orchestrator != nil {
-		mode, threshold := h.orchestrator.GetMultiAgentDefaults()
-		if req.MultiAgentMode != "" {
-			if parsed, ok := types.ParseMultiAgentMode(strings.ToLower(strings.TrimSpace(req.MultiAgentMode))); ok {
-				mode = parsed
-			}
-		}
-		if req.MultiAgentThreshold > 0 {
-			threshold = req.MultiAgentThreshold
-		}
-
-		if mode != types.MultiAgentModeOff {
-			plan, err := h.orchestrator.PlanTask(ctx, q)
-			if err != nil {
-				logger.Error("Planner failed", logger.Fields{"error": err})
-			} else {
-				decision := h.orchestrator.DecideMultiAgent(plan, mode, threshold)
-				plannerDecision = &decision
-				logger.Info("Planner routing decision", logger.Fields{
-					"mode":        decision.Mode,
-					"complexity":  decision.ComplexityScore,
-					"threshold":   decision.Threshold,
-					"multi_agent": decision.MultiAgent,
-				})
-
-				if decision.MultiAgent {
-					result, err := h.orchestrator.ExecutePlannedTask(ctx, current, q, plan, decision, 10*time.Minute)
-					if err != nil {
-						logger.Error("Orchestration failed", logger.Fields{"error": err})
-					} else {
-						logger.Info("Orchestration completed successfully", logger.Fields{})
-						responseText := result.FinalOutput
-						if responseText == "" && result.Status == "pending_approval" {
-							responseText = "Dynamic agent approval required to continue."
-						}
-						if h.utilityTelemetry != nil {
-							h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
-						}
-						receipt := buildActionReceipt(
-							"orchestration",
-							"Executed multi-agent workflow",
-							"planner selected multi-agent execution",
-							"",
-							"",
-							responseText,
-							0,
-							result.Error == "",
-							result.Error,
-						)
-						orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
-							"response":               responseText,
-							"orchestrated":           true,
-							"workspace_id":           result.WorkspaceID,
-							"status":                 result.Status,
-							"pending_plan_id":        result.PendingPlanID,
-							"planner_decision":       result.PlannerDecision,
-							"planner_plan":           plan,
-							"dynamic_agent_requests": result.DynamicAgentRequests,
-						}, chatRouteMetadata{
-							Mode:   routeModeSpecialistFlow,
-							Reason: "planner selected multi-agent execution",
-						}), []ActionReceipt{receipt}))
-						return
-					}
-				}
-			}
-		} else {
-			decision := types.PlannerDecision{
-				ComplexityScore: 0,
-				Threshold:       threshold,
-				Mode:            string(mode),
-				MultiAgent:      false,
-				Rationale:       "Multi-agent disabled",
-				CreatedAt:       time.Now(),
-			}
-			plannerDecision = &decision
-		}
+	plannerDecision, handled := h.maybeRunPlannerOrchestration(ctx, w, q, current, req.MultiAgentMode, req.MultiAgentThreshold)
+	if handled {
+		return
 	}
 
-	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
-	tools := []llm.Tool{}
-	toolIndex := make(map[string]int)
-	toolSource := make(map[string]string)
-	appendTool := func(def llm.Tool, source string) {
-		name := strings.TrimSpace(def.Name)
-		if name == "" {
-			return
-		}
-		if idx, exists := toolIndex[name]; exists {
-			if source == "mcp" && toolSource[name] == "utility" && shouldPreferMCPToolOverUtility(name) {
-				tools[idx] = def
-				toolSource[name] = source
-			}
-			return
-		}
-		toolIndex[name] = len(tools)
-		toolSource[name] = source
-		tools = append(tools, def)
-	}
-
-	// Add native utility tools first
-	if h.utilityRegistry != nil {
-		for _, def := range h.utilityRegistry.ListToolDefinitions() {
-			if !isUtilityToolAllowedForAgent(ag.Agent, def.Name) {
-				continue
-			}
-			if shouldSuppressUtilityToolForAgent(ag, def.Name) {
-				continue
-			}
-			appendTool(llm.Tool{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters:  def.Parameters,
-			}, "utility")
-		}
-	}
-
-	// Add workspace-scoped tools when in a workspace context
-	if ag.WorkspaceTools != nil {
-		wsTools := ag.WorkspaceTools.Tools()
-		logger.Info("Adding workspace tools to LLM request", logger.Fields{
-			"count": len(wsTools),
-		})
-		for _, wt := range wsTools {
-			def := wt.Definition()
-			logger.Debug("Registering workspace tool", logger.Fields{"name": def.Name})
-			appendTool(llm.Tool{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters:  def.Parameters,
-			}, "workspace")
-		}
-	} else {
-		logger.Debug("No workspace tools to add (WorkspaceTools is nil)")
-	}
-
-	// Add MCP tools for enabled servers
-	logger.Debug("Checking MCP servers for agent", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
-	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
-		logger.Debug("Loading MCP tools for agent", logger.Fields{"agent": current})
-		for _, serverName := range ag.MCPServers {
-			logger.Debug("Attempting to get tools for MCP server", logger.Fields{"server": serverName})
-			mcpTools, err := h.getMCPToolsForServer(serverName)
-			if err != nil {
-				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
-				continue
-			}
-			for _, mcpTool := range mcpTools {
-				mcpDef := mcpTool.Definition()
-				appendTool(llm.Tool{
-					Name:        mcpDef.Name,
-					Description: mcpDef.Description,
-					Parameters:  mcpDef.Parameters,
-				}, "mcp")
-			}
-			logger.Debug("Added MCP tools from server", logger.Fields{"count": len(mcpTools), "server": serverName})
-		}
-	}
-
-	if invokedSkill != nil {
-		tools = filterToolsForSkill(tools, invokedSkill.Skill)
-	}
-	tools = prioritizeToolsForPath(ag.Agent, tools)
+	tools := h.buildChatToolList(ag, current, invokedSkill)
 
 	if invokedSkill == nil {
 		if h.maybeHandleCapabilityRecovery(w, base, ag, current, originalQuery, sessionID, tools, plannerDecision) {
@@ -1401,6 +1137,325 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Handle OpenAI models
 	agentClient := h.getClientForAgent(ag.Agent)
 	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, agentClient, plannerDecision, toolRuntimeSystemPrompt)
+}
+
+// handleDirectToolCommand executes a "/tool <name> {json}" chat message
+// directly, bypassing LLM decision-making. It always writes the response.
+func (h *Handler) handleDirectToolCommand(w http.ResponseWriter, r *http.Request, req chatRequest, q string, executionAgent executionAgentResolution, normalizedRouteContext normalizedChatRouteContext, approvedActionPlanID string) {
+	// Direct tool execution - bypass LLM decision-making
+	cmd, err := parseDirectToolCommand(q)
+	if err != nil {
+		// Return parsing error as response
+		orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
+			"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
+			"direct_tool_call": true,
+			"success":          false,
+		}, chatRouteMetadata{
+			Mode: routeModeDirectTool,
+		}))
+		return
+	}
+
+	// Attach files to the command if present
+	if len(req.Files) > 0 {
+		cmd.Files = ConvertUploadedFilesToAttachments(req.Files)
+	}
+
+	// Load agent - use session-bound agent if available
+	current := executionAgent.Name
+	if current == "" {
+		orihttp.InternalError(w, "no agent available for direct tool execution")
+		return
+	}
+	ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
+	if err != nil {
+		if errors.Is(err, errAgentPaused) {
+			orihttp.Conflict(w, fmt.Sprintf("Agent %q is disabled. Turn Enabled on before starting a chat or running tools.", current))
+			return
+		}
+		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
+		return
+	}
+
+	if req.PlanBeforeAction && approvedActionPlanID == "" {
+		plan := buildDirectToolActionPlan(q, cmd)
+		response := attachRouteMetadata(map[string]any{
+			"response":           formatActionPlanMessage(plan),
+			"requires_approval":  true,
+			"approval_type":      "action_plan",
+			"action_plan_id":     plan.ID,
+			"action_plan":        plan,
+			"plan_before_action": true,
+		}, chatRouteMetadata{
+			Mode:   routeModeDirectTool,
+			Reason: "awaiting action plan approval",
+		})
+		writeJSONResponse(w, response)
+		return
+	}
+
+	result := h.executeDirectTool(r.Context(), ag, cmd)
+
+	// Add to conversation history for context
+	ag.Messages = append(ag.Messages, openai.UserMessage(q))
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(result.Result))
+	_ = h.persistAgent(current, ag.Agent)
+
+	// Return formatted response
+	response := formatDirectToolResponse(result)
+	writeJSONResponse(w, response)
+	return
+}
+
+// maybeHandleWorkspacePlanningForm intercepts prompts that require a
+// workspace planning form before any model call, returning true when it has
+// written the form response.
+func (h *Handler) maybeHandleWorkspacePlanningForm(w http.ResponseWriter, base context.Context, ag *resolvedChatAgent, current, originalQuery, sessionID string, normalizedRouteContext normalizedChatRouteContext) bool {
+	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext, h.workspaceStore, h.sessionStore); planningResp != nil && planningResp.Form != nil {
+		responseText := strings.TrimSpace(planningResp.ResponseText)
+		if responseText == "" {
+			responseText = "Complete the planning step below."
+		}
+
+		ag.Messages = append(ag.Messages, openai.UserMessage(originalQuery))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+		_ = h.persistAgent(current, ag.Agent)
+
+		h.storeMessageInSession(base, sessionID, "user", originalQuery)
+		h.storeMessageInSession(base, sessionID, "assistant", responseText)
+
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response":      responseText,
+			"planning_form": planningResp.Form,
+			"workflow_step": buildWorkflowStepFromPlanningForm(planningResp.Form, sessionID),
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "workspace planning form required",
+		}))
+		return true
+	}
+	return false
+}
+
+// maybeRejectSkillMissingMCP rejects an invoked skill whose required MCP
+// connectors are not enabled on the agent, returning true when it has written
+// the dependency-resolution response.
+func (h *Handler) maybeRejectSkillMissingMCP(w http.ResponseWriter, ag *resolvedChatAgent, invokedSkill *skillInvocation, normalizedRouteContext normalizedChatRouteContext) bool {
+	if invokedSkill != nil && len(invokedSkill.Skill.RequiredMCPServers) > 0 {
+		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
+		if len(missing) > 0 {
+			primaryServer := missing[0]
+			preferenceKey := ""
+			workspaceID := strings.TrimSpace(normalizedRouteContext.WorkspaceID)
+			if workspaceID != "" {
+				preferenceKey = workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, primaryServer)
+			}
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' requires MCP connectors: %s. Bind them from the target workspace.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
+			}, &dependencyResolution{
+				Version:            1,
+				Title:              "Required MCP connectors are not enabled",
+				Summary:            fmt.Sprintf("Enable the required connector for skill \"%s\" before retrying.", invokedSkill.Skill.Name),
+				ReasonCode:         "skill_required_mcp_missing",
+				RecommendedSurface: dependencyResolutionSurfaceModal,
+				RetryContext:       buildDefaultRetryContext(workspaceID != ""),
+				Steps: []dependencyResolutionStep{
+					{
+						ID:           "skill-required-mcp",
+						Type:         dependencyTypeWorkspaceMCP,
+						DisplayName:  primaryServer,
+						Summary:      fmt.Sprintf("Enable %s in the current workspace to run \"%s\".", primaryServer, invokedSkill.Skill.Name),
+						RiskLevel:    "low",
+						Suppressible: workspaceID != "",
+						Actions:      buildSkillRequiredMCPActions(workspaceID, primaryServer, preferenceKey),
+					},
+				},
+			}))
+			return true
+		}
+	}
+	return false
+}
+
+// maybeRunPlannerOrchestration runs planner-first multi-agent routing. When
+// the planner selects (and successfully executes) a multi-agent plan it
+// writes the orchestration response and returns handled=true; otherwise it
+// returns the planner decision (which may be nil) for the single-agent path.
+func (h *Handler) maybeRunPlannerOrchestration(ctx context.Context, w http.ResponseWriter, q, current, requestedMode string, requestedThreshold float64) (*types.PlannerDecision, bool) {
+	var plannerDecision *types.PlannerDecision
+	if h.orchestrator == nil {
+		return nil, false
+	}
+
+	mode, threshold := h.orchestrator.GetMultiAgentDefaults()
+	if requestedMode != "" {
+		if parsed, ok := types.ParseMultiAgentMode(strings.ToLower(strings.TrimSpace(requestedMode))); ok {
+			mode = parsed
+		}
+	}
+	if requestedThreshold > 0 {
+		threshold = requestedThreshold
+	}
+
+	if mode != types.MultiAgentModeOff {
+		plan, err := h.orchestrator.PlanTask(ctx, q)
+		if err != nil {
+			logger.Error("Planner failed", logger.Fields{"error": err})
+		} else {
+			decision := h.orchestrator.DecideMultiAgent(plan, mode, threshold)
+			plannerDecision = &decision
+			logger.Info("Planner routing decision", logger.Fields{
+				"mode":        decision.Mode,
+				"complexity":  decision.ComplexityScore,
+				"threshold":   decision.Threshold,
+				"multi_agent": decision.MultiAgent,
+			})
+
+			if decision.MultiAgent {
+				result, err := h.orchestrator.ExecutePlannedTask(ctx, current, q, plan, decision, 10*time.Minute)
+				if err != nil {
+					logger.Error("Orchestration failed", logger.Fields{"error": err})
+				} else {
+					logger.Info("Orchestration completed successfully", logger.Fields{})
+					responseText := result.FinalOutput
+					if responseText == "" && result.Status == "pending_approval" {
+						responseText = "Dynamic agent approval required to continue."
+					}
+					if h.utilityTelemetry != nil {
+						h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
+					}
+					receipt := buildActionReceipt(
+						"orchestration",
+						"Executed multi-agent workflow",
+						"planner selected multi-agent execution",
+						"",
+						"",
+						responseText,
+						0,
+						result.Error == "",
+						result.Error,
+					)
+					orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
+						"response":               responseText,
+						"orchestrated":           true,
+						"workspace_id":           result.WorkspaceID,
+						"status":                 result.Status,
+						"pending_plan_id":        result.PendingPlanID,
+						"planner_decision":       result.PlannerDecision,
+						"planner_plan":           plan,
+						"dynamic_agent_requests": result.DynamicAgentRequests,
+					}, chatRouteMetadata{
+						Mode:   routeModeSpecialistFlow,
+						Reason: "planner selected multi-agent execution",
+					}), []ActionReceipt{receipt}))
+					return plannerDecision, true
+				}
+			}
+		}
+	} else {
+		decision := types.PlannerDecision{
+			ComplexityScore: 0,
+			Threshold:       threshold,
+			Mode:            string(mode),
+			MultiAgent:      false,
+			Rationale:       "Multi-agent disabled",
+			CreatedAt:       time.Now(),
+		}
+		plannerDecision = &decision
+	}
+	return plannerDecision, false
+}
+
+// buildChatToolList aggregates the tool definitions offered to the model for
+// this turn: native utility tools, workspace-scoped tools, and MCP tools from
+// the agent's enabled servers. Duplicate names keep the first definition
+// except when an MCP tool should supersede a same-named utility tool. The
+// list is then filtered for an invoked skill and path-prioritized.
+func (h *Handler) buildChatToolList(ag *resolvedChatAgent, current string, invokedSkill *skillInvocation) []llm.Tool {
+	tools := []llm.Tool{}
+	toolIndex := make(map[string]int)
+	toolSource := make(map[string]string)
+	appendTool := func(def llm.Tool, source string) {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			return
+		}
+		if idx, exists := toolIndex[name]; exists {
+			if source == "mcp" && toolSource[name] == "utility" && shouldPreferMCPToolOverUtility(name) {
+				tools[idx] = def
+				toolSource[name] = source
+			}
+			return
+		}
+		toolIndex[name] = len(tools)
+		toolSource[name] = source
+		tools = append(tools, def)
+	}
+
+	// Add native utility tools first
+	if h.utilityRegistry != nil {
+		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			if !isUtilityToolAllowedForAgent(ag.Agent, def.Name) {
+				continue
+			}
+			if shouldSuppressUtilityToolForAgent(ag, def.Name) {
+				continue
+			}
+			appendTool(llm.Tool{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters:  def.Parameters,
+			}, "utility")
+		}
+	}
+
+	// Add workspace-scoped tools when in a workspace context
+	if ag.WorkspaceTools != nil {
+		wsTools := ag.WorkspaceTools.Tools()
+		logger.Info("Adding workspace tools to LLM request", logger.Fields{
+			"count": len(wsTools),
+		})
+		for _, wt := range wsTools {
+			def := wt.Definition()
+			logger.Debug("Registering workspace tool", logger.Fields{"name": def.Name})
+			appendTool(llm.Tool{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters:  def.Parameters,
+			}, "workspace")
+		}
+	} else {
+		logger.Debug("No workspace tools to add (WorkspaceTools is nil)")
+	}
+
+	// Add MCP tools for enabled servers
+	logger.Debug("Checking MCP servers for agent", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
+	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		logger.Debug("Loading MCP tools for agent", logger.Fields{"agent": current})
+		for _, serverName := range ag.MCPServers {
+			logger.Debug("Attempting to get tools for MCP server", logger.Fields{"server": serverName})
+			mcpTools, err := h.getMCPToolsForServer(serverName)
+			if err != nil {
+				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
+				continue
+			}
+			for _, mcpTool := range mcpTools {
+				mcpDef := mcpTool.Definition()
+				appendTool(llm.Tool{
+					Name:        mcpDef.Name,
+					Description: mcpDef.Description,
+					Parameters:  mcpDef.Parameters,
+				}, "mcp")
+			}
+			logger.Debug("Added MCP tools from server", logger.Fields{"count": len(mcpTools), "server": serverName})
+		}
+	}
+
+	if invokedSkill != nil {
+		tools = filterToolsForSkill(tools, invokedSkill.Skill)
+	}
+	tools = prioritizeToolsForPath(ag.Agent, tools)
+	return tools
 }
 
 // isImageMimeType checks if a MIME type represents an image
