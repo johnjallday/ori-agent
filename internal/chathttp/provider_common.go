@@ -38,6 +38,10 @@ type ExecuteToolCallsResult struct {
 const (
 	defaultToolLoopMaxTurns          = 4
 	defaultToolLoopMaxRepeatedFinger = 2
+
+	// defaultChatMaxTokens caps completion length for every provider chat
+	// request in this package (initial turn and tool-loop turns alike).
+	defaultChatMaxTokens = 4000
 )
 
 type boundedToolLoopConfig struct {

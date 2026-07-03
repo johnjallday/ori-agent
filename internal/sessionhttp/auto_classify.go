@@ -281,24 +281,7 @@ Please analyze this conversation and suggest the best workspace and agent.`,
 
 	// Parse the JSON response
 	var classification AutoClassifyResponse
-	responseText := strings.TrimSpace(resp.Content)
-
-	// Try to extract JSON if wrapped in markdown code blocks
-	if strings.HasPrefix(responseText, "```") {
-		lines := strings.Split(responseText, "\n")
-		var jsonLines []string
-		inJSON := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, "```") {
-				inJSON = !inJSON
-				continue
-			}
-			if inJSON {
-				jsonLines = append(jsonLines, line)
-			}
-		}
-		responseText = strings.Join(jsonLines, "\n")
-	}
+	responseText := llm.StripCodeFence(resp.Content)
 
 	if err := json.Unmarshal([]byte(responseText), &classification); err != nil {
 		return nil, fmt.Errorf("failed to parse LLM response as JSON: %w (response: %s)", err, responseText)

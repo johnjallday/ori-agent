@@ -61,7 +61,7 @@ func (h *Handler) handleLocalProviderChat(w http.ResponseWriter, r *http.Request
 		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Temperature:  ag.Settings.Temperature,
-		MaxTokens:    4000,
+		MaxTokens:    defaultChatMaxTokens,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
@@ -147,7 +147,7 @@ func (h *Handler) handleLocalProviderToolCalls(
 					SystemPrompt: systemPrompt,
 					Tools:        tools,
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", nil, err
@@ -164,7 +164,7 @@ func (h *Handler) handleLocalProviderToolCalls(
 					Messages:     messages,
 					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", err

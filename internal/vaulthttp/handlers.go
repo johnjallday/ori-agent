@@ -608,31 +608,38 @@ func vaultIDFromRequest(r *http.Request, values ...string) string {
 	return firstNonEmpty(values...)
 }
 
-func respondVaultError(w http.ResponseWriter, err error) {
+// vaultErrorStatus maps a vault sentinel error to its HTTP status code. It is
+// the single source of truth for vault error → status mapping: both the JSON
+// error responses (respondVaultError) and the email OAuth popup flow use it.
+// When adding a vault sentinel error, add its mapping here.
+func vaultErrorStatus(err error) int {
 	switch {
 	case err == nil:
-		return
+		return http.StatusOK
 	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound), errors.Is(err, vault.ErrRecordAttachmentNotFound):
-		_ = orihttp.RespondError(w, http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errors.Is(err, vault.ErrVaultAlreadyExists), errors.Is(err, vault.ErrFolderNotEmpty), errors.Is(err, vault.ErrVaultStoragePathConflict):
-		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
+		return http.StatusConflict
 	case errors.Is(err, vault.ErrPermissionDenied):
-		_ = orihttp.RespondError(w, http.StatusForbidden, err.Error())
-	case errors.Is(err, vault.ErrVaultPasswordInvalid):
-		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
+		return http.StatusForbidden
+	case errors.Is(err, vault.ErrVaultPasswordInvalid), errors.Is(err, vault.ErrImportPasswordInvalid):
+		return http.StatusUnauthorized
 	case errors.Is(err, vault.ErrVaultLocked):
-		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
+		return http.StatusLocked
 	case errors.Is(err, vault.ErrRecordAttachmentTooLarge):
-		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrFolderPathInvalid), errors.Is(err, vault.ErrRecordAttachmentRequired), errors.Is(err, vault.ErrVaultStorageModeInvalid), errors.Is(err, vault.ErrVaultStoragePathRequired), errors.Is(err, vault.ErrVaultStoragePathInvalid):
-		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, vault.ErrImportPasswordInvalid):
-		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, vault.ErrVaultKeyUnavailable), errors.Is(err, vault.ErrMalformedRecord), errors.Is(err, vault.ErrVaultFileMissing), errors.Is(err, vault.ErrVaultFileCorrupt):
-		_ = orihttp.RespondError(w, http.StatusInternalServerError, err.Error())
+		return http.StatusBadRequest
 	case errors.Is(err, vault.ErrSecretStoreUnavailable), errors.Is(err, vault.ErrSecretStoreLocked):
-		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return http.StatusServiceUnavailable
 	default:
-		_ = orihttp.RespondError(w, http.StatusInternalServerError, err.Error())
+		return http.StatusInternalServerError
 	}
+}
+
+func respondVaultError(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+	_ = orihttp.RespondError(w, vaultErrorStatus(err), err.Error())
 }

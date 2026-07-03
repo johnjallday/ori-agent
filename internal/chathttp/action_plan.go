@@ -33,14 +33,6 @@ func newActionPlanID() string {
 	return "plan_" + uuid.NewString()
 }
 
-func truncatePlanText(text string, max int) string {
-	trimmed := strings.TrimSpace(text)
-	if max <= 0 || len(trimmed) <= max {
-		return trimmed
-	}
-	return strings.TrimSpace(trimmed[:max]) + "..."
-}
-
 func buildDirectToolActionPlan(request string, cmd *DirectToolCommand) *ActionPlanPreview {
 	toolName := ""
 	args := ""
@@ -165,7 +157,7 @@ func (h *Handler) buildChatActionPlan(
 						steps = append(steps, ActionPlanStep{
 							Kind:    "planner_task",
 							Title:   fmt.Sprintf("Planner task %d", i+1),
-							Details: truncatePlanText(task.Description, 180),
+							Details: truncateRunes(strings.TrimSpace(task.Description), 180),
 						})
 					}
 				} else {

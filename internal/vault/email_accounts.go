@@ -228,7 +228,7 @@ func buildEmailAccountRecord(input EmailAccountInput) (*Record, error) {
 }
 
 func normalizeEmailAccountRecord(record Record, payload emailAccountPayload) (Record, emailAccountPayload, error) {
-	payload.Provider = normalizeEmailProvider(payload.Provider)
+	payload.Provider = NormalizeEmailProvider(payload.Provider)
 	payload.AuthType = normalizeEmailAuthType(payload.AuthType)
 	payload.EmailAddress = strings.TrimSpace(payload.EmailAddress)
 	payload.DisplayName = strings.TrimSpace(payload.DisplayName)
@@ -368,7 +368,10 @@ func decodeEmailAccountPayload(data json.RawMessage) (emailAccountPayload, error
 	return payload, nil
 }
 
-func normalizeEmailProvider(provider EmailProvider) EmailProvider {
+// NormalizeEmailProvider canonicalizes a provider label (case, separators,
+// aliases like "outlook") to one of the EmailProvider constants. Exported so
+// the HTTP layer normalizes with the exact same alias set.
+func NormalizeEmailProvider(provider EmailProvider) EmailProvider {
 	switch strings.ToLower(strings.TrimSpace(string(provider))) {
 	case "gmail":
 		return EmailProviderGmail

@@ -647,7 +647,7 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 					"created_at":  t.CreatedAt.Format(time.RFC3339),
 				}
 				if t.Result != "" {
-					item["result_preview"] = truncate(t.Result, 300)
+					item["result_preview"] = truncateRunes(t.Result, 300)
 				}
 				if t.ParentTaskID != "" {
 					item["parent_task_id"] = t.ParentTaskID
@@ -950,14 +950,6 @@ func marshalToolResponse(v any) (string, error) {
 }
 
 // truncate shortens a string to maxLen runes, appending "..." if truncated.
-func truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
-}
-
 // ============================================================
 // Phase 2: Management Tools
 // ============================================================
@@ -1295,7 +1287,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 				for _, s := range allSkills {
 					available = append(available, map[string]any{
 						"name":             s.Name,
-						"description":      truncate(s.Description, 200),
+						"description":      truncateRunes(s.Description, 200),
 						"already_attached": boundMap[strings.ToLower(s.Name)],
 					})
 				}

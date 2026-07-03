@@ -77,18 +77,6 @@ func attachActionReceipts(payload map[string]any, receipts []ActionReceipt) map[
 	return payload
 }
 
-func truncateResultPreview(result string, max int) string {
-	compact := strings.TrimSpace(result)
-	if compact == "" {
-		return ""
-	}
-	compact = strings.Join(strings.Fields(compact), " ")
-	if max <= 0 || len(compact) <= max {
-		return compact
-	}
-	return strings.TrimSpace(compact[:max]) + "..."
-}
-
 func extractLocationHints(result string) []string {
 	if strings.TrimSpace(result) == "" {
 		return nil

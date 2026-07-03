@@ -46,7 +46,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Temperature:  ag.Settings.Temperature,
-		MaxTokens:    4000,
+		MaxTokens:    defaultChatMaxTokens,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
@@ -126,7 +126,7 @@ func (h *Handler) handleClaudeToolCalls(
 					SystemPrompt: systemPrompt + "\n\n" + getFollowUpSystemPrompt(),
 					Tools:        tools,
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", nil, err
@@ -143,7 +143,7 @@ func (h *Handler) handleClaudeToolCalls(
 					Messages:     messages,
 					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
 					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    4000,
+					MaxTokens:    defaultChatMaxTokens,
 				})
 				if err != nil {
 					return "", err

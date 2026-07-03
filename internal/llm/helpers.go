@@ -1,6 +1,9 @@
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // NewUserMessage creates a new user message
 func NewUserMessage(content string) Message {
@@ -66,4 +69,28 @@ func IsToolCallResponse(resp *ChatResponse) bool {
 // HasContent checks if the response has content
 func HasContent(resp *ChatResponse) bool {
 	return resp.Content != ""
+}
+
+// StripCodeFence returns the content inside a markdown code fence when the
+// text begins with one (e.g. "```json\n{...}\n```"); otherwise it returns
+// the trimmed input unchanged. Models routinely wrap JSON answers in fences
+// even when instructed not to, so callers should strip before unmarshaling.
+func StripCodeFence(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "```") {
+		return text
+	}
+
+	var inner []string
+	inFence := false
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			inner = append(inner, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(inner, "\n"))
 }
