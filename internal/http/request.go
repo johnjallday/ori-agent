@@ -247,11 +247,14 @@ func ParseFormData(w http.ResponseWriter, r *http.Request) bool {
 // ValidateUploadFilename sanitizes and validates an uploaded filename.
 // Returns the sanitized filename and true if valid, or sends an error response and returns false.
 //
-// Security checks performed:
+// Security handling:
 //   - Path traversal prevention (uses filepath.Base)
 //   - Empty/invalid filename rejection
 //   - Hidden file rejection (files starting with .)
-//   - Character validation (only alphanumeric, hyphens, underscores, dots allowed)
+//   - Character sanitization: alphanumeric, hyphens, underscores, dots,
+//     spaces, and parentheses pass through; every other character is
+//     REPLACED with an underscore (the name is never rejected for bad
+//     characters, only rewritten)
 //
 // Usage:
 //

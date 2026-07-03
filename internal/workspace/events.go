@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"sync"
 	"time"
 
@@ -321,7 +322,7 @@ func generateEventID() string {
 	eventIDMutex.Lock()
 	defer eventIDMutex.Unlock()
 	eventIDCounter++
-	return time.Now().Format("20060102150405") + "-" + string(rune(eventIDCounter%10000))
+	return time.Now().Format("20060102150405") + "-" + strconv.FormatUint(eventIDCounter%10000, 10)
 }
 
 var subIDCounter uint64
@@ -331,7 +332,7 @@ func generateSubscriptionID() string {
 	subIDMutex.Lock()
 	defer subIDMutex.Unlock()
 	subIDCounter++
-	return "sub-" + time.Now().Format("20060102150405") + "-" + string(rune(subIDCounter%10000))
+	return "sub-" + time.Now().Format("20060102150405") + "-" + strconv.FormatUint(subIDCounter%10000, 10)
 }
 
 // Helper methods to create events

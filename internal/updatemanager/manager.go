@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -241,7 +242,45 @@ func (m *Manager) isNewerVersion(latest, current string) bool {
 	latestNormalized := strings.TrimPrefix(latest, "v")
 	currentNormalized := strings.TrimPrefix(current, "v")
 
-	// Simple version comparison - you might want to use a proper semver library
-	// This handles basic cases like v1.2.3 vs v1.2.4
-	return latestNormalized != currentNormalized && latestNormalized > currentNormalized
+	return compareVersions(latestNormalized, currentNormalized) > 0
+}
+
+// compareVersions compares two dot-separated numeric versions segment by
+// segment, returning -1/0/1. Plain string comparison is wrong here because
+// it sorts "0.0.10" before "0.0.9". Non-numeric segments (pre-release tags
+// etc.) fall back to string comparison; a missing segment counts as 0.
+func compareVersions(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+
+	for i := 0; i < len(aParts) || i < len(bParts); i++ {
+		aSeg, bSeg := "0", "0"
+		if i < len(aParts) {
+			aSeg = aParts[i]
+		}
+		if i < len(bParts) {
+			bSeg = bParts[i]
+		}
+
+		aNum, aErr := strconv.Atoi(aSeg)
+		bNum, bErr := strconv.Atoi(bSeg)
+		if aErr == nil && bErr == nil {
+			if aNum != bNum {
+				if aNum > bNum {
+					return 1
+				}
+				return -1
+			}
+			continue
+		}
+
+		if aSeg != bSeg {
+			if aSeg > bSeg {
+				return 1
+			}
+			return -1
+		}
+	}
+
+	return 0
 }

@@ -30,14 +30,17 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	return nil
 }
 
-// GetScheduledTask retrieves a scheduled task by ID
+// GetScheduledTask retrieves a scheduled task by ID. It returns a copy, not
+// a pointer into the workspace's slice: callers mutate the result and then
+// persist it via UpdateScheduledTask, which must not bypass the write lock.
 func (w *Workspace) GetScheduledTask(id string) (*ScheduledTask, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
 	for i := range w.ScheduledTasks {
 		if w.ScheduledTasks[i].ID == id {
-			return &w.ScheduledTasks[i], nil
+			st := w.ScheduledTasks[i]
+			return &st, nil
 		}
 	}
 

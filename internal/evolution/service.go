@@ -224,7 +224,9 @@ func (s *Service) GetSuggestions(agentName string) ([]Suggestion, error) {
 
 	ag, found := s.agentStore.GetAgent(agentName)
 	if !found || ag == nil {
-		return nil, fmt.Errorf("agent %q not found", agentName)
+		// Wrap the sentinel so the HTTP layer's errors.Is mapping can turn
+		// this into a 404 instead of a 500.
+		return nil, fmt.Errorf("agent %q: %w", agentName, ErrAgentNotFound)
 	}
 	ag.InitializeEvolution()
 	ag.InitializeStatistics()
