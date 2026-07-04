@@ -2,8 +2,31 @@ package llm
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
+
+// toInt coerces a config value (which may arrive as int, float64 from JSON
+// decoding, or a numeric string) into an int. Returns 0 when the value is nil
+// or cannot be interpreted as a number.
+func toInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(n))
+		return i
+	default:
+		return 0
+	}
+}
 
 // NewUserMessage creates a new user message
 func NewUserMessage(content string) Message {

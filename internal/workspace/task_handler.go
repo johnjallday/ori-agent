@@ -262,6 +262,11 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	successfulToolCalls := map[string]bool{}
 	forceFinalAnswer := false
 
+	// Resolve the effective context window once and reuse it for every round, so
+	// the prompt is sized against a stable value (and, for Ollama, num_ctx is set
+	// from it). 0 = provider default; cloud providers ignore the field (WS1.3).
+	contextWindow := llm.ResolveModelContextWindow(provider, modelName)
+
 	for round := 0; round < maxTaskToolRounds; round++ {
 		requestTools := tools
 		if forceFinalAnswer {
@@ -281,11 +286,12 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		}
 
 		chatReq := llm.ChatRequest{
-			Model:           modelName,
-			Messages:        conversation,
-			Temperature:     ag.Settings.Temperature,
-			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
-			Tools:           requestTools,
+			Model:               modelName,
+			Messages:            conversation,
+			Temperature:         ag.Settings.Temperature,
+			ReasoningEffort:     ag.Settings.EffectiveReasoningEffort(providerName),
+			Tools:               requestTools,
+			ContextWindowTokens: contextWindow,
 		}
 		// CLI agents (Claude Code / Codex), once opted in, run with an elevated
 		// sandboxed posture: workspace-write filesystem + localhost network +
