@@ -43,6 +43,13 @@ function makeSectionClickTarget(section) {
 function makeAttributeClickTarget(attrs) {
   return {
     closest(selector) {
+      if (selector.includes('data-cmd-open-task') && attrs['data-cmd-open-task']) {
+        return {
+          getAttribute(name) {
+            return attrs[name] || '';
+          }
+        };
+      }
       if (selector.includes('data-cmd-primary-section') && attrs['data-cmd-primary-section']) {
         return {
           getAttribute(name) {
@@ -141,8 +148,11 @@ test('rendered command copy uses detailed-view vocabulary', () => {
     toggleBtn: makeToggleButton(),
     active: true,
     page: {
+      workspaceId: 'workspace-1',
       workspace: {
         name: 'Demo Workspace',
+        description: 'A focused production workspace for launch planning and execution.',
+        tags: ['launch', 'ops'],
         workspace_settings: { workflow: { mode: 'guided' } },
         mcp_bindings: [],
         skill_bindings: []
@@ -179,16 +189,27 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   commandView.render();
 
   assert.match(container.innerHTML, /Workflow · Guided/);
+  assert.match(container.innerHTML, /A focused production workspace/);
+  assert.match(container.innerHTML, /launch/);
+  assert.match(container.innerHTML, /href="\/workspaces"/);
+  assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/canvas"/);
+  assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/diagnostics"/);
+  assert.match(container.innerHTML, /href="\/workflows"/);
+  assert.match(container.innerHTML, /data-cmd-edit-identity="name"/);
+  assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
+  assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
   assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">MCP<\/div>/);
   assert.match(container.innerHTML, />Notes<\/h4>/);
   assert.match(container.innerHTML, />Schedules<\/h4>/);
   assert.match(container.innerHTML, />Sessions<\/h4>/);
   assert.match(container.innerHTML, />Linked Folders<\/h4>/);
-  assert.match(container.innerHTML, /No notes yet\./);
-  assert.match(container.innerHTML, /No schedules yet\./);
-  assert.match(container.innerHTML, /No sessions yet\./);
-  assert.match(container.innerHTML, /No linked folders yet\./);
+  assert.match(container.innerHTML, /data-cmd-primary-section="notes"/);
+  assert.match(container.innerHTML, /data-cmd-primary-section="folders"/);
+  assert.doesNotMatch(container.innerHTML, /No notes yet\./);
+  assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
+  assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
+  assert.doesNotMatch(container.innerHTML, /No linked folders yet\./);
   assert.match(container.innerHTML, /★ Entry Agent/);
   assert.match(container.innerHTML, />Model<\/span>/);
   assert.match(container.innerHTML, /Tasks · 1/);
@@ -246,6 +267,74 @@ test('command rail badges project and reference directory roles', () => {
   assert.match(html, /Reference/);
   assert.match(html, /data-cmd-item-id="dir-project"/);
   assert.match(html, /data-cmd-item-id="dir-ref"/);
+});
+
+test('empty rail panels collapse to the header but keep primary actions', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      workspace: {}
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.match(html, /data-cmd-primary-section="notes"/);
+  assert.match(html, /data-cmd-primary-section="schedules"/);
+  assert.match(html, /data-cmd-primary-section="sessions"/);
+  assert.match(html, /data-cmd-primary-section="folders"/);
+  assert.doesNotMatch(html, /No notes yet\./);
+
+  commandView.activeRailSection = 'notes';
+  const managingHtml = commandView.renderRail();
+  assert.match(managingHtml, /No notes yet\./);
+});
+
+test('escape closes the active rail manager without leaving Command', () => {
+  const renders = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeRailSection: 'notes',
+    statModalSection: '',
+    identityEditMode: '',
+    render() {
+      renders.push(this.activeRailSection);
+    }
+  });
+
+  commandView.handleGlobalKeydown({ key: 'Escape' });
+
+  assert.equal(commandView.activeRailSection, '');
+  assert.deepEqual(renders, ['']);
+});
+
+test('Open Tasks stat is tinted when any task needs attention', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: { name: 'Attention Workspace', mcp_bindings: [], skill_bindings: [] },
+      tasks: [{ status: 'blocked' }],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    '',
+    commandView.computeStats()
+  );
+
+  assert.match(html, /class="ws-cmd-stat is-alert" data-cmd-section="tasks"/);
 });
 
 test('stat clicks open the in-place manager modal without leaving Command view', () => {
@@ -375,6 +464,139 @@ test('rail item actions open existing management flows from Command view', () =>
     ['session', 'session-1'],
     ['folder', 'dir-1', 'owned']
   ]);
+});
+
+test('quest-log task name opens the existing task flow', () => {
+  const garrisonRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-garrison' ? garrisonRoot : null;
+      }
+    },
+    page: {
+      openTask(id) { calls.push(['open', id]); },
+      executeTask(id) { calls.push(['run', id]); }
+    }
+  });
+
+  commandView.bindGarrison();
+
+  garrisonRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-task': 'task-1' })
+  });
+
+  assert.deepEqual(calls, [['open', 'task-1']]);
+});
+
+test('identity saves delegate to the workspace detail save helpers', async () => {
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityEditMode: 'name',
+    identitySaving: false,
+    renderCalls: 0,
+    render() {
+      this.renderCalls += 1;
+    },
+    page: {
+      workspace: { name: 'Old Name', description: 'Old description' },
+      async saveWorkspaceIdentityField(field, value, options) {
+        calls.push([field, value, options.currentValue]);
+        this.workspace.name = value;
+        return { changed: true, workspace: this.workspace };
+      }
+    }
+  });
+
+  await commandView.saveIdentityField('name', 'New Name');
+
+  assert.deepEqual(calls, [['name', 'New Name', 'Old Name']]);
+  assert.equal(commandView.identityEditMode, '');
+  assert.equal(commandView.identitySaving, false);
+  assert.equal(commandView.renderCalls, 1);
+});
+
+test('command tag saves use saveWorkspaceTagList and close the editor', async () => {
+  const saved = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityEditMode: 'tags',
+    identitySaving: false,
+    commandTagDraft: ['alpha', 'beta'],
+    commandTagInput: null,
+    renderCalls: 0,
+    render() {
+      this.renderCalls += 1;
+    },
+    destroyCommandTagInput() {},
+    page: {
+      async saveWorkspaceTagList(tags) {
+        saved.push(tags);
+      }
+    }
+  });
+
+  await commandView.saveCommandTags();
+
+  assert.deepEqual(saved, [['alpha', 'beta']]);
+  assert.equal(commandView.identityEditMode, '');
+  assert.equal(commandView.identitySaving, false);
+  assert.equal(commandView.renderCalls, 1);
+});
+
+test('stat modal inerts command background and traps tab focus', () => {
+  const topbar = {
+    attrs: {},
+    inert: false,
+    setAttribute(name, value) { this.attrs[name] = value; },
+    removeAttribute(name) { delete this.attrs[name]; }
+  };
+  const layout = {
+    attrs: {},
+    inert: false,
+    setAttribute(name, value) { this.attrs[name] = value; },
+    removeAttribute(name) { delete this.attrs[name]; }
+  };
+  const modal = {};
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: { children: [topbar, layout, modal] },
+    statModalEl: modal
+  });
+
+  commandView.setCommandBackgroundInert(true);
+  assert.equal(topbar.attrs['aria-hidden'], 'true');
+  assert.equal(layout.inert, true);
+
+  commandView.setCommandBackgroundInert(false);
+  assert.equal(topbar.attrs['aria-hidden'], undefined);
+  assert.equal(layout.inert, false);
+
+  const first = { hidden: false, focused: 0, focus() { this.focused += 1; } };
+  const last = { hidden: false, focused: 0, focus() { this.focused += 1; } };
+  const originalDocument = globalThis.document;
+  globalThis.document = { activeElement: last };
+  commandView.statModalEl = {
+    querySelector() {
+      return {
+        querySelectorAll() {
+          return [first, last];
+        }
+      };
+    }
+  };
+  let prevented = 0;
+  try {
+    commandView.trapStatModalFocus({ key: 'Tab', preventDefault() { prevented += 1; } });
+  } finally {
+    globalThis.document = originalDocument;
+  }
+
+  assert.equal(prevented, 1);
+  assert.equal(first.focused, 1);
 });
 
 test('mcp manager modal lists bindings with add and detailed-view escape hatch', () => {
