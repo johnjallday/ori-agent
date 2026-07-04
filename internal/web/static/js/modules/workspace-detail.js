@@ -1163,8 +1163,8 @@ export class WorkspaceDetailPage {
       ),
       projectTemplateError: document.getElementById('workspace-detail-project-template-error'),
 
-      // Assist modal
-      workspaceDetailView: document.getElementById('workspace-detail-view'),
+      // Assist modal — the assist page swaps in for the Command view surface.
+      workspaceDetailView: document.getElementById('workspaceCommandView'),
       taskAssistPage: document.getElementById('workspace-detail-task-assist-page'),
       taskAssistBackBtn: document.getElementById('workspace-detail-task-assist-back'),
       taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
@@ -11993,43 +11993,6 @@ export class WorkspaceDetailPage {
     setTimeout(poll, intervalMs);
   }
 
-  focusSection(sectionKey) {
-    const key = String(sectionKey || '').toLowerCase();
-    const targets = {
-      agents: 'workspace-detail-agents-panel',
-      tasks: 'workspace-detail-agents-panel',
-      notes: 'workspace-detail-notes-panel',
-      sessions: 'workspace-detail-sessions-panel',
-      folders: 'workspace-detail-directories-panel',
-      schedules: 'workspace-detail-schedules-panel',
-      mcp: 'workspace-detail-config-content',
-      skills: 'workspace-detail-config-content'
-    };
-    const targetId = targets[key];
-    if (!targetId) return;
-
-    if (key === 'agents') {
-      this.setView('list');
-    } else if (key === 'tasks') {
-      this.setView('board');
-    } else if (key === 'mcp' || key === 'skills') {
-      this.setWorkspaceConfigExpanded(true);
-      const tabId =
-        key === 'mcp'
-          ? 'workspace-detail-config-mcp-tab'
-          : 'workspace-detail-config-skills-tab';
-      this.activateWorkspaceConfigTab(tabId);
-    }
-
-    const target = document.getElementById(targetId);
-    if (!target) return;
-
-    if (typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    this.focusDeepLinkTarget(target);
-  }
-
   activateWorkspaceConfigTab(tabId) {
     const tabBtn = document.getElementById(tabId);
     if (!tabBtn) return;
@@ -12040,18 +12003,6 @@ export class WorkspaceDetailPage {
     }
     if (window.bootstrap?.Tab?.getOrCreateInstance) {
       window.bootstrap.Tab.getOrCreateInstance(tabBtn).show();
-    }
-  }
-
-  focusDeepLinkTarget(target) {
-    if (!target || typeof target.focus !== 'function') return;
-    if (!target.hasAttribute('tabindex')) {
-      target.setAttribute('tabindex', '-1');
-    }
-    try {
-      target.focus({ preventScroll: true });
-    } catch {
-      target.focus();
     }
   }
 

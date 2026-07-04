@@ -20,8 +20,7 @@
     '[role="switch"]',
     '[onclick]',
     '[data-workspace-id]',
-    '[data-group-toggle]',
-    '.workspace-detail-panel.is-expandable'
+    '[data-group-toggle]'
   ].join(', ');
   const ZONE_DEFINITIONS = [
     {
@@ -35,12 +34,6 @@
       prefix: 'H',
       label: 'chat',
       matches: (element) => element.closest('#chatPanel[aria-hidden="false"]')
-    },
-    {
-      id: 'panel',
-      prefix: 'P',
-      label: 'panel',
-      matches: (element) => element.closest('.workspace-detail-panel.is-expanded')
     },
     {
       id: 'navbar',
@@ -58,7 +51,7 @@
       id: 'content',
       prefix: 'C',
       label: 'content',
-      matches: (element) => element.closest('main, .main-content, #workspace-detail-view')
+      matches: (element) => element.closest('main, .main-content, #workspaceCommandView')
     },
     {
       id: 'page',

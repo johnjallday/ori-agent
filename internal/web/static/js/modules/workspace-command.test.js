@@ -380,19 +380,35 @@ test('mission panel actions delegate to workspace mission APIs', () => {
   }
 });
 
-test('goal modal is outside the hidden detailed view and keeps accessibility hooks', () => {
+test('detailed view is deleted; shared hosts and goal modal survive in the template', () => {
   const template = readFileSync(new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url), 'utf8');
-  const detailStart = template.indexOf('id="workspace-detail-view"');
-  const detailEnd = template.indexOf('{{template "session-modals.tmpl" .}}');
-  const modalIndex = template.indexOf('id="workspace-detail-goal-modal"');
-  const addFileIndex = template.indexOf('id="hubAddFileModal"');
 
-  assert.ok(detailStart > -1);
-  assert.ok(detailEnd > detailStart);
-  assert.ok(modalIndex > detailEnd);
-  assert.ok(modalIndex < addFileIndex);
+  // The Detailed subtree and its toggle are gone.
+  assert.equal(template.includes('id="workspace-detail-view"'), false);
+  assert.equal(template.includes('id="workspace-command-toggle"'), false);
+  assert.equal(template.includes('workspaceDetailPanelBackdrop'), false);
+
+  // The four live-mounted shared hosts remain, inside the hidden container.
+  const hostsStart = template.indexOf('id="workspace-detail-shared-hosts"');
+  const hostsEnd = template.indexOf('{{template "session-modals.tmpl" .}}');
+  assert.ok(hostsStart > -1);
+  for (const id of [
+    'id="workspace-detail-tools-card"',
+    'id="workspace-detail-settings-panel"',
+    'id="workspace-detail-tasks-board"',
+    'id="workspace-detail-members-panel"'
+  ]) {
+    const idx = template.indexOf(id);
+    assert.ok(idx > hostsStart && idx < hostsEnd, id + ' must live inside the shared-hosts container');
+  }
+
+  // Goal modal is still present with its accessibility hooks.
   assert.match(template, /aria-labelledby="workspace-detail-goal-modal-title"/);
   assert.match(template, /id="workspace-detail-goal-modal-form"/);
+
+  // The floating assistant is unconditional now (flag removed).
+  assert.match(template, /{{template "support-chat.tmpl" \.}}/);
+  assert.equal(template.includes('WorkspaceFloatingAssistantEnabled'), false);
 });
 
 test('command rail renders project_path fallback when no directories are loaded', () => {
@@ -1345,7 +1361,7 @@ test('modal detailed action retargets mcp and skills to Systems', () => {
   assert.deepEqual(calls, [['close', 'skills'], ['systems', 'skills']]);
 });
 
-test('modal detailed action still deep-links non-system sections', () => {
+test('modal detailed action only closes for sections without a Systems target', () => {
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -1354,114 +1370,76 @@ test('modal detailed action still deep-links non-system sections', () => {
       calls.push(['close', this.statModalSection]);
       this.statModalSection = '';
     },
-    openDetailedSection(section) {
-      calls.push(['detailed', section]);
+    openSystemTab(section) {
+      calls.push(['systems', section]);
     }
   });
 
   commandView.handleStatModalAction('detailed');
 
-  assert.deepEqual(calls, [['close', 'agents'], ['detailed', 'agents']]);
+  assert.deepEqual(calls, [['close', 'agents']]);
 });
 
-test('default deactivate path still persists detailed preference', () => {
-  const persisted = [];
+test('stat modal footer renders only for sections with a Systems target', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(commandView, {
-    active: true,
-    container: { hidden: false },
-    detailedView: { hidden: true },
-    toggleBtn: makeToggleButton(),
-    persist(value) {
-      persisted.push(value);
-    }
-  });
-
-  commandView.deactivate();
-
-  assert.deepEqual(persisted, ['detailed']);
-  assert.equal(commandView.container.hidden, true);
-  assert.equal(commandView.detailedView.hidden, false);
+  assert.match(commandView.statModalFooterHTML('mcp'), /Open Systems: MCP/);
+  assert.match(commandView.statModalFooterHTML('skills'), /Open Systems: Skills/);
+  assert.equal(commandView.statModalFooterHTML('agents'), '');
+  assert.equal(commandView.statModalFooterHTML('tasks'), '');
 });
 
-test('getViewFromURL trusts explicit command and detailed params', () => {
-  const commandView = Object.create(WorkspaceCommandView.prototype);
+test('retireLegacyViewPreference clears the stored pref and strips ?view= deep links', () => {
   const originalWindow = globalThis.window;
-  try {
-    globalThis.window = { location: { search: '?view=command' } };
-    assert.equal(commandView.getViewFromURL(), 'command');
-
-    globalThis.window = { location: { search: '?view=detailed' } };
-    assert.equal(commandView.getViewFromURL(), 'detailed');
-
-    globalThis.window = { location: { search: '' } };
-    assert.equal(commandView.getViewFromURL(), '');
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('syncURL clears command default and marks detailed via replaceState', () => {
-  const commandView = Object.create(WorkspaceCommandView.prototype);
-  const originalWindow = globalThis.window;
+  const originalLocalStorage = globalThis.localStorage;
+  const removed = [];
   const replaceStateCalls = [];
-  globalThis.window = {
-    location: { search: '', pathname: '/workspaces/abc' },
-    history: {
-      replaceState(state, title, url) {
-        replaceStateCalls.push(url);
-      }
-    }
-  };
-
   try {
-    commandView.syncURL('command');
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc']);
+    globalThis.localStorage = { removeItem(key) { removed.push(key); } };
+    globalThis.window = {
+      location: { search: '?view=detailed&tab=notes', pathname: '/workspaces/abc' },
+      history: { replaceState(state, title, url) { replaceStateCalls.push(url); } }
+    };
 
-    globalThis.window.location.search = '';
-    commandView.syncURL('detailed');
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc', '/workspaces/abc?view=detailed']);
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    commandView.retireLegacyViewPreference();
+
+    assert.deepEqual(removed, ['oriWorkspaceDetailView']);
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?tab=notes']);
+
+    // No ?view= param → URL untouched.
+    globalThis.window.location.search = '?tab=notes';
+    commandView.retireLegacyViewPreference();
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?tab=notes']);
   } finally {
     globalThis.window = originalWindow;
+    globalThis.localStorage = originalLocalStorage;
   }
 });
 
-test('setup defaults to Command view without URL or saved preference', () => {
+test('setup always activates Command view', () => {
   const originalDocument = globalThis.document;
   const originalWindow = globalThis.window;
   const originalLocalStorage = globalThis.localStorage;
-  const toggleBtn = {
-    hidden: true,
-    attrs: {},
-    classList: { toggle() {} },
-    addEventListener() {},
-    setAttribute(name, value) {
-      this.attrs[name] = value;
-    }
-  };
   const container = {
     hidden: true,
     innerHTML: '',
     querySelector() { return null; },
     appendChild() {}
   };
-  const detailedView = { hidden: false };
-  const replaceStateCalls = [];
 
   try {
     globalThis.document = {
       getElementById(id) {
         if (id === 'workspaceCommandView') return container;
-        if (id === 'workspace-detail-view') return detailedView;
-        if (id === 'workspace-command-toggle') return toggleBtn;
         return null;
-      }
+      },
+      addEventListener() {}
     };
     globalThis.window = {
       location: { search: '', pathname: '/workspaces/abc' },
-      history: { replaceState(state, title, url) { replaceStateCalls.push(url); } }
+      history: { replaceState() { throw new Error('must not rewrite a clean URL'); } }
     };
-    globalThis.localStorage = { getItem: () => '', setItem() {} };
+    globalThis.localStorage = { removeItem() {} };
 
     const commandView = new WorkspaceCommandView({
       workspace: { name: 'Default Command', mcp_bindings: [], skill_bindings: [] },
@@ -1475,56 +1453,9 @@ test('setup defaults to Command view without URL or saved preference', () => {
 
     assert.equal(commandView.active, true);
     assert.equal(container.hidden, false);
-    assert.equal(detailedView.hidden, true);
-    assert.deepEqual(replaceStateCalls, []);
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
     globalThis.localStorage = originalLocalStorage;
-  }
-});
-
-test('activate/deactivate sync the URL by default but bootstrap can opt out', () => {
-  const replaceStateCalls = [];
-  const originalWindow = globalThis.window;
-  globalThis.window = {
-    location: { search: '', pathname: '/workspaces/abc' },
-    history: {
-      replaceState(state, title, url) {
-        replaceStateCalls.push(url);
-      }
-    }
-  };
-  const persisted = [];
-  const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(commandView, {
-    active: false,
-    container: { hidden: true },
-    detailedView: { hidden: false },
-    toggleBtn: makeToggleButton(),
-    render() {},
-    persist(value) {
-      persisted.push(value);
-    }
-  });
-
-  try {
-    // Bootstrap path (setup()) passes syncUrl: false — a plain visit must
-    // not gain a ?view= param just because a preference is stored.
-    commandView.activate({ syncUrl: false });
-    assert.deepEqual(replaceStateCalls, []);
-    assert.deepEqual(persisted, ['command']);
-
-    commandView.deactivate({ syncUrl: false });
-    assert.deepEqual(replaceStateCalls, []);
-
-    // Real user toggles (default options) sync the URL via replaceState.
-    commandView.activate();
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc']);
-
-    commandView.deactivate();
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc', '/workspaces/abc?view=detailed']);
-  } finally {
-    globalThis.window = originalWindow;
   }
 });
