@@ -38,6 +38,8 @@ export class WorkspaceCommandView {
     this.commandTagInput = null;
     this.commandTagDraft = [];
     this.commandTagError = '';
+    this.activeSystemTab = 'mcp';
+    this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = (event) => this.handleGlobalKeydown(event);
     this.setup();
   }
@@ -109,6 +111,7 @@ export class WorkspaceCommandView {
     this.activeRailSection = '';
     this.identityEditMode = '';
     this.destroyCommandTagInput();
+    this.restoreSharedSurfaces();
     this.closeStatModal();
     if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
       document.removeEventListener('keydown', this.boundGlobalKeydown);
@@ -420,6 +423,7 @@ export class WorkspaceCommandView {
     this.bindRail();
     this.mountCommandTagInput();
     this.syncMissionPanel();
+    this.syncSharedSurfaces();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
@@ -741,9 +745,17 @@ export class WorkspaceCommandView {
       '</header>' +
       '<div class="ws-cmd-modal-body">' + this.statModalRows(section) + '</div>' +
       '<footer class="ws-cmd-modal-foot">' +
-      '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">Open in detailed view ▸</button>' +
+      '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">' +
+      escapeHtml(this.statModalFooterLabel(section)) + '</button>' +
       '</footer>'
     );
+  }
+
+  statModalFooterLabel(section) {
+    const key = String(section || '');
+    if (key === 'mcp') return 'Open Systems: MCP ▸';
+    if (key === 'skills') return 'Open Systems: Skills ▸';
+    return 'Open in detailed view ▸';
   }
 
   statModalFilterToggleHTML(section) {
@@ -977,6 +989,10 @@ export class WorkspaceCommandView {
     }
     if (a === 'detailed') {
       this.closeStatModal();
+      if (section === 'mcp' || section === 'skills') {
+        this.openSystemTab(section);
+        return;
+      }
       this.openDetailedSection(section);
       return;
     }
@@ -1031,6 +1047,12 @@ export class WorkspaceCommandView {
       case 'folders':
         if (page && typeof page.showAddDirectoryModal === 'function') page.showAddDirectoryModal(triggerButton);
         break;
+      case 'files':
+        if (page && typeof page.showFileModal === 'function') page.showFileModal();
+        break;
+      case 'systems':
+        this.openSystemTab(this.activeSystemTab || 'mcp');
+        break;
       default:
         break;
     }
@@ -1055,6 +1077,11 @@ export class WorkspaceCommandView {
       case 'folders':
         if (typeof page.openDirectoryExplorer === 'function') {
           page.openDirectoryExplorer(id, source || 'reference');
+        }
+        break;
+      case 'files':
+        if (typeof page.openWorkspaceFilesExplorer === 'function') {
+          page.openWorkspaceFilesExplorer();
         }
         break;
       default:
@@ -1337,17 +1364,157 @@ export class WorkspaceCommandView {
     return items;
   }
 
+  fileRowData() {
+    const page = this.page || {};
+    return Array.isArray(page.files) ? page.files : [];
+  }
+
+  fileTitle(file) {
+    return String(file?.title || file?.file_meta?.name || file?.name || 'Untitled File');
+  }
+
+  formatFileDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  fileMeta(file) {
+    const page = this.page || {};
+    const parts = [];
+    const size = Number(file?.file_meta?.size || file?.size || 0);
+    if (size > 0 && typeof page.formatFileSize === 'function') {
+      try { parts.push(page.formatFileSize(size)); } catch (err) { /* keep going */ }
+    }
+    const folder = String(file?.file_meta?.relative_path || file?.relative_path || '').trim();
+    if (folder) parts.push(folder);
+    const when = this.formatFileDate(file?.created_at || file?.updated_at);
+    if (when) parts.push(when);
+    if (file?.file_meta?.status === 'missing') parts.unshift('Missing');
+    return parts.join(' · ');
+  }
+
+  fileRailItems(files, expanded) {
+    const arr = Array.isArray(files) ? files : [];
+    const limit = expanded ? arr.length : 5;
+    const shown = arr.slice(0, limit);
+    const items = shown.map((file) => {
+      const id = String(file?.id || file?.file_meta?.name || this.fileTitle(file));
+      const title = this.fileTitle(file);
+      const meta = this.fileMeta(file);
+      const missingClass = file?.file_meta?.status === 'missing' ? ' is-missing' : '';
+      return (
+        '<button type="button" class="ws-cmd-rail-item' + missingClass +
+        '" data-cmd-open-section="files" data-cmd-item-id="' + escapeHtml(id) + '">' +
+        '<span class="ws-cmd-rail-t">' + escapeHtml(title) + '</span>' +
+        (meta ? '<span class="ws-cmd-rail-m">' + escapeHtml(meta) + '</span>' : '') +
+        '</button>'
+      );
+    });
+    if (arr.length > shown.length) {
+      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="files">+ ' +
+        (arr.length - shown.length) + ' more</button>');
+    }
+    return items;
+  }
+
+  renderFilesPanel(files, expanded) {
+    const items = this.fileRailItems(files, expanded);
+    const count = Array.isArray(files) ? files.length : 0;
+    const bodyRows = items.length
+      ? items.join('')
+      : '<div class="ws-cmd-rail-empty">No files yet.</div>';
+    return (
+      '<section class="ws-cmd-panel ws-cmd-files-panel' + (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') + '">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Files</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="files">Upload</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="files" aria-expanded="' +
+      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
+      '" aria-label="' + (expanded ? 'Close Files manager' : 'Manage Files in Command view') + '">' +
+      (expanded ? '×' : '▸') + '</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="ws-cmd-panel-body">' +
+      (expanded
+        ? '<button type="button" class="ws-cmd-files-drop" data-cmd-file-drop>Drop files here or click Upload</button>' +
+          '<button type="button" class="ws-cmd-files-browse" data-cmd-open-section="files" data-cmd-item-id="__workspace_files__">Browse workspace files</button>'
+        : '') +
+      bodyRows +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  systemTabs() {
+    return [
+      { key: 'mcp', label: 'MCP', tabId: 'workspace-detail-config-mcp-tab', host: 'config' },
+      { key: 'skills', label: 'Skills', tabId: 'workspace-detail-config-skills-tab', host: 'config' },
+      { key: 'plugins', label: 'Plugins', tabId: 'workspace-detail-config-plugins-tab', host: 'config' },
+      { key: 'memory', label: 'Memory', tabId: 'workspace-detail-config-memory-tab', host: 'config' },
+      { key: 'triggers', label: 'Triggers', tabId: 'workspace-detail-config-triggers-tab', host: 'config' },
+      { key: 'settings', label: 'Manager Settings', tabId: 'workspace-detail-config-settings-tab', host: 'config' },
+      { key: 'intent', label: 'Intent & Setup', tabId: 'workspace-detail-config-intent-tab', host: 'config' },
+      { key: 'mission', label: 'Goal Settings', tabId: 'workspace-detail-config-mission-tab', host: 'config' },
+      { key: 'tools', label: 'Find Tools', tabId: '', host: 'tools' }
+    ];
+  }
+
+  systemTab(key) {
+    const normalized = String(key || '').trim();
+    return this.systemTabs().find(tab => tab.key === normalized) || this.systemTabs()[0];
+  }
+
+  renderSystemsPanel(expanded) {
+    const tabs = this.systemTabs();
+    const active = this.systemTab(this.activeSystemTab);
+    const tabButtons = tabs.map(tab => (
+      '<button type="button" class="ws-cmd-system-tab' + (tab.key === active.key ? ' is-active' : '') +
+      '" data-cmd-system-tab="' + escapeHtml(tab.key) + '" aria-selected="' +
+      (tab.key === active.key ? 'true' : 'false') + '">' + escapeHtml(tab.label) + '</button>'
+    )).join('');
+    return (
+      '<section class="ws-cmd-panel ws-cmd-systems-panel' + (expanded ? ' is-managing' : '') + '">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Systems</h4><span class="ws-cmd-panel-count">' + tabs.length + '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="systems">Open</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="systems" aria-expanded="' +
+      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
+      '" aria-label="' + (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') + '">' +
+      (expanded ? '×' : '▸') + '</button>' +
+      '</div>' +
+      '</div>' +
+      (expanded
+        ? '<div class="ws-cmd-panel-body ws-cmd-systems-body">' +
+          '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace systems">' + tabButtons + '</div>' +
+          '<div class="ws-cmd-system-host" data-cmd-system-host>' +
+          '<div class="ws-cmd-rail-empty">Loading ' + escapeHtml(active.label) + '...</div>' +
+          '</div>' +
+          '</div>'
+        : '') +
+      '</section>'
+    );
+  }
+
   renderRail() {
     const page = this.page || {};
     const notes = Array.isArray(page.notes) ? page.notes : [];
     const schedules = Array.isArray(page.schedules) ? page.schedules : [];
     const sessions = Array.isArray(page.sessions) ? page.sessions : [];
     const dirs = this.folderRowData();
+    const files = this.fileRowData();
 
     const notesExpanded = this.activeRailSection === 'notes';
     const schedulesExpanded = this.activeRailSection === 'schedules';
     const sessionsExpanded = this.activeRailSection === 'sessions';
     const foldersExpanded = this.activeRailSection === 'folders';
+    const filesExpanded = this.activeRailSection === 'files';
+    const systemsExpanded = this.activeRailSection === 'systems';
 
     const notesItems = this.railItems(notes, (n) => n.name || n.title || 'Untitled Note', {
       sectionKey: 'notes',
@@ -1371,14 +1538,190 @@ export class WorkspaceCommandView {
       this.railPanelHTML('notes', 'Notes', notesItems, notes.length, 'No notes yet.', 'New Note') +
       this.railPanelHTML('schedules', 'Schedules', scheduleItems, schedules.length, 'No schedules yet.', 'Open Schedules') +
       this.railPanelHTML('sessions', 'Sessions', sessionItems, sessions.length, 'No sessions yet.', 'New Session') +
-      this.railPanelHTML('folders', 'Linked Folders', folderItems, dirs.length, 'No linked folders yet.', 'Link Folder')
+      this.railPanelHTML('folders', 'Linked Folders', folderItems, dirs.length, 'No linked folders yet.', 'Link Folder') +
+      this.renderFilesPanel(files, filesExpanded) +
+      this.renderSystemsPanel(systemsExpanded)
     );
+  }
+
+  normalizeSystemTab(key) {
+    return this.systemTab(key).key;
+  }
+
+  openSystemTab(key = 'mcp') {
+    this.activeRailSection = 'systems';
+    this.activeSystemTab = this.normalizeSystemTab(key);
+    this.render();
+  }
+
+  ensureSharedSurfaceAnchor(key, selector) {
+    if (!this.sharedSurfaceAnchors) this.sharedSurfaceAnchors = {};
+    const existing = this.sharedSurfaceAnchors[key];
+    if (existing && existing.node) return existing;
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return null;
+    const node = document.querySelector ? document.querySelector(selector) : null;
+    if (!node || !node.parentNode) return null;
+    const anchor = typeof document.createComment === 'function'
+      ? document.createComment('workspace-command-' + key + '-anchor')
+      : null;
+    if (anchor && node.parentNode) {
+      node.parentNode.insertBefore(anchor, node);
+    }
+    const record = { node, anchor, parent: node.parentNode };
+    this.sharedSurfaceAnchors[key] = record;
+    return record;
+  }
+
+  mountSharedSurface(key, selector, host) {
+    const record = this.ensureSharedSurfaceAnchor(key, selector);
+    if (!record || !record.node || !host || typeof host.appendChild !== 'function') return null;
+    host.innerHTML = '';
+    host.appendChild(record.node);
+    record.node.hidden = false;
+    return record.node;
+  }
+
+  restoreSharedSurface(key) {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors[key];
+    if (!record || !record.node) return;
+    const parent = record.anchor && record.anchor.parentNode ? record.anchor.parentNode : record.parent;
+    if (!parent || typeof parent.insertBefore !== 'function') return;
+    if (record.node.parentNode === parent) return;
+    parent.insertBefore(record.node, record.anchor ? record.anchor.nextSibling : null);
+  }
+
+  restoreSharedSurfaces() {
+    this.restoreSharedSurface('config');
+    this.restoreSharedSurface('tools');
+  }
+
+  showConfigTab(tab) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (page && typeof page.setWorkspaceConfigExpanded === 'function') {
+      page.setWorkspaceConfigExpanded(true);
+    }
+    if (!tab || !tab.tabId) return;
+    const tabBtn = typeof document !== 'undefined' ? document.getElementById(tab.tabId) : null;
+    if (!tabBtn) return;
+
+    let usedBootstrap = false;
+    if (
+      typeof window !== 'undefined' &&
+      window.bootstrap &&
+      window.bootstrap.Tab &&
+      typeof window.bootstrap.Tab.getOrCreateInstance === 'function'
+    ) {
+      window.bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+      usedBootstrap = true;
+    } else if (page && typeof page.activateWorkspaceConfigTab === 'function') {
+      page.activateWorkspaceConfigTab(tab.tabId);
+      usedBootstrap = true;
+    } else if (typeof tabBtn.click === 'function') {
+      tabBtn.click();
+    }
+
+    if (!usedBootstrap && typeof Event === 'function' && typeof tabBtn.dispatchEvent === 'function') {
+      tabBtn.dispatchEvent(new Event('shown.bs.tab', { bubbles: true }));
+    }
+  }
+
+  expandMountedConfig(configNode) {
+    if (!configNode || typeof configNode.querySelector !== 'function') return;
+    configNode.classList?.remove('is-collapsed');
+    const content = configNode.querySelector('#workspace-detail-config-content');
+    if (content) {
+      content.hidden = false;
+      if (typeof content.removeAttribute === 'function') content.removeAttribute('hidden');
+    }
+    const toggle = configNode.querySelector('#workspace-detail-config-toggle');
+    if (toggle && typeof toggle.setAttribute === 'function') {
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    const label = configNode.querySelector('#workspace-detail-config-toggle-label');
+    if (label) label.textContent = 'Hide Configuration';
+  }
+
+  refreshSystemTabData(tab) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page || !tab) return;
+    switch (tab.key) {
+      case 'mcp':
+        if (typeof page.renderWorkspaceMCPBindings === 'function') page.renderWorkspaceMCPBindings();
+        if (page.nativeMCPManager && typeof page.nativeMCPManager.load === 'function') {
+          page.nativeMCPManager.load();
+        }
+        break;
+      case 'skills':
+        if (typeof page.renderWorkspaceSkillBindings === 'function') page.renderWorkspaceSkillBindings();
+        break;
+      case 'plugins':
+        if (typeof page.renderWorkspacePluginBindings === 'function') page.renderWorkspacePluginBindings();
+        break;
+      case 'memory':
+        if (page.memoryManager && typeof page.memoryManager.load === 'function') page.memoryManager.load();
+        break;
+      case 'settings':
+        if (typeof page.renderWorkspaceSettings === 'function') page.renderWorkspaceSettings();
+        break;
+      default:
+        break;
+    }
+  }
+
+  syncSharedSurfaces() {
+    const host = this.container && this.container.querySelector('[data-cmd-system-host]');
+    if (!this.active || this.activeRailSection !== 'systems' || !host) {
+      this.restoreSharedSurfaces();
+      return;
+    }
+
+    const tab = this.systemTab(this.activeSystemTab);
+    if (tab.host === 'tools') {
+      this.restoreSharedSurface('config');
+      const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
+      if (!tools) host.innerHTML = '<div class="ws-cmd-rail-empty">Find Tools is unavailable.</div>';
+      return;
+    }
+
+    this.restoreSharedSurface('tools');
+    const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
+    if (!config) {
+      host.innerHTML = '<div class="ws-cmd-rail-empty">Workspace configuration is unavailable.</div>';
+      return;
+    }
+    this.showConfigTab(tab);
+    this.refreshSystemTabData(tab);
+    this.expandMountedConfig(config);
+  }
+
+  setFileDropActive(dropZone, isActive) {
+    if (!dropZone || !dropZone.classList) return;
+    dropZone.classList.toggle('is-active', Boolean(isActive));
+  }
+
+  async uploadDroppedFiles(event) {
+    if (!event || !event.dataTransfer || !event.dataTransfer.files) return;
+    const files = event.dataTransfer.files;
+    if (!files.length) return;
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page || typeof page.uploadFiles !== 'function') return;
+    await page.uploadFiles(files);
   }
 
   bindRail() {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', (event) => {
+      const systemTab = event.target.closest('[data-cmd-system-tab]');
+      if (systemTab) {
+        this.openSystemTab(systemTab.getAttribute('data-cmd-system-tab'));
+        return;
+      }
+      const fileDrop = event.target.closest('[data-cmd-file-drop]');
+      if (fileDrop) {
+        this.runRailPrimaryAction('files', fileDrop);
+        return;
+      }
       const primaryBtn = event.target.closest('[data-cmd-primary-section]');
       if (primaryBtn) {
         this.runRailPrimaryAction(primaryBtn.getAttribute('data-cmd-primary-section'), primaryBtn);
@@ -1397,6 +1740,25 @@ export class WorkspaceCommandView {
           itemBtn.getAttribute('data-cmd-item-source')
         );
       }
+    });
+    root.addEventListener('dragover', (event) => {
+      const dropZone = event.target.closest('[data-cmd-file-drop]');
+      if (!dropZone) return;
+      event.preventDefault();
+      this.setFileDropActive(dropZone, true);
+    });
+    root.addEventListener('dragleave', (event) => {
+      const dropZone = event.target.closest('[data-cmd-file-drop]');
+      if (!dropZone) return;
+      this.setFileDropActive(dropZone, false);
+    });
+    root.addEventListener('drop', (event) => {
+      const dropZone = event.target.closest('[data-cmd-file-drop]');
+      if (!dropZone) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.setFileDropActive(dropZone, false);
+      this.uploadDroppedFiles(event);
     });
   }
 }
