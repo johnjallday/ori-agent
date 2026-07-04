@@ -265,6 +265,73 @@ test('workspace detail renders project_path fallback instead of unlinked empty s
   assert.doesNotMatch(list.innerHTML, /No project folder linked yet/);
 });
 
+test('workspace detail entity loaders refresh Command view after completion', async () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {};
+  page.elements = {};
+  page.renderSessions = () => {};
+  page.renderNotes = () => {};
+  page.renderDirectories = () => {};
+  page.renderSchedules = () => {};
+  page.refreshHomeAssistantQuickPrompts = () => {};
+  page.updateCopyNotesButtonState = () => {};
+  page.syncProjectActionState = () => {};
+  page.renderWorkspaceMCPBindings = () => {};
+  page.renderWorkspaceSkillBindings = () => {};
+  page.renderAgentGroups = () => {};
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  let refreshCount = 0;
+  global.window = {
+    ...originalWindow,
+    workspaceCommand: {
+      refresh() {
+        refreshCount += 1;
+      }
+    }
+  };
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.startsWith('/api/sessions')) {
+      return { ok: true, json: async () => ({ sessions: [{ id: 's1' }] }) };
+    }
+    if (href.endsWith('/notes')) {
+      return { ok: true, json: async () => ({ notes: [{ id: 'n1' }] }) };
+    }
+    if (href.startsWith('/api/orchestration/tasks')) {
+      return {
+        ok: true,
+        json: async () => ({
+          tasks: [{ id: 'sched-1', description: 'Scheduled', schedule: '* * * * *' }]
+        })
+      };
+    }
+    if (href.startsWith('/api/workspaces/')) {
+      return {
+        ok: true,
+        json: async () => ({
+          directory_references: [{ id: 'dir-1', name: 'Project', path: '/tmp/project' }],
+          attachments: []
+        })
+      };
+    }
+    throw new Error(`unexpected fetch: ${href}`);
+  };
+
+  try {
+    await page.loadSessions();
+    await page.loadNotes();
+    await page.loadDirectories();
+    await page.loadSchedules();
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+
+  assert.equal(refreshCount, 4);
+});
+
 test('workspace detail protects the managed project directory row', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const list = { innerHTML: '' };

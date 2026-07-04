@@ -141,8 +141,15 @@
 .ws-cmd-rail-item.is-static { cursor: default; }
 .ws-cmd-rail-item:hover:not(.is-static) { border-color: var(--ws-line-bright); background: var(--ws-bg-2); }
 .ws-cmd-rail-item:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
-.ws-cmd-rail-t { font-size: 13px; color: #eef0f3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-cmd-rail-m { font-family: var(--ws-font-mono); font-size: 9.5px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-rail-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
+.ws-cmd-rail-t { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-cmd-rail-m { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ws-font-mono); font-size: 9.5px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-rail-role {
+  flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono); font-size: 8px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--ws-ink-dim);
+}
+.ws-cmd-rail-role.is-project { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.08); }
+.ws-cmd-rail-role.is-reference { color: var(--ws-ink-dim); }
 .ws-cmd-rail-more {
   margin-top: 4px; padding: 7px; border: 1px dashed var(--ws-line-bright); background: none; color: var(--ws-ink-dim); cursor: pointer;
   font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
@@ -240,6 +247,13 @@
 }
 .ws-cmd-modal-add:hover { background: rgba(70, 211, 154, 0.16); border-color: var(--ws-faction); }
 .ws-cmd-modal-add:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-filter {
+  padding: 7px 10px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
+  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-modal-filter[aria-pressed="true"],
+.ws-cmd-modal-filter:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
+.ws-cmd-modal-filter:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-modal-close {
   width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;

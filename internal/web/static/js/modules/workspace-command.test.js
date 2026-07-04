@@ -202,6 +202,52 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/);
 });
 
+test('command rail renders project_path fallback when no directories are loaded', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      workspace: { project_path: '/tmp/smoke-song' }
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.match(html, /smoke-song/);
+  assert.match(html, /Project Folder/);
+  assert.match(html, /\/tmp\/smoke-song/);
+  assert.doesNotMatch(html, /No linked folders yet\./);
+});
+
+test('command rail badges project and reference directory roles', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [
+        { id: 'dir-project', name: 'Project', path: '/tmp/project', source: 'reference' },
+        { id: 'dir-ref', name: 'Reference', path: '/tmp/reference', source: 'reference' }
+      ],
+      getPrimaryDirectoryId: () => 'dir-project',
+      isProjectDirectory: (dir) => dir.id === 'dir-project'
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.match(html, /Project Folder/);
+  assert.match(html, /Reference/);
+  assert.match(html, /data-cmd-item-id="dir-project"/);
+  assert.match(html, /data-cmd-item-id="dir-ref"/);
+});
+
 test('stat clicks open the in-place manager modal without leaving Command view', () => {
   const readoutRoot = makeListenerRoot();
   const opened = [];
@@ -415,6 +461,54 @@ test('tasks manager modal exposes run / open / delete controls', () => {
   assert.match(html, /data-cmd-modal-action="delete" data-cmd-id="t1"/);
 });
 
+test('tasks manager modal defaults to open tasks and can show all rows', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    taskModalShowAll: false,
+    page: {
+      tasks: [
+        { id: 't1', description: 'Pending task', status: 'pending' },
+        { id: 't2', description: 'Running task', status: 'in_progress' },
+        { id: 't3', description: 'Done task', status: 'completed' },
+        { id: 't4', description: 'Failed task', status: 'failed' }
+      ]
+    }
+  });
+
+  let html = commandView.statModalHTML('tasks');
+  assert.match(html, /Open Tasks/);
+  assert.match(html, /<span class="ws-cmd-modal-count">2<\/span>/);
+  assert.match(html, /Pending task/);
+  assert.match(html, /Running task/);
+  assert.doesNotMatch(html, /Done task/);
+  assert.doesNotMatch(html, /Failed task/);
+  assert.match(html, /Show all/);
+
+  commandView.taskModalShowAll = true;
+  html = commandView.statModalHTML('tasks');
+  assert.match(html, /<span class="ws-cmd-modal-count">4<\/span>/);
+  assert.match(html, /Done task/);
+  assert.match(html, /Failed task/);
+  assert.match(html, /Show open/);
+});
+
+test('tasks manager filter action refreshes visible row count', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    taskModalShowAll: false,
+    statModalSection: 'tasks',
+    renderCalls: 0,
+    renderStatModalBody() {
+      this.renderCalls += 1;
+    }
+  });
+
+  commandView.handleStatModalAction('toggle-task-filter');
+
+  assert.equal(commandView.taskModalShowAll, true);
+  assert.equal(commandView.renderCalls, 1);
+});
+
 test('modal add/edit hand off to page flows and close the modal; delete stays open', () => {
   const calls = [];
   let closed = 0;
@@ -481,7 +575,7 @@ test('default deactivate path still persists detailed preference', () => {
   assert.equal(commandView.detailedView.hidden, false);
 });
 
-test('getViewFromURL only trusts an explicit ?view=command param', () => {
+test('getViewFromURL trusts explicit command and detailed params', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const originalWindow = globalThis.window;
   try {
@@ -489,7 +583,7 @@ test('getViewFromURL only trusts an explicit ?view=command param', () => {
     assert.equal(commandView.getViewFromURL(), 'command');
 
     globalThis.window = { location: { search: '?view=detailed' } };
-    assert.equal(commandView.getViewFromURL(), '');
+    assert.equal(commandView.getViewFromURL(), 'detailed');
 
     globalThis.window = { location: { search: '' } };
     assert.equal(commandView.getViewFromURL(), '');
@@ -498,7 +592,7 @@ test('getViewFromURL only trusts an explicit ?view=command param', () => {
   }
 });
 
-test('syncURL sets ?view=command and clears it back to a bare path via replaceState', () => {
+test('syncURL clears command default and marks detailed via replaceState', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const originalWindow = globalThis.window;
   const replaceStateCalls = [];
@@ -513,13 +607,71 @@ test('syncURL sets ?view=command and clears it back to a bare path via replaceSt
 
   try {
     commandView.syncURL('command');
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc']);
 
-    globalThis.window.location.search = '?view=command';
+    globalThis.window.location.search = '';
     commandView.syncURL('detailed');
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc', '/workspaces/abc?view=detailed']);
   } finally {
     globalThis.window = originalWindow;
+  }
+});
+
+test('setup defaults to Command view without URL or saved preference', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const originalLocalStorage = globalThis.localStorage;
+  const toggleBtn = {
+    hidden: true,
+    attrs: {},
+    classList: { toggle() {} },
+    addEventListener() {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    }
+  };
+  const container = {
+    hidden: true,
+    innerHTML: '',
+    querySelector() { return null; },
+    appendChild() {}
+  };
+  const detailedView = { hidden: false };
+  const replaceStateCalls = [];
+
+  try {
+    globalThis.document = {
+      getElementById(id) {
+        if (id === 'workspaceCommandView') return container;
+        if (id === 'workspace-detail-view') return detailedView;
+        if (id === 'workspace-command-toggle') return toggleBtn;
+        return null;
+      }
+    };
+    globalThis.window = {
+      location: { search: '', pathname: '/workspaces/abc' },
+      history: { replaceState(state, title, url) { replaceStateCalls.push(url); } }
+    };
+    globalThis.localStorage = { getItem: () => '', setItem() {} };
+
+    const commandView = new WorkspaceCommandView({
+      workspace: { name: 'Default Command', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      buildAgentGroups: () => []
+    });
+
+    assert.equal(commandView.active, true);
+    assert.equal(container.hidden, false);
+    assert.equal(detailedView.hidden, true);
+    assert.deepEqual(replaceStateCalls, []);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    globalThis.localStorage = originalLocalStorage;
   }
 });
 
@@ -559,10 +711,10 @@ test('activate/deactivate sync the URL by default but bootstrap can opt out', ()
 
     // Real user toggles (default options) sync the URL via replaceState.
     commandView.activate();
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command']);
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc']);
 
     commandView.deactivate();
-    assert.deepEqual(replaceStateCalls, ['/workspaces/abc?view=command', '/workspaces/abc']);
+    assert.deepEqual(replaceStateCalls, ['/workspaces/abc', '/workspaces/abc?view=detailed']);
   } finally {
     globalThis.window = originalWindow;
   }

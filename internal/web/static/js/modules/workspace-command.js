@@ -37,6 +37,7 @@ export class WorkspaceCommandView {
     this.statModalSection = '';
     this.statModalEl = null;
     this.statModalTrigger = null;
+    this.taskModalShowAll = false;
     this.setup();
   }
 
@@ -44,14 +45,12 @@ export class WorkspaceCommandView {
     if (!this.container || !this.toggleBtn) return;
     this.toggleBtn.hidden = false; // reveal (Phase 1)
     this.toggleBtn.addEventListener('click', () => this.toggle());
-    // The URL wins over localStorage on load; a bare visit (no ?view=) falls
-    // back to the saved preference exactly as before. Bootstrap only reads
-    // the URL — it doesn't rewrite it, so a plain visit stays plain even if
-    // the saved preference is command.
+    // The URL wins over localStorage on load. Command is now the implicit
+    // default; only an explicit detailed URL/preference keeps the legacy view.
     const urlView = this.getViewFromURL();
     let pref = '';
     try { pref = localStorage.getItem(STORAGE_KEY) || ''; } catch (err) { pref = ''; }
-    const initialView = urlView || pref;
+    const initialView = urlView || pref || 'command';
     if (initialView === 'command') this.activate({ syncUrl: false });
     else this.deactivate({ syncUrl: false });
   }
@@ -63,18 +62,20 @@ export class WorkspaceCommandView {
   getViewFromURL() {
     try {
       const raw = new URLSearchParams(window.location.search).get('view');
-      return raw === 'command' ? 'command' : '';
+      if (raw === 'command') return 'command';
+      if (raw === 'detailed') return 'detailed';
+      return '';
     } catch (err) {
       return '';
     }
   }
 
-  // Deep-linkable, non-spammy: detailed (the default) drops the param, and
-  // every toggle uses replaceState so switching views never grows history.
+  // Deep-linkable, non-spammy: command (the default) drops the param, detailed
+  // writes ?view=detailed, and toggles use replaceState so history doesn't grow.
   syncURL(view) {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (view === 'command') params.set('view', 'command');
+      if (view === 'detailed') params.set('view', 'detailed');
       else params.delete('view');
       const query = params.toString();
       const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
@@ -228,7 +229,7 @@ export class WorkspaceCommandView {
   statSectionMeta(section) {
     switch (String(section || '')) {
       case 'agents': return { title: 'Agents', addLabel: '＋ Add Agent' };
-      case 'tasks': return { title: 'Tasks', addLabel: '＋ Add Task' };
+      case 'tasks': return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
       case 'mcp': return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills': return { title: 'Skills', addLabel: '＋ Add Skill' };
       default: return null;
@@ -239,6 +240,7 @@ export class WorkspaceCommandView {
     const section = String(sectionKey || '').trim();
     if (!this.statSectionMeta(section)) return;
     this.statModalSection = section;
+    if (section === 'tasks') this.taskModalShowAll = false;
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
@@ -301,6 +303,7 @@ export class WorkspaceCommandView {
       '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
       '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>' +
       '<div class="ws-cmd-modal-head-actions">' +
+      this.statModalFilterToggleHTML(section) +
       '<button type="button" class="ws-cmd-modal-add" data-cmd-modal-action="add">' + escapeHtml(meta.addLabel) + '</button>' +
       '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
       '</div>' +
@@ -312,10 +315,18 @@ export class WorkspaceCommandView {
     );
   }
 
+  statModalFilterToggleHTML(section) {
+    if (String(section || '') !== 'tasks') return '';
+    const label = this.taskModalShowAll ? 'Show open' : 'Show all';
+    const pressed = this.taskModalShowAll ? 'true' : 'false';
+    return '<button type="button" class="ws-cmd-modal-filter" data-cmd-modal-action="toggle-task-filter" aria-pressed="' +
+      pressed + '">' + escapeHtml(label) + '</button>';
+  }
+
   statModalCount(section) {
     switch (String(section || '')) {
       case 'agents': return this.agentRowData().length;
-      case 'tasks': return this.taskRowData().length;
+      case 'tasks': return this.taskRowData({ includeAll: this.taskModalShowAll }).length;
       case 'mcp': return this.mcpRowData().length;
       case 'skills': return this.skillRowData().length;
       default: return 0;
@@ -393,14 +404,24 @@ export class WorkspaceCommandView {
     }).join('');
   }
 
-  taskRowData() {
+  isOpenTask(task) {
+    const status = String((task && task.status) || '').toLowerCase();
+    return status === 'pending' || status === 'in_progress';
+  }
+
+  taskRowData({ includeAll = false } = {}) {
     const page = this.page || {};
-    return Array.isArray(page.tasks) ? page.tasks : [];
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    return includeAll ? tasks : tasks.filter((task) => this.isOpenTask(task));
   }
 
   taskRowsHTML() {
-    const tasks = this.taskRowData();
-    if (!tasks.length) return this.modalEmptyHTML('No tasks yet. Add one to get started.');
+    const tasks = this.taskRowData({ includeAll: this.taskModalShowAll });
+    if (!tasks.length) {
+      return this.modalEmptyHTML(
+        this.taskModalShowAll ? 'No tasks yet. Add one to get started.' : 'No open tasks. Use Show all to view completed tasks.'
+      );
+    }
     return tasks.map((t) => {
       const id = String(t.id || '');
       const label = String(t.description || t.name || t.title || 'Task');
@@ -518,6 +539,11 @@ export class WorkspaceCommandView {
     const section = this.statModalSection;
     const a = String(action || '');
     if (a === 'close') { this.closeStatModal(); return; }
+    if (a === 'toggle-task-filter' && section === 'tasks') {
+      this.taskModalShowAll = !this.taskModalShowAll;
+      this.renderStatModalBody();
+      return;
+    }
     if (a === 'detailed') {
       this.closeStatModal();
       this.openDetailedSection(section);
@@ -792,12 +818,89 @@ export class WorkspaceCommandView {
     return items;
   }
 
+  getWorkspaceProjectPath() {
+    const page = this.page || {};
+    if (typeof page.getWorkspaceProjectPath === 'function') {
+      try { return String(page.getWorkspaceProjectPath() || '').trim(); } catch (err) { return ''; }
+    }
+    return String((page.workspace && page.workspace.project_path) || '').trim();
+  }
+
+  folderDisplayName(path) {
+    const normalized = String(path || '').replace(/[\\/]+$/, '');
+    const parts = normalized.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || normalized || 'Project Folder';
+  }
+
+  folderRowData() {
+    const page = this.page || {};
+    const dirs = Array.isArray(page.directories) ? page.directories : [];
+    if (dirs.length) return dirs;
+    const projectPath = this.getWorkspaceProjectPath();
+    if (!projectPath) return [];
+    return [{
+      id: '__project_path__',
+      name: this.folderDisplayName(projectPath),
+      path: projectPath,
+      source: 'project_path',
+      isProjectPathOnly: true
+    }];
+  }
+
+  folderRole(dir) {
+    const page = this.page || {};
+    if (dir && dir.isProjectPathOnly) return { label: 'Project Folder', className: 'is-project' };
+    let primaryDirectoryId = '';
+    try {
+      primaryDirectoryId = typeof page.getPrimaryDirectoryId === 'function' ? String(page.getPrimaryDirectoryId() || '') : '';
+    } catch (err) {
+      primaryDirectoryId = '';
+    }
+    let isProject = false;
+    try {
+      isProject = typeof page.isProjectDirectory === 'function' ? Boolean(page.isProjectDirectory(dir)) : false;
+    } catch (err) {
+      isProject = false;
+    }
+    if (isProject || (dir && primaryDirectoryId && String(dir.id || '') === primaryDirectoryId)) {
+      return { label: 'Project Folder', className: 'is-project' };
+    }
+    return { label: 'Reference', className: 'is-reference' };
+  }
+
+  folderRailItems(rows, expanded) {
+    const arr = Array.isArray(rows) ? rows : [];
+    const limit = expanded ? arr.length : 5;
+    const shown = arr.slice(0, limit);
+    const items = shown.map((dir) => {
+      const id = String(dir.id || '');
+      const role = this.folderRole(dir);
+      const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
+      const path = String(dir.path || '');
+      const source = String(dir.source || 'reference');
+      const inner =
+        '<span class="ws-cmd-rail-line"><span class="ws-cmd-rail-t">' + escapeHtml(name) + '</span>' +
+        '<span class="ws-cmd-rail-role ' + escapeHtml(role.className) + '">' + escapeHtml(role.label) + '</span></span>' +
+        (path ? '<span class="ws-cmd-rail-m">' + escapeHtml(path) + '</span>' : '');
+      if (dir.isProjectPathOnly) {
+        return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
+      }
+      return '<button type="button" class="ws-cmd-rail-item" data-cmd-open-section="folders" data-cmd-item-id="' +
+        escapeHtml(id) + '" data-cmd-item-source="' + escapeHtml(source) + '">' + inner + '</button>';
+    });
+    if (arr.length > shown.length) {
+      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="folders">+ ' +
+        (arr.length - shown.length) + ' more</button>');
+    }
+    return items;
+  }
+
   renderRail() {
     const page = this.page || {};
     const notes = Array.isArray(page.notes) ? page.notes : [];
     const schedules = Array.isArray(page.schedules) ? page.schedules : [];
     const sessions = Array.isArray(page.sessions) ? page.sessions : [];
-    const dirs = Array.isArray(page.directories) ? page.directories : [];
+    const dirs = this.folderRowData();
 
     const notesExpanded = this.activeRailSection === 'notes';
     const schedulesExpanded = this.activeRailSection === 'schedules';
@@ -820,13 +923,7 @@ export class WorkspaceCommandView {
       action: (s) => 'data-cmd-open-section="sessions" data-cmd-item-id="' + escapeHtml(String(s.id || '')) + '"',
       metaOf: (s) => s.agent_name || ''
     });
-    const folderItems = this.railItems(dirs, (d) => d.title || d.name || d.path || 'Unnamed Directory', {
-      sectionKey: 'folders',
-      expanded: foldersExpanded,
-      action: (d) => 'data-cmd-open-section="folders" data-cmd-item-id="' + escapeHtml(String(d.id || '')) +
-        '" data-cmd-item-source="' + escapeHtml(String(d.source || 'reference')) + '"',
-      metaOf: (d) => d.path || ''
-    });
+    const folderItems = this.folderRailItems(dirs, foldersExpanded);
 
     return (
       this.railPanelHTML('notes', 'Notes', notesItems, notes.length, 'No notes yet.', 'New Note') +
