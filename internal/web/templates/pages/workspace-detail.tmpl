@@ -255,85 +255,6 @@
             <div id="workspace-tools-panel-host" hidden></div>
           </section>
 
-          <div class="modal fade" id="workspace-detail-goal-modal" tabindex="-1" aria-labelledby="workspace-detail-goal-modal-title" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered">
-              <form class="modal-content workspace-detail-goal-modal-content" id="workspace-detail-goal-modal-form">
-                <div class="modal-header workspace-detail-goal-modal-header">
-                  <div>
-                    <div class="workspace-detail-goal-kicker">Workspace Goal</div>
-                    <h2 class="modal-title workspace-detail-goal-modal-title" id="workspace-detail-goal-modal-title">Set goal</h2>
-                  </div>
-                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body workspace-detail-goal-modal-body">
-                  <div class="workspace-detail-goal-modal-warning" id="workspace-detail-goal-modal-bindings-warning" style="display: none;" role="status">
-                    <strong>Classify workspace bindings before this goal can run.</strong>
-                    <div class="workspace-detail-goal-modal-warning-list" id="workspace-detail-goal-modal-unclassified-list"></div>
-                    <div class="workspace-detail-goal-modal-warning-hint">Open <em>Advanced settings</em> → MCP or Workspace Skills to set each binding's side effect (read / write / external).</div>
-                  </div>
-
-                  <div class="workspace-detail-goal-modal-field">
-                    <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
-                    <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="4" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
-                  </div>
-
-                  <div class="workspace-detail-goal-modal-grid">
-                    <div class="workspace-detail-goal-modal-field">
-                      <label for="workspace-detail-goal-modal-cadence-type" class="form-label">Cadence</label>
-                      <select id="workspace-detail-goal-modal-cadence-type" class="form-select">
-                        <option value="">Manual only</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="interval">Custom interval</option>
-                      </select>
-                    </div>
-
-                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-time-wrap" style="display: none;">
-                      <label for="workspace-detail-goal-modal-cadence-time" class="form-label">Time of day</label>
-                      <input id="workspace-detail-goal-modal-cadence-time" type="time" class="form-control" value="09:00">
-                    </div>
-                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dow-wrap" style="display: none;">
-                      <label for="workspace-detail-goal-modal-cadence-dow" class="form-label">Day of week</label>
-                      <select id="workspace-detail-goal-modal-cadence-dow" class="form-select">
-                        <option value="1">Monday</option>
-                        <option value="2">Tuesday</option>
-                        <option value="3">Wednesday</option>
-                        <option value="4">Thursday</option>
-                        <option value="5">Friday</option>
-                        <option value="6">Saturday</option>
-                        <option value="0">Sunday</option>
-                      </select>
-                    </div>
-                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dom-wrap" style="display: none;">
-                      <label for="workspace-detail-goal-modal-cadence-dom" class="form-label">Day of month</label>
-                      <input id="workspace-detail-goal-modal-cadence-dom" type="number" class="form-control" min="1" max="31" value="1">
-                    </div>
-                    <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-interval-wrap" style="display: none;">
-                      <label for="workspace-detail-goal-modal-cadence-interval" class="form-label">Interval (hours)</label>
-                      <input id="workspace-detail-goal-modal-cadence-interval" type="number" class="form-control" min="1" value="24">
-                    </div>
-                  </div>
-
-                  <div class="form-check form-switch workspace-detail-goal-modal-switch">
-                    <input class="form-check-input" type="checkbox" id="workspace-detail-goal-modal-enabled">
-                    <label class="form-check-label" for="workspace-detail-goal-modal-enabled">
-                      Enable goal automation
-                    </label>
-                  </div>
-                  <div class="workspace-detail-goal-modal-enabled-hint" id="workspace-detail-goal-modal-enabled-hint" style="display: none;">Pick a cadence above to enable automatic runs.</div>
-                  <div class="workspace-detail-goal-modal-autonomy" id="workspace-detail-goal-modal-autonomy"></div>
-                  <div class="workspace-detail-goal-modal-status" id="workspace-detail-goal-modal-status" aria-live="polite"></div>
-                </div>
-                <div class="modal-footer workspace-detail-goal-modal-footer">
-                  <button type="button" class="btn btn-link" id="workspace-detail-goal-modal-advanced">Advanced settings</button>
-                  <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                  <button type="submit" class="btn btn-primary" id="workspace-detail-goal-modal-save">Save goal</button>
-                </div>
-              </form>
-            </div>
-          </div>
-
           <!-- Workspace Configuration -->
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
@@ -1371,6 +1292,85 @@
 
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
+
+  <div class="modal fade" id="workspace-detail-goal-modal" tabindex="-1" aria-labelledby="workspace-detail-goal-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <form class="modal-content workspace-detail-goal-modal-content" id="workspace-detail-goal-modal-form">
+        <div class="modal-header workspace-detail-goal-modal-header">
+          <div>
+            <div class="workspace-detail-goal-kicker">Workspace Goal</div>
+            <h2 class="modal-title workspace-detail-goal-modal-title" id="workspace-detail-goal-modal-title">Set goal</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body workspace-detail-goal-modal-body">
+          <div class="workspace-detail-goal-modal-warning" id="workspace-detail-goal-modal-bindings-warning" style="display: none;" role="status">
+            <strong>Classify workspace bindings before this goal can run.</strong>
+            <div class="workspace-detail-goal-modal-warning-list" id="workspace-detail-goal-modal-unclassified-list"></div>
+            <div class="workspace-detail-goal-modal-warning-hint">Open <em>Advanced settings</em> → MCP or Workspace Skills to set each binding's side effect (read / write / external).</div>
+          </div>
+
+          <div class="workspace-detail-goal-modal-field">
+            <label for="workspace-detail-goal-modal-text" class="form-label">Goal</label>
+            <textarea id="workspace-detail-goal-modal-text" class="form-control" rows="4" placeholder="e.g. Keep brand voice and visuals consistent across all channels."></textarea>
+          </div>
+
+          <div class="workspace-detail-goal-modal-grid">
+            <div class="workspace-detail-goal-modal-field">
+              <label for="workspace-detail-goal-modal-cadence-type" class="form-label">Cadence</label>
+              <select id="workspace-detail-goal-modal-cadence-type" class="form-select">
+                <option value="">Manual only</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="interval">Custom interval</option>
+              </select>
+            </div>
+
+            <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-time-wrap" style="display: none;">
+              <label for="workspace-detail-goal-modal-cadence-time" class="form-label">Time of day</label>
+              <input id="workspace-detail-goal-modal-cadence-time" type="time" class="form-control" value="09:00">
+            </div>
+            <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dow-wrap" style="display: none;">
+              <label for="workspace-detail-goal-modal-cadence-dow" class="form-label">Day of week</label>
+              <select id="workspace-detail-goal-modal-cadence-dow" class="form-select">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
+            <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-dom-wrap" style="display: none;">
+              <label for="workspace-detail-goal-modal-cadence-dom" class="form-label">Day of month</label>
+              <input id="workspace-detail-goal-modal-cadence-dom" type="number" class="form-control" min="1" max="31" value="1">
+            </div>
+            <div class="workspace-detail-goal-modal-field" id="workspace-detail-goal-modal-cadence-interval-wrap" style="display: none;">
+              <label for="workspace-detail-goal-modal-cadence-interval" class="form-label">Interval (hours)</label>
+              <input id="workspace-detail-goal-modal-cadence-interval" type="number" class="form-control" min="1" value="24">
+            </div>
+          </div>
+
+          <div class="form-check form-switch workspace-detail-goal-modal-switch">
+            <input class="form-check-input" type="checkbox" id="workspace-detail-goal-modal-enabled">
+            <label class="form-check-label" for="workspace-detail-goal-modal-enabled">
+              Enable goal automation
+            </label>
+          </div>
+          <div class="workspace-detail-goal-modal-enabled-hint" id="workspace-detail-goal-modal-enabled-hint" style="display: none;">Pick a cadence above to enable automatic runs.</div>
+          <div class="workspace-detail-goal-modal-autonomy" id="workspace-detail-goal-modal-autonomy"></div>
+          <div class="workspace-detail-goal-modal-status" id="workspace-detail-goal-modal-status" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer workspace-detail-goal-modal-footer">
+          <button type="button" class="btn btn-link" id="workspace-detail-goal-modal-advanced">Advanced settings</button>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="workspace-detail-goal-modal-save">Save goal</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Project Template Modal -->
   <div class="modal fade" id="workspace-detail-project-template-modal" tabindex="-1" aria-labelledby="workspace-detail-project-template-title" aria-hidden="true">

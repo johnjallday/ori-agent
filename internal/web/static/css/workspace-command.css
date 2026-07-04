@@ -146,6 +146,60 @@
 
 /* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
 .ws-cmd-layout { display: grid; grid-template-columns: 1fr 332px; gap: 18px; align-items: start; }
+.ws-cmd-main { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.ws-cmd-mission {
+  display: flex; justify-content: space-between; align-items: stretch; gap: 16px; min-width: 0;
+  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014);
+  padding: 14px 16px;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-mission-main { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ws-cmd-mission-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.ws-cmd-mission-kicker {
+  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-faction);
+}
+.ws-cmd-mission-status {
+  display: inline-flex; align-items: center; min-height: 21px; padding: 3px 8px; border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--ws-ink-dim);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-mission-status.is-enabled { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.07); }
+.ws-cmd-mission-status.is-paused,
+.ws-cmd-mission-status.is-manual { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.07); }
+.ws-cmd-mission-status.is-empty,
+.ws-cmd-mission-status.is-loading { color: var(--ws-ink-faint); }
+.ws-cmd-mission-title {
+  margin: 0; color: #eef0f3; font-size: 17px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+}
+.ws-cmd-mission-text {
+  max-width: 88ch; margin: 0; color: var(--ws-ink); font-size: 13.5px; line-height: 1.45;
+}
+.ws-cmd-mission-text.is-empty { color: var(--ws-ink-faint); font-style: italic; }
+.ws-cmd-mission-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.ws-cmd-mission-meta span {
+  display: inline-flex; align-items: center; min-height: 22px; padding: 3px 8px; border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18); color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 0.7px; text-transform: uppercase;
+}
+.ws-cmd-mission-action-status {
+  min-height: 15px; color: var(--ws-ink-dim); font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 0.4px;
+}
+.ws-cmd-mission-action-status.is-error { color: var(--ws-alert); }
+.ws-cmd-mission-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
+.ws-cmd-mission-btn {
+  min-height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
+  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  text-decoration: none; transition: 0.13s;
+}
+.ws-cmd-mission-btn.is-primary {
+  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-mission-btn.has-findings { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.08); }
+.ws-cmd-mission-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); text-decoration: none; }
+.ws-cmd-mission-btn:disabled { color: var(--ws-ink-faint); border-color: var(--ws-line); cursor: not-allowed; opacity: 0.72; }
+.ws-cmd-mission-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 .ws-cmd-garrison {
   border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014); min-height: 200px;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
@@ -357,6 +411,8 @@
 }
 @media (max-width: 900px) {
   .ws-cmd-layout { grid-template-columns: 1fr; }
+  .ws-cmd-mission { flex-direction: column; }
+  .ws-cmd-mission-actions { justify-content: flex-start; }
 }
 @media (max-width: 640px) {
   .ws-cmd-nav-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
@@ -365,6 +421,7 @@
   .ws-cmd-panel-head { align-items: flex-start; }
   .ws-cmd-panel-tools { flex-wrap: wrap; justify-content: flex-end; }
   .ws-cmd-readout .ws-cmd-stat { flex: 1 1 calc(50% - 10px); }
+  .ws-cmd-mission-actions .ws-cmd-mission-btn { flex: 1 1 calc(50% - 8px); }
 }
 
 /* Auto-playing motion is opt-in via the OS "reduce motion" preference. */
@@ -372,7 +429,7 @@
 @keyframes ws-cmd-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd-topbar { animation: ws-cmd-rise 0.35s ease both; }
-  .ws-cmd-garrison, .ws-cmd-rail { animation: ws-cmd-rise 0.4s ease both; animation-delay: 0.05s; }
+  .ws-cmd-mission, .ws-cmd-garrison, .ws-cmd-rail { animation: ws-cmd-rise 0.4s ease both; animation-delay: 0.05s; }
   .ws-cmd-led.working { animation: ws-cmd-pulse 1.5s ease-in-out infinite; }
   .ws-cmd-modal-panel { animation: ws-cmd-rise 0.22s ease both; }
 }

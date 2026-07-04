@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
 
 // The constructor only reads the DOM (getElementById) and returns early from
@@ -43,6 +44,13 @@ function makeSectionClickTarget(section) {
 function makeAttributeClickTarget(attrs) {
   return {
     closest(selector) {
+      if (selector.includes('data-cmd-mission-action') && attrs['data-cmd-mission-action']) {
+        return {
+          getAttribute(name) {
+            return attrs[name] || '';
+          }
+        };
+      }
       if (selector.includes('data-cmd-open-task') && attrs['data-cmd-open-task']) {
         return {
           getAttribute(name) {
@@ -189,6 +197,8 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   commandView.render();
 
   assert.match(container.innerHTML, /Workflow · Guided/);
+  assert.match(container.innerHTML, /workspace-command-mission-card/);
+  assert.match(container.innerHTML, /Mission/);
   assert.match(container.innerHTML, /A focused production workspace/);
   assert.match(container.innerHTML, /launch/);
   assert.match(container.innerHTML, /href="\/workspaces"/);
@@ -221,6 +231,163 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   // per-agent quest-log header stay "Tasks" since those list every task
   // regardless of status, so "Open Tasks" there would misdescribe them.
   assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/);
+});
+
+test('command subtitle includes mission automation state when mission state is loaded', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    workspaceMission: {
+      getSummary: () => ({ label: 'Enabled' })
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: { name: 'Mission Workspace', description: '', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  try {
+    const html = commandView.commandBarHTML(
+      commandView.page.workspace,
+      commandView.page.workspace.name,
+      'Guided',
+      commandView.computeStats()
+    );
+
+    assert.match(html, /Workflow · Guided · Mission · Enabled/);
+    assert.match(html, /id="workspace-command-subtitle"/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('mission panel renders loaded goal state and findings link', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    workspaceMission: {
+      getSummary: () => ({
+        mission: 'Keep launch readiness current.',
+        label: 'Enabled',
+        className: 'is-enabled',
+        title: 'Current goal',
+        text: 'Keep launch readiness current.',
+        cadenceLabel: 'Cadence: Daily at 09:00',
+        nextLabel: 'Next: in 2h',
+        lastLabel: 'Last: 1h ago',
+        canRun: true,
+        runTitle: 'Run this goal check now',
+        findingsHref: '/action-center?workspace=workspace-1',
+        findingsLabel: 'Findings (2)',
+        actionStatus: ''
+      })
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: { workspaceId: 'workspace-1', workspace: { id: 'workspace-1' } }
+  });
+
+  try {
+    const html = commandView.renderMissionPanel();
+
+    assert.match(html, /Keep launch readiness current\./);
+    assert.match(html, /ws-cmd-mission-status is-enabled/);
+    assert.match(html, /Cadence: Daily at 09:00/);
+    assert.match(html, /href="\/action-center\?workspace=workspace-1"/);
+    assert.match(html, />Findings \(2\)<\/a>/);
+    assert.doesNotMatch(html, /id="workspace-command-mission-run"[^>]* disabled/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('mission panel disables Run Now when no saved goal is runnable', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    workspaceMission: {
+      getSummary: () => ({
+        mission: '',
+        label: 'Not set',
+        className: 'is-empty',
+        title: 'No goal set',
+        text: 'No workspace goal yet.',
+        cadenceLabel: 'Cadence: Manual only',
+        nextLabel: 'Next: not scheduled',
+        lastLabel: 'Last: never',
+        canRun: false,
+        runTitle: 'Set a goal before running'
+      })
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: { workspaceId: 'workspace-1', workspace: { id: 'workspace-1' } }
+  });
+
+  try {
+    const html = commandView.renderMissionPanel();
+
+    assert.match(html, /No workspace goal yet\./);
+    assert.match(html, /id="workspace-command-mission-run"[^>]* disabled/);
+    assert.match(html, /title="Set a goal before running"/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('mission panel actions delegate to workspace mission APIs', () => {
+  const missionRoot = makeListenerRoot();
+  const calls = [];
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    workspaceMission: {
+      openGoalModal() { calls.push('edit'); },
+      runNow(button) { calls.push(['run', button.getAttribute('data-cmd-mission-action')]); }
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-mission' ? missionRoot : null;
+      }
+    }
+  });
+
+  try {
+    commandView.bindMissionPanel();
+    missionRoot.listener({
+      target: makeAttributeClickTarget({ 'data-cmd-mission-action': 'edit' })
+    });
+    missionRoot.listener({
+      target: makeAttributeClickTarget({ 'data-cmd-mission-action': 'run' })
+    });
+
+    assert.deepEqual(calls, ['edit', ['run', 'run']]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('goal modal is outside the hidden detailed view and keeps accessibility hooks', () => {
+  const template = readFileSync(new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url), 'utf8');
+  const detailStart = template.indexOf('id="workspace-detail-view"');
+  const detailEnd = template.indexOf('{{template "session-modals.tmpl" .}}');
+  const modalIndex = template.indexOf('id="workspace-detail-goal-modal"');
+  const addFileIndex = template.indexOf('id="hubAddFileModal"');
+
+  assert.ok(detailStart > -1);
+  assert.ok(detailEnd > detailStart);
+  assert.ok(modalIndex > detailEnd);
+  assert.ok(modalIndex < addFileIndex);
+  assert.match(template, /aria-labelledby="workspace-detail-goal-modal-title"/);
+  assert.match(template, /id="workspace-detail-goal-modal-form"/);
 });
 
 test('command rail renders project_path fallback when no directories are loaded', () => {

@@ -77,6 +77,18 @@
     goalModalAutonomy: '#workspace-detail-goal-modal-autonomy',
     goalModalBindingsWarning: '#workspace-detail-goal-modal-bindings-warning',
     goalModalUnclassifiedList: '#workspace-detail-goal-modal-unclassified-list',
+    commandSubtitle: '#workspace-command-subtitle',
+    commandCard: '#workspace-command-mission-card',
+    commandStatus: '#workspace-command-mission-status',
+    commandTitle: '#workspace-command-mission-title',
+    commandText: '#workspace-command-mission-text',
+    commandCadence: '#workspace-command-mission-cadence',
+    commandNextRun: '#workspace-command-mission-next-run',
+    commandLastRun: '#workspace-command-mission-last-run',
+    commandActionStatus: '#workspace-command-mission-action-status',
+    commandEditBtn: '#workspace-command-mission-edit',
+    commandRunBtn: '#workspace-command-mission-run',
+    commandFindingsBtn: '#workspace-command-mission-findings',
   };
 
   // Plain-language summary of each autonomy policy. The quick-edit modal only
@@ -194,6 +206,13 @@
 
   function setGoalActionStatus(msg, kind) {
     const el = $(SELECTORS.goalActionStatus);
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('is-error', kind === 'error');
+  }
+
+  function setCommandActionStatus(msg, kind) {
+    const el = $(SELECTORS.commandActionStatus);
     if (!el) return;
     el.textContent = msg || '';
     el.classList.toggle('is-error', kind === 'error');
@@ -362,6 +381,105 @@
     return { label: 'Manual only', className: 'is-manual' };
   }
 
+  function buildFindingsMeta(state) {
+    const wsId = getWorkspaceId();
+    const openFindings = Number(state.open_findings_count) || 0;
+    return {
+      href: wsId ? `/action-center?workspace=${encodeURIComponent(wsId)}` : '/action-center',
+      label: openFindings > 0 ? `Findings (${openFindings})` : 'Findings',
+      hasFindings: openFindings > 0,
+    };
+  }
+
+  function commandSummary(state) {
+    const current = state || latestState || {};
+    const mission = String(current.mission || '').trim();
+    const status = missionStatus(current);
+    const findings = buildFindingsMeta(current);
+    const mcp = Array.isArray(current.unclassified_mcp_ids) ? current.unclassified_mcp_ids : [];
+    const skills = Array.isArray(current.unclassified_skill_ids) ? current.unclassified_skill_ids : [];
+    const actionStatus = mission && mcp.length + skills.length > 0
+      ? 'Classify MCP or skill bindings before scheduled runs.'
+      : '';
+    return {
+      mission,
+      label: status.label,
+      className: status.className,
+      title: mission ? 'Current goal' : 'No goal set',
+      text: mission || 'No workspace goal yet.',
+      cadenceLabel: `Cadence: ${cadenceLabel(current.cadence)}`,
+      nextLabel: `Next: ${fmtNextRun(current.next_mission_run_at)}`,
+      lastLabel: `Last: ${fmtLastRun(current.last_mission_run_at)}`,
+      nextTitle: current.next_mission_run_at ? fmtTime(current.next_mission_run_at) : '',
+      lastTitle: current.last_mission_run_at ? fmtTime(current.last_mission_run_at) : '',
+      canRun: !!mission && !runInProgress,
+      runTitle: mission ? 'Run this goal check now' : 'Set a goal before running',
+      findingsHref: findings.href,
+      findingsLabel: findings.label,
+      hasFindings: findings.hasFindings,
+      actionStatus,
+    };
+  }
+
+  function renderCommandSubtitle(state) {
+    const el = $(SELECTORS.commandSubtitle);
+    if (!el) return;
+    const workflow = String(el.getAttribute('data-workflow-label') || '').trim();
+    const summary = commandSummary(state);
+    const missionPart = summary.label ? `Mission · ${summary.label}` : '';
+    const text = [workflow, missionPart].filter(Boolean).join(' · ');
+    el.textContent = text;
+    el.hidden = !text;
+  }
+
+  function renderCommandPanel(state) {
+    if (!$(SELECTORS.commandCard)) {
+      renderCommandSubtitle(state);
+      return;
+    }
+    const summary = commandSummary(state);
+    const statusEl = $(SELECTORS.commandStatus);
+    const titleEl = $(SELECTORS.commandTitle);
+    const textEl = $(SELECTORS.commandText);
+    const cadenceEl = $(SELECTORS.commandCadence);
+    const nextEl = $(SELECTORS.commandNextRun);
+    const lastEl = $(SELECTORS.commandLastRun);
+    const editBtn = $(SELECTORS.commandEditBtn);
+    const runBtn = $(SELECTORS.commandRunBtn);
+    const findingsBtn = $(SELECTORS.commandFindingsBtn);
+
+    if (statusEl) {
+      statusEl.textContent = summary.label;
+      statusEl.className = `ws-cmd-mission-status ${summary.className}`;
+    }
+    if (titleEl) titleEl.textContent = summary.title;
+    if (textEl) {
+      textEl.textContent = summary.text;
+      textEl.classList.toggle('is-empty', !summary.mission);
+    }
+    if (cadenceEl) cadenceEl.textContent = summary.cadenceLabel;
+    if (nextEl) {
+      nextEl.textContent = summary.nextLabel;
+      nextEl.title = summary.nextTitle;
+    }
+    if (lastEl) {
+      lastEl.textContent = summary.lastLabel;
+      lastEl.title = summary.lastTitle;
+    }
+    if (editBtn) editBtn.textContent = summary.mission ? 'Edit goal' : 'Set goal';
+    if (runBtn) {
+      runBtn.disabled = !summary.canRun;
+      runBtn.title = summary.runTitle;
+    }
+    if (findingsBtn) {
+      findingsBtn.href = summary.findingsHref;
+      findingsBtn.textContent = summary.findingsLabel;
+      findingsBtn.classList.toggle('has-findings', summary.hasFindings);
+    }
+    if (!runInProgress) setCommandActionStatus(summary.actionStatus, summary.actionStatus ? 'error' : null);
+    renderCommandSubtitle(state);
+  }
+
   function renderGoalCard(state) {
     if (!$(SELECTORS.goalCard)) return;
     const mission = String(state.mission || '').trim();
@@ -404,13 +522,10 @@
     // are open so the card reflects whether runs are producing anything.
     const findingsBtn = $(SELECTORS.goalFindingsBtn);
     if (findingsBtn) {
-      const wsId = getWorkspaceId();
-      findingsBtn.href = wsId
-        ? `/action-center?workspace=${encodeURIComponent(wsId)}`
-        : '/action-center';
-      const openFindings = Number(state.open_findings_count) || 0;
-      findingsBtn.textContent = openFindings > 0 ? `Findings (${openFindings})` : 'Findings';
-      findingsBtn.classList.toggle('has-findings', openFindings > 0);
+      const findings = buildFindingsMeta(state);
+      findingsBtn.href = findings.href;
+      findingsBtn.textContent = findings.label;
+      findingsBtn.classList.toggle('has-findings', findings.hasFindings);
     }
 
     // Don't touch the action-status line mid-run — handleRunClick owns it then
@@ -449,6 +564,33 @@
     if (lastEl) lastEl.textContent = 'Last: —';
     if (runBtn) runBtn.disabled = true;
     setGoalActionStatus(message || 'Could not load workspace goal.', 'error');
+    renderCommandPanelError(message);
+  }
+
+  function renderCommandPanelError(message) {
+    renderCommandSubtitle({});
+    if (!$(SELECTORS.commandCard)) return;
+    const statusEl = $(SELECTORS.commandStatus);
+    const titleEl = $(SELECTORS.commandTitle);
+    const textEl = $(SELECTORS.commandText);
+    const cadenceEl = $(SELECTORS.commandCadence);
+    const nextEl = $(SELECTORS.commandNextRun);
+    const lastEl = $(SELECTORS.commandLastRun);
+    const runBtn = $(SELECTORS.commandRunBtn);
+    if (statusEl) {
+      statusEl.textContent = 'Unavailable';
+      statusEl.className = 'ws-cmd-mission-status is-empty';
+    }
+    if (titleEl) titleEl.textContent = 'Goal unavailable';
+    if (textEl) {
+      textEl.textContent = message || 'Could not load workspace goal.';
+      textEl.classList.add('is-empty');
+    }
+    if (cadenceEl) cadenceEl.textContent = 'Cadence: unavailable';
+    if (nextEl) nextEl.textContent = 'Next: —';
+    if (lastEl) lastEl.textContent = 'Last: —';
+    if (runBtn) runBtn.disabled = true;
+    setCommandActionStatus(message || 'Could not load workspace goal.', 'error');
   }
 
   function renderStatus(state) {
@@ -636,6 +778,14 @@
 
   function openGoalSettings() {
     if (
+      window.workspaceCommand &&
+      window.workspaceCommand.active &&
+      typeof window.workspaceCommand.deactivate === 'function'
+    ) {
+      window.workspaceCommand.deactivate({ persist: false });
+    }
+
+    if (
       window.workspaceDetail &&
       typeof window.workspaceDetail.setWorkspaceConfigExpanded === 'function'
     ) {
@@ -673,6 +823,7 @@
   // mid-run never clobbers anything the user is typing.
   function renderReadOnly(state) {
     renderGoalCard(state);
+    renderCommandPanel(state);
     renderStatus(state);
     renderBindingsWarning(state);
     applyRunButtonModes(state);
@@ -902,6 +1053,27 @@
     }
   }
 
+  function runNowFromCommand(button) {
+    handleRunClick('trigger', button || $(SELECTORS.commandRunBtn), (msg, kind) => {
+      setGoalActionStatus(msg, kind);
+      setCommandActionStatus(msg, kind);
+    });
+  }
+
+  function exposeAPI() {
+    if (typeof window === 'undefined') return;
+    window.workspaceMission = Object.assign(window.workspaceMission || {}, {
+      getState: () => latestState,
+      getSummary: () => latestState ? commandSummary(latestState) : {},
+      renderCommandSurfaces: () => {
+        if (latestState) renderCommandPanel(latestState);
+      },
+      openGoalModal,
+      runNow: runNowFromCommand,
+      reload,
+    });
+  }
+
   function init() {
     // Bail only if neither the visible goal card nor the advanced settings tab
     // is present — the card must function on its own, without depending on the
@@ -935,4 +1107,5 @@
   } else {
     init();
   }
+  exposeAPI();
 })();
