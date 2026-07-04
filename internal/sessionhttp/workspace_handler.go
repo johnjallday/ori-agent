@@ -1240,16 +1240,11 @@ type workspaceSyncLocateRequest struct {
 	Path string `json:"path"`
 }
 
-type workspaceDirectoryReference struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Name        string    `json:"name"`
-	Path        string    `json:"path"`
-	X           float64   `json:"x"`
-	Y           float64   `json:"y"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
+// workspaceDirectoryReference is the session-side JSON shape for a workspace
+// directory reference. It is an alias of agentworkspace.DirectoryReference —
+// the two are field-identical — so the import and folder-sync paths share a
+// single reference-rebase core (see workspace_reference_rebase.go).
+type workspaceDirectoryReference = agentworkspace.DirectoryReference
 
 type workspaceImportItem struct {
 	Workspace  *agentworkspace.Workspace
