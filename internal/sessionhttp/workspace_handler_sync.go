@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -729,108 +728,40 @@ func (h *Handler) syncManagedWorkspacePath(ws session.Workspace) (string, bool) 
 	return "", false
 }
 
+// updateManagedWorkspaceReferences rebases a managed session workspace's
+// directory references and MCP roots after its folder moves from oldPath to
+// newPath, re-encoding the JSON mirror fields. An empty newPath is an error
+// (the sync path always has a concrete destination).
 func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath string, newPath string) error {
 	if workspace == nil {
 		return fmt.Errorf("workspace is required")
 	}
 
-	now := time.Now()
-	normalizedOld := cleanWorkspaceSyncPath(oldPath)
-	normalizedNew := cleanWorkspaceSyncPath(newPath)
-	if normalizedNew == "" {
-		return fmt.Errorf("new workspace folder path is required")
-	}
-	folderSlug := strings.TrimSpace(workspace.FolderSlug)
-	newBaseName := filepath.Base(normalizedNew)
-
-	// Groups keep their linked folder and MCP roots scoped to their own
-	// content directories; rewriting onto the folder root would expose member
-	// sub-workspaces.
-	isGroup := workspace.IsGroup()
-	defaultRefPath := defaultWorkspaceReferencePath(isGroup, normalizedNew)
-	defaultRoots := defaultWorkspaceMCPRoots(isGroup, normalizedNew)
-
 	refs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decode directory references: %w", err)
 	}
+	bindings, err := decodeWorkspaceMCPBindings(workspace.MCPBindingsJSON)
+	if err != nil {
+		return fmt.Errorf("failed to decode workspace MCP bindings: %w", err)
+	}
 
-	matchedReference := false
-	for i := range refs {
-		refPath := cleanWorkspaceSyncPath(refs[i].Path)
-		if refPath == "" {
-			continue
-		}
-		// References at or inside the moved folder keep their relative
-		// location (a group's files/ stays files/).
-		if rewritten, ok := rewriteWorkspaceContentPath(refPath, normalizedOld, normalizedNew); ok {
-			refs[i].WorkspaceID = workspace.ID
-			if strings.TrimSpace(refs[i].Name) == "" {
-				refs[i].Name = sessionWorkspaceReferenceName(workspace, normalizedNew)
-			}
-			refs[i].Path = rewritten
-			refs[i].UpdatedAt = now
-			matchedReference = true
-			continue
-		}
-		if _, ok := rewriteWorkspaceContentPath(refPath, normalizedNew, normalizedNew); ok {
-			// Already pointing into the new location.
-			matchedReference = true
-			continue
-		}
-		// Name-keyed rebind for stale references whose path matches neither
-		// location.
-		if (folderSlug != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), folderSlug)) ||
-			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), newBaseName)) {
-			refs[i].WorkspaceID = workspace.ID
-			if strings.TrimSpace(refs[i].Name) == "" {
-				refs[i].Name = sessionWorkspaceReferenceName(workspace, normalizedNew)
-			}
-			refs[i].Path = defaultRefPath
-			refs[i].UpdatedAt = now
-			matchedReference = true
-		}
+	id := folderRebaseIdentity{
+		workspaceID: workspace.ID,
+		folderSlug:  workspace.FolderSlug,
+		name:        workspace.Name,
+		isGroup:     workspace.IsGroup(),
 	}
-	if !matchedReference {
-		refs = append(refs, workspaceDirectoryReference{
-			ID:          uuid.New().String(),
-			WorkspaceID: workspace.ID,
-			Name:        sessionWorkspaceReferenceName(workspace, normalizedNew),
-			Path:        defaultRefPath,
-			X:           400,
-			Y:           300,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		})
+	refs, bindings, ok := rebaseWorkspaceFolderReferences(id, refs, bindings, oldPath, newPath, time.Now())
+	if !ok {
+		return fmt.Errorf("new workspace folder path is required")
 	}
-	refs = compactWorkspaceDirectoryReferences(refs)
 
 	refData, err := json.Marshal(refs)
 	if err != nil {
 		return fmt.Errorf("failed to encode directory references: %w", err)
 	}
 	workspace.DirectoryReferencesJSON = refData
-
-	bindings, err := decodeWorkspaceMCPBindings(workspace.MCPBindingsJSON)
-	if err != nil {
-		return fmt.Errorf("failed to decode workspace MCP bindings: %w", err)
-	}
-
-	matchedBinding := false
-	for i := range bindings {
-		if strings.EqualFold(strings.TrimSpace(bindings[i].Alias), workspaceFilesMCPAlias) || workspaceBindingHasRoot(bindings[i].Config, normalizedOld) {
-			if bindings[i].Config == nil {
-				bindings[i].Config = make(map[string]any)
-			}
-			bindings[i].Config["roots"] = rewriteWorkspaceBindingRoots(bindings[i].Config["roots"], normalizedOld, normalizedNew, defaultRoots)
-			bindings[i].UpdatedAt = now
-			bindings[i].Enabled = true
-			matchedBinding = true
-		}
-	}
-	if !matchedBinding {
-		bindings = append(bindings, newWorkspaceFilesMCPBinding(defaultRoots, now))
-	}
 
 	bindingData, err := json.Marshal(bindings)
 	if err != nil {
@@ -839,43 +770,6 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 	workspace.MCPBindingsJSON = bindingData
 
 	return nil
-}
-
-func sessionWorkspaceReferenceName(ws *session.Workspace, path string) string {
-	if ws != nil {
-		if name := strings.TrimSpace(ws.FolderSlug); name != "" {
-			return name
-		}
-		if name := strings.TrimSpace(ws.Name); name != "" {
-			return name
-		}
-	}
-	return filepath.Base(path)
-}
-
-func compactWorkspaceDirectoryReferences(refs []workspaceDirectoryReference) []workspaceDirectoryReference {
-	if len(refs) < 2 {
-		return refs
-	}
-
-	seen := make(map[string]int, len(refs))
-	compact := make([]workspaceDirectoryReference, 0, len(refs))
-	for _, ref := range refs {
-		key := cleanWorkspaceSyncPath(ref.Path)
-		if key == "" {
-			compact = append(compact, ref)
-			continue
-		}
-		if existingIndex, ok := seen[key]; ok {
-			if strings.TrimSpace(compact[existingIndex].Name) == "" && strings.TrimSpace(ref.Name) != "" {
-				compact[existingIndex].Name = ref.Name
-			}
-			continue
-		}
-		seen[key] = len(compact)
-		compact = append(compact, ref)
-	}
-	return compact
 }
 
 func (h *Handler) restoreWorkspaceNoteFiles(ctx context.Context, workspaceID string) error {

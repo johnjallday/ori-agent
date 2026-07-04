@@ -563,124 +563,22 @@ func appendWorkspaceImportTree(result *[]workspaceImportItem, folderPath string,
 	return nil
 }
 
+// rebaseImportedWorkspaceFolderReferences rewrites an imported workspace's
+// directory references and MCP roots from the source path onto the local
+// folder path. An empty newPath is a silent no-op (nothing imported).
 func rebaseImportedWorkspaceFolderReferences(ws *agentworkspace.Workspace, oldPath string, newPath string) {
 	if ws == nil {
 		return
 	}
-
-	normalizedNew := cleanWorkspaceSyncPath(newPath)
-	if normalizedNew == "" {
-		return
+	id := folderRebaseIdentity{
+		workspaceID: ws.ID,
+		folderSlug:  ws.FolderSlug,
+		name:        ws.Name,
+		isGroup:     session.NormalizeWorkspaceKind(ws.Kind) == session.WorkspaceKindGroup,
 	}
-
-	now := time.Now()
-	normalizedOld := cleanWorkspaceSyncPath(oldPath)
-	folderSlug := strings.TrimSpace(ws.FolderSlug)
-	newBaseName := filepath.Base(normalizedNew)
-	isGroup := session.NormalizeWorkspaceKind(ws.Kind) == session.WorkspaceKindGroup
-	defaultRefPath := defaultWorkspaceReferencePath(isGroup, normalizedNew)
-	defaultRoots := defaultWorkspaceMCPRoots(isGroup, normalizedNew)
-	matchedReference := false
-
-	for i := range ws.DirectoryReferences {
-		refPath := cleanWorkspaceSyncPath(ws.DirectoryReferences[i].Path)
-		if refPath == "" {
-			continue
-		}
-		if rewritten, ok := rewriteWorkspaceContentPath(refPath, normalizedOld, normalizedNew); ok {
-			ws.DirectoryReferences[i].WorkspaceID = ws.ID
-			if strings.TrimSpace(ws.DirectoryReferences[i].Name) == "" {
-				ws.DirectoryReferences[i].Name = workspaceReferenceName(ws, normalizedNew)
-			}
-			ws.DirectoryReferences[i].Path = rewritten
-			ws.DirectoryReferences[i].UpdatedAt = now
-			matchedReference = true
-			continue
-		}
-		if _, ok := rewriteWorkspaceContentPath(refPath, normalizedNew, normalizedNew); ok {
-			matchedReference = true
-			continue
-		}
-		if (folderSlug != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), folderSlug)) ||
-			(newBaseName != "" && strings.EqualFold(strings.TrimSpace(ws.DirectoryReferences[i].Name), newBaseName)) {
-			ws.DirectoryReferences[i].WorkspaceID = ws.ID
-			if strings.TrimSpace(ws.DirectoryReferences[i].Name) == "" {
-				ws.DirectoryReferences[i].Name = workspaceReferenceName(ws, normalizedNew)
-			}
-			ws.DirectoryReferences[i].Path = defaultRefPath
-			ws.DirectoryReferences[i].UpdatedAt = now
-			matchedReference = true
-		}
-	}
-
-	if !matchedReference {
-		ws.DirectoryReferences = append(ws.DirectoryReferences, agentworkspace.DirectoryReference{
-			ID:          uuid.New().String(),
-			WorkspaceID: ws.ID,
-			Name:        workspaceReferenceName(ws, normalizedNew),
-			Path:        defaultRefPath,
-			X:           400,
-			Y:           300,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		})
-	}
-	ws.DirectoryReferences = compactAgentWorkspaceDirectoryReferences(ws.DirectoryReferences)
-
-	matchedBinding := false
-	for i := range ws.MCPBindings {
-		if strings.EqualFold(strings.TrimSpace(ws.MCPBindings[i].Alias), workspaceFilesMCPAlias) ||
-			workspaceBindingHasRoot(ws.MCPBindings[i].Config, normalizedOld) {
-			if ws.MCPBindings[i].Config == nil {
-				ws.MCPBindings[i].Config = make(map[string]any)
-			}
-			ws.MCPBindings[i].Config["roots"] = rewriteWorkspaceBindingRoots(ws.MCPBindings[i].Config["roots"], normalizedOld, normalizedNew, defaultRoots)
-			ws.MCPBindings[i].UpdatedAt = now
-			ws.MCPBindings[i].Enabled = true
-			matchedBinding = true
-		}
-	}
-
-	if !matchedBinding {
-		ws.MCPBindings = append(ws.MCPBindings, newWorkspaceFilesMCPBinding(defaultRoots, now))
-	}
-}
-
-func workspaceReferenceName(ws *agentworkspace.Workspace, path string) string {
-	if ws != nil {
-		if name := strings.TrimSpace(ws.FolderSlug); name != "" {
-			return name
-		}
-		if name := strings.TrimSpace(ws.Name); name != "" {
-			return name
-		}
-	}
-	return filepath.Base(path)
-}
-
-func compactAgentWorkspaceDirectoryReferences(refs []agentworkspace.DirectoryReference) []agentworkspace.DirectoryReference {
-	if len(refs) < 2 {
-		return refs
-	}
-
-	seen := make(map[string]int, len(refs))
-	compact := make([]agentworkspace.DirectoryReference, 0, len(refs))
-	for _, ref := range refs {
-		key := cleanWorkspaceSyncPath(ref.Path)
-		if key == "" {
-			compact = append(compact, ref)
-			continue
-		}
-		if existingIndex, ok := seen[key]; ok {
-			if strings.TrimSpace(compact[existingIndex].Name) == "" && strings.TrimSpace(ref.Name) != "" {
-				compact[existingIndex].Name = ref.Name
-			}
-			continue
-		}
-		seen[key] = len(compact)
-		compact = append(compact, ref)
-	}
-	return compact
+	refs, bindings, _ := rebaseWorkspaceFolderReferences(id, ws.DirectoryReferences, ws.MCPBindings, oldPath, newPath, time.Now())
+	ws.DirectoryReferences = refs
+	ws.MCPBindings = bindings
 }
 
 func ensureImportedWorkspaceEntryAgent(ws *agentworkspace.Workspace, agentName string) error {
