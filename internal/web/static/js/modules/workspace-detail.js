@@ -13107,6 +13107,7 @@ export class WorkspaceDetailPage {
         this.elements.sessionCount.setAttribute('aria-label', `${this.sessions.length} sessions`);
       }
       this.refreshHomeAssistantQuickPrompts();
+      window.workspaceCommand?.refresh();
     }
   }
 
@@ -13554,6 +13555,8 @@ export class WorkspaceDetailPage {
       this.notes = [];
       this.renderNotes();
       this.refreshHomeAssistantQuickPrompts();
+    } finally {
+      window.workspaceCommand?.refresh();
     }
   }
 
@@ -14069,6 +14072,8 @@ export class WorkspaceDetailPage {
       this.renderDirectories();
       this.syncProjectActionState();
       this.refreshHomeAssistantQuickPrompts();
+    } finally {
+      window.workspaceCommand?.refresh();
     }
   }
 
@@ -14548,6 +14553,8 @@ export class WorkspaceDetailPage {
       console.error('Failed to load schedules:', error);
       this.schedules = [];
       this.renderSchedules();
+    } finally {
+      window.workspaceCommand?.refresh();
     }
   }
 

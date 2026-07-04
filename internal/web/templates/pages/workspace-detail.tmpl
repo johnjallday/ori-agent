@@ -13,6 +13,12 @@
       <div class="container-fluid py-4">
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
+        <section
+          class="modern-card template-onboarding-panel mb-4"
+          id="workspace-template-onboarding"
+          aria-live="polite"
+          hidden>
+        </section>
         <!-- Workspace Detail View -->
         <div id="workspace-detail-view">
           <!-- Header Card -->
@@ -213,13 +219,6 @@
           </div>
 
           <!-- Workspace Health moved to /workspaces/{id}/diagnostics -->
-
-          <section
-            class="modern-card template-onboarding-panel mb-4"
-            id="workspace-template-onboarding"
-            aria-live="polite"
-            hidden>
-          </section>
 
           <!-- Workspace Goal -->
           <section class="modern-card workspace-detail-goal-card mb-4" id="workspace-detail-goal-card" aria-labelledby="workspace-detail-goal-title">
