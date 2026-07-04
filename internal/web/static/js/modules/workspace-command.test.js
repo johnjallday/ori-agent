@@ -166,6 +166,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
         skill_bindings: []
       },
       tasks: [{ status: 'pending' }],
+      files: [],
       notes: [],
       schedules: [],
       sessions: [],
@@ -214,8 +215,12 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, />Schedules<\/h4>/);
   assert.match(container.innerHTML, />Sessions<\/h4>/);
   assert.match(container.innerHTML, />Linked Folders<\/h4>/);
+  assert.match(container.innerHTML, />Files<\/h4>/);
+  assert.match(container.innerHTML, />Systems<\/h4>/);
   assert.match(container.innerHTML, /data-cmd-primary-section="notes"/);
   assert.match(container.innerHTML, /data-cmd-primary-section="folders"/);
+  assert.match(container.innerHTML, /data-cmd-primary-section="files"/);
+  assert.match(container.innerHTML, /data-cmd-primary-section="systems"/);
   assert.doesNotMatch(container.innerHTML, /No notes yet\./);
   assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
   assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
@@ -460,6 +465,160 @@ test('empty rail panels collapse to the header but keep primary actions', () => 
   commandView.activeRailSection = 'notes';
   const managingHtml = commandView.renderRail();
   assert.match(managingHtml, /No notes yet\./);
+});
+
+test('files rail panel lists workspace files and exposes upload, browse, and drop target', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: 'files',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      files: [
+        {
+          id: 'file-1',
+          title: 'Launch Plan.pdf',
+          created_at: '2026-07-04T05:00:00Z',
+          file_meta: { size: 4096, relative_path: 'docs/Launch Plan.pdf' }
+        }
+      ],
+      workspace: {},
+      formatFileSize: size => `${size} B`
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.match(html, />Files<\/h4>/);
+  assert.match(html, /Launch Plan\.pdf/);
+  assert.match(html, /4096 B/);
+  assert.match(html, /docs\/Launch Plan\.pdf/);
+  assert.match(html, /data-cmd-file-drop/);
+  assert.match(html, /Browse workspace files/);
+  assert.match(html, /data-cmd-primary-section="files"/);
+  assert.match(html, /data-cmd-open-section="files" data-cmd-item-id="file-1"/);
+});
+
+test('files rail actions delegate to existing file modal and upload paths', async () => {
+  const calls = [];
+  const files = { length: 1, 0: { name: 'brief.txt' } };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      showFileModal() { calls.push(['modal']); },
+      async uploadFiles(fileList) { calls.push(['upload', fileList]); }
+    }
+  });
+
+  commandView.runRailPrimaryAction('files');
+  await commandView.uploadDroppedFiles({ dataTransfer: { files } });
+
+  assert.deepEqual(calls, [['modal'], ['upload', files]]);
+});
+
+test('files drop handler owns Command drop zones without duplicate page fallback', () => {
+  const listeners = {};
+  const files = { length: 1, 0: { name: 'brief.txt' } };
+  const dropZone = { classList: { toggle() {} } };
+  let prevented = false;
+  let stopped = false;
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail'
+          ? { addEventListener(type, listener) { listeners[type] = listener; } }
+          : null;
+      }
+    },
+    page: {
+      async uploadFiles(fileList) { calls.push(['upload', fileList]); }
+    }
+  });
+
+  commandView.bindRail();
+  listeners.drop({
+    target: { closest: selector => selector === '[data-cmd-file-drop]' ? dropZone : null },
+    dataTransfer: { files },
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; }
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.deepEqual(calls, [['upload', files]]);
+});
+
+test('systems rail panel renders Command-native tabs and a shared host', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeSystemTab: 'memory'
+  });
+
+  const html = commandView.renderSystemsPanel(true);
+
+  assert.match(html, />Systems<\/h4>/);
+  assert.match(html, /data-cmd-system-tab="mcp"/);
+  assert.match(html, /data-cmd-system-tab="plugins"/);
+  assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
+  assert.match(html, /data-cmd-system-tab="settings"/);
+  assert.match(html, /data-cmd-system-tab="intent"/);
+  assert.match(html, /data-cmd-system-tab="tools"/);
+  assert.match(html, /data-cmd-system-host/);
+});
+
+test('openSystemTab keeps Command active and selects the requested Systems tab', () => {
+  const renders = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    activeSystemTab: 'mcp',
+    render() { renders.push([this.activeRailSection, this.activeSystemTab]); }
+  });
+
+  commandView.openSystemTab('plugins');
+
+  assert.equal(commandView.activeRailSection, 'systems');
+  assert.equal(commandView.activeSystemTab, 'plugins');
+  assert.deepEqual(renders, [['systems', 'plugins']]);
+});
+
+test('systems shared surface mounts config or tools without cloning persistence logic', () => {
+  const calls = [];
+  const host = { innerHTML: '', appendChild() {} };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeRailSection: 'systems',
+    activeSystemTab: 'plugins',
+    container: { querySelector: selector => selector === '[data-cmd-system-host]' ? host : null },
+    mountSharedSurface(key, selector) {
+      calls.push(['mount', key, selector]);
+      return { key };
+    },
+    restoreSharedSurface(key) { calls.push(['restore', key]); },
+    showConfigTab(tab) { calls.push(['tab', tab.key]); },
+    refreshSystemTabData(tab) { calls.push(['refresh', tab.key]); },
+    expandMountedConfig(node) { calls.push(['expand', node.key]); }
+  });
+
+  commandView.syncSharedSurfaces();
+
+  commandView.activeSystemTab = 'tools';
+  commandView.syncSharedSurfaces();
+
+  assert.deepEqual(calls, [
+    ['restore', 'tools'],
+    ['mount', 'config', '#workspace-detail-settings-panel'],
+    ['tab', 'plugins'],
+    ['refresh', 'plugins'],
+    ['expand', 'config'],
+    ['restore', 'config'],
+    ['mount', 'tools', '#workspace-detail-tools-card']
+  ]);
 });
 
 test('escape closes the active rail manager without leaving Command', () => {
@@ -766,7 +925,7 @@ test('stat modal inerts command background and traps tab focus', () => {
   assert.equal(first.focused, 1);
 });
 
-test('mcp manager modal lists bindings with add and detailed-view escape hatch', () => {
+test('mcp manager modal lists bindings with add and Systems escape hatch', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     page: {
@@ -787,6 +946,7 @@ test('mcp manager modal lists bindings with add and detailed-view escape hatch',
   assert.match(html, /data-cmd-modal-action="edit" data-cmd-id="b1"/);
   assert.match(html, /data-cmd-modal-action="delete" data-cmd-id="b1"/);
   assert.match(html, /data-cmd-modal-action="detailed"/);
+  assert.match(html, /Open Systems: MCP/);
   // Synthesized bindings are not workspace-owned, so no remove control.
   assert.doesNotMatch(html, /data-cmd-modal-action="delete" data-cmd-id="b2"/);
 });
@@ -924,11 +1084,30 @@ test('modal add/edit hand off to page flows and close the modal; delete stays op
   assert.equal(closed, 2); // add + edit close the modal; delete keeps it open
 });
 
-test('modal detailed action closes the modal and deep-links the detailed view', () => {
+test('modal detailed action retargets mcp and skills to Systems', () => {
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     statModalSection: 'skills',
+    closeStatModal() {
+      calls.push(['close', this.statModalSection]);
+      this.statModalSection = '';
+    },
+    openSystemTab(section) {
+      calls.push(['systems', section]);
+    }
+  });
+
+  commandView.handleStatModalAction('detailed');
+
+  assert.deepEqual(calls, [['close', 'skills'], ['systems', 'skills']]);
+});
+
+test('modal detailed action still deep-links non-system sections', () => {
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    statModalSection: 'agents',
     closeStatModal() {
       calls.push(['close', this.statModalSection]);
       this.statModalSection = '';
@@ -940,8 +1119,7 @@ test('modal detailed action closes the modal and deep-links the detailed view', 
 
   commandView.handleStatModalAction('detailed');
 
-  // Section is captured before close resets it, then forwarded to the deep-link.
-  assert.deepEqual(calls, [['close', 'skills'], ['detailed', 'skills']]);
+  assert.deepEqual(calls, [['close', 'agents'], ['detailed', 'agents']]);
 });
 
 test('default deactivate path still persists detailed preference', () => {

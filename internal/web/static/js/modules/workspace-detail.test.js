@@ -324,12 +324,13 @@ test('workspace detail entity loaders refresh Command view after completion', as
     await page.loadNotes();
     await page.loadDirectories();
     await page.loadSchedules();
+    await page.loadFiles();
   } finally {
     global.fetch = originalFetch;
     global.window = originalWindow;
   }
 
-  assert.equal(refreshCount, 4);
+  assert.equal(refreshCount, 5);
 });
 
 test('workspace detail reusable identity and tag saves update workspace state', async () => {

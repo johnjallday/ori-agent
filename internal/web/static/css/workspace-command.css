@@ -254,6 +254,57 @@
   font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
 }
 .ws-cmd-rail-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
+.ws-cmd-rail-item.is-missing .ws-cmd-rail-t { color: var(--ws-alert); }
+.ws-cmd-files-drop,
+.ws-cmd-files-browse {
+  width: 100%; min-height: 34px; margin-bottom: 6px; display: grid; place-items: center;
+  border: 1px dashed var(--ws-line-bright); background: rgba(0, 0, 0, 0.18); color: var(--ws-ink-dim);
+  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  transition: 0.13s; text-align: center;
+}
+.ws-cmd-files-drop:hover,
+.ws-cmd-files-drop.is-active,
+.ws-cmd-files-browse:hover {
+  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-files-drop:focus-visible,
+.ws-cmd-files-browse:focus-visible {
+  outline: 2px solid var(--ws-faction); outline-offset: 2px;
+}
+.ws-cmd-systems-body { gap: 10px; }
+.ws-cmd-system-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-system-tab {
+  min-height: 28px; padding: 6px 8px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
+  color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono); font-size: 9.5px;
+  letter-spacing: 0.9px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-system-tab:hover,
+.ws-cmd-system-tab.is-active {
+  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-system-tab:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-system-host {
+  max-height: 72vh; overflow: auto; min-width: 0; padding-right: 2px;
+}
+.ws-cmd-system-host .workspace-detail-tools-card,
+.ws-cmd-system-host .workspace-detail-config-card {
+  margin: 0; border: 0; box-shadow: none; background: transparent; border-radius: 0; color: var(--text-primary);
+}
+.ws-cmd-system-host .workspace-detail-config-header,
+.ws-cmd-system-host .workspace-detail-config-nav {
+  display: none;
+}
+.ws-cmd-system-host .workspace-detail-config-content {
+  padding: 0; border: 0; background: transparent;
+}
+.ws-cmd-system-host .workspace-detail-config-body {
+  padding: 0;
+}
+.ws-cmd-system-host .workspace-detail-config-pane {
+  padding: 0;
+}
 .ws-cmd-soon {
   display: grid; place-items: center; min-height: 200px; padding: 24px;
   font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); text-align: center;
@@ -409,10 +460,16 @@
   .ws-cmd-garrison-grid { grid-template-columns: 1fr; }
   .ws-cmd-garrison-grid.is-odd .ws-cmd-unit:last-child { grid-column: auto; }
 }
+@media (min-width: 1101px) {
+  .ws-cmd-layout:has(.ws-cmd-systems-panel.is-managing) {
+    grid-template-columns: minmax(0, 0.78fr) minmax(520px, 0.72fr);
+  }
+}
 @media (max-width: 900px) {
   .ws-cmd-layout { grid-template-columns: 1fr; }
   .ws-cmd-mission { flex-direction: column; }
   .ws-cmd-mission-actions { justify-content: flex-start; }
+  .ws-cmd-system-host { max-height: none; }
 }
 @media (max-width: 640px) {
   .ws-cmd-nav-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }

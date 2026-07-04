@@ -542,7 +542,11 @@ export class WorkspaceDetailPage {
     };
     const modalOpen = () => Boolean(document.querySelector('.modal.show'));
     const handledByDropZone = event =>
-      Boolean(event.target?.closest?.('.modal, #hubFileDropZone, .is-vault-drop-target'));
+      Boolean(
+        event.target?.closest?.(
+          '.modal, #hubFileDropZone, [data-cmd-file-drop], .is-vault-drop-target'
+        )
+      );
     const hideOverlay = () => {
       dragDepth = 0;
       overlay.classList.remove('is-active');
@@ -13187,6 +13191,7 @@ export class WorkspaceDetailPage {
         this.renderFiles();
         this.refreshHomeAssistantQuickPrompts();
         this.renderWorkspaceHealth();
+        window.workspaceCommand?.refresh();
         return;
       }
 
@@ -13200,6 +13205,7 @@ export class WorkspaceDetailPage {
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
+      window.workspaceCommand?.refresh();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
@@ -13208,6 +13214,7 @@ export class WorkspaceDetailPage {
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
+      window.workspaceCommand?.refresh();
     }
   }
 
