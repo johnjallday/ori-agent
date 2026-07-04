@@ -74,7 +74,7 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 		t.Fatalf("failed to marshal tasks: %v", err)
 	}
 
-	access := []agentworkspace.WorkspaceAgentMCPAccess{
+	access := []agentworkspace.AgentMCPAccess{
 		{AgentInstanceID: writerOne.ID, EnabledBindingIDs: []string{"filesystem"}},
 		{AgentInstanceID: writerTwo.ID, EnabledBindingIDs: []string{"filesystem"}},
 		{AgentInstanceID: reviewer.ID, EnabledBindingIDs: []string{"filesystem"}},
@@ -169,7 +169,7 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 		t.Fatalf("expected reviewer task to stay assigned but clear removed sender, got %#v", updatedTasks[2])
 	}
 
-	var updatedAccess []agentworkspace.WorkspaceAgentMCPAccess
+	var updatedAccess []agentworkspace.AgentMCPAccess
 	if err := json.Unmarshal(updated.AgentMCPAccessJSON, &updatedAccess); err != nil {
 		t.Fatalf("failed to decode updated mcp access: %v", err)
 	}

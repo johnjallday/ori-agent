@@ -575,10 +575,10 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 		target.DynamicAgentRequests = append([]types.DynamicAgentRequest(nil), existing.DynamicAgentRequests...)
 	}
 	if len(existing.SkillBindings) > 0 {
-		target.SkillBindings = append([]WorkspaceSkillBinding(nil), existing.SkillBindings...)
+		target.SkillBindings = append([]SkillBinding(nil), existing.SkillBindings...)
 	}
 	if len(existing.AgentSkillAccess) > 0 {
-		target.AgentSkillAccess = append([]WorkspaceAgentSkillAccess(nil), existing.AgentSkillAccess...)
+		target.AgentSkillAccess = append([]AgentSkillAccess(nil), existing.AgentSkillAccess...)
 	}
 }
 

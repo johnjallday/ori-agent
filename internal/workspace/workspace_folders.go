@@ -47,7 +47,7 @@ func rebaseWorkspaceFolderPath(oldPath, newPath, currentPath string) (string, bo
 	return filepath.Join(newPath, suffix), true
 }
 
-func findWorkspaceFolderIndexByID(folders []WorkspaceFolder, id string) int {
+func findWorkspaceFolderIndexByID(folders []Folder, id string) int {
 	for i := range folders {
 		if folders[i].ID == id {
 			return i
@@ -56,7 +56,7 @@ func findWorkspaceFolderIndexByID(folders []WorkspaceFolder, id string) int {
 	return -1
 }
 
-func findWorkspaceFolderIndexByPath(folders []WorkspaceFolder, path string) int {
+func findWorkspaceFolderIndexByPath(folders []Folder, path string) int {
 	clean := sanitizeWorkspaceRelativePath(path)
 	for i := range folders {
 		if sanitizeWorkspaceRelativePath(folders[i].Path) == clean {
@@ -66,17 +66,17 @@ func findWorkspaceFolderIndexByPath(folders []WorkspaceFolder, path string) int 
 	return -1
 }
 
-func addWorkspaceFolderMetadata(ws *Workspace, folderPath string) (WorkspaceFolder, error) {
+func addWorkspaceFolderMetadata(ws *Workspace, folderPath string) (Folder, error) {
 	clean, err := normalizeManagedWorkspaceFolderPath(folderPath)
 	if err != nil {
-		return WorkspaceFolder{}, err
+		return Folder{}, err
 	}
 	if findWorkspaceFolderIndexByPath(ws.Folders, clean) >= 0 {
-		return WorkspaceFolder{}, fmt.Errorf("folder already exists: %s", clean)
+		return Folder{}, fmt.Errorf("folder already exists: %s", clean)
 	}
 
 	now := time.Now()
-	folder := WorkspaceFolder{
+	folder := Folder{
 		ID:        uuid.New().String(),
 		Path:      clean,
 		CreatedAt: now,
@@ -87,24 +87,24 @@ func addWorkspaceFolderMetadata(ws *Workspace, folderPath string) (WorkspaceFold
 	return folder, nil
 }
 
-func renameWorkspaceFolderMetadata(ws *Workspace, folderID, newPath string) (WorkspaceFolder, string, error) {
+func renameWorkspaceFolderMetadata(ws *Workspace, folderID, newPath string) (Folder, string, error) {
 	cleanNewPath, err := normalizeManagedWorkspaceFolderPath(newPath)
 	if err != nil {
-		return WorkspaceFolder{}, "", err
+		return Folder{}, "", err
 	}
 	idx := findWorkspaceFolderIndexByID(ws.Folders, folderID)
 	if idx < 0 {
-		return WorkspaceFolder{}, "", fmt.Errorf("folder %s not found", folderID)
+		return Folder{}, "", fmt.Errorf("folder %s not found", folderID)
 	}
 	oldPath := sanitizeWorkspaceRelativePath(ws.Folders[idx].Path)
 	if oldPath == "" {
-		return WorkspaceFolder{}, "", fmt.Errorf("folder %s has invalid path", folderID)
+		return Folder{}, "", fmt.Errorf("folder %s has invalid path", folderID)
 	}
 	if oldPath == cleanNewPath {
 		return ws.Folders[idx], oldPath, nil
 	}
 	if duplicateIdx := findWorkspaceFolderIndexByPath(ws.Folders, cleanNewPath); duplicateIdx >= 0 && duplicateIdx != idx {
-		return WorkspaceFolder{}, "", fmt.Errorf("folder already exists: %s", cleanNewPath)
+		return Folder{}, "", fmt.Errorf("folder already exists: %s", cleanNewPath)
 	}
 
 	now := time.Now()
@@ -129,10 +129,10 @@ func renameWorkspaceFolderMetadata(ws *Workspace, folderID, newPath string) (Wor
 	return ws.Folders[idx], oldPath, nil
 }
 
-func deleteWorkspaceFolderMetadata(ws *Workspace, folderID string) (WorkspaceFolder, error) {
+func deleteWorkspaceFolderMetadata(ws *Workspace, folderID string) (Folder, error) {
 	idx := findWorkspaceFolderIndexByID(ws.Folders, folderID)
 	if idx < 0 {
-		return WorkspaceFolder{}, fmt.Errorf("folder %s not found", folderID)
+		return Folder{}, fmt.Errorf("folder %s not found", folderID)
 	}
 	folder := ws.Folders[idx]
 	ws.Folders = append(ws.Folders[:idx], ws.Folders[idx+1:]...)
@@ -148,8 +148,8 @@ func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath stri
 		if !StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) {
 			continue
 		}
-		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.StoreNodes[i].WorkspaceFolder); ok {
-			ws.StoreNodes[i].WorkspaceFolder = rebasedPath
+		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.StoreNodes[i].Folder); ok {
+			ws.StoreNodes[i].Folder = rebasedPath
 			ws.StoreNodes[i].BaseDir = rebasedPath
 			ws.StoreNodes[i].UpdatedAt = now
 		}
@@ -158,8 +158,8 @@ func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath stri
 		if !ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) {
 			continue
 		}
-		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.Tasks[i].ResultStorage.WorkspaceFolder); ok {
-			ws.Tasks[i].ResultStorage.WorkspaceFolder = rebasedPath
+		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.Tasks[i].ResultStorage.Folder); ok {
+			ws.Tasks[i].ResultStorage.Folder = rebasedPath
 		}
 	}
 }
@@ -169,12 +169,12 @@ func workspaceFolderHasStorageReferences(ws *Workspace, folderPath string) bool 
 		return false
 	}
 	for i := range ws.StoreNodes {
-		if StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) && workspaceFolderContainsPath(folderPath, ws.StoreNodes[i].WorkspaceFolder) {
+		if StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) && workspaceFolderContainsPath(folderPath, ws.StoreNodes[i].Folder) {
 			return true
 		}
 	}
 	for i := range ws.Tasks {
-		if ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) && workspaceFolderContainsPath(folderPath, ws.Tasks[i].ResultStorage.WorkspaceFolder) {
+		if ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) && workspaceFolderContainsPath(folderPath, ws.Tasks[i].ResultStorage.Folder) {
 			return true
 		}
 	}

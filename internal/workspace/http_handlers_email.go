@@ -19,7 +19,7 @@ func (h *HTTPHandler) SetEmailAccountStore(store emailAccountStore) {
 	h.emailAccounts = store
 }
 
-func (h *HTTPHandler) normalizeBindingForPersistence(ctx context.Context, workspaceID string, binding WorkspaceMCPBinding) (WorkspaceMCPBinding, error) {
+func (h *HTTPHandler) normalizeBindingForPersistence(ctx context.Context, workspaceID string, binding MCPBinding) (MCPBinding, error) {
 	if !isEmailMCPServer(binding.ServerName) {
 		return binding, nil
 	}
@@ -92,7 +92,7 @@ func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspace
 	return normalized, account, nil
 }
 
-func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding WorkspaceMCPBinding) map[string]any {
+func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding MCPBinding) map[string]any {
 	resp := map[string]any{
 		"id":          binding.ID,
 		"server_name": binding.ServerName,
@@ -114,7 +114,7 @@ func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding WorkspaceM
 	return resp
 }
 
-func (h *HTTPHandler) mcpBindingResponses(ctx context.Context, bindings []WorkspaceMCPBinding) []map[string]any {
+func (h *HTTPHandler) mcpBindingResponses(ctx context.Context, bindings []MCPBinding) []map[string]any {
 	items := make([]map[string]any, 0, len(bindings))
 	for _, binding := range bindings {
 		items = append(items, h.mcpBindingResponse(ctx, binding))
@@ -122,7 +122,7 @@ func (h *HTTPHandler) mcpBindingResponses(ctx context.Context, bindings []Worksp
 	return items
 }
 
-func (h *HTTPHandler) lookupEmailAccountForBinding(ctx context.Context, binding WorkspaceMCPBinding) (*vault.EmailAccount, error) {
+func (h *HTTPHandler) lookupEmailAccountForBinding(ctx context.Context, binding MCPBinding) (*vault.EmailAccount, error) {
 	if !isEmailMCPServer(binding.ServerName) || h == nil || h.emailAccounts == nil {
 		return nil, nil
 	}

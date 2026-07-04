@@ -37,7 +37,7 @@ func TestEvaluateMissionToolCallDecision_PolicyMatrix(t *testing.T) {
 func TestResolveMissionToolSideEffect_OverrideWins(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
-	ws.MCPBindings = []WorkspaceMCPBinding{
+	ws.MCPBindings = []MCPBinding{
 		{
 			ID:                "b1",
 			Enabled:           true,
@@ -61,7 +61,7 @@ func TestResolveMissionToolSideEffect_FallsBackToHeuristic(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
 	// No overrides; tool name matches read-prefix heuristic.
-	ws.MCPBindings = []WorkspaceMCPBinding{{ID: "b1", Enabled: true}}
+	ws.MCPBindings = []MCPBinding{{ID: "b1", Enabled: true}}
 	_ = store.Save(ws)
 
 	h := &LLMTaskHandler{workspaceStore: store}
@@ -73,7 +73,7 @@ func TestResolveMissionToolSideEffect_FallsBackToHeuristic(t *testing.T) {
 func TestResolveMissionToolSideEffect_InheritsBindingDefault(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
-	ws.MCPBindings = []WorkspaceMCPBinding{{
+	ws.MCPBindings = []MCPBinding{{
 		ID:                "b1",
 		Enabled:           true,
 		DefaultSideEffect: SideEffectExternal,
@@ -96,7 +96,7 @@ func TestResolveMissionToolSideEffect_WriteDefaultAllowsWrites(t *testing.T) {
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
 	// A write-classified binding with no per-tool overrides — the common case
 	// after the one-time mission classification flow sets a binding default.
-	ws.MCPBindings = []WorkspaceMCPBinding{{
+	ws.MCPBindings = []MCPBinding{{
 		ID:                "b1",
 		Enabled:           true,
 		DefaultSideEffect: SideEffectWrite,
@@ -131,7 +131,7 @@ func TestResolveMissionToolSideEffect_MostRestrictiveDefaultWins(t *testing.T) {
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
 	// Mixed defaults: without per-tool attribution we fail closed to the most
 	// restrictive (external) so an unknown tool is never under-classified.
-	ws.MCPBindings = []WorkspaceMCPBinding{
+	ws.MCPBindings = []MCPBinding{
 		{ID: "b1", Enabled: true, DefaultSideEffect: SideEffectRead},
 		{ID: "b2", Enabled: true, DefaultSideEffect: SideEffectExternal},
 	}
@@ -148,7 +148,7 @@ func TestResolveMissionToolSideEffect_ExternalDefaultBeatsReadHeuristic(t *testi
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
 	// fetch_ matches the read-prefix heuristic, but the binding is external —
 	// the default must win so a read-named external tool isn't wrongly allowed.
-	ws.MCPBindings = []WorkspaceMCPBinding{{
+	ws.MCPBindings = []MCPBinding{{
 		ID:                "b1",
 		Enabled:           true,
 		DefaultSideEffect: SideEffectExternal,
@@ -164,7 +164,7 @@ func TestResolveMissionToolSideEffect_ExternalDefaultBeatsReadHeuristic(t *testi
 func TestResolveMissionToolSideEffect_IgnoresDisabledBindings(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
-	ws.MCPBindings = []WorkspaceMCPBinding{
+	ws.MCPBindings = []MCPBinding{
 		{
 			ID:      "b1",
 			Enabled: false, // disabled — override must be ignored
@@ -240,7 +240,7 @@ func TestEvaluateMissionGate_EndToEndBlocksUnknownToolUnderWatch(t *testing.T) {
 func TestEvaluateMissionGate_EndToEndUsesPerToolOverride(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
-	ws.MCPBindings = []WorkspaceMCPBinding{{
+	ws.MCPBindings = []MCPBinding{{
 		ID:      "b1",
 		Enabled: true,
 		ToolOverrides: map[string]SideEffect{

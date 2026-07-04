@@ -19,7 +19,7 @@ func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 		SharedData:  params.InitialData,
 		Messages:    []AgentMessage{},
 		Tasks:       []Task{},
-		Folders:     []WorkspaceFolder{},
+		Folders:     []Folder{},
 		Status:      StatusActive,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -144,7 +144,7 @@ func FromJSON(data []byte) (*Workspace, error) {
 	ws.NormalizeAgentInstances()      // Collapse duplicate agent instances to one per profile
 	ws.MigrateScheduledTasksToTasks() // Auto-migrate legacy scheduled tasks
 	if ws.Folders == nil {
-		ws.Folders = []WorkspaceFolder{}
+		ws.Folders = []Folder{}
 	}
 	ws.rebuildTaskIndex() // Build index for O(1) task lookups
 	return &ws, nil
@@ -179,7 +179,7 @@ func FromJSONMetadata(data []byte) (*Workspace, error) {
 	ws.NormalizeAgentInstances()
 	ws.MigrateScheduledTasksToTasks()
 	if ws.Folders == nil {
-		ws.Folders = []WorkspaceFolder{}
+		ws.Folders = []Folder{}
 	}
 	ws.rebuildTaskIndex()
 	return ws, nil

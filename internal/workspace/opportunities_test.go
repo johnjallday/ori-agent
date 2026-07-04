@@ -341,7 +341,7 @@ func TestWorkspace_LegacyJSON_LoadsWithZeroMissionFields(t *testing.T) {
 }
 
 func TestWorkspaceMCPBinding_SideEffectRoundTrip(t *testing.T) {
-	b := WorkspaceMCPBinding{
+	b := MCPBinding{
 		ID:                "b-1",
 		ServerName:        "fs",
 		Enabled:           true,
@@ -355,7 +355,7 @@ func TestWorkspaceMCPBinding_SideEffectRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	var got WorkspaceMCPBinding
+	var got MCPBinding
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}

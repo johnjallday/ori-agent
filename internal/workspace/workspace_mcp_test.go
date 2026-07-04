@@ -5,7 +5,7 @@ import "testing"
 func TestWorkspaceMCPBindingLifecycle(t *testing.T) {
 	ws := &Workspace{}
 
-	if err := ws.UpsertMCPBinding(WorkspaceMCPBinding{
+	if err := ws.UpsertMCPBinding(MCPBinding{
 		ID:         "binding-1",
 		ServerName: "filesystem",
 		Enabled:    true,
@@ -32,7 +32,7 @@ func TestWorkspaceMCPBindingLifecycle(t *testing.T) {
 		t.Fatalf("expected config to be preserved on binding")
 	}
 
-	if err := ws.SetAgentMCPAccess(WorkspaceAgentMCPAccess{
+	if err := ws.SetAgentMCPAccess(AgentMCPAccess{
 		AgentInstanceID:   "agent-1",
 		EnabledBindingIDs: []string{"binding-1", "binding-1"},
 	}); err != nil {

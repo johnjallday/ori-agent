@@ -80,7 +80,7 @@ func bindWorkspaceMCPServers(b *ServerBuilder, workspaceID string, servers []str
 			}
 		}
 		bound[key] = true
-		if err := ws.UpsertMCPBinding(workspace.WorkspaceMCPBinding{
+		if err := ws.UpsertMCPBinding(workspace.MCPBinding{
 			ID: uuid.NewString(), ServerName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
 		}); err == nil {
 			applied = append(applied, "mcp:"+name)

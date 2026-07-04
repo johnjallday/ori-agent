@@ -367,7 +367,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 	if agentWS.Folders == nil {
-		agentWS.Folders = []workspace.WorkspaceFolder{}
+		agentWS.Folders = []workspace.Folder{}
 	}
 
 	if len(ws.ScheduledTasksJSON) > 0 {
@@ -406,7 +406,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 	if agentWS.MCPBindings == nil {
-		agentWS.MCPBindings = []workspace.WorkspaceMCPBinding{}
+		agentWS.MCPBindings = []workspace.MCPBinding{}
 	}
 
 	if len(ws.AgentMCPAccessJSON) > 0 {
@@ -415,7 +415,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 	if agentWS.AgentMCPAccess == nil {
-		agentWS.AgentMCPAccess = []workspace.WorkspaceAgentMCPAccess{}
+		agentWS.AgentMCPAccess = []workspace.AgentMCPAccess{}
 	}
 
 	if len(ws.SkillBindingsJSON) > 0 {
@@ -424,7 +424,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 	if agentWS.SkillBindings == nil {
-		agentWS.SkillBindings = []workspace.WorkspaceSkillBinding{}
+		agentWS.SkillBindings = []workspace.SkillBinding{}
 	}
 
 	if len(ws.AgentSkillAccessJSON) > 0 {
@@ -433,7 +433,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		}
 	}
 	if agentWS.AgentSkillAccess == nil {
-		agentWS.AgentSkillAccess = []workspace.WorkspaceAgentSkillAccess{}
+		agentWS.AgentSkillAccess = []workspace.AgentSkillAccess{}
 	}
 
 	if len(ws.OpportunitiesJSON) > 0 {

@@ -71,7 +71,7 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 		trusted = *req.Trusted
 	}
 
-	binding := WorkspaceSkillBinding{
+	binding := SkillBinding{
 		ID:                bindingID,
 		SkillName:         req.SkillName,
 		Enabled:           enabled,
@@ -385,7 +385,7 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	entry := WorkspaceAgentSkillAccess{
+	entry := AgentSkillAccess{
 		AgentInstanceID:   agentInstanceID,
 		EnabledBindingIDs: req.EnabledBindingIDs,
 		UpdatedAt:         time.Now(),

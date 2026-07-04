@@ -11,14 +11,14 @@ func TestWriteToStoreForWorkspaceUsesWorkspaceFolderTarget(t *testing.T) {
 	store, ws := newStoreOperationTestWorkspace(t, "ws-store-folder", "Store Folder")
 
 	node := &StoreNode{
-		ID:              "store-1",
-		WorkspaceID:     ws.ID,
-		Name:            "Reports",
-		StorageTarget:   StorageTargetWorkspaceFolder,
-		WorkspaceFolder: filepath.Join("reports", "daily"),
-		Format:          "text",
-		WriteMode:       "overwrite",
-		AutoCreateDir:   true,
+		ID:            "store-1",
+		WorkspaceID:   ws.ID,
+		Name:          "Reports",
+		StorageTarget: StorageTargetWorkspaceFolder,
+		Folder:        filepath.Join("reports", "daily"),
+		Format:        "text",
+		WriteMode:     "overwrite",
+		AutoCreateDir: true,
 	}
 
 	if err := WriteToStoreForWorkspace(node, store, ws.ID, filepath.Join("runs", "summary.txt"), "workspace data"); err != nil {
@@ -68,14 +68,14 @@ func TestWriteToStoreForWorkspacePreservesExternalBaseDir(t *testing.T) {
 func TestWriteToStoreForWorkspaceRejectsTraversalAndSymlinkEscape(t *testing.T) {
 	store, ws := newStoreOperationTestWorkspace(t, "ws-store-secure", "Store Secure")
 	node := &StoreNode{
-		ID:              "store-secure",
-		WorkspaceID:     ws.ID,
-		Name:            "Secure",
-		StorageTarget:   StorageTargetWorkspaceFolder,
-		WorkspaceFolder: "",
-		Format:          "text",
-		WriteMode:       "overwrite",
-		AutoCreateDir:   true,
+		ID:            "store-secure",
+		WorkspaceID:   ws.ID,
+		Name:          "Secure",
+		StorageTarget: StorageTargetWorkspaceFolder,
+		Folder:        "",
+		Format:        "text",
+		WriteMode:     "overwrite",
+		AutoCreateDir: true,
 	}
 
 	if err := WriteToStoreForWorkspace(node, store, ws.ID, "../outside.txt", "nope"); err == nil {
@@ -107,14 +107,14 @@ func TestCSVWithoutHeaderForExistingStoreStrictInWorkspaceResolvesFolderTarget(t
 		t.Fatalf("WriteFile: %v", err)
 	}
 	node := &StoreNode{
-		ID:              "store-csv",
-		WorkspaceID:     ws.ID,
-		Name:            "CSV",
-		StorageTarget:   StorageTargetWorkspaceFolder,
-		WorkspaceFolder: "reports",
-		Format:          "csv",
-		WriteMode:       "append",
-		AutoCreateDir:   true,
+		ID:            "store-csv",
+		WorkspaceID:   ws.ID,
+		Name:          "CSV",
+		StorageTarget: StorageTargetWorkspaceFolder,
+		Folder:        "reports",
+		Format:        "csv",
+		WriteMode:     "append",
+		AutoCreateDir: true,
 	}
 
 	payload, err := CSVWithoutHeaderForExistingStoreStrictInWorkspace(node, store, ws.ID, "runs.csv", "date,value\n2026-05-26,high")

@@ -54,7 +54,7 @@ func ResolveStoreNodeBaseDir(node *StoreNode, resolver AttachmentFilePathResolve
 		return "", fmt.Errorf("store node is required")
 	}
 	if StoreNodeUsesWorkspaceFolder(node) {
-		baseDir, _, err := ResolveWorkspaceFolderBaseDir(resolver, workspaceID, node.WorkspaceFolder)
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(resolver, workspaceID, node.Folder)
 		return baseDir, err
 	}
 	if strings.TrimSpace(node.BaseDir) == "" {

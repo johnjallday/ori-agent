@@ -489,7 +489,7 @@ func cleanupRemovedAgentWorkspaceState(
 	}
 
 	if len(workspace.AgentMCPAccessJSON) > 0 && len(removedInstanceIDs) > 0 {
-		var accessEntries []agentworkspace.WorkspaceAgentMCPAccess
+		var accessEntries []agentworkspace.AgentMCPAccess
 		if err := json.Unmarshal(workspace.AgentMCPAccessJSON, &accessEntries); err != nil {
 			return fmt.Errorf("decode agent mcp access: %w", err)
 		}

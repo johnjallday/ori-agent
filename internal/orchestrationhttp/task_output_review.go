@@ -694,7 +694,7 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 
 	filePath := storage.FilePath
 	if workspace.ResultStorageUsesWorkspaceFolder(storage) {
-		baseDir, _, err := workspace.ResolveWorkspaceFolderBaseDir(store, ws.ID, storage.WorkspaceFolder)
+		baseDir, _, err := workspace.ResolveWorkspaceFolderBaseDir(store, ws.ID, storage.Folder)
 		if err != nil {
 			return err
 		}

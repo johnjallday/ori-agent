@@ -68,7 +68,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
-	binding := WorkspaceMCPBinding{
+	binding := MCPBinding{
 		ID:                bindingID,
 		ServerName:        req.ServerName,
 		Alias:             req.Alias,
@@ -397,7 +397,7 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	entry := WorkspaceAgentMCPAccess{
+	entry := AgentMCPAccess{
 		AgentInstanceID:   agentInstanceID,
 		EnabledBindingIDs: req.EnabledBindingIDs,
 		UpdatedAt:         time.Now(),

@@ -18,7 +18,7 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 		Description: "Test",
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		MCPBindings: []workspace.WorkspaceMCPBinding{
+		MCPBindings: []workspace.MCPBinding{
 			{
 				ID:         "binding-1",
 				ServerName: "filesystem",
@@ -36,7 +36,7 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 				UpdatedAt: now,
 			},
 		},
-		AgentMCPAccess: []workspace.WorkspaceAgentMCPAccess{
+		AgentMCPAccess: []workspace.AgentMCPAccess{
 			{
 				AgentInstanceID:   "agent-1",
 				EnabledBindingIDs: []string{"binding-1"},
@@ -151,7 +151,7 @@ func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
 		Name:      "Workspace Skills",
 		CreatedAt: now,
 		UpdatedAt: now,
-		SkillBindings: []workspace.WorkspaceSkillBinding{
+		SkillBindings: []workspace.SkillBinding{
 			{
 				ID:        "binding-1",
 				SkillName: "workspace-planning",
@@ -165,7 +165,7 @@ func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
 				UpdatedAt: now,
 			},
 		},
-		AgentSkillAccess: []workspace.WorkspaceAgentSkillAccess{
+		AgentSkillAccess: []workspace.AgentSkillAccess{
 			{
 				AgentInstanceID:   "agent-1",
 				EnabledBindingIDs: []string{"binding-1"},
@@ -209,7 +209,7 @@ func TestWorkspaceStoreAdapter_WorkspaceFoldersRoundTrip(t *testing.T) {
 		Name:      "Workspace Folders",
 		CreatedAt: now,
 		UpdatedAt: now,
-		Folders: []workspace.WorkspaceFolder{
+		Folders: []workspace.Folder{
 			{
 				ID:        "folder-1",
 				Path:      "research/notes",

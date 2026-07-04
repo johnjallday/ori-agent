@@ -55,7 +55,7 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 				return
 			}
 			boundSkills[key] = true
-			if err := ws.UpsertSkillBinding(workspace.WorkspaceSkillBinding{
+			if err := ws.UpsertSkillBinding(workspace.SkillBinding{
 				ID: uuid.NewString(), SkillName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
 			}); err == nil {
 				applied = append(applied, "skill:"+name)
@@ -68,7 +68,7 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 				return
 			}
 			boundMCP[key] = true
-			if err := ws.UpsertMCPBinding(workspace.WorkspaceMCPBinding{
+			if err := ws.UpsertMCPBinding(workspace.MCPBinding{
 				ID: uuid.NewString(), ServerName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
 			}); err == nil {
 				applied = append(applied, "mcp:"+name)
