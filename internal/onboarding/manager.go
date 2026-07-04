@@ -451,14 +451,14 @@ func (m *Manager) SetNotesOpenBehavior(behavior string) error {
 }
 
 // GetUserProfile returns the stored user profile (may be nil)
-func (m *Manager) GetUserProfile() *types.UserProfile {
+func (m *Manager) GetUserProfile() *types.InferredProfile {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.state.UserProfile
 }
 
 // SetUserProfile stores the user's inferred profile
-func (m *Manager) SetUserProfile(profile *types.UserProfile) error {
+func (m *Manager) SetUserProfile(profile *types.InferredProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

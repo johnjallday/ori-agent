@@ -109,8 +109,10 @@ type MenuBarSettings struct {
 	Port             int  `json:"port,omitempty"`      // Server port (defaults to 8765 if not set)
 }
 
-// UserProfile represents the user's inferred or described profile
-type UserProfile struct {
+// InferredProfile represents the user's inferred or described profile from
+// onboarding. Named to disambiguate from userprofile.UserProfile, which is a
+// separate, unrelated profile type.
+type InferredProfile struct {
 	PrimaryCategory     string    `json:"primary_category"`               // developer, devops, designer, data_scientist, writer, project_manager, general
 	SecondaryCategories []string  `json:"secondary_categories,omitempty"` // Additional relevant categories
 	Specializations     []string  `json:"specializations,omitempty"`      // e.g., "Go developer", "iOS developer"
@@ -172,7 +174,7 @@ func (p *AssistantProgress) EnsureDefaults() {
 type AppState struct {
 	Onboarding        OnboardingState    `json:"onboarding"`
 	Device            DeviceInfo         `json:"device"`
-	UserProfile       *UserProfile       `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
+	UserProfile       *InferredProfile   `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
 	AssistantProgress *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
 	UserName          string             `json:"user_name,omitempty"`          // Optional user-provided display name
 	AssistantName     string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding

@@ -275,7 +275,7 @@ func (h *SmartOnboardingHandler) Apply(w http.ResponseWriter, r *http.Request) {
 
 	// Save user profile to app state
 	if req.Config.Profile != nil && h.onboardingMgr != nil {
-		userProfile := &types.UserProfile{
+		userProfile := &types.InferredProfile{
 			PrimaryCategory:     string(req.Config.Profile.PrimaryCategory),
 			SecondaryCategories: make([]string, len(req.Config.Profile.SecondaryCategories)),
 			Specializations:     req.Config.Profile.Specializations,
@@ -463,10 +463,10 @@ type PersonalizeRequest struct {
 
 // PersonalizeResponse represents the personalization save response.
 type PersonalizeResponse struct {
-	Success   bool               `json:"success"`
-	Profile   *types.UserProfile `json:"profile"`
-	XPAwarded int64              `json:"xp_awarded"`
-	Message   string             `json:"message,omitempty"`
+	Success   bool                   `json:"success"`
+	Profile   *types.InferredProfile `json:"profile"`
+	XPAwarded int64                  `json:"xp_awarded"`
+	Message   string                 `json:"message,omitempty"`
 }
 
 // SavePersonalization saves user personalization data and awards XP on first completion.
@@ -490,7 +490,7 @@ func (h *SmartOnboardingHandler) SavePersonalization(w http.ResponseWriter, r *h
 	// Get existing profile or create a new one
 	profile := h.onboardingMgr.GetUserProfile()
 	if profile == nil {
-		profile = &types.UserProfile{}
+		profile = &types.InferredProfile{}
 	}
 
 	// Merge personalization fields (preserve detection-derived fields)

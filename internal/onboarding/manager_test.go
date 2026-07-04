@@ -182,7 +182,7 @@ func TestManager_SeedLocalUserProfileFromOnboardingState(t *testing.T) {
 	if err := mgr.SetTimezone("America/New_York"); err != nil {
 		t.Fatalf("SetTimezone: %v", err)
 	}
-	if err := mgr.SetUserProfile(&types.UserProfile{
+	if err := mgr.SetUserProfile(&types.InferredProfile{
 		PrimaryCategory: "developer",
 		Specializations: []string{"Go developer", "Tooling"},
 	}); err != nil {
