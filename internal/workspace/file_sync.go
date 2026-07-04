@@ -273,8 +273,8 @@ func workspaceGeneratedFilePaths(ws *Workspace) map[string]bool {
 			continue
 		}
 		relativePath := node.LastFilePath
-		if strings.TrimSpace(node.WorkspaceFolder) != "" {
-			relativePath = filepath.Join(node.WorkspaceFolder, relativePath)
+		if strings.TrimSpace(node.Folder) != "" {
+			relativePath = filepath.Join(node.Folder, relativePath)
 		}
 		add(relativePath)
 	}
@@ -312,8 +312,8 @@ func resultStorageWorkspaceFilePath(task *Task, storage *ResultStorageConfig) st
 	if relativePath == "" {
 		return ""
 	}
-	if strings.TrimSpace(storage.WorkspaceFolder) != "" {
-		relativePath = filepath.Join(storage.WorkspaceFolder, relativePath)
+	if strings.TrimSpace(storage.Folder) != "" {
+		relativePath = filepath.Join(storage.Folder, relativePath)
 	}
 	return sanitizeWorkspaceRelativePath(relativePath)
 }

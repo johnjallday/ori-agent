@@ -611,7 +611,7 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.UseStorage && ResultStorageUsesWorkspaceFolder(storageCfg) {
-		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storageCfg.WorkspaceFolder)
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storageCfg.Folder)
 		if err != nil {
 			orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder storage target: %v", err))
 			return
@@ -762,7 +762,7 @@ func (h *HTTPHandler) resolveTaskResultJSONLPath(ws *Workspace, owner *Task, sto
 	}
 
 	if ResultStorageUsesWorkspaceFolder(storage) {
-		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storage.WorkspaceFolder)
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storage.Folder)
 		if err != nil {
 			return "", err
 		}

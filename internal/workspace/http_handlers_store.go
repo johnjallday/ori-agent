@@ -17,15 +17,15 @@ import (
 
 // CreateStoreNodeRequest represents the request to create a store node
 type CreateStoreNodeRequest struct {
-	Name            string  `json:"name"`
-	BaseDir         string  `json:"base_dir"`
-	StorageTarget   string  `json:"storage_target"`
-	WorkspaceFolder string  `json:"workspace_folder"`
-	Format          string  `json:"format"`
-	WriteMode       string  `json:"write_mode"`
-	AutoCreateDir   bool    `json:"auto_create_dir"`
-	X               float64 `json:"x"`
-	Y               float64 `json:"y"`
+	Name          string  `json:"name"`
+	BaseDir       string  `json:"base_dir"`
+	StorageTarget string  `json:"storage_target"`
+	Folder        string  `json:"workspace_folder"`
+	Format        string  `json:"format"`
+	WriteMode     string  `json:"write_mode"`
+	AutoCreateDir bool    `json:"auto_create_dir"`
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
 }
 
 // CreateStoreNode handles POST /api/workspaces/:id/store-nodes
@@ -88,7 +88,7 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	workspaceFolder := ""
 	if storageTarget == StorageTargetWorkspaceFolder {
-		absFolder, clean, err := workspaceFolderPathWithinRoot(h.store.GetFilesPath(workspaceID), req.WorkspaceFolder)
+		absFolder, clean, err := workspaceFolderPathWithinRoot(h.store.GetFilesPath(workspaceID), req.Folder)
 		if err != nil {
 			orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace folder: %v", err))
 			return
@@ -113,25 +113,25 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	canvasNodeID := fmt.Sprintf("store-node-%d", len(workspace.StoreNodes)+1)
 
 	storeNode := StoreNode{
-		ID:              uuid.New().String(),
-		CanvasNodeID:    canvasNodeID,
-		WorkspaceID:     workspaceID,
-		Name:            req.Name,
-		BaseDir:         req.BaseDir,
-		StorageTarget:   storageTarget,
-		WorkspaceFolder: workspaceFolder,
-		Format:          req.Format,
-		WriteMode:       req.WriteMode,
-		AutoCreateDir:   req.AutoCreateDir,
-		AutoStore:       true,        // Default to enabled for automatic task result storage
-		LastWriteTime:   time.Time{}, // Zero value
-		WriteCount:      0,
-		LastError:       "",
-		LastFilePath:    "",
-		X:               req.X,
-		Y:               req.Y,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		ID:            uuid.New().String(),
+		CanvasNodeID:  canvasNodeID,
+		WorkspaceID:   workspaceID,
+		Name:          req.Name,
+		BaseDir:       req.BaseDir,
+		StorageTarget: storageTarget,
+		Folder:        workspaceFolder,
+		Format:        req.Format,
+		WriteMode:     req.WriteMode,
+		AutoCreateDir: req.AutoCreateDir,
+		AutoStore:     true,        // Default to enabled for automatic task result storage
+		LastWriteTime: time.Time{}, // Zero value
+		WriteCount:    0,
+		LastError:     "",
+		LastFilePath:  "",
+		X:             req.X,
+		Y:             req.Y,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	// Add to workspace
@@ -208,17 +208,17 @@ func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
 
 // UpdateStoreNodeRequest represents the request to update a store node
 type UpdateStoreNodeRequest struct {
-	Name            *string  `json:"name"`
-	BaseDir         *string  `json:"base_dir"`
-	StorageTarget   *string  `json:"storage_target"`
-	WorkspaceFolder *string  `json:"workspace_folder"`
-	Format          *string  `json:"format"`
-	WriteMode       *string  `json:"write_mode"`
-	AutoCreateDir   *bool    `json:"auto_create_dir"`
-	AutoStore       *bool    `json:"auto_store"`
-	AgentNodeID     *string  `json:"agent_node_id"`
-	X               *float64 `json:"x"`
-	Y               *float64 `json:"y"`
+	Name          *string  `json:"name"`
+	BaseDir       *string  `json:"base_dir"`
+	StorageTarget *string  `json:"storage_target"`
+	Folder        *string  `json:"workspace_folder"`
+	Format        *string  `json:"format"`
+	WriteMode     *string  `json:"write_mode"`
+	AutoCreateDir *bool    `json:"auto_create_dir"`
+	AutoStore     *bool    `json:"auto_store"`
+	AgentNodeID   *string  `json:"agent_node_id"`
+	X             *float64 `json:"x"`
+	Y             *float64 `json:"y"`
 }
 
 // UpdateStoreNode handles PUT /api/workspaces/:id/store-nodes/:node_id
@@ -275,16 +275,16 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		storeNode.Name = *req.Name
 	}
-	if req.StorageTarget != nil || req.WorkspaceFolder != nil || req.BaseDir != nil {
+	if req.StorageTarget != nil || req.Folder != nil || req.BaseDir != nil {
 		nextTarget := storeNode.StorageTarget
 		if req.StorageTarget != nil {
 			nextTarget = NormalizeStorageTarget(*req.StorageTarget)
 		}
 
 		if nextTarget == StorageTargetWorkspaceFolder {
-			rawFolder := storeNode.WorkspaceFolder
-			if req.WorkspaceFolder != nil {
-				rawFolder = *req.WorkspaceFolder
+			rawFolder := storeNode.Folder
+			if req.Folder != nil {
+				rawFolder = *req.Folder
 			} else if req.BaseDir != nil {
 				rawFolder = *req.BaseDir
 			}
@@ -298,7 +298,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			storeNode.StorageTarget = StorageTargetWorkspaceFolder
-			storeNode.WorkspaceFolder = clean
+			storeNode.Folder = clean
 			storeNode.BaseDir = clean
 		} else {
 			if req.BaseDir != nil {
@@ -311,7 +311,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 				storeNode.BaseDir = *req.BaseDir
 			}
 			storeNode.StorageTarget = ""
-			storeNode.WorkspaceFolder = ""
+			storeNode.Folder = ""
 		}
 	}
 	if req.Format != nil {

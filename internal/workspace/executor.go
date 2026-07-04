@@ -849,11 +849,11 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 	// Otherwise use file path (or default output directory)
 	filePath := storage.FilePath
 	if ResultStorageUsesWorkspaceFolder(storage) {
-		baseDir, _, err := ResolveWorkspaceFolderBaseDir(workspaceStore, ws.ID, storage.WorkspaceFolder)
+		baseDir, _, err := ResolveWorkspaceFolderBaseDir(workspaceStore, ws.ID, storage.Folder)
 		if err != nil {
 			logger.Error("Failed to resolve workspace folder for task result storage", logger.Fields{
 				"task_id": task.ID,
-				"folder":  storage.WorkspaceFolder,
+				"folder":  storage.Folder,
 				"err":     err,
 			})
 			return

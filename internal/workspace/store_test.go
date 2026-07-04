@@ -105,7 +105,7 @@ func TestFileStore_WorkspaceFoldersRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Round(time.Second)
 
 	ws := newTestWorkspace("ws-folders", "Folder Workspace")
-	ws.Folders = []WorkspaceFolder{
+	ws.Folders = []Folder{
 		{
 			ID:        "folder-1",
 			Path:      "research/notes",
@@ -446,7 +446,7 @@ func TestFileStore_RebindExistingFolderPreservesUnmirroredFields(t *testing.T) {
 			CreatedAt:      time.Now(),
 		},
 	}
-	diskWorkspace.SkillBindings = []WorkspaceSkillBinding{
+	diskWorkspace.SkillBindings = []SkillBinding{
 		{
 			ID:        "binding-1",
 			SkillName: "workspace-planning",
@@ -454,7 +454,7 @@ func TestFileStore_RebindExistingFolderPreservesUnmirroredFields(t *testing.T) {
 			Trusted:   true,
 		},
 	}
-	diskWorkspace.AgentSkillAccess = []WorkspaceAgentSkillAccess{
+	diskWorkspace.AgentSkillAccess = []AgentSkillAccess{
 		{
 			AgentInstanceID:   "agent-1",
 			EnabledBindingIDs: []string{"binding-1"},

@@ -260,7 +260,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	setWorkspacePrimaryDirectoryID(workspace, dirRef.ID)
 
 	mcpBinding := newWorkspaceFilesMCPBinding([]string{normalizedPath}, time.Now())
-	if bindingData, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
+	if bindingData, err := json.Marshal([]agentworkspace.MCPBinding{mcpBinding}); err == nil {
 		workspace.MCPBindingsJSON = bindingData
 	} else {
 		logger.Error("Failed to marshal MCP binding for workspace import", logger.Fields{"workspace_id": workspace.ID, "error": err})

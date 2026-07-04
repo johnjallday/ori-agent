@@ -256,7 +256,7 @@ func TestAgentRuntimeResolver_RespectsAgentInstanceBindingAccess(t *testing.T) {
 			{ID: "allowed", Name: "Coder", NodeID: "coder-allowed"},
 			{ID: "denied", Name: "Coder", NodeID: "coder-denied"},
 		},
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{
 				ID:         "binding-1",
 				ServerName: "filesystem",
@@ -266,7 +266,7 @@ func TestAgentRuntimeResolver_RespectsAgentInstanceBindingAccess(t *testing.T) {
 				},
 			},
 		},
-		AgentMCPAccess: []WorkspaceAgentMCPAccess{
+		AgentMCPAccess: []AgentMCPAccess{
 			{AgentInstanceID: "allowed", EnabledBindingIDs: []string{"binding-1"}},
 			{AgentInstanceID: "denied", EnabledBindingIDs: []string{}},
 		},
@@ -311,7 +311,7 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 		AgentInstances: []AgentInstance{
 			{ID: "agent-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{
 				ID:         "binding-1",
 				ServerName: "browser",
@@ -383,7 +383,7 @@ func TestAgentRuntimeResolver_UsesFilesystemRootsFromBindingConfig(t *testing.T)
 		AgentInstances: []AgentInstance{
 			{ID: "agent-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{
 				ID:         "binding-config-roots",
 				ServerName: "filesystem",
@@ -454,7 +454,7 @@ func TestResolveEffectiveSkills_WorkspaceOnly(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "sb-1", SkillName: "code-review", Enabled: true},
 			{ID: "sb-2", SkillName: "testing", Enabled: true},
 		},
@@ -491,7 +491,7 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{
 				ID:        "sb-planning",
 				SkillName: "workspace-planning",
@@ -609,7 +609,7 @@ func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSk
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{
 				ID:        "sb-planning",
 				SkillName: "workspace-planning",
@@ -760,7 +760,7 @@ func TestResolveEffectiveSkills_AgentOverridesWorkspace(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "sb-1", SkillName: "code-review", Enabled: true},
 		},
 	}
@@ -804,12 +804,12 @@ func TestResolveEffectiveSkills_AccessControlFilters(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "sb-1", SkillName: "code-review", Enabled: true},
 			{ID: "sb-2", SkillName: "testing", Enabled: true},
 			{ID: "sb-3", SkillName: "deploy", Enabled: true},
 		},
-		AgentSkillAccess: []WorkspaceAgentSkillAccess{
+		AgentSkillAccess: []AgentSkillAccess{
 			{AgentInstanceID: "inst-1", EnabledBindingIDs: []string{"sb-1", "sb-3"}},
 		},
 	}
@@ -857,7 +857,7 @@ func TestResolveEffectiveSkills_UnresolvableSkipped(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "sb-1", SkillName: "exists", Enabled: true},
 			{ID: "sb-2", SkillName: "deleted-skill", Enabled: true},
 		},
@@ -897,7 +897,7 @@ func TestResolveEffectiveSkills_NoSkillResolver(t *testing.T) {
 		AgentInstances: []AgentInstance{
 			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "sb-1", SkillName: "code-review", Enabled: true},
 		},
 	}

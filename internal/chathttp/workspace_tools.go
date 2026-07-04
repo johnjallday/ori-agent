@@ -1150,7 +1150,7 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 				if strings.TrimSpace(req.ServerName) == "" {
 					return "", fmt.Errorf("server_name is required for 'attach' action")
 				}
-				binding := workspace.WorkspaceMCPBinding{
+				binding := workspace.MCPBinding{
 					ID:         uuid.New().String(),
 					ServerName: req.ServerName,
 					Enabled:    true,
@@ -1297,7 +1297,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 				if strings.TrimSpace(req.SkillName) == "" {
 					return "", fmt.Errorf("skill_name is required for 'attach' action")
 				}
-				binding := workspace.WorkspaceSkillBinding{
+				binding := workspace.SkillBinding{
 					ID:        uuid.New().String(),
 					SkillName: req.SkillName,
 					Enabled:   true,

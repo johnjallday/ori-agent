@@ -41,7 +41,7 @@ func (w *Workspace) FindAgentInstance(agentName, nodeID string) (*AgentInstance,
 }
 
 // GetMCPBindings returns a copy of the workspace MCP bindings.
-func (w *Workspace) GetMCPBindings() []WorkspaceMCPBinding {
+func (w *Workspace) GetMCPBindings() []MCPBinding {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -49,13 +49,13 @@ func (w *Workspace) GetMCPBindings() []WorkspaceMCPBinding {
 		return nil
 	}
 
-	out := make([]WorkspaceMCPBinding, len(w.MCPBindings))
+	out := make([]MCPBinding, len(w.MCPBindings))
 	copy(out, w.MCPBindings)
 	return out
 }
 
 // GetMCPBinding returns a copy of the workspace MCP binding by ID.
-func (w *Workspace) GetMCPBinding(bindingID string) (*WorkspaceMCPBinding, bool) {
+func (w *Workspace) GetMCPBinding(bindingID string) (*MCPBinding, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -82,7 +82,7 @@ func (w *Workspace) GetMCPBinding(bindingID string) (*WorkspaceMCPBinding, bool)
 }
 
 // UpsertMCPBinding creates or updates a workspace MCP binding.
-func (w *Workspace) UpsertMCPBinding(binding WorkspaceMCPBinding) error {
+func (w *Workspace) UpsertMCPBinding(binding MCPBinding) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -138,7 +138,7 @@ func (w *Workspace) DeleteMCPBinding(bindingID string) error {
 }
 
 // GetAgentMCPAccess returns the MCP access rule for the given agent instance.
-func (w *Workspace) GetAgentMCPAccess(agentInstanceID string) (*WorkspaceAgentMCPAccess, bool) {
+func (w *Workspace) GetAgentMCPAccess(agentInstanceID string) (*AgentMCPAccess, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -162,7 +162,7 @@ func (w *Workspace) GetAgentMCPAccess(agentInstanceID string) (*WorkspaceAgentMC
 }
 
 // ListAgentMCPAccess returns a copy of all per-agent-instance MCP access rules.
-func (w *Workspace) ListAgentMCPAccess() []WorkspaceAgentMCPAccess {
+func (w *Workspace) ListAgentMCPAccess() []AgentMCPAccess {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -170,7 +170,7 @@ func (w *Workspace) ListAgentMCPAccess() []WorkspaceAgentMCPAccess {
 		return nil
 	}
 
-	out := make([]WorkspaceAgentMCPAccess, len(w.AgentMCPAccess))
+	out := make([]AgentMCPAccess, len(w.AgentMCPAccess))
 	for i := range w.AgentMCPAccess {
 		out[i] = w.AgentMCPAccess[i]
 		if len(w.AgentMCPAccess[i].EnabledBindingIDs) > 0 {
@@ -181,7 +181,7 @@ func (w *Workspace) ListAgentMCPAccess() []WorkspaceAgentMCPAccess {
 }
 
 // SetAgentMCPAccess creates or updates the MCP access rule for an agent instance.
-func (w *Workspace) SetAgentMCPAccess(entry WorkspaceAgentMCPAccess) error {
+func (w *Workspace) SetAgentMCPAccess(entry AgentMCPAccess) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -226,7 +226,7 @@ func (w *Workspace) DeleteAgentMCPAccess(agentInstanceID string) error {
 	return fmt.Errorf("agent MCP access %s not found in workspace", agentInstanceID)
 }
 
-func cloneBinding(binding WorkspaceMCPBinding) WorkspaceMCPBinding {
+func cloneBinding(binding MCPBinding) MCPBinding {
 	copy := binding
 	if len(binding.Scope) > 0 {
 		copy.Scope = cloneInterfaceMap(binding.Scope)
@@ -251,7 +251,7 @@ func cloneSideEffectMap(src map[string]SideEffect) map[string]SideEffect {
 	return out
 }
 
-func cloneAccessEntry(entry WorkspaceAgentMCPAccess) WorkspaceAgentMCPAccess {
+func cloneAccessEntry(entry AgentMCPAccess) AgentMCPAccess {
 	copy := entry
 	if len(entry.EnabledBindingIDs) > 0 {
 		copy.EnabledBindingIDs = append([]string{}, entry.EnabledBindingIDs...)

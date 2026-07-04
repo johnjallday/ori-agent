@@ -1309,11 +1309,11 @@ func workspaceBindingHasRoot(config map[string]any, path string) bool {
 	return false
 }
 
-func decodeWorkspaceMCPBindings(raw json.RawMessage) ([]agentworkspace.WorkspaceMCPBinding, error) {
+func decodeWorkspaceMCPBindings(raw json.RawMessage) ([]agentworkspace.MCPBinding, error) {
 	if len(raw) == 0 {
-		return []agentworkspace.WorkspaceMCPBinding{}, nil
+		return []agentworkspace.MCPBinding{}, nil
 	}
-	var bindings []agentworkspace.WorkspaceMCPBinding
+	var bindings []agentworkspace.MCPBinding
 	if err := json.Unmarshal(raw, &bindings); err != nil {
 		return nil, err
 	}

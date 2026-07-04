@@ -79,8 +79,8 @@ type AgentInstance struct {
 	CreatedAt      time.Time `json:"created_at"`            // When this instance was added
 }
 
-// WorkspaceFolder represents a managed folder under the workspace files root.
-type WorkspaceFolder struct {
+// Folder represents a managed folder under the workspace files root.
+type Folder struct {
 	ID        string    `json:"id"`
 	Path      string    `json:"path"`
 	CreatedAt time.Time `json:"created_at"`
@@ -107,14 +107,14 @@ type Workspace struct {
 	PendingPlan          *types.PendingPlan          `json:"pending_plan,omitempty"`
 	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
 	Attachments          []Attachment                `json:"attachments,omitempty"`
-	Folders              []WorkspaceFolder           `json:"folders,omitempty"`
+	Folders              []Folder                    `json:"folders,omitempty"`
 	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
 	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
 	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
-	MCPBindings          []WorkspaceMCPBinding       `json:"mcp_bindings,omitempty"`
-	AgentMCPAccess       []WorkspaceAgentMCPAccess   `json:"agent_mcp_access,omitempty"`
-	SkillBindings        []WorkspaceSkillBinding     `json:"skill_bindings,omitempty"`
-	AgentSkillAccess     []WorkspaceAgentSkillAccess `json:"agent_skill_access,omitempty"`
+	MCPBindings          []MCPBinding                `json:"mcp_bindings,omitempty"`
+	AgentMCPAccess       []AgentMCPAccess            `json:"agent_mcp_access,omitempty"`
+	SkillBindings        []SkillBinding              `json:"skill_bindings,omitempty"`
+	AgentSkillAccess     []AgentSkillAccess          `json:"agent_skill_access,omitempty"`
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
@@ -333,14 +333,14 @@ type TaskRuntimeInputs struct {
 
 // ResultStorageConfig specifies how task results should be automatically stored
 type ResultStorageConfig struct {
-	Enabled         bool   `json:"enabled"`                    // Enable auto-save on completion
-	StoreNodeID     string `json:"store_node_id,omitempty"`    // Save to specific store node (if set)
-	StorageTarget   string `json:"storage_target,omitempty"`   // Destination mode: workspace_folder or external/default
-	WorkspaceFolder string `json:"workspace_folder,omitempty"` // Folder path under the workspace-owned files root
-	FilePath        string `json:"file_path,omitempty"`        // Custom file path (if no store node)
-	FileName        string `json:"file_name,omitempty"`        // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
-	Format          string `json:"format,omitempty"`           // Output format: text, json, markdown, csv
-	WriteMode       string `json:"write_mode,omitempty"`       // Output mode: new_file, append
+	Enabled       bool   `json:"enabled"`                    // Enable auto-save on completion
+	StoreNodeID   string `json:"store_node_id,omitempty"`    // Save to specific store node (if set)
+	StorageTarget string `json:"storage_target,omitempty"`   // Destination mode: workspace_folder or external/default
+	Folder        string `json:"workspace_folder,omitempty"` // Folder path under the workspace-owned files root
+	FilePath      string `json:"file_path,omitempty"`        // Custom file path (if no store node)
+	FileName      string `json:"file_name,omitempty"`        // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
+	Format        string `json:"format,omitempty"`           // Output format: text, json, markdown, csv
+	WriteMode     string `json:"write_mode,omitempty"`       // Output mode: new_file, append
 }
 
 // TaskStatus represents the current state of a task
@@ -664,31 +664,31 @@ type ScheduledTask struct {
 
 // StoreNode represents a file storage node on the canvas
 type StoreNode struct {
-	ID              string    `json:"id"`
-	CanvasNodeID    string    `json:"canvas_node_id"`
-	AgentNodeID     string    `json:"agent_node_id"` // Agent instance this store is connected to
-	WorkspaceID     string    `json:"workspace_id"`
-	Name            string    `json:"name"`
-	BaseDir         string    `json:"base_dir"` // Base directory (e.g., "reports/")
-	StorageTarget   string    `json:"storage_target,omitempty"`
-	WorkspaceFolder string    `json:"workspace_folder,omitempty"`
-	Format          string    `json:"format"`     // "json", "text", "markdown", "csv", "binary"
-	WriteMode       string    `json:"write_mode"` // "overwrite", "append"
-	AutoCreateDir   bool      `json:"auto_create_dir"`
-	AutoStore       bool      `json:"auto_store"` // Automatically store task results on completion
-	LastWriteTime   time.Time `json:"last_write_time"`
-	WriteCount      int       `json:"write_count"`
-	LastError       string    `json:"last_error"`
-	LastFilePath    string    `json:"last_file_path"` // Last written file (relative to base_dir)
-	X               float64   `json:"x"`
-	Y               float64   `json:"y"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	CanvasNodeID  string    `json:"canvas_node_id"`
+	AgentNodeID   string    `json:"agent_node_id"` // Agent instance this store is connected to
+	WorkspaceID   string    `json:"workspace_id"`
+	Name          string    `json:"name"`
+	BaseDir       string    `json:"base_dir"` // Base directory (e.g., "reports/")
+	StorageTarget string    `json:"storage_target,omitempty"`
+	Folder        string    `json:"workspace_folder,omitempty"`
+	Format        string    `json:"format"`     // "json", "text", "markdown", "csv", "binary"
+	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
+	AutoCreateDir bool      `json:"auto_create_dir"`
+	AutoStore     bool      `json:"auto_store"` // Automatically store task results on completion
+	LastWriteTime time.Time `json:"last_write_time"`
+	WriteCount    int       `json:"write_count"`
+	LastError     string    `json:"last_error"`
+	LastFilePath  string    `json:"last_file_path"` // Last written file (relative to base_dir)
+	X             float64   `json:"x"`
+	Y             float64   `json:"y"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// WorkspaceMCPBinding represents a concrete MCP binding owned by the workspace.
+// MCPBinding represents a concrete MCP binding owned by the workspace.
 // ServerName maps to the globally configured MCP server template/definition.
-type WorkspaceMCPBinding struct {
+type MCPBinding struct {
 	ID         string         `json:"id"`
 	ServerName string         `json:"server_name"`
 	Alias      string         `json:"alias,omitempty"`
@@ -707,17 +707,17 @@ type WorkspaceMCPBinding struct {
 	UpdatedAt     time.Time             `json:"updated_at,omitempty"`
 }
 
-// WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
+// AgentMCPAccess narrows which workspace MCP bindings an agent instance
 // may use. When no access entry exists for an instance, all enabled bindings are allowed.
-type WorkspaceAgentMCPAccess struct {
+type AgentMCPAccess struct {
 	AgentInstanceID   string    `json:"agent_instance_id"`
 	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
-// WorkspaceSkillBinding represents a skill binding owned by the workspace.
+// SkillBinding represents a skill binding owned by the workspace.
 // SkillName maps to a skill known to the SkillManager (resolved by name at runtime).
-type WorkspaceSkillBinding struct {
+type SkillBinding struct {
 	ID        string         `json:"id"`
 	SkillName string         `json:"skill_name"`
 	Enabled   bool           `json:"enabled"`
@@ -734,9 +734,9 @@ type WorkspaceSkillBinding struct {
 	UpdatedAt     time.Time             `json:"updated_at,omitempty"`
 }
 
-// WorkspaceAgentSkillAccess narrows which workspace skill bindings an agent instance
+// AgentSkillAccess narrows which workspace skill bindings an agent instance
 // may use. When no access entry exists for an instance, all enabled bindings are allowed.
-type WorkspaceAgentSkillAccess struct {
+type AgentSkillAccess struct {
 	AgentInstanceID   string    `json:"agent_instance_id"`
 	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
@@ -796,8 +796,8 @@ type AgentStats struct {
 	LastActive      time.Time `json:"last_active,omitempty"`
 }
 
-// WorkspaceProgress represents overall workspace progress metrics
-type WorkspaceProgress struct {
+// Progress represents overall workspace progress metrics
+type Progress struct {
 	TotalTasks      int       `json:"total_tasks"`
 	CompletedTasks  int       `json:"completed_tasks"`
 	InProgressTasks int       `json:"in_progress_tasks"`

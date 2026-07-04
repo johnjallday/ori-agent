@@ -144,7 +144,7 @@ func (h *Handler) backfillGroupScaffolding(ctx context.Context, ws *session.Work
 	return true, nil
 }
 
-func hasWorkspaceFilesBinding(bindings []agentworkspace.WorkspaceMCPBinding) bool {
+func hasWorkspaceFilesBinding(bindings []agentworkspace.MCPBinding) bool {
 	for _, binding := range bindings {
 		if strings.EqualFold(strings.TrimSpace(binding.Alias), workspaceFilesMCPAlias) {
 			return true

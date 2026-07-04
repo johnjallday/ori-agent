@@ -118,13 +118,13 @@ func TestIsAllowedUnderPolicy_UnknownPolicyDenies(t *testing.T) {
 
 func TestUnclassifiedBindings_FindsEnabledUnclassified(t *testing.T) {
 	ws := &Workspace{
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{ID: "mcp-classified", Enabled: true, DefaultSideEffect: SideEffectRead},
 			{ID: "mcp-unclassified", Enabled: true},
 			{ID: "mcp-disabled-unclassified", Enabled: false}, // ignored: disabled
 			{ID: "mcp-bad-value", Enabled: true, DefaultSideEffect: SideEffect("bogus")},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "skill-classified", Enabled: true, DefaultSideEffect: SideEffectRead},
 			{ID: "skill-unclassified", Enabled: true},
 		},
@@ -147,7 +147,7 @@ func TestUnclassifiedBindings_FindsEnabledUnclassified(t *testing.T) {
 
 func TestMissionBindingsReady(t *testing.T) {
 	ready := &Workspace{
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{ID: "a", Enabled: true, DefaultSideEffect: SideEffectRead},
 		},
 	}
@@ -156,7 +156,7 @@ func TestMissionBindingsReady(t *testing.T) {
 	}
 
 	notReady := &Workspace{
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{ID: "a", Enabled: true},
 		},
 	}
@@ -170,7 +170,7 @@ func TestMissionBindingsReady(t *testing.T) {
 	}
 
 	disabledOK := &Workspace{
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{ID: "a", Enabled: false}, // disabled, unclassified is fine
 		},
 	}

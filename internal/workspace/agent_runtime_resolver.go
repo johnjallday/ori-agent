@@ -169,7 +169,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	return resolved, nil
 }
 
-func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance *AgentInstance) ([]WorkspaceMCPBinding, []string) {
+func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance *AgentInstance) ([]MCPBinding, []string) {
 	if ws == nil {
 		return nil, nil
 	}
@@ -183,7 +183,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance 
 		return nil, nil
 	}
 
-	enabledBindings := make([]WorkspaceMCPBinding, 0, len(bindings))
+	enabledBindings := make([]MCPBinding, 0, len(bindings))
 	overriddenServerNames := make([]string, 0, len(bindings))
 	for _, binding := range bindings {
 		serverName := strings.TrimSpace(binding.ServerName)
@@ -215,7 +215,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance 
 		return nil, dedupeStringsPreserveOrder(overriddenServerNames)
 	}
 
-	filtered := make([]WorkspaceMCPBinding, 0, len(enabledBindings))
+	filtered := make([]MCPBinding, 0, len(enabledBindings))
 	for _, binding := range enabledBindings {
 		if allowedIDs[strings.ToLower(strings.TrimSpace(binding.ID))] {
 			filtered = append(filtered, binding)
@@ -225,7 +225,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance 
 	return filtered, dedupeStringsPreserveOrder(overriddenServerNames)
 }
 
-func synthesizeFilesystemBinding(bindings []WorkspaceMCPBinding, ws *Workspace) *WorkspaceMCPBinding {
+func synthesizeFilesystemBinding(bindings []MCPBinding, ws *Workspace) *MCPBinding {
 	if ws == nil {
 		return nil
 	}
@@ -246,7 +246,7 @@ func synthesizeFilesystemBinding(bindings []WorkspaceMCPBinding, ws *Workspace) 
 		now = ws.CreatedAt
 	}
 
-	return &WorkspaceMCPBinding{
+	return &MCPBinding{
 		ID:         synthesizedFilesystemBindingID,
 		ServerName: "filesystem",
 		Alias:      "workspace_filesystem",
@@ -286,7 +286,7 @@ func collectWorkspaceDirectoryRoots(ws *Workspace) []string {
 	return roots
 }
 
-func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, binding WorkspaceMCPBinding) (string, error) {
+func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, binding MCPBinding) (string, error) {
 	templateName := strings.TrimSpace(binding.ServerName)
 	if templateName == "" {
 		return "", fmt.Errorf("binding %s has no server name", binding.ID)
@@ -406,7 +406,7 @@ func extractFilesystemRoots(scope map[string]any) []string {
 	return cleaned
 }
 
-func extractFilesystemRootsFromBinding(binding WorkspaceMCPBinding) []string {
+func extractFilesystemRootsFromBinding(binding MCPBinding) []string {
 	if roots := extractFilesystemRoots(binding.Config); len(roots) > 0 {
 		return roots
 	}
@@ -565,7 +565,7 @@ func normalizeValueSet(values []string) map[string]bool {
 
 // resolveWorkspaceSkillBindings filters workspace skill bindings by enabled state
 // and per-agent access control, returning the allowed bindings.
-func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, instance *AgentInstance) []WorkspaceSkillBinding {
+func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, instance *AgentInstance) []SkillBinding {
 	if ws == nil {
 		return nil
 	}
@@ -575,7 +575,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, inst
 		return nil
 	}
 
-	enabledBindings := make([]WorkspaceSkillBinding, 0, len(bindings))
+	enabledBindings := make([]SkillBinding, 0, len(bindings))
 	for _, binding := range bindings {
 		if strings.TrimSpace(binding.SkillName) == "" || !binding.Enabled {
 			continue
@@ -597,7 +597,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, inst
 		return nil
 	}
 
-	filtered := make([]WorkspaceSkillBinding, 0, len(enabledBindings))
+	filtered := make([]SkillBinding, 0, len(enabledBindings))
 	for _, binding := range enabledBindings {
 		if allowedIDs[strings.ToLower(strings.TrimSpace(binding.ID))] {
 			filtered = append(filtered, binding)
@@ -607,7 +607,7 @@ func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, inst
 	return filtered
 }
 
-func (r *AgentRuntimeResolver) resolveSettingsManagedSkillBindings(ws *Workspace, agentName string) []WorkspaceSkillBinding {
+func (r *AgentRuntimeResolver) resolveSettingsManagedSkillBindings(ws *Workspace, agentName string) []SkillBinding {
 	if ws == nil {
 		return nil
 	}
@@ -622,13 +622,13 @@ func (r *AgentRuntimeResolver) resolveSettingsManagedSkillBindings(ws *Workspace
 		return nil
 	}
 
-	bindings := make([]WorkspaceSkillBinding, 0, len(effective.ManagedSkills))
+	bindings := make([]SkillBinding, 0, len(effective.ManagedSkills))
 	for _, managed := range effective.ManagedSkills {
 		skillName := strings.TrimSpace(managed.SkillName)
 		if skillName == "" || !managed.Active {
 			continue
 		}
-		bindings = append(bindings, WorkspaceSkillBinding{
+		bindings = append(bindings, SkillBinding{
 			ID:        synthesizedWorkspaceSettingsSkillBindingPrefix + strings.ToLower(skillName),
 			SkillName: skillName,
 			Enabled:   true,
@@ -687,7 +687,7 @@ func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *A
 	}
 
 	skillNames := make([]string, 0, len(allowedBindings))
-	bindingMap := make(map[string]WorkspaceSkillBinding, len(allowedBindings))
+	bindingMap := make(map[string]SkillBinding, len(allowedBindings))
 	for _, binding := range allowedBindings {
 		name := strings.TrimSpace(binding.SkillName)
 		// Skip workspace skills that are overridden by agent-specific skills

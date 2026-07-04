@@ -62,11 +62,11 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 		StoreNodes: []StoreNode{
 			{ID: "store-1", AgentNodeID: "Writer-node-3"},
 		},
-		AgentMCPAccess: []WorkspaceAgentMCPAccess{
+		AgentMCPAccess: []AgentMCPAccess{
 			{AgentInstanceID: "writer-1", EnabledBindingIDs: []string{"filesystem"}},
 			{AgentInstanceID: "writer-2", EnabledBindingIDs: []string{"github"}},
 		},
-		AgentSkillAccess: []WorkspaceAgentSkillAccess{
+		AgentSkillAccess: []AgentSkillAccess{
 			{AgentInstanceID: "writer-1", EnabledBindingIDs: []string{"skill-a"}},
 			{AgentInstanceID: "writer-2", EnabledBindingIDs: []string{"skill-b"}},
 		},

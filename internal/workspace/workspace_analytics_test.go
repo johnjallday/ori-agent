@@ -16,8 +16,8 @@ func TestComputeMapSummaryFields(t *testing.T) {
 			{Name: "Research Lead", EntryPoint: true},
 			{Name: "Source Scout"},
 		},
-		MCPBindings:   []WorkspaceMCPBinding{{}, {}},
-		SkillBindings: []WorkspaceSkillBinding{{}},
+		MCPBindings:   []MCPBinding{{}, {}},
+		SkillBindings: []SkillBinding{{}},
 		Tasks: []Task{
 			{Status: TaskStatusPending},
 			{Status: TaskStatusInProgress},

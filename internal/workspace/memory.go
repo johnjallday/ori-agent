@@ -302,9 +302,9 @@ var (
 	ErrMemoryIndexOutOfRange = errors.New("memory entry index out of range")
 )
 
-// WorkspaceFolderResolver resolves a workspace ID to its folder path.
+// FolderResolver resolves a workspace ID to its folder path.
 // *FileStore satisfies this via GetFolderPath.
-type WorkspaceFolderResolver interface {
+type FolderResolver interface {
 	GetFolderPath(workspaceID string) (string, error)
 }
 
@@ -320,11 +320,11 @@ var memoryMu sync.Mutex
 // serialized process-wide (memoryMu) and re-read the file from disk first, so
 // concurrent hand edits are honored on a last-write-wins basis.
 type MemoryStore struct {
-	resolver WorkspaceFolderResolver
+	resolver FolderResolver
 }
 
 // NewMemoryStore creates a memory store backed by the given folder resolver.
-func NewMemoryStore(resolver WorkspaceFolderResolver) *MemoryStore {
+func NewMemoryStore(resolver FolderResolver) *MemoryStore {
 	return &MemoryStore{resolver: resolver}
 }
 

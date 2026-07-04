@@ -67,8 +67,8 @@ func newWorkspaceDirectoryReference(ws *session.Workspace, referencePath string,
 
 // newWorkspaceFilesMCPBinding builds the auto-provisioned filesystem MCP
 // binding rooted at the given directories.
-func newWorkspaceFilesMCPBinding(roots []string, now time.Time) agentworkspace.WorkspaceMCPBinding {
-	return agentworkspace.WorkspaceMCPBinding{
+func newWorkspaceFilesMCPBinding(roots []string, now time.Time) agentworkspace.MCPBinding {
+	return agentworkspace.MCPBinding{
 		ID:         uuid.New().String(),
 		ServerName: "filesystem",
 		Alias:      workspaceFilesMCPAlias,
@@ -97,7 +97,7 @@ func (h *Handler) provisionWorkspaceScaffolding(ctx context.Context, ws *session
 	setWorkspacePrimaryDirectoryID(ws, dirRef.ID)
 
 	mcpBinding := newWorkspaceFilesMCPBinding(mcpRoots, now)
-	if data, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
+	if data, err := json.Marshal([]agentworkspace.MCPBinding{mcpBinding}); err == nil {
 		ws.MCPBindingsJSON = data
 	}
 
@@ -121,7 +121,7 @@ func (h *Handler) provisionWorkspaceScaffolding(ctx context.Context, ws *session
 			UpdatedAt:   dirRef.UpdatedAt,
 		},
 	}
-	folderWS.MCPBindings = []agentworkspace.WorkspaceMCPBinding{mcpBinding}
+	folderWS.MCPBindings = []agentworkspace.MCPBinding{mcpBinding}
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
 		logger.Warn("Failed to resync workspace.json after creation", logger.Fields{"id": ws.ID, "error": err})

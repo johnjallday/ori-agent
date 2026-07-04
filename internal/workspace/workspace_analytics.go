@@ -172,11 +172,11 @@ func (w *Workspace) agentStatsLocked() map[string]AgentStats {
 }
 
 // GetWorkspaceProgress calculates overall workspace progress
-func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
+func (w *Workspace) GetWorkspaceProgress() Progress {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	progress := WorkspaceProgress{
+	progress := Progress{
 		TotalTasks:  len(w.Tasks),
 		TotalAgents: len(w.agentNamesLocked()),
 	}

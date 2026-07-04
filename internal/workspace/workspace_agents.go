@@ -418,7 +418,7 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 	}
 
 	if len(w.AgentMCPAccess) > 0 {
-		merged := make(map[string]WorkspaceAgentMCPAccess, len(w.AgentMCPAccess))
+		merged := make(map[string]AgentMCPAccess, len(w.AgentMCPAccess))
 		for _, entry := range w.AgentMCPAccess {
 			canonicalID := strings.TrimSpace(entry.AgentInstanceID)
 			if mapped := instanceIDMap[canonicalID]; mapped != "" {
@@ -442,7 +442,7 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 			merged[canonicalID] = current
 			changed = true
 		}
-		normalized := make([]WorkspaceAgentMCPAccess, 0, len(merged))
+		normalized := make([]AgentMCPAccess, 0, len(merged))
 		for _, inst := range normalizedInstances {
 			if entry, exists := merged[inst.ID]; exists {
 				normalized = append(normalized, entry)
@@ -455,7 +455,7 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 	}
 
 	if len(w.AgentSkillAccess) > 0 {
-		merged := make(map[string]WorkspaceAgentSkillAccess, len(w.AgentSkillAccess))
+		merged := make(map[string]AgentSkillAccess, len(w.AgentSkillAccess))
 		for _, entry := range w.AgentSkillAccess {
 			canonicalID := strings.TrimSpace(entry.AgentInstanceID)
 			if mapped := instanceIDMap[canonicalID]; mapped != "" {
@@ -479,7 +479,7 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 			merged[canonicalID] = current
 			changed = true
 		}
-		normalized := make([]WorkspaceAgentSkillAccess, 0, len(merged))
+		normalized := make([]AgentSkillAccess, 0, len(merged))
 		for _, inst := range normalizedInstances {
 			if entry, exists := merged[inst.ID]; exists {
 				normalized = append(normalized, entry)

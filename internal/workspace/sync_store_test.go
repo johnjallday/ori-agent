@@ -82,10 +82,10 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		SharedData: make(map[string]any),
-		MCPBindings: []WorkspaceMCPBinding{
+		MCPBindings: []MCPBinding{
 			{ID: "mcp-1", ServerName: "test-server", Enabled: true},
 		},
-		SkillBindings: []WorkspaceSkillBinding{
+		SkillBindings: []SkillBinding{
 			{ID: "skill-1", SkillName: "test-skill", Enabled: true},
 		},
 	}
@@ -96,7 +96,7 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 	}
 
 	// Update with new data
-	ws.MCPBindings = append(ws.MCPBindings, WorkspaceMCPBinding{
+	ws.MCPBindings = append(ws.MCPBindings, MCPBinding{
 		ID: "mcp-2", ServerName: "another-server", Enabled: true,
 	})
 	ws.UpdatedAt = time.Now()

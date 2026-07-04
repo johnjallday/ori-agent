@@ -253,7 +253,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				UpdatedAt:   now,
 			},
 		},
-		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+		MCPBindings: []agentworkspace.MCPBinding{
 			{
 				ID:         "root-files-binding",
 				ServerName: "filesystem",
@@ -308,7 +308,7 @@ func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
 				UpdatedAt:   now,
 			},
 		},
-		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+		MCPBindings: []agentworkspace.MCPBinding{
 			{
 				ID:         "child-files-binding",
 				ServerName: "filesystem",

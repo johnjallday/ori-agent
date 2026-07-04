@@ -35,8 +35,8 @@ func seedMapSummaryFixture(t *testing.T, fileStore *agentworkspace.FileStore, wo
 		{ID: "t2", Status: agentworkspace.TaskStatusInProgress},
 		{ID: "t3", Status: agentworkspace.TaskStatusCompleted},
 	}
-	ws.MCPBindings = []agentworkspace.WorkspaceMCPBinding{{}, {}}
-	ws.SkillBindings = []agentworkspace.WorkspaceSkillBinding{{}}
+	ws.MCPBindings = []agentworkspace.MCPBinding{{}, {}}
+	ws.SkillBindings = []agentworkspace.SkillBinding{{}}
 	ws.SharedData = workspacesettings.Store(map[string]any{}, settings)
 
 	if err := fileStore.Save(ws); err != nil {

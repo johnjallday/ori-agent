@@ -26,8 +26,8 @@ func TestAddWorkspaceMapFields(t *testing.T) {
 			{Name: "Research Lead", EntryPoint: true},
 			{Name: "Source Scout"},
 		},
-		MCPBindings:   []workspace.WorkspaceMCPBinding{{}, {}},
-		SkillBindings: []workspace.WorkspaceSkillBinding{{}},
+		MCPBindings:   []workspace.MCPBinding{{}, {}},
+		SkillBindings: []workspace.SkillBinding{{}},
 		Tasks: []workspace.Task{
 			{Status: workspace.TaskStatusPending},
 			{Status: workspace.TaskStatusInProgress},
@@ -67,7 +67,7 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	ws.CreatedAt = now
 	ws.UpdatedAt = now
 	ws.Tags = []string{"music", "reaper"}
-	ws.SkillBindings = []workspace.WorkspaceSkillBinding{
+	ws.SkillBindings = []workspace.SkillBinding{
 		{
 			ID:        "binding-1",
 			SkillName: "workspace-planning",
@@ -77,7 +77,7 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 			UpdatedAt: now,
 		},
 	}
-	ws.AgentSkillAccess = []workspace.WorkspaceAgentSkillAccess{
+	ws.AgentSkillAccess = []workspace.AgentSkillAccess{
 		{
 			AgentInstanceID:   "agent-1",
 			EnabledBindingIDs: []string{"binding-1"},

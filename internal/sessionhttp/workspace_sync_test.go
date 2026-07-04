@@ -176,7 +176,7 @@ func TestUpdateManagedWorkspaceReferencesCompactsStaleImportedPath(t *testing.T)
 		t.Fatalf("marshal refs: %v", err)
 	}
 
-	bindings, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{
+	bindings, err := json.Marshal([]agentworkspace.MCPBinding{
 		{
 			ID:         "binding",
 			ServerName: "filesystem",
@@ -309,7 +309,7 @@ func TestHandleWorkspaceSyncImportPreservesDiskWorkspaceMetadata(t *testing.T) {
 				UpdatedAt:   now,
 			},
 		},
-		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+		MCPBindings: []agentworkspace.MCPBinding{
 			{
 				ID:         "binding-1",
 				ServerName: "filesystem",

@@ -31,7 +31,7 @@ type Handler struct {
 // NewHandler builds the memory handler over a folder-backed store. Both
 // arguments are typically the same *workspace.FileStore. Returns a handler
 // whose endpoints 503 when the store is unavailable.
-func NewHandler(lookup workspaceLookup, resolver workspace.WorkspaceFolderResolver) *Handler {
+func NewHandler(lookup workspaceLookup, resolver workspace.FolderResolver) *Handler {
 	h := &Handler{lookup: lookup}
 	if resolver != nil {
 		h.memory = workspace.NewMemoryStore(resolver)

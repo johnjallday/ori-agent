@@ -8,7 +8,7 @@ import (
 )
 
 // GetSkillBindings returns a copy of the workspace skill bindings.
-func (w *Workspace) GetSkillBindings() []WorkspaceSkillBinding {
+func (w *Workspace) GetSkillBindings() []SkillBinding {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -16,7 +16,7 @@ func (w *Workspace) GetSkillBindings() []WorkspaceSkillBinding {
 		return nil
 	}
 
-	out := make([]WorkspaceSkillBinding, len(w.SkillBindings))
+	out := make([]SkillBinding, len(w.SkillBindings))
 	for i := range w.SkillBindings {
 		out[i] = cloneSkillBinding(w.SkillBindings[i])
 	}
@@ -24,7 +24,7 @@ func (w *Workspace) GetSkillBindings() []WorkspaceSkillBinding {
 }
 
 // GetSkillBinding returns a copy of the workspace skill binding by ID.
-func (w *Workspace) GetSkillBinding(bindingID string) (*WorkspaceSkillBinding, bool) {
+func (w *Workspace) GetSkillBinding(bindingID string) (*SkillBinding, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -45,7 +45,7 @@ func (w *Workspace) GetSkillBinding(bindingID string) (*WorkspaceSkillBinding, b
 }
 
 // UpsertSkillBinding creates or updates a workspace skill binding.
-func (w *Workspace) UpsertSkillBinding(binding WorkspaceSkillBinding) error {
+func (w *Workspace) UpsertSkillBinding(binding SkillBinding) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -101,7 +101,7 @@ func (w *Workspace) DeleteSkillBinding(bindingID string) error {
 }
 
 // GetAgentSkillAccess returns the skill access rule for the given agent instance.
-func (w *Workspace) GetAgentSkillAccess(agentInstanceID string) (*WorkspaceAgentSkillAccess, bool) {
+func (w *Workspace) GetAgentSkillAccess(agentInstanceID string) (*AgentSkillAccess, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -122,7 +122,7 @@ func (w *Workspace) GetAgentSkillAccess(agentInstanceID string) (*WorkspaceAgent
 }
 
 // ListAgentSkillAccess returns a copy of all per-agent-instance skill access rules.
-func (w *Workspace) ListAgentSkillAccess() []WorkspaceAgentSkillAccess {
+func (w *Workspace) ListAgentSkillAccess() []AgentSkillAccess {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -130,7 +130,7 @@ func (w *Workspace) ListAgentSkillAccess() []WorkspaceAgentSkillAccess {
 		return nil
 	}
 
-	out := make([]WorkspaceAgentSkillAccess, len(w.AgentSkillAccess))
+	out := make([]AgentSkillAccess, len(w.AgentSkillAccess))
 	for i := range w.AgentSkillAccess {
 		out[i] = cloneSkillAccessEntry(w.AgentSkillAccess[i])
 	}
@@ -138,7 +138,7 @@ func (w *Workspace) ListAgentSkillAccess() []WorkspaceAgentSkillAccess {
 }
 
 // SetAgentSkillAccess creates or updates the skill access rule for an agent instance.
-func (w *Workspace) SetAgentSkillAccess(entry WorkspaceAgentSkillAccess) error {
+func (w *Workspace) SetAgentSkillAccess(entry AgentSkillAccess) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -183,7 +183,7 @@ func (w *Workspace) DeleteAgentSkillAccess(agentInstanceID string) error {
 	return fmt.Errorf("agent skill access %s not found in workspace", agentInstanceID)
 }
 
-func cloneSkillBinding(binding WorkspaceSkillBinding) WorkspaceSkillBinding {
+func cloneSkillBinding(binding SkillBinding) SkillBinding {
 	cp := binding
 	if len(binding.Config) > 0 {
 		data, err := json.Marshal(binding.Config)
@@ -205,7 +205,7 @@ func cloneSkillBinding(binding WorkspaceSkillBinding) WorkspaceSkillBinding {
 	return cp
 }
 
-func cloneSkillAccessEntry(entry WorkspaceAgentSkillAccess) WorkspaceAgentSkillAccess {
+func cloneSkillAccessEntry(entry AgentSkillAccess) AgentSkillAccess {
 	cp := entry
 	if len(entry.EnabledBindingIDs) > 0 {
 		cp.EnabledBindingIDs = append([]string{}, entry.EnabledBindingIDs...)

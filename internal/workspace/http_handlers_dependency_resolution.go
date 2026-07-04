@@ -67,7 +67,7 @@ func (h *HTTPHandler) resolveEnableWorkspaceMCP(w http.ResponseWriter, workspace
 	created := false
 	if binding == nil {
 		created = true
-		binding = &WorkspaceMCPBinding{
+		binding = &MCPBinding{
 			ID:         uuid.NewString(),
 			ServerName: serverName,
 			Alias:      serverName,
@@ -151,7 +151,7 @@ func isWorkspaceSuppressibleDependencyType(dependencyType string) bool {
 	}
 }
 
-func findWorkspaceMCPBindingByServer(bindings []WorkspaceMCPBinding, serverName string) *WorkspaceMCPBinding {
+func findWorkspaceMCPBindingByServer(bindings []MCPBinding, serverName string) *MCPBinding {
 	normalizedServer := strings.ToLower(strings.TrimSpace(serverName))
 	for i := range bindings {
 		if strings.ToLower(strings.TrimSpace(bindings[i].ServerName)) == normalizedServer {

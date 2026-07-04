@@ -10,7 +10,7 @@ func TestSkillBinding_CRUD(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
 
 	// Create
-	err := ws.UpsertSkillBinding(WorkspaceSkillBinding{
+	err := ws.UpsertSkillBinding(SkillBinding{
 		ID:        "sb-1",
 		SkillName: "code-review",
 		Enabled:   true,
@@ -39,7 +39,7 @@ func TestSkillBinding_CRUD(t *testing.T) {
 	}
 
 	// Update
-	err = ws.UpsertSkillBinding(WorkspaceSkillBinding{
+	err = ws.UpsertSkillBinding(SkillBinding{
 		ID:        "sb-1",
 		SkillName: "code-review",
 		Enabled:   false,
@@ -70,12 +70,12 @@ func TestSkillBinding_CRUD(t *testing.T) {
 func TestSkillBinding_ValidationErrors(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
 
-	err := ws.UpsertSkillBinding(WorkspaceSkillBinding{SkillName: "test"})
+	err := ws.UpsertSkillBinding(SkillBinding{SkillName: "test"})
 	if err == nil || !strings.Contains(err.Error(), "binding ID is required") {
 		t.Fatalf("expected binding ID error, got %v", err)
 	}
 
-	err = ws.UpsertSkillBinding(WorkspaceSkillBinding{ID: "sb-1"})
+	err = ws.UpsertSkillBinding(SkillBinding{ID: "sb-1"})
 	if err == nil || !strings.Contains(err.Error(), "skill name is required") {
 		t.Fatalf("expected skill name error, got %v", err)
 	}
@@ -92,9 +92,9 @@ func TestSkillBinding_DeleteNotFound(t *testing.T) {
 func TestSkillBinding_DeleteCascadesToAccess(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
 
-	_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{ID: "sb-1", SkillName: "skill-a", Enabled: true})
-	_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{ID: "sb-2", SkillName: "skill-b", Enabled: true})
-	_ = ws.SetAgentSkillAccess(WorkspaceAgentSkillAccess{
+	_ = ws.UpsertSkillBinding(SkillBinding{ID: "sb-1", SkillName: "skill-a", Enabled: true})
+	_ = ws.UpsertSkillBinding(SkillBinding{ID: "sb-2", SkillName: "skill-b", Enabled: true})
+	_ = ws.SetAgentSkillAccess(AgentSkillAccess{
 		AgentInstanceID:   "agent-1",
 		EnabledBindingIDs: []string{"sb-1", "sb-2"},
 	})
@@ -119,7 +119,7 @@ func TestAgentSkillAccess_CRUD(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
 
 	// Create
-	err := ws.SetAgentSkillAccess(WorkspaceAgentSkillAccess{
+	err := ws.SetAgentSkillAccess(AgentSkillAccess{
 		AgentInstanceID:   "agent-1",
 		EnabledBindingIDs: []string{"sb-1", "sb-2"},
 	})
@@ -142,7 +142,7 @@ func TestAgentSkillAccess_CRUD(t *testing.T) {
 	}
 
 	// Update
-	err = ws.SetAgentSkillAccess(WorkspaceAgentSkillAccess{
+	err = ws.SetAgentSkillAccess(AgentSkillAccess{
 		AgentInstanceID:   "agent-1",
 		EnabledBindingIDs: []string{"sb-2"},
 	})
@@ -167,7 +167,7 @@ func TestAgentSkillAccess_CRUD(t *testing.T) {
 
 func TestAgentSkillAccess_EmptyID(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
-	err := ws.SetAgentSkillAccess(WorkspaceAgentSkillAccess{})
+	err := ws.SetAgentSkillAccess(AgentSkillAccess{})
 	if err == nil || !strings.Contains(err.Error(), "agent instance ID is required") {
 		t.Fatalf("expected error, got %v", err)
 	}
@@ -175,7 +175,7 @@ func TestAgentSkillAccess_EmptyID(t *testing.T) {
 
 func TestAgentSkillAccess_Deduplication(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
-	_ = ws.SetAgentSkillAccess(WorkspaceAgentSkillAccess{
+	_ = ws.SetAgentSkillAccess(AgentSkillAccess{
 		AgentInstanceID:   "agent-1",
 		EnabledBindingIDs: []string{"sb-1", "sb-1", "sb-2"},
 	})
@@ -193,7 +193,7 @@ func TestSkillBinding_ConcurrentAccess(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			id := "sb-" + strings.Repeat("x", n%5)
-			_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{ID: id, SkillName: "skill-" + id, Enabled: true})
+			_ = ws.UpsertSkillBinding(SkillBinding{ID: id, SkillName: "skill-" + id, Enabled: true})
 			_ = ws.GetSkillBindings()
 			_, _ = ws.GetSkillBinding(id)
 			_ = ws.DeleteSkillBinding(id)
@@ -204,7 +204,7 @@ func TestSkillBinding_ConcurrentAccess(t *testing.T) {
 
 func TestSkillBinding_CaseInsensitiveLookup(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
-	_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{ID: "SB-1", SkillName: "Test", Enabled: true})
+	_ = ws.UpsertSkillBinding(SkillBinding{ID: "SB-1", SkillName: "Test", Enabled: true})
 
 	got, ok := ws.GetSkillBinding("sb-1")
 	if !ok || got == nil {
@@ -215,7 +215,7 @@ func TestSkillBinding_CaseInsensitiveLookup(t *testing.T) {
 func TestSkillBinding_ConfigCloned(t *testing.T) {
 	ws := &Workspace{ID: "ws-1"}
 	cfg := map[string]any{"key": "value"}
-	_ = ws.UpsertSkillBinding(WorkspaceSkillBinding{
+	_ = ws.UpsertSkillBinding(SkillBinding{
 		ID:        "sb-1",
 		SkillName: "test",
 		Enabled:   true,

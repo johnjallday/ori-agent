@@ -35,8 +35,8 @@ func TestHTTPHandlerCreateStoreNodeSupportsWorkspaceFolderTarget(t *testing.T) {
 	if node.StorageTarget != StorageTargetWorkspaceFolder {
 		t.Fatalf("expected storage target %q, got %q", StorageTargetWorkspaceFolder, node.StorageTarget)
 	}
-	if node.WorkspaceFolder != filepath.Join("reports", "daily") {
-		t.Fatalf("expected workspace folder reports/daily, got %q", node.WorkspaceFolder)
+	if node.Folder != filepath.Join("reports", "daily") {
+		t.Fatalf("expected workspace folder reports/daily, got %q", node.Folder)
 	}
 	if node.BaseDir != filepath.Join("reports", "daily") {
 		t.Fatalf("expected display base dir reports/daily, got %q", node.BaseDir)
@@ -52,8 +52,8 @@ func TestHTTPHandlerCreateStoreNodeSupportsWorkspaceFolderTarget(t *testing.T) {
 	if len(stored.StoreNodes) != 1 {
 		t.Fatalf("expected 1 store node, got %d", len(stored.StoreNodes))
 	}
-	if stored.StoreNodes[0].WorkspaceFolder != filepath.Join("reports", "daily") {
-		t.Fatalf("expected stored workspace folder reports/daily, got %q", stored.StoreNodes[0].WorkspaceFolder)
+	if stored.StoreNodes[0].Folder != filepath.Join("reports", "daily") {
+		t.Fatalf("expected stored workspace folder reports/daily, got %q", stored.StoreNodes[0].Folder)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestHTTPHandlerUpdateStoreNodeSwitchesToWorkspaceFolderTarget(t *testing.T)
 	if err := json.Unmarshal(rr.Body.Bytes(), &node); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if node.StorageTarget != StorageTargetWorkspaceFolder || node.WorkspaceFolder != "exports" || node.BaseDir != "exports" {
+	if node.StorageTarget != StorageTargetWorkspaceFolder || node.Folder != "exports" || node.BaseDir != "exports" {
 		t.Fatalf("unexpected workspace folder node: %+v", node)
 	}
 	if _, err := os.Stat(filepath.Join(store.GetFilesPath(ws.ID), "exports")); err != nil {

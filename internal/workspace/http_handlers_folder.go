@@ -639,7 +639,7 @@ func (h *HTTPHandler) LocateAttachmentFile(w http.ResponseWriter, r *http.Reques
 
 func buildWorkspaceFileTree(ws *Workspace, filesPath string) ([]FileInfo, error) {
 	items := make(map[string]FileInfo)
-	managedFolders := make(map[string]WorkspaceFolder)
+	managedFolders := make(map[string]Folder)
 	trashedAttachmentPaths := make(map[string]bool)
 	diskFilePaths := make(map[string]bool)
 	for _, attachment := range ws.Attachments {
@@ -791,7 +791,7 @@ func mergeWorkspaceFileInfo(existing, incoming FileInfo) FileInfo {
 	return incoming
 }
 
-func ensureWorkspaceFileTreeAncestors(items map[string]FileInfo, managedFolders map[string]WorkspaceFolder, relativePath string) {
+func ensureWorkspaceFileTreeAncestors(items map[string]FileInfo, managedFolders map[string]Folder, relativePath string) {
 	dir := filepath.Dir(relativePath)
 	for dir != "." && dir != string(filepath.Separator) && dir != "" {
 		if _, ok := items[dir]; !ok {
