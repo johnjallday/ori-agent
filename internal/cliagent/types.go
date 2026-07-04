@@ -184,18 +184,18 @@ type TaskResult struct {
 	Error         string        `json:"error,omitempty"`
 }
 
-// CLIAgentCapabilities describes what a CLI backend can do.
-type CLIAgentCapabilities struct {
+// Capabilities describes what a CLI backend can do.
+type Capabilities struct {
 	SupportsTools     bool     `json:"supports_tools"`
 	SupportsStreaming bool     `json:"supports_streaming"`
 	MaxContextWindow  int      `json:"max_context_window"`
 	SupportedFormats  []string `json:"supported_formats"`
 }
 
-// CLIAgentInfo provides metadata about a registered CLI agent backend.
-type CLIAgentInfo struct {
-	Backend      string               `json:"backend"`
-	Available    bool                 `json:"available"`
-	Models       []string             `json:"models,omitempty"`
-	Capabilities CLIAgentCapabilities `json:"capabilities"`
+// Info provides metadata about a registered CLI agent backend.
+type Info struct {
+	Backend      string       `json:"backend"`
+	Available    bool         `json:"available"`
+	Models       []string     `json:"models,omitempty"`
+	Capabilities Capabilities `json:"capabilities"`
 }

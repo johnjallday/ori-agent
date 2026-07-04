@@ -8,16 +8,16 @@ import (
 
 // CLIAgentRegistry manages available CLI agent backends.
 type CLIAgentRegistry struct {
-	adapters map[string]CLIAgentAdapter
+	adapters map[string]Adapter
 	mu       sync.RWMutex
 }
 
 // NewRegistry creates a CLIAgentRegistry and auto-detects installed CLIs.
 // Pass nil for adapters to use default auto-detection; pass explicit adapters
 // for testing.
-func NewRegistry(adapters ...CLIAgentAdapter) *CLIAgentRegistry {
+func NewRegistry(adapters ...Adapter) *CLIAgentRegistry {
 	r := &CLIAgentRegistry{
-		adapters: make(map[string]CLIAgentAdapter),
+		adapters: make(map[string]Adapter),
 	}
 	for _, a := range adapters {
 		r.adapters[a.Backend()] = a
@@ -42,14 +42,14 @@ func (r *CLIAgentRegistry) AutoDetect() {
 }
 
 // Register adds or replaces an adapter in the registry.
-func (r *CLIAgentRegistry) Register(adapter CLIAgentAdapter) {
+func (r *CLIAgentRegistry) Register(adapter Adapter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adapters[adapter.Backend()] = adapter
 }
 
 // Get returns the adapter for the given backend name.
-func (r *CLIAgentRegistry) Get(backend string) (CLIAgentAdapter, error) {
+func (r *CLIAgentRegistry) Get(backend string) (Adapter, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -73,13 +73,13 @@ func (r *CLIAgentRegistry) IsAvailable(backend string) bool {
 }
 
 // List returns information about all registered CLI agent backends.
-func (r *CLIAgentRegistry) List() []CLIAgentInfo {
+func (r *CLIAgentRegistry) List() []Info {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	infos := make([]CLIAgentInfo, 0, len(r.adapters))
+	infos := make([]Info, 0, len(r.adapters))
 	for _, a := range r.adapters {
-		infos = append(infos, CLIAgentInfo{
+		infos = append(infos, Info{
 			Backend:      a.Backend(),
 			Available:    a.IsAvailable(),
 			Models:       a.AvailableModels(),

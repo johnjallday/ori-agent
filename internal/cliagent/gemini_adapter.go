@@ -34,8 +34,8 @@ func (a *GeminiCLIAdapter) IsAvailable() bool {
 }
 
 // Capabilities returns Gemini CLI capabilities.
-func (a *GeminiCLIAdapter) Capabilities() CLIAgentCapabilities {
-	return CLIAgentCapabilities{
+func (a *GeminiCLIAdapter) Capabilities() Capabilities {
+	return Capabilities{
 		SupportsTools:     true,
 		SupportsStreaming: true,
 		MaxContextWindow:  1000000,

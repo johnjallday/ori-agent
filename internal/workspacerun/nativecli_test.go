@@ -212,8 +212,8 @@ func (a *stubCLIAgentAdapter) ExecuteStep(_ context.Context, req cliagent.StepRe
 	return a.result, a.err
 }
 
-func (a *stubCLIAgentAdapter) Capabilities() cliagent.CLIAgentCapabilities {
-	return cliagent.CLIAgentCapabilities{SupportsStreaming: true}
+func (a *stubCLIAgentAdapter) Capabilities() cliagent.Capabilities {
+	return cliagent.Capabilities{SupportsStreaming: true}
 }
 
 func (a *stubCLIAgentAdapter) AvailableModels() []string {

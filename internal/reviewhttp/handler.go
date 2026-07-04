@@ -67,7 +67,7 @@ func (h *Handler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
 		since = &t
 	}
 
-	opts := review.ReviewOptions{
+	opts := review.Options{
 		AgentName:   req.AgentName,
 		SessionID:   req.SessionID,
 		Since:       since,
@@ -284,7 +284,7 @@ func (h *Handler) HandleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if runs == nil {
-		runs = []review.ReviewRun{}
+		runs = []review.Run{}
 	}
 
 	orihttp.WriteJSON(w, map[string]any{

@@ -108,9 +108,9 @@ func (h *AutoCategorizeHandler) CheckAvailabilityHandler(w http.ResponseWriter, 
 	orihttp.WriteJSON(w, response)
 }
 
-// AutoCategorizeHandler handles the auto-categorization request
+// Suggest serves the auto-categorization request.
 // POST /api/models/auto-categorize
-func (h *AutoCategorizeHandler) AutoCategorizeHandler(w http.ResponseWriter, r *http.Request) {
+func (h *AutoCategorizeHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return

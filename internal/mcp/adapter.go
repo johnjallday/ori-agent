@@ -13,9 +13,9 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPAdapter adapts an MCP server to the toolapi.Tool interface
+// Adapter adapts an MCP server to the toolapi.Tool interface
 // This allows MCP tools to be used seamlessly alongside native tools
-type MCPAdapter struct {
+type Adapter struct {
 	server      *Server
 	tool        Tool
 	agentCtx    toolapi.AgentContext
@@ -23,8 +23,8 @@ type MCPAdapter struct {
 }
 
 // NewMCPAdapter creates a new adapter for an MCP tool
-func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
-	return &MCPAdapter{
+func NewMCPAdapter(server *Server, tool Tool) *Adapter {
+	return &Adapter{
 		server: server,
 		tool:   tool,
 	}
@@ -32,7 +32,7 @@ func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
 
 // Definition converts MCP tool schema to generic tool definition
 // This is the bridge that makes MCP tools compatible with any LLM provider
-func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
+func (a *Adapter) Definition() toolapi.ToolDefinition {
 	// Convert MCP inputSchema to generic parameters format
 	parameters := map[string]any(nil)
 	switch schema := a.tool.InputSchema.(type) {
@@ -63,7 +63,7 @@ func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
 }
 
 // Call executes the MCP tool and returns the result
-func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
+func (a *Adapter) Call(ctx context.Context, args string) (string, error) {
 	// Parse arguments
 	var arguments map[string]any
 	if len(args) > 0 {
@@ -99,7 +99,7 @@ func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
 }
 
 // formatResult converts MCP tool result content to a string
-func (a *MCPAdapter) formatResult(result *ToolCallResult) (string, error) {
+func (a *Adapter) formatResult(result *ToolCallResult) (string, error) {
 	if len(result.Content) == 0 {
 		return "", nil
 	}
@@ -170,20 +170,20 @@ func (a *MCPAdapter) formatResult(result *ToolCallResult) (string, error) {
 }
 
 // SetAgentContext implements AgentAwareTool interface
-func (a *MCPAdapter) SetAgentContext(ctx toolapi.AgentContext) {
+func (a *Adapter) SetAgentContext(ctx toolapi.AgentContext) {
 	a.agentCtx = ctx
 	a.hasAgentCtx = true
 }
 
 // Version returns the adapter version (implements VersionedTool)
-func (a *MCPAdapter) Version() string {
+func (a *Adapter) Version() string {
 	return "mcp-adapter-0.1.0"
 }
 
 // Ensure MCPAdapter implements required interfaces
-var _ toolapi.Tool = (*MCPAdapter)(nil)
-var _ toolapi.AgentAwareTool = (*MCPAdapter)(nil)
-var _ toolapi.VersionedTool = (*MCPAdapter)(nil)
+var _ toolapi.Tool = (*Adapter)(nil)
+var _ toolapi.AgentAwareTool = (*Adapter)(nil)
+var _ toolapi.VersionedTool = (*Adapter)(nil)
 
 func normalizeFilesystemArguments(toolName string, arguments map[string]any, serverConfig ServerConfig) map[string]any {
 	if len(arguments) == 0 || !isFilesystemTool(toolName) {

@@ -12,10 +12,10 @@ type stubAdapter struct {
 	models    []string
 }
 
-func (s *stubAdapter) Backend() string                    { return s.backend }
-func (s *stubAdapter) IsAvailable() bool                  { return s.available }
-func (s *stubAdapter) AvailableModels() []string          { return s.models }
-func (s *stubAdapter) Capabilities() CLIAgentCapabilities { return CLIAgentCapabilities{} }
+func (s *stubAdapter) Backend() string            { return s.backend }
+func (s *stubAdapter) IsAvailable() bool          { return s.available }
+func (s *stubAdapter) AvailableModels() []string  { return s.models }
+func (s *stubAdapter) Capabilities() Capabilities { return Capabilities{} }
 func (s *stubAdapter) ExecuteStep(_ context.Context, _ StepRequest) (*StepResult, error) {
 	return nil, nil
 }

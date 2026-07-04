@@ -59,17 +59,17 @@ type Issue struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ReviewRunStatus indicates the state of a review job.
-type ReviewRunStatus string
+// RunStatus indicates the state of a review job.
+type RunStatus string
 
 const (
-	ReviewRunStatusRunning   ReviewRunStatus = "running"
-	ReviewRunStatusCompleted ReviewRunStatus = "completed"
-	ReviewRunStatusFailed    ReviewRunStatus = "failed"
+	ReviewRunStatusRunning   RunStatus = "running"
+	ReviewRunStatusCompleted RunStatus = "completed"
+	ReviewRunStatusFailed    RunStatus = "failed"
 )
 
-// ReviewRun tracks the execution of a review job.
-type ReviewRun struct {
+// Run tracks the execution of a review job.
+type Run struct {
 	// ID is a unique identifier for the run (UUID format).
 	ID string `json:"id"`
 
@@ -86,7 +86,7 @@ type ReviewRun struct {
 	IssuesFound int `json:"issues_found"`
 
 	// Status indicates the current state of the run.
-	Status ReviewRunStatus `json:"status"`
+	Status RunStatus `json:"status"`
 
 	// ErrorMessage contains error details if the run failed.
 	ErrorMessage string `json:"error_message,omitempty"`
@@ -105,8 +105,8 @@ type SessionReviewStatus struct {
 	LastMessageID string `json:"last_message_id,omitempty"`
 }
 
-// ReviewOptions configures what sessions to review.
-type ReviewOptions struct {
+// Options configures what sessions to review.
+type Options struct {
 	// AgentName filters to sessions for a specific agent.
 	AgentName string `json:"agent_name,omitempty"`
 

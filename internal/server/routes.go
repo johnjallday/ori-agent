@@ -203,7 +203,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/agents/capabilities", s.Handlers.Orchestration.AgentCapabilitiesHandler)
 
 	// Agent auto-config endpoints
-	mux.HandleFunc("/api/agents/auto-config", s.Handlers.AutoConfig.AutoConfigHandler)
+	mux.HandleFunc("/api/agents/auto-config", s.Handlers.AutoConfig.Handle)
 	mux.HandleFunc("/api/agents/auto-config/availability", s.Handlers.AutoConfig.CheckLLMAvailabilityHandler)
 
 	// Home assistant task routing endpoint
@@ -408,7 +408,7 @@ func registerModelCategoryRoutes(mux *http.ServeMux, s *Server) {
 	// Auto-categorize endpoints (requires both category store and LLM)
 	if s.Handlers.AutoCategorize != nil {
 		mux.HandleFunc("/api/models/auto-categorize/availability", s.Handlers.AutoCategorize.CheckAvailabilityHandler)
-		mux.HandleFunc("/api/models/auto-categorize", s.Handlers.AutoCategorize.AutoCategorizeHandler)
+		mux.HandleFunc("/api/models/auto-categorize", s.Handlers.AutoCategorize.Suggest)
 	}
 }
 

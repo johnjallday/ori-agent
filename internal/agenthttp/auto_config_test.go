@@ -165,7 +165,7 @@ func TestAutoConfigHandler_AutoConfig_NoSystemModel(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoConfigHandler(rr, req)
+	handler.Handle(rr, req)
 
 	// Should return service unavailable when no system model configured
 	if rr.Code != http.StatusServiceUnavailable {
@@ -188,7 +188,7 @@ func TestAutoConfigHandler_AutoConfig_ProviderNotAvailable(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoConfigHandler(rr, req)
+	handler.Handle(rr, req)
 
 	// Should return service unavailable when provider not available
 	if rr.Code != http.StatusServiceUnavailable {
@@ -212,7 +212,7 @@ func TestAutoConfigHandler_AutoConfig_EmptyDescription(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoConfigHandler(rr, req)
+	handler.Handle(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -234,7 +234,7 @@ func TestAutoConfigHandler_AutoConfig_SuccessIncludesGeneratedDescription(t *tes
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoConfigHandler(rr, req)
+	handler.Handle(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
@@ -259,7 +259,7 @@ func TestAutoConfigHandler_AutoConfig_InvalidMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/auto-config", nil)
 	rr := httptest.NewRecorder()
 
-	handler.AutoConfigHandler(rr, req)
+	handler.Handle(rr, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)

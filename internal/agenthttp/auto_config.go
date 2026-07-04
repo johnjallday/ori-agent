@@ -132,8 +132,8 @@ func unavailableLocalModelMessage(providerName string) string {
 	}
 }
 
-// AutoConfigHandler handles the auto-configuration request
-func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Request) {
+// Handle serves the auto-configuration request.
+func (h *AutoConfigHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return

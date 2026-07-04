@@ -167,7 +167,7 @@ func TestAutoCategorizeHandler_AutoCategorize_WrongMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/models/auto-categorize", nil)
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
@@ -188,7 +188,7 @@ func TestAutoCategorizeHandler_AutoCategorize_EmptyModelIDs(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -215,7 +215,7 @@ func TestAutoCategorizeHandler_AutoCategorize_TooManyModels(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -236,7 +236,7 @@ func TestAutoCategorizeHandler_AutoCategorize_NoSystemModel(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusServiceUnavailable, rr.Code, rr.Body.String())
@@ -263,7 +263,7 @@ func TestAutoCategorizeHandler_AutoCategorize_NoCategories(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -285,7 +285,7 @@ func TestAutoCategorizeHandler_AutoCategorize_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
-	handler.AutoCategorizeHandler(rr, req)
+	handler.Suggest(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())

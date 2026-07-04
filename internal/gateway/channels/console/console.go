@@ -12,29 +12,29 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// ConsoleChannel implements gateway.Channel for terminal interaction
-type ConsoleChannel struct {
+// Channel implements gateway.Channel for terminal interaction
+type Channel struct {
 	id     string
 	logger *logger.Logger
 	cancel context.CancelFunc
 }
 
 // NewConsoleChannel creates a new console channel
-func NewConsoleChannel(id string, l *logger.Logger) *ConsoleChannel {
-	return &ConsoleChannel{
+func NewConsoleChannel(id string, l *logger.Logger) *Channel {
+	return &Channel{
 		id:     id,
 		logger: l,
 	}
 }
 
 // ID returns the channel ID
-func (c *ConsoleChannel) ID() string { return c.id }
+func (c *Channel) ID() string { return c.id }
 
 // Type returns the channel type
-func (c *ConsoleChannel) Type() string { return "console" }
+func (c *Channel) Type() string { return "console" }
 
 // Start begins listening for input from os.Stdin
-func (c *ConsoleChannel) Start(ctx context.Context, handler gateway.Handler) error {
+func (c *Channel) Start(ctx context.Context, handler gateway.Handler) error {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
@@ -85,7 +85,7 @@ func (c *ConsoleChannel) Start(ctx context.Context, handler gateway.Handler) err
 }
 
 // Stop stops the console channel
-func (c *ConsoleChannel) Stop(ctx context.Context) error {
+func (c *Channel) Stop(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -93,7 +93,7 @@ func (c *ConsoleChannel) Stop(ctx context.Context) error {
 }
 
 // Send outputs a message to os.Stdout
-func (c *ConsoleChannel) Send(ctx context.Context, msg gateway.Message) error {
+func (c *Channel) Send(ctx context.Context, msg gateway.Message) error {
 	fmt.Printf("\n[ORI]: %s\n> ", msg.Content)
 	return nil
 }
