@@ -85,6 +85,22 @@
 .ws-cmd-title .ws-kicker { display: flex; align-items: center; gap: 10px; }
 .ws-cmd-title .ws-dot { width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg); }
 .ws-cmd-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ws-cmd-group-badge {
+  flex: 0 0 auto; align-self: center; margin-top: 4px; padding: 3px 8px;
+  border: 1px solid var(--ws-group-accent-line, var(--ws-line-bright));
+  background: var(--ws-group-accent-soft, rgba(70, 211, 154, 0.08));
+  color: var(--ws-group-accent, var(--ws-faction));
+  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 6px) 100%, 0 100%);
+}
+.ws-cmd-topbar.is-group .ws-dot {
+  background: var(--ws-group-accent, var(--ws-faction));
+  box-shadow: 0 0 8px var(--ws-group-accent, var(--ws-faction));
+}
+.ws-cmd-topbar.is-group .ws-cmd-crest {
+  color: var(--ws-group-accent, var(--ws-faction));
+  border-color: var(--ws-group-accent-line, var(--ws-line-bright));
+}
 .ws-cmd-title h2 {
   flex: 1 1 auto; min-width: 0; margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; color: #eef0f3;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -255,6 +271,23 @@
 }
 .ws-cmd-rail-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
 .ws-cmd-rail-item.is-missing .ws-cmd-rail-t { color: var(--ws-alert); }
+/* Notes multi-select rows: checkbox + open button on one line. */
+.ws-cmd-note-row { flex-direction: row; align-items: center; gap: 8px; padding: 4px 9px; }
+.ws-cmd-note-check { flex: 0 0 auto; width: 14px; height: 14px; accent-color: var(--ws-faction); cursor: pointer; }
+.ws-cmd-note-open {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; text-align: left;
+  padding: 4px 0; border: 0; background: none; color: var(--ws-ink); cursor: pointer;
+}
+.ws-cmd-note-open:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
+.ws-cmd-note-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.ws-cmd-note-tool {
+  padding: 5px 9px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
+  cursor: pointer; text-decoration: none; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-note-tool:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
+.ws-cmd-note-tool.is-danger:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); }
+.ws-cmd-note-tool:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-note-filter, .ws-cmd-modal-note-filter { margin-bottom: 8px; }
 .ws-cmd-files-drop,
 .ws-cmd-files-browse {
   width: 100%; min-height: 34px; margin-bottom: 6px; display: grid; place-items: center;
@@ -305,6 +338,20 @@
 .ws-cmd-system-host .workspace-detail-config-pane {
   padding: 0;
 }
+.ws-cmd-members-host {
+  max-height: 72vh; overflow: auto; min-width: 0; padding-right: 2px;
+}
+/* Neutralize the mounted detail-view members bento card so it reads as a rail panel body. */
+.ws-cmd-members-host .workspace-detail-panel-members {
+  margin: 0; border: 0; box-shadow: none; background: transparent; border-radius: 0;
+  cursor: default; color: var(--text-primary); padding: 0;
+}
+.ws-cmd-members-host .workspace-detail-panel-members:hover {
+  box-shadow: none; border-color: transparent;
+}
+.ws-cmd-members-host .workspace-detail-panel-close { display: none; }
+.ws-cmd-members-host .workspace-detail-panel-header { padding: 0 0 8px; }
+.ws-cmd-members-host .workspace-detail-panel-body { padding: 0; max-height: none; }
 .ws-cmd-soon {
   display: grid; place-items: center; min-height: 200px; padding: 24px;
   font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); text-align: center;
@@ -410,6 +457,21 @@
 .ws-cmd-modal-filter[aria-pressed="true"],
 .ws-cmd-modal-filter:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
 .ws-cmd-modal-filter:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-viewtoggle { display: inline-flex; border: 1px solid var(--ws-line-bright); }
+.ws-cmd-modal-view {
+  padding: 7px 11px; border: 0; border-right: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
+  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; transition: 0.13s;
+}
+.ws-cmd-modal-view:last-child { border-right: 0; }
+.ws-cmd-modal-view.is-active,
+.ws-cmd-modal-view:hover { color: var(--ws-faction); background: rgba(70, 211, 154, 0.08); }
+.ws-cmd-modal-view:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: -2px; }
+/* Board mode goes wide so status columns have room. */
+.ws-cmd-modal-panel.is-board { max-width: min(1240px, 96vw); }
+.ws-cmd-modal-board-body { flex: 1 1 auto; min-height: 0; padding: 12px 14px; }
+.ws-cmd-board-host { min-width: 0; height: 100%; overflow: auto; }
+/* Neutralize the mounted detail board wrapper chrome inside the modal host. */
+.ws-cmd-board-host .workspace-detail-board { display: block; margin: 0; }
 .ws-cmd-modal-close {
   width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;
@@ -470,6 +532,7 @@
   .ws-cmd-mission { flex-direction: column; }
   .ws-cmd-mission-actions { justify-content: flex-start; }
   .ws-cmd-system-host { max-height: none; }
+  .ws-cmd-members-host { max-height: none; }
 }
 @media (max-width: 640px) {
   .ws-cmd-nav-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }

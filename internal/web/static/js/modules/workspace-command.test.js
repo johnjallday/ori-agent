@@ -441,6 +441,246 @@ test('command rail badges project and reference directory roles', () => {
   assert.match(html, /data-cmd-item-id="dir-ref"/);
 });
 
+test('command bar shows group badge and color accent for group workspaces', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'grp-1',
+      workspace: { name: 'Alpha Group', kind: 'group', color: '#3b82f6', description: '', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+
+  assert.match(html, /ws-cmd-topbar is-group/);
+  assert.match(html, /ws-cmd-group-badge/);
+  assert.match(html, /--ws-group-accent: #3b82f6/);
+  assert.match(html, /Detachment · Command/);
+});
+
+test('group accent color is sourced from the members-panel group node (detail workspace has none)', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'grp-1',
+      // The detail workspace object carries no color; the tree node does.
+      workspace: { name: 'Alpha Group', kind: 'group', description: '', mcp_bindings: [], skill_bindings: [] },
+      membersPanel: { group: { color: '#8b5cf6' } },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+
+  assert.match(html, /--ws-group-accent: #8b5cf6/);
+});
+
+test('command bar omits group treatment for non-group workspaces', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'ws-1',
+      workspace: { name: 'Solo Outpost', kind: 'workspace', description: '', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+
+  assert.doesNotMatch(html, /ws-cmd-group-badge/);
+  assert.doesNotMatch(html, /is-group/);
+  assert.match(html, /Outpost · Command/);
+});
+
+test('detachment rail panel renders only for group workspaces with member count', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: 'members',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      workspace: { name: 'Alpha Group', kind: 'group' },
+      membersPanel: { group: { children: [{ id: 'm1' }, { id: 'm2' }] } }
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.match(html, />Detachment<\/h4>/);
+  assert.match(html, /ws-cmd-panel-count">2</);
+  assert.match(html, /data-cmd-members-host/);
+  assert.match(html, /data-cmd-primary-section="members"/);
+});
+
+test('notes panel exposes tag filter host, multi-select toolbar, and per-note checkboxes when managing', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: 'notes',
+    noteFilterBar: null,
+    page: {
+      workspaceId: 'ws-1',
+      notes: [{ id: 'n1', name: 'Alpha' }, { id: 'n2', name: 'Beta' }],
+      selectedNoteIds: new Set(['n1'])
+    }
+  });
+
+  const html = commandView.renderNotesPanel(commandView.page.notes, true);
+
+  assert.match(html, /data-cmd-note-filter/);
+  assert.match(html, /data-cmd-note-action="select-all"/);
+  assert.match(html, /data-cmd-note-action="copy"/);
+  assert.match(html, /data-cmd-note-action="delete"/);
+  assert.match(html, /href="\/workspaces\/ws-1\/notes"/);
+  assert.match(html, /data-cmd-note-select="n1" checked/);
+  assert.match(html, /data-cmd-note-select="n2"/);
+  assert.doesNotMatch(html, /data-cmd-note-select="n2" checked/);
+});
+
+test('collapsed notes panel stays checkbox-free', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    noteFilterBar: null,
+    page: { notes: [{ id: 'n1', name: 'Alpha' }] }
+  });
+
+  const html = commandView.renderNotesPanel(commandView.page.notes, false);
+  assert.doesNotMatch(html, /data-cmd-note-select/);
+  assert.doesNotMatch(html, /data-cmd-note-action/);
+});
+
+test('handleNoteAction delegates bulk actions to the page', () => {
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    render() { calls.push('render'); },
+    page: {
+      toggleSelectAllNotes: () => calls.push('select-all'),
+      copySelectedNotesToClipboard: () => calls.push('copy'),
+      deleteSelectedNotes: () => calls.push('delete')
+    }
+  });
+
+  commandView.handleNoteAction('select-all');
+  commandView.handleNoteAction('copy');
+  commandView.handleNoteAction('delete');
+
+  assert.deepEqual(calls, ['select-all', 'render', 'copy', 'delete']);
+});
+
+test('note and task tag filters reuse OriTagFilterBar.filterItems on active tags', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriTagFilterBar: {
+      filterItems: (items, active) => items.filter(i => (i.tags || []).some(t => active.includes(t)))
+    }
+  };
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      noteFilterBar: { getActiveTags: () => ['urgent'] },
+      taskFilterBar: { getActiveTags: () => ['urgent'] },
+      taskModalShowAll: true,
+      page: {
+        notes: [{ id: 'n1', tags: ['urgent'] }, { id: 'n2', tags: ['later'] }],
+        tasks: [{ id: 't1', tags: ['urgent'] }, { id: 't2', tags: [] }]
+      }
+    });
+
+    assert.deepEqual(commandView.visibleNotes(commandView.page.notes).map(n => n.id), ['n1']);
+    assert.deepEqual(commandView.taskRowData({ includeAll: true }).map(t => t.id), ['t1']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('tasks modal exposes a List/Board view toggle and renders the board host in board mode', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    taskModalShowAll: false,
+    taskModalBoardMode: false,
+    page: { tasks: [] }
+  });
+
+  const listHtml = commandView.statModalHTML('tasks');
+  assert.match(listHtml, /data-cmd-modal-action="view-list"/);
+  assert.match(listHtml, /data-cmd-modal-action="view-board"/);
+  assert.doesNotMatch(listHtml, /data-cmd-board-host/);
+
+  commandView.taskModalBoardMode = true;
+  const boardHtml = commandView.statModalHTML('tasks');
+  assert.match(boardHtml, /data-cmd-board-host/);
+  // The list-only "Show all" filter is hidden while the board is showing.
+  assert.doesNotMatch(boardHtml, /data-cmd-modal-action="toggle-task-filter"/);
+});
+
+test('view-board / view-list toggle flips board mode and hands the board node back on exit', () => {
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    statModalSection: 'tasks',
+    taskModalBoardMode: false,
+    page: { setView: (v) => calls.push(['setView', v]) },
+    renderStatModalBody() { calls.push(['render']); },
+    syncBoardSurface(opts) { calls.push(['sync', opts && opts.load === true]); },
+    restoreSharedSurface(key) { calls.push(['restore', key]); }
+  });
+
+  commandView.handleStatModalAction('view-board');
+  assert.equal(commandView.taskModalBoardMode, true);
+  assert.deepEqual(calls, [['render'], ['sync', true]]);
+
+  calls.length = 0;
+  commandView.handleStatModalAction('view-list');
+  assert.equal(commandView.taskModalBoardMode, false);
+  assert.deepEqual(calls, [['restore', 'board'], ['setView', 'list'], ['render']]);
+});
+
+test('detachment rail panel is absent for non-group workspaces', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    page: {
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      workspace: { name: 'Solo', kind: 'workspace' }
+    }
+  });
+
+  const html = commandView.renderRail();
+
+  assert.doesNotMatch(html, /Detachment/);
+});
+
 test('empty rail panels collapse to the header but keep primary actions', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -616,8 +856,10 @@ test('systems shared surface mounts config or tools without cloning persistence 
     ['tab', 'plugins'],
     ['refresh', 'plugins'],
     ['expand', 'config'],
+    ['restore', 'members'],
     ['restore', 'config'],
-    ['mount', 'tools', '#workspace-detail-tools-card']
+    ['mount', 'tools', '#workspace-detail-tools-card'],
+    ['restore', 'members']
   ]);
 });
 

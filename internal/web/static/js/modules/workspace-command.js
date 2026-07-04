@@ -32,6 +32,7 @@ export class WorkspaceCommandView {
     this.statModalEl = null;
     this.statModalTrigger = null;
     this.taskModalShowAll = false;
+    this.taskModalBoardMode = false;
     this.identityExpanded = false;
     this.identityEditMode = '';
     this.identitySaving = false;
@@ -245,8 +246,49 @@ export class WorkspaceCommandView {
       '</div><div class="ws-l">' + escapeHtml(label) + '</div></button>';
   }
 
+  isGroupWorkspace() {
+    const ws = (this.page && this.page.workspace) || {};
+    return String(ws.kind || '').trim().toLowerCase() === 'group';
+  }
+
+  hexToRgba(hex, alpha) {
+    if (!hex || typeof hex !== 'string') return '';
+    const cleaned = hex.replace('#', '').trim();
+    if (cleaned.length !== 6) return '';
+    const r = parseInt(cleaned.slice(0, 2), 16);
+    const g = parseInt(cleaned.slice(2, 4), 16);
+    const b = parseInt(cleaned.slice(4, 6), 16);
+    if ([r, g, b].some(Number.isNaN)) return '';
+    return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+  }
+
+  groupColor(ws) {
+    // The detail workspace object carries no color; the tree node loaded by the
+    // members panel is the reliable source. Fall back to any color on ws.
+    const panelGroup = this.page && this.page.membersPanel && this.page.membersPanel.group;
+    const fromPanel = panelGroup ? panelGroup.color : '';
+    return String(fromPanel || (ws && ws.color) || '').trim();
+  }
+
+  groupAccentStyle(ws) {
+    if (!this.isGroupWorkspace()) return '';
+    const color = this.groupColor(ws);
+    if (!color) return '';
+    const soft = this.hexToRgba(color, 0.14);
+    const line = this.hexToRgba(color, 0.5);
+    const vars = ['--ws-group-accent: ' + color];
+    if (soft) vars.push('--ws-group-accent-soft: ' + soft);
+    if (line) vars.push('--ws-group-accent-line: ' + line);
+    return ' style="' + escapeHtml(vars.join('; ')) + '"';
+  }
+
   commandBarHTML(ws, name, mode, stats) {
     const description = String((ws && ws.description) || '').trim();
+    const isGroup = this.isGroupWorkspace();
+    const kicker = isGroup ? 'Detachment · Command' : 'Outpost · Command';
+    const groupBadge = isGroup
+      ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
+      : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
     const descriptionClass = 'ws-cmd-description' +
@@ -258,7 +300,7 @@ export class WorkspaceCommandView {
     const subtitle = this.commandSubtitle(mode);
 
     return (
-      '<header class="ws-cmd-topbar">' +
+      '<header class="ws-cmd-topbar' + (isGroup ? ' is-group' : '') + '"' + this.groupAccentStyle(ws) + '>' +
       '<div class="ws-cmd-nav">' +
       '<a class="ws-cmd-nav-btn" href="/workspaces" aria-label="Back to workspaces">Workspaces</a>' +
       '<button type="button" class="ws-cmd-nav-btn" data-ws-cmd-detailed aria-label="Open detailed view">Detailed</button>' +
@@ -271,9 +313,10 @@ export class WorkspaceCommandView {
       '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>' +
       '</div>' +
       '<div class="ws-cmd-title">' +
-      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">Outpost · Command</span></div>' +
+      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">' + escapeHtml(kicker) + '</span></div>' +
       '<div class="ws-cmd-title-row">' +
       '<h2>' + escapeHtml(name) + '</h2>' +
+      groupBadge +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
@@ -424,6 +467,7 @@ export class WorkspaceCommandView {
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
+    this.mountNoteFilterBar();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
@@ -628,7 +672,10 @@ export class WorkspaceCommandView {
     const section = String(sectionKey || '').trim();
     if (!this.statSectionMeta(section)) return;
     this.statModalSection = section;
-    if (section === 'tasks') this.taskModalShowAll = false;
+    if (section === 'tasks') {
+      this.taskModalShowAll = false;
+      this.taskModalBoardMode = false;
+    }
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
@@ -643,8 +690,16 @@ export class WorkspaceCommandView {
 
   closeStatModal() {
     const trigger = this.statModalTrigger;
+    const wasBoard = this.taskModalBoardMode;
     this.statModalSection = '';
     this.statModalTrigger = null;
+    this.taskModalBoardMode = false;
+    // Hand the live board node back to its Detailed home before hiding.
+    if (wasBoard) {
+      this.restoreSharedSurface('board');
+      const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      if (page && typeof page.setView === 'function') page.setView('list');
+    }
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
     if (trigger && typeof trigger.focus === 'function') trigger.focus();
@@ -727,27 +782,106 @@ export class WorkspaceCommandView {
     if (!panel) return;
     const meta = this.statSectionMeta(this.statModalSection);
     if (meta) panel.setAttribute('aria-label', meta.title);
+    const boardMode = this.statModalSection === 'tasks' && this.taskModalBoardMode;
+    if (panel.classList) panel.classList.toggle('is-board', boardMode);
     panel.innerHTML = this.statModalHTML(this.statModalSection);
+    this.syncBoardSurface();
+    this.mountTaskFilterBar();
+  }
+
+  ensureTaskFilterBar() {
+    if (this.taskFilterBar) return this.taskFilterBar;
+    const helper = this.tagFilterHelper();
+    if (!helper || typeof helper.createTagFilterBar !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const holder = document.createElement('div');
+    this.taskFilterBar = helper.createTagFilterBar({
+      container: holder,
+      label: 'Tags',
+      onChange: () => this.renderStatModalBody()
+    });
+    return this.taskFilterBar;
+  }
+
+  mountTaskFilterBar() {
+    if (this.statModalSection !== 'tasks' || this.taskModalBoardMode) return;
+    const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
+    const host = panel && panel.querySelector('[data-cmd-task-filter]');
+    if (!host) return;
+    const bar = this.ensureTaskFilterBar();
+    if (!bar || !bar.element) return;
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const helper = this.tagFilterHelper();
+    if (helper && typeof helper.collectTags === 'function' && typeof bar.setAvailableTags === 'function') {
+      bar.setAvailableTags(helper.collectTags(tasks));
+    }
+    host.innerHTML = '';
+    host.appendChild(bar.element);
+  }
+
+  syncBoardSurface({ load = false } = {}) {
+    const inBoard = this.statModalSection === 'tasks' &&
+      this.taskModalBoardMode &&
+      this.statModalEl && !this.statModalEl.hidden;
+    if (!inBoard) {
+      this.restoreSharedSurface('board');
+      return;
+    }
+    const host = this.statModalEl.querySelector('[data-cmd-board-host]');
+    if (!host) return;
+    const board = this.mountSharedSurface('board', '#workspace-detail-tasks-board', host);
+    if (!board) {
+      host.innerHTML = '<div class="ws-cmd-modal-empty">Board is unavailable.</div>';
+      return;
+    }
+    if (board.style) board.style.display = '';
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (load && page && typeof page.setView === 'function') page.setView('board');
   }
 
   statModalHTML(section) {
     const meta = this.statSectionMeta(section);
     if (!meta) return '';
+    const boardMode = section === 'tasks' && this.taskModalBoardMode;
+    const taskFilterHost = section === 'tasks'
+      ? '<div class="ws-cmd-modal-note-filter" data-cmd-task-filter></div>'
+      : '';
+    const body = boardMode
+      ? '<div class="ws-cmd-modal-body ws-cmd-modal-board-body">' +
+        '<div class="ws-cmd-board-host" data-cmd-board-host>' +
+        '<div class="ws-cmd-modal-empty">Loading board...</div>' +
+        '</div></div>'
+      : '<div class="ws-cmd-modal-body">' + taskFilterHost + this.statModalRows(section) + '</div>';
     return (
       '<header class="ws-cmd-modal-head">' +
       '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
       '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>' +
       '<div class="ws-cmd-modal-head-actions">' +
-      this.statModalFilterToggleHTML(section) +
+      this.taskViewToggleHTML(section) +
+      (boardMode ? '' : this.statModalFilterToggleHTML(section)) +
       '<button type="button" class="ws-cmd-modal-add" data-cmd-modal-action="add">' + escapeHtml(meta.addLabel) + '</button>' +
       '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
       '</div>' +
       '</header>' +
-      '<div class="ws-cmd-modal-body">' + this.statModalRows(section) + '</div>' +
+      body +
       '<footer class="ws-cmd-modal-foot">' +
       '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">' +
       escapeHtml(this.statModalFooterLabel(section)) + '</button>' +
       '</footer>'
+    );
+  }
+
+  taskViewToggleHTML(section) {
+    if (String(section || '') !== 'tasks') return '';
+    const board = this.taskModalBoardMode;
+    return (
+      '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Task view">' +
+      '<button type="button" class="ws-cmd-modal-view' + (board ? '' : ' is-active') +
+      '" data-cmd-modal-action="view-list" aria-pressed="' + (board ? 'false' : 'true') + '">List</button>' +
+      '<button type="button" class="ws-cmd-modal-view' + (board ? ' is-active' : '') +
+      '" data-cmd-modal-action="view-board" aria-pressed="' + (board ? 'true' : 'false') + '">Board</button>' +
+      '</div>'
     );
   }
 
@@ -852,10 +986,24 @@ export class WorkspaceCommandView {
     return status === 'pending' || status === 'in_progress';
   }
 
+  taskFilterActiveTags() {
+    const bar = this.taskFilterBar;
+    return bar && typeof bar.getActiveTags === 'function' ? bar.getActiveTags() : [];
+  }
+
+  applyTaskTagFilter(tasks) {
+    const all = Array.isArray(tasks) ? tasks : [];
+    const active = this.taskFilterActiveTags();
+    const helper = this.tagFilterHelper();
+    if (!active.length || !helper || typeof helper.filterItems !== 'function') return all;
+    return helper.filterItems(all, active);
+  }
+
   taskRowData({ includeAll = false } = {}) {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    return includeAll ? tasks : tasks.filter((task) => this.isOpenTask(task));
+    const base = includeAll ? tasks : tasks.filter((task) => this.isOpenTask(task));
+    return this.applyTaskTagFilter(base);
   }
 
   taskRowsHTML() {
@@ -987,6 +1135,20 @@ export class WorkspaceCommandView {
       this.renderStatModalBody();
       return;
     }
+    if ((a === 'view-board' || a === 'view-list') && section === 'tasks') {
+      const nextBoard = a === 'view-board';
+      if (this.taskModalBoardMode === nextBoard) return;
+      this.taskModalBoardMode = nextBoard;
+      if (!nextBoard) {
+        this.restoreSharedSurface('board');
+        if (typeof page.setView === 'function') page.setView('list');
+        this.renderStatModalBody();
+      } else {
+        this.renderStatModalBody();
+        this.syncBoardSurface({ load: true });
+      }
+      return;
+    }
     if (a === 'detailed') {
       this.closeStatModal();
       if (section === 'mcp' || section === 'skills') {
@@ -1032,6 +1194,25 @@ export class WorkspaceCommandView {
     this.render();
   }
 
+  handleNoteAction(action) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page) return;
+    switch (String(action || '')) {
+      case 'select-all':
+        if (typeof page.toggleSelectAllNotes === 'function') page.toggleSelectAllNotes();
+        this.render();
+        break;
+      case 'copy':
+        if (typeof page.copySelectedNotesToClipboard === 'function') page.copySelectedNotesToClipboard();
+        break;
+      case 'delete':
+        if (typeof page.deleteSelectedNotes === 'function') page.deleteSelectedNotes();
+        break;
+      default:
+        break;
+    }
+  }
+
   runRailPrimaryAction(sectionKey, triggerButton) {
     const page = this.page || window.workspaceDetail;
     switch (String(sectionKey || '')) {
@@ -1052,6 +1233,15 @@ export class WorkspaceCommandView {
         break;
       case 'systems':
         this.openSystemTab(this.activeSystemTab || 'mcp');
+        break;
+      case 'members':
+        if (this.activeRailSection !== 'members') {
+          this.activeRailSection = 'members';
+          this.render();
+        }
+        if (page && page.membersPanel && typeof page.membersPanel.openAddPicker === 'function') {
+          page.membersPanel.openAddPicker();
+        }
         break;
       default:
         break;
@@ -1172,13 +1362,14 @@ export class WorkspaceCommandView {
   }
 
   questLogHTML(group, encoded) {
-    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const tasks = this.applyTaskTagFilter(Array.isArray(group.tasks) ? group.tasks : []);
     const add = group.isUnassigned ? '' :
       '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' + escapeHtml(encoded) +
       '" aria-label="Add task">＋</button>';
     const head = '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' + tasks.length + '</span>' + add + '</div>';
     if (!tasks.length) {
-      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">— no tasks yet —</div></div>';
+      const emptyText = this.taskFilterActiveTags().length ? '— no tasks match the tag filter —' : '— no tasks yet —';
+      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">' + emptyText + '</div></div>';
     }
     const items = tasks.map((t) => {
       const label = String(t.description || t.name || t.title || 'Task');
@@ -1501,6 +1692,163 @@ export class WorkspaceCommandView {
     );
   }
 
+  detachmentMemberCount() {
+    const panel = this.page && this.page.membersPanel;
+    const group = panel && panel.group;
+    if (!group || !Array.isArray(group.children)) return 0;
+    return group.children.length;
+  }
+
+  renderDetachmentPanel(expanded) {
+    if (!this.isGroupWorkspace()) return '';
+    const count = this.detachmentMemberCount();
+    return (
+      '<section class="ws-cmd-panel ws-cmd-detachment-panel' + (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') + '">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Detachment</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="members">Add Member</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="members" aria-expanded="' +
+      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
+      '" aria-label="' + (expanded ? 'Close Detachment manager' : 'Manage members in Command view') + '">' +
+      (expanded ? '×' : '▸') + '</button>' +
+      '</div>' +
+      '</div>' +
+      (expanded
+        ? '<div class="ws-cmd-panel-body ws-cmd-detachment-body">' +
+          '<div class="ws-cmd-members-host" data-cmd-members-host>' +
+          '<div class="ws-cmd-rail-empty">Loading detachment...</div>' +
+          '</div>' +
+          '</div>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  // ---------- notes panel (tag filter + multi-select) ----------
+
+  tagFilterHelper() {
+    return (typeof window !== 'undefined' && window.OriTagFilterBar) || null;
+  }
+
+  noteFilterActiveTags() {
+    const bar = this.noteFilterBar;
+    return bar && typeof bar.getActiveTags === 'function' ? bar.getActiveTags() : [];
+  }
+
+  visibleNotes(notes) {
+    const all = Array.isArray(notes) ? notes : [];
+    const active = this.noteFilterActiveTags();
+    const helper = this.tagFilterHelper();
+    if (!active.length || !helper || typeof helper.filterItems !== 'function') return all;
+    return helper.filterItems(all, active);
+  }
+
+  isNoteSelected(id) {
+    const set = this.page && this.page.selectedNoteIds;
+    return set && typeof set.has === 'function' ? set.has(String(id)) : false;
+  }
+
+  noteRowsHTML(list, expanded, total) {
+    const arr = Array.isArray(list) ? list : [];
+    const limit = expanded ? arr.length : 5;
+    const shown = arr.slice(0, limit);
+    const rows = shown.map((note) => {
+      const id = String(note.id || '');
+      const label = escapeHtml(note.name || note.title || 'Untitled Note');
+      const checkbox = expanded
+        ? '<input type="checkbox" class="ws-cmd-note-check" data-cmd-note-select="' + escapeHtml(id) + '"' +
+          (this.isNoteSelected(id) ? ' checked' : '') + ' aria-label="Select ' + label + '">'
+        : '';
+      return (
+        '<div class="ws-cmd-rail-item ws-cmd-note-row">' +
+        checkbox +
+        '<button type="button" class="ws-cmd-note-open" data-cmd-open-section="notes" data-cmd-item-id="' +
+        escapeHtml(id) + '"><span class="ws-cmd-rail-t">' + label + '</span></button>' +
+        '</div>'
+      );
+    });
+    if (arr.length > shown.length) {
+      rows.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="notes">+ ' +
+        (arr.length - shown.length) + ' more</button>');
+    }
+    if (expanded && !arr.length) {
+      rows.push('<div class="ws-cmd-rail-empty">' +
+        (total ? 'No notes match the active tag filter.' : 'No notes yet.') + '</div>');
+    }
+    return rows;
+  }
+
+  noteMultiSelectToolbarHTML() {
+    return (
+      '<div class="ws-cmd-note-tools" role="group" aria-label="Note bulk actions">' +
+      '<button type="button" class="ws-cmd-note-tool" data-cmd-note-action="select-all">Select all</button>' +
+      '<button type="button" class="ws-cmd-note-tool" data-cmd-note-action="copy">Copy</button>' +
+      '<button type="button" class="ws-cmd-note-tool is-danger" data-cmd-note-action="delete">Delete</button>' +
+      '<a class="ws-cmd-note-tool" href="' + escapeHtml(this.workspaceRoute('/notes')) + '">View all</a>' +
+      '</div>'
+    );
+  }
+
+  renderNotesPanel(notes, expanded) {
+    const all = Array.isArray(notes) ? notes : [];
+    const visible = this.visibleNotes(all);
+    const count = all.length;
+    const rows = this.noteRowsHTML(visible, expanded, count).join('');
+    const hasBody = expanded || visible.length > 0;
+    const body = expanded
+      ? '<div class="ws-cmd-note-filter" data-cmd-note-filter></div>' +
+        this.noteMultiSelectToolbarHTML() +
+        rows
+      : (visible.length ? rows : '<div class="ws-cmd-rail-empty">No notes yet.</div>');
+    return (
+      '<section class="ws-cmd-panel ws-cmd-notes-panel' + (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') + '">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Notes</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="notes">New Note</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="notes" aria-expanded="' +
+      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
+      '" aria-label="' + (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') + '">' +
+      (expanded ? '×' : '▸') + '</button>' +
+      '</div>' +
+      '</div>' +
+      (hasBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
+      '</section>'
+    );
+  }
+
+  ensureNoteFilterBar() {
+    if (this.noteFilterBar) return this.noteFilterBar;
+    const helper = this.tagFilterHelper();
+    if (!helper || typeof helper.createTagFilterBar !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const holder = document.createElement('div');
+    this.noteFilterBar = helper.createTagFilterBar({
+      container: holder,
+      label: 'Tags',
+      onChange: () => this.render()
+    });
+    return this.noteFilterBar;
+  }
+
+  mountNoteFilterBar() {
+    if (!this.container) return;
+    const host = this.container.querySelector('[data-cmd-note-filter]');
+    if (!host) return;
+    const bar = this.ensureNoteFilterBar();
+    if (!bar || !bar.element) return;
+    const notes = Array.isArray(this.page && this.page.notes) ? this.page.notes : [];
+    const helper = this.tagFilterHelper();
+    if (helper && typeof helper.collectTags === 'function' && typeof bar.setAvailableTags === 'function') {
+      bar.setAvailableTags(helper.collectTags(notes));
+    }
+    host.innerHTML = '';
+    host.appendChild(bar.element);
+  }
+
   renderRail() {
     const page = this.page || {};
     const notes = Array.isArray(page.notes) ? page.notes : [];
@@ -1515,12 +1863,8 @@ export class WorkspaceCommandView {
     const foldersExpanded = this.activeRailSection === 'folders';
     const filesExpanded = this.activeRailSection === 'files';
     const systemsExpanded = this.activeRailSection === 'systems';
+    const detachmentExpanded = this.activeRailSection === 'members';
 
-    const notesItems = this.railItems(notes, (n) => n.name || n.title || 'Untitled Note', {
-      sectionKey: 'notes',
-      expanded: notesExpanded,
-      action: (n) => 'data-cmd-open-section="notes" data-cmd-item-id="' + escapeHtml(String(n.id || '')) + '"'
-    });
     const scheduleItems = this.railItems(schedules, (s) => s.name || s.task_description || 'Unnamed Schedule', {
       sectionKey: 'schedules',
       expanded: schedulesExpanded,
@@ -1535,10 +1879,11 @@ export class WorkspaceCommandView {
     const folderItems = this.folderRailItems(dirs, foldersExpanded);
 
     return (
-      this.railPanelHTML('notes', 'Notes', notesItems, notes.length, 'No notes yet.', 'New Note') +
+      this.renderNotesPanel(notes, notesExpanded) +
       this.railPanelHTML('schedules', 'Schedules', scheduleItems, schedules.length, 'No schedules yet.', 'Open Schedules') +
       this.railPanelHTML('sessions', 'Sessions', sessionItems, sessions.length, 'No sessions yet.', 'New Session') +
       this.railPanelHTML('folders', 'Linked Folders', folderItems, dirs.length, 'No linked folders yet.', 'Link Folder') +
+      this.renderDetachmentPanel(detachmentExpanded) +
       this.renderFilesPanel(files, filesExpanded) +
       this.renderSystemsPanel(systemsExpanded)
     );
@@ -1593,6 +1938,8 @@ export class WorkspaceCommandView {
   restoreSharedSurfaces() {
     this.restoreSharedSurface('config');
     this.restoreSharedSurface('tools');
+    this.restoreSharedSurface('members');
+    this.restoreSharedSurface('board');
   }
 
   showConfigTab(tab) {
@@ -1669,9 +2016,15 @@ export class WorkspaceCommandView {
   }
 
   syncSharedSurfaces() {
+    this.syncSystemsSurface();
+    this.syncDetachmentSurface();
+  }
+
+  syncSystemsSurface() {
     const host = this.container && this.container.querySelector('[data-cmd-system-host]');
     if (!this.active || this.activeRailSection !== 'systems' || !host) {
-      this.restoreSharedSurfaces();
+      this.restoreSharedSurface('config');
+      this.restoreSharedSurface('tools');
       return;
     }
 
@@ -1692,6 +2045,24 @@ export class WorkspaceCommandView {
     this.showConfigTab(tab);
     this.refreshSystemTabData(tab);
     this.expandMountedConfig(config);
+  }
+
+  async syncDetachmentSurface() {
+    if (!this.active || this.activeRailSection !== 'members') {
+      this.restoreSharedSurface('members');
+      return;
+    }
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (page && page.membersPanel && typeof page.membersPanel.syncWorkspace === 'function') {
+      try { await page.membersPanel.syncWorkspace(page.workspace); } catch (err) { /* keep going */ }
+    }
+    // Re-query after the await: a later render may have replaced the host.
+    const host = this.container && this.container.querySelector('[data-cmd-members-host]');
+    if (!host) return;
+    const members = this.mountSharedSurface('members', '#workspace-detail-members-panel', host);
+    if (!members) {
+      host.innerHTML = '<div class="ws-cmd-rail-empty">Members are unavailable.</div>';
+    }
   }
 
   setFileDropActive(dropZone, isActive) {
@@ -1732,6 +2103,11 @@ export class WorkspaceCommandView {
         this.toggleRailManager(manageBtn.getAttribute('data-cmd-manage-section'));
         return;
       }
+      const noteAction = event.target.closest('[data-cmd-note-action]');
+      if (noteAction) {
+        this.handleNoteAction(noteAction.getAttribute('data-cmd-note-action'));
+        return;
+      }
       const itemBtn = event.target.closest('[data-cmd-open-section][data-cmd-item-id]');
       if (itemBtn) {
         this.openRailItem(
@@ -1739,6 +2115,14 @@ export class WorkspaceCommandView {
           itemBtn.getAttribute('data-cmd-item-id'),
           itemBtn.getAttribute('data-cmd-item-source')
         );
+      }
+    });
+    root.addEventListener('change', (event) => {
+      const cb = event.target.closest('[data-cmd-note-select]');
+      if (!cb) return;
+      const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      if (page && typeof page.toggleNoteSelection === 'function') {
+        page.toggleNoteSelection(cb.getAttribute('data-cmd-note-select'), cb.checked);
       }
     });
     root.addEventListener('dragover', (event) => {
