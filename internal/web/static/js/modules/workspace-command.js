@@ -17,12 +17,6 @@ function escapeHtml(value) {
   });
 }
 
-function statBox(value, label, sectionKey, ariaLabel) {
-  return '<button type="button" class="ws-cmd-stat" data-cmd-section="' + escapeHtml(sectionKey) +
-    '" aria-label="' + escapeHtml(ariaLabel) + '"><div class="ws-v">' + escapeHtml(value) +
-    '</div><div class="ws-l">' + escapeHtml(label) + '</div></button>';
-}
-
 export class WorkspaceCommandView {
   /**
    * @param {object} page - the live WorkspaceDetailPage instance (window.workspaceDetail).
@@ -38,6 +32,13 @@ export class WorkspaceCommandView {
     this.statModalEl = null;
     this.statModalTrigger = null;
     this.taskModalShowAll = false;
+    this.identityExpanded = false;
+    this.identityEditMode = '';
+    this.identitySaving = false;
+    this.commandTagInput = null;
+    this.commandTagDraft = [];
+    this.commandTagError = '';
+    this.boundGlobalKeydown = (event) => this.handleGlobalKeydown(event);
     this.setup();
   }
 
@@ -95,6 +96,9 @@ export class WorkspaceCommandView {
     this.render();
     if (this.container) this.container.hidden = false;
     if (this.detailedView) this.detailedView.hidden = true;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('keydown', this.boundGlobalKeydown);
+    }
     this.updateToggle();
     this.persist('command');
     if (syncUrl) this.syncURL('command');
@@ -102,7 +106,13 @@ export class WorkspaceCommandView {
 
   deactivate({ persist = true, syncUrl = true } = {}) {
     this.active = false;
+    this.activeRailSection = '';
+    this.identityEditMode = '';
+    this.destroyCommandTagInput();
     this.closeStatModal();
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('keydown', this.boundGlobalKeydown);
+    }
     if (this.container) this.container.hidden = true;
     if (this.detailedView) this.detailedView.hidden = false;
     this.updateToggle();
@@ -121,6 +131,14 @@ export class WorkspaceCommandView {
   refresh() {
     if (this.active) this.render();
     else if (this.statModalSection) this.renderStatModalBody();
+  }
+
+  handleGlobalKeydown(event) {
+    if (!this.active || !event || event.key !== 'Escape') return;
+    if (this.statModalSection || this.identityEditMode) return;
+    if (!this.activeRailSection) return;
+    this.activeRailSection = '';
+    this.render();
   }
 
   computeStats() {
@@ -159,32 +177,166 @@ export class WorkspaceCommandView {
     }
   }
 
+  workspaceId() {
+    const page = this.page || {};
+    return String(page.workspaceId || (page.workspace && page.workspace.id) || '').trim();
+  }
+
+  workspaceTags() {
+    const page = this.page || {};
+    if (typeof page.getWorkspaceTags === 'function') {
+      try { return page.getWorkspaceTags(); } catch (err) { return []; }
+    }
+    const ws = page.workspace || {};
+    return Array.isArray(ws.tags) ? ws.tags.map(tag => String(tag || '').trim()).filter(Boolean) : [];
+  }
+
+  workflowHref() {
+    const page = this.page || {};
+    if (typeof page.collectWorkspaceWorkflowReferences === 'function' && typeof page.buildBehaviorStudioHref === 'function') {
+      try {
+        const refs = page.collectWorkspaceWorkflowReferences();
+        if (Array.isArray(refs) && refs.length === 1) {
+          return page.buildBehaviorStudioHref(refs[0].templateId);
+        }
+      } catch (err) {
+        return '/workflows';
+      }
+    }
+    return '/workflows';
+  }
+
+  workspaceRoute(suffix = '') {
+    const id = this.workspaceId();
+    return id ? '/workspaces/' + encodeURIComponent(id) + suffix : '#';
+  }
+
+  hasAttentionTasks() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    return tasks.some(task => {
+      const status = String((task && task.status) || '').toLowerCase();
+      return status === 'failed' || status === 'blocked';
+    });
+  }
+
+  statBoxHTML(value, label, sectionKey, ariaLabel, extraClass = '') {
+    const className = ('ws-cmd-stat ' + String(extraClass || '')).trim();
+    return '<button type="button" class="' + escapeHtml(className) + '" data-cmd-section="' + escapeHtml(sectionKey) +
+      '" aria-label="' + escapeHtml(ariaLabel) + '"><div class="ws-v">' + escapeHtml(value) +
+      '</div><div class="ws-l">' + escapeHtml(label) + '</div></button>';
+  }
+
+  commandBarHTML(ws, name, mode, stats) {
+    const description = String((ws && ws.description) || '').trim();
+    const tags = this.workspaceTags();
+    const isLongDescription = Array.from(description).length > 150;
+    const descriptionClass = 'ws-cmd-description' +
+      (!description ? ' is-empty' : '') +
+      (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
+    const descriptionText = description || 'No description';
+    const workflowHref = this.workflowHref();
+
+    return (
+      '<header class="ws-cmd-topbar">' +
+      '<div class="ws-cmd-nav">' +
+      '<a class="ws-cmd-nav-btn" href="/workspaces" aria-label="Back to workspaces">Workspaces</a>' +
+      '<button type="button" class="ws-cmd-nav-btn" data-ws-cmd-detailed aria-label="Open detailed view">Detailed</button>' +
+      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/canvas')) + '">Canvas</a>' +
+      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/diagnostics')) + '">Diagnostics</a>' +
+      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(workflowHref) + '">Orchestration Skills</a>' +
+      '</div>' +
+      '<div class="ws-cmd-crest">' +
+      '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
+      '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>' +
+      '</div>' +
+      '<div class="ws-cmd-title">' +
+      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">Outpost · Command</span></div>' +
+      '<div class="ws-cmd-title-row">' +
+      '<h2>' + escapeHtml(name) + '</h2>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
+      '</div>' +
+      (mode ? '<div class="ws-sub">Workflow · ' + escapeHtml(mode) + '</div>' : '') +
+      '<div class="ws-cmd-description-row">' +
+      '<p class="' + descriptionClass + '">' + escapeHtml(descriptionText) + '</p>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description">Edit</button>' +
+      (isLongDescription
+        ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
+          (this.identityExpanded ? 'true' : 'false') + '">' + (this.identityExpanded ? 'Less' : 'More') + '</button>'
+        : '') +
+      '</div>' +
+      '<div class="ws-cmd-tags-row">' +
+      '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="tags" aria-label="Edit workspace tags">Edit</button>' +
+      '</div>' +
+      this.identityEditorHTML(name, description) +
+      '</div>' +
+      '<div class="ws-cmd-readout">' +
+      this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
+      this.statBoxHTML(stats.openTasks, 'Open Tasks', 'tasks', 'View open tasks', this.hasAttentionTasks() ? 'is-alert' : '') +
+      this.statBoxHTML(stats.mcp, 'MCP', 'mcp', 'Open MCP settings') +
+      this.statBoxHTML(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
+      '</div>' +
+      '</header>'
+    );
+  }
+
+  commandTagsHTML(tags) {
+    const arr = Array.isArray(tags) ? tags : [];
+    if (!arr.length) return '<span class="ws-cmd-tag-empty">No tags</span>';
+    const limit = 8;
+    const shown = arr.slice(0, limit).map(tag => '<span class="ws-cmd-tag">' + escapeHtml(tag) + '</span>').join('');
+    const more = arr.length > limit ? '<span class="ws-cmd-tag is-more">+' + (arr.length - limit) + '</span>' : '';
+    return shown + more;
+  }
+
+  identityEditorHTML(name, description) {
+    const mode = this.identityEditMode;
+    if (!mode) return '';
+    if (mode === 'name' || mode === 'description') {
+      const isDescription = mode === 'description';
+      const value = isDescription ? description : name;
+      const field = isDescription
+        ? '<textarea class="ws-cmd-identity-field" data-cmd-identity-input rows="2">' + escapeHtml(value) + '</textarea>'
+        : '<input class="ws-cmd-identity-field" data-cmd-identity-input type="text" value="' + escapeHtml(value) + '">';
+      return (
+        '<form class="ws-cmd-identity-editor" data-cmd-identity-form="' + escapeHtml(mode) + '">' +
+        field +
+        '<div class="ws-cmd-identity-actions">' +
+        '<button type="submit" class="ws-cmd-identity-save"' + (this.identitySaving ? ' disabled' : '') + '>Save</button>' +
+        '<button type="button" class="ws-cmd-identity-cancel" data-cmd-cancel-identity>Cancel</button>' +
+        '</div>' +
+        '</form>'
+      );
+    }
+    if (mode === 'tags') {
+      return (
+        '<div class="ws-cmd-identity-editor" data-cmd-identity-form="tags">' +
+        '<div class="ws-cmd-tags-editor-mount" data-cmd-tags-mount></div>' +
+        (this.commandTagError ? '<div class="ws-cmd-identity-error" role="alert">' + escapeHtml(this.commandTagError) + '</div>' : '') +
+        '<div class="ws-cmd-identity-actions">' +
+        '<button type="button" class="ws-cmd-identity-save" data-cmd-save-tags' + (this.identitySaving ? ' disabled' : '') + '>Save</button>' +
+        '<button type="button" class="ws-cmd-identity-cancel" data-cmd-cancel-identity>Cancel</button>' +
+        '</div>' +
+        '</div>'
+      );
+    }
+    return '';
+  }
+
   render() {
     if (!this.container) return;
+    if (this.commandTagInput) {
+      try { this.commandTagDraft = this.commandTagInput.getTags(); } catch (err) { /* keep existing draft */ }
+      this.destroyCommandTagInput();
+    }
     const ws = (this.page && this.page.workspace) || {};
     const name = String(ws.name || 'Workspace');
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
 
     this.container.innerHTML =
-      '<header class="ws-cmd-topbar">' +
-      '<button type="button" class="ws-cmd-back" data-ws-cmd-detailed aria-label="Back to detailed view">◂ Detailed</button>' +
-      '<div class="ws-cmd-crest">' +
-      '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">' +
-      '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>' +
-      '</div>' +
-      '<div class="ws-cmd-title">' +
-      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">Outpost · Command</span></div>' +
-      '<h2>' + escapeHtml(name) + '</h2>' +
-      (mode ? '<div class="ws-sub">Workflow · ' + escapeHtml(mode) + '</div>' : '') +
-      '</div>' +
-      '<div class="ws-cmd-readout">' +
-      statBox(stats.agents, 'Agents', 'agents', 'View agents') +
-      statBox(stats.openTasks, 'Open Tasks', 'tasks', 'View open tasks') +
-      statBox(stats.mcp, 'MCP', 'mcp', 'Open MCP settings') +
-      statBox(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
-      '</div>' +
-      '</header>' +
+      this.commandBarHTML(ws, name, mode, stats) +
       '<div class="ws-cmd-layout">' +
       '<section class="ws-cmd-garrison">' + this.renderGarrison() + '</section>' +
       '<aside class="ws-cmd-rail">' + this.renderRail() + '</aside>' +
@@ -192,15 +344,153 @@ export class WorkspaceCommandView {
 
     const back = this.container.querySelector('[data-ws-cmd-detailed]');
     if (back) back.addEventListener('click', () => this.deactivate());
+    this.bindIdentityControls();
     this.bindReadout();
     this.bindGarrison();
     this.bindRail();
+    this.mountCommandTagInput();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
     if (this.statModalEl && this.container && this.container.appendChild) {
       this.container.appendChild(this.statModalEl);
-      if (this.statModalSection) this.renderStatModalBody();
+      if (this.statModalSection) {
+        this.renderStatModalBody();
+        this.setCommandBackgroundInert(true);
+      }
+    }
+  }
+
+  bindIdentityControls() {
+    const root = this.container && this.container.querySelector('.ws-cmd-topbar');
+    if (!root) return;
+
+    root.addEventListener('click', (event) => {
+      const editBtn = event.target.closest('[data-cmd-edit-identity]');
+      if (editBtn) {
+        this.startIdentityEdit(editBtn.getAttribute('data-cmd-edit-identity'));
+        return;
+      }
+      const toggleBtn = event.target.closest('[data-cmd-toggle-description]');
+      if (toggleBtn) {
+        this.identityExpanded = !this.identityExpanded;
+        this.render();
+        return;
+      }
+      const cancelBtn = event.target.closest('[data-cmd-cancel-identity]');
+      if (cancelBtn) {
+        this.cancelIdentityEdit();
+        return;
+      }
+      const saveTagsBtn = event.target.closest('[data-cmd-save-tags]');
+      if (saveTagsBtn) {
+        this.saveCommandTags();
+      }
+    });
+
+    root.addEventListener('submit', (event) => {
+      const form = event.target.closest('[data-cmd-identity-form]');
+      if (!form) return;
+      event.preventDefault();
+      const mode = form.getAttribute('data-cmd-identity-form');
+      if (mode === 'name' || mode === 'description') {
+        const input = form.querySelector('[data-cmd-identity-input]');
+        this.saveIdentityField(mode, input ? input.value : '');
+      }
+    });
+
+    root.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && event.target.closest('[data-cmd-identity-form]')) {
+        event.preventDefault();
+        this.cancelIdentityEdit();
+      }
+      if (
+        event.key === 'Enter' &&
+        event.target.matches('textarea[data-cmd-identity-input]') &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        event.preventDefault();
+        this.saveIdentityField('description', event.target.value);
+      }
+    });
+  }
+
+  startIdentityEdit(mode) {
+    const nextMode = String(mode || '').trim();
+    if (!['name', 'description', 'tags'].includes(nextMode)) return;
+    this.identityEditMode = nextMode;
+    this.commandTagError = '';
+    if (nextMode === 'tags') this.commandTagDraft = this.workspaceTags();
+    this.render();
+    const input = this.container && this.container.querySelector('[data-cmd-identity-input]');
+    if (input && typeof input.focus === 'function') {
+      try { input.focus({ preventScroll: true }); } catch (err) { input.focus(); }
+      if (typeof input.select === 'function') input.select();
+    }
+  }
+
+  cancelIdentityEdit() {
+    this.identityEditMode = '';
+    this.identitySaving = false;
+    this.commandTagError = '';
+    this.commandTagDraft = [];
+    this.destroyCommandTagInput();
+    this.render();
+  }
+
+  async saveIdentityField(mode, value) {
+    const page = this.page || {};
+    if (typeof page.saveWorkspaceIdentityField !== 'function') return;
+    const ws = page.workspace || {};
+    const currentValue = mode === 'description' ? String(ws.description || '') : String(ws.name || '');
+    this.identitySaving = true;
+    const result = await page.saveWorkspaceIdentityField(mode, value, { currentValue });
+    this.identitySaving = false;
+    if (result && (result.error || result.invalid)) {
+      this.render();
+      return;
+    }
+    this.identityEditMode = '';
+    this.render();
+  }
+
+  mountCommandTagInput() {
+    if (this.identityEditMode !== 'tags' || this.commandTagInput) return;
+    const mount = this.container && this.container.querySelector('[data-cmd-tags-mount]');
+    if (!mount || !window.OriTagInput?.createTagInput) return;
+    this.commandTagInput = window.OriTagInput.createTagInput({
+      container: mount,
+      initialTags: this.commandTagDraft,
+      onChange: tags => {
+        this.commandTagDraft = tags;
+        this.commandTagError = '';
+      }
+    });
+    this.commandTagInput?.focus?.();
+  }
+
+  destroyCommandTagInput() {
+    if (!this.commandTagInput) return;
+    try { this.commandTagInput.destroy?.(); } catch (err) { /* no-op */ }
+    this.commandTagInput = null;
+  }
+
+  async saveCommandTags() {
+    const page = this.page || {};
+    if (typeof page.saveWorkspaceTagList !== 'function') return;
+    const tags = this.commandTagInput ? this.commandTagInput.getTags() : this.commandTagDraft;
+    this.identitySaving = true;
+    this.commandTagError = '';
+    try {
+      await page.saveWorkspaceTagList(tags);
+      this.identityEditMode = '';
+      this.commandTagDraft = [];
+      this.destroyCommandTagInput();
+    } catch (error) {
+      this.commandTagError = error.message || 'Failed to update tags';
+    } finally {
+      this.identitySaving = false;
+      this.render();
     }
   }
 
@@ -246,6 +536,7 @@ export class WorkspaceCommandView {
     if (!el) return;
     this.renderStatModalBody();
     el.hidden = false;
+    this.setCommandBackgroundInert(true);
     const panel = el.querySelector('.ws-cmd-modal-panel');
     if (panel && typeof panel.focus === 'function') {
       try { panel.focus({ preventScroll: true }); } catch (err) { panel.focus(); }
@@ -257,7 +548,51 @@ export class WorkspaceCommandView {
     this.statModalSection = '';
     this.statModalTrigger = null;
     if (this.statModalEl) this.statModalEl.hidden = true;
+    this.setCommandBackgroundInert(false);
     if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  setCommandBackgroundInert(isInert) {
+    if (!this.container || !this.container.children) return;
+    Array.from(this.container.children).forEach(child => {
+      if (child === this.statModalEl) return;
+      if (isInert) {
+        child.setAttribute('aria-hidden', 'true');
+        try { child.inert = true; } catch (err) { /* inert may be readonly in tests */ }
+      } else {
+        child.removeAttribute('aria-hidden');
+        try { child.inert = false; } catch (err) { /* inert may be readonly in tests */ }
+      }
+    });
+  }
+
+  modalFocusableElements() {
+    const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
+    if (!panel || typeof panel.querySelectorAll !== 'function') return [];
+    return Array.from(panel.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el && !el.hidden && typeof el.focus === 'function');
+  }
+
+  trapStatModalFocus(event) {
+    if (!event || event.key !== 'Tab') return;
+    const focusable = this.modalFocusableElements();
+    if (!focusable.length) {
+      event.preventDefault();
+      const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
+      if (panel && typeof panel.focus === 'function') panel.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+    if (event.shiftKey && activeEl === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && activeEl === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   ensureStatModal() {
@@ -278,7 +613,9 @@ export class WorkspaceCommandView {
       if (event.key === 'Escape') {
         event.stopPropagation();
         this.closeStatModal();
+        return;
       }
+      this.trapStatModalFocus(event);
     });
     this.statModalEl = el;
     if (this.container && this.container.appendChild) this.container.appendChild(el);
@@ -726,12 +1063,14 @@ export class WorkspaceCommandView {
       const label = String(t.description || t.name || t.title || 'Task');
       const tone = this.taskTone(t.status);
       const statusText = String(t.status || 'pending').replace('_', ' ');
+      const taskId = String(t.id || '');
       return (
         '<div class="ws-cmd-quest">' +
         '<span class="ws-cmd-q-glyph">&bull;</span>' +
-        '<span class="ws-cmd-q-name">' + escapeHtml(label) + '</span>' +
+        '<button type="button" class="ws-cmd-q-name" data-cmd-open-task="' + escapeHtml(taskId) +
+        '" aria-label="Open task ' + escapeHtml(label) + '">' + escapeHtml(label) + '</button>' +
         '<span class="ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
-        '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' + escapeHtml(String(t.id || '')) +
+        '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' + escapeHtml(taskId) +
         '" title="Run" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
         '</div>'
       );
@@ -747,21 +1086,28 @@ export class WorkspaceCommandView {
     if (!units.length) {
       return '<div class="ws-cmd-soon">No agents yet.</div>';
     }
-    return '<div class="ws-cmd-garrison-grid">' + units.map((g) => this.unitCardHTML(g)).join('') + '</div>';
+    const gridClass = 'ws-cmd-garrison-grid' + (units.length > 1 && units.length % 2 === 1 ? ' is-odd' : '');
+    return '<div class="' + gridClass + '">' + units.map((g) => this.unitCardHTML(g)).join('') + '</div>';
   }
 
   bindGarrison() {
     const root = this.container && this.container.querySelector('.ws-cmd-garrison');
     if (!root) return;
     root.addEventListener('click', (event) => {
+      const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       const addBtn = event.target.closest('[data-cmd-add-task]');
-      if (addBtn && window.workspaceDetail && window.workspaceDetail.showAddTaskModalForAgent) {
-        window.workspaceDetail.showAddTaskModalForAgent(addBtn.getAttribute('data-cmd-add-task'));
+      if (addBtn && page && page.showAddTaskModalForAgent) {
+        page.showAddTaskModalForAgent(addBtn.getAttribute('data-cmd-add-task'));
         return;
       }
       const runBtn = event.target.closest('[data-cmd-run-task]');
-      if (runBtn && window.workspaceDetail && window.workspaceDetail.executeTask) {
-        window.workspaceDetail.executeTask(runBtn.getAttribute('data-cmd-run-task'));
+      if (runBtn && page && page.executeTask) {
+        page.executeTask(runBtn.getAttribute('data-cmd-run-task'));
+        return;
+      }
+      const openBtn = event.target.closest('[data-cmd-open-task]');
+      if (openBtn && page && page.openTask) {
+        page.openTask(openBtn.getAttribute('data-cmd-open-task'));
       }
     });
   }
@@ -770,24 +1116,26 @@ export class WorkspaceCommandView {
 
   railPanelHTML(sectionKey, title, items, count, emptyText, primaryLabel) {
     const isManaging = this.activeRailSection === sectionKey;
-    const body = items.length
+    const hasItems = items.length > 0;
+    const shouldShowBody = hasItems || isManaging;
+    const body = hasItems
       ? items.join('')
       : '<div class="ws-cmd-rail-empty">' + escapeHtml(emptyText) + '</div>';
-    const actions = isManaging
-      ? '<div class="ws-cmd-panel-actions"><button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="' +
-        escapeHtml(sectionKey) + '">' + escapeHtml(primaryLabel) + '</button></div>'
-      : '';
     return (
-      '<section class="ws-cmd-panel' + (isManaging ? ' is-managing' : '') + '">' +
+      '<section class="ws-cmd-panel' + (isManaging ? ' is-managing' : '') + (!hasItems ? ' is-empty' : '') + '">' +
       '<div class="ws-cmd-panel-head">' +
       '<div class="ws-cmd-panel-title"><h4>' + escapeHtml(title) + '</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="' +
+        escapeHtml(sectionKey) + '">' + escapeHtml(primaryLabel) + '</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="' + escapeHtml(sectionKey) +
       '" aria-expanded="' + (isManaging ? 'true' : 'false') +
       '" title="' + (isManaging ? 'Close Command manager' : 'Manage in Command view') +
       '" aria-label="' + (isManaging ? 'Close ' : 'Manage ') +
       escapeHtml(title) + ' in Command view">' + (isManaging ? '×' : '▸') + '</button>' +
       '</div>' +
-      '<div class="ws-cmd-panel-body">' + actions + body + '</div>' +
+      '</div>' +
+      (shouldShowBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
       '</section>'
     );
   }

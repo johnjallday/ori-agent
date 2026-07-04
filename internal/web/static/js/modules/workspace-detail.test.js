@@ -332,6 +332,53 @@ test('workspace detail entity loaders refresh Command view after completion', as
   assert.equal(refreshCount, 4);
 });
 
+test('workspace detail reusable identity and tag saves update workspace state', async () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = { id: 'workspace-1', name: 'Old Name', description: '', tags: ['old'] };
+  page.elements = {};
+  page.renderWorkspaceInfo = async () => {};
+  page.renderWorkspaceTags = () => {};
+  page.loadNotes = async () => {};
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const requests = [];
+  global.window = {
+    ...originalWindow,
+    Toast: { success() {}, error() {} },
+    OriTagInput: { clearTagPoolCache() {} },
+    workspaceCommand: { refresh() {} }
+  };
+  global.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), body: options.body || '' });
+    if (String(url).endsWith('/rename')) {
+      return {
+        ok: true,
+        json: async () => ({ folder: { id: 'workspace-1', name: 'New Name', folder_slug: 'new-name' } })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ folder: { id: 'workspace-1', tags: ['alpha', 'beta'] } })
+    };
+  };
+
+  try {
+    await page.saveWorkspaceIdentityField('name', 'New Name', { currentValue: 'Old Name' });
+    const tags = await page.saveWorkspaceTagList(['Alpha', 'beta']);
+
+    assert.equal(page.workspace.name, 'New Name');
+    assert.deepEqual(tags, ['alpha', 'beta']);
+    assert.deepEqual(page.workspace.tags, ['alpha', 'beta']);
+    assert.match(requests[0].url, /\/api\/workspaces\/workspace-1\/rename$/);
+    assert.match(requests[1].url, /\/api\/workspaces\/workspace-1$/);
+    assert.match(requests[1].body, /"tags":\["alpha","beta"\]/);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+});
+
 test('workspace detail protects the managed project directory row', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const list = { innerHTML: '' };

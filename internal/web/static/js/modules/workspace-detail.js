@@ -1828,6 +1828,77 @@ export class WorkspaceDetailPage {
     return result;
   }
 
+  async saveWorkspaceIdentityField(field, value, options = {}) {
+    const key = String(field || '').trim();
+    if (key !== 'name' && key !== 'description') return { changed: false };
+
+    const newValue = String(value || '').trim();
+    const hasCurrent = Object.prototype.hasOwnProperty.call(options, 'currentValue');
+    const currentValue = hasCurrent ? String(options.currentValue || '').trim() : null;
+    if (hasCurrent && newValue === currentValue) return { changed: false };
+
+    if (key === 'name' && !newValue) {
+      if (window.Toast) window.Toast.error('Name cannot be empty');
+      return { changed: false, invalid: true };
+    }
+
+    try {
+      let result;
+      if (key === 'name') {
+        result = await this.renameWorkspace(newValue);
+      } else {
+        result = await this.updateWorkspace({ [key]: newValue });
+      }
+
+      const updatedWorkspace = result?.folder || result?.workspace || null;
+      if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+        this.workspace = {
+          ...(this.workspace || {}),
+          ...updatedWorkspace
+        };
+      } else if (this.workspace) {
+        this.workspace[key] = newValue;
+        if (key === 'description') {
+          this.workspace.shared_data =
+            this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+              ? this.workspace.shared_data
+              : {};
+          this.workspace.shared_data.workspace_bootstrap = {
+            ...(this.workspace.shared_data.workspace_bootstrap || {}),
+            goal: newValue
+          };
+        }
+      }
+
+      await this.renderWorkspaceInfo();
+      if (key === 'description') {
+        await this.loadNotes();
+      }
+
+      if (window.Toast) {
+        if (key === 'name') {
+          const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+          const expectedSlug = slugifyWorkspaceName(newValue);
+          window.Toast.success(
+            appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+              ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+              : 'Workspace renamed'
+          );
+        } else {
+          window.Toast.success('Description updated');
+        }
+      }
+
+      window.workspaceCommand?.refresh();
+      return { changed: true, workspace: this.workspace };
+    } catch (err) {
+      console.error(`Failed to update ${key}:`, err);
+      if (!err?.cancelled && window.Toast)
+        window.Toast.error(err.message || `Failed to update ${key}`);
+      return { changed: false, error: err };
+    }
+  }
+
   /**
    * Create inline editable element
    * @param {HTMLElement} element - The element to make editable
@@ -1874,63 +1945,7 @@ export class WorkspaceDetailPage {
 
         if (!save || newValue === currentValue) return;
 
-        // For name, don't allow empty
-        if (field === 'name' && !newValue) {
-          if (window.Toast) window.Toast.error('Name cannot be empty');
-          return;
-        }
-
-        try {
-          let result;
-          if (field === 'name') {
-            result = await this.renameWorkspace(newValue);
-          } else {
-            result = await this.updateWorkspace({ [field]: newValue });
-          }
-
-          const updatedWorkspace = result?.folder || result?.workspace || null;
-          if (updatedWorkspace && typeof updatedWorkspace === 'object') {
-            this.workspace = {
-              ...(this.workspace || {}),
-              ...updatedWorkspace
-            };
-          } else if (this.workspace) {
-            this.workspace[field] = newValue;
-            if (field === 'description') {
-              this.workspace.shared_data =
-                this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
-                  ? this.workspace.shared_data
-                  : {};
-              this.workspace.shared_data.workspace_bootstrap = {
-                ...(this.workspace.shared_data.workspace_bootstrap || {}),
-                goal: newValue
-              };
-            }
-          }
-
-          await this.renderWorkspaceInfo();
-          if (field === 'description') {
-            await this.loadNotes();
-          }
-
-          if (window.Toast) {
-            if (field === 'name') {
-              const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
-              const expectedSlug = slugifyWorkspaceName(newValue);
-              window.Toast.success(
-                appliedSlug && expectedSlug && appliedSlug !== expectedSlug
-                  ? `Workspace renamed. Folder saved as "${appliedSlug}".`
-                  : 'Workspace renamed'
-              );
-            } else {
-              window.Toast.success('Description updated');
-            }
-          }
-        } catch (err) {
-          console.error(`Failed to update ${field}:`, err);
-          if (!err?.cancelled && window.Toast)
-            window.Toast.error(err.message || `Failed to update ${field}`);
-        }
+        await this.saveWorkspaceIdentityField(field, newValue, { currentValue });
       };
 
       input.addEventListener('blur', () => finishEdit(true));
@@ -2051,15 +2066,34 @@ export class WorkspaceDetailPage {
     errorEl.hidden = text === '';
   }
 
+  async saveWorkspaceTagList(tags) {
+    const result = this.normalizeWorkspaceTagList(tags);
+    if (result.error) {
+      const validationError = new Error(result.error);
+      validationError.validation = true;
+      throw validationError;
+    }
+
+    const response = await this.updateWorkspace({ tags: result.tags });
+    const updatedWorkspace = response?.folder || response?.workspace || {};
+    const updatedTags = Array.isArray(updatedWorkspace.tags) ? updatedWorkspace.tags : result.tags;
+    this.workspace = {
+      ...(this.workspace || {}),
+      ...updatedWorkspace,
+      tags: updatedTags
+    };
+    this.renderWorkspaceTags();
+    // New tags should show up in suggestions everywhere right away.
+    window.OriTagInput?.clearTagPoolCache?.();
+    window.workspaceCommand?.refresh();
+    if (window.Toast) window.Toast.success('Tags updated');
+    return updatedTags;
+  }
+
   async saveWorkspaceTags() {
     if (this.workspaceTagsSaving) return;
 
     const draft = this.workspaceTagInput ? this.workspaceTagInput.getTags() : this.workspaceTagDraft;
-    const result = this.normalizeWorkspaceTagList(draft);
-    if (result.error) {
-      this.setWorkspaceTagsError(result.error);
-      return;
-    }
 
     this.workspaceTagsSaving = true;
     if (this.elements.workspaceTagsSaveBtn) {
@@ -2067,19 +2101,8 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await this.updateWorkspace({ tags: result.tags });
-      const updatedWorkspace = response?.folder || response?.workspace || {};
-      const updatedTags = Array.isArray(updatedWorkspace.tags) ? updatedWorkspace.tags : result.tags;
-      this.workspace = {
-        ...(this.workspace || {}),
-        ...updatedWorkspace,
-        tags: updatedTags
-      };
+      await this.saveWorkspaceTagList(draft);
       this.closeWorkspaceTagsEditor();
-      this.renderWorkspaceTags();
-      // New tags should show up in suggestions everywhere right away.
-      window.OriTagInput?.clearTagPoolCache?.();
-      if (window.Toast) window.Toast.success('Tags updated');
     } catch (error) {
       console.error('Failed to update workspace tags:', error);
       this.setWorkspaceTagsError(error.message || 'Failed to update tags');
