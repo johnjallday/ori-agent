@@ -1,15 +1,13 @@
 /*
- * workspace-command.js — Workspace Command view (interior "tactical" reskin)
+ * workspace-command.js — Workspace Command view (the workspace detail page)
  *
- * An opt-in tactical layout on the workspace detail page, beside the existing
- * detailed view. It reuses the live WorkspaceDetailPage instance (data + helpers
- * like buildAgentGroups / isWorkspaceEntryAgent) and renders into
- * #workspaceCommandView — no backend, no rewrite of the detailed page.
- *
- * Phase 1 = command bar (name, ops mode, stats) + the Detailed/Command toggle
- * with persistence. Garrison, quest logs, and the right rail land in Phase 2-3.
+ * The tactical layout that IS the workspace detail page. It reuses the live
+ * WorkspaceDetailPage instance (a headless data/action layer plus shared
+ * modals and hidden shared hosts — see #workspace-detail-shared-hosts) and
+ * renders into #workspaceCommandView.
  */
-const STORAGE_KEY = 'oriWorkspaceDetailView';
+// Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
+const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -24,8 +22,6 @@ export class WorkspaceCommandView {
   constructor(page) {
     this.page = page || null;
     this.container = document.getElementById('workspaceCommandView');
-    this.detailedView = document.getElementById('workspace-detail-view');
-    this.toggleBtn = document.getElementById('workspace-command-toggle');
     this.active = false;
     this.activeRailSection = '';
     this.statModalSection = '';
@@ -46,89 +42,35 @@ export class WorkspaceCommandView {
   }
 
   setup() {
-    if (!this.container || !this.toggleBtn) return;
-    this.toggleBtn.hidden = false; // reveal (Phase 1)
-    this.toggleBtn.addEventListener('click', () => this.toggle());
-    // The URL wins over localStorage on load. Command is now the implicit
-    // default; only an explicit detailed URL/preference keeps the legacy view.
-    const urlView = this.getViewFromURL();
-    let pref = '';
-    try { pref = localStorage.getItem(STORAGE_KEY) || ''; } catch (err) { pref = ''; }
-    const initialView = urlView || pref || 'command';
-    if (initialView === 'command') this.activate({ syncUrl: false });
-    else this.deactivate({ syncUrl: false });
+    if (!this.container) return;
+    this.retireLegacyViewPreference();
+    this.activate();
   }
 
-  persist(view) {
-    try { localStorage.setItem(STORAGE_KEY, view); } catch (err) { /* storage may be unavailable */ }
-  }
-
-  getViewFromURL() {
-    try {
-      const raw = new URLSearchParams(window.location.search).get('view');
-      if (raw === 'command') return 'command';
-      if (raw === 'detailed') return 'detailed';
-      return '';
-    } catch (err) {
-      return '';
-    }
-  }
-
-  // Deep-linkable, non-spammy: command (the default) drops the param, detailed
-  // writes ?view=detailed, and toggles use replaceState so history doesn't grow.
-  syncURL(view) {
+  // The Detailed view (and its toggle) is gone: drop the stale localStorage
+  // preference and strip any lingering ?view= param from deep links.
+  retireLegacyViewPreference() {
+    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (err) { /* storage may be unavailable */ }
     try {
       const params = new URLSearchParams(window.location.search);
-      if (view === 'detailed') params.set('view', 'detailed');
-      else params.delete('view');
-      const query = params.toString();
-      const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
-      window.history.replaceState(null, '', nextUrl);
+      if (params.has('view')) {
+        params.delete('view');
+        const query = params.toString();
+        const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+        window.history.replaceState(null, '', nextUrl);
+      }
     } catch (err) {
       // no-op: history API may be unavailable in some embedding contexts
     }
   }
 
-  toggle() {
-    if (this.active) this.deactivate();
-    else this.activate();
-  }
-
-  activate({ syncUrl = true } = {}) {
+  activate() {
     this.active = true;
     this.render();
     if (this.container) this.container.hidden = false;
-    if (this.detailedView) this.detailedView.hidden = true;
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', this.boundGlobalKeydown);
     }
-    this.updateToggle();
-    this.persist('command');
-    if (syncUrl) this.syncURL('command');
-  }
-
-  deactivate({ persist = true, syncUrl = true } = {}) {
-    this.active = false;
-    this.activeRailSection = '';
-    this.identityEditMode = '';
-    this.destroyCommandTagInput();
-    this.restoreSharedSurfaces();
-    this.closeStatModal();
-    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
-      document.removeEventListener('keydown', this.boundGlobalKeydown);
-    }
-    if (this.container) this.container.hidden = true;
-    if (this.detailedView) this.detailedView.hidden = false;
-    this.updateToggle();
-    if (persist) this.persist('detailed');
-    if (syncUrl) this.syncURL('detailed');
-  }
-
-  updateToggle() {
-    if (!this.toggleBtn) return;
-    this.toggleBtn.setAttribute('aria-pressed', this.active ? 'true' : 'false');
-    this.toggleBtn.classList.toggle('modern-btn-primary', this.active);
-    this.toggleBtn.classList.toggle('modern-btn-secondary', !this.active);
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -303,7 +245,6 @@ export class WorkspaceCommandView {
       '<header class="ws-cmd-topbar' + (isGroup ? ' is-group' : '') + '"' + this.groupAccentStyle(ws) + '>' +
       '<div class="ws-cmd-nav">' +
       '<a class="ws-cmd-nav-btn" href="/workspaces" aria-label="Back to workspaces">Workspaces</a>' +
-      '<button type="button" class="ws-cmd-nav-btn" data-ws-cmd-detailed aria-label="Open detailed view">Detailed</button>' +
       '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/canvas')) + '">Canvas</a>' +
       '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/diagnostics')) + '">Diagnostics</a>' +
       '<a class="ws-cmd-nav-btn" href="' + escapeHtml(workflowHref) + '">Orchestration Skills</a>' +
@@ -457,8 +398,6 @@ export class WorkspaceCommandView {
       '<aside class="ws-cmd-rail">' + this.renderRail() + '</aside>' +
       '</div>';
 
-    const back = this.container.querySelector('[data-ws-cmd-detailed]');
-    if (back) back.addEventListener('click', () => this.deactivate());
     this.bindIdentityControls();
     this.bindReadout();
     this.bindMissionPanel();
@@ -643,16 +582,6 @@ export class WorkspaceCommandView {
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
     if (mission && typeof mission.renderCommandSurfaces === 'function') {
       mission.renderCommandSurfaces();
-    }
-  }
-
-  /** Escape hatch: leave the Command view for the full detailed section. */
-  openDetailedSection(sectionKey) {
-    const section = String(sectionKey || '').trim();
-    if (!section) return;
-    this.deactivate({ persist: false });
-    if (this.page && typeof this.page.focusSection === 'function') {
-      this.page.focusSection(section);
     }
   }
 
@@ -865,9 +794,19 @@ export class WorkspaceCommandView {
       '</div>' +
       '</header>' +
       body +
+      this.statModalFooterHTML(section)
+    );
+  }
+
+  // Only sections with a deeper Systems surface get a footer link; the old
+  // "Open in detailed view" escape hatch died with the Detailed view.
+  statModalFooterHTML(section) {
+    const label = this.statModalFooterLabel(section);
+    if (!label) return '';
+    return (
       '<footer class="ws-cmd-modal-foot">' +
       '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">' +
-      escapeHtml(this.statModalFooterLabel(section)) + '</button>' +
+      escapeHtml(label) + '</button>' +
       '</footer>'
     );
   }
@@ -889,7 +828,7 @@ export class WorkspaceCommandView {
     const key = String(section || '');
     if (key === 'mcp') return 'Open Systems: MCP ▸';
     if (key === 'skills') return 'Open Systems: Skills ▸';
-    return 'Open in detailed view ▸';
+    return '';
   }
 
   statModalFilterToggleHTML(section) {
@@ -1153,9 +1092,7 @@ export class WorkspaceCommandView {
       this.closeStatModal();
       if (section === 'mcp' || section === 'skills') {
         this.openSystemTab(section);
-        return;
       }
-      this.openDetailedSection(section);
       return;
     }
     // Add/Edit hand off to an existing modal, so close ours first (avoids stacked
@@ -2062,6 +1999,15 @@ export class WorkspaceCommandView {
     const members = this.mountSharedSurface('members', '#workspace-detail-members-panel', host);
     if (!members) {
       host.innerHTML = '<div class="ws-cmd-rail-empty">Members are unavailable.</div>';
+      return;
+    }
+    // The Detailed panel-expansion machinery that lazily loaded rollups is
+    // gone; the mounted panel is always "expanded" here, so load directly.
+    if (page && page.membersPanel && typeof page.membersPanel.loadRollups === 'function') {
+      try {
+        page.membersPanel.rollupsLoaded = true;
+        void page.membersPanel.loadRollups();
+      } catch (err) { /* keep going */ }
     }
   }
 

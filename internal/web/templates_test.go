@@ -15,10 +15,12 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
-// TestRenderWorkspaceDetailGroupScaffold confirms the workspace-detail page
-// (which groups now share) carries the group-only scaffold: the Members panel
-// and the header identity elements, all hidden until the page detects a group.
-func TestRenderWorkspaceDetailGroupScaffold(t *testing.T) {
+// TestRenderWorkspaceDetailSharedHosts confirms the workspace-detail page (now
+// Command-only) carries the hidden shared-hosts container the Command view
+// mounts live DOM into, plus the Command mount and the Members panel the
+// Detachment surface reuses. The old Detailed subtree and its header identity
+// elements are gone.
+func TestRenderWorkspaceDetailSharedHosts(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
@@ -34,14 +36,27 @@ func TestRenderWorkspaceDetailGroupScaffold(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		`id="workspaceCommandView"`,
+		`id="workspace-detail-shared-hosts"`,
+		`id="workspace-detail-settings-panel"`,
+		`id="workspace-detail-tasks-board"`,
+		`id="workspace-detail-tools-card"`,
 		`id="workspace-detail-members-panel"`,
 		`id="workspace-detail-members-list"`,
-		`id="workspace-group-badge"`,
-		`id="workspace-group-color"`,
-		`id="workspace-member-stat"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered workspace-detail page missing %q", want)
+		}
+	}
+
+	// The deleted Detailed view must be gone.
+	for _, gone := range []string{
+		`id="workspace-detail-view"`,
+		`id="workspace-command-toggle"`,
+		`id="workspaceDetailPanelBackdrop"`,
+	} {
+		if strings.Contains(html, gone) {
+			t.Errorf("rendered workspace-detail page still contains deleted element %q", gone)
 		}
 	}
 }

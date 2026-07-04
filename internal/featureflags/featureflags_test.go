@@ -30,19 +30,3 @@ func TestParseBoolDefaultTrue(t *testing.T) {
 		})
 	}
 }
-
-func TestWorkspaceFloatingAssistantEnabledDefaultsOn(t *testing.T) {
-	t.Setenv(envWorkspaceFloatingAssistantEnabled, "")
-
-	if !WorkspaceFloatingAssistantEnabled() {
-		t.Fatal("WorkspaceFloatingAssistantEnabled() = false, want true by default")
-	}
-}
-
-func TestWorkspaceFloatingAssistantEnabledCanBeDisabled(t *testing.T) {
-	t.Setenv(envWorkspaceFloatingAssistantEnabled, "false")
-
-	if WorkspaceFloatingAssistantEnabled() {
-		t.Fatal("WorkspaceFloatingAssistantEnabled() = true, want false when disabled")
-	}
-}

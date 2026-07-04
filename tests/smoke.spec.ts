@@ -492,55 +492,33 @@ test.describe('Workspace Agent Character Roster', () => {
     });
   }
 
-  test('renders truthful character cards without losing roster actions', async ({ page }) => {
+  // The Detailed agent character cards were deleted with the Detailed view;
+  // the Command Garrison unit cards are the roster surface now. (The old
+  // local-agent identity-routing test died with the links — Garrison renders
+  // no per-agent identity links, so local agents can't be mis-routed to
+  // missing global pages.)
+  test('garrison renders truthful unit cards from the roster data', async ({ page }) => {
     await installRosterRoutes(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/workspaces/roster-ws');
 
-    const cards = page.locator('#workspace-detail-agents-list .workspace-detail-agent-card');
-    await expect(cards).toHaveCount(2);
-    await expect(cards.first()).toHaveClass(/is-leader/);
-    await expect(cards.first().locator('.workspace-detail-agent-avatar')).toHaveText('RM');
-    await expect(cards.first().locator('.workspace-detail-agent-class-chip')).toHaveText('Coordinator');
-    await expect(cards.first().locator('.workspace-detail-agent-status-chip')).toHaveText('Idle');
-    await expect(cards.first().locator('.workspace-detail-agent-skill-summary')).toContainText('workspace-planning');
-    await expect(cards.first().locator('.workspace-detail-agent-model-badge')).toContainText('High capacity');
-    await expect(cards.nth(1).locator('.workspace-detail-agent-class-chip')).toHaveText('Multiple roles');
-    await expect(cards.nth(1).locator('.workspace-detail-agent-status-chip')).toHaveText('Working');
-    await expect(cards.nth(1).locator('.workspace-detail-agent-instance-tag')).toHaveText('2x');
-    await expect(cards.nth(1).locator('.workspace-detail-agent-skill-summary')).toContainText('browser:control-in-app-browser');
+    const units = page.locator('#workspaceCommandView .ws-cmd-unit');
+    await expect(units).toHaveCount(2);
 
-    await expect(cards.first().locator('.workspace-detail-agent-identity-link[href="/agents/Roster%20Manager"]')).toBeVisible();
-    await expect(cards.first().locator('.workspace-detail-agent-section-btn')).toBeVisible();
-    await expect(cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-remove-btn')).toBeVisible();
-    await expect(cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-flip-btn')).toBeVisible();
+    // Entry agent leads with the keeper badge and truthful status/identity.
+    await expect(units.first()).toHaveClass(/is-keeper/);
+    await expect(units.first().locator('.ws-cmd-av')).toHaveText('RM');
+    await expect(units.first().locator('.ws-cmd-unit-name')).toHaveText('Roster Manager');
+    await expect(units.first().locator('.ws-cmd-badge.is-keeper')).toContainText('Entry Agent');
+    await expect(units.first().locator('.ws-cmd-state')).toContainText('Idle');
+    await expect(units.nth(1).locator('.ws-cmd-state')).toContainText('Working');
 
-    await cards.first().locator('.workspace-detail-agent-identity-link').focus();
-    await expect(cards.first().locator('.workspace-detail-agent-identity-link')).toBeFocused();
-    await cards.first().locator('.workspace-detail-agent-card-face-front .workspace-detail-agent-flip-btn').click();
-    await expect(cards.first()).toHaveClass(/is-flipped/);
-    await expect(cards.first()).not.toContainText('Agent Lvl');
-    await expect(cards.first()).toContainText('Role');
-    await expect(cards.first()).toContainText('MCP Attached');
+    // Model and skills rows render for real agents.
+    await expect(units.first().locator('.ws-cmd-unit-rows')).toContainText('Model');
+    await expect(units.first().locator('.ws-cmd-unit-rows')).toContainText('Skills');
 
-    const overflow = await page.locator('#workspace-detail-agents-list').evaluate(el => el.scrollWidth - el.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
-  });
-
-  test('does not send workspace-local agents to missing global detail pages', async ({ page }) => {
-    await installRosterRoutes(page, {
-      omitRosterManagerFromCatalog: true,
-      snapshotAgents: ['Roster Manager']
-    });
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/workspaces/roster-ws');
-
-    const managerIdentity = page.locator(
-      '#workspace-detail-agents-list .workspace-detail-agent-card.is-leader .workspace-detail-agent-identity-link'
-    );
-    await expect(managerIdentity).toContainText('Roster Manager');
-    await expect(managerIdentity).toHaveAttribute('data-agent-detail-kind', 'workspace-local');
-    await expect(managerIdentity).not.toHaveAttribute('href', /\/agents\/Roster%20Manager/);
+    // Quest logs list the roster tasks.
+    await expect(units.first().locator('.ws-cmd-questlog')).toBeVisible();
   });
 });
 
@@ -681,7 +659,7 @@ test.describe('Workspace File Folders', () => {
 
     try {
       await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
+      await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toBeVisible();
       await page.waitForFunction(() =>
         Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
       );
@@ -703,7 +681,7 @@ test.describe('Workspace File Folders', () => {
         await page.evaluate(() => window.Toast?.dismissAll?.());
       }
 
-      await page.locator('#workspace-detail-add-file').click();
+      await page.locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-primary-section="files"]').click();
       await expect(page.locator('#hubAddFileModal')).toBeVisible();
 
       page.once('dialog', async dialog => {
@@ -727,12 +705,11 @@ test.describe('Workspace File Folders', () => {
       await page.locator('#hubAddFileSubmitBtn').click();
       expect((await uploadResponse).ok()).toBeTruthy();
       await expect(page.locator('#hubAddFileModal.show')).toHaveCount(0);
-      await expect(page.locator('#workspace-detail-files-list')).toContainText('folder-smoke-report.txt');
+      await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toContainText('folder-smoke-report.txt');
 
-      await page.locator('#workspace-detail-files-panel .workspace-detail-panel-title').click();
+      await page.locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-open-section="files"]').first().click();
       const explorer = page.locator('#workspace-directory-explorer-modal');
       await expect(explorer).toBeVisible();
-      await expect(page.locator('#workspace-detail-files-panel')).not.toHaveClass(/is-expanded/);
       await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'research' })).toBeVisible();
 
       await expect(explorer.locator('.workspace-directory-preview-code')).toContainText('workspace folder smoke test');

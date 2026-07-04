@@ -783,12 +783,6 @@
       typeof window.workspaceCommand.openSystemTab === 'function'
     ) {
       window.workspaceCommand.openSystemTab('mission');
-    } else if (
-      window.workspaceCommand &&
-      window.workspaceCommand.active &&
-      typeof window.workspaceCommand.deactivate === 'function'
-    ) {
-      window.workspaceCommand.deactivate({ persist: false });
     }
 
     if (
