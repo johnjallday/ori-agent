@@ -262,9 +262,17 @@ export class WorkspaceCommandView {
     return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
   }
 
+  groupColor(ws) {
+    // The detail workspace object carries no color; the tree node loaded by the
+    // members panel is the reliable source. Fall back to any color on ws.
+    const panelGroup = this.page && this.page.membersPanel && this.page.membersPanel.group;
+    const fromPanel = panelGroup ? panelGroup.color : '';
+    return String(fromPanel || (ws && ws.color) || '').trim();
+  }
+
   groupAccentStyle(ws) {
     if (!this.isGroupWorkspace()) return '';
-    const color = String((ws && ws.color) || '').trim();
+    const color = this.groupColor(ws);
     if (!color) return '';
     const soft = this.hexToRgba(color, 0.14);
     const line = this.hexToRgba(color, 0.5);

@@ -467,6 +467,31 @@ test('command bar shows group badge and color accent for group workspaces', () =
   assert.match(html, /Detachment · Command/);
 });
 
+test('group accent color is sourced from the members-panel group node (detail workspace has none)', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    page: {
+      workspaceId: 'grp-1',
+      // The detail workspace object carries no color; the tree node does.
+      workspace: { name: 'Alpha Group', kind: 'group', description: '', mcp_bindings: [], skill_bindings: [] },
+      membersPanel: { group: { color: '#8b5cf6' } },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+
+  assert.match(html, /--ws-group-accent: #8b5cf6/);
+});
+
 test('command bar omits group treatment for non-group workspaces', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
