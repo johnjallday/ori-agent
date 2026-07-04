@@ -177,6 +177,21 @@ export class WorkspaceCommandView {
     }
   }
 
+  missionSummary() {
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    if (mission && typeof mission.getSummary === 'function') {
+      try { return mission.getSummary() || {}; } catch (err) { return {}; }
+    }
+    return {};
+  }
+
+  commandSubtitle(mode) {
+    const workflow = mode ? 'Workflow · ' + mode : '';
+    const mission = this.missionSummary();
+    const missionLabel = mission && mission.label ? 'Mission · ' + mission.label : '';
+    return [workflow, missionLabel].filter(Boolean).join(' · ');
+  }
+
   workspaceId() {
     const page = this.page || {};
     return String(page.workspaceId || (page.workspace && page.workspace.id) || '').trim();
@@ -236,6 +251,8 @@ export class WorkspaceCommandView {
       (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
     const descriptionText = description || 'No description';
     const workflowHref = this.workflowHref();
+    const workflowLabel = mode ? 'Workflow · ' + mode : '';
+    const subtitle = this.commandSubtitle(mode);
 
     return (
       '<header class="ws-cmd-topbar">' +
@@ -256,7 +273,8 @@ export class WorkspaceCommandView {
       '<h2>' + escapeHtml(name) + '</h2>' +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
-      (mode ? '<div class="ws-sub">Workflow · ' + escapeHtml(mode) + '</div>' : '') +
+      '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
+      escapeHtml(workflowLabel) + '"' + (subtitle ? '' : ' hidden') + '>' + escapeHtml(subtitle) + '</div>' +
       '<div class="ws-cmd-description-row">' +
       '<p class="' + descriptionClass + '">' + escapeHtml(descriptionText) + '</p>' +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description">Edit</button>' +
@@ -278,6 +296,54 @@ export class WorkspaceCommandView {
       this.statBoxHTML(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
       '</div>' +
       '</header>'
+    );
+  }
+
+  renderMissionPanel() {
+    const summary = this.missionSummary();
+    const missionText = String(summary.mission || '').trim();
+    const title = summary.title || (missionText ? 'Current goal' : 'Workspace goal');
+    const text = summary.text || (missionText || 'Loading workspace goal...');
+    const statusLabel = summary.label || 'Loading';
+    const statusClass = summary.className || 'is-loading';
+    const cadence = summary.cadenceLabel || 'Cadence: loading';
+    const nextRun = summary.nextLabel || 'Next: loading';
+    const lastRun = summary.lastLabel || 'Last: loading';
+    const findingsHref = summary.findingsHref || (this.workspaceId()
+      ? '/action-center?workspace=' + encodeURIComponent(this.workspaceId())
+      : '/action-center');
+    const findingsLabel = summary.findingsLabel || 'Findings';
+    const runDisabled = summary.canRun === true ? '' : ' disabled';
+    const runTitle = summary.runTitle || 'Set a goal before running';
+    const actionStatus = summary.actionStatus || '';
+
+    return (
+      '<section class="ws-cmd-mission" id="workspace-command-mission-card" aria-labelledby="workspace-command-mission-title">' +
+      '<div class="ws-cmd-mission-main">' +
+      '<div class="ws-cmd-mission-head">' +
+      '<span class="ws-cmd-mission-kicker">Mission</span>' +
+      '<span class="ws-cmd-mission-status ' + escapeHtml(statusClass) + '" id="workspace-command-mission-status">' +
+      escapeHtml(statusLabel) + '</span>' +
+      '</div>' +
+      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title">' + escapeHtml(title) + '</h3>' +
+      '<p id="workspace-command-mission-text" class="ws-cmd-mission-text' + (missionText ? '' : ' is-empty') + '">' +
+      escapeHtml(text) + '</p>' +
+      '<div class="ws-cmd-mission-meta" aria-label="Mission automation timing">' +
+      '<span id="workspace-command-mission-cadence">' + escapeHtml(cadence) + '</span>' +
+      '<span id="workspace-command-mission-next-run">' + escapeHtml(nextRun) + '</span>' +
+      '<span id="workspace-command-mission-last-run">' + escapeHtml(lastRun) + '</span>' +
+      '</div>' +
+      '<div class="ws-cmd-mission-action-status" id="workspace-command-mission-action-status" aria-live="polite">' +
+      escapeHtml(actionStatus) + '</div>' +
+      '</div>' +
+      '<div class="ws-cmd-mission-actions">' +
+      '<button type="button" class="ws-cmd-mission-btn" id="workspace-command-mission-edit" data-cmd-mission-action="edit">Set Goal</button>' +
+      '<button type="button" class="ws-cmd-mission-btn is-primary" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
+      runDisabled + ' title="' + escapeHtml(runTitle) + '">Run now</button>' +
+      '<a class="ws-cmd-mission-btn" id="workspace-command-mission-findings" href="' + escapeHtml(findingsHref) + '">' +
+      escapeHtml(findingsLabel) + '</a>' +
+      '</div>' +
+      '</section>'
     );
   }
 
@@ -338,7 +404,10 @@ export class WorkspaceCommandView {
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
       '<div class="ws-cmd-layout">' +
+      '<main class="ws-cmd-main">' +
+      this.renderMissionPanel() +
       '<section class="ws-cmd-garrison">' + this.renderGarrison() + '</section>' +
+      '</main>' +
       '<aside class="ws-cmd-rail">' + this.renderRail() + '</aside>' +
       '</div>';
 
@@ -346,9 +415,11 @@ export class WorkspaceCommandView {
     if (back) back.addEventListener('click', () => this.deactivate());
     this.bindIdentityControls();
     this.bindReadout();
+    this.bindMissionPanel();
     this.bindGarrison();
     this.bindRail();
     this.mountCommandTagInput();
+    this.syncMissionPanel();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
@@ -502,6 +573,29 @@ export class WorkspaceCommandView {
       if (!sectionBtn) return;
       this.openStatModal(sectionBtn.getAttribute('data-cmd-section'), sectionBtn);
     });
+  }
+
+  bindMissionPanel() {
+    const root = this.container && this.container.querySelector('.ws-cmd-mission');
+    if (!root) return;
+    root.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-cmd-mission-action]');
+      if (!btn) return;
+      const action = btn.getAttribute('data-cmd-mission-action');
+      const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+      if (action === 'edit' && mission && typeof mission.openGoalModal === 'function') {
+        mission.openGoalModal();
+      } else if (action === 'run' && mission && typeof mission.runNow === 'function') {
+        mission.runNow(btn);
+      }
+    });
+  }
+
+  syncMissionPanel() {
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    if (mission && typeof mission.renderCommandSurfaces === 'function') {
+      mission.renderCommandSurfaces();
+    }
   }
 
   /** Escape hatch: leave the Command view for the full detailed section. */
