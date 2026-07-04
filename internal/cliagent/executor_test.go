@@ -13,10 +13,10 @@ type testAdapter struct {
 	callIdx int
 }
 
-func (a *testAdapter) Backend() string                    { return BackendClaude }
-func (a *testAdapter) IsAvailable() bool                  { return true }
-func (a *testAdapter) AvailableModels() []string          { return []string{"test"} }
-func (a *testAdapter) Capabilities() CLIAgentCapabilities { return CLIAgentCapabilities{} }
+func (a *testAdapter) Backend() string            { return BackendClaude }
+func (a *testAdapter) IsAvailable() bool          { return true }
+func (a *testAdapter) AvailableModels() []string  { return []string{"test"} }
+func (a *testAdapter) Capabilities() Capabilities { return Capabilities{} }
 
 func (a *testAdapter) ExecuteStep(_ context.Context, req StepRequest) (*StepResult, error) {
 	if a.callIdx < len(a.results) {

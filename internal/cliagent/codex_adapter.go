@@ -37,8 +37,8 @@ func (a *CodexCLIAdapter) IsAvailable() bool {
 }
 
 // Capabilities returns Codex CLI capabilities.
-func (a *CodexCLIAdapter) Capabilities() CLIAgentCapabilities {
-	return CLIAgentCapabilities{
+func (a *CodexCLIAdapter) Capabilities() Capabilities {
+	return Capabilities{
 		SupportsTools:     true,
 		SupportsStreaming: true,
 		MaxContextWindow:  128000,

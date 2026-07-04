@@ -34,8 +34,8 @@ func (a *ClaudeCLIAdapter) IsAvailable() bool {
 }
 
 // Capabilities returns Claude CLI capabilities.
-func (a *ClaudeCLIAdapter) Capabilities() CLIAgentCapabilities {
-	return CLIAgentCapabilities{
+func (a *ClaudeCLIAdapter) Capabilities() Capabilities {
+	return Capabilities{
 		SupportsTools:     true,
 		SupportsStreaming: true,
 		MaxContextWindow:  200000,

@@ -17,10 +17,10 @@ type Store interface {
 	GetIssueByHash(ctx context.Context, sessionID, contentHash string) (*Issue, error)
 
 	// ReviewRun operations
-	CreateReviewRun(ctx context.Context) (*ReviewRun, error)
-	UpdateReviewRun(ctx context.Context, run *ReviewRun) error
-	GetReviewRun(ctx context.Context, id string) (*ReviewRun, error)
-	GetReviewRuns(ctx context.Context, limit int) ([]ReviewRun, error)
+	CreateReviewRun(ctx context.Context) (*Run, error)
+	UpdateReviewRun(ctx context.Context, run *Run) error
+	GetReviewRun(ctx context.Context, id string) (*Run, error)
+	GetReviewRuns(ctx context.Context, limit int) ([]Run, error)
 
 	// SessionReviewStatus operations
 	GetSessionReviewStatus(ctx context.Context, sessionID string) (*SessionReviewStatus, error)
@@ -184,8 +184,8 @@ func (s *SQLiteStore) GetIssueByHash(ctx context.Context, sessionID, contentHash
 }
 
 // CreateReviewRun creates a new review run and returns it.
-func (s *SQLiteStore) CreateReviewRun(ctx context.Context) (*ReviewRun, error) {
-	run := &ReviewRun{
+func (s *SQLiteStore) CreateReviewRun(ctx context.Context) (*Run, error) {
+	run := &Run{
 		ID:        uuid.New().String(),
 		StartedAt: time.Now(),
 		Status:    ReviewRunStatusRunning,
@@ -204,7 +204,7 @@ func (s *SQLiteStore) CreateReviewRun(ctx context.Context) (*ReviewRun, error) {
 }
 
 // UpdateReviewRun updates an existing review run.
-func (s *SQLiteStore) UpdateReviewRun(ctx context.Context, run *ReviewRun) error {
+func (s *SQLiteStore) UpdateReviewRun(ctx context.Context, run *Run) error {
 	query := `
 		UPDATE review_runs
 		SET completed_at = ?, sessions_reviewed = ?, issues_found = ?, status = ?, error_message = ?
@@ -228,14 +228,14 @@ func (s *SQLiteStore) UpdateReviewRun(ctx context.Context, run *ReviewRun) error
 }
 
 // GetReviewRun retrieves a review run by ID.
-func (s *SQLiteStore) GetReviewRun(ctx context.Context, id string) (*ReviewRun, error) {
+func (s *SQLiteStore) GetReviewRun(ctx context.Context, id string) (*Run, error) {
 	query := `
 		SELECT id, started_at, completed_at, sessions_reviewed, issues_found, status, error_message
 		FROM review_runs
 		WHERE id = ?
 	`
 
-	var run ReviewRun
+	var run Run
 	var completedAt sql.NullTime
 	var status string
 
@@ -258,12 +258,12 @@ func (s *SQLiteStore) GetReviewRun(ctx context.Context, id string) (*ReviewRun, 
 	if completedAt.Valid {
 		run.CompletedAt = completedAt.Time
 	}
-	run.Status = ReviewRunStatus(status)
+	run.Status = RunStatus(status)
 	return &run, nil
 }
 
 // GetReviewRuns retrieves the most recent review runs.
-func (s *SQLiteStore) GetReviewRuns(ctx context.Context, limit int) ([]ReviewRun, error) {
+func (s *SQLiteStore) GetReviewRuns(ctx context.Context, limit int) ([]Run, error) {
 	query := `
 		SELECT id, started_at, completed_at, sessions_reviewed, issues_found, status, error_message
 		FROM review_runs
@@ -277,9 +277,9 @@ func (s *SQLiteStore) GetReviewRuns(ctx context.Context, limit int) ([]ReviewRun
 	}
 	defer func() { _ = rows.Close() }()
 
-	var runs []ReviewRun
+	var runs []Run
 	for rows.Next() {
-		var run ReviewRun
+		var run Run
 		var completedAt sql.NullTime
 		var status string
 
@@ -299,7 +299,7 @@ func (s *SQLiteStore) GetReviewRuns(ctx context.Context, limit int) ([]ReviewRun
 		if completedAt.Valid {
 			run.CompletedAt = completedAt.Time
 		}
-		run.Status = ReviewRunStatus(status)
+		run.Status = RunStatus(status)
 		runs = append(runs, run)
 	}
 

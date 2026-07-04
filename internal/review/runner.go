@@ -19,7 +19,7 @@ type Runner struct {
 	detector     *Detector
 
 	mu      sync.RWMutex
-	running map[string]*ReviewRun // Active runs by ID
+	running map[string]*Run // Active runs by ID
 }
 
 // NewRunner creates a new review runner.
@@ -30,7 +30,7 @@ func NewRunner(reviewStore Store, sessionStore session.SessionStore, toolStore s
 		toolStore:    toolStore,
 		config:       config,
 		detector:     NewDetector(config),
-		running:      make(map[string]*ReviewRun),
+		running:      make(map[string]*Run),
 	}
 }
 
@@ -40,7 +40,7 @@ func (r *Runner) SetAgentStore(agentStore store.Store) {
 }
 
 // StartReview begins a new review job asynchronously and returns the job ID.
-func (r *Runner) StartReview(ctx context.Context, opts ReviewOptions) (string, error) {
+func (r *Runner) StartReview(ctx context.Context, opts Options) (string, error) {
 	// Create the review run record
 	run, err := r.store.CreateReviewRun(ctx)
 	if err != nil {
@@ -59,7 +59,7 @@ func (r *Runner) StartReview(ctx context.Context, opts ReviewOptions) (string, e
 }
 
 // GetStatus returns the current status of a review job.
-func (r *Runner) GetStatus(ctx context.Context, jobID string) (*ReviewRun, error) {
+func (r *Runner) GetStatus(ctx context.Context, jobID string) (*Run, error) {
 	// First check in-memory running jobs. Return a snapshot, not the live
 	// pointer: executeReview keeps mutating the tracked run under r.mu, and
 	// callers read the result without holding the lock.
@@ -76,7 +76,7 @@ func (r *Runner) GetStatus(ctx context.Context, jobID string) (*ReviewRun, error
 }
 
 // executeReview performs the actual review work.
-func (r *Runner) executeReview(runID string, opts ReviewOptions) {
+func (r *Runner) executeReview(runID string, opts Options) {
 	ctx := context.Background()
 
 	// Get the run from our tracking map
@@ -166,7 +166,7 @@ func (r *Runner) executeReview(runID string, opts ReviewOptions) {
 }
 
 // getSessionsToReview retrieves sessions matching the review options.
-func (r *Runner) getSessionsToReview(ctx context.Context, opts ReviewOptions) ([]session.SessionListItem, error) {
+func (r *Runner) getSessionsToReview(ctx context.Context, opts Options) ([]session.SessionListItem, error) {
 	// If specific session requested, just get that one
 	if opts.SessionID != "" {
 		sess, err := r.sessionStore.GetSession(ctx, opts.SessionID)
@@ -210,7 +210,7 @@ func (r *Runner) getSessionsToReview(ctx context.Context, opts ReviewOptions) ([
 }
 
 // shouldReviewSession determines if a session needs review (incremental).
-func (r *Runner) shouldReviewSession(ctx context.Context, sess session.SessionListItem, opts ReviewOptions) bool {
+func (r *Runner) shouldReviewSession(ctx context.Context, sess session.SessionListItem, opts Options) bool {
 	// If Since is specified, check session activity
 	if opts.Since != nil && sess.UpdatedAt.Before(*opts.Since) {
 		return false
@@ -234,7 +234,7 @@ func (r *Runner) shouldReviewSession(ctx context.Context, sess session.SessionLi
 }
 
 // failRun marks a run as failed with an error.
-func (r *Runner) failRun(ctx context.Context, run *ReviewRun, err error) {
+func (r *Runner) failRun(ctx context.Context, run *Run, err error) {
 	r.mu.Lock()
 	run.Status = ReviewRunStatusFailed
 	run.CompletedAt = time.Now()

@@ -26,8 +26,8 @@ func (a dashboardCLIStubAdapter) IsAvailable() bool {
 func (a dashboardCLIStubAdapter) AvailableModels() []string {
 	return a.models
 }
-func (a dashboardCLIStubAdapter) Capabilities() cliagent.CLIAgentCapabilities {
-	return cliagent.CLIAgentCapabilities{}
+func (a dashboardCLIStubAdapter) Capabilities() cliagent.Capabilities {
+	return cliagent.Capabilities{}
 }
 func (a dashboardCLIStubAdapter) ExecuteStep(context.Context, cliagent.StepRequest) (*cliagent.StepResult, error) {
 	return nil, nil
