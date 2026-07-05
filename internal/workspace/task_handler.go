@@ -229,6 +229,28 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	// because tool schemas consume the context window too.
 	tools := h.convertAgentToolsToLLMTools(ag, task)
 
+	// Capability-aware tool exposure (WS4). A provider that supports neither the
+	// internal tool loop nor native MCP is offered no tools and told so; local
+	// providers get the toolset pruned to a manageable cap so a small model isn't
+	// swamped by a huge tool list it will mishandle.
+	if !provider.Capabilities().SupportsTools && !providerSupportsNativeMCP(provider) {
+		if len(tools) > 0 {
+			logger.Info("Provider does not support tools; running task tool-less", logger.Fields{
+				"workspace_id": task.WorkspaceID,
+				"task_id":      task.ID,
+				"provider":     providerName,
+				"dropped":      len(tools),
+			})
+		}
+		tools = nil
+		taskSystemPrompt += "\n\nTool calling is unavailable for this model. Answer directly from the information provided; do not attempt to call tools."
+	} else if provider.Type() == llm.ProviderTypeLocal {
+		if kept, dropped := pruneToolsForLocal(tools, task.Description, localToolCap); len(dropped) > 0 {
+			h.reportToolsPruned(task, agentName, dropped)
+			tools = kept
+		}
+	}
+
 	// Resolve the effective context window once and budget the assembled prompt
 	// against it, trimming the least-load-bearing sections in a fixed order (WS2).
 	// Cloud windows are large enough that nothing trims. If the prompt still
@@ -277,6 +299,12 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	// local providers, whose context windows are small (WS2.9).
 	isLocal := provider.Type() == llm.ProviderTypeLocal
 
+	// Tool-support degradation (WS4). toolsRejected latches once a model rejects
+	// the tools parameter, so the rest of the task runs tool-less. textToolProtocol
+	// enables the feature-flagged prompt-based fallback (default off).
+	toolsRejected := false
+	textToolProtocol := isLocal && localTextToolProtocolEnabled()
+
 	// Constrained decoding for structured output: on rounds where tools are not
 	// offered (initial tool-less request or a forced final answer), enforce the
 	// task's output schema when the provider supports it (WS3.14). Tool rounds
@@ -289,7 +317,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 
 	for round := 0; round < maxTaskToolRounds; round++ {
 		requestTools := tools
-		if forceFinalAnswer {
+		if forceFinalAnswer || toolsRejected {
 			requestTools = nil
 		}
 
@@ -372,6 +400,23 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		if cancelCall != nil {
 			cancelCall()
 		}
+		// Tools-rejected degradation (WS4.17): some local models reject the tools
+		// parameter outright. Retry this round once without tools and run tool-less
+		// for the remainder of the task rather than failing.
+		if err != nil && !nativeMCPActive && len(chatReq.Tools) > 0 && isToolsRejectedError(err) {
+			toolsRejected = true
+			h.reportToolSupportDegraded(task, agentName, err)
+			chatReq.Tools = nil
+			// Now that the round is tool-less, structured output can be enforced.
+			if taskResponseSchema != nil {
+				chatReq.ResponseSchema = taskResponseSchema
+			}
+			// Optionally switch the model to the prompt-based tool protocol.
+			if textToolProtocol && len(conversation) > 0 && conversation[0].Role == llm.RoleSystem {
+				conversation[0].Content += textToolProtocolInstruction
+			}
+			resp, err = provider.Chat(ctx, chatReq)
+		}
 		if err != nil {
 			// Surface the raw provider error (CLI stderr/stdout) before it is
 			// replaced by a friendly message, so MCP connection / permission /
@@ -396,6 +441,29 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				"round":           round + 1,
 				"tool_call_count": len(resp.ToolCalls),
 			}))
+		}
+
+		// Feature-flagged prompt-based tool protocol (WS4.19): once native tools
+		// were rejected, a tool-less response may still carry a fenced
+		// {"tool_call": …} block. Parse and execute it as a tool round.
+		if textToolProtocol && toolsRejected && len(resp.ToolCalls) == 0 {
+			if name, args, ok := parseTextToolCall(resp.Content); ok {
+				textCall := llm.ToolCall{ID: fmt.Sprintf("txt_%d", round+1), Name: name, Arguments: args}
+				conversation = append(conversation, llm.Message{Role: llm.RoleAssistant, Content: resp.Content})
+				results := h.executeToolCalls(ctx, ag, agentName, task, []llm.ToolCall{textCall})
+				lastToolSummary = buildToolResultsSummary(resp.Content, results)
+				for _, tr := range results {
+					toolContent := tr.Result
+					if tr.Error != nil {
+						toolContent = fmt.Sprintf("ERROR: %s", tr.Error.Error())
+					}
+					if capped, cut := truncateHeadTailBytes(toolContent, maxToolResultBytesLocal); cut > 0 {
+						toolContent = capped
+					}
+					conversation = append(conversation, llm.NewToolMessage(textCall.ID, toolContent))
+				}
+				continue
+			}
 		}
 
 		if len(resp.ToolCalls) == 0 {
@@ -776,6 +844,41 @@ func (h *LLMTaskHandler) reportConversationEviction(task Task, agentName string,
 			"round":              round,
 			"messages_compacted": compacted,
 			"still_over_budget":  stillOver,
+		}))
+	}
+}
+
+// reportToolsPruned logs and emits the tools dropped when pruning the toolset
+// for a local provider, so a silently-missing capability is diagnosable (WS4.18).
+func (h *LLMTaskHandler) reportToolsPruned(task Task, agentName string, dropped []string) {
+	logger.Info("Pruned task toolset for local provider", logger.Fields{
+		"workspace_id":  task.WorkspaceID,
+		"task_id":       task.ID,
+		"dropped_count": len(dropped),
+		"dropped":       strings.Join(dropped, ","),
+		"cap":           localToolCap,
+	})
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":         "tools_pruned",
+			"dropped_tools": dropped,
+			"cap":           localToolCap,
+		}))
+	}
+}
+
+// reportToolSupportDegraded logs and emits that the model rejected the tools
+// parameter and the task is continuing tool-less (WS4.17).
+func (h *LLMTaskHandler) reportToolSupportDegraded(task Task, agentName string, cause error) {
+	logger.Warn("Model rejected tools; continuing tool-less", logger.Fields{
+		"workspace_id": task.WorkspaceID,
+		"task_id":      task.ID,
+		"error":        cause.Error(),
+	})
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":        "tool_support_degraded",
+			"tool_support": "rejected_by_model",
 		}))
 	}
 }
