@@ -55,7 +55,26 @@ const (
 	taskPromptPathLimit      = 180
 )
 
-func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
+// compactTaskSystemPrompt is a small-model-sized variant of the task system
+// prompt (WS5.20): imperative bullets, task-first, ordered rules/output-last,
+// preserving the load-bearing semantics of the full prompt (use tools only when
+// needed; read full notes/files via workspace tools rather than previews; never
+// fabricate URL/filesystem contents; synthesize tool results into a final answer;
+// state blockers explicitly).
+const compactTaskSystemPrompt = "You are completing one task in a shared workspace. Rules:\n" +
+	"- Do the task described in the prompt. Use tools only when they are needed; answer simple questions directly.\n" +
+	"- The workspace snapshot shows truncated previews. To use a full note, file, session, or directory, call the matching workspace_* tool with its id instead of relying on the preview.\n" +
+	"- Never invent file, folder, or URL contents. If a tool is unavailable or a target is unreachable, say so plainly.\n" +
+	"- After using tools, synthesize the results into a clear final answer. Never return raw tool output as your answer.\n" +
+	"- If you cannot finish, state exactly what is blocking you."
+
+// buildTaskSystemPrompt returns the task system prompt. The compact variant is
+// used for local providers, whose smaller models follow a short imperative prompt
+// better than the long cloud-tuned one (WS5.20); both preserve the same rules.
+func (h *LLMTaskHandler) buildTaskSystemPrompt(compact bool) string {
+	if compact {
+		return compactTaskSystemPrompt
+	}
 	var prompt strings.Builder
 	prompt.WriteString("You are a helpful AI assistant completing a task in a collaborative workspace. ")
 	prompt.WriteString("You have access to tools, but only use them when they are clearly necessary to complete the specific task. ")

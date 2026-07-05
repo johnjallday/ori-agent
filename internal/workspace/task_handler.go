@@ -219,11 +219,14 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Use a task-specific system prompt that's more conservative about tool use.
 	// The agent's system prompt may encourage aggressive tool use which is
-	// inappropriate for workspace tasks. Skills are injected so task/orchestration
-	// runs get skill instructions too, matching the chat path (skill-less agents
-	// add nothing).
-	taskSystemPrompt := h.buildTaskSystemPrompt()
+	// inappropriate for workspace tasks. Local providers get the compact tier,
+	// sized for small-model instruction following (WS5). Skills are injected so
+	// task/orchestration runs get skill instructions too, matching the chat path
+	// (skill-less agents add nothing).
+	compactPrompt := provider.Type() == llm.ProviderTypeLocal
+	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
+	h.reportPromptTier(task, agentName, compactPrompt)
 
 	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting
 	// because tool schemas consume the context window too.
@@ -844,6 +847,21 @@ func (h *LLMTaskHandler) reportConversationEviction(task Task, agentName string,
 			"round":              round,
 			"messages_compacted": compacted,
 			"still_over_budget":  stillOver,
+		}))
+	}
+}
+
+// reportPromptTier records which task system-prompt tier was used so prompt-tier
+// selection is observable on the execution trace (WS5.22).
+func (h *LLMTaskHandler) reportPromptTier(task Task, agentName string, compact bool) {
+	tier := "full"
+	if compact {
+		tier = "compact"
+	}
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":       "prompt_tier",
+			"prompt_tier": tier,
 		}))
 	}
 }
