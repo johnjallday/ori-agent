@@ -28,6 +28,14 @@ type ChatRequest struct {
 	// providers ignore it.
 	ContextWindowTokens int
 
+	// ResponseSchema is an optional JSON Schema (as a decoded map) that the
+	// response must conform to. Providers advertising
+	// ProviderCapabilities.SupportsStructuredOutput enforce it via
+	// runtime-constrained decoding (Ollama "format", OpenAI-compatible
+	// "response_format"); providers without support ignore it. nil =
+	// unconstrained.
+	ResponseSchema map[string]any
+
 	// Stream indicates whether to stream the response
 	Stream bool
 

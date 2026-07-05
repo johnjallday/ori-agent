@@ -76,13 +76,14 @@ func CloudProviderCapabilities(maxContextWindow int) ProviderCapabilities {
 // LocalProviderCapabilities returns common capabilities for local LLM providers.
 func LocalProviderCapabilities(maxContextWindow int) ProviderCapabilities {
 	return ProviderCapabilities{
-		SupportsTools:          true,
-		SupportsStreaming:      true,
-		SupportsSystemPrompt:   true,
-		SupportsTemperature:    true,
-		RequiresAPIKey:         false,
-		SupportsCustomEndpoint: true,
-		MaxContextWindow:       maxContextWindow,
-		SupportedFormats:       []string{"text"},
+		SupportsTools:            true,
+		SupportsStreaming:        true,
+		SupportsSystemPrompt:     true,
+		SupportsTemperature:      true,
+		SupportsStructuredOutput: true, // Ollama "format" / OpenAI-compatible "response_format"
+		RequiresAPIKey:           false,
+		SupportsCustomEndpoint:   true,
+		MaxContextWindow:         maxContextWindow,
+		SupportedFormats:         []string{"text"},
 	}
 }

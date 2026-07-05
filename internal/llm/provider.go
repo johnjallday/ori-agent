@@ -118,6 +118,12 @@ type ProviderCapabilities struct {
 	// SupportsTemperature indicates if the provider supports temperature parameter
 	SupportsTemperature bool
 
+	// SupportsStructuredOutput indicates the provider enforces
+	// ChatRequest.ResponseSchema via runtime-constrained decoding on the plain
+	// Chat path (Ollama "format", OpenAI-compatible "response_format"). Providers
+	// without it ignore ResponseSchema.
+	SupportsStructuredOutput bool
+
 	// RequiresAPIKey indicates if an API key is required
 	RequiresAPIKey bool
 

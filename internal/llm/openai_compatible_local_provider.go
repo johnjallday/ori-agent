@@ -269,6 +269,21 @@ func (p *OpenAICompatibleLocalProvider) Chat(ctx context.Context, req ChatReques
 		params.Tools = convertToolsToOpenAI(req.Tools)
 	}
 
+	// Constrained decoding via response_format json_schema (WS3.12). Strict is
+	// left off — local OpenAI-compatible servers vary in strict-mode support, and
+	// a derived task schema may not satisfy strict's additionalProperties/required
+	// constraints.
+	if len(req.ResponseSchema) > 0 {
+		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
+					Name:   "task_output",
+					Schema: req.ResponseSchema,
+				},
+			},
+		}
+	}
+
 	completion, err := p.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("%s api error: %w", p.name, err)

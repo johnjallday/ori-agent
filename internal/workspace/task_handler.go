@@ -277,6 +277,16 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	// local providers, whose context windows are small (WS2.9).
 	isLocal := provider.Type() == llm.ProviderTypeLocal
 
+	// Constrained decoding for structured output: on rounds where tools are not
+	// offered (initial tool-less request or a forced final answer), enforce the
+	// task's output schema when the provider supports it (WS3.14). Tool rounds
+	// keep free-form output — tool calls and JSON grammar don't mix reliably on
+	// local runtimes (PRD Decision 4).
+	var taskResponseSchema map[string]any
+	if provider.Capabilities().SupportsStructuredOutput {
+		taskResponseSchema = deriveTaskResponseSchema(task)
+	}
+
 	for round := 0; round < maxTaskToolRounds; round++ {
 		requestTools := tools
 		if forceFinalAnswer {
@@ -325,6 +335,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				})
 				chatReq.MaxTokens = capped
 			}
+		}
+		// Enforce the output schema only on tool-less rounds (WS3.14).
+		if len(requestTools) == 0 && taskResponseSchema != nil {
+			chatReq.ResponseSchema = taskResponseSchema
 		}
 		// CLI agents (Claude Code / Codex), once opted in, run with an elevated
 		// sandboxed posture: workspace-write filesystem + localhost network +

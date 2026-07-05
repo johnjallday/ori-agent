@@ -289,7 +289,15 @@ type ollamaRequest struct {
 	Stream   bool            `json:"stream"`
 	Options  *ollamaOptions  `json:"options,omitempty"`
 	Tools    []ollamaTool    `json:"tools,omitempty"`
+	// Format is either a JSON Schema object (Ollama >= 0.5, for constrained
+	// decoding) or the string "json" (older servers). omitempty leaves it unset
+	// for unconstrained requests.
+	Format json.RawMessage `json:"format,omitempty"`
 }
+
+// ollamaJSONFormat is the plain-"json" format value used as a graceful fallback
+// on servers that reject a JSON Schema object (Ollama < 0.5).
+var ollamaJSONFormat = json.RawMessage(`"json"`)
 
 // ollamaOptions represents Ollama request options.
 // Temperature is a pointer so an explicit 0 (deterministic) is sent rather than
@@ -391,53 +399,56 @@ func (p *OllamaProvider) buildOptions(req ChatRequest) *ollamaOptions {
 	return &opts
 }
 
-// buildRequest assembles a full Ollama chat request shared by both paths.
+// buildRequest assembles a full Ollama chat request shared by both paths. A
+// non-empty ResponseSchema is mapped to the "format" field for constrained
+// decoding (WS3.12).
 func (p *OllamaProvider) buildRequest(req ChatRequest, stream bool) ollamaRequest {
-	return ollamaRequest{
+	out := ollamaRequest{
 		Model:    req.Model,
 		Messages: toOllamaMessages(req),
 		Stream:   stream,
 		Options:  p.buildOptions(req),
 		Tools:    toOllamaTools(req.Tools),
 	}
+	if len(req.ResponseSchema) > 0 {
+		if b, err := json.Marshal(req.ResponseSchema); err == nil {
+			out.Format = b
+		}
+	}
+	return out
+}
+
+// looksLikeFormatUnsupported reports whether an Ollama error body suggests the
+// server does not accept a JSON Schema "format" object (Ollama < 0.5), so the
+// caller can downgrade to plain "json".
+func looksLikeFormatUnsupported(status int, body string) bool {
+	if status != http.StatusBadRequest {
+		return false
+	}
+	b := strings.ToLower(body)
+	return strings.Contains(b, "format") || strings.Contains(b, "schema") || strings.Contains(b, "json")
 }
 
 // Chat sends a chat request to Ollama
 func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	ollamaReq := p.buildRequest(req, false)
 
-	// Marshal request
-	reqBody, err := json.Marshal(ollamaReq)
+	ollamaResp, status, body, err := p.postChat(ctx, ollamaReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, err
 	}
-
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/chat", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	// Send request
-	resp, err := p.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
+	// Graceful downgrade: a server that rejects a JSON Schema "format" object
+	// (Ollama < 0.5) gets one retry with plain "json" so structured tasks still
+	// benefit from JSON-mode instead of failing outright (WS3.12).
+	if status != http.StatusOK && len(ollamaReq.Format) > 0 && !bytes.Equal(ollamaReq.Format, ollamaJSONFormat) && looksLikeFormatUnsupported(status, body) {
+		ollamaReq.Format = ollamaJSONFormat
+		ollamaResp, status, body, err = p.postChat(ctx, ollamaReq)
 		if err != nil {
-			return nil, fmt.Errorf("ollama API error (status %d): failed to read error body: %w", resp.StatusCode, err)
+			return nil, err
 		}
-		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
 	}
-
-	// Parse response
-	var ollamaResp ollamaResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("ollama API error (status %d): %s", status, body)
 	}
 
 	// Convert to common format
@@ -461,6 +472,42 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	return chatResp, nil
+}
+
+// postChat performs one /api/chat round-trip. On a transport error it returns a
+// non-nil error; on an HTTP error status it returns the status and body (no
+// error) so the caller can decide whether to retry (e.g. format downgrade).
+func (p *OllamaProvider) postChat(ctx context.Context, ollamaReq ollamaRequest) (*ollamaResponse, int, string, error) {
+	reqBody, err := json.Marshal(ollamaReq)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/chat", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, resp.StatusCode, "", fmt.Errorf("ollama API error (status %d): failed to read error body: %w", resp.StatusCode, readErr)
+		}
+		return nil, resp.StatusCode, string(body), nil
+	}
+
+	var ollamaResp ollamaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+		return nil, resp.StatusCode, "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &ollamaResp, resp.StatusCode, "", nil
 }
 
 // ollamaStreamReader implements StreamReader for Ollama streaming responses
