@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 const taskOutputAssistantMaxRawBytes = 12000
@@ -44,7 +45,7 @@ func (h *LLMTaskHandler) callTaskOutputAssistant(ctx context.Context, task Task,
 	}
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
+	chatReq := llm.ChatRequest{
 		Model: modelName,
 		Messages: []llm.Message{
 			llm.NewSystemMessage("You normalize task results into strict JSON for storage. Return only one JSON object. Do not include markdown fences or commentary."),
@@ -52,7 +53,19 @@ func (h *LLMTaskHandler) callTaskOutputAssistant(ctx context.Context, task Task,
 		},
 		Temperature:     0,
 		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
-	})
+	}
+	// Enforce the output schema via constrained decoding when the assistant call's
+	// resolved provider supports it (WS3.13) — checked against this provider, which
+	// may differ from the one that ran the task's tool loop.
+	constrained := false
+	if provider.Capabilities().SupportsStructuredOutput {
+		if schema := deriveTaskResponseSchema(task); schema != nil {
+			chatReq.ResponseSchema = schema
+			constrained = true
+		}
+	}
+
+	resp, err := provider.Chat(ctx, chatReq)
 	if err != nil {
 		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
 			return "", fmt.Errorf("%s", friendlyMsg)
@@ -63,7 +76,19 @@ func (h *LLMTaskHandler) callTaskOutputAssistant(ctx context.Context, task Task,
 	if content == "" {
 		return "", fmt.Errorf("assistant returned an empty normalized row")
 	}
-	return trimTaskOutputAssistantJSON(content), nil
+	normalized := trimTaskOutputAssistantJSON(content)
+	// Defense in depth: constrained decoding should already be schema-shaped, so
+	// output that isn't even valid JSON points to a schema-mapping bug rather than
+	// model noise (WS3.15).
+	if constrained && !json.Valid([]byte(normalized)) {
+		logger.Warn("constrained_output_invalid", logger.Fields{
+			"workspace_id": task.WorkspaceID,
+			"task_id":      task.ID,
+			"provider":     providerName,
+			"model":        modelName,
+		})
+	}
+	return normalized, nil
 }
 
 func buildTaskOutputNormalizationPrompt(task Task, rawResult string) string {

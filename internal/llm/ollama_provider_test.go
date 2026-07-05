@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -140,6 +141,87 @@ func TestOllamaChat_SendsNumCtxAndParsesUsage(t *testing.T) {
 	// Usage parsed.
 	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 7 || resp.Usage.TotalTokens != 19 {
 		t.Fatalf("usage not parsed: %+v", resp.Usage)
+	}
+}
+
+func TestOllamaBuildRequest_MapsResponseSchema(t *testing.T) {
+	p := NewOllamaProvider(ProviderConfig{BaseURL: "http://localhost:11434"})
+	schema := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
+	r := p.buildRequest(ChatRequest{ResponseSchema: schema}, false)
+	if len(r.Format) == 0 {
+		t.Fatal("expected Format to be set from ResponseSchema")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(r.Format, &got); err != nil {
+		t.Fatalf("Format is not valid JSON: %v", err)
+	}
+	if got["type"] != "object" {
+		t.Fatalf("Format schema not mapped: %+v", got)
+	}
+	// No schema -> no format.
+	if r2 := p.buildRequest(ChatRequest{}, false); len(r2.Format) != 0 {
+		t.Fatalf("expected empty Format, got %s", r2.Format)
+	}
+}
+
+func TestLooksLikeFormatUnsupported(t *testing.T) {
+	if !looksLikeFormatUnsupported(http.StatusBadRequest, `{"error":"invalid format schema"}`) {
+		t.Fatal("400 mentioning format should be treated as unsupported")
+	}
+	if looksLikeFormatUnsupported(http.StatusInternalServerError, "boom") {
+		t.Fatal("non-400 should not be treated as format-unsupported")
+	}
+	if looksLikeFormatUnsupported(http.StatusBadRequest, "unrelated error") {
+		t.Fatal("400 without format/schema/json should not downgrade")
+	}
+}
+
+func TestOllamaChat_FormatDowngrade(t *testing.T) {
+	var sawSchemaObject, sawJSONString int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ollamaRequest
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		trimmed := bytes.TrimSpace(req.Format)
+		if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte(`"json"`)) {
+			// Old server rejects a schema object.
+			atomic.AddInt32(&sawSchemaObject, 1)
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"json: cannot unmarshal object into Go value (format)"}`)
+			return
+		}
+		atomic.AddInt32(&sawJSONString, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"message":{"role":"assistant","content":"{}"},"done":true}`)
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(ProviderConfig{BaseURL: srv.URL})
+	resp, err := p.Chat(context.Background(), ChatRequest{
+		Model:          "llama3.1:8b",
+		Messages:       []Message{NewUserMessage("go")},
+		ResponseSchema: map[string]any{"type": "object"},
+	})
+	if err != nil {
+		t.Fatalf("Chat error after downgrade: %v", err)
+	}
+	if resp.Content != "{}" {
+		t.Fatalf("unexpected content %q", resp.Content)
+	}
+	if atomic.LoadInt32(&sawSchemaObject) != 1 || atomic.LoadInt32(&sawJSONString) != 1 {
+		t.Fatalf("expected one schema-object attempt then one json downgrade, got schema=%d json=%d",
+			sawSchemaObject, sawJSONString)
+	}
+}
+
+func TestLocalCapabilitiesSupportStructuredOutput(t *testing.T) {
+	ollama := NewOllamaProvider(ProviderConfig{BaseURL: "http://localhost:11434"})
+	if !ollama.Capabilities().SupportsStructuredOutput {
+		t.Fatal("ollama should advertise structured output support")
+	}
+	lm := NewLMStudioProvider(ProviderConfig{})
+	if !lm.Capabilities().SupportsStructuredOutput {
+		t.Fatal("lmstudio should advertise structured output support")
 	}
 }
 
