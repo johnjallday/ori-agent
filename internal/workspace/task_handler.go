@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -280,6 +281,53 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 // resolveExecutionAgent and the rest of the agent-resolution helpers live
 // in task_handler_agent_resolver.go.
 
+// localProviderConcurrency is the per-instance concurrency limit for local
+// providers (default 1 — one task at a time protects a single GPU), configurable
+// via ORI_LOCAL_PROVIDER_CONCURRENCY (WS6.23).
+func localProviderConcurrency() int {
+	if v := strings.TrimSpace(os.Getenv("ORI_LOCAL_PROVIDER_CONCURRENCY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+// ResolveTaskProviderProfile resolves a task's provider profile for the executor's
+// scheduling decisions (WS6). Cloud tasks (and any task that can't be resolved)
+// return the zero profile — global pool, default timeout. Local tasks get a
+// per-provider-instance concurrency key/limit, IsLocal, and an order key that
+// groups identical provider+model pairs within a poll cycle.
+//
+// The key is currently the resolved provider name, which for the built-in local
+// providers is one instance each; distinguishing multiple configs at the same
+// base URL would require exposing the URL on the provider interface (follow-up).
+func (h *LLMTaskHandler) ResolveTaskProviderProfile(task Task) TaskProviderProfile {
+	if h == nil || h.llmFactory == nil {
+		return TaskProviderProfile{}
+	}
+	agentName := strings.TrimSpace(task.To)
+	if agentName == "" {
+		return TaskProviderProfile{}
+	}
+	ag, err := h.resolveExecutionAgent(agentName, task)
+	if err != nil {
+		return TaskProviderProfile{}
+	}
+	providerName := h.getProviderForAgent(ag.Settings.Provider, ag.Settings.Model)
+	provider, err := h.llmFactory.GetProvider(providerName)
+	if err != nil || provider.Type() != llm.ProviderTypeLocal {
+		return TaskProviderProfile{}
+	}
+	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
+	return TaskProviderProfile{
+		ConcurrencyKey: "local:" + providerName,
+		Limit:          localProviderConcurrency(),
+		IsLocal:        true,
+		OrderKey:       providerName + "|" + modelName,
+	}
+}
+
 func (h *LLMTaskHandler) executeTaskConversation(
 	ctx context.Context,
 	provider llm.Provider,
@@ -307,6 +355,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	// enables the feature-flagged prompt-based fallback (default off).
 	toolsRejected := false
 	textToolProtocol := isLocal && localTextToolProtocolEnabled()
+
+	// Cold-load retry (WS6.26): a first-round local failure that looks like the
+	// model still loading gets one retry after a short delay before failing.
+	coldLoadRetried := false
 
 	// Constrained decoding for structured output: on rounds where tools are not
 	// offered (initial tool-less request or a forced final answer), enforce the
@@ -417,6 +469,20 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			// Optionally switch the model to the prompt-based tool protocol.
 			if textToolProtocol && len(conversation) > 0 && conversation[0].Role == llm.RoleSystem {
 				conversation[0].Content += textToolProtocolInstruction
+			}
+			resp, err = provider.Chat(ctx, chatReq)
+		}
+		// Cold-load retry (WS6.26): a first-round local failure that looks like the
+		// model still loading (or a dropped/timed-out connection to a reachable
+		// server) is retried once after a short delay. Offline/unreachable errors
+		// are NOT retried here — they surface for offline handling (WS8).
+		if err != nil && isLocal && round == 0 && !coldLoadRetried && classifyLocalError(err) == localErrorColdLoad {
+			coldLoadRetried = true
+			h.reportColdLoadRetry(task, agentName, err)
+			select {
+			case <-time.After(coldLoadRetryDelay):
+			case <-ctx.Done():
+				return "", ctx.Err()
 			}
 			resp, err = provider.Chat(ctx, chatReq)
 		}
@@ -847,6 +913,27 @@ func (h *LLMTaskHandler) reportConversationEviction(task Task, agentName string,
 			"round":              round,
 			"messages_compacted": compacted,
 			"still_over_budget":  stillOver,
+		}))
+	}
+}
+
+// coldLoadRetryDelay is how long to wait before retrying a first-round local
+// failure that looks like the model still loading (WS6.26).
+const coldLoadRetryDelay = 5 * time.Second
+
+// reportColdLoadRetry logs and emits a cold-load retry so the wait is visible on
+// the execution trace rather than looking like a stall (WS6.26).
+func (h *LLMTaskHandler) reportColdLoadRetry(task Task, agentName string, cause error) {
+	logger.Warn("Local model call failed on first round; retrying after cold-load delay", logger.Fields{
+		"workspace_id": task.WorkspaceID,
+		"task_id":      task.ID,
+		"delay":        coldLoadRetryDelay.String(),
+		"error":        cause.Error(),
+	})
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":    "cold_load_retry",
+			"delay_ms": coldLoadRetryDelay.Milliseconds(),
 		}))
 	}
 }
