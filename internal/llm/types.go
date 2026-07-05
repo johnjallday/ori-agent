@@ -20,6 +20,14 @@ type ChatRequest struct {
 	// MaxTokens is the maximum number of tokens to generate
 	MaxTokens int
 
+	// ContextWindowTokens is the effective context window (prompt + generation)
+	// the caller has resolved for this model, in tokens. 0 means "provider
+	// default". Local providers that own their context size (Ollama) map it to
+	// their runtime option (num_ctx); OpenAI-compatible local servers size their
+	// own context, so for them it is advisory (used for budgeting only). Cloud
+	// providers ignore it.
+	ContextWindowTokens int
+
 	// Stream indicates whether to stream the response
 	Stream bool
 

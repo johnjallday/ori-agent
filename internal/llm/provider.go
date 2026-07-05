@@ -38,6 +38,29 @@ type StructuredOutputProvider interface {
 	ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error)
 }
 
+// ModelContextWindowResolver reports a model-specific context window (in tokens)
+// when a provider can resolve one (e.g. from per-model config). Return 0 to defer
+// to Capabilities().MaxContextWindow. Prefer ResolveModelContextWindow, which
+// applies that fallback.
+type ModelContextWindowResolver interface {
+	ModelContextWindow(model string) int
+}
+
+// ResolveModelContextWindow returns the best-known context window for a model:
+// a provider's per-model override (when it implements ModelContextWindowResolver
+// and returns a positive value), otherwise its Capabilities().MaxContextWindow.
+func ResolveModelContextWindow(provider Provider, model string) int {
+	if provider == nil {
+		return 0
+	}
+	if r, ok := provider.(ModelContextWindowResolver); ok {
+		if n := r.ModelContextWindow(model); n > 0 {
+			return n
+		}
+	}
+	return provider.Capabilities().MaxContextWindow
+}
+
 // StreamReader provides an interface for reading streamed responses
 type StreamReader interface {
 	// Next returns the next chunk of the response
@@ -52,6 +75,11 @@ type StreamChunk struct {
 	Content  string
 	ToolCall *ToolCall
 	Done     bool
+
+	// Usage carries token usage and is populated only on the final (Done)
+	// chunk by providers that report it (e.g. Ollama's eval counters). Zero on
+	// intermediate chunks.
+	Usage Usage
 }
 
 // ProviderType categorizes providers

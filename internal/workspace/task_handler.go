@@ -217,29 +217,39 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	}
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
-	// Build the prompt for the task
-	prompt := h.buildTaskPrompt(ctx, task)
-
-	// Prepare messages
-	messages := []llm.Message{
-		llm.NewUserMessage(prompt),
-	}
-
-	// Use a task-specific system prompt that's more conservative about tool use
-	// The agent's system prompt may encourage aggressive tool use which is inappropriate for workspace tasks
+	// Use a task-specific system prompt that's more conservative about tool use.
+	// The agent's system prompt may encourage aggressive tool use which is
+	// inappropriate for workspace tasks. Skills are injected so task/orchestration
+	// runs get skill instructions too, matching the chat path (skill-less agents
+	// add nothing).
 	taskSystemPrompt := h.buildTaskSystemPrompt()
-	// Inject the agent's resolved (enabled + bound) skills so task/orchestration
-	// runs get skill instructions too, matching the chat path. Skill-less agents
-	// add nothing (AppendSkillPromptsFromResolved returns the base unchanged).
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
 
-	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
-
-	// Convert agent tools (MCP + workspace) to LLM format
+	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting
+	// because tool schemas consume the context window too.
 	tools := h.convertAgentToolsToLLMTools(ag, task)
 
+	// Resolve the effective context window once and budget the assembled prompt
+	// against it, trimming the least-load-bearing sections in a fixed order (WS2).
+	// Cloud windows are large enough that nothing trims. If the prompt still
+	// overflows after all trims, block rather than let the server truncate it.
+	contextWindow := llm.ResolveModelContextWindow(provider, modelName)
+	segments := h.buildTaskPromptSegments(ctx, task)
+	trims, overflow := budgetPromptSegments(contextWindow, taskSystemPrompt, tools, segments)
+	if overflow {
+		return "", h.buildContextOverflowError(task, contextWindow, trimmableSegmentLabels(segments))
+	}
+	if len(trims) > 0 {
+		h.reportPromptTrims(task, agentName, contextWindow, trims)
+	}
+
+	messages := []llm.Message{
+		llm.NewSystemMessage(taskSystemPrompt),
+		llm.NewUserMessage(renderPromptSegments(segments)),
+	}
+
 	// Call the LLM
-	return h.executeTaskConversation(ctx, provider, providerName, modelName, ag, agentName, task, messages, tools)
+	return h.executeTaskConversation(ctx, provider, providerName, modelName, contextWindow, ag, agentName, task, messages, tools)
 }
 
 // resolveExecutionAgent and the rest of the agent-resolution helpers live
@@ -250,6 +260,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	provider llm.Provider,
 	providerName string,
 	modelName string,
+	contextWindow int,
 	ag *resolvedTaskAgent,
 	agentName string,
 	task Task,
@@ -262,10 +273,25 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	successfulToolCalls := map[string]bool{}
 	forceFinalAnswer := false
 
+	// Tool-result messages appended to the conversation are capped tighter for
+	// local providers, whose context windows are small (WS2.9).
+	isLocal := provider.Type() == llm.ProviderTypeLocal
+
 	for round := 0; round < maxTaskToolRounds; round++ {
 		requestTools := tools
 		if forceFinalAnswer {
 			requestTools = nil
+		}
+
+		// The conversation grows every round; keep it within the window by
+		// compacting the oldest tool-result messages before sending (WS2.10a). If
+		// it still overflows after compaction, block instead of letting the server
+		// truncate mid-task.
+		if compacted, stillOver := evictConversationForContext(conversation, contextWindow, requestTools); compacted > 0 || stillOver {
+			h.reportConversationEviction(task, agentName, round+1, compacted, stillOver)
+			if stillOver {
+				return "", h.buildContextOverflowError(task, contextWindow, []string{"conversation_history"})
+			}
 		}
 
 		// Bracket the LLM call so the UI can show "awaiting LLM" instead of a
@@ -281,11 +307,24 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		}
 
 		chatReq := llm.ChatRequest{
-			Model:           modelName,
-			Messages:        conversation,
-			Temperature:     ag.Settings.Temperature,
-			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
-			Tools:           requestTools,
+			Model:               modelName,
+			Messages:            conversation,
+			Temperature:         ag.Settings.Temperature,
+			ReasoningEffort:     ag.Settings.EffectiveReasoningEffort(providerName),
+			Tools:               requestTools,
+			ContextWindowTokens: contextWindow,
+		}
+		// Keep generation from overrunning the context window: an explicit cap
+		// larger than the reserved output headroom is lowered so prompt+generation
+		// cannot exceed num_ctx and truncate the answer (WS2.5a). With no explicit
+		// cap (0 = provider default) this is a no-op.
+		if contextWindow > 0 {
+			if capped, lowered := reconcileGenerationCap(chatReq.MaxTokens, reservedOutputHeadroom(contextWindow)); lowered {
+				logger.Debug("Lowered generation cap to reserved output headroom", logger.Fields{
+					"task_id": task.ID, "from": chatReq.MaxTokens, "to": capped,
+				})
+				chatReq.MaxTokens = capped
+			}
 		}
 		// CLI agents (Claude Code / Codex), once opted in, run with an elevated
 		// sandboxed posture: workspace-write filesystem + localhost network +
@@ -432,6 +471,17 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			toolContent := tr.Result
 			if tr.Error != nil {
 				toolContent = fmt.Sprintf("ERROR: %s", tr.Error.Error())
+			}
+
+			// Cap the copy appended to the conversation so one large tool result
+			// cannot dominate a small window. The full untruncated result stays in
+			// toolResults for event previews / result storage (WS2.9).
+			toolResultCap := maxToolResultBytesCloud
+			if isLocal {
+				toolResultCap = maxToolResultBytesLocal
+			}
+			if capped, cut := truncateHeadTailBytes(toolContent, toolResultCap); cut > 0 {
+				toolContent = capped
 			}
 
 			toolCallID := strings.TrimSpace(conversationToolCalls[index].ID)
@@ -647,6 +697,75 @@ func (h *LLMTaskHandler) cleanToolResult(result string) string {
 // looksLikeBrowserCapabilityRefusal helpers and their pattern data) lives
 // in task_handler_browser_intent.go.
 
+// buildContextOverflowError builds a blocked error for a prompt/conversation
+// that exceeds the model's context window even after all trims (WS2.10). The
+// offending sections are named so the user can act on them.
+func (h *LLMTaskHandler) buildContextOverflowError(task Task, window int, sections []string) error {
+	sectionList := strings.Join(sections, ", ")
+	logger.Warn("Task prompt exceeds model context window after trims", logger.Fields{
+		"workspace_id":   task.WorkspaceID,
+		"task_id":        task.ID,
+		"context_window": window,
+		"sections":       sectionList,
+	})
+	reason := fmt.Sprintf("The task prompt exceeds the model's %d-token context window even after trimming.", window)
+	if sectionList != "" {
+		reason = fmt.Sprintf("%s Largest sections: %s.", reason, sectionList)
+	}
+	return &TaskBlockedError{
+		ReasonCode:       "context_overflow",
+		Reason:           reason,
+		Question:         "The task is too large for this model's context window. Reduce attachments/inputs, assign a larger-context model, or switch agents?",
+		SuggestedActions: []string{"switch_agent_retry", "retry", "mark_failed"},
+	}
+}
+
+// reportPromptTrims logs and emits the prompt trims performed to fit the window
+// so they are observable on the execution trace (WS2 observability).
+func (h *LLMTaskHandler) reportPromptTrims(task Task, agentName string, window int, trims []budgetTrim) {
+	total := 0
+	parts := make([]string, 0, len(trims))
+	for _, t := range trims {
+		total += t.BytesCut
+		parts = append(parts, fmt.Sprintf("%s:%d", t.Label, t.BytesCut))
+	}
+	logger.Info("Trimmed task prompt to fit model context", logger.Fields{
+		"workspace_id":    task.WorkspaceID,
+		"task_id":         task.ID,
+		"context_window":  window,
+		"bytes_cut_total": total,
+		"trims":           strings.Join(parts, ","),
+	})
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":           "prompt_trimmed",
+			"context_window":  window,
+			"bytes_cut_total": total,
+			"sections":        parts,
+		}))
+	}
+}
+
+// reportConversationEviction logs and emits a per-round conversation compaction
+// (WS2.10a observability).
+func (h *LLMTaskHandler) reportConversationEviction(task Task, agentName string, round, compacted int, stillOver bool) {
+	logger.Info("Compacted task conversation to fit model context", logger.Fields{
+		"workspace_id":     task.WorkspaceID,
+		"task_id":          task.ID,
+		"round":            round,
+		"messages_compact": compacted,
+		"still_over":       stillOver,
+	})
+	if h.eventBus != nil {
+		h.eventBus.Publish(NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{
+			"phase":              "conversation_compacted",
+			"round":              round,
+			"messages_compacted": compacted,
+			"still_over_budget":  stillOver,
+		}))
+	}
+}
+
 // buildTaskPrompt creates a prompt for the task
 // AttachmentContent holds attachment info and file contents
 type AttachmentContent struct {
@@ -670,6 +789,7 @@ func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent 
 	}
 
 	var attachmentContents []AttachmentContent
+	totalInjected := 0 // bytes of attachment content injected so far (WS2.8)
 
 	// Find connections from attachments to this task
 	if workspace.Layout != nil && workspace.Layout.WorkflowConnections != nil {
@@ -695,7 +815,31 @@ func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent 
 								logger.Warn("Failed to read attachment file", logger.Fields{"file": filePath, "error": err})
 								attContent.Content = fmt.Sprintf("[Failed to read file: %v]", err)
 							} else {
-								attContent.Content = string(content)
+								// Enforce per-file and total byte caps before injection so a
+								// large attachment cannot blow the context window ahead of the
+								// budget pass (WS2.8). Full content stays available via
+								// workspace_files tools.
+								remaining := maxAttachmentBytesTotal - totalInjected
+								if remaining <= 0 {
+									attContent.Content = fmt.Sprintf("…[attachment omitted: task attachment budget of %d bytes exhausted; read it with the workspace_files tool]…", maxAttachmentBytesTotal)
+								} else {
+									perFileCap := maxAttachmentBytesPerFile
+									if remaining < perFileCap {
+										perFileCap = remaining
+									}
+									capped, cut := truncateHeadTailBytes(string(content), perFileCap)
+									if cut > 0 {
+										logger.Warn("Capped oversized task attachment", logger.Fields{
+											"workspace_id": task.WorkspaceID,
+											"task_id":      task.ID,
+											"file":         filePath,
+											"bytes_cut":    cut,
+											"cap":          perFileCap,
+										})
+									}
+									attContent.Content = capped
+									totalInjected += len(capped)
+								}
 							}
 						}
 
