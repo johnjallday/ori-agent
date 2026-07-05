@@ -310,6 +310,10 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		MaxConcurrent: 5,
 	})
 	b.taskExecutor.SetEventBus(b.eventBus)
+	// The execution handler may be a run bridge that does not itself resolve
+	// provider profiles, so wire the LLM task handler directly for scheduling
+	// decisions (per-provider concurrency, local timeouts) — WS6.
+	b.taskExecutor.SetProviderResolver(b.taskHandler)
 
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
