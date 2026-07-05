@@ -210,20 +210,45 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 		}
 	}
 
-	// Determine which provider to use based on explicit agent provider + model fallback.
-	providerName := h.getProviderForAgent(ag.Settings.Provider, ag.Settings.Model)
+	// Run on the agent's configured provider. If that provider is a local server
+	// that turns out to be offline and the agent has a configured fallback, re-run
+	// the whole task on the fallback provider — which re-resolves the context
+	// window, re-budgets the prompt, re-selects the prompt tier, and re-checks
+	// tool/structured-output support for that backend (WS8.33a).
+	primaryProviderName := h.getProviderForAgent(ag.Settings.Provider, ag.Settings.Model)
+	result, err := h.runTaskOnProvider(ctx, primaryProviderName, ag.Settings.Model, ag, agentName, task)
+	if err == nil || !isLocalProviderOfflineError(err) {
+		return result, err
+	}
+
+	fallbackProvider, fallbackModel, hasFallback := resolveAgentFallback(ag)
+	if !hasFallback {
+		return result, err // the offline block stands (WS8.32)
+	}
+	// Gate a local->cloud fallback behind explicit opt-in to avoid silent spend
+	// (WS8.33b); a local->local fallback proceeds with just a trace note.
+	if gateErr := h.fallbackCloudSpendGate(ag, task, agentName, fallbackProvider); gateErr != nil {
+		return "", gateErr
+	}
+	h.reportProviderFallback(task, agentName, primaryProviderName, fallbackProvider)
+	return h.runTaskOnProvider(ctx, fallbackProvider, fallbackModel, ag, agentName, task)
+}
+
+// runTaskOnProvider resolves the named provider and runs the full task pipeline
+// on it: prompt tier, tool exposure, prompt budgeting, and the tool loop. It is
+// called once for the primary provider and, on an offline block with a configured
+// fallback, again for the fallback — so every provider-dependent decision is
+// re-made for whichever backend actually runs the task (WS8.33a).
+func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, requestedModel string, ag *resolvedTaskAgent, agentName string, task Task) (string, error) {
 	provider, err := h.llmFactory.GetProvider(providerName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get LLM provider: %w", err)
 	}
-	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
+	modelName := h.normalizeModelForProvider(providerName, requestedModel)
 
-	// Use a task-specific system prompt that's more conservative about tool use.
-	// The agent's system prompt may encourage aggressive tool use which is
-	// inappropriate for workspace tasks. Local providers get the compact tier,
-	// sized for small-model instruction following (WS5). Skills are injected so
-	// task/orchestration runs get skill instructions too, matching the chat path
-	// (skill-less agents add nothing).
+	// Local providers get the compact system-prompt tier (WS5). Skills are injected
+	// so task/orchestration runs get skill instructions too (skill-less agents add
+	// nothing).
 	compactPrompt := provider.Type() == llm.ProviderTypeLocal
 	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
@@ -274,7 +299,6 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 		llm.NewUserMessage(renderPromptSegments(segments)),
 	}
 
-	// Call the LLM
 	return h.executeTaskConversation(ctx, provider, providerName, modelName, contextWindow, ag, agentName, task, messages, tools)
 }
 
@@ -485,6 +509,12 @@ func (h *LLMTaskHandler) executeTaskConversation(
 				return "", ctx.Err()
 			}
 			resp, err = provider.Chat(ctx, chatReq)
+		}
+		// Offline classification (WS8.31): a local provider that is unreachable
+		// surfaces as an actionable blocked state (which Execute may turn into a
+		// fallback) rather than a generic failure buried in logs.
+		if err != nil && isLocal && classifyLocalError(err) == localErrorOffline {
+			return "", h.buildOfflineBlockedError(task, providerName, err)
 		}
 		if err != nil {
 			// Surface the raw provider error (CLI stderr/stdout) before it is

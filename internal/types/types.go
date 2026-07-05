@@ -20,6 +20,15 @@ type Settings struct {
 	// per-tool confirmation gate. Security-sensitive, so it defaults OFF (nil or
 	// false). Requires the workspace to also opt in.
 	AllowNativeMCPTools *bool `json:"allow_native_mcp_tools,omitempty"`
+
+	// FallbackProvider/FallbackModel opt a task into an alternative provider when
+	// the primary is unreachable (WS8.32). Empty = no fallback. FallbackModel
+	// falls back to Model when empty.
+	FallbackProvider string `json:"fallback_provider,omitempty"`
+	FallbackModel    string `json:"fallback_model,omitempty"`
+	// FallbackAllowCloud permits a local->cloud fallback to run without a one-time
+	// confirmation (spend guard). Nil/false = confirm first (WS8.33b).
+	FallbackAllowCloud *bool `json:"fallback_allow_cloud,omitempty"`
 }
 
 // IsNativeMCPToolsAllowed reports whether this agent may run native-MCP CLI
