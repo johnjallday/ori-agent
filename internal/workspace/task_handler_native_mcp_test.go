@@ -61,7 +61,7 @@ func TestExecuteTaskConversation_NativeMCPWiring(t *testing.T) {
 	ag := nativeMCPAgent(true)
 	ag.MCPServers = []string{runtime}
 
-	out, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+	out, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
 		Task{WorkspaceID: "ws-x"}, []llm.Message{llm.NewUserMessage("create project")}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -100,7 +100,7 @@ func TestExecuteTaskConversation_NativeMCPGatedOff(t *testing.T) {
 	ag := nativeMCPAgent(false) // agent NOT opted in
 	ag.MCPServers = []string{runtime}
 
-	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
 		Task{WorkspaceID: "ws-y"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestExecuteTaskConversation_SkillOnlyElevated(t *testing.T) {
 	ag := nativeMCPAgent(true) // opted in
 	ag.MCPServers = nil        // skill-only: no MCP servers bound
 
-	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", ag, "reaper",
+	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
 		Task{WorkspaceID: "ws-s"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatalf("err: %v", err)
 	}
