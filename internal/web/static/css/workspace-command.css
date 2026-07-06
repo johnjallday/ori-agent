@@ -472,6 +472,17 @@
 .ws-cmd-board-host { min-width: 0; height: 100%; overflow: auto; }
 /* Neutralize the mounted detail board wrapper chrome inside the modal host. */
 .ws-cmd-board-host .workspace-detail-board { display: block; margin: 0; }
+/* MCP/Skills stat modals mount the live Workspace config surface. Go wide like the board
+   and strip the config card's own header + tab strip so only the active manager pane shows. */
+.ws-cmd-modal-panel.is-config { max-width: min(1000px, 94vw); }
+.ws-cmd-modal-config-body { flex: 1 1 auto; min-height: 0; padding: 0; }
+.ws-cmd-config-host { min-width: 0; height: 100%; overflow: auto; }
+.ws-cmd-config-host .workspace-detail-config-card.is-command-modal {
+  margin: 0; border: 0; background: transparent; box-shadow: none; clip-path: none;
+}
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-header,
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-nav { display: none; }
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-content { padding: 14px 16px; }
 .ws-cmd-modal-close {
   width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;
