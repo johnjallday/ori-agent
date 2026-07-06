@@ -130,7 +130,7 @@ test('computeStats reads counts from the page instance', () => {
     tasks: [{ status: 'pending' }, { status: 'in_progress' }, { status: 'completed' }],
     workspace: { mcp_bindings: [{}, {}], skill_bindings: [{}] }
   };
-  assert.deepEqual(view.computeStats(), { agents: 2, openTasks: 2, mcp: 2, skills: 1 });
+  assert.deepEqual(view.computeStats(), { agents: 2, openTasks: 2, mcp: 2, skills: 1, tools: 3 });
 });
 
 test('rendered command copy uses detailed-view vocabulary', () => {
@@ -210,7 +210,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /data-cmd-edit-identity="description"/);
   assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
   assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
-  assert.match(container.innerHTML, /<div class="ws-l">MCP<\/div>/);
+  assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
   assert.match(container.innerHTML, />Notes<\/h4>/);
   assert.match(container.innerHTML, />Schedules<\/h4>/);
   assert.match(container.innerHTML, />Sessions<\/h4>/);
@@ -817,15 +817,15 @@ test('systems rail panel renders Command-native tabs and a shared host', () => {
   const html = commandView.renderSystemsPanel(true);
 
   assert.match(html, />Systems<\/h4>/);
-  // Systems now hosts only the four surfaces with no other home.
-  assert.match(html, /data-cmd-system-tab="plugins"/);
+  // Systems keeps only workspace state/automation now.
   assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
   assert.match(html, /data-cmd-system-tab="triggers"/);
-  assert.match(html, /data-cmd-system-tab="tools"/);
   assert.match(html, /data-cmd-system-host/);
-  // MCP/Skills moved to the header stat boxes; Manager/Goal/Intent to their own entry points.
+  // Capability providers + Find Tools moved to the header Tools stat-box modal.
   assert.doesNotMatch(html, /data-cmd-system-tab="mcp"/);
   assert.doesNotMatch(html, /data-cmd-system-tab="skills"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="plugins"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="tools"/);
   assert.doesNotMatch(html, /data-cmd-system-tab="settings"/);
   assert.doesNotMatch(html, /data-cmd-system-tab="intent"/);
   assert.doesNotMatch(html, /data-cmd-system-tab="mission"/);
@@ -836,25 +836,27 @@ test('openSystemTab keeps Command active and selects the requested Systems tab',
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: '',
-    activeSystemTab: 'mcp',
+    activeSystemTab: 'memory',
     render() { renders.push([this.activeRailSection, this.activeSystemTab]); }
   });
 
-  commandView.openSystemTab('plugins');
+  commandView.openSystemTab('triggers');
 
   assert.equal(commandView.activeRailSection, 'systems');
-  assert.equal(commandView.activeSystemTab, 'plugins');
-  assert.deepEqual(renders, [['systems', 'plugins']]);
+  assert.equal(commandView.activeSystemTab, 'triggers');
+  assert.deepEqual(renders, [['systems', 'triggers']]);
 });
 
-test('systems shared surface mounts config or tools without cloning persistence logic', () => {
+test('systems shared surface mounts config without cloning persistence logic', () => {
   const calls = [];
   const host = { innerHTML: '', appendChild() {} };
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     active: true,
     activeRailSection: 'systems',
-    activeSystemTab: 'plugins',
+    activeSystemTab: 'memory',
+    statModalSection: '',
+    statModalEl: null,
     container: { querySelector: selector => selector === '[data-cmd-system-host]' ? host : null },
     mountSharedSurface(key, selector) {
       calls.push(['mount', key, selector]);
@@ -868,20 +870,36 @@ test('systems shared surface mounts config or tools without cloning persistence 
 
   commandView.syncSharedSurfaces();
 
-  commandView.activeSystemTab = 'tools';
-  commandView.syncSharedSurfaces();
-
   assert.deepEqual(calls, [
     ['restore', 'tools'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
-    ['tab', 'plugins'],
-    ['refresh', 'plugins'],
+    ['tab', 'memory'],
+    ['refresh', 'memory'],
     ['expand', 'config'],
-    ['restore', 'members'],
-    ['restore', 'config'],
-    ['mount', 'tools', '#workspace-detail-tools-card'],
     ['restore', 'members']
   ]);
+});
+
+test('tools modal mounts the config surface for MCP/Skills/Plugins and the tools card for Find Tools', () => {
+  const calls = [];
+  const host = { innerHTML: '', appendChild() {} };
+  const base = {
+    statModalSection: 'tools',
+    statModalEl: { hidden: false, querySelector: sel => sel === '[data-cmd-tools-host]' ? host : null },
+    mountSharedSurface(key, selector) { calls.push(['mount', key, selector]); return { key }; },
+    restoreSharedSurface(key) { calls.push(['restore', key]); },
+    showConfigTab(tab) { calls.push(['tab', tab.tabId]); },
+    refreshConfigData(key) { calls.push(['refresh', key]); },
+    expandMountedConfig(node) { calls.push(['expand', node.key]); }
+  };
+
+  const plugins = Object.assign(Object.create(WorkspaceCommandView.prototype), base, { activeToolsTab: 'plugins' });
+  plugins.syncToolsModalSurface();
+
+  const find = Object.assign(Object.create(WorkspaceCommandView.prototype), base, { activeToolsTab: 'find' });
+  calls.length = 0;
+  find.syncToolsModalSurface();
+  assert.deepEqual(calls, [['restore', 'config'], ['mount', 'tools', '#workspace-detail-tools-card']]);
 });
 
 test('escape closes the active rail manager without leaving Command', () => {

@@ -475,8 +475,10 @@
 /* MCP/Skills stat modals mount the live Workspace config surface. Go wide like the board
    and strip the config card's own header + tab strip so only the active manager pane shows. */
 .ws-cmd-modal-panel.is-config { max-width: min(1000px, 94vw); }
-.ws-cmd-modal-config-body { flex: 1 1 auto; min-height: 0; padding: 0; }
-.ws-cmd-config-host { min-width: 0; height: 100%; overflow: auto; }
+.ws-cmd-modal-config-body { flex: 1 1 auto; min-height: 0; padding: 0; display: flex; flex-direction: column; }
+/* The Tools modal stacks a sub-tab strip above the mounted surface. */
+.ws-cmd-modal-config-body .ws-cmd-system-tabs { flex: 0 0 auto; padding: 12px 14px 0; }
+.ws-cmd-config-host { min-width: 0; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .ws-cmd-config-host .workspace-detail-config-card.is-command-modal {
   margin: 0; border: 0; background: transparent; box-shadow: none; clip-path: none;
 }
