@@ -24,9 +24,6 @@ test.describe('Smoke Tests', () => {
       }
     });
 
-    // Wait for app initialization
-    await page.waitForLoadState('networkidle');
-
     // Filter out expected errors (add patterns as needed)
     const unexpectedErrors = errors.filter(e =>
       !e.includes('favicon') &&
@@ -38,7 +35,7 @@ test.describe('Smoke Tests', () => {
 
   test('theme toggle works', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('html')).toBeAttached();
 
     // Get initial theme
     const html = page.locator('html');
@@ -58,7 +55,6 @@ test.describe('Smoke Tests', () => {
 
   test('sidebar navigation is accessible', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
 
     // Check sidebar exists
     const sidebar = page.locator('.sidebar, [class*="sidebar"]').first();
@@ -189,7 +185,7 @@ test.describe('Home First Run', () => {
 test.describe('Agent Management', () => {
   test('can open create agent modal', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).toBeVisible();
 
     // Look for create agent button (adjust selector based on your UI)
     const createBtn = page.locator('button:has-text("Create"), [data-bs-target="#addAgentModal"]').first();
@@ -209,7 +205,7 @@ test.describe('Agent Management', () => {
 
   test('agent form validation works', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).toBeVisible();
 
     // Open create modal
     const createBtn = page.locator('[data-bs-target="#addAgentModal"]').first();
@@ -308,23 +304,19 @@ test.describe('Workspace Import Flow', () => {
     });
 
     await page.goto('/workspaces');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('#launcherCreateWorkspaceBtn')).toBeVisible();
     const modal = page.locator('#addFolderModal');
-    if (!await modal.isVisible()) {
-      await page.locator('#launcherCreateWorkspaceBtn').click();
-    }
+    await page.locator('#launcherImportFolderBtn').click();
     await expect(modal).toBeVisible();
 
     const importToggle = page.locator('#folderImportToggle');
-    if (!await importToggle.isChecked()) {
-      await importToggle.click();
-    }
     await expect(importToggle).toBeChecked();
     await expect(page.locator('#folderImportSection')).toBeVisible();
 
     await page.locator('#folderImportBrowseBtn').click();
     await expect(page.locator('#folderImportPathInput')).toHaveValue('/tmp/demo-project');
     await expect(page.locator('#folderImportDuplicateWarning')).toBeVisible();
+    await page.locator('#folderDescriptionInput').fill('Imported demo project for smoke coverage.');
 
     await page.locator('#folderImportProceedDuplicateBtn').click();
     await page.locator('#createFolderBtn').click();
@@ -336,20 +328,15 @@ test.describe('Workspace Import Flow', () => {
   test('import controls are keyboard and mobile friendly', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/workspaces');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('#launcherCreateWorkspaceBtn')).toBeVisible();
 
     const modal = page.locator('#addFolderModal');
-    if (!await modal.isVisible()) {
-      await page.locator('#launcherCreateWorkspaceBtn').click();
-    }
+    await page.locator('#launcherImportFolderBtn').focus();
+    await page.keyboard.press('Enter');
+    await expect(modal).toBeVisible();
 
     const importToggle = page.locator('#folderImportToggle');
-    if (await importToggle.isChecked()) {
-      await importToggle.focus();
-      await page.keyboard.press('Space');
-    }
-    await importToggle.focus();
-    await page.keyboard.press('Space');
+    await expect(importToggle).toBeChecked();
     await expect(page.locator('#folderImportSection')).toBeVisible();
 
     const pathBox = await page.locator('#folderImportPathInput').boundingBox();
@@ -364,7 +351,7 @@ test.describe('Workspace Import Flow', () => {
 
 test.describe('API Health', () => {
   test('health endpoint returns OK', async ({ request }) => {
-    const response = await request.get('/api/health');
+    const response = await request.get('/health');
     expect(response.ok()).toBeTruthy();
   });
 
@@ -566,7 +553,9 @@ test.describe('Task Output Contracts', () => {
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('date, location, pollen_count');
 
-      await page.getByText('Advanced settings', { exact: true }).click();
+      await page.locator('.workspace-task-advanced-summary').click();
+      await expect(page.locator('#workspace-task-automation-storage [data-action="open-automation-storage-modal"]')).toBeVisible();
+      await page.locator('#workspace-task-automation-storage [data-action="open-automation-storage-modal"]').click();
       await expect(page.locator('#taskModalOutputContractSection')).toBeVisible();
       await expect(page.locator('#taskModalAutoSaveWriteMode')).toHaveValue('append');
       await expect(page.locator('#taskModalOutputContractRows [data-output-contract-name]').first()).toHaveValue('date');
@@ -626,13 +615,14 @@ test.describe('Task Output Contracts', () => {
       expect(taskId).toBeTruthy();
 
       await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
-      await expect(page.getByText('Store each run of this task to CSV')).toBeVisible();
+      await page.locator('.workspace-task-advanced-summary').click();
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Save each run of this task to a dataset');
 
-      await page.locator('[data-action="toggle-csv-storage"]').check();
+      await page.locator('#workspace-task-automation-columns [data-action="toggle-csv-storage"]').check();
 
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Custom path');
-      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Result format');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText('What each run returns');
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('date');
     } finally {
       if (workspaceId) {
@@ -658,28 +648,14 @@ test.describe('Workspace File Folders', () => {
     workspaceId = workspaceData.workspace_id;
 
     try {
+      await page.addInitScript((id) => {
+        window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
+      }, workspaceId);
       await page.goto(`/workspaces/${workspaceId}`);
       await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toBeVisible();
       await page.waitForFunction(() =>
         Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
       );
-      const entryAgentTitle = page.locator('#workspace-detail-task-confirm-title', {
-        hasText: 'Create an entry agent for this workspace?'
-      });
-      if (await entryAgentTitle.waitFor({ state: 'visible', timeout: 1500 }).then(() => true).catch(() => false)) {
-        await page.waitForTimeout(150);
-        await page.locator('#workspace-detail-task-confirm-cancel').click();
-        await page.waitForFunction(() => {
-          const modal = document.getElementById('workspace-detail-task-confirm-modal');
-          return !modal || !modal.classList.contains('show');
-        });
-        await page.waitForFunction(() => {
-          const modal = document.getElementById('workspace-detail-task-confirm-modal');
-          const settled = !modal || window.getComputedStyle(modal).display === 'none';
-          return settled && !(window as any).workspaceDetail?.pendingTaskConfirm;
-        });
-        await page.evaluate(() => window.Toast?.dismissAll?.());
-      }
 
       await page.locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-primary-section="files"]').click();
       await expect(page.locator('#hubAddFileModal')).toBeVisible();
@@ -783,24 +759,17 @@ test.describe('Floating Workspace Assistant', () => {
     });
   }
 
-  async function dismissEntryAgentDialogIfPresent(page) {
-    const entryAgentTitle = page.locator('#workspace-detail-task-confirm-title', {
-      hasText: 'Create an entry agent for this workspace?'
-    });
-    if (await entryAgentTitle.waitFor({ state: 'visible', timeout: 1500 }).then(() => true).catch(() => false)) {
-      await page.waitForTimeout(150);
-      await page.locator('#workspace-detail-task-confirm-cancel').click();
-      await page.waitForFunction(() => {
-        const modal = document.getElementById('workspace-detail-task-confirm-modal');
-        return !modal || !modal.classList.contains('show');
-      });
-      await page.waitForFunction(() => {
-        const modal = document.getElementById('workspace-detail-task-confirm-modal');
-        const settled = !modal || window.getComputedStyle(modal).display === 'none';
-        return settled && !(window as any).workspaceDetail?.pendingTaskConfirm;
-      });
-      await page.evaluate(() => window.Toast?.dismissAll?.());
-    }
+  async function suppressEntryAgentPrompt(page, workspaceId: string) {
+    await page.addInitScript((id) => {
+      window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
+    }, workspaceId);
+  }
+
+  async function gotoWorkspaceCommand(page, workspaceId: string) {
+    await suppressOnboarding(page);
+    await suppressEntryAgentPrompt(page, workspaceId);
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(page.locator('#workspaceCommandView')).toBeVisible();
   }
 
   test('replaces the workspace-detail inline bar with a full floating assistant panel', async ({ page, request }) => {
@@ -808,10 +777,7 @@ test.describe('Floating Workspace Assistant', () => {
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Assistant');
 
     try {
-      await suppressOnboarding(page);
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
 
       await expect(page.locator('#homeAssistantCard.modern-card')).toHaveCount(0);
       await expect(page.locator('#hubSupportChatLauncher')).toBeVisible();
@@ -842,10 +808,7 @@ test.describe('Floating Workspace Assistant', () => {
     const taskTitle = `Write floating assistant smoke task ${Date.now()}`;
 
     try {
-      await suppressOnboarding(page);
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
       await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
 
       await page.locator('#hubSupportChatLauncher').click();
@@ -871,10 +834,7 @@ test.describe('Floating Workspace Assistant', () => {
     const noteText = `Floating assistant note smoke ${Date.now()}`;
 
     try {
-      await suppressOnboarding(page);
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
       await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
 
       await page.locator('#hubSupportChatLauncher').click();
@@ -897,18 +857,8 @@ test.describe('Floating Workspace Assistant', () => {
     let workspaceId = '';
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Quick Actions');
 
-    const getWorkspaceNoteCount = async () => {
-      const notesResp = await request.get(`/api/workspaces/${workspaceId}/notes`);
-      expect(notesResp.ok()).toBeTruthy();
-      const notesData = await notesResp.json();
-      return (notesData.notes || []).length;
-    };
-
     try {
-      await suppressOnboarding(page);
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
 
       await page.locator('#hubSupportChatLauncher').click();
       const panel = page.locator('#hubSupportChatPanel');
@@ -919,18 +869,16 @@ test.describe('Floating Workspace Assistant', () => {
       await expect(page.locator('#noteNameInput')).toHaveValue('Workspace Description');
       await expect(page.locator('#noteContentInput')).toHaveValue(/## Description/);
 
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
       await page.locator('#hubSupportChatLauncher').click();
       await page.locator('#hubSupportChatPanel').getByRole('button', { name: 'Note', exact: true }).click();
 
-      let expectedNotes = await getWorkspaceNoteCount();
       for (const selector of ['#homeAssistantQuickPlan', '#homeAssistantQuickTasks', '#homeAssistantQuickReview']) {
-        await page.locator('#hubSupportChatPanel').locator(selector).click();
-        expectedNotes += 1;
-        await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Note Created');
-        await expect.poll(getWorkspaceNoteCount).toBe(expectedNotes);
+        const button = page.locator('#hubSupportChatPanel').locator(selector);
+        const prompt = await button.getAttribute('data-home-prompt');
+        expect(prompt).toBeTruthy();
+        await button.click();
+        await expect(page.locator('#homeAssistantInput')).toHaveValue(prompt || '');
         await expect(page.locator('#homeAssistantSendBtn')).toBeEnabled();
       }
     } finally {
@@ -962,9 +910,7 @@ test.describe('Floating Workspace Assistant', () => {
         });
       });
 
-      await page.goto(`/workspaces/${workspaceId}`);
-      await expect(page.locator('#workspace-detail-files-panel')).toBeVisible();
-      await dismissEntryAgentDialogIfPresent(page);
+      await gotoWorkspaceCommand(page, workspaceId);
       await page.waitForFunction(() => Boolean((window as any).workspaceDetail));
 
       await page.locator('#hubSupportChatLauncher').click();
