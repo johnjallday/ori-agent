@@ -1478,7 +1478,7 @@ export class WorkspaceMCPManager {
             <div class="workspace-detail-mcp-card-top-main">
               <div class="workspace-detail-mcp-server">
                 <span>${this.host.escapeHtml(serverName)}</span>
-                <code>${this.host.escapeHtml(binding.id)}</code>
+                <code class="workspace-detail-mcp-id" title="${this.host.escapeHtml(binding.id)}">${this.host.escapeHtml(binding.id)}</code>
               </div>
               <div class="workspace-detail-mcp-meta">${this.host.escapeHtml(accessSummary)}</div>
             </div>

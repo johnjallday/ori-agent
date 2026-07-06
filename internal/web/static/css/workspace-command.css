@@ -553,6 +553,9 @@
   .ws-cmd-panel-tools { flex-wrap: wrap; justify-content: flex-end; }
   .ws-cmd-readout .ws-cmd-stat { flex: 1 1 calc(50% - 10px); }
   .ws-cmd-mission-actions .ws-cmd-mission-btn { flex: 1 1 calc(50% - 8px); }
+  /* Reserve space for the floating Workspace Assistant FAB so the last rail/panel
+     controls are never trapped underneath it (PRD FR5.20). */
+  .ws-cmd { padding-bottom: 84px; }
 }
 
 /* Auto-playing motion is opt-in via the OS "reduce motion" preference. */

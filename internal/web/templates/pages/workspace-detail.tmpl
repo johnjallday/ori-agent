@@ -4357,10 +4357,19 @@
       display: flex;
       align-items: center;
       gap: 0.45rem;
+      min-width: 0;
       font-size: 0.8rem;
       font-weight: 600;
       color: var(--text-primary);
       line-height: 1.2;
+    }
+
+    .workspace-detail-mcp-server > span {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .workspace-detail-mcp-server code {
@@ -4370,6 +4379,14 @@
       border: 1px solid rgba(99, 102, 241, 0.18);
       border-radius: 999px;
       padding: 0.15rem 0.45rem;
+      /* Long binding UUIDs truncate with ellipsis; full value is in the title tooltip. */
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: help;
     }
 
     .workspace-detail-mcp-meta {
