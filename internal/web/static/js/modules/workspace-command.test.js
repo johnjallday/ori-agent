@@ -817,13 +817,18 @@ test('systems rail panel renders Command-native tabs and a shared host', () => {
   const html = commandView.renderSystemsPanel(true);
 
   assert.match(html, />Systems<\/h4>/);
-  assert.match(html, /data-cmd-system-tab="mcp"/);
+  // Systems now hosts only the four surfaces with no other home.
   assert.match(html, /data-cmd-system-tab="plugins"/);
   assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
-  assert.match(html, /data-cmd-system-tab="settings"/);
-  assert.match(html, /data-cmd-system-tab="intent"/);
+  assert.match(html, /data-cmd-system-tab="triggers"/);
   assert.match(html, /data-cmd-system-tab="tools"/);
   assert.match(html, /data-cmd-system-host/);
+  // MCP/Skills moved to the header stat boxes; Manager/Goal/Intent to their own entry points.
+  assert.doesNotMatch(html, /data-cmd-system-tab="mcp"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="skills"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="settings"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="intent"/);
+  assert.doesNotMatch(html, /data-cmd-system-tab="mission"/);
 });
 
 test('openSystemTab keeps Command active and selects the requested Systems tab', () => {
@@ -1183,7 +1188,7 @@ test('stat modal inerts command background and traps tab focus', () => {
   assert.equal(first.focused, 1);
 });
 
-test('mcp manager modal lists bindings with add and Systems escape hatch', () => {
+test('mcp manager modal hosts the live config surface with the binding count, no Systems link', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     page: {
@@ -1196,20 +1201,17 @@ test('mcp manager modal lists bindings with add and Systems escape hatch', () =>
 
   const html = commandView.statModalHTML('mcp');
   assert.match(html, /MCP Servers/);
-  assert.match(html, /filesystem/);
-  assert.match(html, /gmail/);
-  assert.match(html, /Disabled/);
-  assert.match(html, /Synthesized/);
-  assert.match(html, /data-cmd-modal-action="add"/);
-  assert.match(html, /data-cmd-modal-action="edit" data-cmd-id="b1"/);
-  assert.match(html, /data-cmd-modal-action="delete" data-cmd-id="b1"/);
-  assert.match(html, /data-cmd-modal-action="detailed"/);
-  assert.match(html, /Open Systems: MCP/);
-  // Synthesized bindings are not workspace-owned, so no remove control.
-  assert.doesNotMatch(html, /data-cmd-modal-action="delete" data-cmd-id="b2"/);
+  // Mounts the live manager surface instead of a summary list.
+  assert.match(html, /data-cmd-config-host/);
+  // Binding count still shown in the header.
+  assert.match(html, /ws-cmd-modal-count">2</);
+  // No "Open Systems" escape hatch and no inline summary rows anymore.
+  assert.doesNotMatch(html, /data-cmd-modal-action="detailed"/);
+  assert.doesNotMatch(html, /Open Systems/);
+  assert.doesNotMatch(html, /data-cmd-modal-action="edit"/);
 });
 
-test('skills manager modal lists bindings and offers add', () => {
+test('skills manager modal hosts the live config surface', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     page: {
@@ -1219,10 +1221,19 @@ test('skills manager modal lists bindings and offers add', () => {
 
   const html = commandView.statModalHTML('skills');
   assert.match(html, />Skills</);
-  assert.match(html, /summarize/);
-  assert.match(html, /Trusted/);
-  assert.match(html, /data-cmd-modal-action="edit" data-cmd-id="s1"/);
-  assert.match(html, /data-cmd-modal-action="delete" data-cmd-id="s1"/);
+  assert.match(html, /data-cmd-config-host/);
+  assert.match(html, /ws-cmd-modal-count">1</);
+  assert.doesNotMatch(html, /Open Systems/);
+});
+
+test('manager settings modal hosts the settings surface without a count chip', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const html = commandView.statModalHTML('settings');
+  assert.match(html, /Manager Settings/);
+  assert.match(html, /data-cmd-config-host/);
+  // Settings/goal/intent carry no list count.
+  assert.doesNotMatch(html, /ws-cmd-modal-count/);
+  assert.doesNotMatch(html, /Open Systems/);
 });
 
 test('agents manager modal locks the entry agent from removal', () => {
@@ -1316,76 +1327,123 @@ test('tasks manager filter action refreshes visible row count', () => {
   assert.equal(commandView.renderCalls, 1);
 });
 
-test('modal add/edit hand off to page flows and close the modal; delete stays open', () => {
+test('agents modal add/edit hand off to page flows and close the modal; delete stays open', () => {
   const calls = [];
   let closed = 0;
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    statModalSection: 'mcp',
+    statModalSection: 'agents',
     closeStatModal() {
       closed += 1;
       this.statModalSection = '';
     },
     page: {
-      openWorkspaceMCPModal(id) { calls.push(['open', id]); },
-      deleteWorkspaceMCPBinding(id) { calls.push(['delete', id]); }
+      openAddAgentModal() { calls.push(['add']); },
+      openAgentModelModal(id) { calls.push(['edit', id]); },
+      removeAgentFromWorkspace(id) { calls.push(['delete', id]); }
     }
   });
 
   commandView.handleStatModalAction('add');
-  commandView.statModalSection = 'mcp';
-  commandView.handleStatModalAction('edit', 'b1');
-  commandView.statModalSection = 'mcp';
-  commandView.handleStatModalAction('delete', 'b2');
+  commandView.statModalSection = 'agents';
+  commandView.handleStatModalAction('edit', 'a1');
+  commandView.statModalSection = 'agents';
+  commandView.handleStatModalAction('delete', 'a2');
 
-  assert.deepEqual(calls, [['open', undefined], ['open', 'b1'], ['delete', 'b2']]);
+  assert.deepEqual(calls, [['add'], ['edit', 'a1'], ['delete', 'a2']]);
   assert.equal(closed, 2); // add + edit close the modal; delete keeps it open
 });
 
-test('modal detailed action retargets mcp and skills to Systems', () => {
+test('mcp/skills CRUD is not routed through handleStatModalAction (lives in the mounted panel)', () => {
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    statModalSection: 'skills',
-    closeStatModal() {
-      calls.push(['close', this.statModalSection]);
-      this.statModalSection = '';
-    },
-    openSystemTab(section) {
-      calls.push(['systems', section]);
+    statModalSection: 'mcp',
+    closeStatModal() { calls.push(['close']); },
+    page: {
+      openWorkspaceMCPModal() { calls.push(['mcp-modal']); },
+      deleteWorkspaceMCPBinding() { calls.push(['mcp-delete']); }
     }
   });
 
-  commandView.handleStatModalAction('detailed');
+  // The mounted Workspace MCP manager owns its own controls, so a stray edit/delete
+  // routed to the stat modal handler is a no-op (no page flow, no close).
+  commandView.handleStatModalAction('edit', 'b1');
+  commandView.handleStatModalAction('delete', 'b1');
 
-  assert.deepEqual(calls, [['close', 'skills'], ['systems', 'skills']]);
+  assert.deepEqual(calls, []);
 });
 
-test('modal detailed action only closes for sections without a Systems target', () => {
+test('config-surface stat sections no longer emit an Open Systems footer', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, { page: { getWorkspaceMCPBindings: () => [], getWorkspaceSkillBindings: () => [] } });
+  for (const section of ['mcp', 'skills', 'settings', 'mission', 'intent']) {
+    assert.doesNotMatch(commandView.statModalHTML(section), /Open Systems|data-cmd-modal-action="detailed"/);
+  }
+  // The removed footer builder is gone entirely.
+  assert.equal(typeof commandView.statModalFooterHTML, 'undefined');
+});
+
+test('closing a config-surface stat modal restores the shared node and re-syncs the rail', () => {
+  const calls = [];
+  const node = { classList: { remove(c) { calls.push(['unclass', c]); } } };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    statModalSection: 'settings',
+    statModalTrigger: null,
+    taskModalBoardMode: false,
+    statModalEl: { hidden: false },
+    sharedSurfaceAnchors: { config: { node } },
+    restoreSharedSurface(key) { calls.push(['restore', key]); },
+    syncSystemsSurface() { calls.push(['syncSystems']); },
+    setCommandBackgroundInert() {}
+  });
+
+  commandView.closeStatModal();
+
+  // Sheds the modal-only chrome class, hands the node home, then re-offers it to the rail.
+  assert.deepEqual(calls, [['unclass', 'is-command-modal'], ['restore', 'config'], ['syncSystems']]);
+  assert.equal(commandView.statModalEl.hidden, true);
+});
+
+test('syncSystemsSurface yields while a config-surface stat modal holds the config node', () => {
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    statModalSection: 'agents',
-    closeStatModal() {
-      calls.push(['close', this.statModalSection]);
-      this.statModalSection = '';
-    },
-    openSystemTab(section) {
-      calls.push(['systems', section]);
-    }
+    statModalSection: 'mcp',
+    statModalEl: { hidden: false },
+    container: { querySelector() { calls.push('query'); return null; } },
+    restoreSharedSurface(key) { calls.push(['restore', key]); }
   });
 
-  commandView.handleStatModalAction('detailed');
+  commandView.syncSystemsSurface();
 
-  assert.deepEqual(calls, [['close', 'agents']]);
+  // Returns before touching the rail host or restoring the shared surface.
+  assert.deepEqual(calls, []);
 });
 
-test('stat modal footer renders only for sections with a Systems target', () => {
+test('entry-agent unit card exposes a manager-settings gear; other agents do not', () => {
+  const page = {
+    isWorkspaceEntryAgent: name => name === 'Atlas',
+    getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
+    getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+    getAgentProfile: () => ({}),
+    getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
+    getAgentSkillSummary: () => ({ count: 1 })
+  };
   const commandView = Object.create(WorkspaceCommandView.prototype);
-  assert.match(commandView.statModalFooterHTML('mcp'), /Open Systems: MCP/);
-  assert.match(commandView.statModalFooterHTML('skills'), /Open Systems: Skills/);
-  assert.equal(commandView.statModalFooterHTML('agents'), '');
-  assert.equal(commandView.statModalFooterHTML('tasks'), '');
+  Object.assign(commandView, {
+    page,
+    applyTaskTagFilter: tasks => tasks || [],
+    taskFilterActiveTags: () => []
+  });
+
+  const keeper = commandView.unitCardHTML({ name: 'Atlas', isWorkspaceAgent: true, isUnassigned: false, tasks: [] });
+  const other = commandView.unitCardHTML({ name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] });
+
+  assert.match(keeper, /data-cmd-manager-settings/);
+  assert.match(keeper, /ws-cmd-unit is-keeper/);
+  assert.doesNotMatch(other, /data-cmd-manager-settings/);
 });
 
 test('retireLegacyViewPreference clears the stored pref and strips ?view= deep links', () => {
