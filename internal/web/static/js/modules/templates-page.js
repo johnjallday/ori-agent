@@ -355,6 +355,10 @@ function tplApplyReadOnly() {
   if (notice) notice.hidden = !builtin;
   const agentsNotice = tplEl('tplAgentsReadOnlyNotice');
   if (agentsNotice) agentsNotice.hidden = !builtin;
+  ['tplAgentsAddBtn', 'tplAgentsSaveBtn'].forEach((id) => {
+    const el = tplEl(id);
+    if (el) el.hidden = builtin;
+  });
   [
     'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplEditStarterTasks',
     'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
@@ -1383,12 +1387,57 @@ function tplAgentsLoad() {
   tplAgentsRender(template.agents);
 }
 
+function tplAgentsDisplayName(agent, index) {
+  const name = String(agent?.name || '').trim();
+  if (name) return name;
+  return index === 0 ? 'Entry agent' : `Agent ${index + 1}`;
+}
+
+function tplAgentsInitials(name, index) {
+  const cleaned = String(name || '').trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('');
+  return initials || String(index + 1).padStart(2, '0');
+}
+
+function tplAgentsRoleLabel(agent, index) {
+  if (index === 0) return 'Entry agent';
+  const role = String(agent?.role || '').trim();
+  if (!role) return 'Specialist';
+  return role.replace(/[_-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function tplAgentsTypeLabel(type) {
+  const value = String(type || '').trim();
+  if (!value) return 'Default type';
+  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function tplAgentsChip(text, kind = '') {
+  const chip = document.createElement('span');
+  chip.className = `tpl-agent-chip${kind ? ` is-${kind}` : ''}`;
+  chip.textContent = text;
+  return chip;
+}
+
+function tplAgentsChipList(values, emptyText, kind = '') {
+  const list = document.createElement('div');
+  list.className = 'tpl-agent-chip-list';
+  const items = (Array.isArray(values) ? values : []).map((item) => String(item || '').trim()).filter(Boolean);
+  if (items.length === 0) {
+    list.appendChild(tplAgentsChip(emptyText, 'empty'));
+    return list;
+  }
+  items.slice(0, 3).forEach((item) => list.appendChild(tplAgentsChip(item, kind)));
+  if (items.length > 3) list.appendChild(tplAgentsChip(`+${items.length - 3}`, 'count'));
+  return list;
+}
+
 function tplAgentsField(label, input) {
   const wrap = document.createElement('div');
-  wrap.className = 'mb-2';
+  wrap.className = 'tpl-agent-field';
   const lab = document.createElement('label');
-  lab.className = 'form-label';
-  lab.style.cssText = 'color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;';
+  lab.className = 'tpl-agent-field-label';
   lab.textContent = label;
   wrap.appendChild(lab);
   wrap.appendChild(input);
@@ -1397,7 +1446,7 @@ function tplAgentsField(label, input) {
 
 function tplAgentsCol(label, input) {
   const col = document.createElement('div');
-  col.className = 'col-6';
+  col.className = 'tpl-agent-form-col';
   col.appendChild(tplAgentsField(label, input));
   return col;
 }
@@ -1425,72 +1474,135 @@ function tplAgentsInput(cls, value, placeholder) {
 }
 
 function tplAgentsCard(agent, index) {
+  const readOnly = Boolean(tplSelected() && tplSelected().builtin);
   const card = document.createElement('div');
-  card.className = 'tpl-agent-card';
+  card.className = `tpl-agent-card${index === 0 ? ' is-entry' : ''}${readOnly ? ' is-readonly' : ''}`;
   card.dataset.index = String(index);
-  card.draggable = true;
-  card.style.cssText = 'border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: var(--bg-tertiary);';
+  card.draggable = !readOnly;
+
+  const displayName = tplAgentsDisplayName(agent, index);
+  const skills = (agent.tools && agent.tools.skills ? agent.tools.skills : []);
+  const mcpServers = (agent.tools && agent.tools.mcp_servers ? agent.tools.mcp_servers : []);
 
   const header = document.createElement('div');
-  header.className = 'd-flex align-items-center gap-2 mb-2';
+  header.className = 'tpl-agent-card-head';
+
   const handle = document.createElement('span');
-  handle.textContent = '⠿';
+  handle.className = 'tpl-agent-drag-handle';
+  handle.textContent = 'Drag';
   handle.title = 'Drag to reorder';
-  handle.style.cssText = 'cursor: grab; color: var(--text-secondary); user-select: none;';
-  header.appendChild(handle);
-  const tag = document.createElement('span');
-  if (index === 0) {
-    tag.className = 'badge';
-    tag.textContent = 'Entry agent';
-    tag.style.cssText = 'background: #22c55e; color: #fff; font-size: 10px;';
-  } else {
-    tag.textContent = 'Specialist';
-    tag.style.cssText = 'font-size: 11px; color: var(--text-secondary);';
-  }
-  header.appendChild(tag);
+  if (!readOnly) header.appendChild(handle);
+
+  const avatar = document.createElement('span');
+  avatar.className = 'tpl-agent-avatar';
+  avatar.textContent = tplAgentsInitials(displayName, index);
+  header.appendChild(avatar);
+
+  const identity = document.createElement('div');
+  identity.className = 'tpl-agent-identity';
+  const name = document.createElement('div');
+  name.className = 'tpl-agent-display-name';
+  name.textContent = displayName;
+  identity.appendChild(name);
+  const subtitle = document.createElement('div');
+  subtitle.className = 'tpl-agent-subtitle';
+  subtitle.textContent = index === 0 ? 'Required workspace front door' : 'Seeded workspace specialist';
+  identity.appendChild(subtitle);
+  header.appendChild(identity);
+
   const remove = document.createElement('button');
   remove.type = 'button';
-  remove.className = 'modern-btn modern-btn-secondary btn-sm ms-auto';
+  remove.className = 'tpl-agent-remove modern-btn modern-btn-secondary btn-sm';
   remove.textContent = 'Remove';
-  remove.style.color = '#ef4444';
+  remove.setAttribute('aria-label', `Remove ${displayName}`);
   remove.addEventListener('click', () => tplAgentsRemove(index));
-  header.appendChild(remove);
+  if (!readOnly) header.appendChild(remove);
   card.appendChild(header);
 
-  card.appendChild(tplAgentsField('Name', tplAgentsInput('tpl-agent-name', agent.name, 'Agent name')));
+  const summary = document.createElement('div');
+  summary.className = 'tpl-agent-summary';
+  summary.appendChild(tplAgentsChip(tplAgentsRoleLabel(agent, index), index === 0 ? 'entry' : 'role'));
+  summary.appendChild(tplAgentsChip(tplAgentsTypeLabel(agent.type), 'type'));
+  summary.appendChild(tplAgentsChip(agent.model ? agent.model : 'Workspace model', agent.model ? 'model' : 'empty'));
+  card.appendChild(summary);
 
-  const rt = document.createElement('div');
-  rt.className = 'row g-2 mb-2';
-  rt.appendChild(tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || '')));
-  rt.appendChild(tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || '')));
-  card.appendChild(rt);
+  const promptPreview = document.createElement('p');
+  promptPreview.className = 'tpl-agent-prompt-preview';
+  promptPreview.textContent = agent.system_prompt || 'No system prompt yet.';
+  card.appendChild(promptPreview);
 
-  card.appendChild(tplAgentsField('Model', tplAgentsInput('tpl-agent-model', agent.model, 'Defaults to the workspace model')));
+  const tools = document.createElement('div');
+  tools.className = 'tpl-agent-tools';
+  const skillsBlock = document.createElement('div');
+  skillsBlock.className = 'tpl-agent-tool-block';
+  const skillsLabel = document.createElement('div');
+  skillsLabel.className = 'tpl-agent-tool-label';
+  skillsLabel.textContent = 'Skills';
+  skillsBlock.appendChild(skillsLabel);
+  skillsBlock.appendChild(tplAgentsChipList(skills, 'No skills', 'skill'));
+  tools.appendChild(skillsBlock);
 
-  const prompt = document.createElement('textarea');
-  prompt.className = 'form-control tpl-agent-prompt';
-  prompt.rows = 2;
-  prompt.style.cssText = 'background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
-  prompt.value = agent.system_prompt || '';
-  prompt.placeholder = "This agent's instructions";
-  card.appendChild(tplAgentsField('System prompt', prompt));
+  const mcpBlock = document.createElement('div');
+  mcpBlock.className = 'tpl-agent-tool-block';
+  const mcpLabel = document.createElement('div');
+  mcpLabel.className = 'tpl-agent-tool-label';
+  mcpLabel.textContent = 'MCP';
+  mcpBlock.appendChild(mcpLabel);
+  mcpBlock.appendChild(tplAgentsChipList(mcpServers, 'No MCP servers', 'mcp'));
+  tools.appendChild(mcpBlock);
+  card.appendChild(tools);
 
-  const sm = document.createElement('div');
-  sm.className = 'row g-2';
-  const skillsVal = (agent.tools && agent.tools.skills ? agent.tools.skills : []).join(', ');
-  const mcpVal = (agent.tools && agent.tools.mcp_servers ? agent.tools.mcp_servers : []).join(', ');
-  sm.appendChild(tplAgentsCol('Skills', tplAgentsInput('tpl-agent-skills', skillsVal, 'comma-separated')));
-  sm.appendChild(tplAgentsCol('MCP servers', tplAgentsInput('tpl-agent-mcp', mcpVal, 'comma-separated')));
-  card.appendChild(sm);
+  if (!readOnly) {
+    const details = document.createElement('details');
+    details.className = 'tpl-agent-editor';
+    details.open = !agent.name;
+    const summaryToggle = document.createElement('summary');
+    summaryToggle.className = 'tpl-agent-editor-summary';
+    summaryToggle.textContent = 'Edit agent';
+    details.appendChild(summaryToggle);
+
+    const form = document.createElement('div');
+    form.className = 'tpl-agent-form';
+    form.appendChild(tplAgentsField('Name', tplAgentsInput('tpl-agent-name', agent.name, 'Agent name')));
+
+    const rt = document.createElement('div');
+    rt.className = 'tpl-agent-form-row';
+    rt.appendChild(tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || '')));
+    rt.appendChild(tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || '')));
+    form.appendChild(rt);
+
+    form.appendChild(tplAgentsField('Model', tplAgentsInput('tpl-agent-model', agent.model, 'Defaults to the workspace model')));
+
+    const prompt = document.createElement('textarea');
+    prompt.className = 'form-control tpl-agent-prompt';
+    prompt.rows = 2;
+    prompt.value = agent.system_prompt || '';
+    prompt.placeholder = "This agent's instructions";
+    form.appendChild(tplAgentsField('System prompt', prompt));
+
+    const sm = document.createElement('div');
+    sm.className = 'tpl-agent-form-row';
+    const skillsVal = skills.join(', ');
+    const mcpVal = mcpServers.join(', ');
+    sm.appendChild(tplAgentsCol('Skills', tplAgentsInput('tpl-agent-skills', skillsVal, 'comma-separated')));
+    sm.appendChild(tplAgentsCol('MCP servers', tplAgentsInput('tpl-agent-mcp', mcpVal, 'comma-separated')));
+    form.appendChild(sm);
+    details.appendChild(form);
+    card.appendChild(details);
+  }
 
   card.addEventListener('dragstart', (event) => {
+    if (readOnly) return;
     tplAgents.dragIndex = index;
-    card.style.opacity = '0.5';
+    card.classList.add('is-dragging');
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   });
-  card.addEventListener('dragend', () => { card.style.opacity = ''; });
-  card.addEventListener('dragover', (event) => event.preventDefault());
+  card.addEventListener('dragend', () => { card.classList.remove('is-dragging'); });
+  card.addEventListener('dragover', (event) => {
+    if (!readOnly) event.preventDefault();
+  });
   card.addEventListener('drop', (event) => {
+    if (readOnly) return;
     event.preventDefault();
     tplAgentsReorder(tplAgents.dragIndex, index);
   });
