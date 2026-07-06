@@ -923,6 +923,24 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 					"workspace_id": id,
 					"agent":        entryAgentName,
 				})
+
+				// Purge any sessions that still reference the now-deleted entry
+				// agent so the UI cannot restore stale state that resolves to a
+				// 404 on /api/agents. Mirrors the DELETE /api/agents path.
+				// Non-fatal on failure.
+				if n, perr := h.store.DeleteSessionsByAgent(ctx, entryAgentName); perr != nil {
+					logger.Warn("Failed to purge sessions for deleted entry agent", logger.Fields{
+						"workspace_id": id,
+						"agent":        entryAgentName,
+						"error":        perr,
+					})
+				} else if n > 0 {
+					logger.Info("Purged sessions for deleted entry agent", logger.Fields{
+						"workspace_id": id,
+						"agent":        entryAgentName,
+						"count":        n,
+					})
+				}
 			}
 		}
 	}
