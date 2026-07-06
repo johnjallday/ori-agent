@@ -55,7 +55,26 @@ const (
 	taskPromptPathLimit      = 180
 )
 
-func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
+// compactTaskSystemPrompt is a small-model-sized variant of the task system
+// prompt (WS5.20): imperative bullets, task-first, ordered rules/output-last,
+// preserving the load-bearing semantics of the full prompt (use tools only when
+// needed; read full notes/files via workspace tools rather than previews; never
+// fabricate URL/filesystem contents; synthesize tool results into a final answer;
+// state blockers explicitly).
+const compactTaskSystemPrompt = "You are completing one task in a shared workspace. Rules:\n" +
+	"- Do the task described in the prompt. Use tools only when they are needed; answer simple questions directly.\n" +
+	"- The workspace snapshot shows truncated previews. To use a full note, file, session, or directory, call the matching workspace_* tool with its id instead of relying on the preview.\n" +
+	"- Never invent file, folder, or URL contents. If a tool is unavailable or a target is unreachable, say so plainly.\n" +
+	"- After using tools, synthesize the results into a clear final answer. Never return raw tool output as your answer.\n" +
+	"- If you cannot finish, state exactly what is blocking you."
+
+// buildTaskSystemPrompt returns the task system prompt. The compact variant is
+// used for local providers, whose smaller models follow a short imperative prompt
+// better than the long cloud-tuned one (WS5.20); both preserve the same rules.
+func (h *LLMTaskHandler) buildTaskSystemPrompt(compact bool) string {
+	if compact {
+		return compactTaskSystemPrompt
+	}
 	var prompt strings.Builder
 	prompt.WriteString("You are a helpful AI assistant completing a task in a collaborative workspace. ")
 	prompt.WriteString("You have access to tools, but only use them when they are clearly necessary to complete the specific task. ")
@@ -665,114 +684,150 @@ func sanitizeTaskPromptText(value string, maxLen int) string {
 	return cleaned
 }
 
-// buildTaskPrompt creates a prompt for the task
+// buildTaskPrompt creates the rendered (unbudgeted) task user-prompt. Callers
+// that need token budgeting use buildTaskPromptSegments + budgetPromptSegments
+// and render the result themselves; this convenience wrapper keeps the previous
+// behavior for any caller that just wants the string.
 func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string {
-	var prompt strings.Builder
+	return renderPromptSegments(h.buildTaskPromptSegments(ctx, task))
+}
 
-	prompt.WriteString("# Task Assignment\n\n")
-	prompt.WriteString("You have been assigned a task in a collaborative workspace.\n\n")
-	fmt.Fprintf(&prompt, "**Task ID**: %s\n", task.ID)
-	fmt.Fprintf(&prompt, "**From**: %s\n", task.From)
-	fmt.Fprintf(&prompt, "**Priority**: %d/5\n\n", task.Priority)
+// buildTaskPromptSegments assembles the task user-prompt as ordered, labeled
+// segments. The task description, output-format instructions, and framing live
+// in protected segments (trimOrder 0); memory, workspace snapshot, attachments,
+// and upstream results carry trim ranks so the budget pass can shrink them in a
+// fixed order (WS2.6) without dropping load-bearing content. Concatenating the
+// segments in order reproduces the previous single-string prompt exactly when no
+// trimming occurs.
+func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task) []promptSegment {
+	segs := make([]promptSegment, 0, 6)
 
-	// Process task description with placeholder substitution
+	// Protected header: assignment framing, description, details, reference URL,
+	// user profile.
+	var header strings.Builder
+	header.WriteString("# Task Assignment\n\n")
+	header.WriteString("You have been assigned a task in a collaborative workspace.\n\n")
+	fmt.Fprintf(&header, "**Task ID**: %s\n", task.ID)
+	fmt.Fprintf(&header, "**From**: %s\n", task.From)
+	fmt.Fprintf(&header, "**Priority**: %d/5\n\n", task.Priority)
+
 	processedDescription := h.substitutePlaceholders(task)
-	fmt.Fprintf(&prompt, "## Task Description\n\n%s\n\n", processedDescription)
+	fmt.Fprintf(&header, "## Task Description\n\n%s\n\n", processedDescription)
 
 	if details := strings.TrimSpace(task.Details); details != "" {
-		prompt.WriteString("## Task Details\n\n")
-		prompt.WriteString(details)
-		prompt.WriteString("\n\n")
+		header.WriteString("## Task Details\n\n")
+		header.WriteString(details)
+		header.WriteString("\n\n")
 	}
 
 	if referenceURL := strings.TrimSpace(task.ReferenceURL); referenceURL != "" {
-		prompt.WriteString("## Reference URL\n\n")
-		prompt.WriteString(referenceURL)
-		prompt.WriteString("\n\n")
-		prompt.WriteString("Treat this URL as authoritative source material for this task. Inspect it with available fetch, browser, or web tools before making claims about its contents. If you cannot inspect it, state that limitation in your final response.\n\n")
+		header.WriteString("## Reference URL\n\n")
+		header.WriteString(referenceURL)
+		header.WriteString("\n\n")
+		header.WriteString("Treat this URL as authoritative source material for this task. Inspect it with available fetch, browser, or web tools before making claims about its contents. If you cannot inspect it, state that limitation in your final response.\n\n")
 	}
 
 	if userProfile := h.buildUserProfileSection(ctx, h.taskOwnerUserID(task)); userProfile != "" {
-		prompt.WriteString(userProfile)
-		prompt.WriteString("\n\n")
+		header.WriteString(userProfile)
+		header.WriteString("\n\n")
 	}
+	segs = append(segs, promptSegment{label: "header", text: header.String(), trimOrder: 0})
 
+	// Workspace memory — trimmed last (WS2.6 d).
 	if workspaceMemory := h.buildTaskMemorySection(task); workspaceMemory != "" {
-		prompt.WriteString(workspaceMemory)
-		prompt.WriteString("\n\n")
+		segs = append(segs, promptSegment{label: "memory", text: workspaceMemory + "\n\n", trimOrder: 4})
 	}
 
+	// Workspace snapshot (task/file/note/session lists) — WS2.6 c.
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {
-		prompt.WriteString(workspaceSnapshot)
-		prompt.WriteString("\n\n")
+		segs = append(segs, promptSegment{label: "workspace_snapshot", text: workspaceSnapshot + "\n\n", trimOrder: 3})
 	}
 
-	// Include attachments if any are connected to this task
-	attachmentContents := h.getAttachedFileContents(task)
-	if len(attachmentContents) > 0 {
-		prompt.WriteString("## Attached Files\n\n")
-		prompt.WriteString("The following files are attached to this task:\n\n")
-		for _, att := range attachmentContents {
-			fmt.Fprintf(&prompt, "### %s\n\n", att.Title)
-			if att.FilePath != "" {
-				fmt.Fprintf(&prompt, "**File**: `%s`\n\n", att.FilePath)
-			}
-			if att.Body != "" {
-				fmt.Fprintf(&prompt, "**Note**: %s\n\n", att.Body)
-			}
-			if att.Content != "" {
-				prompt.WriteString("**Content**:\n```\n")
-				prompt.WriteString(att.Content)
-				prompt.WriteString("\n```\n\n")
-			}
-		}
+	// Attached file contents — trimmed first (WS2.6 a).
+	if attachmentSection := h.buildAttachmentsSection(task); attachmentSection != "" {
+		segs = append(segs, promptSegment{label: "attachments", text: attachmentSection, trimOrder: 1})
 	}
 
-	// Handle input task results specially for better formatting. Runtime inputs
-	// (rebuilt each execution) live on task.RuntimeInputs — never in Context.
-	// Structured outputs from upstream tasks with an OutputSchema get rendered
-	// as JSON alongside the raw text, so downstream tasks can consume either.
+	// Upstream task results / structured outputs — WS2.6 b. Runtime inputs
+	// (rebuilt each execution) live on task.RuntimeInputs; structured outputs from
+	// upstream tasks with an OutputSchema render as JSON alongside the raw text.
 	if task.RuntimeInputs != nil {
-		h.formatInputResults(&prompt, task.RuntimeInputs)
+		var inputs strings.Builder
+		h.formatInputResults(&inputs, task.RuntimeInputs)
+		if inputs.Len() > 0 {
+			segs = append(segs, promptSegment{label: "upstream_inputs", text: inputs.String(), trimOrder: 2})
+		}
 	}
 
-	// Include authored context fields. With runtime inputs no longer merged
-	// into Context, every key here is authored — no filtering needed.
+	// Protected tail: authored context, required output format, time limit, and
+	// the closing instructions.
+	var tail strings.Builder
 	if len(task.Context) > 0 {
-		prompt.WriteString("## Additional Context\n\n")
+		tail.WriteString("## Additional Context\n\n")
 		for key, value := range task.Context {
-			fmt.Fprintf(&prompt, "- **%s**: %v\n", key, value)
+			fmt.Fprintf(&tail, "- **%s**: %v\n", key, value)
 		}
-		prompt.WriteString("\n")
+		tail.WriteString("\n")
 	}
 
 	if outputInstructions := BuildTaskOutputSpecPrompt(ActiveTaskOutputSpec(&task)); outputInstructions != "" {
-		prompt.WriteString("## Required Output Format\n\n")
-		prompt.WriteString(outputInstructions)
-		prompt.WriteString("\n\n")
+		tail.WriteString("## Required Output Format\n\n")
+		tail.WriteString(outputInstructions)
+		tail.WriteString("\n\n")
 	} else if outputInstructions := BuildTaskOutputSchemaPrompt(task.OutputSchema); outputInstructions != "" {
-		prompt.WriteString("## Required Output Format\n\n")
-		prompt.WriteString(outputInstructions)
-		prompt.WriteString("\n\n")
+		tail.WriteString("## Required Output Format\n\n")
+		tail.WriteString(outputInstructions)
+		tail.WriteString("\n\n")
 	} else if outputInstructions := BuildTaskOutputContractPrompt(task.OutputContract); outputInstructions != "" {
-		prompt.WriteString("## Required Output Format\n\n")
-		prompt.WriteString(outputInstructions)
-		prompt.WriteString("\n\n")
+		tail.WriteString("## Required Output Format\n\n")
+		tail.WriteString(outputInstructions)
+		tail.WriteString("\n\n")
 	}
 
 	if task.Timeout > 0 {
-		fmt.Fprintf(&prompt, "**Time Limit**: %v\n\n", task.Timeout)
+		fmt.Fprintf(&tail, "**Time Limit**: %v\n\n", task.Timeout)
 	}
 
-	prompt.WriteString("Please complete this task to the best of your ability. ")
-	prompt.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
-	prompt.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
-	prompt.WriteString("respond directly without calling tools. ")
+	tail.WriteString("Please complete this task to the best of your ability. ")
+	tail.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
+	tail.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
+	tail.WriteString("respond directly without calling tools. ")
 	if ActiveTaskOutputSpec(&task) != nil || NormalizeTaskOutputSchema(task.OutputSchema) != nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
-		prompt.WriteString("When you are done, your final answer must be the JSON object described above and nothing else.")
+		tail.WriteString("When you are done, your final answer must be the JSON object described above and nothing else.")
 	} else {
-		prompt.WriteString("Provide a clear, concise response with your findings or results.")
+		tail.WriteString("Provide a clear, concise response with your findings or results.")
+	}
+	segs = append(segs, promptSegment{label: "tail", text: tail.String(), trimOrder: 0})
+
+	return segs
+}
+
+// buildAttachmentsSection renders the "Attached Files" prompt block, or "" when
+// the task has no attachments. Attachment contents are capped (per-file and
+// total) before injection (WS2.8) so a large file cannot blow the context window
+// before budgeting even runs.
+func (h *LLMTaskHandler) buildAttachmentsSection(task Task) string {
+	attachmentContents := h.getAttachedFileContents(task)
+	if len(attachmentContents) == 0 {
+		return ""
 	}
 
+	var prompt strings.Builder
+	prompt.WriteString("## Attached Files\n\n")
+	prompt.WriteString("The following files are attached to this task:\n\n")
+	for _, att := range attachmentContents {
+		fmt.Fprintf(&prompt, "### %s\n\n", att.Title)
+		if att.FilePath != "" {
+			fmt.Fprintf(&prompt, "**File**: `%s`\n\n", att.FilePath)
+		}
+		if att.Body != "" {
+			fmt.Fprintf(&prompt, "**Note**: %s\n\n", att.Body)
+		}
+		if att.Content != "" {
+			prompt.WriteString("**Content**:\n```\n")
+			prompt.WriteString(att.Content)
+			prompt.WriteString("\n```\n\n")
+		}
+	}
 	return prompt.String()
 }

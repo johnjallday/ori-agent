@@ -32,7 +32,7 @@ func (p *providerStub) Type() llm.ProviderType {
 }
 
 func (p *providerStub) Capabilities() llm.ProviderCapabilities {
-	return llm.ProviderCapabilities{}
+	return llm.ProviderCapabilities{SupportsTools: true}
 }
 
 func (p *providerStub) ValidateConfig(_ llm.ProviderConfig) error {
@@ -68,7 +68,7 @@ func (p *scriptedProviderStub) Name() string { return p.name }
 func (p *scriptedProviderStub) Type() llm.ProviderType { return llm.ProviderTypeCloud }
 
 func (p *scriptedProviderStub) Capabilities() llm.ProviderCapabilities {
-	return llm.ProviderCapabilities{}
+	return llm.ProviderCapabilities{SupportsTools: true}
 }
 
 func (p *scriptedProviderStub) ValidateConfig(_ llm.ProviderConfig) error { return nil }

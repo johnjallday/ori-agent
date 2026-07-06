@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,16 +18,64 @@ import (
 
 // TaskExecutor handles automatic execution of workspace tasks
 type TaskExecutor struct {
-	workspaceStore Store
-	taskHandler    TaskHandler
-	pollInterval   time.Duration
-	maxConcurrent  int
-	eventBus       *EventBus // Optional event bus for publishing events
+	workspaceStore         Store
+	taskHandler            TaskHandler
+	pollInterval           time.Duration
+	maxConcurrent          int
+	localTimeoutMultiplier int
+	eventBus               *EventBus // Optional event bus for publishing events
+
+	providerResolver TaskProviderResolver // optional; overrides taskHandler assertion
 
 	mu           sync.RWMutex
 	runningTasks map[string]*taskExecution
+	runningByKey map[string]int // per concurrency-key running counts (WS6.23)
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
+}
+
+// SetProviderResolver wires provider-profile resolution for scheduling (WS6).
+// This is needed when the execution handler is a wrapper (e.g. a run bridge) that
+// does not itself implement TaskProviderResolver; without it the executor falls
+// back to type-asserting the task handler.
+func (te *TaskExecutor) SetProviderResolver(resolver TaskProviderResolver) {
+	te.providerResolver = resolver
+}
+
+// resolveProviderProfile resolves a task's provider profile, preferring an
+// explicitly wired resolver over a type-asserted handler.
+func (te *TaskExecutor) resolveProviderProfile(task Task) TaskProviderProfile {
+	resolver := te.providerResolver
+	if resolver == nil {
+		resolver, _ = te.taskHandler.(TaskProviderResolver)
+	}
+	if resolver == nil {
+		return TaskProviderProfile{}
+	}
+	return resolver.ResolveTaskProviderProfile(task)
+}
+
+// TaskProviderProfile describes a task's resolved provider for scheduling
+// decisions, so the executor can respect local hardware without coupling to the
+// LLM layer (WS6).
+type TaskProviderProfile struct {
+	// ConcurrencyKey scopes a per-instance concurrency limit ("" = global pool
+	// only, i.e. cloud providers).
+	ConcurrencyKey string
+	// Limit is the max concurrent tasks for ConcurrencyKey (<= 0 = unlimited).
+	Limit int
+	// IsLocal reports whether the task runs on a local provider.
+	IsLocal bool
+	// OrderKey groups identical provider+model tasks consecutively within a poll
+	// cycle to reduce model-swap churn (empty for cloud).
+	OrderKey string
+}
+
+// TaskProviderResolver lets the executor learn a task's provider profile. It is
+// an optional capability of the task handler; when absent the executor falls
+// back to the global concurrency pool and default timeout (cloud behavior).
+type TaskProviderResolver interface {
+	ResolveTaskProviderProfile(task Task) TaskProviderProfile
 }
 
 var errSkipOrphanCleanup = errors.New("skip orphan cleanup")
@@ -40,16 +89,39 @@ type TaskHandler interface {
 
 // taskExecution tracks a running task
 type taskExecution struct {
-	Task      Task
-	StartedAt time.Time
-	Context   context.Context
-	Cancel    context.CancelFunc
+	Task           Task
+	StartedAt      time.Time
+	Context        context.Context
+	Cancel         context.CancelFunc
+	ConcurrencyKey string // per-instance key held for the duration (WS6.23)
+}
+
+// defaultTaskTimeout is the fallback per-task timeout when a task sets none.
+const defaultTaskTimeout = 5 * time.Minute
+
+// defaultLocalTimeoutMultiplier scales the default timeout for local providers to
+// absorb cold model loads (WS6.25).
+const defaultLocalTimeoutMultiplier = 2
+
+// effectiveTaskTimeout returns the timeout for a task: an explicit task timeout is
+// honored as-is; otherwise the default is scaled by the local multiplier for
+// local-provider tasks (WS6.25).
+func effectiveTaskTimeout(taskTimeout time.Duration, isLocal bool, multiplier int) time.Duration {
+	if taskTimeout != 0 {
+		return taskTimeout
+	}
+	timeout := defaultTaskTimeout
+	if isLocal && multiplier > 1 {
+		timeout *= time.Duration(multiplier)
+	}
+	return timeout
 }
 
 // ExecutorConfig contains configuration for the task executor
 type ExecutorConfig struct {
-	PollInterval  time.Duration // How often to check for new tasks
-	MaxConcurrent int           // Max number of concurrent task executions
+	PollInterval           time.Duration // How often to check for new tasks
+	MaxConcurrent          int           // Max number of concurrent task executions
+	LocalTimeoutMultiplier int           // Multiplies the default timeout for local providers (0 = default)
 }
 
 // NewTaskExecutor creates a new task executor
@@ -60,14 +132,19 @@ func NewTaskExecutor(store Store, handler TaskHandler, config ExecutorConfig) *T
 	if config.MaxConcurrent == 0 {
 		config.MaxConcurrent = 5
 	}
+	if config.LocalTimeoutMultiplier <= 0 {
+		config.LocalTimeoutMultiplier = defaultLocalTimeoutMultiplier
+	}
 
 	return &TaskExecutor{
-		workspaceStore: store,
-		taskHandler:    handler,
-		pollInterval:   config.PollInterval,
-		maxConcurrent:  config.MaxConcurrent,
-		runningTasks:   make(map[string]*taskExecution),
-		stopChan:       make(chan struct{}),
+		workspaceStore:         store,
+		taskHandler:            handler,
+		pollInterval:           config.PollInterval,
+		maxConcurrent:          config.MaxConcurrent,
+		localTimeoutMultiplier: config.LocalTimeoutMultiplier,
+		runningTasks:           make(map[string]*taskExecution),
+		runningByKey:           make(map[string]int),
+		stopChan:               make(chan struct{}),
 	}
 }
 
@@ -201,73 +278,91 @@ func (te *TaskExecutor) pollLoop() {
 	}
 }
 
-// checkAndExecuteTasks checks for pending tasks and executes them
+// taskCandidate is a claimable task plus its workspace and resolved provider
+// profile, collected before ordering/claiming within a poll cycle.
+type taskCandidate struct {
+	ws      *Workspace
+	task    Task
+	profile TaskProviderProfile
+}
+
+// checkAndExecuteTasks checks for assigned tasks and executes those that fit the
+// global and per-provider concurrency limits.
 func (te *TaskExecutor) checkAndExecuteTasks() {
-	// Get all workspaces
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return
 	}
 
+	// Collect all claimable candidates across active workspaces first, so they can
+	// be ordered before claiming.
+	var candidates []taskCandidate
 	for _, wsID := range workspaceIDs {
 		ws, err := te.workspaceStore.Get(wsID)
-		if err != nil {
+		if err != nil || ws.Status != StatusActive {
 			continue
 		}
-
-		// Only process active workspaces
-		if ws.Status != StatusActive {
-			continue
-		}
-
-		// Find tasks ready for execution
 		for i := range ws.Tasks {
-			task := &ws.Tasks[i]
-
-			// Only auto-execute tasks with "assigned" status
-			// Pending tasks require manual execution via the UI (click RUN button)
-			if task.Status != TaskStatusAssigned {
+			// Only auto-execute "assigned" tasks; "pending" requires the UI RUN button.
+			if ws.Tasks[i].Status != TaskStatusAssigned {
 				continue
 			}
-
-			// Check if already running and claim the task atomically
-			// Use write lock to prevent race condition between check and insert
-			te.mu.Lock()
-			_, isRunning := te.runningTasks[task.ID]
-			if isRunning {
-				te.mu.Unlock()
-				continue
-			}
-
-			// Check if we have capacity
-			if len(te.runningTasks) >= te.maxConcurrent {
-				te.mu.Unlock()
-				logger.Warn("Max concurrent tasks reached, deferring task", logger.Fields{"max_concurrent": te.maxConcurrent, "task_id": task.ID})
-				continue
-			}
-
-			// Mark task as claimed immediately to prevent double execution
-			// Create a placeholder execution entry that will be replaced by executeTask
-			te.runningTasks[task.ID] = &taskExecution{
-				Task:      *task,
-				StartedAt: time.Now(),
-			}
-			te.mu.Unlock()
-
-			// Execute the task (it will update the runningTasks entry with full context)
-			te.executeTask(ws, *task)
+			task := ws.Tasks[i]
+			candidates = append(candidates, taskCandidate{ws: ws, task: task, profile: te.resolveProviderProfile(task)})
 		}
+	}
+
+	// Group identical provider+model tasks consecutively to cut model-swap churn
+	// on a single local server (WS6.24). A stable sort preserves the original
+	// (FIFO) order within a group and among cloud tasks (OrderKey ""), so no task
+	// is starved by reordering (WS6.23).
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].profile.OrderKey < candidates[j].profile.OrderKey
+	})
+
+	for _, c := range candidates {
+		te.mu.Lock()
+		if _, running := te.runningTasks[c.task.ID]; running {
+			te.mu.Unlock()
+			continue
+		}
+		// Global capacity.
+		if len(te.runningTasks) >= te.maxConcurrent {
+			te.mu.Unlock()
+			logger.Warn("Max concurrent tasks reached, deferring task", logger.Fields{"max_concurrent": te.maxConcurrent, "task_id": c.task.ID})
+			continue
+		}
+		// Per-provider-instance capacity: a task whose provider is at its limit is
+		// deferred (not failed) and consumes no global slot (WS6.23).
+		key := c.profile.ConcurrencyKey
+		if key != "" && c.profile.Limit > 0 && te.runningByKey[key] >= c.profile.Limit {
+			te.mu.Unlock()
+			logger.Debug("Provider at concurrency limit, deferring task", logger.Fields{"provider_key": key, "limit": c.profile.Limit, "task_id": c.task.ID})
+			continue
+		}
+
+		// Claim: placeholder entry (replaced by executeTask with full context) and
+		// hold a per-key slot for the duration.
+		te.runningTasks[c.task.ID] = &taskExecution{
+			Task:           c.task,
+			StartedAt:      time.Now(),
+			ConcurrencyKey: key,
+		}
+		if key != "" {
+			te.runningByKey[key]++
+		}
+		te.mu.Unlock()
+
+		te.executeTask(c.ws, c.task, c.profile)
 	}
 }
 
 // executeTask executes a single task asynchronously
-func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
-	// Create context with timeout
-	timeout := task.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Minute // Default timeout
-	}
+func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProviderProfile) {
+	// Create context with timeout. Local providers get a scaled default to absorb
+	// cold model loads when the task set no explicit timeout (WS6.25).
+	timeout := effectiveTaskTimeout(task.Timeout, profile.IsLocal, te.localTimeoutMultiplier)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	// NOTE: Don't defer cancel() here because we launch a goroutine below
@@ -276,10 +371,11 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	// Track running task
 	te.mu.Lock()
 	te.runningTasks[task.ID] = &taskExecution{
-		Task:      task,
-		StartedAt: time.Now(),
-		Context:   ctx,
-		Cancel:    cancel,
+		Task:           task,
+		StartedAt:      time.Now(),
+		Context:        ctx,
+		Cancel:         cancel,
+		ConcurrencyKey: profile.ConcurrencyKey,
 	}
 	te.mu.Unlock()
 
@@ -343,6 +439,12 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		defer cancel()
 		defer func() {
 			te.mu.Lock()
+			if exec, ok := te.runningTasks[task.ID]; ok && exec.ConcurrencyKey != "" {
+				te.runningByKey[exec.ConcurrencyKey]--
+				if te.runningByKey[exec.ConcurrencyKey] <= 0 {
+					delete(te.runningByKey, exec.ConcurrencyKey)
+				}
+			}
 			delete(te.runningTasks, task.ID)
 			te.mu.Unlock()
 		}()

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -27,11 +28,19 @@ type openAICompatibleModelsResponse struct {
 // OpenAICompatibleLocalProvider implements local providers that expose
 // OpenAI-compatible chat completion endpoints, such as LM Studio and MLX-LM.
 type OpenAICompatibleLocalProvider struct {
-	name           string
-	baseURL        string
-	client         openai.Client
-	httpClient     *http.Client
-	fallbackModels []string
+	name                 string
+	baseURL              string
+	client               openai.Client
+	httpClient           *http.Client
+	fallbackModels       []string
+	defaultContextWindow int            // provider-level default (0 = use fallback)
+	contextWindows       map[string]int // per-model overrides, keyed lower-case
+
+	// modelCache memoizes /models results for modelListCacheTTL so per-task
+	// HasModel lookups do not each hit the server (WS7.29).
+	modelCacheMu      sync.Mutex
+	modelCache        []string
+	modelCacheExpires time.Time
 }
 
 // NewLMStudioProvider creates a provider for LM Studio's OpenAI-compatible server.
@@ -63,13 +72,28 @@ func newOpenAICompatibleLocalProvider(name, defaultBaseURL string, config Provid
 		fallbackModels = append(fallbackModels, model)
 	}
 
+	defaultWindow, perModel := resolveContextWindows(config)
+
 	return &OpenAICompatibleLocalProvider{
-		name:           name,
-		baseURL:        baseURL,
-		client:         openai.NewClient(opts...),
-		httpClient:     httpClient,
-		fallbackModels: fallbackModels,
+		name:                 name,
+		baseURL:              baseURL,
+		client:               openai.NewClient(opts...),
+		httpClient:           httpClient,
+		fallbackModels:       fallbackModels,
+		defaultContextWindow: defaultWindow,
+		contextWindows:       perModel,
 	}
+}
+
+// ModelContextWindow returns the configured context window for a specific model,
+// falling back to the provider-level default (0 if neither is set). For these
+// providers the value is advisory — the server sizes its own context — and is
+// used for prompt budgeting only (WS1.1).
+func (p *OpenAICompatibleLocalProvider) ModelContextWindow(model string) int {
+	if w, ok := p.contextWindows[strings.ToLower(strings.TrimSpace(model))]; ok && w > 0 {
+		return w
+	}
+	return p.defaultContextWindow
 }
 
 func normalizeOpenAICompatibleBaseURL(baseURL, defaultBaseURL string) string {
@@ -94,7 +118,11 @@ func (p *OpenAICompatibleLocalProvider) Type() ProviderType {
 }
 
 func (p *OpenAICompatibleLocalProvider) Capabilities() ProviderCapabilities {
-	return LocalProviderCapabilities(8192)
+	window := p.defaultContextWindow
+	if window <= 0 {
+		window = defaultLocalContextWindow
+	}
+	return LocalProviderCapabilities(window)
 }
 
 func (p *OpenAICompatibleLocalProvider) ValidateConfig(config ProviderConfig) error {
@@ -154,6 +182,29 @@ func (p *OpenAICompatibleLocalProvider) HasModel(modelName string) bool {
 }
 
 func (p *OpenAICompatibleLocalProvider) fetchAvailableModels() ([]string, error) {
+	p.modelCacheMu.Lock()
+	defer p.modelCacheMu.Unlock()
+
+	if p.modelCache != nil && time.Now().Before(p.modelCacheExpires) {
+		cached := make([]string, len(p.modelCache))
+		copy(cached, p.modelCache)
+		return cached, nil
+	}
+
+	models, err := p.fetchAvailableModelsUncached()
+	if err != nil {
+		return nil, err
+	}
+
+	p.modelCache = models
+	p.modelCacheExpires = time.Now().Add(modelListCacheTTL)
+
+	cached := make([]string, len(models))
+	copy(cached, models)
+	return cached, nil
+}
+
+func (p *OpenAICompatibleLocalProvider) fetchAvailableModelsUncached() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultModelFetchTimeout)
 	defer cancel()
 
@@ -216,6 +267,21 @@ func (p *OpenAICompatibleLocalProvider) Chat(ctx context.Context, req ChatReques
 
 	if len(req.Tools) > 0 {
 		params.Tools = convertToolsToOpenAI(req.Tools)
+	}
+
+	// Constrained decoding via response_format json_schema (WS3.12). Strict is
+	// left off — local OpenAI-compatible servers vary in strict-mode support, and
+	// a derived task schema may not satisfy strict's additionalProperties/required
+	// constraints.
+	if len(req.ResponseSchema) > 0 {
+		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
+					Name:   "task_output",
+					Schema: req.ResponseSchema,
+				},
+			},
+		}
 	}
 
 	completion, err := p.client.Chat.Completions.New(ctx, params)

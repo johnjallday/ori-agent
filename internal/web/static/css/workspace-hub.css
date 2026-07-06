@@ -5338,6 +5338,25 @@ body.modal-open .hub-support-chat {
   .hub-support-chat-launcher {
     align-self: flex-end;
   }
+
+  /* Compact the launcher to an icon-only circle on phones so it can't obscure
+     workspace controls sitting at the bottom of the command view (PRD FR5.20). */
+  .hub-support-chat[data-state="closed"] .hub-support-chat-launcher {
+    width: 52px;
+    min-width: 52px;
+    padding: 0;
+  }
+
+  .hub-support-chat[data-state="closed"] .hub-support-chat-launcher-icon {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .hub-support-chat[data-state="closed"] .hub-support-chat-launcher-label {
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+  }
 }
 
 .template-onboarding-panel[hidden] {

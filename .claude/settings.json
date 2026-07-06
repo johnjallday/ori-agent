@@ -10,7 +10,11 @@
       "Bash(go build *)",
       "Bash(gofmt -l *)",
       "Bash(git fetch *)",
-      "Bash(golangci-lint run *)"
+      "Bash(golangci-lint run *)",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__read_console_messages",
+      "mcp__claude-in-chrome__read_network_requests",
+      "mcp__claude-in-chrome__find"
     ]
   },
   "hooks": {

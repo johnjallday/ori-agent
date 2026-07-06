@@ -4,6 +4,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"os"
@@ -144,6 +145,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	}
 	ollamaProvider := llm.NewOllamaProvider(llm.ProviderConfig{
 		BaseURL: ollamaBaseURL,
+		Options: localProviderContextOptions("OLLAMA"),
 	})
 	factory.Register("ollama", ollamaProvider)
 	if verbose {
@@ -156,6 +158,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	lmStudioProvider := llm.NewLMStudioProvider(llm.ProviderConfig{
 		BaseURL: lmStudioBaseURL,
 		Model:   lmStudioModel,
+		Options: localProviderContextOptions("LM_STUDIO"),
 	})
 	factory.Register("lmstudio", lmStudioProvider)
 	if verbose {
@@ -171,6 +174,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	mlxLMProvider := llm.NewMLXLMProvider(llm.ProviderConfig{
 		BaseURL: mlxLMBaseURL,
 		Model:   mlxLMModel,
+		Options: localProviderContextOptions("MLX_LM"),
 	})
 	factory.Register("mlx_lm", mlxLMProvider)
 	if verbose {
@@ -181,6 +185,43 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	}
 
 	return nil
+}
+
+// localProviderContextOptions builds a ProviderConfig.Options map for a local
+// provider from environment variables, using the given prefix (e.g. "OLLAMA").
+// Recognized vars:
+//
+//	<PREFIX>_CONTEXT_WINDOW    provider-level default context window (tokens)
+//	<PREFIX>_MAX_NUM_CTX       ceiling for the requested num_ctx (Ollama)
+//	<PREFIX>_CONTEXT_WINDOWS   JSON object of per-model overrides, e.g.
+//	                          '{"llama3.1:8b":8192,"qwen2.5:7b":16384}'
+//
+// Returns nil when nothing is configured, so zero-config behavior is unchanged.
+// Long-term this config should move to provider settings (PRD Open Question 5);
+// env keeps parity with how local providers are configured today.
+func localProviderContextOptions(prefix string) map[string]any {
+	opts := map[string]any{}
+	if v := os.Getenv(prefix + "_CONTEXT_WINDOW"); v != "" {
+		opts["context_window"] = v
+	}
+	if v := os.Getenv(prefix + "_MAX_NUM_CTX"); v != "" {
+		opts["max_num_ctx"] = v
+	}
+	if v := os.Getenv(prefix + "_CONTEXT_WINDOWS"); v != "" {
+		var perModel map[string]any
+		if err := json.Unmarshal([]byte(v), &perModel); err == nil {
+			opts["context_windows"] = perModel
+		} else {
+			logger.Warn("Ignoring malformed per-model context window config", logger.Fields{
+				"env":   prefix + "_CONTEXT_WINDOWS",
+				"error": err.Error(),
+			})
+		}
+	}
+	if len(opts) == 0 {
+		return nil
+	}
+	return opts
 }
 
 // resolveAgentStorePath determines the agent store path from environment or default.

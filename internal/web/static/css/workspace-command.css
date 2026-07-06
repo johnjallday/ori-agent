@@ -472,6 +472,19 @@
 .ws-cmd-board-host { min-width: 0; height: 100%; overflow: auto; }
 /* Neutralize the mounted detail board wrapper chrome inside the modal host. */
 .ws-cmd-board-host .workspace-detail-board { display: block; margin: 0; }
+/* MCP/Skills stat modals mount the live Workspace config surface. Go wide like the board
+   and strip the config card's own header + tab strip so only the active manager pane shows. */
+.ws-cmd-modal-panel.is-config { max-width: min(1000px, 94vw); }
+.ws-cmd-modal-config-body { flex: 1 1 auto; min-height: 0; padding: 0; display: flex; flex-direction: column; }
+/* The Tools modal stacks a sub-tab strip above the mounted surface. */
+.ws-cmd-modal-config-body .ws-cmd-system-tabs { flex: 0 0 auto; padding: 12px 14px 0; }
+.ws-cmd-config-host { min-width: 0; flex: 1 1 auto; min-height: 0; overflow: auto; }
+.ws-cmd-config-host .workspace-detail-config-card.is-command-modal {
+  margin: 0; border: 0; background: transparent; box-shadow: none; clip-path: none;
+}
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-header,
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-nav { display: none; }
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-content { padding: 14px 16px; }
 .ws-cmd-modal-close {
   width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;
@@ -542,6 +555,9 @@
   .ws-cmd-panel-tools { flex-wrap: wrap; justify-content: flex-end; }
   .ws-cmd-readout .ws-cmd-stat { flex: 1 1 calc(50% - 10px); }
   .ws-cmd-mission-actions .ws-cmd-mission-btn { flex: 1 1 calc(50% - 8px); }
+  /* Reserve space for the floating Workspace Assistant FAB so the last rail/panel
+     controls are never trapped underneath it (PRD FR5.20). */
+  .ws-cmd { padding-bottom: 84px; }
 }
 
 /* Auto-playing motion is opt-in via the OS "reduce motion" preference. */

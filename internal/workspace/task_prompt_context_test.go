@@ -413,9 +413,31 @@ func TestPrepareTaskContext_IncludesReferenceURLSurface(t *testing.T) {
 	}
 }
 
+func TestBuildTaskSystemPrompt_CompactVariant(t *testing.T) {
+	handler := &LLMTaskHandler{}
+	full := handler.buildTaskSystemPrompt(false)
+	compact := handler.buildTaskSystemPrompt(true)
+
+	if compact == full {
+		t.Fatal("compact variant should differ from the full prompt")
+	}
+	if words := len(strings.Fields(compact)); words > 160 {
+		t.Fatalf("compact prompt too long: %d words", words)
+	}
+	if len(strings.Fields(full)) <= len(strings.Fields(compact)) {
+		t.Fatal("full prompt should be longer than the compact one")
+	}
+	// The compact variant preserves the load-bearing semantics.
+	for _, want := range []string{"workspace_", "Never invent", "synthesize", "blocking"} {
+		if !strings.Contains(compact, want) {
+			t.Fatalf("compact prompt missing semantic %q:\n%s", want, compact)
+		}
+	}
+}
+
 func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T) {
 	handler := &LLMTaskHandler{}
-	prompt := handler.buildTaskSystemPrompt()
+	prompt := handler.buildTaskSystemPrompt(false)
 
 	for _, want := range []string{
 		"workspace as the collaborative workspace data provided in the prompt",
