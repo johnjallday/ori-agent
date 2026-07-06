@@ -264,7 +264,7 @@ export class WorkspaceCommandView {
       escapeHtml(workflowLabel) + '"' + (subtitle ? '' : ' hidden') + '>' + escapeHtml(subtitle) + '</div>' +
       '<div class="ws-cmd-description-row">' +
       '<p class="' + descriptionClass + '">' + escapeHtml(descriptionText) + '</p>' +
-      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description">Edit</button>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
       (isLongDescription
         ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
           (this.identityExpanded ? 'true' : 'false') + '">' + (this.identityExpanded ? 'Less' : 'More') + '</button>'
@@ -426,7 +426,15 @@ export class WorkspaceCommandView {
     root.addEventListener('click', (event) => {
       const editBtn = event.target.closest('[data-cmd-edit-identity]');
       if (editBtn) {
-        this.startIdentityEdit(editBtn.getAttribute('data-cmd-edit-identity'));
+        const field = editBtn.getAttribute('data-cmd-edit-identity');
+        // "Edit description" now opens the full Workspace Intent editor (description +
+        // systems + capabilities + key context), which replaced the Intent & Setup tab.
+        // Name and tags keep their lightweight inline editors.
+        if (field === 'description') {
+          this.openStatModal('intent', editBtn);
+        } else {
+          this.startIdentityEdit(field);
+        }
         return;
       }
       const toggleBtn = event.target.closest('[data-cmd-toggle-description]');
@@ -593,6 +601,9 @@ export class WorkspaceCommandView {
       case 'tasks': return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
       case 'mcp': return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills': return { title: 'Skills', addLabel: '＋ Add Skill' };
+      case 'settings': return { title: 'Manager Settings', addLabel: '' };
+      case 'mission': return { title: 'Goal Settings', addLabel: '' };
+      case 'intent': return { title: 'Workspace Intent', addLabel: '' };
       default: return null;
     }
   }
@@ -823,10 +834,14 @@ export class WorkspaceCommandView {
     // summary list. The mounted panel carries its own add/edit/delete controls, so the
     // modal header only needs title + count + close (no Add button, no footer link).
     if (this.sectionUsesConfigSurface(section)) {
+      // Manager/Goal Settings have no list count; MCP/Skills show their binding count.
+      const countChip = this.sectionHasNoCount(section)
+        ? ''
+        : '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>';
       return (
         '<header class="ws-cmd-modal-head">' +
         '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
-        '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>' +
+        countChip +
         '<div class="ws-cmd-modal-head-actions">' +
         '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
         '</div>' +
@@ -862,10 +877,19 @@ export class WorkspaceCommandView {
     );
   }
 
-  // MCP and Skills stat boxes host the live Workspace config surface.
+  // These stat sections host the live Workspace config surface in the modal:
+  // MCP and Skills (header stat boxes), Manager Settings (entry-agent card gear),
+  // and Goal Settings (the goal modal's "Advanced settings" button).
   sectionUsesConfigSurface(section) {
     const key = String(section || '');
-    return key === 'mcp' || key === 'skills';
+    return key === 'mcp' || key === 'skills' || key === 'settings' ||
+      key === 'mission' || key === 'intent';
+  }
+
+  // Config sections that carry no list count in the modal header.
+  sectionHasNoCount(section) {
+    const key = String(section || '');
+    return key === 'settings' || key === 'mission' || key === 'intent';
   }
 
   taskViewToggleHTML(section) {
@@ -1236,7 +1260,9 @@ export class WorkspaceCommandView {
     const ctl = group.isUnassigned
       ? ''
       : (keeper
-          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>'
+          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>' +
+            '<button type="button" class="ws-cmd-icon-btn" data-cmd-manager-settings="1"' +
+            ' title="Manager settings" aria-label="Manager settings for ' + escapeHtml(name) + '">⚙</button>'
           : '') +
         '<button type="button" class="ws-cmd-icon-btn" data-cmd-add-task="' + escapeHtml(encoded) +
         '" title="Add a task for ' + escapeHtml(name) + '" aria-label="Add a task for ' + escapeHtml(name) + '">＋</button>';
@@ -1311,6 +1337,11 @@ export class WorkspaceCommandView {
     if (!root) return;
     root.addEventListener('click', (event) => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const settingsBtn = event.target.closest('[data-cmd-manager-settings]');
+      if (settingsBtn) {
+        this.openStatModal('settings', settingsBtn);
+        return;
+      }
       const addBtn = event.target.closest('[data-cmd-add-task]');
       if (addBtn && page && page.showAddTaskModalForAgent) {
         page.showAddTaskModalForAgent(addBtn.getAttribute('data-cmd-add-task'));
@@ -1564,6 +1595,7 @@ export class WorkspaceCommandView {
       case 'mcp': return 'workspace-detail-config-mcp-tab';
       case 'skills': return 'workspace-detail-config-skills-tab';
       case 'settings': return 'workspace-detail-config-settings-tab';
+      case 'mission': return 'workspace-detail-config-mission-tab';
       case 'intent': return 'workspace-detail-config-intent-tab';
       default: return '';
     }
@@ -1931,6 +1963,9 @@ export class WorkspaceCommandView {
         break;
       case 'settings':
         if (typeof page.renderWorkspaceSettings === 'function') page.renderWorkspaceSettings();
+        break;
+      case 'intent':
+        if (typeof page.renderWorkspaceIntent === 'function') page.renderWorkspaceIntent();
         break;
       default:
         break;
