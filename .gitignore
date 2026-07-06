@@ -15,6 +15,15 @@ playwright-report/
 
 # Output of the go coverage tool
 *.out
+coverage/
+coverage.html
+
+# Secrets / credentials
+*.pem
+*.key
+*.p12
+credentials.json
+service-account*.json
 
 # Dependency directories
 vendor/
@@ -50,7 +59,8 @@ Thumbs.db
 # Local-only agent skill tooling (release-manager); workspace-planning stays tracked
 .agents/skills/release-manager/
 .env
-.env.local
+.env.*
+!.env.example
 
 # Runtime/cache directories
 plugin_cache/
@@ -127,7 +137,8 @@ __pycache__/
 # Temporary files from various tools
 .tmp/
 *.tmp
-*.tempfrontend/dist/
+*.temp
+frontend/dist/
 
 # Runtime data directories
 agents.json
