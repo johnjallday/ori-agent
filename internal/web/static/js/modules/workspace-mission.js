@@ -777,14 +777,18 @@
   }
 
   function openGoalSettings() {
+    // Command view: the Goal Settings Systems tab is gone — open the full goal config
+    // (autonomy, cadence, notifications) as a modal over the command surface instead.
     if (
       window.workspaceCommand &&
       window.workspaceCommand.active &&
-      typeof window.workspaceCommand.openSystemTab === 'function'
+      typeof window.workspaceCommand.openStatModal === 'function'
     ) {
-      window.workspaceCommand.openSystemTab('mission');
+      window.workspaceCommand.openStatModal('mission');
+      return;
     }
 
+    // Legacy (non-command) fallback: expand the config panel + mission tab directly.
     if (
       window.workspaceDetail &&
       typeof window.workspaceDetail.setWorkspaceConfigExpanded === 'function'

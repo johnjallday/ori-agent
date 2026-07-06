@@ -35,7 +35,8 @@ export class WorkspaceCommandView {
     this.commandTagInput = null;
     this.commandTagDraft = [];
     this.commandTagError = '';
-    this.activeSystemTab = 'mcp';
+    this.activeSystemTab = 'memory';
+    this.activeToolsTab = 'mcp';
     this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = (event) => this.handleGlobalKeydown(event);
     this.setup();
@@ -107,7 +108,9 @@ export class WorkspaceCommandView {
     }).length;
     const mcp = Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings.length : 0;
     const skills = Array.isArray(ws.skill_bindings) ? ws.skill_bindings.length : 0;
-    return { agents, openTasks, mcp, skills };
+    // "Tools" groups the capability providers (MCP + Skills + Plugins). Plugins install
+    // themselves as MCP/skill bindings, so they are already reflected in this count.
+    return { agents, openTasks, mcp, skills, tools: mcp + skills };
   }
 
   opsModeLabel() {
@@ -264,7 +267,7 @@ export class WorkspaceCommandView {
       escapeHtml(workflowLabel) + '"' + (subtitle ? '' : ' hidden') + '>' + escapeHtml(subtitle) + '</div>' +
       '<div class="ws-cmd-description-row">' +
       '<p class="' + descriptionClass + '">' + escapeHtml(descriptionText) + '</p>' +
-      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description">Edit</button>' +
+      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
       (isLongDescription
         ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
           (this.identityExpanded ? 'true' : 'false') + '">' + (this.identityExpanded ? 'Less' : 'More') + '</button>'
@@ -279,8 +282,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-readout">' +
       this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
       this.statBoxHTML(stats.openTasks, 'Open Tasks', 'tasks', 'View open tasks', this.hasAttentionTasks() ? 'is-alert' : '') +
-      this.statBoxHTML(stats.mcp, 'MCP', 'mcp', 'Open MCP settings') +
-      this.statBoxHTML(stats.skills, 'Skills', 'skills', 'Open Skills settings') +
+      this.statBoxHTML(stats.tools, 'Tools', 'tools', 'Open tools: MCP, skills, plugins, and find tools') +
       '</div>' +
       '</header>'
     );
@@ -426,7 +428,15 @@ export class WorkspaceCommandView {
     root.addEventListener('click', (event) => {
       const editBtn = event.target.closest('[data-cmd-edit-identity]');
       if (editBtn) {
-        this.startIdentityEdit(editBtn.getAttribute('data-cmd-edit-identity'));
+        const field = editBtn.getAttribute('data-cmd-edit-identity');
+        // "Edit description" now opens the full Workspace Intent editor (description +
+        // systems + capabilities + key context), which replaced the Intent & Setup tab.
+        // Name and tags keep their lightweight inline editors.
+        if (field === 'description') {
+          this.openStatModal('intent', editBtn);
+        } else {
+          this.startIdentityEdit(field);
+        }
         return;
       }
       const toggleBtn = event.target.closest('[data-cmd-toggle-description]');
@@ -593,6 +603,10 @@ export class WorkspaceCommandView {
       case 'tasks': return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
       case 'mcp': return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills': return { title: 'Skills', addLabel: '＋ Add Skill' };
+      case 'tools': return { title: 'Tools', addLabel: '' };
+      case 'settings': return { title: 'Manager Settings', addLabel: '' };
+      case 'mission': return { title: 'Goal Settings', addLabel: '' };
+      case 'intent': return { title: 'Workspace Intent', addLabel: '' };
       default: return null;
     }
   }
@@ -605,11 +619,16 @@ export class WorkspaceCommandView {
       this.taskModalShowAll = false;
       this.taskModalBoardMode = false;
     }
+    if (section === 'tools') {
+      this.activeToolsTab = this.toolsTab(this.activeToolsTab).key;
+    }
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
-    this.renderStatModalBody();
+    // Un-hide before rendering the body: mounting the live config surface into the
+    // MCP/Skills modal is gated on the modal being visible (syncConfigModalSurface).
     el.hidden = false;
+    this.renderStatModalBody();
     this.setCommandBackgroundInert(true);
     const panel = el.querySelector('.ws-cmd-modal-panel');
     if (panel && typeof panel.focus === 'function') {
@@ -620,6 +639,8 @@ export class WorkspaceCommandView {
   closeStatModal() {
     const trigger = this.statModalTrigger;
     const wasBoard = this.taskModalBoardMode;
+    const wasConfig = this.sectionUsesConfigSurface(this.statModalSection);
+    const wasTools = this.statModalSection === 'tools';
     this.statModalSection = '';
     this.statModalTrigger = null;
     this.taskModalBoardMode = false;
@@ -628,6 +649,14 @@ export class WorkspaceCommandView {
       this.restoreSharedSurface('board');
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (page && typeof page.setView === 'function') page.setView('list');
+    }
+    // Hand the live config surface back, then re-offer it to the Systems rail if it is
+    // still expanded on a config-host tab (single-node arbitration — see PRD FR6.26).
+    if (wasConfig) {
+      this.releaseConfigModalSurface();
+    }
+    if (wasTools) {
+      this.releaseToolsModalSurface();
     }
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
@@ -687,6 +716,11 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-modal-backdrop" data-cmd-modal-action="close"></div>' +
       '<div class="ws-cmd-modal-panel" role="dialog" aria-modal="true" tabindex="-1"></div>';
     el.addEventListener('click', (event) => {
+      const toolsTab = event.target.closest('[data-cmd-tools-tab]');
+      if (toolsTab) {
+        this.setToolsTab(toolsTab.getAttribute('data-cmd-tools-tab'));
+        return;
+      }
       const btn = event.target.closest('[data-cmd-modal-action]');
       if (!btn) return;
       this.handleStatModalAction(btn.getAttribute('data-cmd-modal-action'), btn.getAttribute('data-cmd-id'));
@@ -713,9 +747,102 @@ export class WorkspaceCommandView {
     if (meta) panel.setAttribute('aria-label', meta.title);
     const boardMode = this.statModalSection === 'tasks' && this.taskModalBoardMode;
     if (panel.classList) panel.classList.toggle('is-board', boardMode);
+    // Config-surface and Tools modals get the wide panel treatment.
+    const isConfig = this.statModalHoldsSharedSurface();
+    if (panel.classList) panel.classList.toggle('is-config', isConfig);
     panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
+    this.syncConfigModalSurface();
+    this.syncToolsModalSurface();
     this.mountTaskFilterBar();
+  }
+
+  // Mount the live Workspace config surface into the open MCP/Skills stat modal, showing
+  // only the relevant manager pane. Mirrors syncBoardSurface. The single config node is
+  // pulled from wherever it currently lives (hidden host or the Systems rail).
+  syncConfigModalSurface() {
+    const section = this.statModalSection;
+    const open = this.statModalEl && !this.statModalEl.hidden;
+    if (!this.sectionUsesConfigSurface(section) || !open) return;
+    const host = this.statModalEl.querySelector('[data-cmd-config-host]');
+    if (!host) return;
+    const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
+    if (!config) {
+      host.innerHTML = '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
+      return;
+    }
+    // is-command-modal hides the config header/tab strip so only the active pane shows.
+    if (config.classList) config.classList.add('is-command-modal');
+    const tabId = this.configTabIdFor(section);
+    if (tabId) this.showConfigTab({ tabId });
+    this.refreshConfigData(section);
+    // expandMountedConfig must run LAST: refreshConfigData re-collapses the config
+    // content, so the rail (syncSystemsSurface) also expands last — mirror that order.
+    this.expandMountedConfig(config);
+  }
+
+  // Hand the config surface back to its hidden home and, if the Systems rail is still
+  // expanded on a config-host tab, re-mount it there so Plugins/Memory/Triggers is not
+  // left blank (single-node arbitration).
+  releaseConfigModalSurface() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.config;
+    if (record && record.node && record.node.classList) {
+      record.node.classList.remove('is-command-modal');
+    }
+    this.restoreSharedSurface('config');
+    this.syncSystemsSurface();
+  }
+
+  // Mount the active Tools sub-tab into the Tools modal: MCP/Skills/Plugins mount the
+  // config surface (showing that pane); Find Tools mounts the tools card. The two shared
+  // surfaces ('config' and 'tools') are mutually exclusive inside the modal.
+  syncToolsModalSurface() {
+    if (this.statModalSection !== 'tools') return;
+    const open = this.statModalEl && !this.statModalEl.hidden;
+    if (!open) return;
+    const host = this.statModalEl.querySelector('[data-cmd-tools-host]');
+    if (!host) return;
+    const tab = this.toolsTab(this.activeToolsTab);
+    if (tab.host === 'tools') {
+      this.restoreSharedSurface('config');
+      const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
+      if (!tools) { host.innerHTML = '<div class="ws-cmd-modal-empty">Find Tools is unavailable.</div>'; return; }
+      if (tools.style) tools.style.display = '';
+      return;
+    }
+    this.restoreSharedSurface('tools');
+    const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
+    if (!config) {
+      host.innerHTML = '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
+      return;
+    }
+    if (config.classList) config.classList.add('is-command-modal');
+    const tabId = this.configTabIdFor(tab.key);
+    if (tabId) this.showConfigTab({ tabId });
+    this.refreshConfigData(tab.key);
+    this.expandMountedConfig(config);
+  }
+
+  setToolsTab(key) {
+    this.activeToolsTab = this.toolsTab(key).key;
+    this.renderStatModalBody();
+  }
+
+  // Close-path for the Tools modal: hand both shared surfaces home and re-offer config to
+  // the Systems rail if it is still expanded (single-node arbitration).
+  releaseToolsModalSurface() {
+    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.config;
+    if (record && record.node && record.node.classList) {
+      record.node.classList.remove('is-command-modal');
+    }
+    this.restoreSharedSurface('config');
+    this.restoreSharedSurface('tools');
+    this.syncSystemsSurface();
+  }
+
+  // A config-surface or the Tools modal currently holds a shared surface on loan.
+  statModalHoldsSharedSurface() {
+    return this.sectionUsesConfigSurface(this.statModalSection) || this.statModalSection === 'tools';
   }
 
   ensureTaskFilterBar() {
@@ -772,6 +899,53 @@ export class WorkspaceCommandView {
   statModalHTML(section) {
     const meta = this.statSectionMeta(section);
     if (!meta) return '';
+    // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
+    // Find Tools discovery flow behind one tabbed surface.
+    if (section === 'tools') {
+      const tabs = this.toolsTabs();
+      const active = this.toolsTab(this.activeToolsTab);
+      const tabButtons = tabs.map(tab => (
+        '<button type="button" class="ws-cmd-system-tab' + (tab.key === active.key ? ' is-active' : '') +
+        '" data-cmd-tools-tab="' + escapeHtml(tab.key) + '" role="tab" aria-selected="' +
+        (tab.key === active.key ? 'true' : 'false') + '">' + escapeHtml(tab.label) + '</button>'
+      )).join('');
+      return (
+        '<header class="ws-cmd-modal-head">' +
+        '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
+        '<span class="ws-cmd-modal-count">' + this.statModalCount('tools') + '</span>' +
+        '<div class="ws-cmd-modal-head-actions">' +
+        '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
+        '</div>' +
+        '</header>' +
+        '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
+        '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace tools">' + tabButtons + '</div>' +
+        '<div class="ws-cmd-config-host" data-cmd-tools-host>' +
+        '<div class="ws-cmd-modal-empty">Loading ' + escapeHtml(active.label) + '...</div>' +
+        '</div></div>'
+      );
+    }
+    // MCP/Skills mount the live Workspace config surface (full manager) instead of a
+    // summary list. The mounted panel carries its own add/edit/delete controls, so the
+    // modal header only needs title + count + close (no Add button, no footer link).
+    if (this.sectionUsesConfigSurface(section)) {
+      // Manager/Goal Settings have no list count; MCP/Skills show their binding count.
+      const countChip = this.sectionHasNoCount(section)
+        ? ''
+        : '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>';
+      return (
+        '<header class="ws-cmd-modal-head">' +
+        '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
+        countChip +
+        '<div class="ws-cmd-modal-head-actions">' +
+        '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
+        '</div>' +
+        '</header>' +
+        '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
+        '<div class="ws-cmd-config-host" data-cmd-config-host>' +
+        '<div class="ws-cmd-modal-empty">Loading ' + escapeHtml(meta.title) + '...</div>' +
+        '</div></div>'
+      );
+    }
     const boardMode = section === 'tasks' && this.taskModalBoardMode;
     const taskFilterHost = section === 'tasks'
       ? '<div class="ws-cmd-modal-note-filter" data-cmd-task-filter></div>'
@@ -793,22 +967,23 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
       '</div>' +
       '</header>' +
-      body +
-      this.statModalFooterHTML(section)
+      body
     );
   }
 
-  // Only sections with a deeper Systems surface get a footer link; the old
-  // "Open in detailed view" escape hatch died with the Detailed view.
-  statModalFooterHTML(section) {
-    const label = this.statModalFooterLabel(section);
-    if (!label) return '';
-    return (
-      '<footer class="ws-cmd-modal-foot">' +
-      '<button type="button" class="ws-cmd-modal-detailed" data-cmd-modal-action="detailed">' +
-      escapeHtml(label) + '</button>' +
-      '</footer>'
-    );
+  // These stat sections host the live Workspace config surface in the modal:
+  // MCP and Skills (header stat boxes), Manager Settings (entry-agent card gear),
+  // and Goal Settings (the goal modal's "Advanced settings" button).
+  sectionUsesConfigSurface(section) {
+    const key = String(section || '');
+    return key === 'mcp' || key === 'skills' || key === 'settings' ||
+      key === 'mission' || key === 'intent';
+  }
+
+  // Config sections that carry no list count in the modal header.
+  sectionHasNoCount(section) {
+    const key = String(section || '');
+    return key === 'settings' || key === 'mission' || key === 'intent';
   }
 
   taskViewToggleHTML(section) {
@@ -822,13 +997,6 @@ export class WorkspaceCommandView {
       '" data-cmd-modal-action="view-board" aria-pressed="' + (board ? 'true' : 'false') + '">Board</button>' +
       '</div>'
     );
-  }
-
-  statModalFooterLabel(section) {
-    const key = String(section || '');
-    if (key === 'mcp') return 'Open Systems: MCP ▸';
-    if (key === 'skills') return 'Open Systems: Skills ▸';
-    return '';
   }
 
   statModalFilterToggleHTML(section) {
@@ -845,6 +1013,7 @@ export class WorkspaceCommandView {
       case 'tasks': return this.taskRowData({ includeAll: this.taskModalShowAll }).length;
       case 'mcp': return this.mcpRowData().length;
       case 'skills': return this.skillRowData().length;
+      case 'tools': return this.mcpRowData().length + this.skillRowData().length;
       default: return 0;
     }
   }
@@ -853,8 +1022,6 @@ export class WorkspaceCommandView {
     switch (String(section || '')) {
       case 'agents': return this.agentRowsHTML();
       case 'tasks': return this.taskRowsHTML();
-      case 'mcp': return this.mcpRowsHTML();
-      case 'skills': return this.skillRowsHTML();
       default: return '';
     }
   }
@@ -989,41 +1156,6 @@ export class WorkspaceCommandView {
     return Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings : [];
   }
 
-  mcpRowsHTML() {
-    const bindings = this.mcpRowData();
-    if (!bindings.length) return this.modalEmptyHTML('No MCP servers bound yet.');
-    return bindings.map((b) => {
-      const id = String(b.id || '');
-      const serverName = String(b.serverName || b.server_name || 'unknown');
-      const alias = String(b.alias || '');
-      const isDisabled = b.enabled === false;
-      const isSynth = b.source === 'synthesized';
-      const canRemove = b.source === 'workspace';
-      const chips =
-        '<span class="ws-cmd-mchip ' + (isDisabled ? 'is-disabled' : 'is-on') + '">' +
-        (isDisabled ? 'Disabled' : 'Enabled') + '</span>' +
-        '<span class="ws-cmd-mchip">' + (isSynth ? 'Synthesized' : 'Explicit') + '</span>' +
-        (alias ? '<span class="ws-cmd-mchip">' + escapeHtml(alias) + '</span>' : '');
-      const removeBtn = canRemove
-        ? '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
-          escapeHtml(id) + '" title="Remove" aria-label="Remove ' + escapeHtml(serverName) + '">✕</button>'
-        : '';
-      return (
-        '<div class="ws-cmd-mrow">' +
-        '<div class="ws-cmd-mrow-main">' +
-        '<div class="ws-cmd-mrow-name">' + escapeHtml(serverName) + '</div>' +
-        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
-        '</div>' +
-        '<div class="ws-cmd-mrow-actions">' +
-        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
-        escapeHtml(id) + '" title="Edit binding" aria-label="Edit ' + escapeHtml(serverName) + '">Edit</button>' +
-        removeBtn +
-        '</div>' +
-        '</div>'
-      );
-    }).join('');
-  }
-
   skillRowData() {
     const page = this.page || {};
     if (typeof page.getWorkspaceSkillBindings === 'function') {
@@ -1031,37 +1163,6 @@ export class WorkspaceCommandView {
     }
     const ws = page.workspace || {};
     return Array.isArray(ws.skill_bindings) ? ws.skill_bindings : [];
-  }
-
-  skillRowsHTML() {
-    const bindings = this.skillRowData();
-    if (!bindings.length) return this.modalEmptyHTML('No skills bound yet.');
-    return bindings.map((b) => {
-      const id = String(b.id || '');
-      const skillName = String(b.skillName || b.skill_name || 'unknown');
-      const isDisabled = b.enabled === false;
-      const isPlanning = b.planningProfile === true;
-      const isTrusted = b.trusted === true;
-      const chips =
-        '<span class="ws-cmd-mchip ' + (isDisabled ? 'is-disabled' : 'is-on') + '">' +
-        (isDisabled ? 'Disabled' : 'Enabled') + '</span>' +
-        (isPlanning ? '<span class="ws-cmd-mchip">Planning</span>' : '') +
-        (isTrusted ? '<span class="ws-cmd-mchip">Trusted</span>' : '');
-      return (
-        '<div class="ws-cmd-mrow">' +
-        '<div class="ws-cmd-mrow-main">' +
-        '<div class="ws-cmd-mrow-name">' + escapeHtml(skillName) + '</div>' +
-        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
-        '</div>' +
-        '<div class="ws-cmd-mrow-actions">' +
-        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
-        escapeHtml(id) + '" title="Edit binding" aria-label="Edit ' + escapeHtml(skillName) + '">Edit</button>' +
-        '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
-        escapeHtml(id) + '" title="Remove" aria-label="Remove ' + escapeHtml(skillName) + '">✕</button>' +
-        '</div>' +
-        '</div>'
-      );
-    }).join('');
   }
 
   handleStatModalAction(action, id) {
@@ -1088,15 +1189,10 @@ export class WorkspaceCommandView {
       }
       return;
     }
-    if (a === 'detailed') {
-      this.closeStatModal();
-      if (section === 'mcp' || section === 'skills') {
-        this.openSystemTab(section);
-      }
-      return;
-    }
     // Add/Edit hand off to an existing modal, so close ours first (avoids stacked
     // overlays). Run/Delete stay in place; the page reload triggers refresh().
+    // Note: mcp/skills mount the live manager surface (with its own controls), so their
+    // add/edit/delete arrive through that panel's handlers, not this switch.
     switch (section) {
       case 'agents':
         if (a === 'add') { this.closeStatModal(); if (typeof page.openAddAgentModal === 'function') page.openAddAgentModal(); }
@@ -1108,16 +1204,6 @@ export class WorkspaceCommandView {
         else if (a === 'run') { if (typeof page.executeTask === 'function') page.executeTask(id); }
         else if (a === 'open') { if (typeof page.openTask === 'function') page.openTask(id); }
         else if (a === 'delete') { if (typeof page.deleteTask === 'function') page.deleteTask(id); }
-        break;
-      case 'mcp':
-        if (a === 'add') { this.closeStatModal(); if (typeof page.openWorkspaceMCPModal === 'function') page.openWorkspaceMCPModal(); }
-        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openWorkspaceMCPModal === 'function') page.openWorkspaceMCPModal(id); }
-        else if (a === 'delete') { if (typeof page.deleteWorkspaceMCPBinding === 'function') page.deleteWorkspaceMCPBinding(id); }
-        break;
-      case 'skills':
-        if (a === 'add') { this.closeStatModal(); if (typeof page.openWorkspaceSkillModal === 'function') page.openWorkspaceSkillModal(); }
-        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openWorkspaceSkillModal === 'function') page.openWorkspaceSkillModal(id); }
-        else if (a === 'delete') { if (typeof page.deleteWorkspaceSkillBinding === 'function') page.deleteWorkspaceSkillBinding(id); }
         break;
       default:
         break;
@@ -1169,7 +1255,7 @@ export class WorkspaceCommandView {
         if (page && typeof page.showFileModal === 'function') page.showFileModal();
         break;
       case 'systems':
-        this.openSystemTab(this.activeSystemTab || 'mcp');
+        this.openSystemTab(this.activeSystemTab || 'memory');
         break;
       case 'members':
         if (this.activeRailSection !== 'members') {
@@ -1269,7 +1355,9 @@ export class WorkspaceCommandView {
     const ctl = group.isUnassigned
       ? ''
       : (keeper
-          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>'
+          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>' +
+            '<button type="button" class="ws-cmd-icon-btn" data-cmd-manager-settings="1"' +
+            ' title="Manager settings" aria-label="Manager settings for ' + escapeHtml(name) + '">⚙</button>'
           : '') +
         '<button type="button" class="ws-cmd-icon-btn" data-cmd-add-task="' + escapeHtml(encoded) +
         '" title="Add a task for ' + escapeHtml(name) + '" aria-label="Add a task for ' + escapeHtml(name) + '">＋</button>';
@@ -1344,6 +1432,11 @@ export class WorkspaceCommandView {
     if (!root) return;
     root.addEventListener('click', (event) => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const settingsBtn = event.target.closest('[data-cmd-manager-settings]');
+      if (settingsBtn) {
+        this.openStatModal('settings', settingsBtn);
+        return;
+      }
       const addBtn = event.target.closest('[data-cmd-add-task]');
       if (addBtn && page && page.showAddTaskModalForAgent) {
         page.showAddTaskModalForAgent(addBtn.getAttribute('data-cmd-add-task'));
@@ -1579,17 +1672,45 @@ export class WorkspaceCommandView {
   }
 
   systemTabs() {
+    // Capability providers (MCP/Skills/Plugins) + Find Tools now live in the header Tools
+    // stat-box manager; Manager Settings → entry-agent modal; Goal Settings → "Set Goal";
+    // Intent & Setup → header description edit. Systems keeps only workspace state/automation.
+    return [
+      { key: 'memory', label: 'Memory', tabId: 'workspace-detail-config-memory-tab', host: 'config' },
+      { key: 'triggers', label: 'Triggers', tabId: 'workspace-detail-config-triggers-tab', host: 'config' }
+    ];
+  }
+
+  // Sub-tabs of the header Tools stat-box modal: the three capability providers plus the
+  // Find Tools discovery surface. MCP/Skills/Plugins mount the config panel; Find Tools
+  // mounts the tools card.
+  toolsTabs() {
     return [
       { key: 'mcp', label: 'MCP', tabId: 'workspace-detail-config-mcp-tab', host: 'config' },
       { key: 'skills', label: 'Skills', tabId: 'workspace-detail-config-skills-tab', host: 'config' },
       { key: 'plugins', label: 'Plugins', tabId: 'workspace-detail-config-plugins-tab', host: 'config' },
-      { key: 'memory', label: 'Memory', tabId: 'workspace-detail-config-memory-tab', host: 'config' },
-      { key: 'triggers', label: 'Triggers', tabId: 'workspace-detail-config-triggers-tab', host: 'config' },
-      { key: 'settings', label: 'Manager Settings', tabId: 'workspace-detail-config-settings-tab', host: 'config' },
-      { key: 'intent', label: 'Intent & Setup', tabId: 'workspace-detail-config-intent-tab', host: 'config' },
-      { key: 'mission', label: 'Goal Settings', tabId: 'workspace-detail-config-mission-tab', host: 'config' },
-      { key: 'tools', label: 'Find Tools', tabId: '', host: 'tools' }
+      { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' }
     ];
+  }
+
+  toolsTab(key) {
+    const normalized = String(key || '').trim();
+    return this.toolsTabs().find(tab => tab.key === normalized) || this.toolsTabs()[0];
+  }
+
+  // Config-pane tab ids for surfaces that are reached from outside the Systems rail
+  // (header stat-box MCP/Skills managers, the entry-agent Manager Settings modal, and
+  // the header intent editor). Kept separate from systemTabs() on purpose.
+  configTabIdFor(key) {
+    switch (String(key || '')) {
+      case 'mcp': return 'workspace-detail-config-mcp-tab';
+      case 'skills': return 'workspace-detail-config-skills-tab';
+      case 'plugins': return 'workspace-detail-config-plugins-tab';
+      case 'settings': return 'workspace-detail-config-settings-tab';
+      case 'mission': return 'workspace-detail-config-mission-tab';
+      case 'intent': return 'workspace-detail-config-intent-tab';
+      default: return '';
+    }
   }
 
   systemTab(key) {
@@ -1830,7 +1951,7 @@ export class WorkspaceCommandView {
     return this.systemTab(key).key;
   }
 
-  openSystemTab(key = 'mcp') {
+  openSystemTab(key = 'memory') {
     this.activeRailSection = 'systems';
     this.activeSystemTab = this.normalizeSystemTab(key);
     this.render();
@@ -1926,9 +2047,17 @@ export class WorkspaceCommandView {
   }
 
   refreshSystemTabData(tab) {
+    if (!tab) return;
+    this.refreshConfigData(tab.key);
+  }
+
+  // Re-run a config pane's data load. Shared by the Systems rail (Plugins/Memory/Triggers)
+  // and by the relocated surfaces that mount the same config node into a modal
+  // (mcp/skills stat boxes, entry-agent settings), so there is one source of truth.
+  refreshConfigData(key) {
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    if (!page || !tab) return;
-    switch (tab.key) {
+    if (!page) return;
+    switch (String(key || '')) {
       case 'mcp':
         if (typeof page.renderWorkspaceMCPBindings === 'function') page.renderWorkspaceMCPBindings();
         if (page.nativeMCPManager && typeof page.nativeMCPManager.load === 'function') {
@@ -1947,6 +2076,9 @@ export class WorkspaceCommandView {
       case 'settings':
         if (typeof page.renderWorkspaceSettings === 'function') page.renderWorkspaceSettings();
         break;
+      case 'intent':
+        if (typeof page.renderWorkspaceIntent === 'function') page.renderWorkspaceIntent();
+        break;
       default:
         break;
     }
@@ -1958,6 +2090,13 @@ export class WorkspaceCommandView {
   }
 
   syncSystemsSurface() {
+    // The config/tools nodes may be on loan to an open stat modal (MCP/Skills/Manager
+    // Settings or the Tools modal) — don't steal them back mid-view on a background
+    // re-render (single-node arbitration, PRD FR6.26).
+    const modalHoldsSurface = this.statModalHoldsSharedSurface() &&
+      this.statModalEl && !this.statModalEl.hidden;
+    if (modalHoldsSurface) return;
+
     const host = this.container && this.container.querySelector('[data-cmd-system-host]');
     if (!this.active || this.activeRailSection !== 'systems' || !host) {
       this.restoreSharedSurface('config');
@@ -1979,6 +2118,8 @@ export class WorkspaceCommandView {
       host.innerHTML = '<div class="ws-cmd-rail-empty">Workspace configuration is unavailable.</div>';
       return;
     }
+    // Shed any modal-only chrome hiding if this node was last used inside a stat modal.
+    if (config.classList) config.classList.remove('is-command-modal');
     this.showConfigTab(tab);
     this.refreshSystemTabData(tab);
     this.expandMountedConfig(config);
