@@ -63,11 +63,6 @@ Thumbs.db
 !.env.example
 
 # Runtime/cache directories
-plugin_cache/
-uploaded_plugins/
-test_plugins/
-local_plugin_registry.json
-plugin_registry_cache.json
 marketplace_cache_*.json
 # Local installed-plugins store (installed.json + downloaded src); machine-local state
 plugins/
