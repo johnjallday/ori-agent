@@ -184,6 +184,44 @@ func TestBuildRuntimeSystemPrompt_IncludesUserProfile(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeSystemPrompt_IncludesAgentRefinement(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Content", Agents: []string{"Copywriter"}})
+	ws.ID = "workspace-refine"
+	ws.AgentInstances = []workspace.AgentInstance{
+		{ID: "i1", Name: "Copywriter", InstanceNumber: 1, EntryPoint: true,
+			Role: "Voice keeper", CustomInstructions: "Favor short-form social copy."},
+	}
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	h := &Handler{workspaceStore: wsStore}
+
+	// With the responding agent set, its per-workspace refinement is layered in.
+	prompt := h.buildRuntimeSystemPrompt(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+		AgentName:   "Copywriter",
+	})
+	for _, want := range []string{"Voice keeper", "Favor short-form social copy.", "only in this workspace"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected refinement %q in runtime prompt, got:\n%s", want, prompt)
+		}
+	}
+
+	// Without a resolved agent, no refinement section is added.
+	noAgent := h.buildRuntimeSystemPrompt(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+	})
+	if strings.Contains(noAgent, "Favor short-form social copy.") {
+		t.Fatalf("expected no refinement without a resolved agent, got:\n%s", noAgent)
+	}
+}
+
 func TestBuildWorkspaceSnapshotPrompt_EmptyWorkspace(t *testing.T) {
 	wsStore := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Empty"})

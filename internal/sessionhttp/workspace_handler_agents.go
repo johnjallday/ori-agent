@@ -312,14 +312,15 @@ func buildWorkspaceAnalyticsView(workspace *session.Workspace) *agentworkspace.W
 		analyticsWorkspace.AgentInstances = make([]agentworkspace.AgentInstance, len(workspace.AgentInstances))
 		for i, inst := range workspace.AgentInstances {
 			analyticsWorkspace.AgentInstances[i] = agentworkspace.AgentInstance{
-				ID:             inst.ID,
-				Name:           inst.Name,
-				InstanceNumber: inst.InstanceNumber,
-				NodeID:         inst.NodeID,
-				Role:           inst.Role,
-				Description:    inst.Description,
-				EntryPoint:     inst.EntryPoint,
-				CreatedAt:      inst.CreatedAt,
+				ID:                 inst.ID,
+				Name:               inst.Name,
+				InstanceNumber:     inst.InstanceNumber,
+				NodeID:             inst.NodeID,
+				Role:               inst.Role,
+				Description:        inst.Description,
+				CustomInstructions: inst.CustomInstructions,
+				EntryPoint:         inst.EntryPoint,
+				CreatedAt:          inst.CreatedAt,
 			}
 		}
 	}

@@ -19,6 +19,9 @@ type normalizedChatRouteContext struct {
 	WorkspaceID string
 	TaskID      string
 	Origin      string
+	// AgentName is the resolved responding agent, set after agent resolution so
+	// the runtime prompt can layer that agent's per-workspace refinement.
+	AgentName string
 }
 
 const (

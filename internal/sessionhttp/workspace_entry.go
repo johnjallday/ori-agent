@@ -264,14 +264,15 @@ func toWorkspaceAgentInstances(items []session.AgentInstance) []agentworkspace.A
 	out := make([]agentworkspace.AgentInstance, len(items))
 	for i, item := range items {
 		out[i] = agentworkspace.AgentInstance{
-			ID:             item.ID,
-			Name:           item.Name,
-			InstanceNumber: item.InstanceNumber,
-			NodeID:         item.NodeID,
-			Role:           item.Role,
-			Description:    item.Description,
-			EntryPoint:     item.EntryPoint,
-			CreatedAt:      item.CreatedAt,
+			ID:                 item.ID,
+			Name:               item.Name,
+			InstanceNumber:     item.InstanceNumber,
+			NodeID:             item.NodeID,
+			Role:               item.Role,
+			Description:        item.Description,
+			CustomInstructions: item.CustomInstructions,
+			EntryPoint:         item.EntryPoint,
+			CreatedAt:          item.CreatedAt,
 		}
 	}
 	return out
