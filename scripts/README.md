@@ -1,171 +1,86 @@
-# Build Scripts
+# Scripts
 
-This directory contains shell scripts for building the ori-agent project and its plugins.
+Developer and CI scripts for the ori-agent project. Run all scripts from the
+project root unless noted otherwise.
 
-## Main Build Scripts
+> Tool capabilities are provided via MCP servers and skills — the legacy gRPC
+> plugin system has been removed. There are no plugin build/clean scripts.
 
-### `build.sh` - Complete Project Build
+## Build
+
+### `build.sh` — Full local build
 ```bash
 ./scripts/build.sh
 ```
-Builds the main server binary and all plugins. This is the primary build script for development.
+Builds the server binary (`bin/ori-agent`) and, on macOS, the menu bar app
+(`bin/ori-menubar`), embedding version, git commit, and build date.
 
-**Features:**
-- Builds server binary with version information
-- Builds all plugins automatically
-- Embeds version, git commit, and build date
-- Cross-platform compatible
-- Colored output for easy reading
+Environment overrides:
+- `BUILD_MENUBAR=false` — skip the menu bar app
+- `GOOS` / `GOARCH` — cross-compile for another target
 
-### `build-server.sh` - Server Only Build
+### `build-server.sh` — Server only
 ```bash
 ./scripts/build-server.sh
 ```
-Builds just the main server binary without plugins for faster iterations.
+Builds just `bin/ori-agent` for faster iteration.
 
-**Features:**
-- Faster builds when plugins haven't changed
-- Same version embedding as full build
-- Outputs to `bin/` directory
-
-### `build-release.sh` - Cross-Platform Release Build
+### `build-folder-picker.sh` — Native folder-picker helper
 ```bash
-./scripts/build-release.sh
+./scripts/build-folder-picker.sh
 ```
-Builds release binaries for multiple platforms (Linux, macOS, Windows) with both amd64 and arm64 architectures.
+Builds the platform folder-picker helper used by the workspace launcher.
+Invoked by the release and smoke-test workflows.
 
-**Features:**
-- Cross-compilation for multiple platforms
-- Creates compressed archives for each platform
-- Includes plugins in each platform build
-- Outputs to `dist/` directory
+## Release
 
-## Plugin Build Scripts
+The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 
-### `build-plugins.sh` - Build All Plugins
+- `release.sh` — Main release driver (tag, changelog, goreleaser). Guarded; do
+  not run casually.
+- `create-release.sh` — Wrapper that runs `pre-release-check.sh` then `release.sh`.
+- `pre-release-check.sh` — Aggregate pre-release gate (lint, cross-platform,
+  Go version, installer tests, docs, dependabot).
+- `release-ready.sh` — Lightweight readiness probe used by the auto-release
+  workflow.
+
+## Testing & diagnostics
+
+- `test-all-installers.sh` — Exercise the generated installers.
+- `docker-test-installers.sh` — Installer tests inside Docker.
+- `test-with-ollama.sh` — Run the suite against a local Ollama provider.
+- `diagnose-test-failures.sh` — Summarize and triage failing Go tests.
+- `check-cross-platform.sh` — Verify the code cross-compiles for release targets.
+- `check-go-version.sh` — Assert the toolchain matches the required Go version.
+
+## Lint & maintenance
+
+- `fix-all-lint.sh` — Run linters and apply common auto-fixes.
+- `fix-orihttp-errcheck.sh` / `fix-orihttp-errcheck.go` — Opt-in helper
+  (`FIX_ORIHTTP_ERRCHECK=1`) that adds error handling for `internal/http`
+  (`orihttp`) response calls flagged by errcheck.
+- `merge-dependabot.sh` — Batch-merge open dependabot PRs.
+- `update-readme.sh` — Regenerate README sections during the release flow.
+
+## Assets
+
+- `generate-app-icon.sh` — Generate the app icon set.
+- `generate-menubar-icons.sh` — Generate the menu bar status icons.
+
+## Worktrees
+
+### `wt.sh` — Worktree manager
 ```bash
-./scripts/build-plugins.sh
+source scripts/wt.sh   # load the function
+wt                     # interactive: pick a worktree to navigate
+wt new <name>          # create a worktree
+wt rm <name>           # remove a worktree
+wt ls                  # list worktrees
+wt cd <name>           # navigate to a worktree
 ```
-Builds all plugins in the `plugins/` directory and outputs them to `uploaded_plugins/`.
-
-**Features:**
-- Builds all plugins automatically
-- Creates output directory if needed
-- Colored output for easy reading
-- Exits on any build error
-- Lists all built plugins at completion
-
-### `build-plugin.sh` - Build Single Plugin
-```bash
-./scripts/build-plugin.sh <plugin-name>
-
-# Examples:
-./scripts/build-plugin.sh weather
-./scripts/build-plugin.sh math
-./scripts/build-plugin.sh result-handler
-```
-Builds a specific plugin by name.
-
-**Features:**
-- Auto-detects source file (`main.go` or `<plugin-name>.go`)
-- Shows available plugins if invalid name provided
-- Detailed build output and error reporting
-
-### `clean-plugins.sh` - Clean Plugin Binaries
-```bash
-./scripts/clean-plugins.sh
-```
-Removes all compiled `.so` files from the project.
-
-**Features:**
-- Cleans `uploaded_plugins/` directory
-- Removes `.so` files from individual plugin directories
-- Safe operation - only removes plugin binaries
-
-### `clean-agents.sh` - Clean Stale Agent Configuration
-```bash
-./scripts/clean-agents.sh
-```
-Checks and reports stale plugin paths in `agents.json`.
-
-**Features:**
-- Detects temporary/stale plugin paths
-- Checks for non-existent plugin files
-- Creates backup before any changes
-- Provides guidance for manual fixes
-
-### `build-external-plugins.sh` - Build External Plugins
-```bash
-./scripts/build-external-plugins.sh
-```
-Builds plugins that are in separate repositories or directories outside the main project.
-
-**Features:**
-- Builds plugins from external directories (like `../ori-reaper`)
-- Uses plugin's own build script if available
-- Falls back to direct Go build if `main.go` exists
-- Copies built plugins to `uploaded_plugins/` directory
-
-## Usage Examples
-
-```bash
-# Complete project build (server + plugins)
-./scripts/build.sh
-
-# Server only (faster for development)
-./scripts/build-server.sh
-
-# Cross-platform release build
-./scripts/build-release.sh
-
-# Plugin management
-./scripts/build-plugins.sh    # Build all plugins
-./scripts/build-plugin.sh weather  # Build specific plugin
-./scripts/clean-plugins.sh    # Clean plugin binaries
-
-# Typical development workflow
-./scripts/clean-plugins.sh    # Clean old builds
-./scripts/build.sh            # Build everything
-./bin/ori-agent          # Run the server
-
-# Release workflow
-./scripts/clean-plugins.sh    # Clean old builds
-./scripts/build-release.sh    # Build for all platforms
-```
-
-## Environment Variables
-
-### Build Configuration
-- `BUILD_PLUGINS=false` - Skip plugin builds in main build script
-- `BUILD_EXTERNAL_PLUGINS=false` - Skip external plugin builds
-- `GOOS=linux` - Target operating system for build
-- `GOARCH=amd64` - Target architecture for build
-
-### Examples
-```bash
-# Build without plugins
-BUILD_PLUGINS=false ./scripts/build.sh
-
-# Build plugins but skip external plugins
-BUILD_EXTERNAL_PLUGINS=false ./scripts/build.sh
-
-# Cross-compile for Linux
-GOOS=linux GOARCH=amd64 ./scripts/build-server.sh
-
-# Build for Windows
-GOOS=windows GOARCH=amd64 ./scripts/build-server.sh
-```
+Source it (don't execute) so `cd` affects your current shell.
 
 ## Requirements
 
-- Go compiler installed
-- Run from project root directory
-- Plugins must be in `plugins/` subdirectories
-- Each plugin needs either `main.go` or `<plugin-name>.go`
-
-## Notes
-
-- All scripts use colored output for better visibility
-- Scripts are designed to be run from the project root
-- Build failures will stop execution and show clear error messages
-- All scripts are executable and ready to use
+- Go toolchain installed (see `check-go-version.sh` for the required version)
+- Run from the project root

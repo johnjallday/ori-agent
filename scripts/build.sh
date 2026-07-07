@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Build script for ori-agent project
-# Builds the main server binary and all plugins
+# Builds the main server binary and the macOS menu bar app
 
 set -e # Exit on any error
 
@@ -91,18 +91,6 @@ elif [ "$BUILD_MENUBAR" = "true" ]; then
   echo -e "${YELLOW}Skipping menu bar app (only available on macOS)${NC}"
 fi
 
-# Build plugins if requested
-BUILD_PLUGINS=${BUILD_PLUGINS:-true}
-if [ "$BUILD_PLUGINS" = "true" ]; then
-  echo -e "${YELLOW}Building plugins...${NC}"
-  if [ -f "scripts/build-plugins.sh" ]; then
-    ./scripts/build-plugins.sh
-  else
-    echo -e "${YELLOW}Plugin build script not found, skipping plugins${NC}"
-  fi
-
-fi
-
 # Display build results
 echo ""
 echo -e "${GREEN}🎉 Build completed successfully!${NC}"
@@ -111,11 +99,6 @@ ls -la "$OUTPUT_DIR/$BINARY_NAME"
 
 if [ "$BUILD_MENUBAR" = "true" ] && [ "$TARGET_OS" = "darwin" ] && [ -f "$OUTPUT_DIR/$MENUBAR_BINARY_NAME" ]; then
   ls -la "$OUTPUT_DIR/$MENUBAR_BINARY_NAME"
-fi
-
-if [ -d "uploaded_plugins" ] && [ "$(ls -A uploaded_plugins 2>/dev/null)" ]; then
-  echo -e "${BLUE}Plugin files:${NC}"
-  ls -la uploaded_plugins/*.so 2>/dev/null || true
 fi
 
 echo ""
