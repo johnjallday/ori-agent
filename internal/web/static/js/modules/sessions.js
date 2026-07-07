@@ -3479,6 +3479,13 @@ const sessionManager = {
           .filter((msg) => typeof msg === 'string' && msg)
           .forEach((msg) => this.showToast(msg, 'warning'));
       }
+      // A roster entry matched an existing agent by name; the existing
+      // definition was reused instead of the template's (PRD FR7).
+      if (Array.isArray(result.agent_reuse_notices)) {
+        result.agent_reuse_notices
+          .filter((msg) => typeof msg === 'string' && msg)
+          .forEach((msg) => this.showToast(msg, 'info'));
+      }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
       if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
       window.OriTagInput?.clearTagPoolCache?.();

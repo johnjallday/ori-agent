@@ -188,11 +188,8 @@ function applyFiltersAndRender() {
   const searchTerm = rawSearchTerm.toLowerCase();
 
   dashboardFilteredAgents = dashboardAgents.filter((agent) => {
-    // Hide workspace-scoped entry agents from the top-level agents list —
-    // they're managed from their workspace detail page.
-    if (String(agent?.scope || '').toLowerCase() === 'workspace') {
-      return false;
-    }
+    // Every definition is shown — entry agents are no longer hidden; their
+    // workspace membership is rendered on the card instead (PRD FR1/FR3).
     const name = String(agent?.name || '').toLowerCase();
     const description = String(agent?.metadata?.description || '').toLowerCase();
     return name.includes(searchTerm) || description.includes(searchTerm);
@@ -337,6 +334,42 @@ function renderBucket(containerId, agents, emptyMessage) {
   });
 }
 
+// renderMembershipHtml renders the "attached to N workspaces" row for a
+// definition card: workspace chips (entry agent flagged) when attached, or a
+// "Library · unattached" pill when the definition belongs to no workspace
+// (PRD FR2/FR4/FR5).
+function renderMembershipHtml(agent) {
+  const count = Number(agent?.workspace_count || 0);
+  const workspaces = Array.isArray(agent?.workspaces) ? agent.workspaces : [];
+
+  if (count === 0) {
+    return `<div class="ops-agent-membership ops-agent-membership--library">`
+      + `<span class="ops-membership-pill library" title="Not attached to any workspace — a reusable library agent.">Library · unattached</span>`
+      + `</div>`;
+  }
+
+  const shown = workspaces.slice(0, 4);
+  const chips = shown.map((ws) => {
+    const rawName = String(ws?.name || 'Workspace');
+    const wsName = safeEscapeHtml(rawName);
+    const isEntry = !!ws?.entry_point;
+    const titleText = safeEscapeHtml(isEntry ? `Entry agent of ${rawName}` : `Attached to ${rawName}`);
+    const cls = isEntry ? 'ops-membership-chip entry' : 'ops-membership-chip';
+    if (ws?.id) {
+      return `<a class="${cls}" href="/workspaces/${encodeURIComponent(ws.id)}" title="${titleText}">${wsName}</a>`;
+    }
+    return `<span class="${cls}" title="${titleText}">${wsName}</span>`;
+  }).join('');
+  const overflow = workspaces.length > shown.length
+    ? `<span class="ops-membership-more" title="${workspaces.length - shown.length} more">+${workspaces.length - shown.length}</span>`
+    : '';
+  const label = safeEscapeHtml(`Attached to ${count} workspace${count === 1 ? '' : 's'}`);
+  return `<div class="ops-agent-membership">`
+    + `<span class="ops-membership-label">${label}</span>`
+    + `<span class="ops-membership-chips">${chips}${overflow}</span>`
+    + `</div>`;
+}
+
 function createAgentCard(agent) {
   const card = document.createElement('article');
   card.className = 'ops-agent-card';
@@ -357,9 +390,14 @@ function createAgentCard(agent) {
   const enabledCheckedAttr = isDisabled ? '' : 'checked';
   const isSystemAgent = isSystemAssistantAgentName(name);
   const isCLIAgent = isCLIAgentEntry(agent);
+  const workspaceCount = Number(agent?.workspace_count || 0);
+  const attachedBlockReason = workspaceCount > 0
+    ? `Attached to ${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'} — detach it everywhere before deleting.`
+    : '';
   const deleteBlockedReason = isSystemAgent
     ? 'System assistant cannot be deleted.'
-    : (isCLIAgent ? 'Built-in CLI agent cannot be deleted.' : '');
+    : (isCLIAgent ? 'Built-in CLI agent cannot be deleted.' : attachedBlockReason);
+  const membershipHtml = isCLIAgent ? '' : renderMembershipHtml(agent);
   const deleteDisabledAttr = deleteBlockedReason
     ? `disabled title="${safeEscapeHtml(deleteBlockedReason)}" aria-disabled="true"`
     : 'title="Delete agent"';
@@ -384,6 +422,7 @@ function createAgentCard(agent) {
         </div>
         <p class="ops-agent-purpose" title="${safeEscapeHtml(description)}">${safeEscapeHtml(description)}</p>
         <div class="ops-agent-time">Last active: ${safeEscapeHtml(formatDate(agent?.statistics?.last_active || ''))}</div>
+        ${membershipHtml}
       </div>
       <div class="ops-card-controls">
         <label class="ops-enable-toggle" title="${safeEscapeHtml(enableToggleTitle)}">

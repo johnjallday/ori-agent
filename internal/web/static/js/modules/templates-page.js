@@ -1357,7 +1357,7 @@ async function tplToolsSave() {
 const TPL_AGENT_ROLES = ['', 'orchestrator', 'specialist', 'researcher', 'analyzer', 'synthesizer', 'validator', 'general'];
 const TPL_AGENT_TYPES = ['', 'tool-calling', 'general', 'research'];
 
-const tplAgents = { templateId: '', dragIndex: -1 };
+const tplAgents = { templateId: '', dragIndex: -1, existingNames: [], existingLoaded: false };
 
 function tplAgentsBlank() {
   return { name: '', role: '', type: '', model: '', system_prompt: '', tools: { skills: [], mcp_servers: [] } };
@@ -1464,13 +1464,54 @@ function tplAgentsSelect(cls, values, selected) {
   return sel;
 }
 
-function tplAgentsInput(cls, value, placeholder) {
+function tplAgentsInput(cls, value, placeholder, listId) {
   const i = document.createElement('input');
   i.type = 'text';
   i.className = `modern-input w-100 ${cls}`;
   i.value = value || '';
   i.placeholder = placeholder || '';
+  if (listId) i.setAttribute('list', listId);
   return i;
+}
+
+// tplAgentsEnsureExistingNames lazily loads the global agent names once so the
+// roster name field can offer an "attach existing agent" picker (a datalist) and
+// flag when a typed name will reuse an existing definition (PRD FR7 / reuse
+// surfaces). Non-fatal: on failure the picker simply offers no suggestions.
+async function tplAgentsEnsureExistingNames() {
+  if (tplAgents.existingLoaded) return;
+  tplAgents.existingLoaded = true;
+  try {
+    const res = await fetch('/api/agents');
+    const data = await res.json().catch(() => ({}));
+    tplAgents.existingNames = Array.isArray(data.agents)
+      ? data.agents.map((a) => (a && typeof a === 'object' ? a.name : a)).filter(Boolean)
+      : [];
+  } catch {
+    tplAgents.existingNames = [];
+  }
+  tplAgentsPopulateDatalist();
+}
+
+function tplAgentsPopulateDatalist() {
+  let dl = document.getElementById('tpl-existing-agents');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'tpl-existing-agents';
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = '';
+  (tplAgents.existingNames || []).forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = String(name);
+    dl.appendChild(opt);
+  });
+}
+
+function tplAgentsNameMatchesExisting(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return false;
+  return (tplAgents.existingNames || []).some((n) => String(n).toLowerCase() === v);
 }
 
 function tplAgentsCard(agent, index) {
@@ -1563,7 +1604,16 @@ function tplAgentsCard(agent, index) {
 
     const form = document.createElement('div');
     form.className = 'tpl-agent-form';
-    form.appendChild(tplAgentsField('Name', tplAgentsInput('tpl-agent-name', agent.name, 'Agent name')));
+    const nameInput = tplAgentsInput('tpl-agent-name', agent.name, 'Agent name or pick an existing agent', 'tpl-existing-agents');
+    const nameField = tplAgentsField('Name', nameInput);
+    const reuseHint = document.createElement('div');
+    reuseHint.className = 'tpl-agent-reuse-hint';
+    reuseHint.textContent = 'Matches an existing agent — its saved prompt, model, and tools will be reused.';
+    const syncReuseHint = () => { reuseHint.hidden = !tplAgentsNameMatchesExisting(nameInput.value); };
+    nameInput.addEventListener('input', syncReuseHint);
+    syncReuseHint();
+    nameField.appendChild(reuseHint);
+    form.appendChild(nameField);
 
     const rt = document.createElement('div');
     rt.className = 'tpl-agent-form-row';
@@ -1614,6 +1664,13 @@ function tplAgentsRender(agents) {
   const list = tplEl('tplAgentsList');
   const empty = tplEl('tplAgentsEmpty');
   if (!list) return;
+  // Lazily load existing agent names so the roster name field can suggest /
+  // flag reuse; re-syncs hints once names arrive.
+  tplAgentsEnsureExistingNames().then(() => {
+    list.querySelectorAll('.tpl-agent-name').forEach((input) => {
+      input.dispatchEvent(new Event('input'));
+    });
+  });
   const items = tplAgentsNormalizeList(agents);
   list.innerHTML = '';
   items.forEach((agent, idx) => list.appendChild(tplAgentsCard(agent, idx)));

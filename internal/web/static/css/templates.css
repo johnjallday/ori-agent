@@ -305,6 +305,21 @@
   grid-template-columns: 1fr 1fr;
 }
 
+#templatesPage .tpl-agent-reuse-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #5b21b6;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-reuse-hint {
+  color: #c4b5fd;
+}
+
+#templatesPage .tpl-agent-reuse-hint[hidden] {
+  display: none;
+}
+
 #templatesPage .tpl-agent-field {
   min-width: 0;
 }
