@@ -266,8 +266,15 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 		allowed := allowlist != nil && allowlist.Contains(ws.ID)
 		for _, name := range referenced {
 			key := strings.ToLower(name)
-			if _, ok, err := workspaces.GetWorkspaceAgent(ws.ID, name); err == nil && ok {
-				workspaceManagedAgents[key] = struct{}{}
+			if snap, ok, err := workspaces.GetWorkspaceAgent(ws.ID, name); err == nil && ok {
+				// Only a pure mirror of the workspace snapshot is a wipe
+				// candidate. A global definition the user has since edited
+				// (diverged from every snapshot) is user-owned and must be
+				// preserved — the boot-wipe must not do what the attached-delete
+				// guard forbids (PRD FR11).
+				if global, gok := agents.GetAgent(name); !gok || global == nil || agentDefinitionEquivalent(global, snap) {
+					workspaceManagedAgents[key] = struct{}{}
+				}
 			}
 			if allowed {
 				allowedReferencedAgents[key] = struct{}{}
@@ -314,6 +321,21 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 // changes.
 func isSystemAgentName(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "Ori")
+}
+
+// agentDefinitionEquivalent reports whether two agents share the same core
+// definition (type, role, model, system prompt). The boot-wipe uses it to tell
+// a pristine workspace-snapshot mirror (safe to reconcile away under the
+// allowlist gate) from a global definition the user has since edited, which is
+// user-owned and must be preserved (PRD FR11).
+func agentDefinitionEquivalent(a, b *agent.Agent) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Type == b.Type &&
+		a.Role == b.Role &&
+		a.Settings.Model == b.Settings.Model &&
+		a.Settings.SystemPrompt == b.Settings.SystemPrompt
 }
 
 func referencedAgentSnapshotCount(s Store, ws *Workspace) int {

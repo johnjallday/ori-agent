@@ -197,25 +197,34 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 	// Otherwise, return list of all agents
 	names := h.State.ListAgents()
 
-	// Map of lowercase agent name → workspace ID for agents that are
-	// designated entry agents for a workspace. Sidebar / selector UIs use
-	// the resulting scope annotation to hide workspace-scoped agents.
-	entryAgentWorkspaces := collectWorkspaceEntryAgentNames(h.workspaceStore)
+	// Per-agent workspace membership (lowercase agent name → attached
+	// workspaces), computed from the metadata-only cache. Every referenced
+	// definition is annotated with workspace_count + workspaces; scope is no
+	// longer used to hide workspace entry agents (PRD FR1/FR2).
+	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 
 	// Build agent details list with name and type
 	type AgentInfo struct {
-		Name        string                `json:"name"`
-		Type        string                `json:"type"`
-		Source      string                `json:"source"`
-		Scope       string                `json:"scope,omitempty"`
-		WorkspaceID string                `json:"workspace_id,omitempty"`
-		Status      types.AgentStatus     `json:"status,omitempty"`
-		Evolution   *types.AgentEvolution `json:"evolution,omitempty"`
+		Name           string                   `json:"name"`
+		Type           string                   `json:"type"`
+		Source         string                   `json:"source"`
+		Scope          string                   `json:"scope,omitempty"`
+		WorkspaceID    string                   `json:"workspace_id,omitempty"`
+		WorkspaceCount int                      `json:"workspace_count"`
+		Workspaces     []workspace.WorkspaceRef `json:"workspaces,omitempty"`
+		Status         types.AgentStatus        `json:"status,omitempty"`
+		Evolution      *types.AgentEvolution    `json:"evolution,omitempty"`
 	}
 	annotate := func(info AgentInfo) AgentInfo {
-		if wsID, ok := entryAgentWorkspaces[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
-			info.Scope = "workspace"
-			info.WorkspaceID = wsID
+		if m, ok := memberships[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
+			info.WorkspaceCount = m.Count
+			info.Workspaces = m.Workspaces
+			for _, ref := range m.Workspaces {
+				if ref.EntryPoint {
+					info.WorkspaceID = ref.ID
+					break
+				}
+			}
 		}
 		return info
 	}
@@ -402,8 +411,39 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		AvatarColor    *string                    `json:"avatar_color,omitempty"`
 		Favorite       *bool                      `json:"favorite,omitempty"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
+		// ConfirmSharedEdit acknowledges that this edit changes a definition
+		// shared by multiple workspaces (PRD FR9). Required when the agent is
+		// attached to >1 workspace and a shared-definition field is being
+		// changed; the server re-checks membership at write time so API callers
+		// cannot bypass the UI warning.
+		ConfirmSharedEdit *bool `json:"confirm_shared_edit,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	// Workspace membership drives the shared-edit / rename guards (PRD FR9/FR10).
+	// The system assistant ("Ori") is exempt (PRD FR1). Computed once from the
+	// metadata-only cache.
+	membership := workspace.WorkspaceMembershipFor(h.workspaceStore, agentName)
+	guardsApply := !isSystemAssistantAgent(agentName)
+
+	// Shared-edit confirmation: changing a field that lives on the shared
+	// definition affects every attached workspace. When attached to more than
+	// one workspace, require explicit confirmation and re-check here so a direct
+	// PATCH cannot skip the warning.
+	touchesSharedDefinition := req.SystemPrompt != nil || req.Model != nil || req.LLMProvider != nil ||
+		req.Type != nil || req.Role != nil || req.Tags != nil || req.AvatarColor != nil ||
+		req.RoutingProfile != nil || req.Temperature != nil || req.ReasoningEffort != nil ||
+		req.MaxTokens != nil || req.AllowWebSearch != nil
+	confirmed := req.ConfirmSharedEdit != nil && *req.ConfirmSharedEdit
+	if guardsApply && membership.Count > 1 && touchesSharedDefinition && !confirmed {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":           "shared_agent_edit_requires_confirmation",
+			"message":         fmt.Sprintf("%q is attached to %d workspaces — this change affects all of them. Resend with confirm_shared_edit=true to proceed.", agentName, membership.Count),
+			"workspace_count": membership.Count,
+			"workspaces":      membership.Workspaces,
+		})
 		return
 	}
 
@@ -478,6 +518,19 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil && *req.Name != "" && *req.Name != agentName {
 		if isSystemAssistantAgent(agentName) || isSystemAssistantAgent(*req.Name) {
 			orihttp.BadRequest(w, "system assistant cannot be renamed")
+			return
+		}
+
+		// Agent identity is still the bare name, so renaming an attached
+		// definition would strand every workspace that references the old name
+		// (PRD FR10). Block it; users create a new definition instead.
+		if guardsApply && membership.Count > 0 {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":           "attached_agent_rename_blocked",
+				"message":         fmt.Sprintf("%q is attached to %d workspace(s) and cannot be renamed. Create a new agent and attach it instead.", agentName, membership.Count),
+				"workspace_count": membership.Count,
+				"workspaces":      membership.Workspaces,
+			})
 			return
 		}
 
@@ -582,6 +635,20 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "CLI agents are built-in and cannot be deleted")
 		return
 	}
+
+	// Deleting a definition still attached to a workspace would leave a stale
+	// reference (and a restored snapshot pointing at a missing definition).
+	// Only unattached/library definitions may be deleted (PRD FR11).
+	if membership := workspace.WorkspaceMembershipFor(h.workspaceStore, name); membership.Count > 0 {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":           "attached_agent_delete_blocked",
+			"message":         fmt.Sprintf("%q is attached to %d workspace(s) and cannot be deleted. Detach it from every workspace first.", name, membership.Count),
+			"workspace_count": membership.Count,
+			"workspaces":      membership.Workspaces,
+		})
+		return
+	}
+
 	if err := h.State.DeleteAgent(name); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return

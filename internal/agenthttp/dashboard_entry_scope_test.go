@@ -13,13 +13,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// TestDashboardListAgents_AnnotatesWorkspaceEntryAgents verifies that agents
-// designated as a workspace entry agent are returned with scope="workspace"
-// and a workspace_id, so the UI can choose to group or hide them.
-func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
+// TestDashboardListAgents_AnnotatesWorkspaceMembership verifies that the
+// dashboard list annotates every referenced definition — entry agent AND
+// specialists — with workspace_count and the attached workspaces, with the
+// entry agent's ref flagged entry_point=true (PRD FR1/FR2).
+func TestDashboardListAgents_AnnotatesWorkspaceMembership(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create agent store with two agents
+	// Create agent store with three agents
 	st, err := store.NewFileStore(filepath.Join(tmpDir, "agents_index.json"), types.Settings{
 		Model:       "gpt-4o-mini",
 		Temperature: 1.0,
@@ -33,6 +34,9 @@ func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 	}
 	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{Type: "orchestration"}); err != nil {
 		t.Fatalf("CreateAgent workspace manager failed: %v", err)
+	}
+	if err := st.CreateAgent("Specialist", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent specialist failed: %v", err)
 	}
 
 	// Create workspace store with a workspace that designates "Workspace Manager" as entry
@@ -50,6 +54,7 @@ func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 		Name: "Test Workspace",
 		AgentInstances: []workspace.AgentInstance{
 			{ID: "inst-1", Name: "Workspace Manager", EntryPoint: true},
+			{ID: "inst-2", Name: "Specialist"},
 		},
 		SharedData: map[string]any{
 			"entry_agent_name": "Workspace Manager",
@@ -80,8 +85,8 @@ func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 		t.Fatalf("unmarshal response failed: %v", err)
 	}
 
-	if len(body.Agents) != 2 {
-		t.Fatalf("expected 2 agents to be returned, got %d", len(body.Agents))
+	if len(body.Agents) != 3 {
+		t.Fatalf("expected 3 agents to be returned, got %d", len(body.Agents))
 	}
 
 	byName := make(map[string]AgentListItem, len(body.Agents))
@@ -93,19 +98,33 @@ func TestDashboardListAgents_AnnotatesWorkspaceEntryAgents(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected 'Regular Agent' in response")
 	}
-	if regular.Scope != "" {
-		t.Errorf("expected Regular Agent to have empty scope, got %q", regular.Scope)
+	if regular.WorkspaceCount != 0 || len(regular.Workspaces) != 0 {
+		t.Errorf("expected Regular Agent to have no membership, got count=%d refs=%+v", regular.WorkspaceCount, regular.Workspaces)
 	}
 
 	entry, ok := byName["Workspace Manager"]
 	if !ok {
 		t.Fatalf("expected 'Workspace Manager' in response")
 	}
-	if entry.Scope != "workspace" {
-		t.Errorf("expected Workspace Manager scope='workspace', got %q", entry.Scope)
+	if entry.WorkspaceCount != 1 || len(entry.Workspaces) != 1 {
+		t.Fatalf("expected Workspace Manager attached to 1 workspace, got count=%d refs=%+v", entry.WorkspaceCount, entry.Workspaces)
+	}
+	if entry.Workspaces[0].ID != "ws-1" || !entry.Workspaces[0].EntryPoint {
+		t.Errorf("expected Workspace Manager ref {ws-1, entry_point:true}, got %+v", entry.Workspaces[0])
 	}
 	if entry.WorkspaceID != "ws-1" {
 		t.Errorf("expected Workspace Manager workspace_id='ws-1', got %q", entry.WorkspaceID)
+	}
+
+	spec, ok := byName["Specialist"]
+	if !ok {
+		t.Fatalf("expected 'Specialist' in response")
+	}
+	if spec.WorkspaceCount != 1 || len(spec.Workspaces) != 1 {
+		t.Fatalf("expected Specialist attached to 1 workspace, got count=%d refs=%+v", spec.WorkspaceCount, spec.Workspaces)
+	}
+	if spec.Workspaces[0].ID != "ws-1" || spec.Workspaces[0].EntryPoint {
+		t.Errorf("expected Specialist ref {ws-1, entry_point:false}, got %+v", spec.Workspaces[0])
 	}
 }
 

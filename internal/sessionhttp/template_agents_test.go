@@ -88,6 +88,15 @@ func TestSeedTemplateAgents_ReuseOnNameMatchDoesNotMutate(t *testing.T) {
 	if _, ok := handler.agentStore.GetAgent("Fresh"); !ok {
 		t.Fatal("expected unmatched specialist to be created")
 	}
+
+	// The reused "Shared" agent must produce exactly one visible reuse notice;
+	// the freshly-created "Fresh" must not (PRD FR7).
+	if len(res.ReuseNotices) != 1 {
+		t.Fatalf("expected 1 reuse notice, got %d: %v", len(res.ReuseNotices), res.ReuseNotices)
+	}
+	if !strings.Contains(res.ReuseNotices[0], "Shared") {
+		t.Errorf("expected reuse notice to name 'Shared', got %q", res.ReuseNotices[0])
+	}
 }
 
 func TestSeedTemplateAgents_EmptyRosterNoop(t *testing.T) {

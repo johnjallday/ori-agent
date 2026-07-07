@@ -303,6 +303,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if len(agentSeedWarnings) > 0 {
 		response["agent_warnings"] = agentSeedWarnings
 	}
+	if len(seed.ReuseNotices) > 0 {
+		response["agent_reuse_notices"] = seed.ReuseNotices
+	}
 	if prov.onboardingSummary != nil {
 		response["onboarding"] = prov.onboardingSummary
 	}
