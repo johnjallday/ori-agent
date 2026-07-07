@@ -2,11 +2,18 @@ package projecttemplates
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 )
+
+// ErrInvalidPromptVariable reports a template agent whose system prompt uses a
+// variable outside the closed vocabulary. Callers map it to a client error.
+var ErrInvalidPromptVariable = errors.New("invalid prompt variable")
 
 // MaxTemplateAgents caps how many agents a single template may declare. Extra
 // entries beyond the cap are dropped during normalization rather than failing
@@ -71,6 +78,26 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 	return out
 }
 
+// ValidateAgentPrompts rejects any agent whose system prompt references a
+// variable outside the closed vocabulary, returning an error naming the first
+// offending variable and the agent (PRD FR23). Called at roster save / import so
+// an invalid template never reaches runtime; template loading/listing does NOT
+// call this, so one bad template cannot crash the library view.
+func ValidateAgentPrompts(specs []AgentSpec) error {
+	for _, s := range specs {
+		unknown := promptvars.Unknown(s.SystemPrompt)
+		if len(unknown) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			name = "(unnamed)"
+		}
+		return fmt.Errorf("%w: agent %q uses unknown prompt variable {{%s}} — only the documented variables are allowed", ErrInvalidPromptVariable, name, unknown[0])
+	}
+	return nil
+}
+
 // SetAgents writes (or clears) the `agents` block in a template's template.json,
 // preserving every other key. The roster is normalized first; an empty result
 // clears the key. Like the tools/onboarding writers, this stores agent specs as
@@ -90,6 +117,9 @@ func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 	}
 
 	if normalized := normalizeAgentSpecs(agents); len(normalized) > 0 {
+		if err := ValidateAgentPrompts(normalized); err != nil {
+			return Template{}, err
+		}
 		encoded, err := json.Marshal(normalized)
 		if err != nil {
 			return Template{}, fmt.Errorf("failed to encode agents: %w", err)
