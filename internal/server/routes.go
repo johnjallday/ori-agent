@@ -891,6 +891,14 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.GetNativeMCPSettings)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPWorkspace)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPAgent)
+
+	// Per-instance refinement of a shared agent definition (role / description /
+	// custom_instructions) scoped to this workspace only; never mutates the
+	// global definition (PRD FR18). Handled by the session handler which owns
+	// the workspace AgentInstances.
+	if s.Handlers.Session != nil {
+		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/instance-settings", s.Handlers.Session.UpdateWorkspaceAgentInstanceSettings)
+	}
 }
 
 // registerActionCenterRoutes registers cross-workspace Action Center triage endpoints.

@@ -8,6 +8,59 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// TestWorkspaceStoreAdapter_AgentInstanceCustomInstructionsRoundTrip verifies the
+// per-instance custom_instructions field survives both adapter directions and the
+// SQLite JSON (de)serialization used for AgentInstances (PRD FR17).
+func TestWorkspaceStoreAdapter_AgentInstanceCustomInstructionsRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	const custom = "First line of guidance.\nSecond line — keep internal newlines."
+	input := &workspace.Workspace{
+		ID:        "ws-ci",
+		Name:      "CI Workspace",
+		CreatedAt: now,
+		UpdatedAt: now,
+		AgentInstances: []workspace.AgentInstance{
+			{
+				ID:                 "inst-1",
+				Name:               "Brand Copywriter",
+				InstanceNumber:     1,
+				NodeID:             "brand-node-1",
+				Role:               "Voice keeper",
+				Description:        "Owns tone",
+				CustomInstructions: custom,
+				EntryPoint:         true,
+				CreatedAt:          now,
+			},
+		},
+	}
+
+	// workspace -> session -> workspace preserves the field.
+	sessionWS := adapter.toSessionWorkspace(input)
+	if got := sessionWS.AgentInstances[0].CustomInstructions; got != custom {
+		t.Fatalf("session AgentInstance custom_instructions = %q, want %q", got, custom)
+	}
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if got := roundTripped.AgentInstances[0].CustomInstructions; got != custom {
+		t.Fatalf("round-tripped custom_instructions = %q, want %q", got, custom)
+	}
+
+	// The SQLite store serializes AgentInstances as a JSON blob; confirm the
+	// field marshals/unmarshals intact (internal newlines preserved).
+	data, err := json.Marshal(sessionWS.AgentInstances)
+	if err != nil {
+		t.Fatalf("marshal AgentInstances: %v", err)
+	}
+	var decoded []AgentInstance
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal AgentInstances: %v", err)
+	}
+	if got := decoded[0].CustomInstructions; got != custom {
+		t.Fatalf("JSON round-trip custom_instructions = %q, want %q", got, custom)
+	}
+}
+
 func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 	adapter := &WorkspaceStoreAdapter{}
 	now := time.Now().UTC().Round(time.Second)

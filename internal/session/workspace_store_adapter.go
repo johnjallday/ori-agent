@@ -175,14 +175,15 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		sessionWS.AgentInstances = make([]AgentInstance, len(ws.AgentInstances))
 		for i, ai := range ws.AgentInstances {
 			sessionWS.AgentInstances[i] = AgentInstance{
-				ID:             ai.ID,
-				Name:           ai.Name,
-				InstanceNumber: ai.InstanceNumber,
-				NodeID:         ai.NodeID,
-				Role:           ai.Role,
-				Description:    ai.Description,
-				EntryPoint:     ai.EntryPoint,
-				CreatedAt:      ai.CreatedAt,
+				ID:                 ai.ID,
+				Name:               ai.Name,
+				InstanceNumber:     ai.InstanceNumber,
+				NodeID:             ai.NodeID,
+				Role:               ai.Role,
+				Description:        ai.Description,
+				CustomInstructions: ai.CustomInstructions,
+				EntryPoint:         ai.EntryPoint,
+				CreatedAt:          ai.CreatedAt,
 			}
 		}
 	}
@@ -319,14 +320,15 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 		agentWS.AgentInstances = make([]workspace.AgentInstance, len(ws.AgentInstances))
 		for i, ai := range ws.AgentInstances {
 			agentWS.AgentInstances[i] = workspace.AgentInstance{
-				ID:             ai.ID,
-				Name:           ai.Name,
-				InstanceNumber: ai.InstanceNumber,
-				NodeID:         ai.NodeID,
-				Role:           ai.Role,
-				Description:    ai.Description,
-				EntryPoint:     ai.EntryPoint,
-				CreatedAt:      ai.CreatedAt,
+				ID:                 ai.ID,
+				Name:               ai.Name,
+				InstanceNumber:     ai.InstanceNumber,
+				NodeID:             ai.NodeID,
+				Role:               ai.Role,
+				Description:        ai.Description,
+				CustomInstructions: ai.CustomInstructions,
+				EntryPoint:         ai.EntryPoint,
+				CreatedAt:          ai.CreatedAt,
 			}
 		}
 	}

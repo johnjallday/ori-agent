@@ -201,6 +201,11 @@ type AgentInstance struct {
 	// Description is optional guidance about this instance's responsibility.
 	Description string `json:"description,omitempty"`
 
+	// CustomInstructions is the workspace owner's per-attachment refinement of a
+	// shared agent definition, layered onto the shared base prompt for this
+	// workspace only (never mutates the global definition). PRD FR16/FR17.
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+
 	// EntryPoint marks the instance as the default workspace entry node.
 	EntryPoint bool `json:"entry_point,omitempty"`
 
