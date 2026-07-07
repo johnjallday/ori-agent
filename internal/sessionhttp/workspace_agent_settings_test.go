@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
 )
 
 // patchInstanceSettings issues a PATCH to UpdateWorkspaceAgentInstanceSettings with
@@ -100,5 +102,48 @@ func TestUpdateWorkspaceAgentInstanceSettings_UnattachedAgent404(t *testing.T) {
 	rr := patchInstanceSettings(h, "ws-1", "Nonexistent", `{"role":"x"}`)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for unattached agent, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestGetWorkspaceAgentEffectivePrompt verifies the inspector returns the shared
+// base prompt layered with the per-workspace refinement (PRD FR30).
+func TestGetWorkspaceAgentEffectivePrompt(t *testing.T) {
+	h, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	if err := h.agentStore.CreateAgent("Copywriter", &agentstore.CreateAgentConfig{SystemPrompt: "BASE PROMPT"}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	seedWorkspaceWithInstance(t, h, "ws-1", "Copywriter")
+	if rr := patchInstanceSettings(h, "ws-1", "Copywriter", `{"custom_instructions":"Be concise."}`); rr.Code != http.StatusOK {
+		t.Fatalf("seed custom_instructions: %d", rr.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-1/agents/Copywriter/effective-prompt", nil)
+	req.SetPathValue("workspaceID", "ws-1")
+	req.SetPathValue("name", "Copywriter")
+	rr := httptest.NewRecorder()
+	h.GetWorkspaceAgentEffectivePrompt(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var body struct {
+		BaseSystemPrompt   string `json:"base_system_prompt"`
+		CustomInstructions string `json:"custom_instructions"`
+		Refinement         string `json:"refinement"`
+		EffectivePrompt    string `json:"effective_prompt"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if body.BaseSystemPrompt != "BASE PROMPT" {
+		t.Errorf("base_system_prompt = %q, want BASE PROMPT", body.BaseSystemPrompt)
+	}
+	if body.CustomInstructions != "Be concise." || !strings.Contains(body.Refinement, "Be concise.") {
+		t.Errorf("refinement not surfaced: %+v", body)
+	}
+	if !strings.Contains(body.EffectivePrompt, "BASE PROMPT") || !strings.Contains(body.EffectivePrompt, "Be concise.") {
+		t.Errorf("effective_prompt should layer base + refinement, got %q", body.EffectivePrompt)
 	}
 }

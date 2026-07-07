@@ -898,6 +898,8 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	// the workspace AgentInstances.
 	if s.Handlers.Session != nil {
 		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/instance-settings", s.Handlers.Session.UpdateWorkspaceAgentInstanceSettings)
+		// Resolved effective prompt inspector (base + per-workspace refinement).
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents/{name}/effective-prompt", s.Handlers.Session.GetWorkspaceAgentEffectivePrompt)
 	}
 }
 

@@ -1074,6 +1074,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Carry the resolved agent so the runtime prompt can layer this agent's
+	// per-workspace refinement (PRD FR15/FR16/FR19).
+	normalizedRouteContext.AgentName = current
 	toolRuntimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
 	providerName, providerErr := resolveChatProviderName(current, ag, h.llmFactory)
 	if providerErr != nil {

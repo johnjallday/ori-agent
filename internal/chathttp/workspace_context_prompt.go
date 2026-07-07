@@ -43,8 +43,9 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
 	profile := h.buildUserProfilePrompt(ctx, routeCtx)
 	memory := h.buildWorkspaceMemoryPrompt(routeCtx, toolCallable)
+	refinement := h.buildAgentRefinementPrompt(routeCtx)
 
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if strings.TrimSpace(base) != "" {
 		parts = append(parts, base)
 	}
@@ -54,7 +55,29 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 	if strings.TrimSpace(memory) != "" {
 		parts = append(parts, memory)
 	}
+	if strings.TrimSpace(refinement) != "" {
+		parts = append(parts, refinement)
+	}
 	return strings.Join(parts, "\n\n---\n")
+}
+
+// buildAgentRefinementPrompt renders the responding agent's per-workspace
+// refinement (role/description/custom_instructions) so it reaches the chat
+// prompt. Requires a workspace-scoped route with a resolved agent (PRD
+// FR16/FR19). Shares the renderer with the task path.
+func (h *Handler) buildAgentRefinementPrompt(routeCtx normalizedChatRouteContext) string {
+	if h == nil || h.workspaceStore == nil || !shouldAttachWorkspaceSnapshot(routeCtx) {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(routeCtx.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	inst, ok := workspace.AgentInstanceByName(ws, routeCtx.AgentName)
+	if !ok {
+		return ""
+	}
+	return workspace.RenderAgentRefinement(inst)
 }
 
 func (h *Handler) buildUserProfilePrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {

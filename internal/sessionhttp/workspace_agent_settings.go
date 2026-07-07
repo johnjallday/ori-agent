@@ -9,6 +9,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // maxCustomInstructionsLen bounds a per-instance refinement string (PRD FR17).
@@ -101,5 +102,81 @@ func (h *Handler) UpdateWorkspaceAgentInstanceSettings(w http.ResponseWriter, r 
 		"agent":     agentName,
 		"instances": matched,
 		"workspace": workspace,
+	})
+}
+
+// GetWorkspaceAgentEffectivePrompt handles
+// GET /api/workspaces/{workspaceID}/agents/{name}/effective-prompt.
+//
+// It returns the shared base system prompt plus this workspace's per-instance
+// refinement and the layered result, so the workspace agent view can show what
+// the agent effectively sees here (PRD FR30). Live workspace context (notes,
+// memory, tools) is composed at run time and intentionally not resolved here —
+// that fuller inspector belongs to the composer work (4.0b).
+func (h *Handler) GetWorkspaceAgentEffectivePrompt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	agentName := strings.TrimSpace(r.PathValue("name"))
+	if workspaceID == "" || agentName == "" {
+		_ = orihttp.RespondBadRequest(w, "workspace id and agent name are required")
+		return
+	}
+
+	workspace, err := h.store.GetWorkspace(r.Context(), workspaceID)
+	if err == session.ErrWorkspaceNotFound {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return
+	}
+	if err != nil {
+		logger.Error("Failed to get workspace", logger.Fields{"id": workspaceID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
+		return
+	}
+
+	var inst *session.AgentInstance
+	for i := range workspace.AgentInstances {
+		if !strings.EqualFold(strings.TrimSpace(workspace.AgentInstances[i].Name), agentName) {
+			continue
+		}
+		inst = &workspace.AgentInstances[i]
+		if workspace.AgentInstances[i].EntryPoint {
+			break
+		}
+	}
+	if inst == nil {
+		_ = orihttp.RespondNotFound(w, fmt.Sprintf("Agent %q is not attached to this workspace", agentName))
+		return
+	}
+
+	basePrompt := ""
+	if h.agentStore != nil {
+		if ag, ok := h.agentStore.GetAgent(agentName); ok && ag != nil {
+			basePrompt = ag.Settings.SystemPrompt
+		}
+	}
+
+	// Share the renderer with the prompt paths so the inspector matches runtime.
+	refinement := agentworkspace.RenderAgentRefinement(agentworkspace.AgentInstance{
+		Role:               inst.Role,
+		Description:        inst.Description,
+		CustomInstructions: inst.CustomInstructions,
+	})
+	effective := basePrompt
+	if refinement != "" {
+		if strings.TrimSpace(effective) != "" {
+			effective += "\n\n---\n" + refinement
+		} else {
+			effective = refinement
+		}
+	}
+
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"agent":               agentName,
+		"base_system_prompt":  basePrompt,
+		"role":                inst.Role,
+		"description":         inst.Description,
+		"custom_instructions": inst.CustomInstructions,
+		"refinement":          refinement,
+		"effective_prompt":    effective,
+		"note":                "Live workspace context (notes, memory, tools) is added at run time and not shown here.",
 	})
 }

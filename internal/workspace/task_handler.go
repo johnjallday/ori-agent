@@ -252,6 +252,9 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	compactPrompt := provider.Type() == llm.ProviderTypeLocal
 	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
+	// Layer the workspace owner's per-instance refinement of this agent onto the
+	// task prompt so refinement reaches the task path too (PRD FR15/FR16/FR19).
+	taskSystemPrompt = AppendAgentRefinement(taskSystemPrompt, h.workspaceStore, task.WorkspaceID, agentName)
 	h.reportPromptTier(task, agentName, compactPrompt)
 
 	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting
