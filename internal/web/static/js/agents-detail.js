@@ -1075,11 +1075,11 @@ async function saveProfileChanges() {
     setProfileSavingState(true);
     setProfileStatus('Saving profile...');
 
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const { response, cancelled } = await saveAgentPatch(agentName, payload);
+    if (cancelled) {
+      setProfileStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(await readResponseError(response, 'Failed to save profile'));
@@ -1115,6 +1115,41 @@ async function saveProfileChanges() {
   }
 }
 
+// saveAgentPatch PATCHes an agent definition and transparently handles the
+// shared-edit confirmation gate (PRD FR9). On a 409 asking for confirmation it
+// shows a blast-radius warning naming every affected workspace and, if the user
+// confirms, retries with confirm_shared_edit=true. Rename/delete blocks (also
+// 409, different error codes) fall through as a normal non-ok response for the
+// caller's error handling. Returns { response, cancelled }.
+async function saveAgentPatch(name, payload) {
+  const doPatch = (body) => fetch(`/api/agents/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  let response = await doPatch(payload);
+  if (response.status === 409) {
+    const info = await response.clone().json().catch(() => ({}));
+    if (info && info.error === 'shared_agent_edit_requires_confirmation') {
+      const names = Array.isArray(info.workspaces)
+        ? info.workspaces.map((w) => w && w.name).filter(Boolean)
+        : [];
+      const count = Number(info.workspace_count || names.length || 0);
+      const list = names.length ? `\n\n• ${names.join('\n• ')}` : '';
+      const proceed = window.confirm(
+        `"${name}" is attached to ${count} workspace${count === 1 ? '' : 's'}. `
+        + `This change affects all of them:${list}\n\nApply the change everywhere?`
+      );
+      if (!proceed) {
+        return { response, cancelled: true };
+      }
+      response = await doPatch({ ...payload, confirm_shared_edit: true });
+    }
+  }
+  return { response, cancelled: false };
+}
+
 function setProfileSavingState(isSaving) {
   const saveButton = document.getElementById('profileSaveBtn');
   if (!saveButton) return;
@@ -1144,7 +1179,9 @@ function setProfileStatus(message, type = 'info') {
 async function readResponseError(response, fallback) {
   try {
     const data = await response.clone().json();
-    return data?.error || data?.message || fallback;
+    // Prefer the human-readable message; fall back to the (sometimes
+    // machine-code) error field, then the caller's fallback.
+    return data?.message || data?.error || fallback;
   } catch {
     const text = await response.text().catch(() => '');
     return text || fallback;
@@ -1267,17 +1304,14 @@ async function saveConfigChanges() {
     setConfigSavingState(true);
     setConfigStatus('Saving changes...');
 
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+    const { response, cancelled } = await saveAgentPatch(agentName, payload);
+    if (cancelled) {
+      setConfigStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to save changes');
+      throw new Error(await readResponseError(response, 'Failed to save changes'));
     }
 
     await refreshAgentDetails();
@@ -1370,17 +1404,14 @@ async function savePromptChanges() {
     setPromptSavingState(true);
     setPromptStatus('Saving system prompt...');
 
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ system_prompt: systemPrompt })
-    });
+    const { response, cancelled } = await saveAgentPatch(agentName, { system_prompt: systemPrompt });
+    if (cancelled) {
+      setPromptStatus('Change cancelled — shared agent not modified.');
+      return;
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to save system prompt');
+      throw new Error(await readResponseError(response, 'Failed to save system prompt'));
     }
 
     await refreshAgentDetails();

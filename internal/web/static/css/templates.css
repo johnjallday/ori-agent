@@ -1,0 +1,395 @@
+#templatesPage .tpl-section-kicker {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+#templatesPage .tpl-section-title {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin: 4px 0 2px;
+}
+
+#templatesPage .tpl-section-copy {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 66ch;
+}
+
+#templatesPage .tpl-agents-readonly {
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+#templatesPage .tpl-agents-head {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+}
+
+#templatesPage .tpl-agents-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+#templatesPage .tpl-agents-empty {
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 22px 16px;
+  text-align: center;
+}
+
+#templatesPage .tpl-agents-empty-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+#templatesPage .tpl-agents-grid {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
+
+#templatesPage .tpl-agent-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0)),
+    var(--bg-secondary);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+#templatesPage .tpl-agent-card.is-entry {
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow:
+    inset 3px 0 0 rgba(245, 158, 11, 0.84),
+    0 12px 26px rgba(15, 23, 42, 0.08);
+}
+
+#templatesPage .tpl-agent-card.is-dragging {
+  opacity: 0.55;
+}
+
+#templatesPage .tpl-agent-card-head {
+  align-items: flex-start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+
+#templatesPage .tpl-agent-card.is-readonly .tpl-agent-card-head {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+#templatesPage .tpl-agent-drag-handle {
+  align-self: center;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: grab;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 6px 5px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+#templatesPage .tpl-agent-avatar {
+  align-items: center;
+  background: linear-gradient(135deg, rgba(14, 116, 144, 0.92), rgba(21, 94, 117, 0.96));
+  border: 1px solid rgba(8, 145, 178, 0.38);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  height: 42px;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  width: 42px;
+}
+
+#templatesPage .tpl-agent-card.is-entry .tpl-agent-avatar {
+  background: linear-gradient(135deg, rgba(180, 83, 9, 0.95), rgba(146, 64, 14, 0.98));
+  border-color: rgba(245, 158, 11, 0.56);
+}
+
+#templatesPage .tpl-agent-identity {
+  min-width: 0;
+}
+
+#templatesPage .tpl-agent-display-name {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#templatesPage .tpl-agent-subtitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+
+#templatesPage .tpl-agent-remove {
+  color: #dc2626;
+  flex: 0 0 auto;
+}
+
+#templatesPage .tpl-agent-summary,
+#templatesPage .tpl-agent-chip-list {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#templatesPage .tpl-agent-chip {
+  align-items: center;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  min-height: 22px;
+  padding: 5px 8px;
+}
+
+#templatesPage .tpl-agent-chip.is-entry {
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #92400e;
+}
+
+#templatesPage .tpl-agent-chip.is-role,
+#templatesPage .tpl-agent-chip.is-type {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.23);
+  color: #0369a1;
+}
+
+#templatesPage .tpl-agent-chip.is-model {
+  background: rgba(22, 163, 74, 0.1);
+  border-color: rgba(22, 163, 74, 0.24);
+  color: #166534;
+}
+
+#templatesPage .tpl-agent-chip.is-skill {
+  background: rgba(79, 70, 229, 0.1);
+  border-color: rgba(79, 70, 229, 0.22);
+  color: #4338ca;
+}
+
+#templatesPage .tpl-agent-chip.is-mcp {
+  background: rgba(217, 119, 6, 0.1);
+  border-color: rgba(217, 119, 6, 0.23);
+  color: #a16207;
+}
+
+#templatesPage .tpl-agent-chip.is-empty,
+#templatesPage .tpl-agent-chip.is-count {
+  color: var(--text-secondary);
+}
+
+#templatesPage .tpl-agent-prompt-preview {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  min-height: 50px;
+  overflow: hidden;
+}
+
+#templatesPage .tpl-agent-tools {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+#templatesPage .tpl-agent-tool-block {
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+
+#templatesPage .tpl-agent-tool-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+
+#templatesPage .tpl-agent-editor {
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+}
+
+#templatesPage .tpl-agent-editor-summary {
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  list-style-position: outside;
+  outline: none;
+}
+
+#templatesPage .tpl-agent-editor-summary:focus-visible {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.55);
+}
+
+#templatesPage .tpl-agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+#templatesPage .tpl-agent-form-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+#templatesPage .tpl-agent-reuse-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #5b21b6;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-reuse-hint {
+  color: #c4b5fd;
+}
+
+#templatesPage .tpl-agent-reuse-hint[hidden] {
+  display: none;
+}
+
+#templatesPage .tpl-agent-field {
+  min-width: 0;
+}
+
+#templatesPage .tpl-agent-field-label {
+  color: var(--text-secondary);
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+#templatesPage .tpl-agent-prompt {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 13px;
+  resize: vertical;
+}
+
+@media (max-width: 720px) {
+  #templatesPage .tpl-agents-head {
+    flex-direction: column;
+  }
+
+  #templatesPage .tpl-agents-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  #templatesPage .tpl-agent-card-head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  #templatesPage .tpl-agent-drag-handle {
+    display: none;
+  }
+
+  #templatesPage .tpl-agent-tools,
+  #templatesPage .tpl-agent-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    var(--bg-secondary);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-entry {
+  color: #fcd34d;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-role,
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-type {
+  color: #7dd3fc;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-model {
+  color: #86efac;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-skill {
+  color: #c4b5fd;
+}
+
+[data-bs-theme="dark"] #templatesPage .tpl-agent-chip.is-mcp {
+  color: #fcd34d;
+}

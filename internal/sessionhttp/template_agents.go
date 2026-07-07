@@ -27,7 +27,12 @@ type createdAgent struct {
 type seedAgentsResult struct {
 	Created  []createdAgent
 	Warnings []string
-	EntrySet bool
+	// ReuseNotices carries an informational message for each roster entry that
+	// matched an existing global agent by name and was attached as-is (its saved
+	// prompt/model/tools win over the template's). Surfaced to the user so the
+	// name-match reuse is visible rather than silent (PRD FR7).
+	ReuseNotices []string
+	EntrySet     bool
 }
 
 // validAgentTypes canonicalizes a template-declared agent type to the real
@@ -104,6 +109,14 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 					fmt.Sprintf("Specialist agent %q could not be created and was skipped.", spec.Name))
 				continue
 			}
+		}
+
+		if exists {
+			// Name-match reuse: the template's declared prompt/model/tools for
+			// this entry are ignored in favor of the existing definition. Make
+			// that visible (PRD FR7).
+			result.ReuseNotices = append(result.ReuseNotices,
+				fmt.Sprintf("Reusing existing agent %q — its saved prompt, model, and tools are used, not the template's.", spec.Name))
 		}
 
 		if isEntry {

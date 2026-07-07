@@ -22,13 +22,16 @@ async function openCreateModal(page: Page) {
     window.bootstrap.Modal.getOrCreateInstance(el).show();
   });
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  // The show handler renders the Starting-point grid.
-  await expect(page.locator('#folderTemplateGrid .workspace-template-card')).toHaveCount(6);
+  // The show handler renders the unified Template picker.
+  await expect(cardByLabel(page, 'Blank')).toBeVisible();
+  await expect(cardByLabel(page, 'Research Project')).toBeVisible();
+  await expect(cardByLabel(page, 'Travels')).toBeVisible();
+  await expect(cardByLabel(page, 'Content Production')).toBeVisible();
 }
 
 function cardByLabel(page: Page, label: string) {
   return page
-    .locator('#folderTemplateGrid .workspace-template-card')
+    .locator('#templatePicker .workspace-template-card')
     .filter({ has: page.locator('.workspace-template-card-label', { hasText: new RegExp(`^${label}$`) }) });
 }
 

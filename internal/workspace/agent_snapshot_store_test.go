@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
@@ -306,12 +307,20 @@ func TestRestoreAllowlistedWorkspaceAgents_NilAllowlistRestoresNothing(t *testin
 func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(t *testing.T) {
 	primary := NewInMemoryStore()
 
-	// One allowlisted workspace, one not. Both have workspace-local snapshots.
-	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", &agent.Agent{}); err != nil {
+	// Snapshots mirror the global definition at snapshot time (as SaveWorkspaceAgent
+	// does in production). One allowlisted workspace, two not: one holding a pure
+	// mirror, one holding a *stale* snapshot of a since-edited global.
+	allowedDef := &agent.Agent{Type: agent.TypeGeneral}
+	deniedDef := &agent.Agent{Type: agent.TypeGeneral}
+	editedSnapshot := &agent.Agent{Type: agent.TypeGeneral, Settings: types.Settings{SystemPrompt: "OLD"}}
+	if err := primary.SaveWorkspaceAgent("ws-allow", "AllowedManager", allowedDef); err != nil {
 		t.Fatalf("seed allow snapshot: %v", err)
 	}
-	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", &agent.Agent{}); err != nil {
+	if err := primary.SaveWorkspaceAgent("ws-deny", "DeniedManager", deniedDef); err != nil {
 		t.Fatalf("seed deny snapshot: %v", err)
+	}
+	if err := primary.SaveWorkspaceAgent("ws-deny-edited", "EditedManager", editedSnapshot); err != nil {
+		t.Fatalf("seed edited snapshot: %v", err)
 	}
 	if err := primary.Save(&Workspace{ID: "ws-allow", AgentInstances: AgentInstancesFromNames("AllowedManager")}); err != nil {
 		t.Fatalf("save allow ws: %v", err)
@@ -319,13 +328,18 @@ func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(
 	if err := primary.Save(&Workspace{ID: "ws-deny", AgentInstances: AgentInstancesFromNames("DeniedManager")}); err != nil {
 		t.Fatalf("save deny ws: %v", err)
 	}
+	if err := primary.Save(&Workspace{ID: "ws-deny-edited", AgentInstances: AgentInstancesFromNames("EditedManager")}); err != nil {
+		t.Fatalf("save edited ws: %v", err)
+	}
 
-	// Global agent store has: the system agent (Ori), both workspace-managed
-	// agents, and a user-owned agent that no workspace knows about.
+	// Global agent store has: the system agent (Ori), the two mirror-managed
+	// agents, a user-owned agent no workspace knows about, and EditedManager
+	// whose global system prompt has since diverged from its stale snapshot.
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
 		"Ori":             {Type: agent.TypeToolCalling},
 		"AllowedManager":  {Type: agent.TypeGeneral},
 		"DeniedManager":   {Type: agent.TypeGeneral},
+		"EditedManager":   {Type: agent.TypeGeneral, Settings: types.Settings{SystemPrompt: "EDITED"}},
 		"UserOwnedHelper": {Type: agent.TypeGeneral},
 	}}
 	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "wl.json"))
@@ -336,10 +350,13 @@ func TestWipeNonAllowlistedAgentSnapshots_RemovesUnallowedKeepsAllowedAndSystem(
 	WipeNonAllowlistedAgentSnapshots(primary, agents, allowlist)
 
 	if _, ok := agents.GetAgent("DeniedManager"); ok {
-		t.Fatal("DeniedManager should be wiped (workspace not in allowlist)")
+		t.Fatal("DeniedManager should be wiped (mirror of a non-allowlisted workspace snapshot)")
 	}
 	if _, ok := agents.GetAgent("AllowedManager"); !ok {
 		t.Fatal("AllowedManager should be preserved (workspace allowlisted)")
+	}
+	if _, ok := agents.GetAgent("EditedManager"); !ok {
+		t.Fatal("EditedManager must be preserved: user edited the global, so it is not a pure snapshot mirror (PRD FR11)")
 	}
 	if _, ok := agents.GetAgent("Ori"); !ok {
 		t.Fatal("system agent Ori must never be wiped")
