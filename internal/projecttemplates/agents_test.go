@@ -1,9 +1,11 @@
 package projecttemplates
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -176,5 +178,39 @@ func TestSetAgents_RoundTripAndPreservesName(t *testing.T) {
 	}
 	if tpl.HasAgents() || tpl.Name != "Demo" {
 		t.Fatalf("expected agents cleared with metadata intact, got %+v", tpl)
+	}
+}
+
+func TestValidateAgentPrompts(t *testing.T) {
+	// Known variables pass.
+	if err := ValidateAgentPrompts([]AgentSpec{
+		{Name: "Writer", SystemPrompt: "You write for {{workspace.name}}. {{workspace.notes.recent}}"},
+	}); err != nil {
+		t.Fatalf("expected known variables to pass, got %v", err)
+	}
+
+	// Unknown variable is rejected, naming the variable + agent, as ErrInvalidPromptVariable.
+	err := ValidateAgentPrompts([]AgentSpec{
+		{Name: "Writer", SystemPrompt: "Hello {{workspace.bogus}}"},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown variable")
+	}
+	if !errors.Is(err, ErrInvalidPromptVariable) {
+		t.Errorf("expected ErrInvalidPromptVariable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Writer") || !strings.Contains(err.Error(), "workspace.bogus") {
+		t.Errorf("error should name agent + variable, got %q", err.Error())
+	}
+}
+
+func TestSetAgents_RejectsUnknownVariable(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := CreateBlank(dir, "Demo"); err != nil {
+		t.Fatalf("CreateBlank: %v", err)
+	}
+	_, err := SetAgents(dir, "demo", []AgentSpec{{Name: "Writer", SystemPrompt: "{{nope.var}}"}})
+	if !errors.Is(err, ErrInvalidPromptVariable) {
+		t.Fatalf("expected SetAgents to reject unknown variable, got %v", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -59,6 +60,45 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 		parts = append(parts, refinement)
 	}
 	return strings.Join(parts, "\n\n---\n")
+}
+
+// resolveAgentBasePromptVars resolves the closed prompt-variable vocabulary in
+// the responding agent's base system prompt in place (the agent is a per-request
+// clone, so this never touches the stored definition). It returns true when the
+// base prompt contained variables — in which case the author has placed context
+// explicitly and the generic workspace-context layer is suppressed (PRD FR24).
+func (h *Handler) resolveAgentBasePromptVars(routeCtx normalizedChatRouteContext, ag *resolvedChatAgent) bool {
+	if h == nil || ag == nil || ag.Agent == nil {
+		return false
+	}
+	prompt := ag.Agent.Settings.SystemPrompt
+	if !promptvars.HasVariables(prompt) {
+		return false
+	}
+
+	var ws *workspace.Workspace
+	if h.workspaceStore != nil && strings.TrimSpace(routeCtx.WorkspaceID) != "" {
+		ws, _ = h.workspaceStore.Get(routeCtx.WorkspaceID)
+	}
+	inst, _ := workspace.AgentInstanceByName(ws, routeCtx.AgentName)
+
+	memory := ""
+	if h.fileStore != nil && ws != nil {
+		if raw, err := workspace.NewMemoryStore(h.fileStore).ReadRaw(routeCtx.WorkspaceID); err == nil {
+			memory = raw
+		}
+	}
+
+	resolved, hadVars := workspace.ResolveAgentBasePrompt(prompt, workspace.PromptVarInputs{
+		Workspace: ws,
+		Instance:  inst,
+		AgentName: routeCtx.AgentName,
+		Memory:    memory,
+	})
+	if hadVars {
+		ag.Agent.Settings.SystemPrompt = resolved
+	}
+	return hadVars
 }
 
 // buildAgentRefinementPrompt renders the responding agent's per-workspace
