@@ -67,7 +67,7 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 // clone, so this never touches the stored definition). It returns true when the
 // base prompt contained variables — in which case the author has placed context
 // explicitly and the generic workspace-context layer is suppressed (PRD FR24).
-func (h *Handler) resolveAgentBasePromptVars(routeCtx normalizedChatRouteContext, ag *resolvedChatAgent) bool {
+func (h *Handler) resolveAgentBasePromptVars(ctx context.Context, routeCtx normalizedChatRouteContext, ag *resolvedChatAgent) bool {
 	if h == nil || ag == nil || ag.Agent == nil {
 		return false
 	}
@@ -89,11 +89,38 @@ func (h *Handler) resolveAgentBasePromptVars(routeCtx normalizedChatRouteContext
 		}
 	}
 
+	// Fetch notes / tools only when the prompt actually uses those variables, to
+	// avoid a note-store query on every variable-bearing prompt.
+	notes := ""
+	if h.sessionStore != nil && strings.Contains(prompt, "workspace.notes.recent") && strings.TrimSpace(routeCtx.WorkspaceID) != "" {
+		if items, err := h.sessionStore.ListNotesByWorkspace(ctx, routeCtx.WorkspaceID); err == nil {
+			lines := make([]string, 0, len(items))
+			for _, n := range limitWorkspaceNotes(items, workspaceSnapshotMaxNotes) {
+				line := "- " + strings.TrimSpace(n.Name)
+				if p := strings.TrimSpace(n.Preview); p != "" {
+					line += " — " + p
+				}
+				lines = append(lines, line)
+			}
+			notes = strings.Join(lines, "\n")
+		}
+	}
+	tools := ""
+	if strings.Contains(prompt, "workspace.tools") {
+		skillNames := make([]string, 0, len(ag.EffectiveSkills))
+		for _, s := range ag.EffectiveSkills {
+			skillNames = append(skillNames, s.Name)
+		}
+		tools = workspace.FormatToolNames(skillNames, ag.MCPServers)
+	}
+
 	resolved, hadVars := workspace.ResolveAgentBasePrompt(prompt, workspace.PromptVarInputs{
-		Workspace: ws,
-		Instance:  inst,
-		AgentName: routeCtx.AgentName,
-		Memory:    memory,
+		Workspace:   ws,
+		Instance:    inst,
+		AgentName:   routeCtx.AgentName,
+		Memory:      memory,
+		NotesRecent: notes,
+		Tools:       tools,
 	})
 	if hadVars {
 		ag.Agent.Settings.SystemPrompt = resolved

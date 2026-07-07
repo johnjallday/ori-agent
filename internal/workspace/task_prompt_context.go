@@ -111,7 +111,7 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt(compact bool) string {
 // author used variables they clearly intend a parametric persona to apply, so we
 // resolve it and let the caller lead the task prompt with it (PRD FR24). Returns
 // hadVars=false (and "") for plain prompts, leaving task behavior untouched.
-func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ag *resolvedTaskAgent, agentName string, task Task) (string, bool) {
+func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task) (string, bool) {
 	if h == nil || ag == nil || ag.Agent == nil {
 		return "", false
 	}
@@ -133,12 +133,38 @@ func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ag *resolvedTaskAgent, agent
 		}
 	}
 
+	// Fetch notes / tools only when the prompt actually uses those variables.
+	notes := ""
+	if h.contextStore != nil && strings.Contains(prompt, "workspace.notes.recent") && strings.TrimSpace(task.WorkspaceID) != "" {
+		if items, err := h.contextStore.ListNotesByWorkspace(ctx, task.WorkspaceID); err == nil {
+			lines := make([]string, 0, len(items))
+			for _, n := range limitTaskPromptNotes(items, taskPromptMaxNotes) {
+				line := "- " + strings.TrimSpace(n.Name)
+				if p := strings.TrimSpace(n.Preview); p != "" {
+					line += " — " + p
+				}
+				lines = append(lines, line)
+			}
+			notes = strings.Join(lines, "\n")
+		}
+	}
+	tools := ""
+	if strings.Contains(prompt, "workspace.tools") {
+		skillNames := make([]string, 0, len(ag.EffectiveSkills))
+		for _, s := range ag.EffectiveSkills {
+			skillNames = append(skillNames, s.Name)
+		}
+		tools = FormatToolNames(skillNames, ag.MCPServers)
+	}
+
 	return ResolveAgentBasePrompt(prompt, PromptVarInputs{
-		Workspace: ws,
-		Instance:  inst,
-		AgentName: agentName,
-		Memory:    memory,
-		TaskGoal:  task.Description,
+		Workspace:   ws,
+		Instance:    inst,
+		AgentName:   agentName,
+		Memory:      memory,
+		NotesRecent: notes,
+		Tools:       tools,
+		TaskGoal:    task.Description,
 	})
 }
 

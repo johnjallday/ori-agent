@@ -1080,7 +1080,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Resolve any closed-vocabulary variables in the agent's base prompt. When it
 	// used variables, the author placed context explicitly, so the generic
 	// workspace-context layer is suppressed (PRD FR24).
-	basePromptHasVars := h.resolveAgentBasePromptVars(normalizedRouteContext, ag)
+	basePromptHasVars := h.resolveAgentBasePromptVars(ctx, normalizedRouteContext, ag)
 	toolRuntimeSystemPrompt := ""
 	if !basePromptHasVars {
 		toolRuntimeSystemPrompt = h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)

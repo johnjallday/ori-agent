@@ -38,3 +38,14 @@ func TestResolveAgentBasePrompt(t *testing.T) {
 		t.Errorf("empty block should self-omit, got %q", out)
 	}
 }
+
+func TestFormatToolNames(t *testing.T) {
+	// De-dupes (case-insensitive), trims, drops blanks, preserves order.
+	got := FormatToolNames([]string{"web_search", " notes ", "Web_Search"}, []string{"filesystem", "", "notes"})
+	if got != "web_search, notes, filesystem" {
+		t.Fatalf("FormatToolNames = %q", got)
+	}
+	if FormatToolNames(nil, nil) != "" {
+		t.Errorf("empty inputs should yield empty string")
+	}
+}

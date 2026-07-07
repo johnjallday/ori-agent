@@ -252,7 +252,7 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	compactPrompt := provider.Type() == llm.ProviderTypeLocal
 	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
-	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ag, agentName, task); hadVars {
+	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ctx, ag, agentName, task); hadVars {
 		// The author wrote a variable-bearing base prompt, so a parametric persona
 		// is meant to apply here too: lead the task prompt with the resolved
 		// persona. The author placed context via variables, so the generic

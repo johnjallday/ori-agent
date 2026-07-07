@@ -244,7 +244,7 @@ func TestResolveAgentBasePromptVars(t *testing.T) {
 	ag := &resolvedChatAgent{Agent: &agent.Agent{Settings: types.Settings{
 		SystemPrompt: "You serve {{workspace.name}} ({{workspace.description}}). {{workspace.custom_instructions}}",
 	}}}
-	if !h.resolveAgentBasePromptVars(routeCtx, ag) {
+	if !h.resolveAgentBasePromptVars(context.Background(), routeCtx, ag) {
 		t.Fatal("expected hadVars=true for variable-bearing prompt")
 	}
 	got := ag.Agent.Settings.SystemPrompt
@@ -259,7 +259,7 @@ func TestResolveAgentBasePromptVars(t *testing.T) {
 
 	// Plain base prompt: unchanged, hadVars=false.
 	plain := &resolvedChatAgent{Agent: &agent.Agent{Settings: types.Settings{SystemPrompt: "Plain prompt."}}}
-	if h.resolveAgentBasePromptVars(routeCtx, plain) {
+	if h.resolveAgentBasePromptVars(context.Background(), routeCtx, plain) {
 		t.Error("expected hadVars=false for plain prompt")
 	}
 	if plain.Agent.Settings.SystemPrompt != "Plain prompt." {
