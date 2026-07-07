@@ -252,9 +252,18 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	compactPrompt := provider.Type() == llm.ProviderTypeLocal
 	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
-	// Layer the workspace owner's per-instance refinement of this agent onto the
-	// task prompt so refinement reaches the task path too (PRD FR15/FR16/FR19).
-	taskSystemPrompt = AppendAgentRefinement(taskSystemPrompt, h.workspaceStore, task.WorkspaceID, agentName)
+	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ag, agentName, task); hadVars {
+		// The author wrote a variable-bearing base prompt, so a parametric persona
+		// is meant to apply here too: lead the task prompt with the resolved
+		// persona. The author placed context via variables, so the generic
+		// refinement layer is not also appended (mirrors chat FR24).
+		taskSystemPrompt = resolvedBase + "\n\n---\n" + taskSystemPrompt
+	} else {
+		// Plain prompt: task behavior is unchanged (the base persona is not
+		// injected), but the workspace owner's per-instance refinement still
+		// reaches the task path (PRD FR15/FR16/FR19).
+		taskSystemPrompt = AppendAgentRefinement(taskSystemPrompt, h.workspaceStore, task.WorkspaceID, agentName)
+	}
 	h.reportPromptTier(task, agentName, compactPrompt)
 
 	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting

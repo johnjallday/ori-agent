@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -103,6 +104,44 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt(compact bool) string {
 // prompt. Memory tools are available during task execution, so tool guidance is
 // included. Returns "" when the store can't resolve a folder path (e.g. a
 // non-folder store) or memory is empty and there's nothing to guide.
+// resolveTaskAgentBasePrompt resolves the closed prompt-variable vocabulary in
+// the task agent's base system prompt, but ONLY when it actually uses variables
+// (opt-in): the task path otherwise ignores an agent's base prompt, so injecting
+// it unconditionally would change behavior for every existing agent. When the
+// author used variables they clearly intend a parametric persona to apply, so we
+// resolve it and let the caller lead the task prompt with it (PRD FR24). Returns
+// hadVars=false (and "") for plain prompts, leaving task behavior untouched.
+func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ag *resolvedTaskAgent, agentName string, task Task) (string, bool) {
+	if h == nil || ag == nil || ag.Agent == nil {
+		return "", false
+	}
+	prompt := ag.Settings.SystemPrompt
+	if !promptvars.HasVariables(prompt) {
+		return "", false
+	}
+
+	var ws *Workspace
+	if h.workspaceStore != nil && strings.TrimSpace(task.WorkspaceID) != "" {
+		ws, _ = h.workspaceStore.Get(task.WorkspaceID)
+	}
+	inst, _ := AgentInstanceByName(ws, agentName)
+
+	memory := ""
+	if resolver, ok := h.workspaceStore.(workspaceFolderStore); ok && strings.TrimSpace(task.WorkspaceID) != "" {
+		if raw, err := NewMemoryStore(resolver).ReadRaw(task.WorkspaceID); err == nil {
+			memory = raw
+		}
+	}
+
+	return ResolveAgentBasePrompt(prompt, PromptVarInputs{
+		Workspace: ws,
+		Instance:  inst,
+		AgentName: agentName,
+		Memory:    memory,
+		TaskGoal:  task.Description,
+	})
+}
+
 func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
 	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return ""
