@@ -3501,9 +3501,18 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
-  // Reset and open the Create Group modal (used by the toolbar button and the
-  // Cmd/Ctrl+G shortcut).
-  function openCreateGroupModal() {
+  // When set, the Create Group modal groups this explicit id set instead of the
+  // List view's checkbox selection. The Map view's "Group selected" action uses
+  // it to funnel its own multi-select set through the same modal + create flow.
+  // Reset to null on every modal open so a cancelled map-group never leaks into
+  // a later List-view group.
+  let pendingGroupMemberIds = null;
+
+  // Reset and open the Create Group modal. Called by the List toolbar button,
+  // the Cmd/Ctrl+G shortcut (no arg → group the List selection), and the Map
+  // view's "Group selected" action (memberIds → group that explicit set).
+  function openCreateGroupModal(memberIds) {
+    pendingGroupMemberIds = Array.isArray(memberIds) && memberIds.length ? memberIds.slice() : null;
     if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
     const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
     if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
@@ -3514,10 +3523,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function createGroupFromSelection() {
-    // Top-level ids only: moving a checked group into the new group carries its
-    // members with it, so we must not also move the members (that would flatten
-    // them out of their group).
-    const selected = getTopLevelSelectedIds();
+    // Map view supplies an explicit id set; List view derives one from its
+    // checkbox selection. Top-level ids only: moving a checked group into the
+    // new group carries its members with it, so we must not also move the
+    // members (that would flatten them out of their group).
+    const selected = pendingGroupMemberIds || getTopLevelSelectedIds();
     if (selected.length === 0) return;
 
     const name = (elements.launcherGroupNameInput?.value || '').trim();
@@ -3568,7 +3578,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
       if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
 
-      // Reset selection + refresh
+      // Reset selection + refresh. Clearing the List selection is harmless when
+      // the members came from the Map view (that selection set is empty).
+      pendingGroupMemberIds = null;
       clearLauncherSelection({ render: false });
       await loadWorkspaces();
     } catch (err) {
@@ -4671,6 +4683,9 @@ console.log('[workspace-hub.js] FILE LOADED');
   // Batch delete (confirm + Trash + Undo) reused by the Map view's multi-select
   // action bar; also reloads on success, which re-mounts the map.
   window.WorkspaceHub.deleteWorkspaces = confirmAndDeleteWorkspaces;
+  // Group an explicit id set (the Map view's multi-select) via the shared Create
+  // Group modal + create/reparent flow; reloads on success, re-mounting the map.
+  window.WorkspaceHub.groupWorkspaces = (ids) => openCreateGroupModal(ids);
   window.WorkspaceHub.__test = {
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,

@@ -546,6 +546,7 @@
   display: flex;
   gap: 8px;
 }
+.ws-map-selbar-group,
 .ws-map-selbar-del,
 .ws-map-selbar-clear {
   padding: 7px 13px;
@@ -558,6 +559,15 @@
   transition: 0.15s;
   white-space: nowrap;
   clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.ws-map-selbar-group {
+  background: var(--ws-faction-soft, rgba(45, 212, 145, 0.12));
+  border: 1px solid var(--ws-faction);
+  color: var(--ws-faction);
+}
+.ws-map-selbar-group:hover {
+  background: var(--ws-faction);
+  color: #04120b;
 }
 .ws-map-selbar-del {
   background: rgba(226, 96, 96, 0.1);
@@ -578,6 +588,7 @@
   border-color: var(--ws-faction);
   color: var(--ws-faction);
 }
+.ws-map-selbar-group:focus-visible,
 .ws-map-selbar-del:focus-visible,
 .ws-map-selbar-clear:focus-visible {
   outline: 2px solid var(--ws-faction);
