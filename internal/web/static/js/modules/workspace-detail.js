@@ -3103,13 +3103,14 @@ export class WorkspaceDetailPage {
     `;
     }
 
-    const safeHref = this.escapeAttribute(target.href);
     const safeTitle = this.escapeAttribute(target.title || `Open ${agentName} details`);
     const safeAriaLabel = this.escapeAttribute(target.ariaLabel || target.title || `Open ${agentName} details`);
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+    const safeHref = this.escapeAttribute(target.href);
     return `
       <a href="${safeHref}"
          class="workspace-detail-agent-link"
-         data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+         data-agent-detail-kind="${safeKind}"
          title="${safeTitle}"
          aria-label="${safeAriaLabel}"
          onclick="event.stopPropagation();">
@@ -3163,17 +3164,20 @@ export class WorkspaceDetailPage {
     }
 
     if (this.hasWorkspaceAgentSnapshot(normalizedName)) {
-      // Workspace-local agents (entry/manager agents) are hydrated into the
-      // agent store on startup, so /agents/<name> renders their detail page.
-      // The page degrades gracefully to a repair view if a snapshot is missing.
-      const title = `Open ${normalizedName} details (workspace-local agent)`;
-      return {
-        kind: 'workspace-local',
-        href: `/agents/${encodedAgentName}`,
-        interactive: true,
-        title,
-        ariaLabel: title
-      };
+      // Workspace-local agents (entry/manager agents defined in the workspace's
+      // config.json) are NOT part of the global agent store, so /agents/<name>
+      // would 404. They have a workspace-scoped detail page instead.
+      const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+      if (workspaceId) {
+        const title = `Open ${normalizedName} details`;
+        return {
+          kind: 'workspace-local',
+          href: `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodedAgentName}`,
+          interactive: true,
+          title,
+          ariaLabel: title
+        };
+      }
     }
 
     if (this.isWorkspaceEntryAgent(normalizedName)) {
@@ -3234,10 +3238,12 @@ export class WorkspaceDetailPage {
           `;
     }
 
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+
     return `
             <a href="${this.escapeAttribute(target.href)}"
                class="workspace-detail-agent-identity-link"
-               data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+               data-agent-detail-kind="${safeKind}"
                title="${this.escapeAttribute(title)}"
                aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
                aria-describedby="${summaryId}"
@@ -4175,7 +4181,16 @@ export class WorkspaceDetailPage {
     agentName = String(agentName || '').trim();
     if (!agentName) return;
 
-    this.activeAgentPromptView = { agentName, data: null };
+    // Workspace-local agents (those with a config.json snapshot) can edit their
+    // base system prompt in place; global agents remain read-only here.
+    const editable = this.hasWorkspaceAgentSnapshot(agentName);
+    this.activeAgentPromptView = {
+      agentName,
+      data: null,
+      editable,
+      editing: false,
+      basePrompt: ''
+    };
 
     if (this.elements.agentPromptAgentName) {
       this.elements.agentPromptAgentName.textContent = agentName;
@@ -4212,9 +4227,123 @@ export class WorkspaceDetailPage {
       return;
     }
     this.activeAgentPromptView.data = data;
+
+    // For editable agents, load the real base prompt from config.json (the
+    // effective-prompt endpoint reads the global store, which is empty for
+    // workspace-local agents). If the endpoint is unavailable, fall back to
+    // read-only display.
+    if (this.activeAgentPromptView.editable) {
+      const base = await this.fetchWorkspaceAgentBasePrompt(agentName);
+      if (!this.activeAgentPromptView || this.activeAgentPromptView.agentName !== agentName) {
+        return;
+      }
+      if (base == null) {
+        this.activeAgentPromptView.editable = false;
+      } else {
+        this.activeAgentPromptView.basePrompt = base;
+      }
+    }
+
     this.renderAgentPromptModalBody(agentName, data);
     // Keep the flip-card preview consistent with what the modal just loaded.
     this.refreshAgentCardPrompt(agentName);
+  }
+
+  async fetchWorkspaceAgentBasePrompt(agentName) {
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return null;
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+          agentName
+        )}/system-prompt`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return String(data?.system_prompt || '');
+    } catch (error) {
+      console.error('Failed to load workspace agent base prompt:', error);
+      return null;
+    }
+  }
+
+  enterModalPromptEdit() {
+    const view = this.activeAgentPromptView;
+    if (!view || !view.editable) return;
+    view.editing = true;
+    this.renderAgentPromptModalBody(view.agentName, view.data);
+    document.getElementById('workspace-detail-agent-prompt-editor')?.focus();
+  }
+
+  cancelModalPromptEdit() {
+    const view = this.activeAgentPromptView;
+    if (!view) return;
+    view.editing = false;
+    this.renderAgentPromptModalBody(view.agentName, view.data);
+  }
+
+  async saveModalPrompt() {
+    const view = this.activeAgentPromptView;
+    if (!view || !view.editable) return;
+    const editor = document.getElementById('workspace-detail-agent-prompt-editor');
+    if (!editor) return;
+    const value = editor.value;
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return;
+
+    const status = document.getElementById('workspace-detail-agent-prompt-status');
+    const saveBtn = document.getElementById('workspace-detail-agent-prompt-save');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+    }
+    if (status) {
+      status.textContent = 'Saving…';
+      status.classList.remove('is-error', 'is-success');
+    }
+
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+          view.agentName
+        )}/system-prompt`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ system_prompt: value })
+        }
+      );
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const body = await res.json();
+          detail = String(body?.error || body?.message || '').trim();
+        } catch (_error) {
+          detail = '';
+        }
+        throw new Error(detail || `save failed: ${res.status}`);
+      }
+      const body = await res.json();
+      view.basePrompt = String(body?.system_prompt ?? value.trim());
+      view.editing = false;
+      this.renderAgentPromptModalBody(view.agentName, view.data);
+      // Invalidate the cached effective prompt so the flip-card preview refreshes.
+      this.agentPromptCache?.delete(this.normalizeAgentName(view.agentName));
+      this.refreshAgentCardPrompt(view.agentName);
+      if (window.Toast) window.Toast.success('System prompt saved.');
+    } catch (error) {
+      console.error('Failed to save system prompt:', error);
+      if (status) {
+        status.textContent = error?.message || 'Could not save the system prompt.';
+        status.classList.add('is-error');
+      }
+      if (window.Toast) window.Toast.error('Failed to save system prompt.');
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+    }
   }
 
   renderAgentPromptModalBody(agentName, data) {
@@ -4228,7 +4357,7 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    const base = String(data.base_system_prompt || '').trim();
+    const view = this.activeAgentPromptView || {};
     const refinement = String(data.refinement || '').trim();
     const effective = String(data.effective_prompt || '').trim();
     const note = String(data.note || '').trim();
@@ -4244,6 +4373,57 @@ export class WorkspaceDetailPage {
       </div>
     `;
 
+    // Editable path: workspace-local agents edit their base prompt (config.json)
+    // in place. The base comes from view.basePrompt, not the effective-prompt
+    // endpoint (whose base is the global store, empty for these agents).
+    if (view.editable) {
+      const base = String(view.basePrompt || '').trim();
+      const baseBlock = view.editing
+        ? `
+          <div class="workspace-detail-agent-prompt-block">
+            <div class="workspace-detail-agent-prompt-block-head">
+              <div class="workspace-detail-agent-prompt-block-label">Base system prompt</div>
+              <div class="workspace-detail-agent-prompt-edit-actions">
+                <button type="button" class="btn btn-sm btn-link p-0" onclick="window.workspaceDetail?.cancelModalPromptEdit()">Cancel</button>
+                <button type="button" class="btn btn-sm btn-primary" id="workspace-detail-agent-prompt-save" onclick="window.workspaceDetail?.saveModalPrompt()">Save</button>
+              </div>
+            </div>
+            <textarea id="workspace-detail-agent-prompt-editor" class="workspace-detail-agent-prompt-editor" rows="10" placeholder="Describe how this agent should behave…">${this.escapeHtml(
+              base
+            )}</textarea>
+            <div id="workspace-detail-agent-prompt-status" class="workspace-detail-agent-prompt-status"></div>
+          </div>`
+        : `
+          <div class="workspace-detail-agent-prompt-block">
+            <div class="workspace-detail-agent-prompt-block-head">
+              <div class="workspace-detail-agent-prompt-block-label">Base system prompt</div>
+              <button type="button" class="btn btn-sm btn-link p-0" onclick="window.workspaceDetail?.enterModalPromptEdit()">Edit</button>
+            </div>
+            ${
+              base
+                ? `<pre class="workspace-detail-agent-prompt-pre">${this.escapeHtml(base)}</pre>`
+                : `<div class="workspace-detail-agent-prompt-empty">No base system prompt set. Click Edit to add one.</div>`
+            }
+          </div>`;
+
+      body.innerHTML = `
+        ${baseBlock}
+        ${section(
+          'Workspace refinement',
+          refinement,
+          'No workspace-specific refinement (role, description, or custom instructions).'
+        )}
+        ${
+          note
+            ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>`
+            : ''
+        }
+      `;
+      return;
+    }
+
+    // Read-only path (global agents): unchanged three-section view.
+    const base = String(data.base_system_prompt || '').trim();
     body.innerHTML = `
       ${section('Base system prompt', base, 'No base system prompt set for this agent.')}
       ${section(

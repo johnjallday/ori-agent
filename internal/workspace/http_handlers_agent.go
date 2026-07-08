@@ -393,3 +393,124 @@ func (h *HTTPHandler) UpdateWorkspaceAgentModel(w http.ResponseWriter, r *http.R
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
+
+// maxWorkspaceAgentSystemPromptLen bounds a workspace-local agent's editable
+// base system prompt. Generous, but guards against accidental huge payloads.
+const maxWorkspaceAgentSystemPromptLen = 20000
+
+// workspaceAgentNameFromPath returns the {name} path value with any ":instance"
+// suffix stripped, since agent config (model, prompt) is per agent name.
+func workspaceAgentNameFromPath(r *http.Request) string {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if idx := strings.Index(name, ":"); idx >= 0 {
+		name = name[:idx]
+	}
+	return strings.TrimSpace(name)
+}
+
+// GetWorkspaceAgentSystemPrompt handles GET
+// /api/workspaces/{workspaceID}/agents/{name}/system-prompt and returns the
+// base system prompt stored in a workspace-local agent's config.json. The
+// workspace config.json is the single source of truth for these agents.
+func (h *HTTPHandler) GetWorkspaceAgentSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	agentName := workspaceAgentNameFromPath(r)
+	if workspaceID == "" || agentName == "" {
+		orihttp.BadRequest(w, "workspace id and agent name are required")
+		return
+	}
+
+	if _, err := h.store.Get(workspaceID); err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace %s not found", workspaceID))
+		return
+	}
+
+	ag, ok, err := h.store.GetWorkspaceAgent(workspaceID, agentName)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to read workspace agent: %v", err))
+		return
+	}
+	if !ok || ag == nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace agent %q not found", agentName))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"agent":         agentName,
+		"system_prompt": ag.Settings.SystemPrompt,
+		"source":        "workspace",
+	}); encErr != nil {
+		logger.Error("Failed to encode workspace agent system prompt", logger.Fields{"error": encErr})
+	}
+}
+
+// UpdateWorkspaceAgentSystemPromptRequest is the body for PATCH
+// /api/workspaces/{id}/agents/{name}/system-prompt.
+type UpdateWorkspaceAgentSystemPromptRequest struct {
+	SystemPrompt *string `json:"system_prompt"`
+}
+
+// UpdateWorkspaceAgentSystemPrompt handles PATCH
+// /api/workspaces/{workspaceID}/agents/{name}/system-prompt and writes the base
+// system prompt into the workspace-local agent's config.json. It never touches
+// the global agent store; the workspace config.json is the source of truth.
+func (h *HTTPHandler) UpdateWorkspaceAgentSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	agentName := workspaceAgentNameFromPath(r)
+	if workspaceID == "" || agentName == "" {
+		orihttp.BadRequest(w, "workspace id and agent name are required")
+		return
+	}
+
+	var req UpdateWorkspaceAgentSystemPromptRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if req.SystemPrompt == nil {
+		orihttp.BadRequest(w, "system_prompt is required")
+		return
+	}
+	// Trim outer whitespace (also drops stray leading/trailing newlines) while
+	// preserving intentional internal formatting. Empty is allowed (clears it).
+	prompt := strings.TrimSpace(*req.SystemPrompt)
+	if len(prompt) > maxWorkspaceAgentSystemPromptLen {
+		orihttp.BadRequest(w, fmt.Sprintf("system_prompt exceeds %d characters", maxWorkspaceAgentSystemPromptLen))
+		return
+	}
+
+	if _, err := h.store.Get(workspaceID); err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace %s not found", workspaceID))
+		return
+	}
+
+	ag, ok, err := h.store.GetWorkspaceAgent(workspaceID, agentName)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to read workspace agent: %v", err))
+		return
+	}
+	if !ok || ag == nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace agent %q not found", agentName))
+		return
+	}
+
+	ag.Settings.SystemPrompt = prompt
+	if err := h.store.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace agent: %v", err))
+		return
+	}
+
+	logger.Info("Updated workspace agent system prompt", logger.Fields{
+		"workspace_id": workspaceID, "agent": agentName, "length": len(prompt),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"message":       "Agent system prompt updated",
+		"agent":         agentName,
+		"system_prompt": prompt,
+		"source":        "workspace",
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
