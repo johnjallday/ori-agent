@@ -41,6 +41,28 @@ func BuildPromptVarValues(in PromptVarInputs) map[string]string {
 	return values
 }
 
+// FormatToolNames renders a compact, de-duplicated, comma-separated list of the
+// agent's effective tool/skill names for the workspace.tools variable.
+func FormatToolNames(skillNames, mcpNames []string) string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(skillNames)+len(mcpNames))
+	for _, group := range [][]string{skillNames, mcpNames} {
+		for _, n := range group {
+			n = strings.TrimSpace(n)
+			if n == "" {
+				continue
+			}
+			key := strings.ToLower(n)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
 // ResolveAgentBasePrompt resolves the closed prompt variables in prompt using
 // inputs. When prompt contains no variables it is returned unchanged with
 // hadVars=false, letting callers decide whether to suppress the generic
