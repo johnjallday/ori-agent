@@ -4308,6 +4308,46 @@
       padding-top: 0.6rem;
     }
 
+    .workspace-detail-agent-prompt-block-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-agent-prompt-block-head .workspace-detail-agent-prompt-block-label {
+      margin-bottom: 0;
+    }
+
+    .workspace-detail-agent-prompt-edit-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-agent-prompt-editor {
+      width: 100%;
+      resize: vertical;
+      min-height: 180px;
+      padding: 0.7rem 0.8rem;
+      background: var(--bg-primary);
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      border-radius: 8px;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-agent-prompt-editor:focus {
+      outline: 2px solid rgba(56, 189, 248, 0.85);
+      outline-offset: 1px;
+    }
+
+    .workspace-detail-agent-prompt-status.is-error { color: #dc2626; }
+    .workspace-detail-agent-prompt-status.is-success { color: #16a34a; }
+
     .workspace-detail-agent-info-block {
       background: rgba(100, 116, 139, 0.06);
       border: 1px solid rgba(100, 116, 139, 0.14);
