@@ -507,7 +507,7 @@ test('workspace detail links catalog-backed agents to the global detail page', (
   assert.match(markup, /data-agent-detail-kind="global"/);
 });
 
-test('workspace detail keeps snapshot-backed local agents off the global detail route', () => {
+test('workspace detail links snapshot-backed local agents to their detail page', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.workspace = {
     entry_agent_name: 'Local Manager',
@@ -524,13 +524,14 @@ test('workspace detail keeps snapshot-backed local agents off the global detail 
     'summary-local'
   );
 
+  // Snapshot-backed local agents are hydrated into the agent store on startup,
+  // so /agents/<name> resolves (degrading to a repair view if it does not).
   assert.equal(target.kind, 'workspace-local');
-  assert.equal(target.interactive, false);
-  assert.equal(target.href, '');
-  assert.match(markup, /workspace-detail-agent-identity-link is-static/);
+  assert.equal(target.interactive, true);
+  assert.equal(target.href, '/agents/Local%20Manager');
   assert.match(markup, /data-agent-detail-kind="workspace-local"/);
-  assert.doesNotMatch(markup, /href="/);
-  assert.doesNotMatch(markup, /\/agents\/Local%20Manager/);
+  assert.match(markup, /href="\/agents\/Local%20Manager"/);
+  assert.doesNotMatch(markup, /is-static/);
 });
 
 test('workspace detail routes missing entry agents to workspace recovery', () => {
@@ -561,6 +562,30 @@ test('workspace detail routes missing entry agents to workspace recovery', () =>
   assert.match(backMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
   assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
   assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);
+});
+
+test('buildAgentPromptPreview collapses whitespace and truncates long prompts', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  assert.equal(
+    page.buildAgentPromptPreview({ effective_prompt: 'You are\n  a  helpful\tagent.' }),
+    'You are a helpful agent.'
+  );
+  assert.equal(
+    page.buildAgentPromptPreview({ base_system_prompt: '', effective_prompt: '' }),
+    'No system prompt set for this agent.'
+  );
+
+  const long = 'x'.repeat(400);
+  const preview = page.buildAgentPromptPreview({ effective_prompt: long });
+  assert.ok(preview.length <= 161, `preview should be capped, got ${preview.length}`);
+  assert.ok(preview.endsWith('…'), 'truncated preview should end with an ellipsis');
+
+  // Falls back to the base prompt when no composed prompt is present.
+  assert.equal(
+    page.buildAgentPromptPreview({ base_system_prompt: 'Base only.', effective_prompt: '' }),
+    'Base only.'
+  );
 });
 
 test('workspace detail agent back face does not render agent level copy', () => {
