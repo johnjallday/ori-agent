@@ -1,7 +1,8 @@
 /*
  * workspace-map.js — Workspace Map view ("tactical command-center")
  *
- * Opt-in third view on the /workspaces hub, beside Cards and Tree. Loaded as a
+ * Primary browse/open view on the /workspaces hub, beside the Tree management
+ * view. Loaded as a
  * plain deferred script (not an ES module); exposes itself on
  * window.OriWorkspaceMap, which workspace-hub.js calls when the "map" view is
  * active.
@@ -355,7 +356,118 @@
       escapeHtml(initials(name)) + '</span>';
   }
 
-  function overviewBodyHTML(ws) {
+  function mapMetadata(options) {
+    return options && options.metadata && typeof options.metadata === 'object'
+      ? options.metadata
+      : {};
+  }
+
+  function metadataValue(options, key, id) {
+    var metadata = mapMetadata(options);
+    var table = metadata && metadata[key];
+    return table && id ? table[id] : null;
+  }
+
+  function normalizeTags(tags) {
+    return (Array.isArray(tags) ? tags : [])
+      .map(function (tag) { return String(tag || '').trim(); })
+      .filter(Boolean);
+  }
+
+  function folderDisplayFor(ws, options) {
+    if (!ws || !ws.id) return null;
+    return metadataValue(options, 'folderDisplayById', ws.id) ||
+      ws.map_folder_display ||
+      ws.folder_display ||
+      null;
+  }
+
+  function tagsFor(ws, options) {
+    if (!ws || !ws.id) return [];
+    return normalizeTags(metadataValue(options, 'tagsById', ws.id) || ws.tags);
+  }
+
+  function groupPreviewFor(ws, options) {
+    if (!ws || !ws.id || !isGroup(ws)) return null;
+    var fromMetadata = metadataValue(options, 'groupPreviewById', ws.id);
+    if (fromMetadata) return fromMetadata;
+
+    var children = Array.isArray(ws.children) ? ws.children : [];
+    var names = children.slice(0, 3).map(function (child) {
+      return String(child && (child.name || child.id) || 'Untitled Workspace').trim();
+    }).filter(Boolean);
+    return {
+      childCount: children.length,
+      previewNames: names,
+      overflowCount: Math.max(0, children.length - names.length)
+    };
+  }
+
+  function folderOverviewHTML(ws, options) {
+    var folder = folderDisplayFor(ws, options);
+    if (!folder) return '';
+    var badgeClass = folder.badgeClass || (folder.linked ? 'is-linked' : 'is-unlinked');
+    var badge = folder.badgeLabel || (folder.linked ? 'Linked folder' : 'No folder linked');
+    var detail = folder.detail || (folder.linked ? 'Linked folder' : 'No local folder attached.');
+    var title = folder.detailTitle || detail;
+    return (
+      '<div class="ws-map-ov-label">Folder</div>' +
+      '<div class="ws-map-folder ' + escapeHtml(badgeClass) + '">' +
+      '<span class="ws-map-folder-badge">' + escapeHtml(badge) + '</span>' +
+      '<span class="ws-map-folder-path" title="' + escapeHtml(title) + '">' + escapeHtml(detail) + '</span>' +
+      '</div>'
+    );
+  }
+
+  function tagsOverviewHTML(ws, options) {
+    var tags = tagsFor(ws, options);
+    var workspaceId = ws && ws.id ? String(ws.id) : '';
+    var limit = 4;
+    var visible = tags.slice(0, limit);
+    var overflow = Math.max(0, tags.length - visible.length);
+    var body = '';
+
+    if (!tags.length) {
+      body = '<span class="ws-map-ov-none">No tags yet</span>';
+    } else {
+      body = '<div class="ws-map-tags">' + visible.map(function (tag) {
+        var safeTag = escapeHtml(tag);
+        return (
+          '<span class="ws-map-tag" title="' + safeTag + '">' +
+          '<button type="button" class="ws-map-tag-label" data-ws-tag-filter="' + safeTag + '" title="Filter by ' + safeTag + '">' + safeTag + '</button>' +
+          '<button type="button" class="ws-map-tag-remove" data-ws-tag-remove="' + escapeHtml(workspaceId) + '" data-ws-tag="' + safeTag + '" aria-label="Remove tag ' + safeTag + '" title="Remove tag">&times;</button>' +
+          '</span>'
+        );
+      }).join('') +
+        (overflow > 0
+          ? '<span class="ws-map-tag ws-map-tag-more" title="' + escapeHtml(tags.slice(limit).join(', ')) + '">+' + overflow + ' more</span>'
+          : '') +
+        '</div>';
+    }
+
+    return '<div class="ws-map-ov-label">Tags</div>' + body;
+  }
+
+  function groupPreviewHTML(ws, options) {
+    var preview = groupPreviewFor(ws, options);
+    if (!preview) return '';
+    var count = Number(preview.childCount || 0);
+    var names = normalizeTags(preview.previewNames);
+    var overflow = Number(preview.overflowCount || 0);
+    var summary = count + ' workspace' + (count === 1 ? '' : 's');
+    var body = names.length
+      ? names.join(' · ') + (overflow > 0 ? ' +' + overflow + ' more' : '')
+      : 'Drop workspaces here to organize related work.';
+    return (
+      '<div class="ws-map-ov-label">Group Preview</div>' +
+      '<div class="ws-map-group-preview">' +
+      '<span class="ws-map-group-count">' + escapeHtml(summary) + '</span>' +
+      '<span class="ws-map-group-names" title="' + escapeHtml(body) + '">' + escapeHtml(body) + '</span>' +
+      '</div>'
+    );
+  }
+
+  function overviewBodyHTML(ws, options) {
     if (!ws) {
       return '<div class="ws-map-overview-empty"><span class="ws-big">◈</span>' +
         'Select a workspace to see its agents, tasks, tools, and skills.</div>';
@@ -392,6 +504,9 @@
       (description
         ? '<p class="ws-map-ov-desc" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</p>'
         : '<p class="ws-map-ov-desc is-empty">No description yet.</p>') +
+      folderOverviewHTML(ws, options) +
+      tagsOverviewHTML(ws, options) +
+      groupPreviewHTML(ws, options) +
       '<div class="ws-map-ov-label">Entry agent</div>' +
       '<div class="ws-map-ov-keeperwrap">' + keeper + '</div>' +
       '<div class="ws-map-ov-label">Agents · ' + agents.length + '</div>' +
@@ -409,7 +524,7 @@
     );
   }
 
-  function shellHTML(stats, workspaces, selectedId, maxCols) {
+  function shellHTML(stats, workspaces, selectedId, maxCols, options) {
     var canvas = (Array.isArray(workspaces) && workspaces.length > 0)
       ? canvasHTML(workspaces, selectedId, maxCols).html
       : emptyCanvasHTML();
@@ -442,7 +557,7 @@
       '<aside class="ws-map-overview" role="region" aria-label="Workspace overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
       '<div class="ws-map-overview-body">' +
-      overviewBodyHTML(findWs(workspaces, selectedId)) +
+      overviewBodyHTML(findWs(workspaces, selectedId), options) +
       '</div>' +
       '</aside>' +
       '</div>'
@@ -518,7 +633,7 @@
     }
   }
 
-  function bindOverviewActions(container) {
+  function bindOverviewActions(container, options) {
     var opens = container.querySelectorAll('[data-ws-open]');
     Array.prototype.forEach.call(opens, function (el) {
       el.addEventListener('click', function () {
@@ -531,10 +646,30 @@
         deleteWorkspace(el.getAttribute('data-ws-delete'));
       });
     });
+    var tagFilters = container.querySelectorAll('[data-ws-tag-filter]');
+    Array.prototype.forEach.call(tagFilters, function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        var callback = options && options.onTagFilter;
+        if (typeof callback === 'function') {
+          callback(el.getAttribute('data-ws-tag-filter'));
+        }
+      });
+    });
+    var tagRemoves = container.querySelectorAll('[data-ws-tag-remove]');
+    Array.prototype.forEach.call(tagRemoves, function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        var callback = options && options.onTagRemove;
+        if (typeof callback === 'function') {
+          callback(el.getAttribute('data-ws-tag-remove'), el.getAttribute('data-ws-tag'));
+        }
+      });
+    });
   }
 
   // Update selection in place (no full re-mount) to avoid flicker.
-  function applySelection(container, workspaces, id) {
+  function applySelection(container, workspaces, id, options) {
     selectedId = id;
     var tiles = container.querySelectorAll('.ws-map-tile');
     Array.prototype.forEach.call(tiles, function (el) {
@@ -544,8 +679,8 @@
     });
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
-      body.innerHTML = overviewBodyHTML(findWs(workspaces, id));
-      bindOverviewActions(container);
+      body.innerHTML = overviewBodyHTML(findWs(workspaces, id), options);
+      bindOverviewActions(container, options);
     }
   }
 
@@ -597,7 +732,7 @@
     if (clr) clr.addEventListener('click', function () { clearMulti(container); });
   }
 
-  function bindTiles(container, workspaces) {
+  function bindTiles(container, workspaces, options) {
     var selectables = container.querySelectorAll(
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
@@ -617,7 +752,7 @@
           return;
         }
         if (id && id === selectedId) { openWorkspace(id); return; }
-        applySelection(container, workspaces, id);
+        applySelection(container, workspaces, id, options);
       });
       el.addEventListener('dblclick', function () {
         openWorkspace(el.getAttribute('data-ws-id'));
@@ -649,10 +784,10 @@
     lastMount = { container: container, state: state };
     lastMaxCols = maxCols;
 
-    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId, maxCols);
+    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId, maxCols, state);
     bindCreate(container);
-    bindTiles(container, workspaces);
-    bindOverviewActions(container);
+    bindTiles(container, workspaces, state);
+    bindOverviewActions(container, state);
     bindSelBar(container);
 
     if (!resizeBound && typeof window.addEventListener === 'function') {
