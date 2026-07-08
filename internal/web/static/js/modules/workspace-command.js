@@ -404,6 +404,7 @@ export class WorkspaceCommandView {
     this.bindReadout();
     this.bindMissionPanel();
     this.bindGarrison();
+    this.hydrateGarrisonPrompts();
     this.bindRail();
     this.mountCommandTagInput();
     this.syncMissionPanel();
@@ -1368,13 +1369,25 @@ export class WorkspaceCommandView {
       escapeHtml(modelLabel || '—') + '</span></div>' +
       '<div class="ws-cmd-row"><span class="ws-cmd-rk">Skills</span><span class="ws-cmd-rv">' +
       skillCount + '</span></div>' +
-      '</div>';
+      '</div>' +
+      this.promptBlockHTML(group, name, encoded);
+
+    // Link the unit name to the agent's detail page when one is reachable.
+    let nameInner = escapeHtml(name);
+    if (!group.isUnassigned && page.getAgentDetailTarget) {
+      const target = page.getAgentDetailTarget(name);
+      if (target && target.interactive && target.href) {
+        nameInner = '<a class="ws-cmd-unit-name-link" href="' + escapeHtml(target.href) +
+          '" title="' + escapeHtml(target.title || ('Open ' + name + ' details')) + '">' +
+          escapeHtml(name) + '</a>';
+      }
+    }
 
     return (
       '<article class="ws-cmd-unit' + (keeper ? ' is-keeper' : '') + '">' +
       '<div class="ws-cmd-unit-top">' +
       '<span class="ws-cmd-av" style="' + escapeHtml(avatar.style || '') + '">' + escapeHtml(avatar.initials) + '</span>' +
-      '<div class="ws-cmd-unit-id"><div class="ws-cmd-unit-name">' + escapeHtml(name) + '</div>' +
+      '<div class="ws-cmd-unit-id"><div class="ws-cmd-unit-name">' + nameInner + '</div>' +
       '<div class="ws-cmd-unit-role">' + roleBadge +
       '<span class="ws-cmd-state"><span class="ws-cmd-led ' + tone + '"></span>' + escapeHtml(status.label || 'Idle') + '</span>' +
       '</div></div>' +
@@ -1415,6 +1428,50 @@ export class WorkspaceCommandView {
     return '<div class="ws-cmd-questlog">' + head + items + '</div>';
   }
 
+  // System-prompt block on a unit card: a lazily-hydrated preview that opens the
+  // full system-prompt modal (base + workspace refinement + effective) on click.
+  // The preview text is filled in by hydrateGarrisonPrompts() once the
+  // effective-prompt fetch resolves.
+  promptBlockHTML(group, name, encoded) {
+    if (group.isUnassigned) return '';
+    return (
+      '<button type="button" class="ws-cmd-prompt" data-cmd-view-prompt="' + escapeHtml(encoded) + '"' +
+      ' title="View ' + escapeHtml(name) + ' system prompt"' +
+      ' aria-label="View ' + escapeHtml(name) + ' system prompt">' +
+      '<span class="ws-cmd-prompt-head"><span class="ws-cmd-rk">System Prompt</span>' +
+      '<span class="ws-cmd-prompt-cta">View ▸</span></span>' +
+      '<span class="ws-cmd-prompt-preview" data-cmd-prompt-name="' + escapeHtml(encoded) + '">Loading…</span>' +
+      '</button>'
+    );
+  }
+
+  hydrateGarrisonPrompts() {
+    const page = this.page;
+    if (!page || typeof page.ensureAgentPromptData !== 'function') return;
+    const root = this.container && this.container.querySelector('.ws-cmd-garrison');
+    if (!root) return;
+    const previews = root.querySelectorAll('.ws-cmd-prompt-preview[data-cmd-prompt-name]');
+    previews.forEach((el) => {
+      let name = '';
+      try { name = decodeURIComponent(el.getAttribute('data-cmd-prompt-name') || ''); }
+      catch (_e) { name = el.getAttribute('data-cmd-prompt-name') || ''; }
+      if (!name) return;
+      Promise.resolve(page.ensureAgentPromptData(name)).then((data) => {
+        if (!el.isConnected) return;
+        if (!data || data.error) {
+          el.textContent = 'System prompt unavailable.';
+          el.classList.add('is-empty');
+          return;
+        }
+        const preview = typeof page.buildAgentPromptPreview === 'function'
+          ? page.buildAgentPromptPreview(data)
+          : String(data.effective_prompt || data.base_system_prompt || '');
+        el.textContent = preview || 'No system prompt set.';
+        el.classList.toggle('is-empty', !preview);
+      }).catch(() => {});
+    });
+  }
+
   renderGarrison() {
     const page = this.page;
     let groups = [];
@@ -1435,6 +1492,11 @@ export class WorkspaceCommandView {
       const settingsBtn = event.target.closest('[data-cmd-manager-settings]');
       if (settingsBtn) {
         this.openStatModal('settings', settingsBtn);
+        return;
+      }
+      const promptBtn = event.target.closest('[data-cmd-view-prompt]');
+      if (promptBtn && page && typeof page.openAgentPromptModal === 'function') {
+        page.openAgentPromptModal(promptBtn.getAttribute('data-cmd-view-prompt'));
         return;
       }
       const addBtn = event.target.closest('[data-cmd-add-task]');

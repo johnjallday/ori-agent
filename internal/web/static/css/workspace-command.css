@@ -402,6 +402,26 @@
 .ws-cmd-rk { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ws-ink-faint); }
 .ws-cmd-rv { font-family: var(--ws-font-mono); font-size: 12px; color: #eef0f3; }
 
+.ws-cmd-unit-name-link { color: inherit; text-decoration: none; border-bottom: 1px dashed transparent; transition: color 0.15s, border-color 0.15s; }
+.ws-cmd-unit-name-link:hover, .ws-cmd-unit-name-link:focus-visible { color: var(--ws-faction); border-bottom-color: var(--ws-faction-deep); outline: none; }
+
+/* System-prompt preview block on a unit card (opens the full prompt modal). */
+.ws-cmd-prompt {
+  display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left;
+  margin: 0 13px 11px; padding: 9px 11px; box-sizing: border-box; width: calc(100% - 26px);
+  border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.18); color: inherit; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ws-cmd-prompt:hover { border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.06); }
+.ws-cmd-prompt:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-prompt-head { display: flex; justify-content: space-between; align-items: center; }
+.ws-cmd-prompt-cta { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--ws-faction); }
+.ws-cmd-prompt-preview {
+  font-size: 11.5px; line-height: 1.45; color: var(--ws-ink-dim);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ws-cmd-prompt-preview.is-empty { font-style: italic; color: var(--ws-ink-faint); }
+
 .ws-cmd-questlog { margin: 2px 13px 13px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.22); }
 .ws-cmd-ql-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; border-bottom: 1px solid var(--ws-line); }
 .ws-cmd-ql-t { font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-dim); }

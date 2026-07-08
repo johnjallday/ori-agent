@@ -227,6 +227,12 @@ export class WorkspaceDetailPage {
     this.providerCatalogPromise = null;
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
+    // Cached effective-prompt payloads (base + refinement + effective) keyed by
+    // normalized agent name, plus in-flight fetch promises for de-duping. Feeds
+    // both the flip-card prompt preview and the "View system prompt" modal.
+    this.agentPromptCache = new Map();
+    this.agentPromptPromises = new Map();
+    this.activeAgentPromptView = null;
     this.mcpManager = new WorkspaceMCPManager(this);
     this.nativeMCPManager = new WorkspaceNativeMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
@@ -1233,6 +1239,14 @@ export class WorkspaceDetailPage {
       agentModelHelp: document.getElementById('workspace-detail-agent-model-help'),
       agentModelSubmitBtn: document.getElementById('workspace-detail-agent-model-submit'),
 
+      // Agent system prompt modal
+      agentPromptModal: document.getElementById('workspace-detail-agent-prompt-modal'),
+      agentPromptTitle: document.getElementById('workspace-detail-agent-prompt-title'),
+      agentPromptAgentName: document.getElementById('workspace-detail-agent-prompt-agent-name'),
+      agentPromptBody: document.getElementById('workspace-detail-agent-prompt-body'),
+      agentPromptDetailLink: document.getElementById('workspace-detail-agent-prompt-detail-link'),
+      agentPromptCopyBtn: document.getElementById('workspace-detail-agent-prompt-copy'),
+
       // Workspace MCP modal
       mcpModal: document.getElementById('workspace-detail-mcp-modal'),
       mcpForm: document.getElementById('workspace-detail-mcp-form'),
@@ -1674,6 +1688,9 @@ export class WorkspaceDetailPage {
     );
     this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () =>
       this.resetAgentModelModal()
+    );
+    this.elements.agentPromptCopyBtn?.addEventListener('click', () =>
+      this.copyAgentPromptToClipboard()
     );
 
     // Make workspace name and description editable
@@ -3146,11 +3163,14 @@ export class WorkspaceDetailPage {
     }
 
     if (this.hasWorkspaceAgentSnapshot(normalizedName)) {
-      const title = `${normalizedName} is a workspace-local agent. Global agent details are not available.`;
+      // Workspace-local agents (entry/manager agents) are hydrated into the
+      // agent store on startup, so /agents/<name> renders their detail page.
+      // The page degrades gracefully to a repair view if a snapshot is missing.
+      const title = `Open ${normalizedName} details (workspace-local agent)`;
       return {
         kind: 'workspace-local',
-        href: '',
-        interactive: false,
+        href: `/agents/${encodedAgentName}`,
+        interactive: true,
         title,
         ariaLabel: title
       };
@@ -3914,8 +3934,52 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-chip-list">${mcpMarkup}</div>
           </div>
         </div>
+        ${this.renderAgentPromptSection(group, encodedAgentName)}
       </div>
     `;
+  }
+
+  // Renders the "System Prompt" section on the agent info back face: a short,
+  // lazily-loaded preview plus a button that opens the full prompt modal. The
+  // preview span carries a data-agent-prompt-key so refreshAgentCardPrompt() can
+  // fill it in once the effective-prompt fetch resolves (see toggleAgentCardFlip).
+  renderAgentPromptSection(group, encodedAgentName) {
+    const key = String(group?.key || '');
+    const cached = this.agentPromptCache.get(this.normalizeAgentName(group?.name));
+    const hasPrompt = cached && !cached.error;
+    const previewText = hasPrompt
+      ? this.buildAgentPromptPreview(cached)
+      : cached && cached.error
+        ? 'System prompt unavailable.'
+        : 'Flip to load the system prompt this agent uses in this workspace.';
+    const previewClass = hasPrompt ? '' : ' is-placeholder';
+    return `
+      <div class="workspace-detail-agent-prompt-section">
+        <div class="workspace-detail-agent-prompt-head">
+          <div class="workspace-detail-agent-info-label">System Prompt</div>
+          <button type="button"
+                  class="workspace-detail-agent-prompt-view-btn"
+                  title="View full system prompt"
+                  aria-label="View full system prompt for ${this.escapeAttribute(group?.name || 'agent')}"
+                  onclick="event.stopPropagation(); window.workspaceDetail?.openAgentPromptModal('${encodedAgentName}')">
+            View full
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+            </svg>
+          </button>
+        </div>
+        <p class="workspace-detail-agent-prompt-preview${previewClass}" data-agent-prompt-key="${this.escapeAttribute(key)}">${this.escapeHtml(previewText)}</p>
+      </div>
+    `;
+  }
+
+  // Collapses a multi-line prompt into a single-line preview snippet.
+  buildAgentPromptPreview(data) {
+    const source =
+      String(data?.effective_prompt || data?.base_system_prompt || '').replace(/\s+/g, ' ').trim();
+    if (!source) return 'No system prompt set for this agent.';
+    const limit = 160;
+    return source.length > limit ? `${source.slice(0, limit).trim()}…` : source;
   }
 
   // Renders the agent info card's SKILLS chips from the skills that are
@@ -4019,6 +4083,197 @@ export class WorkspaceDetailPage {
     // The agent info card's SKILLS now renders synchronously from
     // workspace-effective skill bindings (see renderAgentWorkspaceSkillChips),
     // so flipping no longer needs to fetch the agent's global skill catalog.
+    //
+    // The system prompt preview IS async: lazy-load it on first flip so we only
+    // hit the effective-prompt endpoint for cards the user actually inspects.
+    this.ensureAgentPromptData(agentName).then(() => this.refreshAgentCardPrompt(agentName));
+  }
+
+  // Updates the flip-card's system prompt preview span in place once the
+  // effective-prompt payload is available, matching refreshAgentCardSkills().
+  refreshAgentCardPrompt(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return false;
+    const card = this.getAgentCardElementByKey(key);
+    if (!card) return false;
+
+    const data = this.agentPromptCache.get(key);
+    const previews = card.querySelectorAll(
+      '.workspace-detail-agent-prompt-preview[data-agent-prompt-key]'
+    );
+    let updated = false;
+    previews.forEach(preview => {
+      if (preview.getAttribute('data-agent-prompt-key') !== key) return;
+      if (!data) return;
+      if (data.error) {
+        preview.textContent = 'System prompt unavailable.';
+        preview.classList.add('is-placeholder');
+      } else {
+        preview.textContent = this.buildAgentPromptPreview(data);
+        preview.classList.remove('is-placeholder');
+      }
+      updated = true;
+    });
+    return updated;
+  }
+
+  // Fetches (and caches) the workspace-effective prompt for an agent from
+  // GET /api/workspaces/{id}/agents/{name}/effective-prompt. De-dupes in-flight
+  // requests and returns the cached payload on repeat calls.
+  async ensureAgentPromptData(agentName, options = {}) {
+    const normalizedName = String(agentName || '').trim();
+    const key = this.normalizeAgentName(normalizedName);
+    if (!normalizedName || !key) return null;
+
+    if (!options.force && this.agentPromptCache.has(key)) {
+      return this.agentPromptCache.get(key);
+    }
+    if (this.agentPromptPromises.has(key)) {
+      return this.agentPromptPromises.get(key);
+    }
+
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return null;
+
+    const loadPromise = (async () => {
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+            normalizedName
+          )}/effective-prompt`
+        );
+        if (!response.ok) {
+          const failure = { error: true, status: response.status };
+          this.agentPromptCache.set(key, failure);
+          return failure;
+        }
+        const data = await response.json();
+        this.agentPromptCache.set(key, data);
+        return data;
+      } catch (_error) {
+        const failure = { error: true };
+        this.agentPromptCache.set(key, failure);
+        return failure;
+      } finally {
+        this.agentPromptPromises.delete(key);
+      }
+    })();
+
+    this.agentPromptPromises.set(key, loadPromise);
+    return loadPromise;
+  }
+
+  // Opens the "System Prompt" modal for an agent, showing the base prompt, the
+  // workspace's per-instance refinement, and the composed effective prompt.
+  async openAgentPromptModal(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+    agentName = String(agentName || '').trim();
+    if (!agentName) return;
+
+    this.activeAgentPromptView = { agentName, data: null };
+
+    if (this.elements.agentPromptAgentName) {
+      this.elements.agentPromptAgentName.textContent = agentName;
+    }
+    if (this.elements.agentPromptTitle) {
+      this.elements.agentPromptTitle.textContent = `System Prompt · ${agentName}`;
+    }
+    if (this.elements.agentPromptDetailLink) {
+      const target = this.getAgentDetailTarget(agentName);
+      if (target.interactive && target.href) {
+        this.elements.agentPromptDetailLink.href = target.href;
+        this.elements.agentPromptDetailLink.classList.remove('d-none');
+      } else {
+        this.elements.agentPromptDetailLink.classList.add('d-none');
+      }
+    }
+    if (this.elements.agentPromptBody) {
+      this.elements.agentPromptBody.innerHTML =
+        '<div class="workspace-detail-loading">Loading system prompt…</div>';
+    }
+
+    if (this.elements.agentPromptModal && window.bootstrap) {
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.agentPromptModal)
+          : bootstrap.Modal.getInstance(this.elements.agentPromptModal) ||
+            new bootstrap.Modal(this.elements.agentPromptModal);
+      modal.show();
+    }
+
+    const data = await this.ensureAgentPromptData(agentName);
+    // Ignore a resolved fetch if the user has since opened a different agent.
+    if (!this.activeAgentPromptView || this.activeAgentPromptView.agentName !== agentName) {
+      return;
+    }
+    this.activeAgentPromptView.data = data;
+    this.renderAgentPromptModalBody(agentName, data);
+    // Keep the flip-card preview consistent with what the modal just loaded.
+    this.refreshAgentCardPrompt(agentName);
+  }
+
+  renderAgentPromptModalBody(agentName, data) {
+    const body = this.elements.agentPromptBody;
+    if (!body) return;
+
+    if (!data || data.error) {
+      body.innerHTML = `<div class="workspace-detail-empty">Could not load the system prompt for ${this.escapeHtml(
+        agentName
+      )}.</div>`;
+      return;
+    }
+
+    const base = String(data.base_system_prompt || '').trim();
+    const refinement = String(data.refinement || '').trim();
+    const effective = String(data.effective_prompt || '').trim();
+    const note = String(data.note || '').trim();
+
+    const section = (label, value, emptyLabel) => `
+      <div class="workspace-detail-agent-prompt-block">
+        <div class="workspace-detail-agent-prompt-block-label">${this.escapeHtml(label)}</div>
+        ${
+          value
+            ? `<pre class="workspace-detail-agent-prompt-pre">${this.escapeHtml(value)}</pre>`
+            : `<div class="workspace-detail-agent-prompt-empty">${this.escapeHtml(emptyLabel)}</div>`
+        }
+      </div>
+    `;
+
+    body.innerHTML = `
+      ${section('Base system prompt', base, 'No base system prompt set for this agent.')}
+      ${section(
+        'Workspace refinement',
+        refinement,
+        'No workspace-specific refinement (role, description, or custom instructions).'
+      )}
+      ${section('Effective prompt (composed)', effective, 'Nothing to compose.')}
+      ${
+        note
+          ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>`
+          : ''
+      }
+    `;
+  }
+
+  async copyAgentPromptToClipboard() {
+    const view = this.activeAgentPromptView;
+    const data = view?.data;
+    const text = String(data?.effective_prompt || data?.base_system_prompt || '').trim();
+    if (!text) {
+      if (window.Toast) window.Toast.warning('No system prompt to copy.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (window.Toast) window.Toast.success('System prompt copied.');
+    } catch (_error) {
+      if (window.Toast) window.Toast.error('Failed to copy system prompt.');
+    }
   }
 
   async loadAgentSkills(agentName, options = {}) {
