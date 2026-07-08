@@ -1,0 +1,183 @@
+{{define "workspace-agent-detail"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div id="workspace-agent-detail-view" class="workspace-agent-detail">
+          <!-- Header / breadcrumb -->
+          <div class="modern-card p-3 mb-3">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+                </svg>
+                Back to Workspace
+              </a>
+              <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
+                  <li class="breadcrumb-item"><a href="/workspaces" style="color: var(--text-secondary); text-decoration: none;">Workspaces</a></li>
+                  <li class="breadcrumb-item"><a href="/workspaces/{{.Extra.WorkspaceID}}" style="color: var(--text-secondary); text-decoration: none;" id="wad-breadcrumb-workspace">Workspace</a></li>
+                  <li class="breadcrumb-item active" aria-current="page" id="wad-breadcrumb-agent">Agent</li>
+                </ol>
+              </nav>
+            </div>
+          </div>
+
+          <!-- Loading / error states -->
+          <div id="wad-loading" class="modern-card p-4 text-center">
+            <div class="wad-muted">Loading agent details…</div>
+          </div>
+          <div id="wad-error" class="modern-card p-4 d-none">
+            <h2 class="wad-error-title">Agent not found in this workspace</h2>
+            <p class="wad-muted" id="wad-error-detail">
+              This agent is not attached to this workspace. Open the workspace to review its roster.
+            </p>
+            <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-primary">Open Workspace</a>
+          </div>
+
+          <!-- Content -->
+          <div id="wad-content" class="d-none">
+            <!-- Identity -->
+            <div class="modern-card p-4 mb-3">
+              <div class="wad-identity">
+                <span class="wad-avatar" id="wad-avatar" aria-hidden="true"></span>
+                <div class="wad-identity-copy">
+                  <h1 class="wad-name" id="wad-name">Agent</h1>
+                  <div class="wad-subtitle" id="wad-subtitle">Workspace agent</div>
+                  <div class="wad-badges" id="wad-badges"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Model -->
+            <div class="modern-card p-4 mb-3">
+              <div class="wad-section-head">
+                <h2 class="wad-section-title">Model</h2>
+                <a class="wad-section-action" href="/workspaces/{{.Extra.WorkspaceID}}" title="Edit this agent's model on the workspace page">Edit in workspace</a>
+              </div>
+              <div class="wad-kv">
+                <div class="wad-kv-row"><span class="wad-kv-key">Model</span><span class="wad-kv-val" id="wad-model">—</span></div>
+                <div class="wad-kv-row"><span class="wad-kv-key">Provider</span><span class="wad-kv-val" id="wad-provider">—</span></div>
+              </div>
+            </div>
+
+            <!-- System prompt -->
+            <div class="modern-card p-4 mb-3">
+              <div class="wad-section-head">
+                <h2 class="wad-section-title">System prompt</h2>
+              </div>
+              <div id="wad-prompt-blocks"></div>
+              <p class="wad-note" id="wad-prompt-note"></p>
+            </div>
+
+            <!-- Skills -->
+            <div class="modern-card p-4 mb-3">
+              <div class="wad-section-head">
+                <h2 class="wad-section-title">Workspace skills <span class="wad-count" id="wad-skills-count"></span></h2>
+              </div>
+              <p class="wad-muted wad-scope-hint">Skills available to agents in this workspace.</p>
+              <div class="wad-chips" id="wad-skills"></div>
+            </div>
+
+            <!-- MCP -->
+            <div class="modern-card p-4 mb-3">
+              <div class="wad-section-head">
+                <h2 class="wad-section-title">MCP servers <span class="wad-count" id="wad-mcp-count"></span></h2>
+              </div>
+              <p class="wad-muted wad-scope-hint">MCP tool servers available to agents in this workspace.</p>
+              <div class="wad-chips" id="wad-mcp"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .workspace-agent-detail { max-width: 960px; }
+    .workspace-agent-detail .wad-muted { color: var(--text-secondary); }
+    .wad-error-title { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.4rem; }
+
+    .wad-identity { display: flex; align-items: center; gap: 1rem; }
+    .wad-avatar {
+      width: 64px; height: 64px; border-radius: 12px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 1.2rem; font-weight: 800; letter-spacing: 0.04em;
+      border: 1px solid hsla(var(--wad-hue, 205), 70%, 34%, 0.35);
+      background: linear-gradient(135deg, hsla(var(--wad-hue, 205), 72%, 42%, 0.9), hsla(var(--wad-hue, 205), 74%, 28%, 0.95));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+    }
+    .wad-identity-copy { min-width: 0; }
+    .wad-name { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin: 0 0 0.15rem; }
+    .wad-subtitle { color: var(--text-secondary); font-size: 0.85rem; font-weight: 600; }
+    .wad-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
+    .wad-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.16rem 0.55rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700;
+      background: rgba(14,165,233,0.12); color: #0369a1; border: 1px solid rgba(14,165,233,0.25);
+    }
+    .wad-badge.is-leader { background: rgba(245,158,11,0.14); color: #92400e; border-color: rgba(245,158,11,0.35); }
+    .wad-badge.is-muted { background: var(--surface-2, rgba(148,163,184,0.14)); color: var(--text-secondary); border-color: rgba(148,163,184,0.3); }
+
+    .wad-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.8rem; }
+    .wad-section-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .wad-count { color: var(--text-secondary); font-weight: 600; font-size: 0.82rem; }
+    .wad-section-action { font-size: 0.78rem; font-weight: 600; color: #0369a1; text-decoration: none; white-space: nowrap; }
+    .wad-section-action:hover { text-decoration: underline; }
+    .wad-scope-hint { font-size: 0.78rem; margin: -0.35rem 0 0.7rem; }
+
+    .wad-kv { display: flex; flex-direction: column; gap: 0.4rem; }
+    .wad-kv-row { display: flex; gap: 0.75rem; align-items: baseline; }
+    .wad-kv-key { width: 84px; flex-shrink: 0; color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; }
+    .wad-kv-val { color: var(--text-primary); font-size: 0.86rem; font-weight: 600; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+
+    .wad-prompt-block { margin-bottom: 1rem; }
+    .wad-prompt-block:last-child { margin-bottom: 0; }
+    .wad-prompt-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 0.35rem; }
+    .wad-prompt-body {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.8rem; line-height: 1.5; color: var(--text-primary);
+      background: var(--surface-2, rgba(148,163,184,0.08)); border: 1px solid rgba(148,163,184,0.2);
+      border-radius: 8px; padding: 0.7rem 0.85rem; max-height: 340px; overflow: auto;
+    }
+    .wad-prompt-body.is-empty { color: var(--text-secondary); font-style: italic; font-family: inherit; }
+    .wad-note { color: var(--text-secondary); font-size: 0.75rem; margin: 0.75rem 0 0; }
+
+    .wad-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .wad-chip {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.24rem 0.6rem; border-radius: 8px; font-size: 0.78rem; font-weight: 600;
+      background: var(--surface-2, rgba(148,163,184,0.1)); color: var(--text-primary);
+      border: 1px solid rgba(148,163,184,0.25);
+    }
+    .wad-chip.is-disabled { opacity: 0.55; }
+    .wad-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+    .wad-chip.is-disabled .wad-chip-dot { background: #94a3b8; }
+    .wad-empty { color: var(--text-secondary); font-size: 0.82rem; font-style: italic; }
+  </style>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script type="module">
+    import { WorkspaceAgentDetailPage } from '/js/modules/workspace-agent-detail.js';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      const agentName = "{{.Extra.AgentName}}";
+      const page = new WorkspaceAgentDetailPage(workspaceId, agentName);
+      page.init().catch((error) => {
+        console.error('Failed to initialize workspace agent detail page:', error);
+      });
+    });
+  </script>
+</body>
+</html>
+{{end}}

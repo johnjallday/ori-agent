@@ -507,7 +507,7 @@ test('workspace detail links catalog-backed agents to the global detail page', (
   assert.match(markup, /data-agent-detail-kind="global"/);
 });
 
-test('workspace detail opens snapshot-backed local agents in-page (no global route)', () => {
+test('workspace detail links snapshot-backed local agents to their workspace-scoped page', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.workspace = {
     entry_agent_name: 'Local Manager',
@@ -525,14 +525,12 @@ test('workspace detail opens snapshot-backed local agents in-page (no global rou
   );
 
   // Workspace-local agents are NOT in the global agent store, so /agents/<name>
-  // would 404. They open their details in-page instead of navigating away.
+  // would 404. They get a workspace-scoped detail page instead.
   assert.equal(target.kind, 'workspace-local');
   assert.equal(target.interactive, true);
-  assert.equal(target.action, 'agent-details');
-  assert.equal(target.href, '');
+  assert.equal(target.href, '/workspaces/workspace-1/agents/Local%20Manager');
   assert.match(markup, /data-agent-detail-kind="workspace-local"/);
-  assert.match(markup, /<button[^>]*type="button"/);
-  assert.match(markup, /openAgentPromptModal\('Local%20Manager'\)/);
+  assert.match(markup, /href="\/workspaces\/workspace-1\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /href="\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /is-static/);
 });
