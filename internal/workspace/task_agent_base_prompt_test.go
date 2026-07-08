@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestResolveTaskAgentBasePrompt(t *testing.T) {
 	varsAgent := &resolvedTaskAgent{Agent: &agent.Agent{Settings: types.Settings{
 		SystemPrompt: "You are {{agent.role}} for {{workspace.name}}. Goal: {{task.goal}}",
 	}}}
-	resolved, hadVars := h.resolveTaskAgentBasePrompt(varsAgent, "Copywriter", task)
+	resolved, hadVars := h.resolveTaskAgentBasePrompt(context.Background(), varsAgent, "Copywriter", task)
 	if !hadVars {
 		t.Fatal("expected hadVars=true")
 	}
@@ -38,7 +39,7 @@ func TestResolveTaskAgentBasePrompt(t *testing.T) {
 
 	// Plain base prompt: hadVars=false, so task behavior is left unchanged.
 	plainAgent := &resolvedTaskAgent{Agent: &agent.Agent{Settings: types.Settings{SystemPrompt: "Plain persona."}}}
-	if _, hadVars := h.resolveTaskAgentBasePrompt(plainAgent, "Copywriter", task); hadVars {
+	if _, hadVars := h.resolveTaskAgentBasePrompt(context.Background(), plainAgent, "Copywriter", task); hadVars {
 		t.Error("expected hadVars=false for plain prompt (no task-behavior change)")
 	}
 }
