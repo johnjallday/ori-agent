@@ -130,6 +130,53 @@ func TestSeedTemplateAgents_ExplicitModelWinsOverSystemModel(t *testing.T) {
 	}
 }
 
+func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider:        "codex",
+		model:           "gpt-5.3-codex",
+		reasoningEffort: "high",
+	})
+	if err := handler.agentStore.CreateAgent("Shared", &agentstore.CreateAgentConfig{
+		Model:       "gpt-5-mini",
+		LLMProvider: "openai",
+	}); err != nil {
+		t.Fatalf("pre-create agent: %v", err)
+	}
+
+	tpl := rosterTemplate(
+		projecttemplates.AgentSpec{Name: "Shared", Model: "ignored-model"},
+		projecttemplates.AgentSpec{Name: "Fresh", Role: "orchestrator", Tools: projecttemplates.ToolDefaults{Skills: []string{"planning"}}},
+	)
+	tpl.ID = "launch"
+	tpl.Name = "Launch"
+
+	plan := handler.buildTemplateAgentPlan(tpl)
+
+	if !plan.HasAgents || plan.EntryAgentName != "Shared" {
+		t.Fatalf("unexpected plan header: %+v", plan)
+	}
+	if !plan.SystemModelConfigured || plan.SystemProvider != "codex" || plan.SystemModel != "gpt-5.3-codex" {
+		t.Fatalf("unexpected system model fields: %+v", plan)
+	}
+	if len(plan.Agents) != 2 {
+		t.Fatalf("expected 2 planned agents, got %d", len(plan.Agents))
+	}
+	if plan.Agents[0].Action != "reuse" || plan.Agents[0].Model != "gpt-5-mini" || plan.Agents[0].ModelSource != "existing" {
+		t.Fatalf("unexpected reused agent plan: %+v", plan.Agents[0])
+	}
+	if plan.Agents[1].Action != "create" || plan.Agents[1].Model != "gpt-5.3-codex" || plan.Agents[1].Provider != "codex" || plan.Agents[1].ModelSource != "system" {
+		t.Fatalf("unexpected created agent plan: %+v", plan.Agents[1])
+	}
+	if len(plan.Agents[1].Tools.Skills) != 1 || plan.Agents[1].Tools.Skills[0] != "planning" {
+		t.Fatalf("expected planned tools to be preserved, got %+v", plan.Agents[1].Tools)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "Shared") {
+		t.Fatalf("expected reuse warning for Shared, got %v", plan.Warnings)
+	}
+}
+
 func TestSeedTemplateAgents_ReuseOnNameMatchDoesNotMutate(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

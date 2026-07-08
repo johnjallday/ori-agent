@@ -123,6 +123,55 @@
 }
 .workspace-create-modal .workspace-template-card-desc { color: var(--wc-ink-faint); }
 
+.workspace-create-modal .workspace-template-agent-review {
+  background: rgba(70, 211, 154, 0.06);
+  border-color: var(--wc-faction-deep);
+}
+.workspace-create-modal .workspace-template-agent-review-title {
+  color: #f3f5f8;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-template-agent-review-summary,
+.workspace-create-modal .workspace-template-agent-review-status,
+.workspace-create-modal .workspace-template-agent-warnings {
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-agent-toggle,
+.workspace-create-modal .workspace-template-agent-row {
+  background: var(--wc-panel-2);
+  border-color: var(--wc-line);
+}
+.workspace-create-modal .workspace-template-agent-toggle {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-template-agent-name,
+.workspace-create-modal .workspace-template-agent-model strong {
+  color: #f3f5f8;
+}
+.workspace-create-modal .workspace-template-agent-model {
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-agent-chip {
+  border-color: var(--wc-line-bright);
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-agent-chip.create {
+  color: #9af2c5;
+  background: rgba(70, 211, 154, 0.1);
+  border-color: rgba(70, 211, 154, 0.26);
+}
+.workspace-create-modal .workspace-template-agent-chip.reuse {
+  color: #f7d27a;
+  background: rgba(232, 181, 75, 0.12);
+  border-color: rgba(232, 181, 75, 0.28);
+}
+.workspace-create-modal .workspace-template-agent-chip.entry {
+  color: #9be2f4;
+  background: rgba(78, 197, 230, 0.1);
+  border-color: rgba(78, 197, 230, 0.24);
+}
+
 /* color picker: keep the swatch colors, tactical active ring */
 .workspace-create-modal .folder-color-btn.active { box-shadow: 0 0 0 2px var(--wc-faction); }
 

@@ -310,6 +310,82 @@ func TestCreateWorkspaceSeedsTemplateAgentRoster(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceTemplateAgentPlanEndpoint(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{provider: "codex", model: "gpt-5.3-codex"})
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/template-agent-plan", bytes.NewBufferString(`{"template_id":"roster-template"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var plan templateAgentPlan
+	if err := json.Unmarshal(w.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("decode plan: %v", err)
+	}
+	if !plan.HasAgents || plan.EntryAgentName != "Campaign Lead" {
+		t.Fatalf("unexpected plan: %+v", plan)
+	}
+	if len(plan.Agents) != 2 || plan.Agents[0].Action != "create" || plan.Agents[0].Model != "gpt-5.3-codex" {
+		t.Fatalf("unexpected planned agents: %+v", plan.Agents)
+	}
+}
+
+func TestCreateWorkspaceCanSkipTemplateAgentRoster(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Launch","template_id":"roster-template","create_template_agents":false}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := handler.agentStore.GetAgent("Campaign Lead"); ok {
+		t.Fatal("entry agent should not be created when create_template_agents=false")
+	}
+	folder := resp["folder"].(map[string]any)
+	wsID := folder["id"].(string)
+	sessWS, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if len(sessWS.AgentInstances) != 0 || currentWorkspaceEntryAgentName(sessWS) != "" {
+		t.Fatalf("expected agentless workspace, got instances=%v entry=%q", sessWS.AgentInstances, currentWorkspaceEntryAgentName(sessWS))
+	}
+}
+
 func TestCreateWorkspaceWithOnboardingTemplateDefersProject(t *testing.T) {
 	handler, baseDir, events, cleanup := templateTestEnv(t)
 	defer cleanup()

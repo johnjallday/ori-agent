@@ -526,6 +526,7 @@ async function ptcBrowse() {
       ptcSelect(PTC_BLANK, ptcBlankCard());
       els.pathInput.value = picked.path;
       ptcUpdateUI();
+      els.pathInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
   } catch (error) {
     ptmToast(error.message || 'Failed to open folder picker', 'error');
@@ -544,6 +545,7 @@ function ptcInit() {
       if (els.pathInput.value.trim()) {
         ptcSelected = PTC_BLANK;
         ptcMarkSelectedAcross(ptcBlankCard());
+        ptcEmitSelection();
       }
       ptcUpdateUI();
     });

@@ -61,6 +61,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "rescan":
 		h.handleWorkspaceRescan(w, r)
 		return
+	case "template-agent-plan":
+		h.handleTemplateAgentPlan(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
@@ -191,22 +194,23 @@ func splitWorkspaceBootstrapValues(raw string) []string {
 
 // createWorkspaceRequest is the JSON body of POST /api/workspaces.
 type createWorkspaceRequest struct {
-	Name               string                     `json:"name"`
-	Kind               string                     `json:"kind,omitempty"`
-	WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
-	Description        string                     `json:"description,omitempty"`
-	ParentID           string                     `json:"parent_id,omitempty"`
-	OrderIndex         *int                       `json:"order_index,omitempty"`
-	Color              string                     `json:"color,omitempty"`
-	ProjectPath        string                     `json:"project_path,omitempty"`
-	FolderSlug         string                     `json:"folder_slug,omitempty"`
-	Location           string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
-	EntryAgentName     string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
-	WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
-	TemplateID         string                     `json:"template_id,omitempty"`   // Optional project template from the library
-	TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
-	ProjectName        string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
-	Tags               []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
+	Name                 string                     `json:"name"`
+	Kind                 string                     `json:"kind,omitempty"`
+	WorkspacePreset      string                     `json:"workspace_preset,omitempty"`
+	Description          string                     `json:"description,omitempty"`
+	ParentID             string                     `json:"parent_id,omitempty"`
+	OrderIndex           *int                       `json:"order_index,omitempty"`
+	Color                string                     `json:"color,omitempty"`
+	ProjectPath          string                     `json:"project_path,omitempty"`
+	FolderSlug           string                     `json:"folder_slug,omitempty"`
+	Location             string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
+	EntryAgentName       string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+	WorkspaceBootstrap   *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
+	TemplateID           string                     `json:"template_id,omitempty"`   // Optional project template from the library
+	TemplatePath         string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
+	ProjectName          string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
+	Tags                 []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
+	CreateTemplateAgents *bool                      `json:"create_template_agents,omitempty"`
 }
 
 // createWorkspace handles POST /api/workspaces. The flow is staged:
@@ -373,7 +377,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			seed.EntrySet = true
 		}
-	case templateResolved && tmpl.HasAgents():
+	case templateResolved && tmpl.HasAgents() && createTemplateAgentsEnabled(req):
 		// The template declares an agent roster: seed it (first = entry agent,
 		// rest = specialists). A seeded entry agent suppresses the mandatory
 		// "create an entry agent" prompt; if it fails, the workspace is left
@@ -386,6 +390,10 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 		}
 	}
 	return seed, true
+}
+
+func createTemplateAgentsEnabled(req createWorkspaceRequest) bool {
+	return req.CreateTemplateAgents == nil || *req.CreateTemplateAgents
 }
 
 // createTemplateContext bundles the template-resolution results that folder

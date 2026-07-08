@@ -37,6 +37,9 @@ const sessionManager = {
   // Create-workspace "Starting point" template currently picked in the modal.
   // Populated when the modal opens (defaults to the first/Blank template).
   workspaceTemplate: null,
+  templateAgentPlan: null,
+  templateAgentPlanRequestId: 0,
+  templateAgentPlanTimer: null,
   // True once the user manually changes "Agent behavior", so selecting a
   // Starting point no longer overwrites their choice. Reset on modal open.
   behaviorOverridden: false,
@@ -233,6 +236,15 @@ const sessionManager = {
       this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
       this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
       this.applyTemplateBehavior(template);
+      void this.refreshTemplateAgentPlan();
+    });
+
+    document.getElementById('templateAgentReviewToggle')?.addEventListener('change', () => {
+      this.updateTemplateAgentReviewDisabledState();
+    });
+
+    document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
+      this.scheduleTemplateAgentPlanRefresh();
     });
 
     const importToggle = document.getElementById('folderImportToggle');
@@ -3027,6 +3039,9 @@ const sessionManager = {
     if (!this.importModeEnabled) {
       this.importAllowDuplicate = false;
       this.clearImportDuplicateWarning();
+      this.scheduleTemplateAgentPlanRefresh();
+    } else {
+      this.resetTemplateAgentReview();
     }
   },
 
@@ -3223,7 +3238,229 @@ const sessionManager = {
     // where the picker module has not loaded yet.
     this.workspaceTemplate = null;
     window.ProjectTemplateCard?.reset?.();
+    this.resetTemplateAgentReview();
     this.updateBehaviorHint();
+  },
+
+  resetTemplateAgentReview() {
+    this.templateAgentPlan = null;
+    this.templateAgentPlanRequestId += 1;
+    if (this.templateAgentPlanTimer) {
+      clearTimeout(this.templateAgentPlanTimer);
+      this.templateAgentPlanTimer = null;
+    }
+    const review = document.getElementById('templateAgentReview');
+    const summary = document.getElementById('templateAgentReviewSummary');
+    const status = document.getElementById('templateAgentReviewStatus');
+    const list = document.getElementById('templateAgentReviewList');
+    const warnings = document.getElementById('templateAgentReviewWarnings');
+    const toggle = document.getElementById('templateAgentReviewToggle');
+    if (review) {
+      review.hidden = true;
+      review.classList.remove('is-disabled');
+    }
+    if (summary) summary.textContent = '';
+    if (status) status.textContent = '';
+    if (list) list.innerHTML = '';
+    if (warnings) {
+      warnings.hidden = true;
+      warnings.innerHTML = '';
+    }
+    if (toggle) toggle.checked = true;
+  },
+
+  scheduleTemplateAgentPlanRefresh() {
+    if (this.templateAgentPlanTimer) {
+      clearTimeout(this.templateAgentPlanTimer);
+    }
+    this.templateAgentPlanTimer = setTimeout(() => {
+      this.templateAgentPlanTimer = null;
+      void this.refreshTemplateAgentPlan();
+    }, 180);
+  },
+
+  async refreshTemplateAgentPlan() {
+    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const templateId = String(fields.template_id || '').trim();
+    const templatePath = String(fields.template_path || '').trim();
+    const requestId = ++this.templateAgentPlanRequestId;
+
+    if (this.importModeEnabled || (!templateId && !templatePath)) {
+      this.resetTemplateAgentReview();
+      return;
+    }
+
+    this.setTemplateAgentReviewLoading();
+    try {
+      const response = await fetch('/api/workspaces/template-agent-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: templateId || undefined,
+          template_path: templatePath || undefined
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (requestId !== this.templateAgentPlanRequestId) return;
+      if (!response.ok || data.error) {
+        this.renderTemplateAgentPlanError(data.error || 'Could not load template agents.');
+        return;
+      }
+      this.templateAgentPlan = data;
+      this.renderTemplateAgentPlan(data);
+    } catch (error) {
+      if (requestId !== this.templateAgentPlanRequestId) return;
+      console.error('Failed to load template agent plan:', error);
+      this.renderTemplateAgentPlanError('Could not load template agents.');
+    }
+  },
+
+  setTemplateAgentReviewLoading() {
+    const review = document.getElementById('templateAgentReview');
+    const summary = document.getElementById('templateAgentReviewSummary');
+    const status = document.getElementById('templateAgentReviewStatus');
+    const list = document.getElementById('templateAgentReviewList');
+    const warnings = document.getElementById('templateAgentReviewWarnings');
+    if (review) {
+      review.hidden = false;
+      review.classList.remove('is-disabled');
+    }
+    if (summary) summary.textContent = 'Checking template roster...';
+    if (status) status.textContent = '';
+    if (list) list.innerHTML = '';
+    if (warnings) {
+      warnings.hidden = true;
+      warnings.innerHTML = '';
+    }
+  },
+
+  renderTemplateAgentPlanError(message) {
+    this.templateAgentPlan = null;
+    const review = document.getElementById('templateAgentReview');
+    const summary = document.getElementById('templateAgentReviewSummary');
+    const status = document.getElementById('templateAgentReviewStatus');
+    const list = document.getElementById('templateAgentReviewList');
+    const toggle = document.getElementById('templateAgentReviewToggle');
+    if (review) {
+      review.hidden = false;
+      review.classList.remove('is-disabled');
+    }
+    if (summary) summary.textContent = 'Template agents could not be checked.';
+    if (status) status.textContent = message || 'Could not load template agents.';
+    if (list) list.innerHTML = '';
+    if (toggle) toggle.checked = true;
+  },
+
+  renderTemplateAgentPlan(plan) {
+    const agents = Array.isArray(plan?.agents) ? plan.agents : [];
+    if (!plan?.has_agents || agents.length === 0) {
+      this.resetTemplateAgentReview();
+      return;
+    }
+
+    const review = document.getElementById('templateAgentReview');
+    const summary = document.getElementById('templateAgentReviewSummary');
+    const status = document.getElementById('templateAgentReviewStatus');
+    const list = document.getElementById('templateAgentReviewList');
+    const warnings = document.getElementById('templateAgentReviewWarnings');
+    const toggle = document.getElementById('templateAgentReviewToggle');
+    if (review) review.hidden = false;
+    if (toggle) toggle.checked = true;
+
+    const createCount = agents.filter((agent) => agent.action === 'create').length;
+    const reuseCount = agents.filter((agent) => agent.action === 'reuse').length;
+    const parts = [];
+    if (createCount) parts.push(`${createCount} new`);
+    if (reuseCount) parts.push(`${reuseCount} reused`);
+    if (summary) {
+      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} will be attached to this workspace.`;
+    }
+    if (status) {
+      const provider = String(plan.system_provider || '').trim();
+      const model = String(plan.system_model || '').trim();
+      status.textContent = provider && model
+        ? `Blank template models resolve to ${provider} / ${model}.`
+        : 'Blank template models use the app default because no system model is configured.';
+    }
+    if (list) {
+      list.innerHTML = agents.map((agent) => this.renderTemplateAgentPlanRow(agent)).join('');
+    }
+    const warningMessages = [
+      ...(Array.isArray(plan.warnings) ? plan.warnings : [])
+    ].filter((msg) => typeof msg === 'string' && msg.trim());
+    if (warnings) {
+      warnings.hidden = warningMessages.length === 0;
+      warnings.innerHTML = warningMessages
+        .map((msg) => `<div>${this.escapeHtml(msg)}</div>`)
+        .join('');
+    }
+    this.updateTemplateAgentReviewDisabledState();
+  },
+
+  renderTemplateAgentPlanRow(agent) {
+    const action = String(agent?.action || 'create').trim() === 'reuse' ? 'reuse' : 'create';
+    const actionLabel = action === 'reuse' ? 'Reuse' : 'Create';
+    const role = String(agent?.role || '').trim();
+    const type = String(agent?.type || '').trim();
+    const model = String(agent?.model || '').trim();
+    const provider = String(agent?.provider || '').trim();
+    const source = this.templateAgentModelSourceLabel(agent?.model_source);
+    const tools = this.templateAgentToolsLabel(agent?.tools);
+    const modelText = model
+      ? `${provider ? `${provider} / ` : ''}${model}`
+      : 'App default';
+    const chips = [
+      `<span class="workspace-template-agent-chip ${action}">${actionLabel}</span>`,
+      agent?.entry_point ? '<span class="workspace-template-agent-chip entry">Entry</span>' : '<span class="workspace-template-agent-chip">Specialist</span>',
+      role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
+      type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
+      tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
+    ].filter(Boolean).join('');
+
+    return `
+      <div class="workspace-template-agent-row">
+        <div class="workspace-template-agent-main">
+          <div class="workspace-template-agent-name">${this.escapeHtml(agent?.name || 'Unnamed agent')}</div>
+          <div class="workspace-template-agent-meta">${chips}</div>
+        </div>
+        <div class="workspace-template-agent-model">
+          <strong>${this.escapeHtml(modelText)}</strong>
+          <span>${this.escapeHtml(source)}</span>
+        </div>
+      </div>
+    `;
+  },
+
+  templateAgentModelSourceLabel(source) {
+    switch (String(source || '').trim()) {
+      case 'system':
+        return 'System model';
+      case 'template':
+        return 'Template model';
+      case 'existing':
+        return 'Saved agent model';
+      case 'agent_default':
+      default:
+        return 'Default model';
+    }
+  },
+
+  templateAgentToolsLabel(tools) {
+    const parts = [];
+    const skills = Array.isArray(tools?.skills) ? tools.skills.length : 0;
+    const mcp = Array.isArray(tools?.mcp_servers) ? tools.mcp_servers.length : 0;
+    const plugins = Array.isArray(tools?.plugins) ? tools.plugins.length : 0;
+    if (skills) parts.push(`${skills} skill${skills === 1 ? '' : 's'}`);
+    if (mcp) parts.push(`${mcp} MCP`);
+    if (plugins) parts.push(`${plugins} plugin${plugins === 1 ? '' : 's'}`);
+    return parts.join(' / ');
+  },
+
+  updateTemplateAgentReviewDisabledState() {
+    const review = document.getElementById('templateAgentReview');
+    const toggle = document.getElementById('templateAgentReviewToggle');
+    if (!review || !toggle) return;
+    review.classList.toggle('is-disabled', !toggle.checked);
   },
 
   // Fills a create-modal input from a template default while tracking the
@@ -3414,6 +3651,10 @@ const sessionManager = {
           // (template_id/template_path). The scaffolded project folder name
           // defaults to the workspace name server-side.
           Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+        }
+        if (this.templateAgentPlan?.has_agents) {
+          const createTemplateAgents = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
+          payload.create_template_agents = createTemplateAgents;
         }
         if (window.WorkspaceTagsCard) {
           Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
