@@ -591,8 +591,26 @@ export class WorkspaceCommandView {
 
   syncMissionPanel() {
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
-    if (mission && typeof mission.renderCommandSurfaces === 'function') {
+    if (!mission) return;
+    if (typeof mission.renderCommandSurfaces === 'function') {
       mission.renderCommandSurfaces();
+    }
+    // The Command view is the primary mission surface, but the mission module's
+    // initial auto-load is gated on the legacy Detailed goal card
+    // (#workspace-detail-goal-card), which no longer exists — so without this the
+    // panel sits at "Loading" until the user opens the Goal Settings tab. Kick
+    // off the first load ourselves when no state has been fetched yet.
+    if (
+      !this._missionLoadKicked &&
+      typeof mission.getState === 'function' &&
+      !mission.getState() &&
+      typeof mission.reload === 'function'
+    ) {
+      this._missionLoadKicked = true;
+      Promise.resolve(mission.reload()).catch(() => {
+        // Let a later render retry if the first load failed.
+        this._missionLoadKicked = false;
+      });
     }
   }
 
