@@ -173,6 +173,35 @@ func TestFileStore_Load_NestedMinimalSettings_MigratesDefaults(t *testing.T) {
 	}
 }
 
+func TestFileStore_Load_NestedAgents_NoIndexFile(t *testing.T) {
+	// The agents/ directory is the source of truth. A missing index file
+	// (agents.json) must NOT prevent agents on disk from loading — this is the
+	// regression that made freshly-adopted legacy agents invisible on first start.
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents.json") // intentionally not created
+
+	agentDir := filepath.Join(tempDir, "agents", "orphan")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("failed creating agent directory: %v", err)
+	}
+	settings := `{"type":"general","Settings":{"model":"gpt-4o-mini","temperature":1}}`
+	if err := os.WriteFile(filepath.Join(agentDir, "agent_settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatalf("failed writing agent settings: %v", err)
+	}
+
+	if _, err := os.Stat(indexPath); !os.IsNotExist(err) {
+		t.Fatalf("precondition: index file should not exist (err=%v)", err)
+	}
+
+	fs := &fileStore{path: indexPath, agents: make(map[string]*agent.Agent)}
+	if err := fs.load(); err != nil {
+		t.Fatalf("load() failed: %v", err)
+	}
+	if got, ok := fs.agents["orphan"]; !ok || got == nil {
+		t.Fatalf("expected orphan agent to load without an index file; agents=%v", fs.ListAgents())
+	}
+}
+
 func TestFileStore_Load_OldTopLevelFormat_MigratesDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	indexPath := filepath.Join(tempDir, "agents_index.json")
