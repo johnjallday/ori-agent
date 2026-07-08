@@ -94,22 +94,49 @@ export class WorkspaceAgentDetailPage {
   }
 
   async loadPrompt() {
-    const container = this.el('wad-prompt-blocks');
+    const [base, effective] = await Promise.all([
+      this.fetchBasePrompt(),
+      this.fetchEffectivePrompt()
+    ]);
+
+    // base === null means the editable prompt could not be loaded (e.g. the
+    // agent has no workspace-local config); fall back to read-only display.
+    this.promptEditable = base !== null;
+    this.currentPrompt = base === null ? '' : base;
+    this.renderPromptView(this.currentPrompt, this.promptEditable);
+    this.renderRefinement(effective);
+    this.bindPromptEditor();
+  }
+
+  async fetchBasePrompt() {
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(
+          this.agentName
+        )}/system-prompt`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return String(data?.system_prompt || '');
+    } catch (error) {
+      console.error('Failed to load system prompt:', error);
+      return null;
+    }
+  }
+
+  async fetchEffectivePrompt() {
     try {
       const res = await fetch(
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(
           this.agentName
         )}/effective-prompt`
       );
-      if (!res.ok) throw new Error(`effective-prompt failed: ${res.status}`);
+      if (!res.ok) return null;
       const body = await res.json();
-      const data = body?.data || body;
-      this.renderPrompt(data);
+      return body?.data || body;
     } catch (error) {
       console.error('Failed to load effective prompt:', error);
-      if (container) {
-        container.innerHTML = `<div class="wad-prompt-body is-empty">Could not load the system prompt.</div>`;
-      }
+      return null;
     }
   }
 
@@ -187,37 +214,129 @@ export class WorkspaceAgentDetailPage {
     this.setText('wad-provider', String(profile?.provider || '').trim() || 'Not set');
   }
 
-  renderPrompt(data) {
-    const container = this.el('wad-prompt-blocks');
-    if (!container) return;
-
-    const base = String(data?.base_system_prompt || '').trim();
-    const refinement = String(data?.refinement || '').trim();
-    const effective = String(data?.effective_prompt || '').trim();
-    const note = String(data?.note || '').trim();
-
-    const block = (label, value) => {
-      const empty = value === '';
-      return `
-        <div class="wad-prompt-block">
-          <div class="wad-prompt-label">${this.escape(label)}</div>
-          <div class="wad-prompt-body${empty ? ' is-empty' : ''}">${
-            empty ? 'None set.' : this.escape(value)
-          }</div>
-        </div>`;
-    };
-
-    // Show the composed prompt prominently; keep base/refinement for provenance
-    // only when they add information beyond the effective prompt.
-    const blocks = [block('Effective prompt', effective)];
-    if (refinement && refinement !== effective) {
-      blocks.push(block('Workspace refinement', refinement));
+  renderPromptView(prompt, editable) {
+    const view = this.el('wad-prompt-view');
+    const value = String(prompt || '').trim();
+    if (view) {
+      if (value) {
+        view.textContent = value;
+        view.classList.remove('is-empty');
+      } else {
+        view.textContent = editable
+          ? 'No system prompt set. Click Edit to add one.'
+          : 'No system prompt set.';
+        view.classList.add('is-empty');
+      }
     }
-    if (base && base !== effective) {
-      blocks.push(block('Base prompt', base));
+    // Only expose the Edit affordance when the prompt is actually editable.
+    this.el('wad-prompt-edit')?.classList.toggle('d-none', !editable);
+  }
+
+  renderRefinement(effective) {
+    const wrap = this.el('wad-refinement-wrap');
+    const body = this.el('wad-refinement');
+    const refinement = String(effective?.refinement || '').trim();
+    const note = String(effective?.note || '').trim();
+
+    if (wrap && body && refinement) {
+      body.textContent = refinement;
+      wrap.classList.remove('d-none');
+    } else if (wrap) {
+      wrap.classList.add('d-none');
     }
-    container.innerHTML = blocks.join('');
     this.setText('wad-prompt-note', note);
+  }
+
+  bindPromptEditor() {
+    if (this._promptBound) return;
+    this._promptBound = true;
+    this.el('wad-prompt-edit')?.addEventListener('click', () => this.enterEditMode());
+    this.el('wad-prompt-cancel')?.addEventListener('click', () => this.exitEditMode());
+    this.el('wad-prompt-save')?.addEventListener('click', () => this.savePrompt());
+  }
+
+  enterEditMode() {
+    const editor = this.el('wad-prompt-editor');
+    if (editor) editor.value = this.currentPrompt || '';
+    this.togglePromptEditing(true);
+    this.setPromptStatus('');
+    editor?.focus();
+  }
+
+  exitEditMode() {
+    this.togglePromptEditing(false);
+    this.setPromptStatus('');
+  }
+
+  togglePromptEditing(editing) {
+    this.el('wad-prompt-view')?.classList.toggle('d-none', editing);
+    this.el('wad-prompt-editor')?.classList.toggle('d-none', !editing);
+    this.el('wad-prompt-edit')?.classList.toggle('d-none', editing);
+    this.el('wad-prompt-cancel')?.classList.toggle('d-none', !editing);
+    this.el('wad-prompt-save')?.classList.toggle('d-none', !editing);
+  }
+
+  async savePrompt() {
+    const editor = this.el('wad-prompt-editor');
+    if (!editor) return;
+    const value = editor.value;
+
+    this.setPromptSaving(true);
+    this.setPromptStatus('Saving…');
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(
+          this.agentName
+        )}/system-prompt`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ system_prompt: value })
+        }
+      );
+      if (!res.ok) {
+        const detail = await this.readError(res);
+        throw new Error(detail || `save failed: ${res.status}`);
+      }
+      const data = await res.json();
+      this.currentPrompt = String(data?.system_prompt ?? value.trim());
+      this.renderPromptView(this.currentPrompt, true);
+      this.togglePromptEditing(false);
+      this.setPromptStatus('Saved.', 'success');
+    } catch (error) {
+      console.error('Failed to save system prompt:', error);
+      this.setPromptStatus(error?.message || 'Could not save the system prompt.', 'error');
+    } finally {
+      this.setPromptSaving(false);
+    }
+  }
+
+  setPromptSaving(saving) {
+    const save = this.el('wad-prompt-save');
+    const cancel = this.el('wad-prompt-cancel');
+    if (save) {
+      save.disabled = saving;
+      save.textContent = saving ? 'Saving…' : 'Save';
+    }
+    if (cancel) cancel.disabled = saving;
+  }
+
+  setPromptStatus(message, kind) {
+    const status = this.el('wad-prompt-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.classList.remove('is-error', 'is-success');
+    if (kind === 'error') status.classList.add('is-error');
+    if (kind === 'success') status.classList.add('is-success');
+  }
+
+  async readError(res) {
+    try {
+      const data = await res.json();
+      return String(data?.error || data?.message || '').trim();
+    } catch (_error) {
+      return '';
+    }
   }
 
   renderChips(listId, countId, bindings, map, emptyLabel) {

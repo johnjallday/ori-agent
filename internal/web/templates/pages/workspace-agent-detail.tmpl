@@ -69,12 +69,25 @@
               </div>
             </div>
 
-            <!-- System prompt -->
+            <!-- System prompt (editable base prompt from config.json) -->
             <div class="modern-card p-4 mb-3">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">System prompt</h2>
+                <div class="wad-prompt-actions">
+                  <button id="wad-prompt-edit" class="wad-section-action" type="button">Edit</button>
+                  <button id="wad-prompt-cancel" class="wad-section-action d-none" type="button">Cancel</button>
+                  <button id="wad-prompt-save" class="wad-section-action is-primary d-none" type="button">Save</button>
+                </div>
               </div>
-              <div id="wad-prompt-blocks"></div>
+              <div id="wad-prompt-view" class="wad-prompt-body is-empty">Loading…</div>
+              <textarea id="wad-prompt-editor" class="wad-prompt-editor d-none" rows="14"
+                        placeholder="Describe how this agent should behave…"></textarea>
+              <div id="wad-prompt-status" class="wad-note" role="status" aria-live="polite"></div>
+
+              <div id="wad-refinement-wrap" class="wad-refinement d-none">
+                <div class="wad-prompt-label">Workspace refinement</div>
+                <div id="wad-refinement" class="wad-prompt-body"></div>
+              </div>
               <p class="wad-note" id="wad-prompt-note"></p>
             </div>
 
@@ -151,6 +164,25 @@
     }
     .wad-prompt-body.is-empty { color: var(--text-secondary); font-style: italic; font-family: inherit; }
     .wad-note { color: var(--text-secondary); font-size: 0.75rem; margin: 0.75rem 0 0; }
+    .wad-note.is-error { color: #dc2626; }
+    .wad-note.is-success { color: #16a34a; }
+
+    .wad-prompt-actions { display: flex; align-items: center; gap: 0.75rem; }
+    .wad-section-action { background: none; border: none; padding: 0; cursor: pointer; }
+    .wad-section-action.is-primary { color: #16a34a; font-weight: 700; }
+    .wad-section-action:disabled { opacity: 0.5; cursor: default; }
+
+    .wad-prompt-editor {
+      width: 100%; resize: vertical; min-height: 220px;
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 0.8rem; line-height: 1.5; color: var(--text-primary);
+      background: var(--surface-2, rgba(148,163,184,0.08)); border: 1px solid rgba(56,189,248,0.5);
+      border-radius: 8px; padding: 0.7rem 0.85rem;
+    }
+    .wad-prompt-editor:focus { outline: 2px solid rgba(56,189,248,0.85); outline-offset: 1px; }
+
+    .wad-refinement { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(148,163,184,0.2); }
+    .wad-refinement .wad-prompt-label { margin-bottom: 0.35rem; }
 
     .wad-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
     .wad-chip {

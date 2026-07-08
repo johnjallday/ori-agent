@@ -905,6 +905,12 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 		// Resolved effective prompt inspector (base + per-workspace refinement).
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents/{name}/effective-prompt", s.Handlers.Session.GetWorkspaceAgentEffectivePrompt)
 	}
+
+	// Editable base system prompt for a workspace-local agent, stored in the
+	// workspace config.json (the source of truth for these agents). Handled by
+	// the workspace handler which owns config.json access.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents/{name}/system-prompt", s.Handlers.Workspace.GetWorkspaceAgentSystemPrompt)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/system-prompt", s.Handlers.Workspace.UpdateWorkspaceAgentSystemPrompt)
 }
 
 // registerActionCenterRoutes registers cross-workspace Action Center triage endpoints.
