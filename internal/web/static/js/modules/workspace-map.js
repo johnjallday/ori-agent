@@ -20,6 +20,19 @@
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
 
+  // Ids checked for a bulk operation (multi-select), remembered across re-mounts.
+  // Distinct from selectedId: selectedId drives the Overview preview, while this
+  // set drives the multi-select action bar. Only plain workspace tiles (not
+  // group districts) can be multi-selected.
+  var multiSelected = Object.create(null);
+
+  function multiIds() {
+    return Object.keys(multiSelected);
+  }
+  function multiCount() {
+    return multiIds().length;
+  }
+
   // curated, distinct building palettes (picked by stable id hash)
   var PALETTE = [
     { key: '#4f9bf0', floor: '#0c2238', top: '#2a5da0', l: '#16365e', r: '#0e2748' }, // blue
@@ -224,6 +237,8 @@
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isSel = selectedId && ws.id === selectedId;
     var selected = isSel ? ' is-selected' : '';
+    var isMulti = !!multiSelected[ws.id];
+    var multiCls = isMulti ? ' is-multi' : '';
     var left = PAD + tile.col * CELL_W;
     var top = PAD + tile.row * CELL_H;
     var meta = agents + (agents === 1 ? ' agent' : ' agents') + ' · ' +
@@ -234,12 +249,15 @@
     var actionHint = isSel ? '. Selected — activate to open' : '. Activate to select, double-click to open';
 
     return (
-      '<button type="button" class="ws-map-tile' + selected + '" ' +
+      '<button type="button" class="ws-map-tile' + selected + multiCls + '" ' +
       'data-ws-id="' + escapeHtml(ws.id) + '" ' +
       'aria-pressed="' + (isSel ? 'true' : 'false') + '" ' +
       'style="left:' + left + 'px;top:' + top + 'px;--i:' + (index || 0) + '" ' +
       'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
       (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + actionHint + '">' +
+      '<span class="ws-map-tile-check" data-ws-check role="checkbox" tabindex="-1" ' +
+      'aria-checked="' + (isMulti ? 'true' : 'false') + '" ' +
+      'aria-label="Select for bulk action" title="Select"></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
       escapeHtml(statusText) + '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
@@ -311,6 +329,22 @@
       '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span></button>' +
       '<div class="ws-map-empty-note">No workspaces yet — build your first one.</div>' +
       '</div></div>'
+    );
+  }
+
+  // Contextual action bar for the multi-select set. Rendered inside the theatre
+  // and shown only while at least one tile is checked. Count text is refreshed
+  // in place by updateSelBar so toggling selection never re-mounts the map.
+  function selBarHTML() {
+    var n = multiCount();
+    return (
+      '<div class="ws-map-selbar" data-ws-selbar' + (n ? '' : ' hidden') + '>' +
+      '<span class="ws-map-selbar-count" data-ws-selbar-count>' + n + ' selected</span>' +
+      '<div class="ws-map-selbar-actions">' +
+      '<button type="button" class="ws-map-selbar-del" data-ws-selbar-delete>✕ Delete</button>' +
+      '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
+      '</div>' +
+      '</div>'
     );
   }
 
@@ -399,6 +433,7 @@
       '<div class="ws-map-theatre-tag"><span class="ws-map-ix">MAP</span><h3>All Workspaces</h3></div>' +
       '<div class="ws-map-compass">N<b>▲</b></div>' +
       canvas +
+      selBarHTML() +
       '</section>' +
       '<aside class="ws-map-overview" role="region" aria-label="Workspace overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
@@ -510,15 +545,73 @@
     }
   }
 
+  // Refresh the multi-select action bar and per-tile checked state in place
+  // (no re-mount) to keep toggling flicker-free.
+  function updateSelBar(container) {
+    var n = multiCount();
+    var bar = container.querySelector('[data-ws-selbar]');
+    if (bar) {
+      bar.hidden = n === 0;
+      var count = bar.querySelector('[data-ws-selbar-count]');
+      if (count) count.textContent = n + ' selected';
+    }
+    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
+    Array.prototype.forEach.call(tiles, function (el) {
+      var on = !!multiSelected[el.getAttribute('data-ws-id')];
+      el.classList.toggle('is-multi', on);
+      var check = el.querySelector('[data-ws-check]');
+      if (check) check.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+
+  function toggleMulti(container, id) {
+    if (!id) return;
+    if (multiSelected[id]) delete multiSelected[id];
+    else multiSelected[id] = true;
+    updateSelBar(container);
+  }
+
+  function clearMulti(container) {
+    multiSelected = Object.create(null);
+    updateSelBar(container);
+  }
+
+  function deleteMulti() {
+    var ids = multiIds();
+    if (!ids.length) return;
+    // Reuse the hub's batch delete (confirm + Trash + Undo). On success it
+    // reloads and re-mounts the map, where mount() prunes the deleted ids.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspaces === 'function') {
+      window.WorkspaceHub.deleteWorkspaces(ids);
+    }
+  }
+
+  function bindSelBar(container) {
+    var del = container.querySelector('[data-ws-selbar-delete]');
+    if (del) del.addEventListener('click', function () { deleteMulti(); });
+    var clr = container.querySelector('[data-ws-selbar-clear]');
+    if (clr) clr.addEventListener('click', function () { clearMulti(container); });
+  }
+
   function bindTiles(container, workspaces) {
     var selectables = container.querySelectorAll(
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
     Array.prototype.forEach.call(selectables, function (el) {
+      var isTile = el.classList.contains('ws-map-tile');
       // Single click selects; clicking (or Enter, which fires click on a
       // button) an already-selected tile opens it. Double-click always opens.
-      el.addEventListener('click', function () {
+      // The corner checkbox — or a Cmd/Ctrl/Shift-click anywhere on a tile —
+      // toggles the tile into the multi-select set instead (group districts
+      // can't be multi-selected).
+      el.addEventListener('click', function (e) {
         var id = el.getAttribute('data-ws-id');
+        var onCheck = e.target && e.target.closest && e.target.closest('[data-ws-check]');
+        if (isTile && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
+          e.preventDefault();
+          toggleMulti(container, id);
+          return;
+        }
         if (id && id === selectedId) { openWorkspace(id); return; }
         applySelection(container, workspaces, id);
       });
@@ -542,6 +635,12 @@
     selectedId = findWs(workspaces, selectedId) ? selectedId
       : (findWs(workspaces, incoming) ? incoming : pickDefaultSelection(workspaces));
 
+    // Drop any multi-selected ids that no longer exist (e.g. after a delete
+    // reload) so the action bar count stays truthful.
+    multiIds().forEach(function (id) {
+      if (!findWs(workspaces, id)) delete multiSelected[id];
+    });
+
     var maxCols = measureMaxCols(container);
     lastMount = { container: container, state: state };
     lastMaxCols = maxCols;
@@ -550,6 +649,7 @@
     bindCreate(container);
     bindTiles(container, workspaces);
     bindOverviewActions(container);
+    bindSelBar(container);
 
     if (!resizeBound && typeof window.addEventListener === 'function') {
       window.addEventListener('resize', handleResize);
@@ -562,6 +662,7 @@
     if (!container) return;
     container.innerHTML = '';
     lastMount = null;
+    multiSelected = Object.create(null);
   }
 
   window.OriWorkspaceMap = {

@@ -215,6 +215,15 @@ test('overviewBodyHTML renders the select-a-workspace placeholder when nothing i
   assert.match(overviewBodyHTML(null), /Select a workspace to see its agents, tasks, tools, and skills\./);
 });
 
+test('tileHTML renders an (unchecked) multi-select checkbox affordance', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({ ws: { id: 'w1', name: 'Ops' }, col: 0, row: 0 }, '', 0);
+  assert.match(html, /class="ws-map-tile-check" data-ws-check role="checkbox"/);
+  assert.match(html, /aria-checked="false"/);
+  // Nothing is multi-selected by default, so the tile is not marked is-multi.
+  assert.doesNotMatch(html, /class="ws-map-tile[^"]*is-multi/);
+});
+
 test('overviewBodyHTML offers a delete action carrying the workspace id', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research' });
