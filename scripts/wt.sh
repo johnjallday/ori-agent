@@ -13,6 +13,13 @@ WORKTREE_DIR="../"
 BASE_BRANCH="dev"
 PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
 
+# Permission mode written into each new feature worktree's
+# .claude/settings.local.json. Feature worktrees are isolated and reviewed at
+# merge, so they run hotter than dev. Options:
+#   acceptEdits       - auto-apply file edits, still gate/deny bash (recommended)
+#   bypassPermissions - skip all prompts, fully unattended (use for headless runs)
+FEATURE_WORKTREE_PERMISSION_MODE="acceptEdits"
+
 unalias wt 2>/dev/null
 
 function wt_is_protected_worktree {
@@ -195,6 +202,32 @@ function wt {
       echo "Copying tasks/ into new worktree..."
       mkdir -p "$WORKTREE_DIR$name/tasks"
       cp -R "$source_root/tasks/." "$WORKTREE_DIR$name/tasks/"
+    fi
+    # Give the feature worktree its own Claude Code permission profile. It runs
+    # hotter than dev (see FEATURE_WORKTREE_PERMISSION_MODE): edits auto-apply
+    # because the worktree is isolated and reviewed at merge, while a deny floor
+    # still blocks destructive commands. settings.local.json is gitignored, so it
+    # stays in this worktree and never touches dev/main; the shared allow/deny in
+    # the checked-in .claude/settings.json still applies on top.
+    local claude_local="$WORKTREE_DIR$name/.claude/settings.local.json"
+    if [[ ! -f "$claude_local" ]]; then
+      echo "Writing feature-worktree Claude profile ($FEATURE_WORKTREE_PERMISSION_MODE)..."
+      mkdir -p "$WORKTREE_DIR$name/.claude"
+      cat > "$claude_local" <<JSON
+{
+  "permissions": {
+    "defaultMode": "$FEATURE_WORKTREE_PERMISSION_MODE",
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(./scripts/release.sh:*)",
+      "Read(**/.env)",
+      "Read(**/*secret*)"
+    ]
+  }
+}
+JSON
     fi
     # Build folder picker in the new worktree
     local picker_script="$WORKTREE_DIR$name/scripts/build-folder-picker.sh"
