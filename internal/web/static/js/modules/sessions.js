@@ -3455,7 +3455,7 @@ const sessionManager = {
           </div>
           <div class="workspace-template-agent-meta">${chips}</div>
           ${reuseNote}
-          <details class="workspace-template-agent-prompt">
+          <details class="workspace-template-agent-prompt" open>
             <summary>
               <span>System prompt</span>
               <span class="workspace-template-agent-prompt-state">${this.escapeHtml(promptState)}</span>
