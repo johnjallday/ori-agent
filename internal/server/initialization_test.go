@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestLoadDefaultSettings(t *testing.T) {
@@ -312,6 +313,17 @@ func writeAgent(t *testing.T, agentsDir, name string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "agent_settings.json"), []byte(`{"type":"tool-calling","Settings":{}}`), 0o644); err != nil {
 		t.Fatalf("write agent settings: %v", err)
+	}
+}
+
+func TestResolveAllowlistPath_AnchoredToDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ORI_DATA_DIR", dataDir)
+
+	got := resolveAllowlistPath()
+	want := filepath.Join(dataDir, workspace.DefaultAllowlistFilename)
+	if got != want {
+		t.Fatalf("expected allowlist path %q, got %q", want, got)
 	}
 }
 

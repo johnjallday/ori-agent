@@ -179,6 +179,39 @@ func SnapshotAllWorkspaces(workspaces Store, agents store.Store) {
 	}
 }
 
+// BackfillLocalWorkspacesIntoAllowlist adds every non-trashed workspace present
+// in the given (local folder) store to the allowlist. It is used at startup to
+// treat the local ~/Ori Workspaces tree as owned by this data directory, so
+// agents referenced by locally-created workspaces are restored — and protected
+// from the non-allowlisted wipe — even though creation predates or bypasses the
+// explicit import flow. Foreign workspaces not present in the local tree are
+// left out, preserving cross-data-directory isolation.
+func BackfillLocalWorkspacesIntoAllowlist(local Store, allowlist *Allowlist) {
+	if local == nil || allowlist == nil {
+		return
+	}
+	added := 0
+	eachWorkspaceMeta(local, func(ws *Workspace) {
+		if ws.Status == StatusTrashed {
+			return
+		}
+		if allowlist.Contains(ws.ID) {
+			return
+		}
+		if err := allowlist.Add(ws.ID); err != nil {
+			logger.Warn("backfill allowlist: add failed", logger.Fields{
+				"workspace_id": ws.ID,
+				"error":        err.Error(),
+			})
+			return
+		}
+		added++
+	})
+	if added > 0 {
+		logger.Info("Local workspaces backfilled into allowlist", logger.Fields{"workspaces": added})
+	}
+}
+
 // RestoreAllWorkspaceAgents walks the workspace store once and restores any
 // workspace-local agent snapshots into the global agent registry when the
 // importing/running environment does not already have those agents.

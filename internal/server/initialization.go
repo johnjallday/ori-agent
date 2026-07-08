@@ -250,6 +250,17 @@ func resolveAgentStorePath() string {
 	return agentStorePath
 }
 
+// resolveAllowlistPath determines the per-data-dir workspace allowlist path.
+//
+// Like the agent store, this is anchored to the stable data directory rather
+// than the current working directory. The allowlist gates which workspaces'
+// agent snapshots hydrate into the global store on startup; resolving it
+// against CWD meant the gate silently emptied whenever the server was launched
+// from a different directory, dropping every workspace's agents from /agents.
+func resolveAllowlistPath() string {
+	return filepath.Join(config.DefaultDataDir(), workspace.DefaultAllowlistFilename)
+}
+
 // createFileStore creates a new file-based storage system for agents.
 func createFileStore(agentStorePath string, defaultConf types.Settings) (store.Store, error) {
 	if err := migrateLegacyAgentStore(agentStorePath); err != nil {
