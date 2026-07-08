@@ -613,8 +613,7 @@ export class WorkspaceDetailPage {
     for (const file of files) {
       const hasExtension = file.name.includes('.');
       const isLikelyFolder =
-        (!file.type && file.size === 0) ||
-        (!file.type && !hasExtension && file.size < 4096);
+        (!file.type && file.size === 0) || (!file.type && !hasExtension && file.size < 4096);
       if (isLikelyFolder) {
         if (window.Toast) {
           window.Toast.info('To add a folder, use the Linked Folders panel instead.', {
@@ -972,7 +971,6 @@ export class WorkspaceDetailPage {
     });
   }
 
-
   /**
    * Cache DOM elements
    */
@@ -1107,9 +1105,7 @@ export class WorkspaceDetailPage {
         'workspace-detail-task-result-next-steps-actions'
       ),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
-      taskResultPromoteModal: document.getElementById(
-        'workspace-detail-task-result-promote-modal'
-      ),
+      taskResultPromoteModal: document.getElementById('workspace-detail-task-result-promote-modal'),
       taskResultPromoteTitleInput: document.getElementById(
         'workspace-detail-task-result-promote-title'
       ),
@@ -1160,13 +1156,9 @@ export class WorkspaceDetailPage {
         'workspace-detail-project-template-refresh'
       ),
       projectTemplatePathInput: document.getElementById('workspace-detail-project-template-path'),
-      projectTemplateBrowseBtn: document.getElementById(
-        'workspace-detail-project-template-browse'
-      ),
+      projectTemplateBrowseBtn: document.getElementById('workspace-detail-project-template-browse'),
       projectNameInput: document.getElementById('workspace-detail-project-name'),
-      projectTemplateSubmitBtn: document.getElementById(
-        'workspace-detail-project-template-submit'
-      ),
+      projectTemplateSubmitBtn: document.getElementById('workspace-detail-project-template-submit'),
       projectTemplateError: document.getElementById('workspace-detail-project-template-error'),
 
       // Assist modal — the assist page swaps in for the Command view surface.
@@ -1441,8 +1433,12 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.selectAllNotesBtn?.addEventListener('click', () => this.toggleSelectAllNotes());
-    this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copySelectedNotesToClipboard());
-    this.elements.deleteSelectedNotesBtn?.addEventListener('click', () => this.deleteSelectedNotes());
+    this.elements.copyAllNotesBtn?.addEventListener('click', () =>
+      this.copySelectedNotesToClipboard()
+    );
+    this.elements.deleteSelectedNotesBtn?.addEventListener('click', () =>
+      this.deleteSelectedNotes()
+    );
 
     // "View all" -> workspace notes app. The href is set here (not in the
     // template) because the workspace ID isn't known at server-render time.
@@ -1453,47 +1449,59 @@ export class WorkspaceDetailPage {
     // "Open task editor" icon button: opens the task modal in auto mode with whatever
     // text is currently in the entry-prompt input, so users can review/configure before saving.
     this.elements.homeAssistantConfigureTaskBtn?.addEventListener('click', () => {
-      if (!window.taskModalController || typeof window.taskModalController.openForCreate !== 'function') {
+      if (
+        !window.taskModalController ||
+        typeof window.taskModalController.openForCreate !== 'function'
+      ) {
         console.warn('Task modal controller not available');
         return;
       }
       const input = this.elements.homeAssistantInput;
       const description = String(input?.value || '').trim();
-      window.taskModalController.openForCreate(this.workspaceId, description, () => {
-        if (input) input.value = '';
-        this.loadTasks?.();
-        this.loadSchedules?.();
-      }, {
-        forceAutoMode: true,
-        prefillAutoDescription: description,
-      });
+      window.taskModalController.openForCreate(
+        this.workspaceId,
+        description,
+        () => {
+          if (input) input.value = '';
+          this.loadTasks?.();
+          this.loadSchedules?.();
+        },
+        {
+          forceAutoMode: true,
+          prefillAutoDescription: description
+        }
+      );
     });
 
     // Quick "Create Description" button: route multiline /note templates to the note modal
     // instead of stuffing markdown (with newlines) into the single-line entry input where it
     // collapses to garbage.
-    this.elements.homeAssistantQuickNotesBtn?.addEventListener('click', (event) => {
-      const button = event.currentTarget;
-      const prompt = button?.getAttribute('data-home-prompt') || '';
-      if (!prompt.startsWith('/note ') || !prompt.includes('\n')) return;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      const body = prompt.slice('/note '.length);
-      const lines = body.split('\n');
-      let title = '';
-      let content = body;
-      if (lines[0]?.startsWith('# ')) {
-        title = lines[0].slice(2).trim();
-        content = lines.slice(1).join('\n').replace(/^\n+/, '');
-      }
-      this.showNoteModal();
-      window.requestAnimationFrame(() => {
-        const titleInput = document.getElementById('noteNameInput');
-        const contentInput = document.getElementById('noteContentInput');
-        if (titleInput && title) titleInput.value = title;
-        if (contentInput) contentInput.value = content;
-      });
-    }, true);
+    this.elements.homeAssistantQuickNotesBtn?.addEventListener(
+      'click',
+      event => {
+        const button = event.currentTarget;
+        const prompt = button?.getAttribute('data-home-prompt') || '';
+        if (!prompt.startsWith('/note ') || !prompt.includes('\n')) return;
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        const body = prompt.slice('/note '.length);
+        const lines = body.split('\n');
+        let title = '';
+        let content = body;
+        if (lines[0]?.startsWith('# ')) {
+          title = lines[0].slice(2).trim();
+          content = lines.slice(1).join('\n').replace(/^\n+/, '');
+        }
+        this.showNoteModal();
+        window.requestAnimationFrame(() => {
+          const titleInput = document.getElementById('noteNameInput');
+          const contentInput = document.getElementById('noteContentInput');
+          if (titleInput && title) titleInput.value = title;
+          if (contentInput) contentInput.value = content;
+        });
+      },
+      true
+    );
 
     // Directory buttons
     this.elements.createProjectBtn?.addEventListener('click', event => {
@@ -1515,7 +1523,10 @@ export class WorkspaceDetailPage {
       this.updateProjectTemplateModalState();
     });
     this.elements.projectTemplatePathInput?.addEventListener('input', () => {
-      if (this.elements.projectTemplatePathInput?.value.trim() && this.elements.projectTemplateSelect) {
+      if (
+        this.elements.projectTemplatePathInput?.value.trim() &&
+        this.elements.projectTemplateSelect
+      ) {
         this.elements.projectTemplateSelect.value = '';
       }
       this.updateProjectTemplateModalState();
@@ -1996,13 +2007,13 @@ export class WorkspaceDetailPage {
 
   getWorkspaceTags(workspace = this.workspace) {
     if (!workspace || !Array.isArray(workspace.tags)) return [];
-    return workspace.tags
-      .map(tag => String(tag || '').trim())
-      .filter(Boolean);
+    return workspace.tags.map(tag => String(tag || '').trim()).filter(Boolean);
   }
 
   normalizeWorkspaceTagValue(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .trim()
+      .toLowerCase();
   }
 
   normalizeWorkspaceTagList(tags) {
@@ -2114,7 +2125,9 @@ export class WorkspaceDetailPage {
   async saveWorkspaceTags() {
     if (this.workspaceTagsSaving) return;
 
-    const draft = this.workspaceTagInput ? this.workspaceTagInput.getTags() : this.workspaceTagDraft;
+    const draft = this.workspaceTagInput
+      ? this.workspaceTagInput.getTags()
+      : this.workspaceTagDraft;
 
     this.workspaceTagsSaving = true;
     if (this.elements.workspaceTagsSaveBtn) {
@@ -2935,7 +2948,10 @@ export class WorkspaceDetailPage {
   renderChildren() {
     // Groups manage members through the dedicated Members panel; the
     // read-only child cards would duplicate it.
-    const isGroup = String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+    const isGroup =
+      String(this.workspace?.kind || '')
+        .trim()
+        .toLowerCase() === 'group';
 
     // Show/hide the children panel based on whether there are children
     if (this.elements.childrenPanel) {
@@ -3065,9 +3081,13 @@ export class WorkspaceDetailPage {
   refreshTaskActivityBadges() {
     if (this._taskActivity.size === 0) return;
     const runningIds = new Set();
-    for (const t of (this.tasks || [])) {
+    for (const t of this.tasks || []) {
       if (!t) continue;
-      if (String(t.status || '').trim().toLowerCase() === 'in_progress') {
+      if (
+        String(t.status || '')
+          .trim()
+          .toLowerCase() === 'in_progress'
+      ) {
         runningIds.add(t.id);
       }
     }
@@ -3104,7 +3124,9 @@ export class WorkspaceDetailPage {
     }
 
     const safeTitle = this.escapeAttribute(target.title || `Open ${agentName} details`);
-    const safeAriaLabel = this.escapeAttribute(target.ariaLabel || target.title || `Open ${agentName} details`);
+    const safeAriaLabel = this.escapeAttribute(
+      target.ariaLabel || target.title || `Open ${agentName} details`
+    );
     const safeKind = this.escapeAttribute(target.kind || 'global');
     const safeHref = this.escapeAttribute(target.href);
     return `
@@ -3454,9 +3476,7 @@ export class WorkspaceDetailPage {
 
   getAgentGroupRolePresentation(group) {
     const roles = Array.isArray(group?.roles)
-      ? group.roles
-          .map(role => String(role || '').trim())
-          .filter(Boolean)
+      ? group.roles.map(role => String(role || '').trim()).filter(Boolean)
       : [];
     const uniqueRoles = [];
     const seen = new Set();
@@ -3487,10 +3507,14 @@ export class WorkspaceDetailPage {
       .split(/[\s._-]+/)
       .map(part => part.trim())
       .filter(Boolean);
-    const initials = (words.length > 1 ? `${words[0][0]}${words[words.length - 1][0]}` : words[0]?.slice(0, 2) || 'A')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '')
-      .slice(0, 2) || 'A';
+    const initials =
+      (words.length > 1
+        ? `${words[0][0]}${words[words.length - 1][0]}`
+        : words[0]?.slice(0, 2) || 'A'
+      )
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(0, 2) || 'A';
 
     let hash = 0;
     for (let index = 0; index < key.length; index += 1) {
@@ -3541,7 +3565,9 @@ export class WorkspaceDetailPage {
       if (!task) continue;
       if (this.normalizeAgentName(task.to) !== key) continue;
 
-      const status = String(task.status || '').trim().toLowerCase();
+      const status = String(task.status || '')
+        .trim()
+        .toLowerCase();
       if (status === 'in_progress') {
         return { key: 'working', label: 'Working', detail: 'Task in progress' };
       }
@@ -3576,7 +3602,9 @@ export class WorkspaceDetailPage {
     }
 
     const chips = summary.visible
-      .map(skill => `<span class="workspace-detail-agent-skill-chip">${this.escapeHtml(skill)}</span>`)
+      .map(
+        skill => `<span class="workspace-detail-agent-skill-chip">${this.escapeHtml(skill)}</span>`
+      )
       .join('');
     const overflow =
       summary.overflow > 0
@@ -3605,7 +3633,9 @@ export class WorkspaceDetailPage {
   renderAgentModelPowerBadge(agentName, profile, encodedAgentName = '') {
     const presentation = this.getAgentModelPresentation(profile);
     const editable = this.agentAllowsModelEditing(profile);
-    const title = presentation.empty ? `Set model for ${agentName}` : `Change model for ${agentName}`;
+    const title = presentation.empty
+      ? `Set model for ${agentName}`
+      : `Change model for ${agentName}`;
     const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${presentation.empty ? ' is-empty' : ''}`;
     const modelMarkup = presentation.empty
       ? '<span>Model not set</span>'
@@ -3715,9 +3745,7 @@ export class WorkspaceDetailPage {
             ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
             : `Remove ${group.name} from workspace`;
         const removeButton =
-          group.isWorkspaceAgent &&
-          !group.isUnassigned &&
-          !this.isWorkspaceEntryAgent(group.name)
+          group.isWorkspaceAgent && !group.isUnassigned && !this.isWorkspaceEntryAgent(group.name)
             ? `
         <button type="button"
                 class="workspace-detail-agent-remove-btn"
@@ -3760,11 +3788,10 @@ export class WorkspaceDetailPage {
           </svg>
         </button>
       `;
-        const backFace = canFlip
-          ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
-          : '';
+        const backFace = canFlip ? this.renderAgentBackFace(group, cardMeta, encodedAgentName) : '';
         const flippedClass = isFlipped ? ' is-flipped' : '';
-        const leaderClass = !group.isUnassigned && this.isWorkspaceEntryAgent(group.name) ? ' is-leader' : '';
+        const leaderClass =
+          !group.isUnassigned && this.isWorkspaceEntryAgent(group.name) ? ' is-leader' : '';
         const unassignedClass = group.isUnassigned ? ' is-unassigned' : '';
         const detailLink = group.isUnassigned
           ? `
@@ -3884,9 +3911,7 @@ export class WorkspaceDetailPage {
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
     const removeButton =
-      group.isWorkspaceAgent &&
-      !group.isUnassigned &&
-      !this.isWorkspaceEntryAgent(group.name)
+      group.isWorkspaceAgent && !group.isUnassigned && !this.isWorkspaceEntryAgent(group.name)
         ? `
       <button type="button"
               class="workspace-detail-agent-remove-btn"
@@ -3981,8 +4006,9 @@ export class WorkspaceDetailPage {
 
   // Collapses a multi-line prompt into a single-line preview snippet.
   buildAgentPromptPreview(data) {
-    const source =
-      String(data?.effective_prompt || data?.base_system_prompt || '').replace(/\s+/g, ' ').trim();
+    const source = String(data?.effective_prompt || data?.base_system_prompt || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!source) return 'No system prompt set for this agent.';
     const limit = 160;
     return source.length > limit ? `${source.slice(0, limit).trim()}…` : source;
@@ -4330,6 +4356,7 @@ export class WorkspaceDetailPage {
       // Invalidate the cached effective prompt so the flip-card preview refreshes.
       this.agentPromptCache?.delete(this.normalizeAgentName(view.agentName));
       this.refreshAgentCardPrompt(view.agentName);
+      window.workspaceCommand?.refresh();
       if (window.Toast) window.Toast.success('System prompt saved.');
     } catch (error) {
       console.error('Failed to save system prompt:', error);
@@ -4433,9 +4460,7 @@ export class WorkspaceDetailPage {
       )}
       ${section('Effective prompt (composed)', effective, 'Nothing to compose.')}
       ${
-        note
-          ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>`
-          : ''
+        note ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>` : ''
       }
     `;
   }
@@ -4538,15 +4563,15 @@ export class WorkspaceDetailPage {
 
       let group = groupByKey.get(normalized);
       if (!group) {
-          group = {
-            key: normalized,
-            name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
-            isWorkspaceAgent,
-            isUnassigned,
-            instanceCount: 0,
-            roles: [],
-            tasks: []
-          };
+        group = {
+          key: normalized,
+          name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
+          isWorkspaceAgent,
+          isUnassigned,
+          instanceCount: 0,
+          roles: [],
+          tasks: []
+        };
         groupByKey.set(normalized, group);
         groups.push(group);
       } else if (isWorkspaceAgent) {
@@ -4824,7 +4849,11 @@ export class WorkspaceDetailPage {
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
-    const taskTerminalState = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' || task.status === 'timeout';
+    const taskTerminalState =
+      task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled' ||
+      task.status === 'timeout';
     const isRerun = !isParent && taskTerminalState;
     const executeTitle = isParent
       ? hasUnassignedSubtasks
@@ -4833,7 +4862,9 @@ export class WorkspaceDetailPage {
           ? 'A subtask is already running'
           : 'Execute workflow now'
       : !assignedAgent
-        ? (isRerun ? 'Will auto-assign a workspace agent before re-running' : 'Will auto-assign a workspace agent before execution')
+        ? isRerun
+          ? 'Will auto-assign a workspace agent before re-running'
+          : 'Will auto-assign a workspace agent before execution'
         : awaitingNextStep
           ? 'Execute the next internal step'
           : task.status === 'in_progress'
@@ -4955,13 +4986,15 @@ export class WorkspaceDetailPage {
                 title="${this.escapeHtml(executeTitle)}"
                 aria-label="${isRerun ? 'Re-run' : 'Execute'} task ${taskLabel}"
                 ${canExecute ? '' : 'disabled'}>
-          ${isRerun
-            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          ${
+            isRerun
+              ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
                </svg>`
-            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
-               </svg>`}
+               </svg>`
+          }
         </button>
         <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -6388,9 +6421,7 @@ export class WorkspaceDetailPage {
     if (!normalizedAgentName || !normalizedKey) return;
 
     if (this.isWorkspaceEntryAgent(normalizedAgentName)) {
-      window.alert(
-        `"${normalizedAgentName}" is the workspace entry agent and can't be removed.`
-      );
+      window.alert(`"${normalizedAgentName}" is the workspace entry agent and can't be removed.`);
       return;
     }
 
@@ -6616,11 +6647,19 @@ export class WorkspaceDetailPage {
 
     const humanLoop = this.getTaskHumanLoop(task);
     const humanLoopState = String(humanLoop?.state || '').toLowerCase();
-    if (humanLoop && (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || task?.status === 'waiting_for_choice')) {
+    if (
+      humanLoop &&
+      (humanLoopState === 'blocked' ||
+        humanLoopState === 'waiting_for_choice' ||
+        task?.status === 'waiting_for_choice')
+    ) {
       const reason = String(humanLoop.reason || '').trim();
       return {
         className: 'blocked',
-        label: task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice' ? 'Waiting for Choice' : 'Needs Input',
+        label:
+          task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice'
+            ? 'Waiting for Choice'
+            : 'Needs Input',
         isBlocked: true,
         reason
       };
@@ -6911,11 +6950,18 @@ export class WorkspaceDetailPage {
 
   canPromoteTaskResultToWorkflow(sourceTask, text) {
     if (!sourceTask || typeof sourceTask !== 'object') return false;
-    if (String(sourceTask.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (
+      String(sourceTask.status || '')
+        .trim()
+        .toLowerCase() !== 'completed'
+    )
+      return false;
     if (!String(sourceTask.result || '').trim()) return false;
     if (String(sourceTask.error || '').trim()) return false;
 
-    const resultType = String(sourceTask.result_type || '').trim().toLowerCase();
+    const resultType = String(sourceTask.result_type || '')
+      .trim()
+      .toLowerCase();
     if (resultType === 'task_list') return true;
 
     const structuredResult = sourceTask.structured_result;
@@ -7020,7 +7066,8 @@ export class WorkspaceDetailPage {
     this.currentTaskResultPromotionSubmitting = Boolean(isSubmitting);
     if (this.elements.taskResultPromoteSubmitBtn) {
       this.elements.taskResultPromoteSubmitBtn.disabled = this.currentTaskResultPromotionSubmitting;
-      this.elements.taskResultPromoteSubmitBtn.textContent = this.currentTaskResultPromotionSubmitting
+      this.elements.taskResultPromoteSubmitBtn.textContent = this
+        .currentTaskResultPromotionSubmitting
         ? 'Creating...'
         : 'Create';
     }
@@ -10126,7 +10173,9 @@ export class WorkspaceDetailPage {
       // Workspace-local agents persist to the workspace config.json via a
       // workspace-scoped endpoint, and their model picker is not type-filtered.
       isWorkspaceAgent:
-        String(profile.source || '').trim().toLowerCase() === 'workspace',
+        String(profile.source || '')
+          .trim()
+          .toLowerCase() === 'workspace',
       workspaceId: this.workspace?.id || ''
     };
 
@@ -10691,7 +10740,9 @@ export class WorkspaceDetailPage {
         ? raw.planning
         : {};
     const taskMarkdown =
-      raw.task_markdown && typeof raw.task_markdown === 'object' && !Array.isArray(raw.task_markdown)
+      raw.task_markdown &&
+      typeof raw.task_markdown === 'object' &&
+      !Array.isArray(raw.task_markdown)
         ? raw.task_markdown
         : {};
     const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
@@ -10965,9 +11016,8 @@ export class WorkspaceDetailPage {
         normalized.task_markdown.generate_agent_views !== false;
     }
     if (this.elements.settingsTaskMarkdownStatus) {
-      this.elements.settingsTaskMarkdownStatus.textContent = this.getTaskMarkdownStatusText(
-        normalized
-      );
+      this.elements.settingsTaskMarkdownStatus.textContent =
+        this.getTaskMarkdownStatusText(normalized);
     }
   }
 
@@ -11044,8 +11094,7 @@ export class WorkspaceDetailPage {
       task_markdown: {
         enabled: this.elements.settingsTaskMarkdownEnabledInput?.checked === true,
         path: String(this.elements.settingsTaskMarkdownPathInput?.value || '').trim(),
-        generate_agent_views:
-          this.elements.settingsTaskMarkdownAgentViewsInput?.checked !== false
+        generate_agent_views: this.elements.settingsTaskMarkdownAgentViewsInput?.checked !== false
       }
     });
 
@@ -11227,7 +11276,8 @@ export class WorkspaceDetailPage {
     try {
       await this.loadTasks();
       if (this.elements.settingsTaskMarkdownStatus) {
-        this.elements.settingsTaskMarkdownStatus.textContent = 'Imported task map and refreshed tasks.';
+        this.elements.settingsTaskMarkdownStatus.textContent =
+          'Imported task map and refreshed tasks.';
       }
       if (window.Toast) {
         window.Toast.success('Markdown tasks imported');
@@ -11303,7 +11353,6 @@ export class WorkspaceDetailPage {
     return ids;
   }
 
-
   async loadWorkspaceAgentSnapshots() {
     this.workspaceAgentSnapshots = new Set();
     this.workspaceAgentProfiles = new Map();
@@ -11328,7 +11377,10 @@ export class WorkspaceDetailPage {
           type: String(agent?.type || '').trim(),
           model: String(agent?.model || '').trim(),
           provider: String(agent?.provider || '').trim(),
-          source: String(agent?.source || 'workspace').trim().toLowerCase() || 'workspace'
+          source:
+            String(agent?.source || 'workspace')
+              .trim()
+              .toLowerCase() || 'workspace'
         });
       });
     } catch (_err) {
@@ -11767,7 +11819,12 @@ export class WorkspaceDetailPage {
     const humanLoopState = String(task?.context?.human_loop?.state || '')
       .trim()
       .toLowerCase();
-    if (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || status === 'waiting_for_choice') return 'waiting_for_choice';
+    if (
+      humanLoopState === 'blocked' ||
+      humanLoopState === 'waiting_for_choice' ||
+      status === 'waiting_for_choice'
+    )
+      return 'waiting_for_choice';
     return status || 'pending';
   }
 
@@ -14110,7 +14167,11 @@ export class WorkspaceDetailPage {
   }
 
   isGroupWorkspace() {
-    return String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+    return (
+      String(this.workspace?.kind || '')
+        .trim()
+        .toLowerCase() === 'group'
+    );
   }
 
   syncProjectActionState() {
@@ -14356,11 +14417,14 @@ export class WorkspaceDetailPage {
     this.setProjectTemplateSubmitting(true);
     this.clearProjectTemplateError();
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/project`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/project`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.error) {
         throw new Error(result.error || 'Failed to create project');
@@ -14426,7 +14490,9 @@ export class WorkspaceDetailPage {
         this.workspace.primary_directory_id =
           typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
         this.workspace.project_path =
-          typeof workspace.project_path === 'string' ? workspace.project_path : this.workspace.project_path || '';
+          typeof workspace.project_path === 'string'
+            ? workspace.project_path
+            : this.workspace.project_path || '';
         this.workspace.shared_data =
           workspace.shared_data && typeof workspace.shared_data === 'object'
             ? workspace.shared_data
@@ -15171,7 +15237,12 @@ export class WorkspaceDetailPage {
     // starts clean. We check live state to avoid stale labels persisting
     // after a completion event sneaks past the heartbeat goroutine.
     const task = this.tasks?.find?.(t => t?.id === taskId);
-    if (task && String(task.status || '').trim().toLowerCase() !== 'in_progress') {
+    if (
+      task &&
+      String(task.status || '')
+        .trim()
+        .toLowerCase() !== 'in_progress'
+    ) {
       this._taskActivity.delete(taskId);
     }
 
@@ -15180,7 +15251,7 @@ export class WorkspaceDetailPage {
   }
 
   taskActivityLabelFor(eventType, payload) {
-    const data = (payload && typeof payload === 'object') ? payload : {};
+    const data = payload && typeof payload === 'object' ? payload : {};
     switch (eventType) {
       case 'task.thinking': {
         const phase = String(data.phase || '').trim();
@@ -15237,8 +15308,12 @@ export class WorkspaceDetailPage {
     }
     const ago = this.formatTaskActivityAgo(activity.at);
     const text = activity.label
-      ? (ago ? `${activity.label} · ${ago}` : activity.label)
-      : (ago ? `Active ${ago}` : 'Active');
+      ? ago
+        ? `${activity.label} · ${ago}`
+        : activity.label
+      : ago
+        ? `Active ${ago}`
+        : 'Active';
     slot.textContent = text;
     slot.hidden = false;
   }
@@ -15758,11 +15833,8 @@ export class WorkspaceDetailPage {
       btn.disabled = isBusy || total === 0;
       btn.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
       btn.setAttribute('aria-label', allSelected ? 'Deselect all notes' : 'Select all notes');
-      btn.title = total === 0
-        ? 'No notes to select'
-        : allSelected
-          ? 'Clear selection'
-          : 'Select every note';
+      btn.title =
+        total === 0 ? 'No notes to select' : allSelected ? 'Clear selection' : 'Select every note';
     }
 
     if (this.elements.copyAllNotesBtn) {
@@ -15770,9 +15842,10 @@ export class WorkspaceDetailPage {
       // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.copyAllNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      const label = selectedCount > 0
-        ? `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
-        : 'Copy selected notes';
+      const label =
+        selectedCount > 0
+          ? `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+          : 'Copy selected notes';
       btn.title = selectedCount === 0 ? 'Select notes to copy' : label;
       btn.setAttribute('aria-label', label);
     }
@@ -15782,9 +15855,10 @@ export class WorkspaceDetailPage {
       // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.deleteSelectedNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      const label = selectedCount > 0
-        ? `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
-        : 'Delete selected notes';
+      const label =
+        selectedCount > 0
+          ? `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+          : 'Delete selected notes';
       btn.title = selectedCount === 0 ? 'Select notes to delete' : label;
       btn.setAttribute('aria-label', label);
     }

@@ -110,7 +110,7 @@ test('taskTone maps a task status to a visual tone', () => {
 });
 
 test('opsModeLabel maps workflow modes to friendly labels', () => {
-  const withMode = (mode) => {
+  const withMode = mode => {
     view.page = { workspace: { workspace_settings: { workflow: { mode } } } };
     return view.opsModeLabel();
   };
@@ -235,7 +235,10 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   // reflects the filtered open-task count specifically — the modal title and
   // per-agent quest-log header stay "Tasks" since those list every task
   // regardless of status, so "Open Tasks" there would misdescribe them.
-  assert.doesNotMatch(container.innerHTML, /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/);
+  assert.doesNotMatch(
+    container.innerHTML,
+    /Quest Log|Keeper|Field Unit|Intel|Comms|Supply Lines|Standing Orders|Tools · MCP|Ops mode|Deploy|✦/
+  );
 });
 
 test('command subtitle includes mission automation state when mission state is loaded', () => {
@@ -251,7 +254,12 @@ test('command subtitle includes mission automation state when mission state is l
     identityEditMode: '',
     page: {
       workspaceId: 'workspace-1',
-      workspace: { name: 'Mission Workspace', description: '', mcp_bindings: [], skill_bindings: [] },
+      workspace: {
+        name: 'Mission Workspace',
+        description: '',
+        mcp_bindings: [],
+        skill_bindings: []
+      },
       tasks: [],
       buildAgentGroups: () => []
     }
@@ -306,6 +314,7 @@ test('mission panel renders loaded goal state and findings link', () => {
     assert.match(html, /Cadence: Daily at 09:00/);
     assert.match(html, /href="\/action-center\?workspace=workspace-1"/);
     assert.match(html, />Findings \(2\)<\/a>/);
+    assert.match(html, />Edit Goal<\/button>/);
     assert.doesNotMatch(html, /id="workspace-command-mission-run"[^>]* disabled/);
   } finally {
     globalThis.window = originalWindow;
@@ -339,6 +348,7 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
     const html = commandView.renderMissionPanel();
 
     assert.match(html, /No workspace goal yet\./);
+    assert.match(html, />Set Goal<\/button>/);
     assert.match(html, /id="workspace-command-mission-run"[^>]* disabled/);
     assert.match(html, /title="Set a goal before running"/);
   } finally {
@@ -352,8 +362,12 @@ test('mission panel actions delegate to workspace mission APIs', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
     workspaceMission: {
-      openGoalModal() { calls.push('edit'); },
-      runNow(button) { calls.push(['run', button.getAttribute('data-cmd-mission-action')]); }
+      openGoalModal() {
+        calls.push('edit');
+      },
+      runNow(button) {
+        calls.push(['run', button.getAttribute('data-cmd-mission-action')]);
+      }
     }
   };
   const commandView = Object.create(WorkspaceCommandView.prototype);
@@ -381,7 +395,10 @@ test('mission panel actions delegate to workspace mission APIs', () => {
 });
 
 test('detailed view is deleted; shared hosts and goal modal survive in the template', () => {
-  const template = readFileSync(new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url), 'utf8');
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
 
   // The Detailed subtree and its toggle are gone.
   assert.equal(template.includes('id="workspace-detail-view"'), false);
@@ -399,7 +416,10 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
     'id="workspace-detail-members-panel"'
   ]) {
     const idx = template.indexOf(id);
-    assert.ok(idx > hostsStart && idx < hostsEnd, id + ' must live inside the shared-hosts container');
+    assert.ok(
+      idx > hostsStart && idx < hostsEnd,
+      id + ' must live inside the shared-hosts container'
+    );
   }
 
   // Goal modal is still present with its accessibility hooks.
@@ -445,7 +465,7 @@ test('command rail badges project and reference directory roles', () => {
         { id: 'dir-ref', name: 'Reference', path: '/tmp/reference', source: 'reference' }
       ],
       getPrimaryDirectoryId: () => 'dir-project',
-      isProjectDirectory: (dir) => dir.id === 'dir-project'
+      isProjectDirectory: dir => dir.id === 'dir-project'
     }
   });
 
@@ -464,7 +484,14 @@ test('command bar shows group badge and color accent for group workspaces', () =
     identityEditMode: '',
     page: {
       workspaceId: 'grp-1',
-      workspace: { name: 'Alpha Group', kind: 'group', color: '#3b82f6', description: '', mcp_bindings: [], skill_bindings: [] },
+      workspace: {
+        name: 'Alpha Group',
+        kind: 'group',
+        color: '#3b82f6',
+        description: '',
+        mcp_bindings: [],
+        skill_bindings: []
+      },
       tasks: [],
       buildAgentGroups: () => []
     }
@@ -491,7 +518,13 @@ test('group accent color is sourced from the members-panel group node (detail wo
     page: {
       workspaceId: 'grp-1',
       // The detail workspace object carries no color; the tree node does.
-      workspace: { name: 'Alpha Group', kind: 'group', description: '', mcp_bindings: [], skill_bindings: [] },
+      workspace: {
+        name: 'Alpha Group',
+        kind: 'group',
+        description: '',
+        mcp_bindings: [],
+        skill_bindings: []
+      },
       membersPanel: { group: { color: '#8b5cf6' } },
       tasks: [],
       buildAgentGroups: () => []
@@ -515,7 +548,13 @@ test('command bar omits group treatment for non-group workspaces', () => {
     identityEditMode: '',
     page: {
       workspaceId: 'ws-1',
-      workspace: { name: 'Solo Outpost', kind: 'workspace', description: '', mcp_bindings: [], skill_bindings: [] },
+      workspace: {
+        name: 'Solo Outpost',
+        kind: 'workspace',
+        description: '',
+        mcp_bindings: [],
+        skill_bindings: []
+      },
       tasks: [],
       buildAgentGroups: () => []
     }
@@ -562,7 +601,10 @@ test('notes panel exposes tag filter host, multi-select toolbar, and per-note ch
     noteFilterBar: null,
     page: {
       workspaceId: 'ws-1',
-      notes: [{ id: 'n1', name: 'Alpha' }, { id: 'n2', name: 'Beta' }],
+      notes: [
+        { id: 'n1', name: 'Alpha' },
+        { id: 'n2', name: 'Beta' }
+      ],
       selectedNoteIds: new Set(['n1'])
     }
   });
@@ -596,7 +638,9 @@ test('handleNoteAction delegates bulk actions to the page', () => {
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    render() { calls.push('render'); },
+    render() {
+      calls.push('render');
+    },
     page: {
       toggleSelectAllNotes: () => calls.push('select-all'),
       copySelectedNotesToClipboard: () => calls.push('copy'),
@@ -615,7 +659,8 @@ test('note and task tag filters reuse OriTagFilterBar.filterItems on active tags
   const originalWindow = globalThis.window;
   globalThis.window = {
     OriTagFilterBar: {
-      filterItems: (items, active) => items.filter(i => (i.tags || []).some(t => active.includes(t)))
+      filterItems: (items, active) =>
+        items.filter(i => (i.tags || []).some(t => active.includes(t)))
     }
   };
   try {
@@ -625,13 +670,25 @@ test('note and task tag filters reuse OriTagFilterBar.filterItems on active tags
       taskFilterBar: { getActiveTags: () => ['urgent'] },
       taskModalShowAll: true,
       page: {
-        notes: [{ id: 'n1', tags: ['urgent'] }, { id: 'n2', tags: ['later'] }],
-        tasks: [{ id: 't1', tags: ['urgent'] }, { id: 't2', tags: [] }]
+        notes: [
+          { id: 'n1', tags: ['urgent'] },
+          { id: 'n2', tags: ['later'] }
+        ],
+        tasks: [
+          { id: 't1', tags: ['urgent'] },
+          { id: 't2', tags: [] }
+        ]
       }
     });
 
-    assert.deepEqual(commandView.visibleNotes(commandView.page.notes).map(n => n.id), ['n1']);
-    assert.deepEqual(commandView.taskRowData({ includeAll: true }).map(t => t.id), ['t1']);
+    assert.deepEqual(
+      commandView.visibleNotes(commandView.page.notes).map(n => n.id),
+      ['n1']
+    );
+    assert.deepEqual(
+      commandView.taskRowData({ includeAll: true }).map(t => t.id),
+      ['t1']
+    );
   } finally {
     globalThis.window = originalWindow;
   }
@@ -663,10 +720,16 @@ test('view-board / view-list toggle flips board mode and hands the board node ba
   Object.assign(commandView, {
     statModalSection: 'tasks',
     taskModalBoardMode: false,
-    page: { setView: (v) => calls.push(['setView', v]) },
-    renderStatModalBody() { calls.push(['render']); },
-    syncBoardSurface(opts) { calls.push(['sync', opts && opts.load === true]); },
-    restoreSharedSurface(key) { calls.push(['restore', key]); }
+    page: { setView: v => calls.push(['setView', v]) },
+    renderStatModalBody() {
+      calls.push(['render']);
+    },
+    syncBoardSurface(opts) {
+      calls.push(['sync', opts && opts.load === true]);
+    },
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    }
   });
 
   commandView.handleStatModalAction('view-board');
@@ -763,8 +826,12 @@ test('files rail actions delegate to existing file modal and upload paths', asyn
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     page: {
-      showFileModal() { calls.push(['modal']); },
-      async uploadFiles(fileList) { calls.push(['upload', fileList]); }
+      showFileModal() {
+        calls.push(['modal']);
+      },
+      async uploadFiles(fileList) {
+        calls.push(['upload', fileList]);
+      }
     }
   });
 
@@ -786,21 +853,31 @@ test('files drop handler owns Command drop zones without duplicate page fallback
     container: {
       querySelector(selector) {
         return selector === '.ws-cmd-rail'
-          ? { addEventListener(type, listener) { listeners[type] = listener; } }
+          ? {
+              addEventListener(type, listener) {
+                listeners[type] = listener;
+              }
+            }
           : null;
       }
     },
     page: {
-      async uploadFiles(fileList) { calls.push(['upload', fileList]); }
+      async uploadFiles(fileList) {
+        calls.push(['upload', fileList]);
+      }
     }
   });
 
   commandView.bindRail();
   listeners.drop({
-    target: { closest: selector => selector === '[data-cmd-file-drop]' ? dropZone : null },
+    target: { closest: selector => (selector === '[data-cmd-file-drop]' ? dropZone : null) },
     dataTransfer: { files },
-    preventDefault() { prevented = true; },
-    stopPropagation() { stopped = true; }
+    preventDefault() {
+      prevented = true;
+    },
+    stopPropagation() {
+      stopped = true;
+    }
   });
 
   assert.equal(prevented, true);
@@ -837,7 +914,9 @@ test('openSystemTab keeps Command active and selects the requested Systems tab',
   Object.assign(commandView, {
     activeRailSection: '',
     activeSystemTab: 'memory',
-    render() { renders.push([this.activeRailSection, this.activeSystemTab]); }
+    render() {
+      renders.push([this.activeRailSection, this.activeSystemTab]);
+    }
   });
 
   commandView.openSystemTab('triggers');
@@ -857,15 +936,23 @@ test('systems shared surface mounts config without cloning persistence logic', (
     activeSystemTab: 'memory',
     statModalSection: '',
     statModalEl: null,
-    container: { querySelector: selector => selector === '[data-cmd-system-host]' ? host : null },
+    container: { querySelector: selector => (selector === '[data-cmd-system-host]' ? host : null) },
     mountSharedSurface(key, selector) {
       calls.push(['mount', key, selector]);
       return { key };
     },
-    restoreSharedSurface(key) { calls.push(['restore', key]); },
-    showConfigTab(tab) { calls.push(['tab', tab.key]); },
-    refreshSystemTabData(tab) { calls.push(['refresh', tab.key]); },
-    expandMountedConfig(node) { calls.push(['expand', node.key]); }
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    },
+    showConfigTab(tab) {
+      calls.push(['tab', tab.key]);
+    },
+    refreshSystemTabData(tab) {
+      calls.push(['refresh', tab.key]);
+    },
+    expandMountedConfig(node) {
+      calls.push(['expand', node.key]);
+    }
   });
 
   commandView.syncSharedSurfaces();
@@ -885,21 +972,42 @@ test('tools modal mounts the config surface for MCP/Skills/Plugins and the tools
   const host = { innerHTML: '', appendChild() {} };
   const base = {
     statModalSection: 'tools',
-    statModalEl: { hidden: false, querySelector: sel => sel === '[data-cmd-tools-host]' ? host : null },
-    mountSharedSurface(key, selector) { calls.push(['mount', key, selector]); return { key }; },
-    restoreSharedSurface(key) { calls.push(['restore', key]); },
-    showConfigTab(tab) { calls.push(['tab', tab.tabId]); },
-    refreshConfigData(key) { calls.push(['refresh', key]); },
-    expandMountedConfig(node) { calls.push(['expand', node.key]); }
+    statModalEl: {
+      hidden: false,
+      querySelector: sel => (sel === '[data-cmd-tools-host]' ? host : null)
+    },
+    mountSharedSurface(key, selector) {
+      calls.push(['mount', key, selector]);
+      return { key };
+    },
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    },
+    showConfigTab(tab) {
+      calls.push(['tab', tab.tabId]);
+    },
+    refreshConfigData(key) {
+      calls.push(['refresh', key]);
+    },
+    expandMountedConfig(node) {
+      calls.push(['expand', node.key]);
+    }
   };
 
-  const plugins = Object.assign(Object.create(WorkspaceCommandView.prototype), base, { activeToolsTab: 'plugins' });
+  const plugins = Object.assign(Object.create(WorkspaceCommandView.prototype), base, {
+    activeToolsTab: 'plugins'
+  });
   plugins.syncToolsModalSurface();
 
-  const find = Object.assign(Object.create(WorkspaceCommandView.prototype), base, { activeToolsTab: 'find' });
+  const find = Object.assign(Object.create(WorkspaceCommandView.prototype), base, {
+    activeToolsTab: 'find'
+  });
   calls.length = 0;
   find.syncToolsModalSurface();
-  assert.deepEqual(calls, [['restore', 'config'], ['mount', 'tools', '#workspace-detail-tools-card']]);
+  assert.deepEqual(calls, [
+    ['restore', 'config'],
+    ['mount', 'tools', '#workspace-detail-tools-card']
+  ]);
 });
 
 test('escape closes the active rail manager without leaving Command', () => {
@@ -1013,10 +1121,18 @@ test('rail primary actions use command-view management hooks', () => {
       }
     },
     page: {
-      showNoteModal() { calls.push('new-note'); },
-      showSchedulesModal() { calls.push('open-schedules'); },
-      createNewSession() { calls.push('new-session'); },
-      showAddDirectoryModal() { calls.push('link-folder'); }
+      showNoteModal() {
+        calls.push('new-note');
+      },
+      showSchedulesModal() {
+        calls.push('open-schedules');
+      },
+      createNewSession() {
+        calls.push('new-session');
+      },
+      showAddDirectoryModal() {
+        calls.push('link-folder');
+      }
     }
   });
 
@@ -1043,10 +1159,18 @@ test('rail item actions open existing management flows from Command view', () =>
     },
     page: {
       notes: [{ id: 'note-1', name: 'Launch note' }],
-      showNoteModal(note) { calls.push(['note', note.id]); },
-      openSchedule(id) { calls.push(['schedule', id]); },
-      openSession(id) { calls.push(['session', id]); },
-      openDirectoryExplorer(id, source) { calls.push(['folder', id, source]); }
+      showNoteModal(note) {
+        calls.push(['note', note.id]);
+      },
+      openSchedule(id) {
+        calls.push(['schedule', id]);
+      },
+      openSession(id) {
+        calls.push(['session', id]);
+      },
+      openDirectoryExplorer(id, source) {
+        calls.push(['folder', id, source]);
+      }
     }
   });
 
@@ -1084,8 +1208,12 @@ test('quest-log task name opens the existing task flow', () => {
       }
     },
     page: {
-      openTask(id) { calls.push(['open', id]); },
-      executeTask(id) { calls.push(['run', id]); }
+      openTask(id) {
+        calls.push(['open', id]);
+      },
+      executeTask(id) {
+        calls.push(['run', id]);
+      }
     }
   });
 
@@ -1158,14 +1286,22 @@ test('stat modal inerts command background and traps tab focus', () => {
   const topbar = {
     attrs: {},
     inert: false,
-    setAttribute(name, value) { this.attrs[name] = value; },
-    removeAttribute(name) { delete this.attrs[name]; }
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+    removeAttribute(name) {
+      delete this.attrs[name];
+    }
   };
   const layout = {
     attrs: {},
     inert: false,
-    setAttribute(name, value) { this.attrs[name] = value; },
-    removeAttribute(name) { delete this.attrs[name]; }
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+    removeAttribute(name) {
+      delete this.attrs[name];
+    }
   };
   const modal = {};
   const commandView = Object.create(WorkspaceCommandView.prototype);
@@ -1182,8 +1318,20 @@ test('stat modal inerts command background and traps tab focus', () => {
   assert.equal(topbar.attrs['aria-hidden'], undefined);
   assert.equal(layout.inert, false);
 
-  const first = { hidden: false, focused: 0, focus() { this.focused += 1; } };
-  const last = { hidden: false, focused: 0, focus() { this.focused += 1; } };
+  const first = {
+    hidden: false,
+    focused: 0,
+    focus() {
+      this.focused += 1;
+    }
+  };
+  const last = {
+    hidden: false,
+    focused: 0,
+    focus() {
+      this.focused += 1;
+    }
+  };
   const originalDocument = globalThis.document;
   globalThis.document = { activeElement: last };
   commandView.statModalEl = {
@@ -1197,7 +1345,12 @@ test('stat modal inerts command background and traps tab focus', () => {
   };
   let prevented = 0;
   try {
-    commandView.trapStatModalFocus({ key: 'Tab', preventDefault() { prevented += 1; } });
+    commandView.trapStatModalFocus({
+      key: 'Tab',
+      preventDefault() {
+        prevented += 1;
+      }
+    });
   } finally {
     globalThis.document = originalDocument;
   }
@@ -1233,7 +1386,9 @@ test('skills manager modal hosts the live config surface', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     page: {
-      getWorkspaceSkillBindings: () => [{ id: 's1', skillName: 'summarize', enabled: true, trusted: true }]
+      getWorkspaceSkillBindings: () => [
+        { id: 's1', skillName: 'summarize', enabled: true, trusted: true }
+      ]
     }
   });
 
@@ -1356,9 +1511,15 @@ test('agents modal add/edit hand off to page flows and close the modal; delete s
       this.statModalSection = '';
     },
     page: {
-      openAddAgentModal() { calls.push(['add']); },
-      openAgentModelModal(id) { calls.push(['edit', id]); },
-      removeAgentFromWorkspace(id) { calls.push(['delete', id]); }
+      openAddAgentModal() {
+        calls.push(['add']);
+      },
+      openAgentModelModal(id) {
+        calls.push(['edit', id]);
+      },
+      removeAgentFromWorkspace(id) {
+        calls.push(['delete', id]);
+      }
     }
   });
 
@@ -1377,10 +1538,16 @@ test('mcp/skills CRUD is not routed through handleStatModalAction (lives in the 
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     statModalSection: 'mcp',
-    closeStatModal() { calls.push(['close']); },
+    closeStatModal() {
+      calls.push(['close']);
+    },
     page: {
-      openWorkspaceMCPModal() { calls.push(['mcp-modal']); },
-      deleteWorkspaceMCPBinding() { calls.push(['mcp-delete']); }
+      openWorkspaceMCPModal() {
+        calls.push(['mcp-modal']);
+      },
+      deleteWorkspaceMCPBinding() {
+        calls.push(['mcp-delete']);
+      }
     }
   });
 
@@ -1394,9 +1561,14 @@ test('mcp/skills CRUD is not routed through handleStatModalAction (lives in the 
 
 test('config-surface stat sections no longer emit an Open Systems footer', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(commandView, { page: { getWorkspaceMCPBindings: () => [], getWorkspaceSkillBindings: () => [] } });
+  Object.assign(commandView, {
+    page: { getWorkspaceMCPBindings: () => [], getWorkspaceSkillBindings: () => [] }
+  });
   for (const section of ['mcp', 'skills', 'settings', 'mission', 'intent']) {
-    assert.doesNotMatch(commandView.statModalHTML(section), /Open Systems|data-cmd-modal-action="detailed"/);
+    assert.doesNotMatch(
+      commandView.statModalHTML(section),
+      /Open Systems|data-cmd-modal-action="detailed"/
+    );
   }
   // The removed footer builder is gone entirely.
   assert.equal(typeof commandView.statModalFooterHTML, 'undefined');
@@ -1404,7 +1576,13 @@ test('config-surface stat sections no longer emit an Open Systems footer', () =>
 
 test('closing a config-surface stat modal restores the shared node and re-syncs the rail', () => {
   const calls = [];
-  const node = { classList: { remove(c) { calls.push(['unclass', c]); } } };
+  const node = {
+    classList: {
+      remove(c) {
+        calls.push(['unclass', c]);
+      }
+    }
+  };
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     statModalSection: 'settings',
@@ -1412,15 +1590,23 @@ test('closing a config-surface stat modal restores the shared node and re-syncs 
     taskModalBoardMode: false,
     statModalEl: { hidden: false },
     sharedSurfaceAnchors: { config: { node } },
-    restoreSharedSurface(key) { calls.push(['restore', key]); },
-    syncSystemsSurface() { calls.push(['syncSystems']); },
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    },
+    syncSystemsSurface() {
+      calls.push(['syncSystems']);
+    },
     setCommandBackgroundInert() {}
   });
 
   commandView.closeStatModal();
 
   // Sheds the modal-only chrome class, hands the node home, then re-offers it to the rail.
-  assert.deepEqual(calls, [['unclass', 'is-command-modal'], ['restore', 'config'], ['syncSystems']]);
+  assert.deepEqual(calls, [
+    ['unclass', 'is-command-modal'],
+    ['restore', 'config'],
+    ['syncSystems']
+  ]);
   assert.equal(commandView.statModalEl.hidden, true);
 });
 
@@ -1430,8 +1616,15 @@ test('syncSystemsSurface yields while a config-surface stat modal holds the conf
   Object.assign(commandView, {
     statModalSection: 'mcp',
     statModalEl: { hidden: false },
-    container: { querySelector() { calls.push('query'); return null; } },
-    restoreSharedSurface(key) { calls.push(['restore', key]); }
+    container: {
+      querySelector() {
+        calls.push('query');
+        return null;
+      }
+    },
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    }
   });
 
   commandView.syncSystemsSurface();
@@ -1440,28 +1633,258 @@ test('syncSystemsSurface yields while a config-surface stat modal holds the conf
   assert.deepEqual(calls, []);
 });
 
-test('entry-agent unit card exposes a manager-settings gear; other agents do not', () => {
+test('entry-agent stage exposes manager settings while other agents expose removal', () => {
   const page = {
     isWorkspaceEntryAgent: name => name === 'Atlas',
-    getAgentAvatarPresentation: name => ({ initials: name.slice(0, 2), style: '' }),
     getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
     getAgentProfile: () => ({}),
     getAgentModelPresentation: () => ({ empty: false, model: 'gpt-test' }),
-    getAgentSkillSummary: () => ({ count: 1 })
+    getAgentSkillSummary: () => ({ count: 1 }),
+    getEffectiveWorkspaceMCPServerNames: () => []
   };
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    page,
+    page
+  });
+
+  const keeperAgent = commandView.agentViewModel({
+    key: 'atlas',
+    name: 'Atlas',
+    isWorkspaceAgent: true,
+    isUnassigned: false,
+    tasks: []
+  });
+  const otherAgent = commandView.agentViewModel({
+    key: 'builder',
+    name: 'Builder',
+    isWorkspaceAgent: true,
+    isUnassigned: false,
+    tasks: []
+  });
+  const keeper = commandView.agentStageHTML(keeperAgent);
+  const other = commandView.agentStageHTML(otherAgent);
+
+  assert.match(keeper, /data-cmd-manager-settings/);
+  assert.match(keeper, /Entry Agent/);
+  assert.doesNotMatch(keeper, /data-cmd-remove-agent/);
+  assert.doesNotMatch(other, /data-cmd-manager-settings/);
+  assert.match(other, /data-cmd-remove-agent/);
+});
+
+test('command deck defaults to the entry agent and groups same-name instances', () => {
+  const groups = [
+    {
+      key: 'builder',
+      name: 'Builder',
+      isWorkspaceAgent: true,
+      isUnassigned: false,
+      instanceCount: 2,
+      roles: ['Writer', 'Reviewer'],
+      tasks: []
+    },
+    {
+      key: 'atlas',
+      name: 'Atlas',
+      isWorkspaceAgent: true,
+      isUnassigned: false,
+      instanceCount: 1,
+      roles: ['Coordinator'],
+      tasks: []
+    }
+  ];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    selectedAgentKey: '',
+    agentSelectionInitialized: false,
+    activeAgentTab: 'overview',
+    page: {
+      workspaceId: 'workspace-1',
+      workspace: { id: 'workspace-1' },
+      buildAgentGroups: () => groups,
+      isWorkspaceEntryAgent: name => name === 'Atlas',
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle', detail: 'No active tasks' }),
+      getAgentGroupRolePresentation: group => ({
+        label: group.roles.length > 1 ? 'Multiple roles' : group.roles[0],
+        detail: group.roles.join(', '),
+        roles: group.roles
+      }),
+      getAgentSkillSummary: () => ({ count: 0, names: [] }),
+      getEffectiveWorkspaceMCPServerNames: () => [],
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: true, label: 'Model not set' })
+    },
     applyTaskTagFilter: tasks => tasks || [],
     taskFilterActiveTags: () => []
   });
 
-  const keeper = commandView.unitCardHTML({ name: 'Atlas', isWorkspaceAgent: true, isUnassigned: false, tasks: [] });
-  const other = commandView.unitCardHTML({ name: 'Builder', isWorkspaceAgent: true, isUnassigned: false, tasks: [] });
+  const html = commandView.renderGarrison();
 
-  assert.match(keeper, /data-cmd-manager-settings/);
-  assert.match(keeper, /ws-cmd-unit is-keeper/);
-  assert.doesNotMatch(other, /data-cmd-manager-settings/);
+  assert.equal(commandView.selectedAgentKey, 'atlas');
+  assert.match(html, /data-cmd-select-agent="Atlas"/);
+  assert.match(html, /data-cmd-select-agent="Builder"/);
+  assert.match(html, /aria-label="2 instances">2×/);
+  assert.match(html, /ws-cmd-agent-stage idle/);
+  assert.match(html, /role="tab"/);
+  assert.doesNotMatch(html, /ws-cmd-unit/);
+});
+
+test('persisted command-deck selection wins when the agent still exists and falls back after removal', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const saved = new Map([['ori-workspace-command-agent:workspace-1', 'builder']]);
+  globalThis.localStorage = {
+    getItem: key => saved.get(key) || null,
+    setItem: (key, value) => saved.set(key, value)
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    selectedAgentKey: '',
+    agentSelectionInitialized: false,
+    page: {
+      workspaceId: 'workspace-1',
+      isWorkspaceEntryAgent: name => name === 'Atlas'
+    }
+  });
+  const atlas = { key: 'atlas', name: 'Atlas' };
+  const builder = { key: 'builder', name: 'Builder' };
+
+  try {
+    assert.equal(commandView.reconcileAgentSelection([atlas, builder]), 'builder');
+    assert.equal(commandView.reconcileAgentSelection([atlas]), 'atlas');
+    assert.equal(saved.get('ori-workspace-command-agent:workspace-1'), 'atlas');
+  } finally {
+    globalThis.localStorage = originalLocalStorage;
+  }
+});
+
+test('geometric agent character is deterministic and does not inject agent markup', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const agent = { key: '<img src=x>', name: '<img src=x>', tone: 'working' };
+  const first = commandView.agentCharacterHTML(agent, 'stage');
+  const second = commandView.agentCharacterHTML(agent, 'stage');
+
+  assert.equal(first, second);
+  assert.match(first, /<svg viewBox="0 0 100 118"/);
+  assert.match(first, /ws-cmd-character is-stage working/);
+  assert.doesNotMatch(first, /<img/);
+});
+
+test('recent activity uses attributable persisted timestamps and orders newest first', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      tasks: [
+        {
+          id: 'old',
+          to: 'Atlas',
+          description: 'Old task',
+          status: 'pending',
+          updated_at: '2026-07-01T10:00:00Z'
+        },
+        {
+          id: 'new',
+          to: 'Atlas',
+          description: 'New task',
+          status: 'completed',
+          updated_at: '2026-07-03T10:00:00Z'
+        },
+        { id: 'invalid', to: 'Atlas', description: 'Invalid task', updated_at: 'not-a-date' },
+        {
+          id: 'other',
+          to: 'Builder',
+          description: 'Other task',
+          updated_at: '2026-07-04T10:00:00Z'
+        }
+      ],
+      sessions: [
+        {
+          id: 'session-1',
+          agent_name: 'Atlas',
+          title: 'Planning session',
+          created_at: '2026-07-02T10:00:00Z'
+        }
+      ]
+    }
+  });
+
+  const items = commandView.recentActivityItems({ key: 'atlas', tasks: [] });
+
+  assert.deepEqual(
+    items.map(item => item.id),
+    ['new', 'session-1', 'old']
+  );
+  assert.deepEqual(
+    items.map(item => item.kind),
+    ['Task', 'Session', 'Task']
+  );
+});
+
+test('effective prompt hydration is Loadout-only and retries with force', async () => {
+  const calls = [];
+  const group = { key: 'atlas', name: 'Atlas', isWorkspaceAgent: true, tasks: [] };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeAgentTab: 'overview',
+    selectedAgentKey: 'atlas',
+    agentPromptLoadingKey: '',
+    page: {
+      buildAgentGroups: () => [group],
+      ensureAgentPromptData: async (name, options) => {
+        calls.push([name, options]);
+        return { effective_prompt: 'Prompt' };
+      },
+      getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
+      getAgentSkillSummary: () => ({ count: 0, names: [] }),
+      getEffectiveWorkspaceMCPServerNames: () => [],
+      getAgentProfile: () => ({}),
+      getAgentModelPresentation: () => ({ empty: true })
+    },
+    render() {}
+  });
+
+  commandView.hydrateActiveAgentPrompt();
+  assert.deepEqual(calls, []);
+
+  commandView.activeAgentTab = 'loadout';
+  commandView.hydrateActiveAgentPrompt({ force: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(calls, [['Atlas', { force: true }]]);
+});
+
+test('agent tabs support arrow, Home, and End keyboard navigation', () => {
+  const calls = [];
+  const tabs = ['overview', 'tasks', 'loadout', 'recent'].map(key => ({
+    key,
+    closest: selector => (selector === '[data-cmd-agent-tab]' ? null : null),
+    getAttribute: name => (name === 'data-cmd-agent-tab' ? key : '')
+  }));
+  tabs.forEach(tab => {
+    tab.closest = selector => (selector === '[data-cmd-agent-tab]' ? tab : null);
+  });
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector: selector =>
+        selector === '.ws-cmd-agent-tabs' ? { querySelectorAll: () => tabs } : null
+    },
+    setActiveAgentTab(key) {
+      calls.push(key);
+    }
+  });
+  const event = (key, target) => ({
+    key,
+    target,
+    preventDefault() {
+      calls.push('prevented');
+    }
+  });
+
+  commandView.handleAgentTabKeydown(event('ArrowRight', tabs[0]));
+  commandView.handleAgentTabKeydown(event('Home', tabs[2]));
+  commandView.handleAgentTabKeydown(event('End', tabs[1]));
+
+  assert.deepEqual(calls, ['prevented', 'tasks', 'prevented', 'overview', 'prevented', 'recent']);
 });
 
 test('retireLegacyViewPreference clears the stored pref and strips ?view= deep links', () => {
@@ -1470,10 +1893,18 @@ test('retireLegacyViewPreference clears the stored pref and strips ?view= deep l
   const removed = [];
   const replaceStateCalls = [];
   try {
-    globalThis.localStorage = { removeItem(key) { removed.push(key); } };
+    globalThis.localStorage = {
+      removeItem(key) {
+        removed.push(key);
+      }
+    };
     globalThis.window = {
       location: { search: '?view=detailed&tab=notes', pathname: '/workspaces/abc' },
-      history: { replaceState(state, title, url) { replaceStateCalls.push(url); } }
+      history: {
+        replaceState(state, title, url) {
+          replaceStateCalls.push(url);
+        }
+      }
     };
 
     const commandView = Object.create(WorkspaceCommandView.prototype);
@@ -1499,7 +1930,9 @@ test('setup always activates Command view', () => {
   const container = {
     hidden: true,
     innerHTML: '',
-    querySelector() { return null; },
+    querySelector() {
+      return null;
+    },
     appendChild() {}
   };
 
@@ -1513,7 +1946,11 @@ test('setup always activates Command view', () => {
     };
     globalThis.window = {
       location: { search: '', pathname: '/workspaces/abc' },
-      history: { replaceState() { throw new Error('must not rewrite a clean URL'); } }
+      history: {
+        replaceState() {
+          throw new Error('must not rewrite a clean URL');
+        }
+      }
     };
     globalThis.localStorage = { removeItem() {} };
 

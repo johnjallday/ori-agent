@@ -8,6 +8,7 @@
  */
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
+const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -37,8 +38,17 @@ export class WorkspaceCommandView {
     this.commandTagError = '';
     this.activeSystemTab = 'memory';
     this.activeToolsTab = 'mcp';
+    this.selectedAgentKey = '';
+    this.agentSelectionInitialized = false;
+    this.activeAgentTab = 'overview';
+    this.agentRosterScroll = { top: 0, left: 0 };
+    this.agentOverviewScroll = 0;
+    this.pendingAgentFocusKey = '';
+    this.pendingAgentTabFocus = '';
+    this.agentPromptLoadingKey = '';
+    this.lastAnnouncedAgentStatus = '';
     this.sharedSurfaceAnchors = {};
-    this.boundGlobalKeydown = (event) => this.handleGlobalKeydown(event);
+    this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.setup();
   }
 
@@ -51,7 +61,11 @@ export class WorkspaceCommandView {
   // The Detailed view (and its toggle) is gone: drop the stale localStorage
   // preference and strip any lingering ?view= param from deep links.
   retireLegacyViewPreference() {
-    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (err) { /* storage may be unavailable */ }
+    try {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch (err) {
+      /* storage may be unavailable */
+    }
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.has('view')) {
@@ -94,7 +108,7 @@ export class WorkspaceCommandView {
     let agents = 0;
     try {
       agents = (page.buildAgentGroups() || []).filter(
-        (g) => g.isWorkspaceAgent && !g.isUnassigned
+        g => g.isWorkspaceAgent && !g.isUnassigned
       ).length;
     } catch (err) {
       agents = Array.isArray(ws.agent_instances) ? ws.agent_instances.length : 0;
@@ -102,7 +116,7 @@ export class WorkspaceCommandView {
     // Canonical "open" = pending + in-progress, matching the server-side
     // open_task_count Map/Cards/Tree all read (see workspace.ComputeMapSummaryFields).
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const openTasks = tasks.filter((t) => {
+    const openTasks = tasks.filter(t => {
       const s = String((t && t.status) || '').toLowerCase();
       return s === 'pending' || s === 'in_progress';
     }).length;
@@ -118,18 +132,27 @@ export class WorkspaceCommandView {
     const settings = ws.workspace_settings || {};
     const mode = String((settings.workflow && settings.workflow.mode) || '').toLowerCase();
     switch (mode) {
-      case 'guided': return 'Guided';
-      case 'direct': return 'Direct';
-      case 'plan_then_execute': return 'Autonomous';
-      case '': return '';
-      default: return mode.charAt(0).toUpperCase() + mode.slice(1);
+      case 'guided':
+        return 'Guided';
+      case 'direct':
+        return 'Direct';
+      case 'plan_then_execute':
+        return 'Autonomous';
+      case '':
+        return '';
+      default:
+        return mode.charAt(0).toUpperCase() + mode.slice(1);
     }
   }
 
   missionSummary() {
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
     if (mission && typeof mission.getSummary === 'function') {
-      try { return mission.getSummary() || {}; } catch (err) { return {}; }
+      try {
+        return mission.getSummary() || {};
+      } catch (err) {
+        return {};
+      }
     }
     return {};
   }
@@ -149,15 +172,24 @@ export class WorkspaceCommandView {
   workspaceTags() {
     const page = this.page || {};
     if (typeof page.getWorkspaceTags === 'function') {
-      try { return page.getWorkspaceTags(); } catch (err) { return []; }
+      try {
+        return page.getWorkspaceTags();
+      } catch (err) {
+        return [];
+      }
     }
     const ws = page.workspace || {};
-    return Array.isArray(ws.tags) ? ws.tags.map(tag => String(tag || '').trim()).filter(Boolean) : [];
+    return Array.isArray(ws.tags)
+      ? ws.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : [];
   }
 
   workflowHref() {
     const page = this.page || {};
-    if (typeof page.collectWorkspaceWorkflowReferences === 'function' && typeof page.buildBehaviorStudioHref === 'function') {
+    if (
+      typeof page.collectWorkspaceWorkflowReferences === 'function' &&
+      typeof page.buildBehaviorStudioHref === 'function'
+    ) {
       try {
         const refs = page.collectWorkspaceWorkflowReferences();
         if (Array.isArray(refs) && refs.length === 1) {
@@ -186,14 +218,28 @@ export class WorkspaceCommandView {
 
   statBoxHTML(value, label, sectionKey, ariaLabel, extraClass = '') {
     const className = ('ws-cmd-stat ' + String(extraClass || '')).trim();
-    return '<button type="button" class="' + escapeHtml(className) + '" data-cmd-section="' + escapeHtml(sectionKey) +
-      '" aria-label="' + escapeHtml(ariaLabel) + '"><div class="ws-v">' + escapeHtml(value) +
-      '</div><div class="ws-l">' + escapeHtml(label) + '</div></button>';
+    return (
+      '<button type="button" class="' +
+      escapeHtml(className) +
+      '" data-cmd-section="' +
+      escapeHtml(sectionKey) +
+      '" aria-label="' +
+      escapeHtml(ariaLabel) +
+      '"><div class="ws-v">' +
+      escapeHtml(value) +
+      '</div><div class="ws-l">' +
+      escapeHtml(label) +
+      '</div></button>'
+    );
   }
 
   isGroupWorkspace() {
     const ws = (this.page && this.page.workspace) || {};
-    return String(ws.kind || '').trim().toLowerCase() === 'group';
+    return (
+      String(ws.kind || '')
+        .trim()
+        .toLowerCase() === 'group'
+    );
   }
 
   hexToRgba(hex, alpha) {
@@ -236,7 +282,8 @@ export class WorkspaceCommandView {
       : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
-    const descriptionClass = 'ws-cmd-description' +
+    const descriptionClass =
+      'ws-cmd-description' +
       (!description ? ' is-empty' : '') +
       (isLongDescription && !this.identityExpanded ? ' is-collapsed' : '');
     const descriptionText = description || 'No description';
@@ -245,44 +292,83 @@ export class WorkspaceCommandView {
     const subtitle = this.commandSubtitle(mode);
 
     return (
-      '<header class="ws-cmd-topbar' + (isGroup ? ' is-group' : '') + '"' + this.groupAccentStyle(ws) + '>' +
+      '<header class="ws-cmd-topbar' +
+      (isGroup ? ' is-group' : '') +
+      '"' +
+      this.groupAccentStyle(ws) +
+      '>' +
       '<div class="ws-cmd-nav">' +
       '<a class="ws-cmd-nav-btn" href="/workspaces" aria-label="Back to workspaces">Workspaces</a>' +
-      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/canvas')) + '">Canvas</a>' +
-      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(this.workspaceRoute('/diagnostics')) + '">Diagnostics</a>' +
-      '<a class="ws-cmd-nav-btn" href="' + escapeHtml(workflowHref) + '">Orchestration Skills</a>' +
+      '<a class="ws-cmd-nav-btn" href="' +
+      escapeHtml(this.workspaceRoute('/canvas')) +
+      '">Canvas</a>' +
+      '<a class="ws-cmd-nav-btn" href="' +
+      escapeHtml(this.workspaceRoute('/diagnostics')) +
+      '">Diagnostics</a>' +
+      '<a class="ws-cmd-nav-btn" href="' +
+      escapeHtml(workflowHref) +
+      '">Orchestration Skills</a>' +
       '</div>' +
       '<div class="ws-cmd-crest">' +
       '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
       '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/><path d="M3 21h18"/></svg>' +
       '</div>' +
       '<div class="ws-cmd-title">' +
-      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">' + escapeHtml(kicker) + '</span></div>' +
+      '<div class="ws-kicker"><span class="ws-dot"></span><span class="ws-tick">' +
+      escapeHtml(kicker) +
+      '</span></div>' +
       '<div class="ws-cmd-title-row">' +
-      '<h2>' + escapeHtml(name) + '</h2>' +
+      '<h2>' +
+      escapeHtml(name) +
+      '</h2>' +
       groupBadge +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
-      escapeHtml(workflowLabel) + '"' + (subtitle ? '' : ' hidden') + '>' + escapeHtml(subtitle) + '</div>' +
+      escapeHtml(workflowLabel) +
+      '"' +
+      (subtitle ? '' : ' hidden') +
+      '>' +
+      escapeHtml(subtitle) +
+      '</div>' +
       '<div class="ws-cmd-description-row">' +
-      '<p class="' + descriptionClass + '">' + escapeHtml(descriptionText) + '</p>' +
+      '<p class="' +
+      descriptionClass +
+      '">' +
+      escapeHtml(descriptionText) +
+      '</p>' +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
       (isLongDescription
         ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
-          (this.identityExpanded ? 'true' : 'false') + '">' + (this.identityExpanded ? 'Less' : 'More') + '</button>'
+          (this.identityExpanded ? 'true' : 'false') +
+          '">' +
+          (this.identityExpanded ? 'Less' : 'More') +
+          '</button>'
         : '') +
       '</div>' +
       '<div class="ws-cmd-tags-row">' +
-      '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' +
+      '<div class="ws-cmd-tags">' +
+      this.commandTagsHTML(tags) +
+      '</div>' +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="tags" aria-label="Edit workspace tags">Edit</button>' +
       '</div>' +
       this.identityEditorHTML(name, description) +
       '</div>' +
       '<div class="ws-cmd-readout">' +
       this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
-      this.statBoxHTML(stats.openTasks, 'Open Tasks', 'tasks', 'View open tasks', this.hasAttentionTasks() ? 'is-alert' : '') +
-      this.statBoxHTML(stats.tools, 'Tools', 'tools', 'Open tools: MCP, skills, plugins, and find tools') +
+      this.statBoxHTML(
+        stats.openTasks,
+        'Open Tasks',
+        'tasks',
+        'View open tasks',
+        this.hasAttentionTasks() ? 'is-alert' : ''
+      ) +
+      this.statBoxHTML(
+        stats.tools,
+        'Tools',
+        'tools',
+        'Open tools: MCP, skills, plugins, and find tools'
+      ) +
       '</div>' +
       '</header>'
     );
@@ -292,45 +378,75 @@ export class WorkspaceCommandView {
     const summary = this.missionSummary();
     const missionText = String(summary.mission || '').trim();
     const title = summary.title || (missionText ? 'Current goal' : 'Workspace goal');
-    const text = summary.text || (missionText || 'Loading workspace goal...');
+    const text = summary.text || missionText || 'Loading workspace goal...';
     const statusLabel = summary.label || 'Loading';
     const statusClass = summary.className || 'is-loading';
     const cadence = summary.cadenceLabel || 'Cadence: loading';
     const nextRun = summary.nextLabel || 'Next: loading';
     const lastRun = summary.lastLabel || 'Last: loading';
-    const findingsHref = summary.findingsHref || (this.workspaceId()
-      ? '/action-center?workspace=' + encodeURIComponent(this.workspaceId())
-      : '/action-center');
+    const findingsHref =
+      summary.findingsHref ||
+      (this.workspaceId()
+        ? '/action-center?workspace=' + encodeURIComponent(this.workspaceId())
+        : '/action-center');
     const findingsLabel = summary.findingsLabel || 'Findings';
     const runDisabled = summary.canRun === true ? '' : ' disabled';
     const runTitle = summary.runTitle || 'Set a goal before running';
     const actionStatus = summary.actionStatus || '';
 
+    const editLabel = missionText ? 'Edit Goal' : 'Set Goal';
+    const missionClass = 'ws-cmd-mission' + (missionText ? '' : ' is-empty');
+
     return (
-      '<section class="ws-cmd-mission" id="workspace-command-mission-card" aria-labelledby="workspace-command-mission-title">' +
+      '<section class="' +
+      missionClass +
+      '" id="workspace-command-mission-card" aria-labelledby="workspace-command-mission-title">' +
       '<div class="ws-cmd-mission-main">' +
       '<div class="ws-cmd-mission-head">' +
       '<span class="ws-cmd-mission-kicker">Mission</span>' +
-      '<span class="ws-cmd-mission-status ' + escapeHtml(statusClass) + '" id="workspace-command-mission-status">' +
-      escapeHtml(statusLabel) + '</span>' +
+      '<span class="ws-cmd-mission-status ' +
+      escapeHtml(statusClass) +
+      '" id="workspace-command-mission-status">' +
+      escapeHtml(statusLabel) +
+      '</span>' +
       '</div>' +
-      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title">' + escapeHtml(title) + '</h3>' +
-      '<p id="workspace-command-mission-text" class="ws-cmd-mission-text' + (missionText ? '' : ' is-empty') + '">' +
-      escapeHtml(text) + '</p>' +
+      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title">' +
+      escapeHtml(title) +
+      '</h3>' +
+      '<p id="workspace-command-mission-text" class="ws-cmd-mission-text' +
+      (missionText ? '' : ' is-empty') +
+      '">' +
+      escapeHtml(text) +
+      '</p>' +
       '<div class="ws-cmd-mission-meta" aria-label="Mission automation timing">' +
-      '<span id="workspace-command-mission-cadence">' + escapeHtml(cadence) + '</span>' +
-      '<span id="workspace-command-mission-next-run">' + escapeHtml(nextRun) + '</span>' +
-      '<span id="workspace-command-mission-last-run">' + escapeHtml(lastRun) + '</span>' +
+      '<span id="workspace-command-mission-cadence">' +
+      escapeHtml(cadence) +
+      '</span>' +
+      '<span id="workspace-command-mission-next-run">' +
+      escapeHtml(nextRun) +
+      '</span>' +
+      '<span id="workspace-command-mission-last-run">' +
+      escapeHtml(lastRun) +
+      '</span>' +
       '</div>' +
       '<div class="ws-cmd-mission-action-status" id="workspace-command-mission-action-status" aria-live="polite">' +
-      escapeHtml(actionStatus) + '</div>' +
+      escapeHtml(actionStatus) +
+      '</div>' +
       '</div>' +
       '<div class="ws-cmd-mission-actions">' +
-      '<button type="button" class="ws-cmd-mission-btn" id="workspace-command-mission-edit" data-cmd-mission-action="edit">Set Goal</button>' +
+      '<button type="button" class="ws-cmd-mission-btn" id="workspace-command-mission-edit" data-cmd-mission-action="edit">' +
+      editLabel +
+      '</button>' +
       '<button type="button" class="ws-cmd-mission-btn is-primary" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
-      runDisabled + ' title="' + escapeHtml(runTitle) + '">Run now</button>' +
-      '<a class="ws-cmd-mission-btn" id="workspace-command-mission-findings" href="' + escapeHtml(findingsHref) + '">' +
-      escapeHtml(findingsLabel) + '</a>' +
+      runDisabled +
+      ' title="' +
+      escapeHtml(runTitle) +
+      '">Run now</button>' +
+      '<a class="ws-cmd-mission-btn" id="workspace-command-mission-findings" href="' +
+      escapeHtml(findingsHref) +
+      '">' +
+      escapeHtml(findingsLabel) +
+      '</a>' +
       '</div>' +
       '</section>'
     );
@@ -340,8 +456,14 @@ export class WorkspaceCommandView {
     const arr = Array.isArray(tags) ? tags : [];
     if (!arr.length) return '<span class="ws-cmd-tag-empty">No tags</span>';
     const limit = 8;
-    const shown = arr.slice(0, limit).map(tag => '<span class="ws-cmd-tag">' + escapeHtml(tag) + '</span>').join('');
-    const more = arr.length > limit ? '<span class="ws-cmd-tag is-more">+' + (arr.length - limit) + '</span>' : '';
+    const shown = arr
+      .slice(0, limit)
+      .map(tag => '<span class="ws-cmd-tag">' + escapeHtml(tag) + '</span>')
+      .join('');
+    const more =
+      arr.length > limit
+        ? '<span class="ws-cmd-tag is-more">+' + (arr.length - limit) + '</span>'
+        : '';
     return shown + more;
   }
 
@@ -352,13 +474,21 @@ export class WorkspaceCommandView {
       const isDescription = mode === 'description';
       const value = isDescription ? description : name;
       const field = isDescription
-        ? '<textarea class="ws-cmd-identity-field" data-cmd-identity-input rows="2">' + escapeHtml(value) + '</textarea>'
-        : '<input class="ws-cmd-identity-field" data-cmd-identity-input type="text" value="' + escapeHtml(value) + '">';
+        ? '<textarea class="ws-cmd-identity-field" data-cmd-identity-input rows="2">' +
+          escapeHtml(value) +
+          '</textarea>'
+        : '<input class="ws-cmd-identity-field" data-cmd-identity-input type="text" value="' +
+          escapeHtml(value) +
+          '">';
       return (
-        '<form class="ws-cmd-identity-editor" data-cmd-identity-form="' + escapeHtml(mode) + '">' +
+        '<form class="ws-cmd-identity-editor" data-cmd-identity-form="' +
+        escapeHtml(mode) +
+        '">' +
         field +
         '<div class="ws-cmd-identity-actions">' +
-        '<button type="submit" class="ws-cmd-identity-save"' + (this.identitySaving ? ' disabled' : '') + '>Save</button>' +
+        '<button type="submit" class="ws-cmd-identity-save"' +
+        (this.identitySaving ? ' disabled' : '') +
+        '>Save</button>' +
         '<button type="button" class="ws-cmd-identity-cancel" data-cmd-cancel-identity>Cancel</button>' +
         '</div>' +
         '</form>'
@@ -368,9 +498,15 @@ export class WorkspaceCommandView {
       return (
         '<div class="ws-cmd-identity-editor" data-cmd-identity-form="tags">' +
         '<div class="ws-cmd-tags-editor-mount" data-cmd-tags-mount></div>' +
-        (this.commandTagError ? '<div class="ws-cmd-identity-error" role="alert">' + escapeHtml(this.commandTagError) + '</div>' : '') +
+        (this.commandTagError
+          ? '<div class="ws-cmd-identity-error" role="alert">' +
+            escapeHtml(this.commandTagError) +
+            '</div>'
+          : '') +
         '<div class="ws-cmd-identity-actions">' +
-        '<button type="button" class="ws-cmd-identity-save" data-cmd-save-tags' + (this.identitySaving ? ' disabled' : '') + '>Save</button>' +
+        '<button type="button" class="ws-cmd-identity-save" data-cmd-save-tags' +
+        (this.identitySaving ? ' disabled' : '') +
+        '>Save</button>' +
         '<button type="button" class="ws-cmd-identity-cancel" data-cmd-cancel-identity>Cancel</button>' +
         '</div>' +
         '</div>'
@@ -381,8 +517,13 @@ export class WorkspaceCommandView {
 
   render() {
     if (!this.container) return;
+    this.captureAgentDeckViewState();
     if (this.commandTagInput) {
-      try { this.commandTagDraft = this.commandTagInput.getTags(); } catch (err) { /* keep existing draft */ }
+      try {
+        this.commandTagDraft = this.commandTagInput.getTags();
+      } catch (err) {
+        /* keep existing draft */
+      }
       this.destroyCommandTagInput();
     }
     const ws = (this.page && this.page.workspace) || {};
@@ -395,21 +536,26 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-layout">' +
       '<main class="ws-cmd-main">' +
       this.renderMissionPanel() +
-      '<section class="ws-cmd-garrison">' + this.renderGarrison() + '</section>' +
+      '<section class="ws-cmd-garrison">' +
+      this.renderGarrison() +
+      '</section>' +
       '</main>' +
-      '<aside class="ws-cmd-rail">' + this.renderRail() + '</aside>' +
+      '<aside class="ws-cmd-rail">' +
+      this.renderRail() +
+      '</aside>' +
       '</div>';
 
     this.bindIdentityControls();
     this.bindReadout();
     this.bindMissionPanel();
     this.bindGarrison();
-    this.hydrateGarrisonPrompts();
     this.bindRail();
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
     this.mountNoteFilterBar();
+    this.restoreAgentDeckViewState();
+    this.hydrateActiveAgentPrompt();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
@@ -426,7 +572,7 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-topbar');
     if (!root) return;
 
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', event => {
       const editBtn = event.target.closest('[data-cmd-edit-identity]');
       if (editBtn) {
         const field = editBtn.getAttribute('data-cmd-edit-identity');
@@ -457,7 +603,7 @@ export class WorkspaceCommandView {
       }
     });
 
-    root.addEventListener('submit', (event) => {
+    root.addEventListener('submit', event => {
       const form = event.target.closest('[data-cmd-identity-form]');
       if (!form) return;
       event.preventDefault();
@@ -468,7 +614,7 @@ export class WorkspaceCommandView {
       }
     });
 
-    root.addEventListener('keydown', (event) => {
+    root.addEventListener('keydown', event => {
       if (event.key === 'Escape' && event.target.closest('[data-cmd-identity-form]')) {
         event.preventDefault();
         this.cancelIdentityEdit();
@@ -493,7 +639,11 @@ export class WorkspaceCommandView {
     this.render();
     const input = this.container && this.container.querySelector('[data-cmd-identity-input]');
     if (input && typeof input.focus === 'function') {
-      try { input.focus({ preventScroll: true }); } catch (err) { input.focus(); }
+      try {
+        input.focus({ preventScroll: true });
+      } catch (err) {
+        input.focus();
+      }
       if (typeof input.select === 'function') input.select();
     }
   }
@@ -511,7 +661,8 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     if (typeof page.saveWorkspaceIdentityField !== 'function') return;
     const ws = page.workspace || {};
-    const currentValue = mode === 'description' ? String(ws.description || '') : String(ws.name || '');
+    const currentValue =
+      mode === 'description' ? String(ws.description || '') : String(ws.name || '');
     this.identitySaving = true;
     const result = await page.saveWorkspaceIdentityField(mode, value, { currentValue });
     this.identitySaving = false;
@@ -540,7 +691,11 @@ export class WorkspaceCommandView {
 
   destroyCommandTagInput() {
     if (!this.commandTagInput) return;
-    try { this.commandTagInput.destroy?.(); } catch (err) { /* no-op */ }
+    try {
+      this.commandTagInput.destroy?.();
+    } catch (err) {
+      /* no-op */
+    }
     this.commandTagInput = null;
   }
 
@@ -566,7 +721,7 @@ export class WorkspaceCommandView {
   bindReadout() {
     const root = this.container && this.container.querySelector('.ws-cmd-readout');
     if (!root) return;
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', event => {
       const sectionBtn = event.target.closest('[data-cmd-section]');
       if (!sectionBtn) return;
       this.openStatModal(sectionBtn.getAttribute('data-cmd-section'), sectionBtn);
@@ -576,7 +731,7 @@ export class WorkspaceCommandView {
   bindMissionPanel() {
     const root = this.container && this.container.querySelector('.ws-cmd-mission');
     if (!root) return;
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', event => {
       const btn = event.target.closest('[data-cmd-mission-action]');
       if (!btn) return;
       const action = btn.getAttribute('data-cmd-mission-action');
@@ -618,15 +773,24 @@ export class WorkspaceCommandView {
 
   statSectionMeta(section) {
     switch (String(section || '')) {
-      case 'agents': return { title: 'Agents', addLabel: '＋ Add Agent' };
-      case 'tasks': return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
-      case 'mcp': return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
-      case 'skills': return { title: 'Skills', addLabel: '＋ Add Skill' };
-      case 'tools': return { title: 'Tools', addLabel: '' };
-      case 'settings': return { title: 'Manager Settings', addLabel: '' };
-      case 'mission': return { title: 'Goal Settings', addLabel: '' };
-      case 'intent': return { title: 'Workspace Intent', addLabel: '' };
-      default: return null;
+      case 'agents':
+        return { title: 'Agents', addLabel: '＋ Add Agent' };
+      case 'tasks':
+        return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
+      case 'mcp':
+        return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
+      case 'skills':
+        return { title: 'Skills', addLabel: '＋ Add Skill' };
+      case 'tools':
+        return { title: 'Tools', addLabel: '' };
+      case 'settings':
+        return { title: 'Manager Settings', addLabel: '' };
+      case 'mission':
+        return { title: 'Goal Settings', addLabel: '' };
+      case 'intent':
+        return { title: 'Workspace Intent', addLabel: '' };
+      default:
+        return null;
     }
   }
 
@@ -651,7 +815,11 @@ export class WorkspaceCommandView {
     this.setCommandBackgroundInert(true);
     const panel = el.querySelector('.ws-cmd-modal-panel');
     if (panel && typeof panel.focus === 'function') {
-      try { panel.focus({ preventScroll: true }); } catch (err) { panel.focus(); }
+      try {
+        panel.focus({ preventScroll: true });
+      } catch (err) {
+        panel.focus();
+      }
     }
   }
 
@@ -688,10 +856,18 @@ export class WorkspaceCommandView {
       if (child === this.statModalEl) return;
       if (isInert) {
         child.setAttribute('aria-hidden', 'true');
-        try { child.inert = true; } catch (err) { /* inert may be readonly in tests */ }
+        try {
+          child.inert = true;
+        } catch (err) {
+          /* inert may be readonly in tests */
+        }
       } else {
         child.removeAttribute('aria-hidden');
-        try { child.inert = false; } catch (err) { /* inert may be readonly in tests */ }
+        try {
+          child.inert = false;
+        } catch (err) {
+          /* inert may be readonly in tests */
+        }
       }
     });
   }
@@ -699,9 +875,11 @@ export class WorkspaceCommandView {
   modalFocusableElements() {
     const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
     if (!panel || typeof panel.querySelectorAll !== 'function') return [];
-    return Array.from(panel.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter(el => el && !el.hidden && typeof el.focus === 'function');
+    return Array.from(
+      panel.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(el => el && !el.hidden && typeof el.focus === 'function');
   }
 
   trapStatModalFocus(event) {
@@ -727,14 +905,15 @@ export class WorkspaceCommandView {
 
   ensureStatModal() {
     if (this.statModalEl) return this.statModalEl;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
     const el = document.createElement('div');
     el.className = 'ws-cmd-modal';
     el.hidden = true;
     el.innerHTML =
       '<div class="ws-cmd-modal-backdrop" data-cmd-modal-action="close"></div>' +
       '<div class="ws-cmd-modal-panel" role="dialog" aria-modal="true" tabindex="-1"></div>';
-    el.addEventListener('click', (event) => {
+    el.addEventListener('click', event => {
       const toolsTab = event.target.closest('[data-cmd-tools-tab]');
       if (toolsTab) {
         this.setToolsTab(toolsTab.getAttribute('data-cmd-tools-tab'));
@@ -742,9 +921,12 @@ export class WorkspaceCommandView {
       }
       const btn = event.target.closest('[data-cmd-modal-action]');
       if (!btn) return;
-      this.handleStatModalAction(btn.getAttribute('data-cmd-modal-action'), btn.getAttribute('data-cmd-id'));
+      this.handleStatModalAction(
+        btn.getAttribute('data-cmd-modal-action'),
+        btn.getAttribute('data-cmd-id')
+      );
     });
-    el.addEventListener('keydown', (event) => {
+    el.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         this.closeStatModal();
@@ -787,7 +969,8 @@ export class WorkspaceCommandView {
     if (!host) return;
     const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
     if (!config) {
-      host.innerHTML = '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
+      host.innerHTML =
+        '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
       return;
     }
     // is-command-modal hides the config header/tab strip so only the active pane shows.
@@ -825,14 +1008,18 @@ export class WorkspaceCommandView {
     if (tab.host === 'tools') {
       this.restoreSharedSurface('config');
       const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
-      if (!tools) { host.innerHTML = '<div class="ws-cmd-modal-empty">Find Tools is unavailable.</div>'; return; }
+      if (!tools) {
+        host.innerHTML = '<div class="ws-cmd-modal-empty">Find Tools is unavailable.</div>';
+        return;
+      }
       if (tools.style) tools.style.display = '';
       return;
     }
     this.restoreSharedSurface('tools');
     const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
     if (!config) {
-      host.innerHTML = '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
+      host.innerHTML =
+        '<div class="ws-cmd-modal-empty">Workspace configuration is unavailable.</div>';
       return;
     }
     if (config.classList) config.classList.add('is-command-modal');
@@ -861,14 +1048,17 @@ export class WorkspaceCommandView {
 
   // A config-surface or the Tools modal currently holds a shared surface on loan.
   statModalHoldsSharedSurface() {
-    return this.sectionUsesConfigSurface(this.statModalSection) || this.statModalSection === 'tools';
+    return (
+      this.sectionUsesConfigSurface(this.statModalSection) || this.statModalSection === 'tools'
+    );
   }
 
   ensureTaskFilterBar() {
     if (this.taskFilterBar) return this.taskFilterBar;
     const helper = this.tagFilterHelper();
     if (!helper || typeof helper.createTagFilterBar !== 'function') return null;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
     const holder = document.createElement('div');
     this.taskFilterBar = helper.createTagFilterBar({
       container: holder,
@@ -888,7 +1078,11 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
     const helper = this.tagFilterHelper();
-    if (helper && typeof helper.collectTags === 'function' && typeof bar.setAvailableTags === 'function') {
+    if (
+      helper &&
+      typeof helper.collectTags === 'function' &&
+      typeof bar.setAvailableTags === 'function'
+    ) {
       bar.setAvailableTags(helper.collectTags(tasks));
     }
     host.innerHTML = '';
@@ -896,9 +1090,11 @@ export class WorkspaceCommandView {
   }
 
   syncBoardSurface({ load = false } = {}) {
-    const inBoard = this.statModalSection === 'tasks' &&
+    const inBoard =
+      this.statModalSection === 'tasks' &&
       this.taskModalBoardMode &&
-      this.statModalEl && !this.statModalEl.hidden;
+      this.statModalEl &&
+      !this.statModalEl.hidden;
     if (!inBoard) {
       this.restoreSharedSurface('board');
       return;
@@ -923,23 +1119,40 @@ export class WorkspaceCommandView {
     if (section === 'tools') {
       const tabs = this.toolsTabs();
       const active = this.toolsTab(this.activeToolsTab);
-      const tabButtons = tabs.map(tab => (
-        '<button type="button" class="ws-cmd-system-tab' + (tab.key === active.key ? ' is-active' : '') +
-        '" data-cmd-tools-tab="' + escapeHtml(tab.key) + '" role="tab" aria-selected="' +
-        (tab.key === active.key ? 'true' : 'false') + '">' + escapeHtml(tab.label) + '</button>'
-      )).join('');
+      const tabButtons = tabs
+        .map(
+          tab =>
+            '<button type="button" class="ws-cmd-system-tab' +
+            (tab.key === active.key ? ' is-active' : '') +
+            '" data-cmd-tools-tab="' +
+            escapeHtml(tab.key) +
+            '" role="tab" aria-selected="' +
+            (tab.key === active.key ? 'true' : 'false') +
+            '">' +
+            escapeHtml(tab.label) +
+            '</button>'
+        )
+        .join('');
       return (
         '<header class="ws-cmd-modal-head">' +
-        '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
-        '<span class="ws-cmd-modal-count">' + this.statModalCount('tools') + '</span>' +
+        '<h3 class="ws-cmd-modal-title">' +
+        escapeHtml(meta.title) +
+        '</h3>' +
+        '<span class="ws-cmd-modal-count">' +
+        this.statModalCount('tools') +
+        '</span>' +
         '<div class="ws-cmd-modal-head-actions">' +
         '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
         '</div>' +
         '</header>' +
         '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
-        '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace tools">' + tabButtons + '</div>' +
+        '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace tools">' +
+        tabButtons +
+        '</div>' +
         '<div class="ws-cmd-config-host" data-cmd-tools-host>' +
-        '<div class="ws-cmd-modal-empty">Loading ' + escapeHtml(active.label) + '...</div>' +
+        '<div class="ws-cmd-modal-empty">Loading ' +
+        escapeHtml(active.label) +
+        '...</div>' +
         '</div></div>'
       );
     }
@@ -953,7 +1166,9 @@ export class WorkspaceCommandView {
         : '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>';
       return (
         '<header class="ws-cmd-modal-head">' +
-        '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
+        '<h3 class="ws-cmd-modal-title">' +
+        escapeHtml(meta.title) +
+        '</h3>' +
         countChip +
         '<div class="ws-cmd-modal-head-actions">' +
         '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
@@ -961,14 +1176,17 @@ export class WorkspaceCommandView {
         '</header>' +
         '<div class="ws-cmd-modal-body ws-cmd-modal-config-body">' +
         '<div class="ws-cmd-config-host" data-cmd-config-host>' +
-        '<div class="ws-cmd-modal-empty">Loading ' + escapeHtml(meta.title) + '...</div>' +
+        '<div class="ws-cmd-modal-empty">Loading ' +
+        escapeHtml(meta.title) +
+        '...</div>' +
         '</div></div>'
       );
     }
     const boardMode = section === 'tasks' && this.taskModalBoardMode;
-    const taskFilterHost = section === 'tasks'
-      ? '<div class="ws-cmd-modal-note-filter" data-cmd-task-filter></div>'
-      : '';
+    const taskFilterHost =
+      section === 'tasks'
+        ? '<div class="ws-cmd-modal-note-filter" data-cmd-task-filter></div>'
+        : '';
     const body = boardMode
       ? '<div class="ws-cmd-modal-body ws-cmd-modal-board-body">' +
         '<div class="ws-cmd-board-host" data-cmd-board-host>' +
@@ -977,12 +1195,18 @@ export class WorkspaceCommandView {
       : '<div class="ws-cmd-modal-body">' + taskFilterHost + this.statModalRows(section) + '</div>';
     return (
       '<header class="ws-cmd-modal-head">' +
-      '<h3 class="ws-cmd-modal-title">' + escapeHtml(meta.title) + '</h3>' +
-      '<span class="ws-cmd-modal-count">' + this.statModalCount(section) + '</span>' +
+      '<h3 class="ws-cmd-modal-title">' +
+      escapeHtml(meta.title) +
+      '</h3>' +
+      '<span class="ws-cmd-modal-count">' +
+      this.statModalCount(section) +
+      '</span>' +
       '<div class="ws-cmd-modal-head-actions">' +
       this.taskViewToggleHTML(section) +
       (boardMode ? '' : this.statModalFilterToggleHTML(section)) +
-      '<button type="button" class="ws-cmd-modal-add" data-cmd-modal-action="add">' + escapeHtml(meta.addLabel) + '</button>' +
+      '<button type="button" class="ws-cmd-modal-add" data-cmd-modal-action="add">' +
+      escapeHtml(meta.addLabel) +
+      '</button>' +
       '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close manager">×</button>' +
       '</div>' +
       '</header>' +
@@ -995,8 +1219,13 @@ export class WorkspaceCommandView {
   // and Goal Settings (the goal modal's "Advanced settings" button).
   sectionUsesConfigSurface(section) {
     const key = String(section || '');
-    return key === 'mcp' || key === 'skills' || key === 'settings' ||
-      key === 'mission' || key === 'intent';
+    return (
+      key === 'mcp' ||
+      key === 'skills' ||
+      key === 'settings' ||
+      key === 'mission' ||
+      key === 'intent'
+    );
   }
 
   // Config sections that carry no list count in the modal header.
@@ -1010,10 +1239,16 @@ export class WorkspaceCommandView {
     const board = this.taskModalBoardMode;
     return (
       '<div class="ws-cmd-modal-viewtoggle" role="tablist" aria-label="Task view">' +
-      '<button type="button" class="ws-cmd-modal-view' + (board ? '' : ' is-active') +
-      '" data-cmd-modal-action="view-list" aria-pressed="' + (board ? 'false' : 'true') + '">List</button>' +
-      '<button type="button" class="ws-cmd-modal-view' + (board ? ' is-active' : '') +
-      '" data-cmd-modal-action="view-board" aria-pressed="' + (board ? 'true' : 'false') + '">Board</button>' +
+      '<button type="button" class="ws-cmd-modal-view' +
+      (board ? '' : ' is-active') +
+      '" data-cmd-modal-action="view-list" aria-pressed="' +
+      (board ? 'false' : 'true') +
+      '">List</button>' +
+      '<button type="button" class="ws-cmd-modal-view' +
+      (board ? ' is-active' : '') +
+      '" data-cmd-modal-action="view-board" aria-pressed="' +
+      (board ? 'true' : 'false') +
+      '">Board</button>' +
       '</div>'
     );
   }
@@ -1022,26 +1257,40 @@ export class WorkspaceCommandView {
     if (String(section || '') !== 'tasks') return '';
     const label = this.taskModalShowAll ? 'Show open' : 'Show all';
     const pressed = this.taskModalShowAll ? 'true' : 'false';
-    return '<button type="button" class="ws-cmd-modal-filter" data-cmd-modal-action="toggle-task-filter" aria-pressed="' +
-      pressed + '">' + escapeHtml(label) + '</button>';
+    return (
+      '<button type="button" class="ws-cmd-modal-filter" data-cmd-modal-action="toggle-task-filter" aria-pressed="' +
+      pressed +
+      '">' +
+      escapeHtml(label) +
+      '</button>'
+    );
   }
 
   statModalCount(section) {
     switch (String(section || '')) {
-      case 'agents': return this.agentRowData().length;
-      case 'tasks': return this.taskRowData({ includeAll: this.taskModalShowAll }).length;
-      case 'mcp': return this.mcpRowData().length;
-      case 'skills': return this.skillRowData().length;
-      case 'tools': return this.mcpRowData().length + this.skillRowData().length;
-      default: return 0;
+      case 'agents':
+        return this.agentRowData().length;
+      case 'tasks':
+        return this.taskRowData({ includeAll: this.taskModalShowAll }).length;
+      case 'mcp':
+        return this.mcpRowData().length;
+      case 'skills':
+        return this.skillRowData().length;
+      case 'tools':
+        return this.mcpRowData().length + this.skillRowData().length;
+      default:
+        return 0;
     }
   }
 
   statModalRows(section) {
     switch (String(section || '')) {
-      case 'agents': return this.agentRowsHTML();
-      case 'tasks': return this.taskRowsHTML();
-      default: return '';
+      case 'agents':
+        return this.agentRowsHTML();
+      case 'tasks':
+        return this.taskRowsHTML();
+      default:
+        return '';
     }
   }
 
@@ -1052,58 +1301,84 @@ export class WorkspaceCommandView {
   agentRowData() {
     const page = this.page || {};
     let groups = [];
-    try { groups = page.buildAgentGroups() || []; } catch (err) { groups = []; }
-    return groups.filter((g) => g && g.isWorkspaceAgent && !g.isUnassigned);
+    try {
+      groups = page.buildAgentGroups() || [];
+    } catch (err) {
+      groups = [];
+    }
+    return groups.filter(g => g && g.isWorkspaceAgent && !g.isUnassigned);
   }
 
   agentRowsHTML() {
     const page = this.page || {};
     const groups = this.agentRowData();
     if (!groups.length) return this.modalEmptyHTML('No agents yet. Add one to build the roster.');
-    return groups.map((group) => {
-      const name = String(group.name || 'Agent');
-      const encoded = encodeURIComponent(name);
-      const keeper = page.isWorkspaceEntryAgent ? page.isWorkspaceEntryAgent(name) : false;
-      const avatar = page.getAgentAvatarPresentation
-        ? page.getAgentAvatarPresentation(name)
-        : { initials: name.slice(0, 2).toUpperCase(), style: '' };
-      const status = page.getAgentRosterStatus
-        ? page.getAgentRosterStatus(name)
-        : { key: 'idle', label: 'Idle' };
-      const tone = this.statusTone(status.key, status.label);
-      let modelLabel = '';
-      if (page.getAgentProfile && page.getAgentModelPresentation) {
-        const m = page.getAgentModelPresentation(page.getAgentProfile(name));
-        modelLabel = m && !m.empty ? m.model : '';
-      }
-      let skillCount = 0;
-      if (page.getAgentSkillSummary) {
-        const sk = page.getAgentSkillSummary(name);
-        skillCount = (sk && sk.count) || 0;
-      }
-      const chips =
-        (keeper ? '<span class="ws-cmd-mchip is-keeper">★ Entry Agent</span>' : '') +
-        '<span class="ws-cmd-mchip">' + escapeHtml(modelLabel || '—') + '</span>' +
-        '<span class="ws-cmd-mchip">Skills · ' + skillCount + '</span>';
-      const removeCtl = keeper
-        ? '<span class="ws-cmd-lock" title="Entry agent — can\'t be removed">🔒</span>'
-        : '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
-          escapeHtml(encoded) + '" title="Remove agent" aria-label="Remove ' + escapeHtml(name) + '">✕</button>';
-      return (
-        '<div class="ws-cmd-mrow">' +
-        '<span class="ws-cmd-mrow-av" style="' + escapeHtml(avatar.style || '') + '">' + escapeHtml(avatar.initials) + '</span>' +
-        '<div class="ws-cmd-mrow-main">' +
-        '<div class="ws-cmd-mrow-name"><span class="ws-cmd-led ' + tone + '"></span>' + escapeHtml(name) + '</div>' +
-        '<div class="ws-cmd-mrow-chips">' + chips + '</div>' +
-        '</div>' +
-        '<div class="ws-cmd-mrow-actions">' +
-        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
-        escapeHtml(encoded) + '" title="Edit model" aria-label="Edit model for ' + escapeHtml(name) + '">Model</button>' +
-        removeCtl +
-        '</div>' +
-        '</div>'
-      );
-    }).join('');
+    return groups
+      .map(group => {
+        const name = String(group.name || 'Agent');
+        const encoded = encodeURIComponent(name);
+        const keeper = page.isWorkspaceEntryAgent ? page.isWorkspaceEntryAgent(name) : false;
+        const avatar = page.getAgentAvatarPresentation
+          ? page.getAgentAvatarPresentation(name)
+          : { initials: name.slice(0, 2).toUpperCase(), style: '' };
+        const status = page.getAgentRosterStatus
+          ? page.getAgentRosterStatus(name)
+          : { key: 'idle', label: 'Idle' };
+        const tone = this.statusTone(status.key, status.label);
+        let modelLabel = '';
+        if (page.getAgentProfile && page.getAgentModelPresentation) {
+          const m = page.getAgentModelPresentation(page.getAgentProfile(name));
+          modelLabel = m && !m.empty ? m.model : '';
+        }
+        let skillCount = 0;
+        if (page.getAgentSkillSummary) {
+          const sk = page.getAgentSkillSummary(name);
+          skillCount = (sk && sk.count) || 0;
+        }
+        const chips =
+          (keeper ? '<span class="ws-cmd-mchip is-keeper">★ Entry Agent</span>' : '') +
+          '<span class="ws-cmd-mchip">' +
+          escapeHtml(modelLabel || '—') +
+          '</span>' +
+          '<span class="ws-cmd-mchip">Skills · ' +
+          skillCount +
+          '</span>';
+        const removeCtl = keeper
+          ? '<span class="ws-cmd-lock" title="Entry agent — can\'t be removed">🔒</span>'
+          : '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+            escapeHtml(encoded) +
+            '" title="Remove agent" aria-label="Remove ' +
+            escapeHtml(name) +
+            '">✕</button>';
+        return (
+          '<div class="ws-cmd-mrow">' +
+          '<span class="ws-cmd-mrow-av" style="' +
+          escapeHtml(avatar.style || '') +
+          '">' +
+          escapeHtml(avatar.initials) +
+          '</span>' +
+          '<div class="ws-cmd-mrow-main">' +
+          '<div class="ws-cmd-mrow-name"><span class="ws-cmd-led ' +
+          tone +
+          '"></span>' +
+          escapeHtml(name) +
+          '</div>' +
+          '<div class="ws-cmd-mrow-chips">' +
+          chips +
+          '</div>' +
+          '</div>' +
+          '<div class="ws-cmd-mrow-actions">' +
+          '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="edit" data-cmd-id="' +
+          escapeHtml(encoded) +
+          '" title="Edit model" aria-label="Edit model for ' +
+          escapeHtml(name) +
+          '">Model</button>' +
+          removeCtl +
+          '</div>' +
+          '</div>'
+        );
+      })
+      .join('');
   }
 
   isOpenTask(task) {
@@ -1127,7 +1402,7 @@ export class WorkspaceCommandView {
   taskRowData({ includeAll = false } = {}) {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const base = includeAll ? tasks : tasks.filter((task) => this.isOpenTask(task));
+    const base = includeAll ? tasks : tasks.filter(task => this.isOpenTask(task));
     return this.applyTaskTagFilter(base);
   }
 
@@ -1135,41 +1410,64 @@ export class WorkspaceCommandView {
     const tasks = this.taskRowData({ includeAll: this.taskModalShowAll });
     if (!tasks.length) {
       return this.modalEmptyHTML(
-        this.taskModalShowAll ? 'No tasks yet. Add one to get started.' : 'No open tasks. Use Show all to view completed tasks.'
+        this.taskModalShowAll
+          ? 'No tasks yet. Add one to get started.'
+          : 'No open tasks. Use Show all to view completed tasks.'
       );
     }
-    return tasks.map((t) => {
-      const id = String(t.id || '');
-      const label = String(t.description || t.name || t.title || 'Task');
-      const assignee = String(t.to || t.agent_name || t.assigned_to || '');
-      const tone = this.taskTone(t.status);
-      const statusText = String(t.status || 'pending').replace('_', ' ');
-      return (
-        '<div class="ws-cmd-mrow">' +
-        '<div class="ws-cmd-mrow-main">' +
-        '<div class="ws-cmd-mrow-name">' + escapeHtml(label) + '</div>' +
-        '<div class="ws-cmd-mrow-chips">' +
-        '<span class="ws-cmd-mchip ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
-        (assignee ? '<span class="ws-cmd-mchip">' + escapeHtml(assignee) + '</span>' : '') +
-        '</div>' +
-        '</div>' +
-        '<div class="ws-cmd-mrow-actions">' +
-        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="run" data-cmd-id="' +
-        escapeHtml(id) + '" title="Run" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
-        '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="open" data-cmd-id="' +
-        escapeHtml(id) + '" title="Open" aria-label="Open task ' + escapeHtml(label) + '">↗</button>' +
-        '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
-        escapeHtml(id) + '" title="Delete" aria-label="Delete task ' + escapeHtml(label) + '">✕</button>' +
-        '</div>' +
-        '</div>'
-      );
-    }).join('');
+    return tasks
+      .map(t => {
+        const id = String(t.id || '');
+        const label = String(t.description || t.name || t.title || 'Task');
+        const assignee = String(t.to || t.agent_name || t.assigned_to || '');
+        const tone = this.taskTone(t.status);
+        const statusText = String(t.status || 'pending').replace('_', ' ');
+        return (
+          '<div class="ws-cmd-mrow">' +
+          '<div class="ws-cmd-mrow-main">' +
+          '<div class="ws-cmd-mrow-name">' +
+          escapeHtml(label) +
+          '</div>' +
+          '<div class="ws-cmd-mrow-chips">' +
+          '<span class="ws-cmd-mchip ws-cmd-q-status ' +
+          tone +
+          '">' +
+          escapeHtml(statusText) +
+          '</span>' +
+          (assignee ? '<span class="ws-cmd-mchip">' + escapeHtml(assignee) + '</span>' : '') +
+          '</div>' +
+          '</div>' +
+          '<div class="ws-cmd-mrow-actions">' +
+          '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="run" data-cmd-id="' +
+          escapeHtml(id) +
+          '" title="Run" aria-label="Run task ' +
+          escapeHtml(label) +
+          '">▶</button>' +
+          '<button type="button" class="ws-cmd-mrow-btn" data-cmd-modal-action="open" data-cmd-id="' +
+          escapeHtml(id) +
+          '" title="Open" aria-label="Open task ' +
+          escapeHtml(label) +
+          '">↗</button>' +
+          '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
+          escapeHtml(id) +
+          '" title="Delete" aria-label="Delete task ' +
+          escapeHtml(label) +
+          '">✕</button>' +
+          '</div>' +
+          '</div>'
+        );
+      })
+      .join('');
   }
 
   mcpRowData() {
     const page = this.page || {};
     if (typeof page.getWorkspaceMCPBindings === 'function') {
-      try { return page.getWorkspaceMCPBindings({ includeDisabled: true }) || []; } catch (err) { /* fall through */ }
+      try {
+        return page.getWorkspaceMCPBindings({ includeDisabled: true }) || [];
+      } catch (err) {
+        /* fall through */
+      }
     }
     const ws = page.workspace || {};
     return Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings : [];
@@ -1178,7 +1476,11 @@ export class WorkspaceCommandView {
   skillRowData() {
     const page = this.page || {};
     if (typeof page.getWorkspaceSkillBindings === 'function') {
-      try { return page.getWorkspaceSkillBindings({ includeDisabled: true }) || []; } catch (err) { /* fall through */ }
+      try {
+        return page.getWorkspaceSkillBindings({ includeDisabled: true }) || [];
+      } catch (err) {
+        /* fall through */
+      }
     }
     const ws = page.workspace || {};
     return Array.isArray(ws.skill_bindings) ? ws.skill_bindings : [];
@@ -1188,7 +1490,10 @@ export class WorkspaceCommandView {
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null) || {};
     const section = this.statModalSection;
     const a = String(action || '');
-    if (a === 'close') { this.closeStatModal(); return; }
+    if (a === 'close') {
+      this.closeStatModal();
+      return;
+    }
     if (a === 'toggle-task-filter' && section === 'tasks') {
       this.taskModalShowAll = !this.taskModalShowAll;
       this.renderStatModalBody();
@@ -1214,15 +1519,28 @@ export class WorkspaceCommandView {
     // add/edit/delete arrive through that panel's handlers, not this switch.
     switch (section) {
       case 'agents':
-        if (a === 'add') { this.closeStatModal(); if (typeof page.openAddAgentModal === 'function') page.openAddAgentModal(); }
-        else if (a === 'edit') { this.closeStatModal(); if (typeof page.openAgentModelModal === 'function') page.openAgentModelModal(id); }
-        else if (a === 'delete') { if (typeof page.removeAgentFromWorkspace === 'function') page.removeAgentFromWorkspace(id); }
+        if (a === 'add') {
+          this.closeStatModal();
+          if (typeof page.openAddAgentModal === 'function') page.openAddAgentModal();
+        } else if (a === 'edit') {
+          this.closeStatModal();
+          if (typeof page.openAgentModelModal === 'function') page.openAgentModelModal(id);
+        } else if (a === 'delete') {
+          if (typeof page.removeAgentFromWorkspace === 'function')
+            page.removeAgentFromWorkspace(id);
+        }
         break;
       case 'tasks':
-        if (a === 'add') { this.closeStatModal(); if (typeof page.showAddTaskModal === 'function') page.showAddTaskModal(); }
-        else if (a === 'run') { if (typeof page.executeTask === 'function') page.executeTask(id); }
-        else if (a === 'open') { if (typeof page.openTask === 'function') page.openTask(id); }
-        else if (a === 'delete') { if (typeof page.deleteTask === 'function') page.deleteTask(id); }
+        if (a === 'add') {
+          this.closeStatModal();
+          if (typeof page.showAddTaskModal === 'function') page.showAddTaskModal();
+        } else if (a === 'run') {
+          if (typeof page.executeTask === 'function') page.executeTask(id);
+        } else if (a === 'open') {
+          if (typeof page.openTask === 'function') page.openTask(id);
+        } else if (a === 'delete') {
+          if (typeof page.deleteTask === 'function') page.deleteTask(id);
+        }
         break;
       default:
         break;
@@ -1245,7 +1563,8 @@ export class WorkspaceCommandView {
         this.render();
         break;
       case 'copy':
-        if (typeof page.copySelectedNotesToClipboard === 'function') page.copySelectedNotesToClipboard();
+        if (typeof page.copySelectedNotesToClipboard === 'function')
+          page.copySelectedNotesToClipboard();
         break;
       case 'delete':
         if (typeof page.deleteSelectedNotes === 'function') page.deleteSelectedNotes();
@@ -1268,7 +1587,8 @@ export class WorkspaceCommandView {
         if (page && typeof page.createNewSession === 'function') page.createNewSession();
         break;
       case 'folders':
-        if (page && typeof page.showAddDirectoryModal === 'function') page.showAddDirectoryModal(triggerButton);
+        if (page && typeof page.showAddDirectoryModal === 'function')
+          page.showAddDirectoryModal(triggerButton);
         break;
       case 'files':
         if (page && typeof page.showFileModal === 'function') page.showFileModal();
@@ -1296,7 +1616,9 @@ export class WorkspaceCommandView {
 
     switch (String(sectionKey || '')) {
       case 'notes': {
-        const note = (Array.isArray(page.notes) ? page.notes : []).find(item => String(item.id || '') === id);
+        const note = (Array.isArray(page.notes) ? page.notes : []).find(
+          item => String(item.id || '') === id
+        );
         if (note && typeof page.showNoteModal === 'function') page.showNoteModal(note);
         break;
       }
@@ -1321,7 +1643,7 @@ export class WorkspaceCommandView {
     }
   }
 
-  // ---------- garrison (agents as unit cards) ----------
+  // ---------- agent command deck ----------
 
   statusTone(statusKey, statusLabel) {
     const s = (String(statusKey || '') + ' ' + String(statusLabel || '')).toLowerCase();
@@ -1332,189 +1654,969 @@ export class WorkspaceCommandView {
 
   taskTone(status) {
     switch (String(status || '').toLowerCase()) {
-      case 'in_progress': return 'working';
-      case 'failed': case 'cancelled': return 'alert';
-      case 'completed': case 'done': return 'done';
-      default: return 'pending';
+      case 'in_progress':
+        return 'working';
+      case 'failed':
+      case 'cancelled':
+        return 'alert';
+      case 'completed':
+      case 'done':
+        return 'done';
+      default:
+        return 'pending';
     }
   }
 
-  unitCardHTML(group) {
-    const page = this.page;
-    const name = String(group.name || 'Agent');
-    const encoded = encodeURIComponent(name);
-    const keeper = !group.isUnassigned && page.isWorkspaceEntryAgent
-      ? page.isWorkspaceEntryAgent(name) : false;
-
-    const avatar = page.getAgentAvatarPresentation
-      ? page.getAgentAvatarPresentation(name)
-      : { initials: name.slice(0, 2).toUpperCase(), style: '' };
-    const status = !group.isUnassigned && page.getAgentRosterStatus
-      ? page.getAgentRosterStatus(name)
-      : { key: 'idle', label: 'Unassigned' };
-    const tone = this.statusTone(status.key, status.label);
-
-    let modelLabel = '';
-    if (!group.isUnassigned && page.getAgentProfile && page.getAgentModelPresentation) {
-      const m = page.getAgentModelPresentation(page.getAgentProfile(name));
-      modelLabel = m && !m.empty ? m.model : '';
+  normalizeAgentKey(name) {
+    const page = this.page || {};
+    if (typeof page.normalizeAgentName === 'function') {
+      return String(page.normalizeAgentName(name) || '');
     }
-    let skillCount = 0;
-    if (!group.isUnassigned && page.getAgentSkillSummary) {
-      const sk = page.getAgentSkillSummary(name);
-      skillCount = (sk && sk.count) || 0;
+    return String(name || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  agentSelectionStorageKey() {
+    const workspaceId = this.workspaceId();
+    return workspaceId ? `ori-workspace-command-agent:${workspaceId}` : '';
+  }
+
+  readPersistedAgentKey() {
+    const storageKey = this.agentSelectionStorageKey();
+    if (!storageKey || typeof localStorage === 'undefined') return '';
+    try {
+      return this.normalizeAgentKey(localStorage.getItem(storageKey));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  persistAgentKey(key) {
+    const storageKey = this.agentSelectionStorageKey();
+    const normalized = this.normalizeAgentKey(key);
+    if (!storageKey || !normalized || typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(storageKey, normalized);
+    } catch (_error) {
+      // Storage is best effort; rendering and selection must continue without it.
+    }
+  }
+
+  agentGroups() {
+    const page = this.page || {};
+    let rawGroups = [];
+    try {
+      rawGroups = typeof page.buildAgentGroups === 'function' ? page.buildAgentGroups() || [] : [];
+    } catch (_error) {
+      rawGroups = [];
     }
 
-    const roleBadge = group.isUnassigned
-      ? '<span class="ws-cmd-badge">Unassigned</span>'
-      : (keeper
-          ? '<span class="ws-cmd-badge is-keeper">★ Entry Agent</span>'
-          : '');
+    const agents = [];
+    const seen = new Set();
+    let unassigned = null;
+    rawGroups.forEach(group => {
+      if (!group) return;
+      if (group.isUnassigned) {
+        if (!unassigned && Array.isArray(group.tasks) && group.tasks.length > 0) {
+          unassigned = group;
+        }
+        return;
+      }
+      if (!group.isWorkspaceAgent) return;
+      const key = this.normalizeAgentKey(group.key || group.name);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      agents.push(group);
+    });
 
-    const ctl = group.isUnassigned
-      ? ''
-      : (keeper
-          ? '<span class="ws-cmd-lock" title="Entry agent — locked, can\'t be removed">🔒</span>' +
-            '<button type="button" class="ws-cmd-icon-btn" data-cmd-manager-settings="1"' +
-            ' title="Manager settings" aria-label="Manager settings for ' + escapeHtml(name) + '">⚙</button>'
-          : '') +
-        '<button type="button" class="ws-cmd-icon-btn" data-cmd-add-task="' + escapeHtml(encoded) +
-        '" title="Add a task for ' + escapeHtml(name) + '" aria-label="Add a task for ' + escapeHtml(name) + '">＋</button>';
+    agents.sort((left, right) => {
+      const leftEntry = this.isEntryAgentGroup(left);
+      const rightEntry = this.isEntryAgentGroup(right);
+      if (leftEntry === rightEntry) return 0;
+      return leftEntry ? -1 : 1;
+    });
+    return { agents, unassigned };
+  }
 
-    const rows = group.isUnassigned ? '' :
-      '<div class="ws-cmd-unit-rows">' +
-      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Model</span><span class="ws-cmd-rv">' +
-      escapeHtml(modelLabel || '—') + '</span></div>' +
-      '<div class="ws-cmd-row"><span class="ws-cmd-rk">Skills</span><span class="ws-cmd-rv">' +
-      skillCount + '</span></div>' +
-      '</div>' +
-      this.promptBlockHTML(group, name, encoded);
+  isEntryAgentGroup(group) {
+    const page = this.page || {};
+    return Boolean(
+      group &&
+      typeof page.isWorkspaceEntryAgent === 'function' &&
+      page.isWorkspaceEntryAgent(group.name)
+    );
+  }
 
-    // Link the unit name to the agent's detail page when one is reachable.
-    let nameInner = escapeHtml(name);
-    if (!group.isUnassigned && page.getAgentDetailTarget) {
-      const target = page.getAgentDetailTarget(name);
-      if (target && target.interactive && target.href) {
-        nameInner = '<a class="ws-cmd-unit-name-link" href="' + escapeHtml(target.href) +
-          '" title="' + escapeHtml(target.title || ('Open ' + name + ' details')) + '">' +
-          escapeHtml(name) + '</a>';
+  reconcileAgentSelection(groups) {
+    const agents = Array.isArray(groups) ? groups : [];
+    const keys = new Set(agents.map(group => this.normalizeAgentKey(group.key || group.name)));
+    let selected = this.normalizeAgentKey(this.selectedAgentKey);
+
+    if (!this.agentSelectionInitialized) {
+      const persisted = this.readPersistedAgentKey();
+      if (persisted && keys.has(persisted)) selected = persisted;
+      this.agentSelectionInitialized = true;
+    }
+
+    if (!selected || !keys.has(selected)) {
+      const entry = agents.find(group => this.isEntryAgentGroup(group));
+      selected = this.normalizeAgentKey(
+        entry?.key || entry?.name || agents[0]?.key || agents[0]?.name
+      );
+    }
+
+    this.selectedAgentKey = selected;
+    if (selected) this.persistAgentKey(selected);
+    return selected;
+  }
+
+  selectedAgentGroup(groups) {
+    const agents = Array.isArray(groups) ? groups : [];
+    const selected = this.reconcileAgentSelection(agents);
+    return (
+      agents.find(group => this.normalizeAgentKey(group.key || group.name) === selected) || null
+    );
+  }
+
+  agentRolePresentation(group) {
+    const page = this.page || {};
+    if (typeof page.getAgentGroupRolePresentation === 'function') {
+      try {
+        return (
+          page.getAgentGroupRolePresentation(group) || {
+            label: 'Agent',
+            detail: 'Agent',
+            roles: []
+          }
+        );
+      } catch (_error) {
+        // Fall through to the group roles.
       }
     }
+    const roles = Array.from(
+      new Set(
+        (Array.isArray(group?.roles) ? group.roles : [])
+          .map(role => String(role || '').trim())
+          .filter(Boolean)
+      )
+    );
+    return {
+      label: roles.length > 1 ? 'Multiple roles' : roles[0] || 'Agent',
+      detail: roles.join(', ') || 'Agent',
+      roles
+    };
+  }
+
+  agentViewModel(group) {
+    if (!group) return null;
+    const page = this.page || {};
+    const name = String(group.name || 'Agent');
+    const key = this.normalizeAgentKey(group.key || name);
+    const status =
+      typeof page.getAgentRosterStatus === 'function'
+        ? page.getAgentRosterStatus(name)
+        : { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+    const role = this.agentRolePresentation(group);
+    const skills =
+      typeof page.getAgentSkillSummary === 'function'
+        ? page.getAgentSkillSummary(name)
+        : { count: 0, names: [] };
+    const mcpNames =
+      typeof page.getEffectiveWorkspaceMCPServerNames === 'function'
+        ? page.getEffectiveWorkspaceMCPServerNames(name)
+        : [];
+    const profile = typeof page.getAgentProfile === 'function' ? page.getAgentProfile(name) : null;
+    const model =
+      typeof page.getAgentModelPresentation === 'function'
+        ? page.getAgentModelPresentation(profile)
+        : { model: '', label: 'Model not set', empty: true };
+    const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const currentTask =
+      tasks.find(task => String(task?.status || '').toLowerCase() === 'in_progress') || null;
+
+    return {
+      group,
+      key,
+      name,
+      encodedName: encodeURIComponent(name),
+      entry: this.isEntryAgentGroup(group),
+      instanceCount: Math.max(1, Number(group.instanceCount || 1)),
+      role,
+      status,
+      tone: this.statusTone(status?.key, status?.label),
+      skills,
+      mcpNames: Array.isArray(mcpNames) ? mcpNames : [],
+      profile,
+      model,
+      tasks,
+      currentTask
+    };
+  }
+
+  agentCharacterHTML(agent, variant = 'roster') {
+    if (!agent) return '';
+    const key = String(agent.key || agent.name || 'agent');
+    let hash = 0;
+    for (let index = 0; index < key.length; index += 1) {
+      hash = (hash * 33 + key.charCodeAt(index)) >>> 0;
+    }
+    const hue = hash % 360;
+    const visor = 28 + (hash % 3) * 5;
+    const antenna =
+      hash % 2 === 0
+        ? '<path d="M50 24V12M50 12L57 7" class="ws-cmd-character-line"/>'
+        : '<path d="M50 24V10M44 8H56" class="ws-cmd-character-line"/>';
+    const emblem =
+      hash % 3 === 0
+        ? '<path d="M50 63L57 70L50 77L43 70Z" class="ws-cmd-character-emblem"/>'
+        : hash % 3 === 1
+          ? '<circle cx="50" cy="69" r="7" class="ws-cmd-character-emblem"/>'
+          : '<path d="M42 75L50 61L58 75Z" class="ws-cmd-character-emblem"/>';
+    const variantClass = variant === 'stage' ? ' is-stage' : ' is-roster';
 
     return (
-      '<article class="ws-cmd-unit' + (keeper ? ' is-keeper' : '') + '">' +
-      '<div class="ws-cmd-unit-top">' +
-      '<span class="ws-cmd-av" style="' + escapeHtml(avatar.style || '') + '">' + escapeHtml(avatar.initials) + '</span>' +
-      '<div class="ws-cmd-unit-id"><div class="ws-cmd-unit-name">' + nameInner + '</div>' +
-      '<div class="ws-cmd-unit-role">' + roleBadge +
-      '<span class="ws-cmd-state"><span class="ws-cmd-led ' + tone + '"></span>' + escapeHtml(status.label || 'Idle') + '</span>' +
-      '</div></div>' +
-      '<div class="ws-cmd-unit-ctl">' + ctl + '</div>' +
+      '<span class="ws-cmd-character' +
+      variantClass +
+      ' ' +
+      escapeHtml(agent.tone || 'idle') +
+      '" style="--agent-character-hue:' +
+      hue +
+      '" aria-hidden="true">' +
+      '<svg viewBox="0 0 100 118" focusable="false">' +
+      '<path d="M18 92L28 56L38 47H62L72 56L82 92L69 108H31Z" class="ws-cmd-character-body"/>' +
+      '<path d="M32 30L42 21H58L68 30V49L59 58H41L32 49Z" class="ws-cmd-character-head"/>' +
+      '<path d="M' +
+      visor +
+      ' 34H' +
+      (100 - visor) +
+      'V45H' +
+      visor +
+      'Z" class="ws-cmd-character-visor"/>' +
+      '<path d="M18 92L5 83L12 66L28 59M82 92L95 83L88 66L72 59" class="ws-cmd-character-shoulders"/>' +
+      antenna +
+      emblem +
+      '<path d="M28 91H72" class="ws-cmd-character-line is-soft"/>' +
+      '</svg>' +
+      '</span>'
+    );
+  }
+
+  rosterItemHTML(agent) {
+    const selected = agent.key === this.selectedAgentKey;
+    const count =
+      agent.instanceCount > 1
+        ? '<span class="ws-cmd-roster-count" aria-label="' +
+          agent.instanceCount +
+          ' instances">' +
+          agent.instanceCount +
+          '×</span>'
+        : '';
+    const entry = agent.entry ? '<span class="ws-cmd-roster-entry">Entry</span>' : '';
+    return (
+      '<button type="button" class="ws-cmd-roster-item' +
+      (selected ? ' is-selected' : '') +
+      (agent.entry ? ' is-entry' : '') +
+      '" data-cmd-select-agent="' +
+      escapeHtml(agent.encodedName) +
+      '" data-agent-key="' +
+      escapeHtml(agent.key) +
+      '" aria-pressed="' +
+      (selected ? 'true' : 'false') +
+      '" aria-label="Select ' +
+      escapeHtml(agent.name) +
+      ', ' +
+      escapeHtml(agent.status?.label || 'Idle') +
+      (agent.instanceCount > 1 ? ', ' + agent.instanceCount + ' instances' : '') +
+      '">' +
+      this.agentCharacterHTML(agent, 'roster') +
+      '<span class="ws-cmd-roster-copy">' +
+      '<span class="ws-cmd-roster-name">' +
+      escapeHtml(agent.name) +
+      '</span>' +
+      '<span class="ws-cmd-roster-role">' +
+      escapeHtml(agent.role?.label || 'Agent') +
+      '</span>' +
+      '<span class="ws-cmd-state"><span class="ws-cmd-led ' +
+      escapeHtml(agent.tone) +
+      '"></span>' +
+      escapeHtml(agent.status?.label || 'Idle') +
+      '</span>' +
+      '</span>' +
+      entry +
+      count +
+      '</button>'
+    );
+  }
+
+  agentDetailTarget(agent) {
+    const page = this.page || {};
+    if (!agent || typeof page.getAgentDetailTarget !== 'function') return null;
+    try {
+      const target = page.getAgentDetailTarget(agent.name);
+      return target && target.interactive && target.href ? target : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  agentStageHTML(agent) {
+    const target = this.agentDetailTarget(agent);
+    const detailAction = target
+      ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(target.href) + '">Open Agent</a>'
+      : '';
+    const entry = agent.entry ? '<span class="ws-cmd-badge is-keeper">★ Entry Agent</span>' : '';
+    const remove = agent.entry
+      ? '<span class="ws-cmd-agent-lock" title="The entry agent cannot be removed">Entry agent locked</span>'
+      : '<button type="button" class="ws-cmd-agent-action is-danger" data-cmd-remove-agent="' +
+        escapeHtml(agent.encodedName) +
+        '">Remove</button>';
+    const instance =
+      agent.instanceCount > 1
+        ? '<span class="ws-cmd-badge">' + agent.instanceCount + ' instances</span>'
+        : '';
+
+    return (
+      '<section class="ws-cmd-agent-stage ' +
+      escapeHtml(agent.tone) +
+      '" aria-labelledby="ws-cmd-selected-agent-name">' +
+      '<div class="ws-cmd-stage-grid" aria-hidden="true"></div>' +
+      '<div class="ws-cmd-stage-character">' +
+      this.agentCharacterHTML(agent, 'stage') +
       '</div>' +
-      rows +
-      this.questLogHTML(group, encoded) +
-      '</article>'
+      '<div class="ws-cmd-stage-copy">' +
+      '<span class="ws-cmd-stage-kicker">Selected Agent</span>' +
+      '<h3 id="ws-cmd-selected-agent-name">' +
+      escapeHtml(agent.name) +
+      '</h3>' +
+      '<div class="ws-cmd-stage-badges">' +
+      entry +
+      instance +
+      '</div>' +
+      '<p class="ws-cmd-stage-role">' +
+      escapeHtml(agent.role?.detail || 'Agent') +
+      '</p>' +
+      '<p class="ws-cmd-stage-status"><span class="ws-cmd-led ' +
+      escapeHtml(agent.tone) +
+      '"></span><strong>' +
+      escapeHtml(agent.status?.label || 'Idle') +
+      '</strong><span>' +
+      escapeHtml(agent.status?.detail || 'No active tasks') +
+      '</span></p>' +
+      '</div>' +
+      '<div class="ws-cmd-stage-actions">' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-task="' +
+      escapeHtml(agent.encodedName) +
+      '">Give Task</button>' +
+      detailAction +
+      (agent.entry
+        ? '<button type="button" class="ws-cmd-agent-action" data-cmd-manager-settings="1">Manager Settings</button>'
+        : '') +
+      remove +
+      '</div>' +
+      '</section>'
     );
   }
 
   questLogHTML(group, encoded) {
     const tasks = this.applyTaskTagFilter(Array.isArray(group.tasks) ? group.tasks : []);
-    const add = group.isUnassigned ? '' :
-      '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' + escapeHtml(encoded) +
-      '" aria-label="Add task">＋</button>';
-    const head = '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' + tasks.length + '</span>' + add + '</div>';
+    const add = group.isUnassigned
+      ? ''
+      : '<button type="button" class="ws-cmd-icon-btn sm" data-cmd-add-task="' +
+        escapeHtml(encoded) +
+        '" aria-label="Add task">＋</button>';
+    const head =
+      '<div class="ws-cmd-ql-head"><span class="ws-cmd-ql-t">Tasks · ' +
+      tasks.length +
+      '</span>' +
+      add +
+      '</div>';
     if (!tasks.length) {
-      const emptyText = this.taskFilterActiveTags().length ? '— no tasks match the tag filter —' : '— no tasks yet —';
-      return '<div class="ws-cmd-questlog">' + head + '<div class="ws-cmd-ql-empty">' + emptyText + '</div></div>';
-    }
-    const items = tasks.map((t) => {
-      const label = String(t.description || t.name || t.title || 'Task');
-      const tone = this.taskTone(t.status);
-      const statusText = String(t.status || 'pending').replace('_', ' ');
-      const taskId = String(t.id || '');
+      const emptyText = this.taskFilterActiveTags().length
+        ? '— no tasks match the tag filter —'
+        : '— no tasks yet —';
       return (
-        '<div class="ws-cmd-quest">' +
-        '<span class="ws-cmd-q-glyph">&bull;</span>' +
-        '<button type="button" class="ws-cmd-q-name" data-cmd-open-task="' + escapeHtml(taskId) +
-        '" aria-label="Open task ' + escapeHtml(label) + '">' + escapeHtml(label) + '</button>' +
-        '<span class="ws-cmd-q-status ' + tone + '">' + escapeHtml(statusText) + '</span>' +
-        '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' + escapeHtml(taskId) +
-        '" title="Run" aria-label="Run task ' + escapeHtml(label) + '">▶</button>' +
-        '</div>'
+        '<div class="ws-cmd-questlog">' +
+        head +
+        '<div class="ws-cmd-ql-empty">' +
+        emptyText +
+        '</div></div>'
       );
-    }).join('');
+    }
+    const items = tasks
+      .map(t => {
+        const label = String(t.description || t.name || t.title || 'Task');
+        const tone = this.taskTone(t.status);
+        const statusText = String(t.status || 'pending').replace('_', ' ');
+        const taskId = String(t.id || '');
+        return (
+          '<div class="ws-cmd-quest">' +
+          '<span class="ws-cmd-q-glyph">&bull;</span>' +
+          '<button type="button" class="ws-cmd-q-name" data-cmd-open-task="' +
+          escapeHtml(taskId) +
+          '" aria-label="Open task ' +
+          escapeHtml(label) +
+          '">' +
+          escapeHtml(label) +
+          '</button>' +
+          '<span class="ws-cmd-q-status ' +
+          tone +
+          '">' +
+          escapeHtml(statusText) +
+          '</span>' +
+          '<button type="button" class="ws-cmd-q-run" data-cmd-run-task="' +
+          escapeHtml(taskId) +
+          '" title="Run" aria-label="Run task ' +
+          escapeHtml(label) +
+          '">▶</button>' +
+          '</div>'
+        );
+      })
+      .join('');
     return '<div class="ws-cmd-questlog">' + head + items + '</div>';
   }
 
-  // System-prompt block on a unit card: a lazily-hydrated preview that opens the
-  // full system-prompt modal (base + workspace refinement + effective) on click.
-  // The preview text is filled in by hydrateGarrisonPrompts() once the
-  // effective-prompt fetch resolves.
-  promptBlockHTML(group, name, encoded) {
-    if (group.isUnassigned) return '';
+  overviewTabHTML(agent) {
+    const currentTask = agent.currentTask
+      ? escapeHtml(agent.currentTask.description || agent.currentTask.name || 'Current task')
+      : 'No task in progress';
+    const currentDetail = agent.currentTask
+      ? 'This agent is actively executing assigned work.'
+      : 'Ready for a new assignment.';
     return (
-      '<button type="button" class="ws-cmd-prompt" data-cmd-view-prompt="' + escapeHtml(encoded) + '"' +
-      ' title="View ' + escapeHtml(name) + ' system prompt"' +
-      ' aria-label="View ' + escapeHtml(name) + ' system prompt">' +
-      '<span class="ws-cmd-prompt-head"><span class="ws-cmd-rk">System Prompt</span>' +
-      '<span class="ws-cmd-prompt-cta">View ▸</span></span>' +
-      '<span class="ws-cmd-prompt-preview" data-cmd-prompt-name="' + escapeHtml(encoded) + '">Loading…</span>' +
-      '</button>'
+      '<div class="ws-cmd-overview-hero">' +
+      '<div><span class="ws-cmd-overview-label">Current assignment</span>' +
+      '<strong>' +
+      currentTask +
+      '</strong><p>' +
+      currentDetail +
+      '</p></div>' +
+      '<span class="ws-cmd-overview-signal ' +
+      escapeHtml(agent.tone) +
+      '">' +
+      escapeHtml(agent.status?.label || 'Idle') +
+      '</span></div>' +
+      '<div class="ws-cmd-overview-stats">' +
+      '<div><span>Tasks</span><strong>' +
+      agent.tasks.length +
+      '</strong></div>' +
+      '<div><span>Skills</span><strong>' +
+      Number(agent.skills?.count || 0) +
+      '</strong></div>' +
+      '<div><span>MCP tools</span><strong>' +
+      agent.mcpNames.length +
+      '</strong></div>' +
+      '<div><span>Instances</span><strong>' +
+      agent.instanceCount +
+      '</strong></div>' +
+      '</div>' +
+      '<div class="ws-cmd-overview-brief">' +
+      '<span class="ws-cmd-overview-label">Role profile</span>' +
+      '<p>' +
+      escapeHtml(agent.role?.detail || 'Agent') +
+      '</p>' +
+      '<span class="ws-cmd-overview-label">Status detail</span>' +
+      '<p>' +
+      escapeHtml(agent.status?.detail || 'No active tasks') +
+      '</p>' +
+      '</div>'
     );
   }
 
-  hydrateGarrisonPrompts() {
-    const page = this.page;
-    if (!page || typeof page.ensureAgentPromptData !== 'function') return;
-    const root = this.container && this.container.querySelector('.ws-cmd-garrison');
-    if (!root) return;
-    const previews = root.querySelectorAll('.ws-cmd-prompt-preview[data-cmd-prompt-name]');
-    previews.forEach((el) => {
-      let name = '';
-      try { name = decodeURIComponent(el.getAttribute('data-cmd-prompt-name') || ''); }
-      catch (_e) { name = el.getAttribute('data-cmd-prompt-name') || ''; }
-      if (!name) return;
-      Promise.resolve(page.ensureAgentPromptData(name)).then((data) => {
-        if (!el.isConnected) return;
-        if (!data || data.error) {
-          el.textContent = 'System prompt unavailable.';
-          el.classList.add('is-empty');
-          return;
-        }
-        const preview = typeof page.buildAgentPromptPreview === 'function'
-          ? page.buildAgentPromptPreview(data)
-          : String(data.effective_prompt || data.base_system_prompt || '');
-        el.textContent = preview || 'No system prompt set.';
-        el.classList.toggle('is-empty', !preview);
-      }).catch(() => {});
+  tasksTabHTML(agent) {
+    const page = this.page || {};
+    if (typeof page.renderAgentTasksContent === 'function') {
+      try {
+        return (
+          '<div class="ws-cmd-agent-task-list">' +
+          page.renderAgentTasksContent(agent.tasks) +
+          '</div>'
+        );
+      } catch (_error) {
+        // Fall back to the compact command task list.
+      }
+    }
+    return this.questLogHTML(agent.group, agent.encodedName);
+  }
+
+  chipListHTML(items, emptyText, tone = '') {
+    const values = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!values.length) {
+      return '<span class="ws-cmd-loadout-empty">' + escapeHtml(emptyText) + '</span>';
+    }
+    return values
+      .map(
+        item =>
+          '<span class="ws-cmd-loadout-chip ' +
+          escapeHtml(tone) +
+          '">' +
+          escapeHtml(item) +
+          '</span>'
+      )
+      .join('');
+  }
+
+  promptCacheEntry(agent) {
+    const cache = this.page && this.page.agentPromptCache;
+    if (!cache || typeof cache.get !== 'function' || !agent) return null;
+    return cache.get(agent.key) || null;
+  }
+
+  promptLoadoutHTML(agent) {
+    const page = this.page || {};
+    const cached = this.promptCacheEntry(agent);
+    const loading = this.agentPromptLoadingKey === agent.key;
+    if (loading) {
+      return (
+        '<div class="ws-cmd-loadout-prompt is-loading" aria-live="polite">' +
+        '<div><span class="ws-cmd-loadout-title">System prompt</span>' +
+        '<p>Loading effective prompt…</p></div></div>'
+      );
+    }
+    if (cached && cached.error) {
+      return (
+        '<div class="ws-cmd-loadout-prompt is-error">' +
+        '<div><span class="ws-cmd-loadout-title">System prompt unavailable</span>' +
+        '<p>The effective prompt could not be loaded.</p></div>' +
+        '<button type="button" class="ws-cmd-agent-action" data-cmd-retry-prompt="' +
+        escapeHtml(agent.encodedName) +
+        '">Retry</button></div>'
+      );
+    }
+    if (cached && !cached.error) {
+      const preview =
+        typeof page.buildAgentPromptPreview === 'function'
+          ? page.buildAgentPromptPreview(cached)
+          : String(cached.effective_prompt || cached.base_system_prompt || '');
+      return (
+        '<div class="ws-cmd-loadout-prompt">' +
+        '<div><span class="ws-cmd-loadout-title">System prompt</span><p>' +
+        escapeHtml(preview || 'No system prompt set for this agent.') +
+        '</p></div>' +
+        '<button type="button" class="ws-cmd-agent-action" data-cmd-view-prompt="' +
+        escapeHtml(agent.encodedName) +
+        '">View full</button></div>'
+      );
+    }
+    return (
+      '<div class="ws-cmd-loadout-prompt is-loading" aria-live="polite">' +
+      '<div><span class="ws-cmd-loadout-title">System prompt</span>' +
+      '<p>Preparing effective prompt…</p></div></div>'
+    );
+  }
+
+  loadoutTabHTML(agent) {
+    const page = this.page || {};
+    const editable =
+      typeof page.agentAllowsModelEditing === 'function'
+        ? page.agentAllowsModelEditing(agent.profile)
+        : false;
+    const model =
+      agent.model && !agent.model.empty ? agent.model.label || agent.model.model : 'Model not set';
+    const modelAction = editable
+      ? '<button type="button" class="ws-cmd-loadout-edit" data-cmd-edit-model="' +
+        escapeHtml(agent.encodedName) +
+        '">Change</button>'
+      : '<span class="ws-cmd-loadout-readonly">Read only</span>';
+    const skillNames = Array.isArray(agent.skills?.names) ? agent.skills.names : [];
+    return (
+      '<div class="ws-cmd-loadout-grid">' +
+      '<section class="ws-cmd-loadout-card"><header><span class="ws-cmd-loadout-kicker">Model</span>' +
+      modelAction +
+      '</header><strong>' +
+      escapeHtml(model) +
+      '</strong></section>' +
+      '<section class="ws-cmd-loadout-card"><header><span class="ws-cmd-loadout-kicker">Skills</span>' +
+      '<span>' +
+      skillNames.length +
+      '</span></header><div class="ws-cmd-loadout-chips">' +
+      this.chipListHTML(skillNames, 'No workspace skills attached.', 'skill') +
+      '</div></section>' +
+      '<section class="ws-cmd-loadout-card"><header><span class="ws-cmd-loadout-kicker">MCP tools</span>' +
+      '<span>' +
+      agent.mcpNames.length +
+      '</span></header><div class="ws-cmd-loadout-chips">' +
+      this.chipListHTML(agent.mcpNames, 'No MCP tools attached.', 'mcp') +
+      '</div></section>' +
+      '</div>' +
+      this.promptLoadoutHTML(agent)
+    );
+  }
+
+  recentActivityItems(agent) {
+    if (!agent) return [];
+    const page = this.page || {};
+    const key = agent.key;
+    const tasks = Array.isArray(page.tasks) ? page.tasks : agent.tasks;
+    const sessions = Array.isArray(page.sessions) ? page.sessions : [];
+    const items = [];
+
+    tasks.forEach(task => {
+      if (this.normalizeAgentKey(task?.to) !== key) return;
+      const timestamp = task?.updated_at || task?.created_at;
+      const time = Date.parse(timestamp || '');
+      if (!Number.isFinite(time)) return;
+      items.push({
+        id: String(task.id || ''),
+        kind: 'Task',
+        title: String(task.description || task.name || task.title || 'Untitled task'),
+        status: String(task.status || 'pending').replaceAll('_', ' '),
+        timestamp: String(timestamp),
+        time
+      });
     });
+    sessions.forEach(session => {
+      if (this.normalizeAgentKey(session?.agent_name) !== key) return;
+      const timestamp = session?.updated_at || session?.created_at;
+      const time = Date.parse(timestamp || '');
+      if (!Number.isFinite(time)) return;
+      items.push({
+        id: String(session.id || ''),
+        kind: 'Session',
+        title: String(session.title || session.name || 'Untitled session'),
+        status: 'Workspace session',
+        timestamp: String(timestamp),
+        time
+      });
+    });
+
+    return items.sort((left, right) => right.time - left.time);
+  }
+
+  formatActivityTimestamp(timestamp) {
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime())
+      ? ''
+      : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  recentActivityTabHTML(agent) {
+    const items = this.recentActivityItems(agent);
+    if (!items.length) {
+      return (
+        '<div class="ws-cmd-tab-empty"><strong>No recent activity</strong>' +
+        '<span>Tasks and sessions attributed to this agent will appear here.</span></div>'
+      );
+    }
+    return (
+      '<div class="ws-cmd-activity-list">' +
+      items
+        .map(
+          item =>
+            '<button type="button" class="ws-cmd-activity-item" data-cmd-' +
+            (item.kind === 'Task' ? 'open-task' : 'open-session') +
+            '="' +
+            escapeHtml(item.id) +
+            '">' +
+            '<span class="ws-cmd-activity-kind">' +
+            escapeHtml(item.kind) +
+            '</span>' +
+            '<span class="ws-cmd-activity-copy"><strong>' +
+            escapeHtml(item.title) +
+            '</strong>' +
+            '<span>' +
+            escapeHtml(item.status) +
+            '</span></span>' +
+            '<time datetime="' +
+            escapeHtml(item.timestamp) +
+            '">' +
+            escapeHtml(this.formatActivityTimestamp(item.timestamp)) +
+            '</time></button>'
+        )
+        .join('') +
+      '</div>'
+    );
+  }
+
+  unassignedQueueHTML(group) {
+    const tasks = Array.isArray(group?.tasks) ? group.tasks : [];
+    if (!tasks.length) return '';
+    return (
+      '<section class="ws-cmd-unassigned" aria-labelledby="ws-cmd-unassigned-title">' +
+      '<div><span class="ws-cmd-unassigned-kicker">Dispatch queue</span>' +
+      '<strong id="ws-cmd-unassigned-title">Unassigned tasks</strong></div>' +
+      '<span class="ws-cmd-unassigned-count">' +
+      tasks.length +
+      '</span>' +
+      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-agent-manager="tasks">Review</button>' +
+      '</section>'
+    );
+  }
+
+  agentTabsHTML(agent) {
+    const tabs = [
+      { key: 'overview', label: 'Overview' },
+      { key: 'tasks', label: 'Tasks' },
+      { key: 'loadout', label: 'Loadout' },
+      { key: 'recent', label: 'Recent Activity' }
+    ];
+    const safeKey = agent.key.replace(/[^a-z0-9_-]+/gi, '-');
+    const tabList = tabs
+      .map(tab => {
+        const active = tab.key === this.activeAgentTab;
+        return (
+          '<button type="button" role="tab" class="ws-cmd-agent-tab' +
+          (active ? ' is-active' : '') +
+          '" id="ws-cmd-agent-tab-' +
+          safeKey +
+          '-' +
+          tab.key +
+          '" aria-selected="' +
+          (active ? 'true' : 'false') +
+          '" aria-controls="ws-cmd-agent-panel-' +
+          safeKey +
+          '-' +
+          tab.key +
+          '" tabindex="' +
+          (active ? '0' : '-1') +
+          '" data-cmd-agent-tab="' +
+          tab.key +
+          '">' +
+          tab.label +
+          '</button>'
+        );
+      })
+      .join('');
+    const content = {
+      overview: this.overviewTabHTML(agent),
+      tasks: this.tasksTabHTML(agent),
+      loadout: this.loadoutTabHTML(agent),
+      recent: this.recentActivityTabHTML(agent)
+    };
+    const panels = tabs
+      .map(tab => {
+        const active = tab.key === this.activeAgentTab;
+        return (
+          '<section role="tabpanel" class="ws-cmd-agent-tabpanel' +
+          (active ? ' is-active' : '') +
+          '" id="ws-cmd-agent-panel-' +
+          safeKey +
+          '-' +
+          tab.key +
+          '" aria-labelledby="ws-cmd-agent-tab-' +
+          safeKey +
+          '-' +
+          tab.key +
+          '"' +
+          (active ? '' : ' hidden') +
+          '>' +
+          content[tab.key] +
+          '</section>'
+        );
+      })
+      .join('');
+    return (
+      '<section class="ws-cmd-agent-overview" aria-label="' +
+      escapeHtml(agent.name) +
+      ' overview">' +
+      '<div class="ws-cmd-agent-tabs" role="tablist" aria-label="Agent overview sections">' +
+      tabList +
+      '</div>' +
+      '<div class="ws-cmd-agent-panel-body">' +
+      panels +
+      '</div>' +
+      '</section>'
+    );
   }
 
   renderGarrison() {
-    const page = this.page;
-    let groups = [];
-    try { groups = page.buildAgentGroups() || []; } catch (err) { groups = []; }
-    const units = groups.filter((g) => g && (g.isWorkspaceAgent || (g.isUnassigned && (g.tasks || []).length)));
-    if (!units.length) {
-      return '<div class="ws-cmd-soon">No agents yet.</div>';
+    if (!AGENT_TAB_KEYS.includes(this.activeAgentTab)) this.activeAgentTab = 'overview';
+    const groups = this.agentGroups();
+    const selectedGroup = this.selectedAgentGroup(groups.agents);
+    if (!selectedGroup) {
+      this.selectedAgentKey = '';
+      return (
+        '<div class="ws-cmd-deck-empty"><div class="ws-cmd-deck-empty-glyph">◇</div>' +
+        '<strong>No agents in this workspace</strong>' +
+        '<span>Add an agent to begin assigning work.</span>' +
+        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Add Agent</button></div>'
+      );
     }
-    const gridClass = 'ws-cmd-garrison-grid' + (units.length > 1 && units.length % 2 === 1 ? ' is-odd' : '');
-    return '<div class="' + gridClass + '">' + units.map((g) => this.unitCardHTML(g)).join('') + '</div>';
+    const agents = groups.agents.map(group => this.agentViewModel(group)).filter(Boolean);
+    const selected = agents.find(agent => agent.key === this.selectedAgentKey) || agents[0];
+    const roster = agents.map(agent => this.rosterItemHTML(agent)).join('');
+    const statusAnnouncement = selected.name + ' selected. ' + (selected.status?.label || 'Idle');
+    const announce = statusAnnouncement === this.lastAnnouncedAgentStatus ? '' : statusAnnouncement;
+    this.lastAnnouncedAgentStatus = statusAnnouncement;
+    return (
+      '<div class="ws-cmd-deck">' +
+      '<aside class="ws-cmd-roster" aria-label="Workspace agents">' +
+      '<header class="ws-cmd-roster-head"><div><span>Agent roster</span><strong>' +
+      agents.length +
+      '</strong></div><button type="button" class="ws-cmd-icon-btn" data-cmd-add-agent' +
+      ' aria-label="Add agent">＋</button></header>' +
+      '<div class="ws-cmd-roster-list">' +
+      roster +
+      '</div>' +
+      this.unassignedQueueHTML(groups.unassigned) +
+      '</aside>' +
+      this.agentStageHTML(selected) +
+      this.agentTabsHTML(selected) +
+      '<div class="ws-cmd-agent-live sr-only" aria-live="polite" aria-atomic="true">' +
+      escapeHtml(announce) +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  captureAgentDeckViewState() {
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const roster = this.container.querySelector('.ws-cmd-roster-list');
+    const overview = this.container.querySelector('.ws-cmd-agent-panel-body');
+    if (roster) {
+      this.agentRosterScroll = {
+        top: Number(roster.scrollTop || 0),
+        left: Number(roster.scrollLeft || 0)
+      };
+    }
+    if (overview) this.agentOverviewScroll = Number(overview.scrollTop || 0);
+  }
+
+  restoreAgentDeckViewState() {
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const roster = this.container.querySelector('.ws-cmd-roster-list');
+    const overview = this.container.querySelector('.ws-cmd-agent-panel-body');
+    if (roster) {
+      roster.scrollTop = Number(this.agentRosterScroll?.top || 0);
+      roster.scrollLeft = Number(this.agentRosterScroll?.left || 0);
+    }
+    if (overview) overview.scrollTop = this.agentOverviewScroll || 0;
+
+    if (this.pendingAgentFocusKey) {
+      const target = this.container.querySelector(
+        '[data-agent-key="' + this.pendingAgentFocusKey + '"]'
+      );
+      if (target && typeof target.focus === 'function') target.focus();
+      this.pendingAgentFocusKey = '';
+    }
+    if (this.pendingAgentTabFocus) {
+      const target = this.container.querySelector(
+        '[data-cmd-agent-tab="' + this.pendingAgentTabFocus + '"]'
+      );
+      if (target && typeof target.focus === 'function') target.focus();
+      this.pendingAgentTabFocus = '';
+    }
+  }
+
+  selectAgent(encodedName, { focus = true } = {}) {
+    let name = '';
+    try {
+      name = decodeURIComponent(String(encodedName || ''));
+    } catch (_error) {
+      name = String(encodedName || '');
+    }
+    const key = this.normalizeAgentKey(name);
+    if (!key) return;
+    this.selectedAgentKey = key;
+    this.agentSelectionInitialized = true;
+    this.persistAgentKey(key);
+    this.agentOverviewScroll = 0;
+    if (focus) this.pendingAgentFocusKey = key;
+    this.render();
+  }
+
+  setActiveAgentTab(key, { focus = true } = {}) {
+    const normalized = String(key || '').toLowerCase();
+    if (!AGENT_TAB_KEYS.includes(normalized)) return;
+    this.activeAgentTab = normalized;
+    this.agentOverviewScroll = 0;
+    if (focus) this.pendingAgentTabFocus = normalized;
+    this.render();
+  }
+
+  hydrateActiveAgentPrompt({ force = false } = {}) {
+    if (this.activeAgentTab !== 'loadout') return;
+    const page = this.page || {};
+    if (typeof page.ensureAgentPromptData !== 'function') return;
+    const groups = this.agentGroups();
+    const group = groups.agents.find(
+      item => this.normalizeAgentKey(item.key || item.name) === this.selectedAgentKey
+    );
+    const agent = this.agentViewModel(group);
+    if (!agent) return;
+    const cached = this.promptCacheEntry(agent);
+    if (!force && cached) return;
+    if (this.agentPromptLoadingKey === agent.key) return;
+
+    this.agentPromptLoadingKey = agent.key;
+    Promise.resolve(page.ensureAgentPromptData(agent.name, force ? { force: true } : {}))
+      .catch(() => ({ error: true }))
+      .finally(() => {
+        if (this.agentPromptLoadingKey === agent.key) this.agentPromptLoadingKey = '';
+        if (
+          this.active &&
+          this.selectedAgentKey === agent.key &&
+          this.activeAgentTab === 'loadout'
+        ) {
+          this.render();
+        }
+      });
+  }
+
+  handleAgentTabKeydown(event) {
+    const current = event?.target?.closest?.('[data-cmd-agent-tab]');
+    if (!current) return;
+    const root = this.container?.querySelector?.('.ws-cmd-agent-tabs');
+    const tabs =
+      root && typeof root.querySelectorAll === 'function'
+        ? Array.from(root.querySelectorAll('[data-cmd-agent-tab]'))
+        : [];
+    if (!tabs.length) return;
+    const index = tabs.indexOf(current);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    this.setActiveAgentTab(tabs[next].getAttribute('data-cmd-agent-tab'));
   }
 
   bindGarrison() {
     const root = this.container && this.container.querySelector('.ws-cmd-garrison');
     if (!root) return;
-    root.addEventListener('click', (event) => {
+    root.addEventListener('keydown', event => this.handleAgentTabKeydown(event));
+    root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const selectBtn = event.target.closest('[data-cmd-select-agent]');
+      if (selectBtn) {
+        this.selectAgent(selectBtn.getAttribute('data-cmd-select-agent'));
+        return;
+      }
+      const tabBtn = event.target.closest('[data-cmd-agent-tab]');
+      if (tabBtn) {
+        this.setActiveAgentTab(tabBtn.getAttribute('data-cmd-agent-tab'), { focus: false });
+        return;
+      }
       const settingsBtn = event.target.closest('[data-cmd-manager-settings]');
       if (settingsBtn) {
         this.openStatModal('settings', settingsBtn);
         return;
       }
+      const addAgentBtn = event.target.closest('[data-cmd-add-agent]');
+      if (addAgentBtn && page && typeof page.openAddAgentModal === 'function') {
+        page.openAddAgentModal();
+        return;
+      }
       const promptBtn = event.target.closest('[data-cmd-view-prompt]');
       if (promptBtn && page && typeof page.openAgentPromptModal === 'function') {
         page.openAgentPromptModal(promptBtn.getAttribute('data-cmd-view-prompt'));
+        return;
+      }
+      const retryBtn = event.target.closest('[data-cmd-retry-prompt]');
+      if (retryBtn) {
+        this.hydrateActiveAgentPrompt({ force: true });
+        return;
+      }
+      const modelBtn = event.target.closest('[data-cmd-edit-model]');
+      if (modelBtn && page && typeof page.openAgentModelModal === 'function') {
+        page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
+        return;
+      }
+      const removeBtn = event.target.closest('[data-cmd-remove-agent]');
+      if (removeBtn && page && typeof page.removeAgentFromWorkspace === 'function') {
+        page.removeAgentFromWorkspace(removeBtn.getAttribute('data-cmd-remove-agent'));
         return;
       }
       const addBtn = event.target.closest('[data-cmd-add-task]');
@@ -1530,7 +2632,16 @@ export class WorkspaceCommandView {
       const openBtn = event.target.closest('[data-cmd-open-task]');
       if (openBtn && page && page.openTask) {
         page.openTask(openBtn.getAttribute('data-cmd-open-task'));
+        return;
       }
+      const sessionBtn = event.target.closest('[data-cmd-open-session]');
+      if (sessionBtn && page && page.openSession) {
+        page.openSession(sessionBtn.getAttribute('data-cmd-open-session'));
+        return;
+      }
+      const managerBtn = event.target.closest('[data-cmd-open-agent-manager]');
+      if (managerBtn)
+        this.openStatModal(managerBtn.getAttribute('data-cmd-open-agent-manager'), managerBtn);
     });
   }
 
@@ -1544,17 +2655,34 @@ export class WorkspaceCommandView {
       ? items.join('')
       : '<div class="ws-cmd-rail-empty">' + escapeHtml(emptyText) + '</div>';
     return (
-      '<section class="ws-cmd-panel' + (isManaging ? ' is-managing' : '') + (!hasItems ? ' is-empty' : '') + '">' +
+      '<section class="ws-cmd-panel' +
+      (isManaging ? ' is-managing' : '') +
+      (!hasItems ? ' is-empty' : '') +
+      '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>' + escapeHtml(title) + '</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-title"><h4>' +
+      escapeHtml(title) +
+      '</h4><span class="ws-cmd-panel-count">' +
+      count +
+      '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="' +
-        escapeHtml(sectionKey) + '">' + escapeHtml(primaryLabel) + '</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="' + escapeHtml(sectionKey) +
-      '" aria-expanded="' + (isManaging ? 'true' : 'false') +
-      '" title="' + (isManaging ? 'Close Command manager' : 'Manage in Command view') +
-      '" aria-label="' + (isManaging ? 'Close ' : 'Manage ') +
-      escapeHtml(title) + ' in Command view">' + (isManaging ? '×' : '▸') + '</button>' +
+      escapeHtml(sectionKey) +
+      '">' +
+      escapeHtml(primaryLabel) +
+      '</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="' +
+      escapeHtml(sectionKey) +
+      '" aria-expanded="' +
+      (isManaging ? 'true' : 'false') +
+      '" title="' +
+      (isManaging ? 'Close Command manager' : 'Manage in Command view') +
+      '" aria-label="' +
+      (isManaging ? 'Close ' : 'Manage ') +
+      escapeHtml(title) +
+      ' in Command view">' +
+      (isManaging ? '×' : '▸') +
+      '</button>' +
       '</div>' +
       '</div>' +
       (shouldShowBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
@@ -1567,23 +2695,38 @@ export class WorkspaceCommandView {
     const attr = opts || {};
     const limit = attr.expanded ? arr.length : 5;
     const shown = arr.slice(0, limit);
-    const items = shown.map((it) => {
+    const items = shown.map(it => {
       const label = escapeHtml(labelOf(it));
       const meta = attr.metaOf ? escapeHtml(attr.metaOf(it)) : '';
-      const inner = '<span class="ws-cmd-rail-t">' + label + '</span>' +
+      const inner =
+        '<span class="ws-cmd-rail-t">' +
+        label +
+        '</span>' +
         (meta ? '<span class="ws-cmd-rail-m">' + meta + '</span>' : '');
       if (attr.href) {
-        return '<a class="ws-cmd-rail-item" href="' + escapeHtml(attr.href(it)) + '">' + inner + '</a>';
+        return (
+          '<a class="ws-cmd-rail-item" href="' + escapeHtml(attr.href(it)) + '">' + inner + '</a>'
+        );
       }
       if (attr.action) {
-        return '<button type="button" class="ws-cmd-rail-item" ' + attr.action(it) + '>' + inner + '</button>';
+        return (
+          '<button type="button" class="ws-cmd-rail-item" ' +
+          attr.action(it) +
+          '>' +
+          inner +
+          '</button>'
+        );
       }
       return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
     });
     if (arr.length > shown.length) {
-      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="' +
-        escapeHtml(attr.sectionKey || '') + '">+ ' +
-        (arr.length - shown.length) + ' more</button>');
+      items.push(
+        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="' +
+          escapeHtml(attr.sectionKey || '') +
+          '">+ ' +
+          (arr.length - shown.length) +
+          ' more</button>'
+      );
     }
     return items;
   }
@@ -1591,7 +2734,11 @@ export class WorkspaceCommandView {
   getWorkspaceProjectPath() {
     const page = this.page || {};
     if (typeof page.getWorkspaceProjectPath === 'function') {
-      try { return String(page.getWorkspaceProjectPath() || '').trim(); } catch (err) { return ''; }
+      try {
+        return String(page.getWorkspaceProjectPath() || '').trim();
+      } catch (err) {
+        return '';
+      }
     }
     return String((page.workspace && page.workspace.project_path) || '').trim();
   }
@@ -1608,13 +2755,15 @@ export class WorkspaceCommandView {
     if (dirs.length) return dirs;
     const projectPath = this.getWorkspaceProjectPath();
     if (!projectPath) return [];
-    return [{
-      id: '__project_path__',
-      name: this.folderDisplayName(projectPath),
-      path: projectPath,
-      source: 'project_path',
-      isProjectPathOnly: true
-    }];
+    return [
+      {
+        id: '__project_path__',
+        name: this.folderDisplayName(projectPath),
+        path: projectPath,
+        source: 'project_path',
+        isProjectPathOnly: true
+      }
+    ];
   }
 
   folderRole(dir) {
@@ -1622,13 +2771,19 @@ export class WorkspaceCommandView {
     if (dir && dir.isProjectPathOnly) return { label: 'Project Folder', className: 'is-project' };
     let primaryDirectoryId = '';
     try {
-      primaryDirectoryId = typeof page.getPrimaryDirectoryId === 'function' ? String(page.getPrimaryDirectoryId() || '') : '';
+      primaryDirectoryId =
+        typeof page.getPrimaryDirectoryId === 'function'
+          ? String(page.getPrimaryDirectoryId() || '')
+          : '';
     } catch (err) {
       primaryDirectoryId = '';
     }
     let isProject = false;
     try {
-      isProject = typeof page.isProjectDirectory === 'function' ? Boolean(page.isProjectDirectory(dir)) : false;
+      isProject =
+        typeof page.isProjectDirectory === 'function'
+          ? Boolean(page.isProjectDirectory(dir))
+          : false;
     } catch (err) {
       isProject = false;
     }
@@ -1642,25 +2797,41 @@ export class WorkspaceCommandView {
     const arr = Array.isArray(rows) ? rows : [];
     const limit = expanded ? arr.length : 5;
     const shown = arr.slice(0, limit);
-    const items = shown.map((dir) => {
+    const items = shown.map(dir => {
       const id = String(dir.id || '');
       const role = this.folderRole(dir);
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
       const path = String(dir.path || '');
       const source = String(dir.source || 'reference');
       const inner =
-        '<span class="ws-cmd-rail-line"><span class="ws-cmd-rail-t">' + escapeHtml(name) + '</span>' +
-        '<span class="ws-cmd-rail-role ' + escapeHtml(role.className) + '">' + escapeHtml(role.label) + '</span></span>' +
+        '<span class="ws-cmd-rail-line"><span class="ws-cmd-rail-t">' +
+        escapeHtml(name) +
+        '</span>' +
+        '<span class="ws-cmd-rail-role ' +
+        escapeHtml(role.className) +
+        '">' +
+        escapeHtml(role.label) +
+        '</span></span>' +
         (path ? '<span class="ws-cmd-rail-m">' + escapeHtml(path) + '</span>' : '');
       if (dir.isProjectPathOnly) {
         return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
       }
-      return '<button type="button" class="ws-cmd-rail-item" data-cmd-open-section="folders" data-cmd-item-id="' +
-        escapeHtml(id) + '" data-cmd-item-source="' + escapeHtml(source) + '">' + inner + '</button>';
+      return (
+        '<button type="button" class="ws-cmd-rail-item" data-cmd-open-section="folders" data-cmd-item-id="' +
+        escapeHtml(id) +
+        '" data-cmd-item-source="' +
+        escapeHtml(source) +
+        '">' +
+        inner +
+        '</button>'
+      );
     });
     if (arr.length > shown.length) {
-      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="folders">+ ' +
-        (arr.length - shown.length) + ' more</button>');
+      items.push(
+        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="folders">+ ' +
+          (arr.length - shown.length) +
+          ' more</button>'
+      );
     }
     return items;
   }
@@ -1687,7 +2858,11 @@ export class WorkspaceCommandView {
     const parts = [];
     const size = Number(file?.file_meta?.size || file?.size || 0);
     if (size > 0 && typeof page.formatFileSize === 'function') {
-      try { parts.push(page.formatFileSize(size)); } catch (err) { /* keep going */ }
+      try {
+        parts.push(page.formatFileSize(size));
+      } catch (err) {
+        /* keep going */
+      }
     }
     const folder = String(file?.file_meta?.relative_path || file?.relative_path || '').trim();
     if (folder) parts.push(folder);
@@ -1701,22 +2876,30 @@ export class WorkspaceCommandView {
     const arr = Array.isArray(files) ? files : [];
     const limit = expanded ? arr.length : 5;
     const shown = arr.slice(0, limit);
-    const items = shown.map((file) => {
+    const items = shown.map(file => {
       const id = String(file?.id || file?.file_meta?.name || this.fileTitle(file));
       const title = this.fileTitle(file);
       const meta = this.fileMeta(file);
       const missingClass = file?.file_meta?.status === 'missing' ? ' is-missing' : '';
       return (
-        '<button type="button" class="ws-cmd-rail-item' + missingClass +
-        '" data-cmd-open-section="files" data-cmd-item-id="' + escapeHtml(id) + '">' +
-        '<span class="ws-cmd-rail-t">' + escapeHtml(title) + '</span>' +
+        '<button type="button" class="ws-cmd-rail-item' +
+        missingClass +
+        '" data-cmd-open-section="files" data-cmd-item-id="' +
+        escapeHtml(id) +
+        '">' +
+        '<span class="ws-cmd-rail-t">' +
+        escapeHtml(title) +
+        '</span>' +
         (meta ? '<span class="ws-cmd-rail-m">' + escapeHtml(meta) + '</span>' : '') +
         '</button>'
       );
     });
     if (arr.length > shown.length) {
-      items.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="files">+ ' +
-        (arr.length - shown.length) + ' more</button>');
+      items.push(
+        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="files">+ ' +
+          (arr.length - shown.length) +
+          ' more</button>'
+      );
     }
     return items;
   }
@@ -1728,16 +2911,25 @@ export class WorkspaceCommandView {
       ? items.join('')
       : '<div class="ws-cmd-rail-empty">No files yet.</div>';
     return (
-      '<section class="ws-cmd-panel ws-cmd-files-panel' + (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') + '">' +
+      '<section class="ws-cmd-panel ws-cmd-files-panel' +
+      (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') +
+      '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Files</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-title"><h4>Files</h4><span class="ws-cmd-panel-count">' +
+      count +
+      '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="files">Upload</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="files" aria-expanded="' +
-      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
-      '" aria-label="' + (expanded ? 'Close Files manager' : 'Manage Files in Command view') + '">' +
-      (expanded ? '×' : '▸') + '</button>' +
+      (expanded ? 'true' : 'false') +
+      '" title="' +
+      (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
+      '" aria-label="' +
+      (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
+      '">' +
+      (expanded ? '×' : '▸') +
+      '</button>' +
       '</div>' +
       '</div>' +
       '<div class="ws-cmd-panel-body">' +
@@ -1756,8 +2948,18 @@ export class WorkspaceCommandView {
     // stat-box manager; Manager Settings → entry-agent modal; Goal Settings → "Set Goal";
     // Intent & Setup → header description edit. Systems keeps only workspace state/automation.
     return [
-      { key: 'memory', label: 'Memory', tabId: 'workspace-detail-config-memory-tab', host: 'config' },
-      { key: 'triggers', label: 'Triggers', tabId: 'workspace-detail-config-triggers-tab', host: 'config' }
+      {
+        key: 'memory',
+        label: 'Memory',
+        tabId: 'workspace-detail-config-memory-tab',
+        host: 'config'
+      },
+      {
+        key: 'triggers',
+        label: 'Triggers',
+        tabId: 'workspace-detail-config-triggers-tab',
+        host: 'config'
+      }
     ];
   }
 
@@ -1767,8 +2969,18 @@ export class WorkspaceCommandView {
   toolsTabs() {
     return [
       { key: 'mcp', label: 'MCP', tabId: 'workspace-detail-config-mcp-tab', host: 'config' },
-      { key: 'skills', label: 'Skills', tabId: 'workspace-detail-config-skills-tab', host: 'config' },
-      { key: 'plugins', label: 'Plugins', tabId: 'workspace-detail-config-plugins-tab', host: 'config' },
+      {
+        key: 'skills',
+        label: 'Skills',
+        tabId: 'workspace-detail-config-skills-tab',
+        host: 'config'
+      },
+      {
+        key: 'plugins',
+        label: 'Plugins',
+        tabId: 'workspace-detail-config-plugins-tab',
+        host: 'config'
+      },
       { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' }
     ];
   }
@@ -1783,13 +2995,20 @@ export class WorkspaceCommandView {
   // the header intent editor). Kept separate from systemTabs() on purpose.
   configTabIdFor(key) {
     switch (String(key || '')) {
-      case 'mcp': return 'workspace-detail-config-mcp-tab';
-      case 'skills': return 'workspace-detail-config-skills-tab';
-      case 'plugins': return 'workspace-detail-config-plugins-tab';
-      case 'settings': return 'workspace-detail-config-settings-tab';
-      case 'mission': return 'workspace-detail-config-mission-tab';
-      case 'intent': return 'workspace-detail-config-intent-tab';
-      default: return '';
+      case 'mcp':
+        return 'workspace-detail-config-mcp-tab';
+      case 'skills':
+        return 'workspace-detail-config-skills-tab';
+      case 'plugins':
+        return 'workspace-detail-config-plugins-tab';
+      case 'settings':
+        return 'workspace-detail-config-settings-tab';
+      case 'mission':
+        return 'workspace-detail-config-mission-tab';
+      case 'intent':
+        return 'workspace-detail-config-intent-tab';
+      default:
+        return '';
     }
   }
 
@@ -1801,28 +3020,50 @@ export class WorkspaceCommandView {
   renderSystemsPanel(expanded) {
     const tabs = this.systemTabs();
     const active = this.systemTab(this.activeSystemTab);
-    const tabButtons = tabs.map(tab => (
-      '<button type="button" class="ws-cmd-system-tab' + (tab.key === active.key ? ' is-active' : '') +
-      '" data-cmd-system-tab="' + escapeHtml(tab.key) + '" aria-selected="' +
-      (tab.key === active.key ? 'true' : 'false') + '">' + escapeHtml(tab.label) + '</button>'
-    )).join('');
+    const tabButtons = tabs
+      .map(
+        tab =>
+          '<button type="button" class="ws-cmd-system-tab' +
+          (tab.key === active.key ? ' is-active' : '') +
+          '" data-cmd-system-tab="' +
+          escapeHtml(tab.key) +
+          '" aria-selected="' +
+          (tab.key === active.key ? 'true' : 'false') +
+          '">' +
+          escapeHtml(tab.label) +
+          '</button>'
+      )
+      .join('');
     return (
-      '<section class="ws-cmd-panel ws-cmd-systems-panel' + (expanded ? ' is-managing' : '') + '">' +
+      '<section class="ws-cmd-panel ws-cmd-systems-panel' +
+      (expanded ? ' is-managing' : '') +
+      '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Systems</h4><span class="ws-cmd-panel-count">' + tabs.length + '</span></div>' +
+      '<div class="ws-cmd-panel-title"><h4>Systems</h4><span class="ws-cmd-panel-count">' +
+      tabs.length +
+      '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="systems">Open</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="systems" aria-expanded="' +
-      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
-      '" aria-label="' + (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') + '">' +
-      (expanded ? '×' : '▸') + '</button>' +
+      (expanded ? 'true' : 'false') +
+      '" title="' +
+      (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
+      '" aria-label="' +
+      (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
+      '">' +
+      (expanded ? '×' : '▸') +
+      '</button>' +
       '</div>' +
       '</div>' +
       (expanded
         ? '<div class="ws-cmd-panel-body ws-cmd-systems-body">' +
-          '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace systems">' + tabButtons + '</div>' +
+          '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace systems">' +
+          tabButtons +
+          '</div>' +
           '<div class="ws-cmd-system-host" data-cmd-system-host>' +
-          '<div class="ws-cmd-rail-empty">Loading ' + escapeHtml(active.label) + '...</div>' +
+          '<div class="ws-cmd-rail-empty">Loading ' +
+          escapeHtml(active.label) +
+          '...</div>' +
           '</div>' +
           '</div>'
         : '') +
@@ -1841,16 +3082,25 @@ export class WorkspaceCommandView {
     if (!this.isGroupWorkspace()) return '';
     const count = this.detachmentMemberCount();
     return (
-      '<section class="ws-cmd-panel ws-cmd-detachment-panel' + (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') + '">' +
+      '<section class="ws-cmd-panel ws-cmd-detachment-panel' +
+      (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') +
+      '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Detachment</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-title"><h4>Detachment</h4><span class="ws-cmd-panel-count">' +
+      count +
+      '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="members">Add Member</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="members" aria-expanded="' +
-      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
-      '" aria-label="' + (expanded ? 'Close Detachment manager' : 'Manage members in Command view') + '">' +
-      (expanded ? '×' : '▸') + '</button>' +
+      (expanded ? 'true' : 'false') +
+      '" title="' +
+      (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
+      '" aria-label="' +
+      (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
+      '">' +
+      (expanded ? '×' : '▸') +
+      '</button>' +
       '</div>' +
       '</div>' +
       (expanded
@@ -1892,28 +3142,42 @@ export class WorkspaceCommandView {
     const arr = Array.isArray(list) ? list : [];
     const limit = expanded ? arr.length : 5;
     const shown = arr.slice(0, limit);
-    const rows = shown.map((note) => {
+    const rows = shown.map(note => {
       const id = String(note.id || '');
       const label = escapeHtml(note.name || note.title || 'Untitled Note');
       const checkbox = expanded
-        ? '<input type="checkbox" class="ws-cmd-note-check" data-cmd-note-select="' + escapeHtml(id) + '"' +
-          (this.isNoteSelected(id) ? ' checked' : '') + ' aria-label="Select ' + label + '">'
+        ? '<input type="checkbox" class="ws-cmd-note-check" data-cmd-note-select="' +
+          escapeHtml(id) +
+          '"' +
+          (this.isNoteSelected(id) ? ' checked' : '') +
+          ' aria-label="Select ' +
+          label +
+          '">'
         : '';
       return (
         '<div class="ws-cmd-rail-item ws-cmd-note-row">' +
         checkbox +
         '<button type="button" class="ws-cmd-note-open" data-cmd-open-section="notes" data-cmd-item-id="' +
-        escapeHtml(id) + '"><span class="ws-cmd-rail-t">' + label + '</span></button>' +
+        escapeHtml(id) +
+        '"><span class="ws-cmd-rail-t">' +
+        label +
+        '</span></button>' +
         '</div>'
       );
     });
     if (arr.length > shown.length) {
-      rows.push('<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="notes">+ ' +
-        (arr.length - shown.length) + ' more</button>');
+      rows.push(
+        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="notes">+ ' +
+          (arr.length - shown.length) +
+          ' more</button>'
+      );
     }
     if (expanded && !arr.length) {
-      rows.push('<div class="ws-cmd-rail-empty">' +
-        (total ? 'No notes match the active tag filter.' : 'No notes yet.') + '</div>');
+      rows.push(
+        '<div class="ws-cmd-rail-empty">' +
+          (total ? 'No notes match the active tag filter.' : 'No notes yet.') +
+          '</div>'
+      );
     }
     return rows;
   }
@@ -1924,7 +3188,9 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-note-tool" data-cmd-note-action="select-all">Select all</button>' +
       '<button type="button" class="ws-cmd-note-tool" data-cmd-note-action="copy">Copy</button>' +
       '<button type="button" class="ws-cmd-note-tool is-danger" data-cmd-note-action="delete">Delete</button>' +
-      '<a class="ws-cmd-note-tool" href="' + escapeHtml(this.workspaceRoute('/notes')) + '">View all</a>' +
+      '<a class="ws-cmd-note-tool" href="' +
+      escapeHtml(this.workspaceRoute('/notes')) +
+      '">View all</a>' +
       '</div>'
     );
   }
@@ -1939,18 +3205,29 @@ export class WorkspaceCommandView {
       ? '<div class="ws-cmd-note-filter" data-cmd-note-filter></div>' +
         this.noteMultiSelectToolbarHTML() +
         rows
-      : (visible.length ? rows : '<div class="ws-cmd-rail-empty">No notes yet.</div>');
+      : visible.length
+        ? rows
+        : '<div class="ws-cmd-rail-empty">No notes yet.</div>';
     return (
-      '<section class="ws-cmd-panel ws-cmd-notes-panel' + (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') + '">' +
+      '<section class="ws-cmd-panel ws-cmd-notes-panel' +
+      (expanded ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') +
+      '">' +
       '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Notes</h4><span class="ws-cmd-panel-count">' + count + '</span></div>' +
+      '<div class="ws-cmd-panel-title"><h4>Notes</h4><span class="ws-cmd-panel-count">' +
+      count +
+      '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="notes">New Note</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="notes" aria-expanded="' +
-      (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
-      '" aria-label="' + (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') + '">' +
-      (expanded ? '×' : '▸') + '</button>' +
+      (expanded ? 'true' : 'false') +
+      '" title="' +
+      (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
+      '" aria-label="' +
+      (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
+      '">' +
+      (expanded ? '×' : '▸') +
+      '</button>' +
       '</div>' +
       '</div>' +
       (hasBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
@@ -1962,7 +3239,8 @@ export class WorkspaceCommandView {
     if (this.noteFilterBar) return this.noteFilterBar;
     const helper = this.tagFilterHelper();
     if (!helper || typeof helper.createTagFilterBar !== 'function') return null;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
     const holder = document.createElement('div');
     this.noteFilterBar = helper.createTagFilterBar({
       container: holder,
@@ -1980,7 +3258,11 @@ export class WorkspaceCommandView {
     if (!bar || !bar.element) return;
     const notes = Array.isArray(this.page && this.page.notes) ? this.page.notes : [];
     const helper = this.tagFilterHelper();
-    if (helper && typeof helper.collectTags === 'function' && typeof bar.setAvailableTags === 'function') {
+    if (
+      helper &&
+      typeof helper.collectTags === 'function' &&
+      typeof bar.setAvailableTags === 'function'
+    ) {
       bar.setAvailableTags(helper.collectTags(notes));
     }
     host.innerHTML = '';
@@ -2003,24 +3285,55 @@ export class WorkspaceCommandView {
     const systemsExpanded = this.activeRailSection === 'systems';
     const detachmentExpanded = this.activeRailSection === 'members';
 
-    const scheduleItems = this.railItems(schedules, (s) => s.name || s.task_description || 'Unnamed Schedule', {
-      sectionKey: 'schedules',
-      expanded: schedulesExpanded,
-      action: (s) => 'data-cmd-open-section="schedules" data-cmd-item-id="' + escapeHtml(String(s.id || '')) + '"'
-    });
-    const sessionItems = this.railItems(sessions, (s) => s.title || s.name || 'Untitled Session', {
+    const scheduleItems = this.railItems(
+      schedules,
+      s => s.name || s.task_description || 'Unnamed Schedule',
+      {
+        sectionKey: 'schedules',
+        expanded: schedulesExpanded,
+        action: s =>
+          'data-cmd-open-section="schedules" data-cmd-item-id="' +
+          escapeHtml(String(s.id || '')) +
+          '"'
+      }
+    );
+    const sessionItems = this.railItems(sessions, s => s.title || s.name || 'Untitled Session', {
       sectionKey: 'sessions',
       expanded: sessionsExpanded,
-      action: (s) => 'data-cmd-open-section="sessions" data-cmd-item-id="' + escapeHtml(String(s.id || '')) + '"',
-      metaOf: (s) => s.agent_name || ''
+      action: s =>
+        'data-cmd-open-section="sessions" data-cmd-item-id="' +
+        escapeHtml(String(s.id || '')) +
+        '"',
+      metaOf: s => s.agent_name || ''
     });
     const folderItems = this.folderRailItems(dirs, foldersExpanded);
 
     return (
       this.renderNotesPanel(notes, notesExpanded) +
-      this.railPanelHTML('schedules', 'Schedules', scheduleItems, schedules.length, 'No schedules yet.', 'Open Schedules') +
-      this.railPanelHTML('sessions', 'Sessions', sessionItems, sessions.length, 'No sessions yet.', 'New Session') +
-      this.railPanelHTML('folders', 'Linked Folders', folderItems, dirs.length, 'No linked folders yet.', 'Link Folder') +
+      this.railPanelHTML(
+        'schedules',
+        'Schedules',
+        scheduleItems,
+        schedules.length,
+        'No schedules yet.',
+        'Open Schedules'
+      ) +
+      this.railPanelHTML(
+        'sessions',
+        'Sessions',
+        sessionItems,
+        sessions.length,
+        'No sessions yet.',
+        'New Session'
+      ) +
+      this.railPanelHTML(
+        'folders',
+        'Linked Folders',
+        folderItems,
+        dirs.length,
+        'No linked folders yet.',
+        'Link Folder'
+      ) +
       this.renderDetachmentPanel(detachmentExpanded) +
       this.renderFilesPanel(files, filesExpanded) +
       this.renderSystemsPanel(systemsExpanded)
@@ -2041,12 +3354,14 @@ export class WorkspaceCommandView {
     if (!this.sharedSurfaceAnchors) this.sharedSurfaceAnchors = {};
     const existing = this.sharedSurfaceAnchors[key];
     if (existing && existing.node) return existing;
-    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function')
+      return null;
     const node = document.querySelector ? document.querySelector(selector) : null;
     if (!node || !node.parentNode) return null;
-    const anchor = typeof document.createComment === 'function'
-      ? document.createComment('workspace-command-' + key + '-anchor')
-      : null;
+    const anchor =
+      typeof document.createComment === 'function'
+        ? document.createComment('workspace-command-' + key + '-anchor')
+        : null;
     if (anchor && node.parentNode) {
       node.parentNode.insertBefore(anchor, node);
     }
@@ -2067,7 +3382,8 @@ export class WorkspaceCommandView {
   restoreSharedSurface(key) {
     const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors[key];
     if (!record || !record.node) return;
-    const parent = record.anchor && record.anchor.parentNode ? record.anchor.parentNode : record.parent;
+    const parent =
+      record.anchor && record.anchor.parentNode ? record.anchor.parentNode : record.parent;
     if (!parent || typeof parent.insertBefore !== 'function') return;
     if (record.node.parentNode === parent) return;
     parent.insertBefore(record.node, record.anchor ? record.anchor.nextSibling : null);
@@ -2105,7 +3421,11 @@ export class WorkspaceCommandView {
       tabBtn.click();
     }
 
-    if (!usedBootstrap && typeof Event === 'function' && typeof tabBtn.dispatchEvent === 'function') {
+    if (
+      !usedBootstrap &&
+      typeof Event === 'function' &&
+      typeof tabBtn.dispatchEvent === 'function'
+    ) {
       tabBtn.dispatchEvent(new Event('shown.bs.tab', { bubbles: true }));
     }
   }
@@ -2139,19 +3459,23 @@ export class WorkspaceCommandView {
     if (!page) return;
     switch (String(key || '')) {
       case 'mcp':
-        if (typeof page.renderWorkspaceMCPBindings === 'function') page.renderWorkspaceMCPBindings();
+        if (typeof page.renderWorkspaceMCPBindings === 'function')
+          page.renderWorkspaceMCPBindings();
         if (page.nativeMCPManager && typeof page.nativeMCPManager.load === 'function') {
           page.nativeMCPManager.load();
         }
         break;
       case 'skills':
-        if (typeof page.renderWorkspaceSkillBindings === 'function') page.renderWorkspaceSkillBindings();
+        if (typeof page.renderWorkspaceSkillBindings === 'function')
+          page.renderWorkspaceSkillBindings();
         break;
       case 'plugins':
-        if (typeof page.renderWorkspacePluginBindings === 'function') page.renderWorkspacePluginBindings();
+        if (typeof page.renderWorkspacePluginBindings === 'function')
+          page.renderWorkspacePluginBindings();
         break;
       case 'memory':
-        if (page.memoryManager && typeof page.memoryManager.load === 'function') page.memoryManager.load();
+        if (page.memoryManager && typeof page.memoryManager.load === 'function')
+          page.memoryManager.load();
         break;
       case 'settings':
         if (typeof page.renderWorkspaceSettings === 'function') page.renderWorkspaceSettings();
@@ -2173,8 +3497,8 @@ export class WorkspaceCommandView {
     // The config/tools nodes may be on loan to an open stat modal (MCP/Skills/Manager
     // Settings or the Tools modal) — don't steal them back mid-view on a background
     // re-render (single-node arbitration, PRD FR6.26).
-    const modalHoldsSurface = this.statModalHoldsSharedSurface() &&
-      this.statModalEl && !this.statModalEl.hidden;
+    const modalHoldsSurface =
+      this.statModalHoldsSharedSurface() && this.statModalEl && !this.statModalEl.hidden;
     if (modalHoldsSurface) return;
 
     const host = this.container && this.container.querySelector('[data-cmd-system-host]');
@@ -2188,14 +3512,16 @@ export class WorkspaceCommandView {
     if (tab.host === 'tools') {
       this.restoreSharedSurface('config');
       const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
-      if (!tools) host.innerHTML = '<div class="ws-cmd-rail-empty">Find Tools is unavailable.</div>';
+      if (!tools)
+        host.innerHTML = '<div class="ws-cmd-rail-empty">Find Tools is unavailable.</div>';
       return;
     }
 
     this.restoreSharedSurface('tools');
     const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
     if (!config) {
-      host.innerHTML = '<div class="ws-cmd-rail-empty">Workspace configuration is unavailable.</div>';
+      host.innerHTML =
+        '<div class="ws-cmd-rail-empty">Workspace configuration is unavailable.</div>';
       return;
     }
     // Shed any modal-only chrome hiding if this node was last used inside a stat modal.
@@ -2212,7 +3538,11 @@ export class WorkspaceCommandView {
     }
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
     if (page && page.membersPanel && typeof page.membersPanel.syncWorkspace === 'function') {
-      try { await page.membersPanel.syncWorkspace(page.workspace); } catch (err) { /* keep going */ }
+      try {
+        await page.membersPanel.syncWorkspace(page.workspace);
+      } catch (err) {
+        /* keep going */
+      }
     }
     // Re-query after the await: a later render may have replaced the host.
     const host = this.container && this.container.querySelector('[data-cmd-members-host]');
@@ -2228,7 +3558,9 @@ export class WorkspaceCommandView {
       try {
         page.membersPanel.rollupsLoaded = true;
         void page.membersPanel.loadRollups();
-      } catch (err) { /* keep going */ }
+      } catch (err) {
+        /* keep going */
+      }
     }
   }
 
@@ -2249,7 +3581,7 @@ export class WorkspaceCommandView {
   bindRail() {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', event => {
       const systemTab = event.target.closest('[data-cmd-system-tab]');
       if (systemTab) {
         this.openSystemTab(systemTab.getAttribute('data-cmd-system-tab'));
@@ -2284,7 +3616,7 @@ export class WorkspaceCommandView {
         );
       }
     });
-    root.addEventListener('change', (event) => {
+    root.addEventListener('change', event => {
       const cb = event.target.closest('[data-cmd-note-select]');
       if (!cb) return;
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
@@ -2292,18 +3624,18 @@ export class WorkspaceCommandView {
         page.toggleNoteSelection(cb.getAttribute('data-cmd-note-select'), cb.checked);
       }
     });
-    root.addEventListener('dragover', (event) => {
+    root.addEventListener('dragover', event => {
       const dropZone = event.target.closest('[data-cmd-file-drop]');
       if (!dropZone) return;
       event.preventDefault();
       this.setFileDropActive(dropZone, true);
     });
-    root.addEventListener('dragleave', (event) => {
+    root.addEventListener('dragleave', event => {
       const dropZone = event.target.closest('[data-cmd-file-drop]');
       if (!dropZone) return;
       this.setFileDropActive(dropZone, false);
     });
-    root.addEventListener('drop', (event) => {
+    root.addEventListener('drop', event => {
       const dropZone = event.target.closest('[data-cmd-file-drop]');
       if (!dropZone) return;
       event.preventDefault();
