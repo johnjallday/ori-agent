@@ -11,7 +11,7 @@ import (
 
 func TestNormalizeAgentSpecs_TrimDropDedupeOrder(t *testing.T) {
 	in := []AgentSpec{
-		{Name: "  Producer  ", Role: " orchestrator ", Type: " general ", SystemPrompt: "  lead  ", Model: " gpt-5.5 "},
+		{Name: "  Producer  ", Role: " orchestrator ", Type: " general ", SystemPrompt: "  lead  ", Model: " gpt-5.5 ", Provider: " codex "},
 		{Name: ""},    // blank name -> dropped
 		{Name: "   "}, // whitespace-only -> dropped
 		{Name: "Copywriter"},
@@ -36,7 +36,7 @@ func TestNormalizeAgentSpecs_TrimDropDedupeOrder(t *testing.T) {
 	}
 
 	first := out[0]
-	if first.Role != "orchestrator" || first.Type != "general" || first.SystemPrompt != "lead" || first.Model != "gpt-5.5" {
+	if first.Role != "orchestrator" || first.Type != "general" || first.SystemPrompt != "lead" || first.Model != "gpt-5.5" || first.Provider != "codex" {
 		t.Fatalf("fields not trimmed: %+v", first)
 	}
 }

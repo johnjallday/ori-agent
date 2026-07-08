@@ -3307,6 +3307,8 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      await this.ensureEditAgentModelOptions();
+      if (requestId !== this.templateAgentPlanRequestId) return;
       this.renderTemplateAgentPlan(data);
     } catch (error) {
       if (requestId !== this.templateAgentPlanRequestId) return;
@@ -3410,9 +3412,11 @@ const sessionManager = {
     const name = String(agent?.name || '').trim();
     const systemPrompt = String(agent?.system_prompt || '').trim();
     const editableModel = ['template', 'existing'].includes(String(agent?.model_source || '').trim()) ? model : '';
+    const editableProvider = editableModel ? provider : '';
     const modelText = model
       ? `${provider ? `${provider} / ` : ''}${model}`
       : 'App default';
+    const modelOptions = this.renderTemplateAgentModelOptions(agent, editableModel, editableProvider, modelText);
     const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
     const chips = [
       `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>`,
@@ -3431,6 +3435,7 @@ const sessionManager = {
            data-original-action="${this.escapeHtml(action)}"
            data-original-name="${this.escapeHtml(name)}"
            data-original-model="${this.escapeHtml(editableModel)}"
+           data-original-provider="${this.escapeHtml(editableProvider)}"
            data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
         <div class="workspace-template-agent-main">
           <div class="workspace-template-agent-fields">
@@ -3443,10 +3448,9 @@ const sessionManager = {
             </label>
             <label class="workspace-template-agent-field">
               <span>Model</span>
-              <input type="text"
-                     class="modern-input workspace-template-agent-control workspace-template-agent-model-input"
-                     value="${this.escapeHtml(editableModel)}"
-                     placeholder="${this.escapeHtml(modelText)}">
+              <select class="modern-input workspace-template-agent-control workspace-template-agent-model-input">
+                ${modelOptions}
+              </select>
             </label>
           </div>
           <div class="workspace-template-agent-meta">${chips}</div>
@@ -3469,12 +3473,51 @@ const sessionManager = {
     `;
   },
 
+  renderTemplateAgentModelOptions(agent, currentModel, currentProvider, inheritedLabel) {
+    const source = String(agent?.model_source || '').trim();
+    const inheritedText = source === 'system'
+      ? `Use system model (${inheritedLabel})`
+      : `Use default (${inheritedLabel})`;
+    const options = [
+      `<option value="" data-provider=""${currentModel ? '' : ' selected'}>${this.escapeHtml(inheritedText)}</option>`
+    ];
+    let foundCurrent = !currentModel;
+    const providers = Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [];
+    providers.forEach((provider) => {
+      const models = Array.isArray(provider?.models) ? provider.models : [];
+      if (models.length === 0) return;
+      const groupOptions = [];
+      models.forEach((model) => {
+        const value = String(model?.value || model?.id || '').trim();
+        if (!value) return;
+        const optionProvider = String(model?.provider || provider?.name || '').trim();
+        const label = String(model?.label || value).trim();
+        const selected = value === currentModel && optionProvider === currentProvider;
+        if (selected) foundCurrent = true;
+        groupOptions.push(
+          `<option value="${this.escapeHtml(value)}" data-provider="${this.escapeHtml(optionProvider)}"${selected ? ' selected' : ''}>${this.escapeHtml(label)}</option>`
+        );
+      });
+      if (groupOptions.length === 0) return;
+      options.push(
+        `<optgroup label="${this.escapeHtml(provider?.display_name || provider?.name || 'Provider')}">${groupOptions.join('')}</optgroup>`
+      );
+    });
+    if (currentModel && !foundCurrent) {
+      options.splice(1, 0,
+        `<option value="${this.escapeHtml(currentModel)}" data-provider="${this.escapeHtml(currentProvider)}" selected>${this.escapeHtml(currentModel)} (current)</option>`
+      );
+    }
+    return options.join('');
+  },
+
   bindTemplateAgentReviewInputs() {
     const list = document.getElementById('templateAgentReviewList');
     if (!list) return;
     list.querySelectorAll('.workspace-template-agent-row').forEach((row) => {
       row.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
         control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
+        control.addEventListener('change', () => this.updateTemplateAgentReviewRowState(row));
       });
       this.updateTemplateAgentReviewRowState(row);
     });
@@ -3490,11 +3533,13 @@ const sessionManager = {
     const promptState = row.querySelector('.workspace-template-agent-prompt-state');
     const originalName = row.dataset.originalName || '';
     const originalModel = row.dataset.originalModel || '';
+    const originalProvider = row.dataset.originalProvider || '';
     const originalPrompt = row.dataset.originalSystemPrompt || '';
     const name = String(nameInput?.value || '').trim();
     const model = String(modelInput?.value || '').trim();
+    const provider = String(modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || '').trim();
     const prompt = String(promptInput?.value || '').trim();
-    const dirty = name !== originalName || model !== originalModel || prompt !== originalPrompt;
+    const dirty = name !== originalName || model !== originalModel || provider !== originalProvider || prompt !== originalPrompt;
     row.classList.toggle('is-edited', dirty);
 
     if (actionChip && row.dataset.originalAction === 'reuse') {
@@ -3504,7 +3549,7 @@ const sessionManager = {
       actionChip.classList.toggle('reuse', !renamed);
     }
     if (sourceLabel && modelInput) {
-      sourceLabel.textContent = model !== originalModel
+      sourceLabel.textContent = model !== originalModel || provider !== originalProvider
         ? 'Custom model'
         : this.templateAgentModelSourceLabel(this.findTemplateAgentPlanItemSource(row));
     }
@@ -3514,9 +3559,13 @@ const sessionManager = {
   },
 
   findTemplateAgentPlanItemSource(row) {
+    return this.findTemplateAgentPlanItem(row)?.model_source || '';
+  },
+
+  findTemplateAgentPlanItem(row) {
     const index = Number.parseInt(row?.dataset?.templateAgentIndex || '', 10);
     const agents = Array.isArray(this.templateAgentPlan?.agents) ? this.templateAgentPlan.agents : [];
-    return Number.isInteger(index) && agents[index] ? agents[index].model_source : '';
+    return Number.isInteger(index) && agents[index] ? agents[index] : null;
   },
 
   collectTemplateAgentOverrides() {
@@ -3535,6 +3584,7 @@ const sessionManager = {
       const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
       const name = String(nameInput?.value || '').trim();
       const model = String(modelInput?.value || '').trim();
+      const provider = String(modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || '').trim();
       const systemPrompt = String(promptInput?.value || '').trim();
       if (!name) {
         nameInput?.focus();
@@ -3551,10 +3601,35 @@ const sessionManager = {
       }
       names.set(duplicateKey, name);
 
+      const originalName = row.dataset.originalName || '';
+      const originalModel = row.dataset.originalModel || '';
+      const originalProvider = row.dataset.originalProvider || '';
+      const originalPrompt = row.dataset.originalSystemPrompt || '';
+      const renamed = name !== originalName;
+      const modelChanged = model !== originalModel || provider !== originalProvider;
+      const promptChanged = systemPrompt !== originalPrompt;
+      if (row.dataset.originalAction === 'reuse' && !renamed && (modelChanged || promptChanged)) {
+        nameInput?.focus();
+        throw new Error(`Rename "${name}" before changing its model or prompt. Existing shared agents are reused as-is.`);
+      }
+
       const override = { index };
-      if (name !== (row.dataset.originalName || '')) override.name = name;
-      if (model !== (row.dataset.originalModel || '')) override.model = model;
-      if (systemPrompt !== (row.dataset.originalSystemPrompt || '')) override.system_prompt = systemPrompt;
+      if (renamed) {
+        override.name = name;
+        if (row.dataset.originalAction === 'reuse') {
+          const planItem = this.findTemplateAgentPlanItem(row) || {};
+          override.model = model;
+          override.provider = provider;
+          override.system_prompt = systemPrompt;
+          if (planItem.role) override.role = String(planItem.role).trim();
+          if (planItem.type) override.type = String(planItem.type).trim();
+        }
+      }
+      if (modelChanged) {
+        override.model = model;
+        override.provider = provider;
+      }
+      if (promptChanged) override.system_prompt = systemPrompt;
       if (Object.keys(override).length > 1) {
         overrides.push(override);
       }

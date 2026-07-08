@@ -385,7 +385,7 @@ func TestCreateWorkspaceAppliesTemplateAgentOverrides(t *testing.T) {
 		"name":"Launch",
 		"template_id":"roster-template",
 		"template_agent_overrides":[
-			{"index":0,"name":"Launch Lead","model":"gpt-5.7","system_prompt":"custom launch prompt"}
+			{"index":0,"name":"Launch Lead","model":"gpt-5.7","provider":"codex","system_prompt":"custom launch prompt"}
 		]
 	}`
 	w, resp := postCreateWorkspace(t, handler, body)
@@ -399,7 +399,7 @@ func TestCreateWorkspaceAppliesTemplateAgentOverrides(t *testing.T) {
 	if !ok {
 		t.Fatal("expected overridden agent name to be created")
 	}
-	if created.Settings.Model != "gpt-5.7" || created.Settings.SystemPrompt != "custom launch prompt" {
+	if created.Settings.Model != "gpt-5.7" || created.Settings.Provider != "codex" || created.Settings.SystemPrompt != "custom launch prompt" {
 		t.Fatalf("overridden settings not applied: %+v", created.Settings)
 	}
 	if len(appliedTools) != 1 || appliedTools[0] != "Launch Lead:planning" {

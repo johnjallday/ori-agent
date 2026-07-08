@@ -24,10 +24,10 @@ const MaxTemplateAgents = 10
 
 // AgentSpec declares one agent a template seeds onto a workspace created from
 // it. Like ToolDefaults, this package carries the spec as data only — it never
-// creates or resolves agents. Role/Type/Model are trimmed and carried verbatim;
-// canonicalizing them against the real agent enums and resolving empty values to
-// defaults happens in the workspace-creation (seeding) layer, keeping this
-// file-copy engine domain-blind. The first surviving entry in a template's
+// creates or resolves agents. Role/Type/Model/Provider are trimmed and carried
+// verbatim; canonicalizing them against the real agent enums and resolving empty
+// values to defaults happens in the workspace-creation (seeding) layer, keeping
+// this file-copy engine domain-blind. The first surviving entry in a template's
 // roster is the workspace entry agent; the rest are specialist sub-agents.
 type AgentSpec struct {
 	Name         string       `json:"name"`
@@ -35,6 +35,7 @@ type AgentSpec struct {
 	Type         string       `json:"type,omitempty"`
 	SystemPrompt string       `json:"system_prompt,omitempty"`
 	Model        string       `json:"model,omitempty"`
+	Provider     string       `json:"provider,omitempty"`
 	Tools        ToolDefaults `json:"tools"`
 }
 
@@ -66,6 +67,7 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 			Type:         strings.TrimSpace(s.Type),
 			SystemPrompt: strings.TrimSpace(s.SystemPrompt),
 			Model:        strings.TrimSpace(s.Model),
+			Provider:     strings.TrimSpace(s.Provider),
 			Tools:        normalizeToolDefaults(s.Tools),
 		})
 		if len(out) >= MaxTemplateAgents {

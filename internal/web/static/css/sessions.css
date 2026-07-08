@@ -1232,10 +1232,15 @@ body.workspace-page .workspace-setup-card {
   color: var(--text-secondary);
 }
 
-.workspace-template-agent-field input {
+.workspace-template-agent-field input,
+.workspace-template-agent-field select {
   min-height: 30px;
   padding: 0.25rem 0.45rem;
   font-size: 0.75rem;
+}
+
+.workspace-template-agent-field select {
+  cursor: pointer;
 }
 
 .workspace-template-agent-row.is-edited {

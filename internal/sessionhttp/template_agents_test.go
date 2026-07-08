@@ -187,6 +187,7 @@ func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
 func TestApplyTemplateAgentOverrides_UpdatesEditableFieldsAndPreservesTools(t *testing.T) {
 	name := "Edited Lead"
 	model := "gpt-5.7"
+	provider := "codex"
 	prompt := "Lead the workspace."
 	idx := 0
 	tpl := rosterTemplate(projecttemplates.AgentSpec{
@@ -199,13 +200,14 @@ func TestApplyTemplateAgentOverrides_UpdatesEditableFieldsAndPreservesTools(t *t
 		Index:        &idx,
 		Name:         &name,
 		Model:        &model,
+		Provider:     &provider,
 		SystemPrompt: &prompt,
 	}})
 	if err != nil {
 		t.Fatalf("apply overrides: %v", err)
 	}
 	got := next.Agents[0]
-	if got.Name != "Edited Lead" || got.Model != "gpt-5.7" || got.SystemPrompt != "Lead the workspace." {
+	if got.Name != "Edited Lead" || got.Model != "gpt-5.7" || got.Provider != "codex" || got.SystemPrompt != "Lead the workspace." {
 		t.Fatalf("editable fields not applied: %+v", got)
 	}
 	if len(got.Tools.Skills) != 1 || got.Tools.Skills[0] != "planning" {

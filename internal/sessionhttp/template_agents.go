@@ -68,6 +68,7 @@ type templateAgentOverride struct {
 	Role         *string `json:"role,omitempty"`
 	Type         *string `json:"type,omitempty"`
 	Model        *string `json:"model,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
 	SystemPrompt *string `json:"system_prompt,omitempty"`
 }
 
@@ -141,6 +142,9 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 		}
 		if override.Model != nil {
 			spec.Model = strings.TrimSpace(*override.Model)
+		}
+		if override.Provider != nil {
+			spec.Provider = strings.TrimSpace(*override.Provider)
 		}
 		if override.SystemPrompt != nil {
 			spec.SystemPrompt = strings.TrimSpace(*override.SystemPrompt)
@@ -271,9 +275,10 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 
 func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (model, provider, reasoningEffort, source string) {
 	model = strings.TrimSpace(spec.Model)
+	provider = strings.TrimSpace(spec.Provider)
 	if model != "" || h == nil || h.systemModelReader == nil {
 		if model != "" {
-			return model, "", "", "template"
+			return model, provider, "", "template"
 		}
 		return "", "", "", "agent_default"
 	}
