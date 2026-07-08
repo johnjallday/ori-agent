@@ -56,9 +56,19 @@ type templateAgentPlanItem struct {
 	Model           string                        `json:"model,omitempty"`
 	Provider        string                        `json:"provider,omitempty"`
 	ReasoningEffort string                        `json:"reasoning_effort,omitempty"`
+	SystemPrompt    string                        `json:"system_prompt,omitempty"`
 	ModelSource     string                        `json:"model_source,omitempty"`
 	Tools           projecttemplates.ToolDefaults `json:"tools,omitempty"`
 	Warning         string                        `json:"warning,omitempty"`
+}
+
+type templateAgentOverride struct {
+	Index        *int    `json:"index"`
+	Name         *string `json:"name,omitempty"`
+	Role         *string `json:"role,omitempty"`
+	Type         *string `json:"type,omitempty"`
+	Model        *string `json:"model,omitempty"`
+	SystemPrompt *string `json:"system_prompt,omitempty"`
 }
 
 // validAgentTypes canonicalizes a template-declared agent type to the real
@@ -89,6 +99,97 @@ func canonicalAgentType(s string) string {
 
 func canonicalAgentRole(s string) string {
 	return validAgentRoles[strings.ToLower(strings.TrimSpace(s))]
+}
+
+func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []templateAgentOverride) (projecttemplates.Template, error) {
+	if len(overrides) == 0 {
+		return tpl, nil
+	}
+	if !tpl.HasAgents() {
+		return tpl, fmt.Errorf("template has no agents to customize")
+	}
+
+	next := tpl
+	next.Agents = append([]projecttemplates.AgentSpec(nil), tpl.Agents...)
+	seenIndexes := make(map[int]struct{}, len(overrides))
+	for _, override := range overrides {
+		if override.Index == nil {
+			return tpl, fmt.Errorf("template agent override is missing an index")
+		}
+		idx := *override.Index
+		if idx < 0 || idx >= len(next.Agents) {
+			return tpl, fmt.Errorf("template agent override index %d is out of range", idx)
+		}
+		if _, exists := seenIndexes[idx]; exists {
+			return tpl, fmt.Errorf("template agent override index %d is duplicated", idx)
+		}
+		seenIndexes[idx] = struct{}{}
+
+		spec := next.Agents[idx]
+		if override.Name != nil {
+			name := strings.TrimSpace(*override.Name)
+			if err := validateTemplateAgentOverrideName(name); err != nil {
+				return tpl, err
+			}
+			spec.Name = name
+		}
+		if override.Role != nil {
+			spec.Role = strings.TrimSpace(*override.Role)
+		}
+		if override.Type != nil {
+			spec.Type = strings.TrimSpace(*override.Type)
+		}
+		if override.Model != nil {
+			spec.Model = strings.TrimSpace(*override.Model)
+		}
+		if override.SystemPrompt != nil {
+			spec.SystemPrompt = strings.TrimSpace(*override.SystemPrompt)
+			if err := projecttemplates.ValidateAgentPrompts([]projecttemplates.AgentSpec{spec}); err != nil {
+				return tpl, err
+			}
+		}
+		next.Agents[idx] = spec
+	}
+	if err := validateTemplateAgentOverrideNames(next.Agents); err != nil {
+		return tpl, err
+	}
+	return next, nil
+}
+
+func validateTemplateAgentOverrideName(name string) error {
+	if name == "" {
+		return fmt.Errorf("template agent name cannot be empty")
+	}
+	if len(name) > 100 {
+		return fmt.Errorf("template agent name %q is too long (max 100 characters)", name)
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == ' ' || r == '_' || r == '-':
+		default:
+			return fmt.Errorf("template agent name %q contains invalid characters (only alphanumeric, spaces, underscores, and hyphens allowed)", name)
+		}
+	}
+	return nil
+}
+
+func validateTemplateAgentOverrideNames(specs []projecttemplates.AgentSpec) error {
+	seen := make(map[string]string, len(specs))
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			return fmt.Errorf("template agent name cannot be empty")
+		}
+		key := strings.ToLower(name)
+		if original, exists := seen[key]; exists {
+			return fmt.Errorf("template agent name %q duplicates %q", name, original)
+		}
+		seen[key] = name
+	}
+	return nil
 }
 
 func (h *Handler) templateAgentCreateConfig(spec projecttemplates.AgentSpec) (*store.CreateAgentConfig, string) {
@@ -236,6 +337,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 			item.Model = strings.TrimSpace(ag.Settings.Model)
 			item.Provider = strings.TrimSpace(ag.Settings.Provider)
 			item.ReasoningEffort = strings.TrimSpace(ag.Settings.EffectiveReasoningEffort(ag.Settings.Provider))
+			item.SystemPrompt = strings.TrimSpace(ag.Settings.SystemPrompt)
 			item.ModelSource = "existing"
 			item.Tools = projecttemplates.ToolDefaults{}
 			item.Warning = fmt.Sprintf("Reusing existing agent %q - its saved prompt, model, and tools are used, not the template's.", name)
@@ -259,6 +361,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	item.Model = strings.TrimSpace(cfg.Model)
 	item.Provider = strings.TrimSpace(cfg.LLMProvider)
 	item.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)
+	item.SystemPrompt = strings.TrimSpace(cfg.SystemPrompt)
 	item.ModelSource = modelSource
 	if item.Model == "" {
 		item.Warning = fmt.Sprintf("Agent %q has no template or system model; it will use the app's default agent model.", name)

@@ -1215,15 +1215,36 @@ body.workspace-page .workspace-setup-card {
   min-width: 0;
 }
 
-.workspace-template-agent-name {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
+.workspace-template-agent-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(160px, 1.1fr);
+  gap: 0.5rem;
+}
+
+.workspace-template-agent-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.workspace-template-agent-field input {
+  min-height: 30px;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.workspace-template-agent-row.is-edited {
+  border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-color) 28%, transparent) inset;
 }
 
 .workspace-template-agent-meta {
-  margin-top: 0.28rem;
+  margin-top: 0.38rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
@@ -1277,6 +1298,45 @@ body.workspace-page .workspace-setup-card {
   font-size: 0.74rem;
 }
 
+.workspace-template-agent-note {
+  margin-top: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.workspace-template-agent-prompt {
+  margin-top: 0.45rem;
+  border-top: 1px dashed var(--border-color);
+  padding-top: 0.42rem;
+}
+
+.workspace-template-agent-prompt summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.workspace-template-agent-prompt summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-template-agent-prompt textarea {
+  width: 100%;
+  min-height: 86px;
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.5rem;
+  resize: vertical;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
 .workspace-template-agent-warnings {
   margin-top: 0.55rem;
   padding-top: 0.5rem;
@@ -1290,8 +1350,16 @@ body.workspace-page .workspace-setup-card {
   opacity: 0.48;
 }
 
+.workspace-template-agent-review.is-disabled .workspace-template-agent-control {
+  pointer-events: none;
+}
+
 @media (max-width: 575.98px) {
   .workspace-template-agent-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-template-agent-fields {
     grid-template-columns: 1fr;
   }
 

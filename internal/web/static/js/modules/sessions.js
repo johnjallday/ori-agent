@@ -3383,7 +3383,7 @@ const sessionManager = {
         : 'Blank template models use the app default because no system model is configured.';
     }
     if (list) {
-      list.innerHTML = agents.map((agent) => this.renderTemplateAgentPlanRow(agent)).join('');
+      list.innerHTML = agents.map((agent, index) => this.renderTemplateAgentPlanRow(agent, index)).join('');
     }
     const warningMessages = [
       ...(Array.isArray(plan.warnings) ? plan.warnings : [])
@@ -3394,10 +3394,11 @@ const sessionManager = {
         .map((msg) => `<div>${this.escapeHtml(msg)}</div>`)
         .join('');
     }
+    this.bindTemplateAgentReviewInputs();
     this.updateTemplateAgentReviewDisabledState();
   },
 
-  renderTemplateAgentPlanRow(agent) {
+  renderTemplateAgentPlanRow(agent, index) {
     const action = String(agent?.action || 'create').trim() === 'reuse' ? 'reuse' : 'create';
     const actionLabel = action === 'reuse' ? 'Reuse' : 'Create';
     const role = String(agent?.role || '').trim();
@@ -3406,29 +3407,159 @@ const sessionManager = {
     const provider = String(agent?.provider || '').trim();
     const source = this.templateAgentModelSourceLabel(agent?.model_source);
     const tools = this.templateAgentToolsLabel(agent?.tools);
+    const name = String(agent?.name || '').trim();
+    const systemPrompt = String(agent?.system_prompt || '').trim();
+    const editableModel = ['template', 'existing'].includes(String(agent?.model_source || '').trim()) ? model : '';
     const modelText = model
       ? `${provider ? `${provider} / ` : ''}${model}`
       : 'App default';
+    const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
     const chips = [
-      `<span class="workspace-template-agent-chip ${action}">${actionLabel}</span>`,
+      `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>`,
       agent?.entry_point ? '<span class="workspace-template-agent-chip entry">Entry</span>' : '<span class="workspace-template-agent-chip">Specialist</span>',
       role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
       type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
       tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
     ].filter(Boolean).join('');
+    const reuseNote = action === 'reuse'
+      ? '<div class="workspace-template-agent-note">This name matches an existing agent. Saved settings are reused unless you rename it.</div>'
+      : '';
 
     return `
-      <div class="workspace-template-agent-row">
+      <div class="workspace-template-agent-row"
+           data-template-agent-index="${index}"
+           data-original-action="${this.escapeHtml(action)}"
+           data-original-name="${this.escapeHtml(name)}"
+           data-original-model="${this.escapeHtml(editableModel)}"
+           data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
         <div class="workspace-template-agent-main">
-          <div class="workspace-template-agent-name">${this.escapeHtml(agent?.name || 'Unnamed agent')}</div>
+          <div class="workspace-template-agent-fields">
+            <label class="workspace-template-agent-field">
+              <span>Name</span>
+              <input type="text"
+                     class="modern-input workspace-template-agent-control workspace-template-agent-name-input"
+                     value="${this.escapeHtml(name)}"
+                     placeholder="Agent name">
+            </label>
+            <label class="workspace-template-agent-field">
+              <span>Model</span>
+              <input type="text"
+                     class="modern-input workspace-template-agent-control workspace-template-agent-model-input"
+                     value="${this.escapeHtml(editableModel)}"
+                     placeholder="${this.escapeHtml(modelText)}">
+            </label>
+          </div>
           <div class="workspace-template-agent-meta">${chips}</div>
+          ${reuseNote}
+          <details class="workspace-template-agent-prompt">
+            <summary>
+              <span>System prompt</span>
+              <span class="workspace-template-agent-prompt-state">${this.escapeHtml(promptState)}</span>
+            </summary>
+            <textarea class="modern-input workspace-template-agent-control workspace-template-agent-prompt-input"
+                      rows="4"
+                      placeholder="Optional system prompt">${this.escapeHtml(systemPrompt)}</textarea>
+          </details>
         </div>
         <div class="workspace-template-agent-model">
           <strong>${this.escapeHtml(modelText)}</strong>
-          <span>${this.escapeHtml(source)}</span>
+          <span class="workspace-template-agent-model-source">${this.escapeHtml(source)}</span>
         </div>
       </div>
     `;
+  },
+
+  bindTemplateAgentReviewInputs() {
+    const list = document.getElementById('templateAgentReviewList');
+    if (!list) return;
+    list.querySelectorAll('.workspace-template-agent-row').forEach((row) => {
+      row.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
+        control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
+      });
+      this.updateTemplateAgentReviewRowState(row);
+    });
+  },
+
+  updateTemplateAgentReviewRowState(row) {
+    if (!row) return;
+    const nameInput = row.querySelector('.workspace-template-agent-name-input');
+    const modelInput = row.querySelector('.workspace-template-agent-model-input');
+    const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
+    const actionChip = row.querySelector('.workspace-template-agent-action');
+    const sourceLabel = row.querySelector('.workspace-template-agent-model-source');
+    const promptState = row.querySelector('.workspace-template-agent-prompt-state');
+    const originalName = row.dataset.originalName || '';
+    const originalModel = row.dataset.originalModel || '';
+    const originalPrompt = row.dataset.originalSystemPrompt || '';
+    const name = String(nameInput?.value || '').trim();
+    const model = String(modelInput?.value || '').trim();
+    const prompt = String(promptInput?.value || '').trim();
+    const dirty = name !== originalName || model !== originalModel || prompt !== originalPrompt;
+    row.classList.toggle('is-edited', dirty);
+
+    if (actionChip && row.dataset.originalAction === 'reuse') {
+      const renamed = name !== '' && name !== originalName;
+      actionChip.textContent = renamed ? 'Create' : 'Reuse';
+      actionChip.classList.toggle('create', renamed);
+      actionChip.classList.toggle('reuse', !renamed);
+    }
+    if (sourceLabel && modelInput) {
+      sourceLabel.textContent = model !== originalModel
+        ? 'Custom model'
+        : this.templateAgentModelSourceLabel(this.findTemplateAgentPlanItemSource(row));
+    }
+    if (promptState) {
+      promptState.textContent = prompt ? 'Prompt set' : 'No prompt';
+    }
+  },
+
+  findTemplateAgentPlanItemSource(row) {
+    const index = Number.parseInt(row?.dataset?.templateAgentIndex || '', 10);
+    const agents = Array.isArray(this.templateAgentPlan?.agents) ? this.templateAgentPlan.agents : [];
+    return Number.isInteger(index) && agents[index] ? agents[index].model_source : '';
+  },
+
+  collectTemplateAgentOverrides() {
+    const review = document.getElementById('templateAgentReview');
+    const toggle = document.getElementById('templateAgentReviewToggle');
+    if (!review || !toggle || !toggle.checked) return [];
+
+    const rows = Array.from(review.querySelectorAll('.workspace-template-agent-row'));
+    const overrides = [];
+    const names = new Map();
+    for (const row of rows) {
+      const index = Number.parseInt(row.dataset.templateAgentIndex || '', 10);
+      if (!Number.isInteger(index)) continue;
+      const nameInput = row.querySelector('.workspace-template-agent-name-input');
+      const modelInput = row.querySelector('.workspace-template-agent-model-input');
+      const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
+      const name = String(nameInput?.value || '').trim();
+      const model = String(modelInput?.value || '').trim();
+      const systemPrompt = String(promptInput?.value || '').trim();
+      if (!name) {
+        nameInput?.focus();
+        throw new Error('Template agent name cannot be empty.');
+      }
+      if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
+        nameInput?.focus();
+        throw new Error('Template agent names can use letters, numbers, spaces, underscores, and hyphens.');
+      }
+      const duplicateKey = name.toLowerCase();
+      if (names.has(duplicateKey)) {
+        nameInput?.focus();
+        throw new Error(`Template agent "${name}" duplicates "${names.get(duplicateKey)}".`);
+      }
+      names.set(duplicateKey, name);
+
+      const override = { index };
+      if (name !== (row.dataset.originalName || '')) override.name = name;
+      if (model !== (row.dataset.originalModel || '')) override.model = model;
+      if (systemPrompt !== (row.dataset.originalSystemPrompt || '')) override.system_prompt = systemPrompt;
+      if (Object.keys(override).length > 1) {
+        overrides.push(override);
+      }
+    }
+    return overrides;
   },
 
   templateAgentModelSourceLabel(source) {
@@ -3461,6 +3592,9 @@ const sessionManager = {
     const toggle = document.getElementById('templateAgentReviewToggle');
     if (!review || !toggle) return;
     review.classList.toggle('is-disabled', !toggle.checked);
+    review.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
+      control.disabled = !toggle.checked;
+    });
   },
 
   // Fills a create-modal input from a template default while tracking the
@@ -3655,6 +3789,12 @@ const sessionManager = {
         if (this.templateAgentPlan?.has_agents) {
           const createTemplateAgents = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
           payload.create_template_agents = createTemplateAgents;
+          if (createTemplateAgents) {
+            const templateAgentOverrides = this.collectTemplateAgentOverrides();
+            if (templateAgentOverrides.length > 0) {
+              payload.template_agent_overrides = templateAgentOverrides;
+            }
+          }
         }
         if (window.WorkspaceTagsCard) {
           Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());

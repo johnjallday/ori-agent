@@ -145,12 +145,31 @@
 .workspace-create-modal .workspace-template-agent-toggle {
   color: var(--wc-faction);
 }
-.workspace-create-modal .workspace-template-agent-name,
 .workspace-create-modal .workspace-template-agent-model strong {
   color: #f3f5f8;
 }
 .workspace-create-modal .workspace-template-agent-model {
   color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-agent-field,
+.workspace-create-modal .workspace-template-agent-note,
+.workspace-create-modal .workspace-template-agent-prompt summary {
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-agent-control {
+  background: rgba(4, 8, 12, 0.48);
+  border-color: var(--wc-line);
+  color: #f3f5f8;
+}
+.workspace-create-modal .workspace-template-agent-control::placeholder {
+  color: rgba(198, 207, 216, 0.54);
+}
+.workspace-create-modal .workspace-template-agent-row.is-edited {
+  border-color: var(--wc-faction-deep);
+  box-shadow: 0 0 0 1px rgba(70, 211, 154, 0.22) inset;
+}
+.workspace-create-modal .workspace-template-agent-prompt {
+  border-top-color: var(--wc-line);
 }
 .workspace-create-modal .workspace-template-agent-chip {
   border-color: var(--wc-line-bright);
