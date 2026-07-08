@@ -47,6 +47,38 @@ func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (proje
 	}
 }
 
+func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		TemplateID   string `json:"template_id,omitempty"`
+		TemplatePath string `json:"template_path,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
+		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
+		return
+	}
+	if strings.TrimSpace(req.TemplateID) == "" && strings.TrimSpace(req.TemplatePath) == "" {
+		_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(projecttemplates.Template{}))
+		return
+	}
+
+	tpl, err := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
+	if err != nil {
+		h.respondWorkspaceProjectError(w, err)
+		return
+	}
+
+	_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(tpl))
+}
+
 // instantiateWorkspaceProject creates a project folder from a template inside
 // the workspace's folder, persists ProjectPath in both the session store and
 // the folder store, and publishes project.created. On any failure after the

@@ -153,6 +153,9 @@ func (b *ServerBuilder) initializeHandlers() {
 			return resolveTemplatesRoot(b.configManager)
 		})
 		b.sessionHandler.SetAgentStore(b.st)
+		if b.configManager != nil {
+			b.sessionHandler.SetSystemModelReader(b.configManager)
+		}
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

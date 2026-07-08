@@ -24,6 +24,20 @@ func wsHasAgent(ws *session.Workspace, name string) bool {
 	return false
 }
 
+type fakeSystemModelReader struct {
+	provider        string
+	model           string
+	reasoningEffort string
+}
+
+func (f fakeSystemModelReader) GetSystemModel() (string, string) {
+	return f.provider, f.model
+}
+
+func (f fakeSystemModelReader) GetSystemReasoningEffort() string {
+	return f.reasoningEffort
+}
+
 func TestSeedTemplateAgents_CreatesRosterAndSetsEntry(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
@@ -53,6 +67,167 @@ func TestSeedTemplateAgents_CreatesRosterAndSetsEntry(t *testing.T) {
 	}
 	if got := currentWorkspaceEntryAgentName(ws); got != "Lead" {
 		t.Fatalf("expected entry agent Lead, got %q", got)
+	}
+}
+
+func TestSeedTemplateAgents_BlankModelInheritsSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider:        "codex",
+		model:           "gpt-5.3-codex",
+		reasoningEffort: "high",
+	})
+
+	ws := &session.Workspace{ID: "ws1", Name: "Campaign"}
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Role: "orchestrator"})
+
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	if !res.EntrySet {
+		t.Fatal("expected EntrySet true")
+	}
+	created, ok := handler.agentStore.GetAgent("Lead")
+	if !ok {
+		t.Fatal("expected Lead agent to be created")
+	}
+	if created.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model = %q, want gpt-5.3-codex", created.Settings.Model)
+	}
+	if created.Settings.Provider != "codex" {
+		t.Fatalf("provider = %q, want codex", created.Settings.Provider)
+	}
+	if created.Settings.ReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", created.Settings.ReasoningEffort)
+	}
+}
+
+func TestSeedTemplateAgents_ExplicitModelWinsOverSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider: "codex",
+		model:    "gpt-5.3-codex",
+	})
+
+	ws := &session.Workspace{ID: "ws1", Name: "Campaign"}
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Model: "gpt-5-mini"})
+
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	if !res.EntrySet {
+		t.Fatal("expected EntrySet true")
+	}
+	created, ok := handler.agentStore.GetAgent("Lead")
+	if !ok {
+		t.Fatal("expected Lead agent to be created")
+	}
+	if created.Settings.Model != "gpt-5-mini" {
+		t.Fatalf("model = %q, want explicit gpt-5-mini", created.Settings.Model)
+	}
+	if created.Settings.Provider != "" {
+		t.Fatalf("provider = %q, want empty provider for explicit model-only template", created.Settings.Provider)
+	}
+}
+
+func TestBuildTemplateAgentPlan_CreateReuseAndSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider:        "codex",
+		model:           "gpt-5.3-codex",
+		reasoningEffort: "high",
+	})
+	if err := handler.agentStore.CreateAgent("Shared", &agentstore.CreateAgentConfig{
+		Model:        "gpt-5-mini",
+		LLMProvider:  "openai",
+		SystemPrompt: "saved shared prompt",
+	}); err != nil {
+		t.Fatalf("pre-create agent: %v", err)
+	}
+
+	tpl := rosterTemplate(
+		projecttemplates.AgentSpec{Name: "Shared", Model: "ignored-model"},
+		projecttemplates.AgentSpec{Name: "Fresh", Role: "orchestrator", SystemPrompt: "fresh prompt", Tools: projecttemplates.ToolDefaults{Skills: []string{"planning"}}},
+	)
+	tpl.ID = "launch"
+	tpl.Name = "Launch"
+
+	plan := handler.buildTemplateAgentPlan(tpl)
+
+	if !plan.HasAgents || plan.EntryAgentName != "Shared" {
+		t.Fatalf("unexpected plan header: %+v", plan)
+	}
+	if !plan.SystemModelConfigured || plan.SystemProvider != "codex" || plan.SystemModel != "gpt-5.3-codex" {
+		t.Fatalf("unexpected system model fields: %+v", plan)
+	}
+	if len(plan.Agents) != 2 {
+		t.Fatalf("expected 2 planned agents, got %d", len(plan.Agents))
+	}
+	if plan.Agents[0].Action != "reuse" || plan.Agents[0].Model != "gpt-5-mini" || plan.Agents[0].ModelSource != "existing" {
+		t.Fatalf("unexpected reused agent plan: %+v", plan.Agents[0])
+	}
+	if plan.Agents[0].SystemPrompt != "saved shared prompt" {
+		t.Fatalf("expected existing prompt to be surfaced, got %q", plan.Agents[0].SystemPrompt)
+	}
+	if plan.Agents[1].Action != "create" || plan.Agents[1].Model != "gpt-5.3-codex" || plan.Agents[1].Provider != "codex" || plan.Agents[1].ModelSource != "system" {
+		t.Fatalf("unexpected created agent plan: %+v", plan.Agents[1])
+	}
+	if plan.Agents[1].SystemPrompt != "fresh prompt" {
+		t.Fatalf("expected template prompt to be surfaced, got %q", plan.Agents[1].SystemPrompt)
+	}
+	if len(plan.Agents[1].Tools.Skills) != 1 || plan.Agents[1].Tools.Skills[0] != "planning" {
+		t.Fatalf("expected planned tools to be preserved, got %+v", plan.Agents[1].Tools)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "Shared") {
+		t.Fatalf("expected reuse warning for Shared, got %v", plan.Warnings)
+	}
+}
+
+func TestApplyTemplateAgentOverrides_UpdatesEditableFieldsAndPreservesTools(t *testing.T) {
+	name := "Edited Lead"
+	model := "gpt-5.7"
+	provider := "codex"
+	prompt := "Lead the workspace."
+	idx := 0
+	tpl := rosterTemplate(projecttemplates.AgentSpec{
+		Name:  "Lead",
+		Model: "gpt-5-mini",
+		Tools: projecttemplates.ToolDefaults{Skills: []string{"planning"}},
+	})
+
+	next, err := applyTemplateAgentOverrides(tpl, []templateAgentOverride{{
+		Index:        &idx,
+		Name:         &name,
+		Model:        &model,
+		Provider:     &provider,
+		SystemPrompt: &prompt,
+	}})
+	if err != nil {
+		t.Fatalf("apply overrides: %v", err)
+	}
+	got := next.Agents[0]
+	if got.Name != "Edited Lead" || got.Model != "gpt-5.7" || got.Provider != "codex" || got.SystemPrompt != "Lead the workspace." {
+		t.Fatalf("editable fields not applied: %+v", got)
+	}
+	if len(got.Tools.Skills) != 1 || got.Tools.Skills[0] != "planning" {
+		t.Fatalf("tools should be preserved, got %+v", got.Tools)
+	}
+}
+
+func TestApplyTemplateAgentOverrides_RejectsDuplicateNames(t *testing.T) {
+	name := "Writer"
+	idx := 0
+	tpl := rosterTemplate(
+		projecttemplates.AgentSpec{Name: "Lead"},
+		projecttemplates.AgentSpec{Name: "Writer"},
+	)
+
+	if _, err := applyTemplateAgentOverrides(tpl, []templateAgentOverride{{
+		Index: &idx,
+		Name:  &name,
+	}}); err == nil {
+		t.Fatal("expected duplicate name error")
 	}
 }
 
