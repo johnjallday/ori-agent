@@ -2,12 +2,14 @@
  * workspace-construct.css — tactical reskin of the create-workspace modal.
  *
  * Everything is scoped under `.workspace-create-modal` (the #addFolderModal root)
- * so it cannot leak to other modals or pages. A dark tactical surface that mirrors
- * the Map's `.ws-map` / Command view's `.ws-cmd` visual system; the self-hosted
- * @font-face declarations are already provided globally by workspace-map.css.
+ * so it cannot leak to other modals or pages. It mirrors the Map's `.ws-map` /
+ * Command view's `.ws-cmd` visual system with theme-responsive tactical tokens;
+ * the self-hosted @font-face declarations are already provided globally by
+ * workspace-map.css.
  *
  * Styling only — the form logic, template picker, submission, and intake are
- * untouched. No ui-refresh.css edits, no `!important`.
+ * untouched. Scoped `!important` is used only where the global modal/input
+ * refresh layer also uses `!important`.
  *
  * Approach: the template's inline styles use app theme vars (var(--bg-primary),
  * var(--text-secondary), ...), so we redefine those vars locally to re-theme the
@@ -32,8 +34,8 @@
   --wc-idle: #4ec5e6;
   --wc-alert: #e2654d;
   --wc-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
-  --wc-font-display: 'Chakra Petch', system-ui, sans-serif;
-  --wc-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --wc-font-display: "Chakra Petch", system-ui, sans-serif;
+  --wc-font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* redefine app theme vars locally → the modal's inline var() usages go tactical */
   --bg-primary: var(--wc-panel);
@@ -46,82 +48,165 @@
 
 /* ---------- chrome ---------- */
 .workspace-create-modal .modal-content {
+  background: var(--wc-panel) !important;
+  border: 1px solid var(--wc-line) !important;
+  backdrop-filter: none !important;
   color: var(--wc-ink);
-  box-shadow: var(--wc-glow);
-  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  box-shadow: var(--wc-glow) !important;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    16px 100%,
+    0 calc(100% - 16px)
+  );
 }
-.workspace-create-modal .modal-header { background: linear-gradient(180deg, var(--wc-panel-2), var(--wc-panel)); }
+.workspace-create-modal .modal-header {
+  background: linear-gradient(180deg, var(--wc-panel-2), var(--wc-panel)) !important;
+  border-bottom-color: var(--wc-line) !important;
+}
 .workspace-create-modal .modal-title {
-  font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: #eef0f3;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #eef0f3;
 }
-.workspace-create-modal .btn-close { filter: invert(1) grayscale(1) brightness(1.4); opacity: 0.7; }
-.workspace-create-modal .btn-close:hover { opacity: 1; }
-.workspace-create-modal .modal-footer { background: linear-gradient(0deg, var(--wc-panel-2), var(--wc-panel)); }
+.workspace-create-modal .btn-close {
+  filter: invert(1) grayscale(1) brightness(1.4);
+  opacity: 0.7;
+}
+.workspace-create-modal .btn-close:hover {
+  opacity: 1;
+}
+.workspace-create-modal .modal-footer {
+  background: linear-gradient(0deg, var(--wc-panel-2), var(--wc-panel)) !important;
+  border-top-color: var(--wc-line) !important;
+}
 
 /* kicker line under the title area */
 .workspace-create-modal .modal-title::after {
-  content: 'Construct'; display: inline-block; margin-left: 10px;
-  font-family: var(--wc-font-mono); font-size: 9px; letter-spacing: 2px; color: var(--wc-faction);
-  border: 1px solid var(--wc-faction-deep); padding: 2px 6px; vertical-align: middle;
+  content: "Construct";
+  display: inline-block;
+  margin-left: 10px;
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--wc-faction);
+  border: 1px solid var(--wc-faction-deep);
+  padding: 2px 6px;
+  vertical-align: middle;
 }
 
 /* ---------- inputs ---------- */
 .workspace-create-modal .modern-input {
-  background: var(--wc-bg-2); border: 1px solid var(--wc-line-bright); color: var(--wc-ink);
+  background: var(--wc-bg-2) !important;
+  border: 1px solid var(--wc-line-bright) !important;
+  color: var(--wc-ink) !important;
   font-family: var(--wc-font-mono);
 }
-.workspace-create-modal .modern-input::placeholder { color: var(--wc-ink-faint); }
-.workspace-create-modal .modern-input:focus {
-  border-color: var(--wc-faction-deep); box-shadow: 0 0 0 1px var(--wc-faction-deep); outline: none;
+.workspace-create-modal .modern-input::placeholder {
+  color: var(--wc-ink-faint);
 }
-.workspace-create-modal select.modern-input option { background: var(--wc-panel); color: var(--wc-ink); }
+.workspace-create-modal .modern-input:focus {
+  border-color: var(--wc-faction-deep) !important;
+  box-shadow: 0 0 0 1px var(--wc-faction-deep) !important;
+  background: var(--wc-bg-2) !important;
+  outline: none;
+}
+.workspace-create-modal select.modern-input option {
+  background: var(--wc-panel);
+  color: var(--wc-ink);
+}
 
 /* ---------- buttons ---------- */
 .workspace-create-modal .modern-btn-primary {
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.18), rgba(70, 211, 154, 0.05));
-  border: 1px solid var(--wc-faction-deep); color: var(--wc-faction);
-  font-family: var(--wc-font-display); letter-spacing: 1px; text-transform: uppercase; font-weight: 700;
+  border: 1px solid var(--wc-faction-deep);
+  color: var(--wc-faction);
+  font-family: var(--wc-font-display);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 700;
 }
-.workspace-create-modal .modern-btn-primary:hover { background: var(--wc-faction); color: #04110c; }
+.workspace-create-modal .modern-btn-primary:hover {
+  background: var(--wc-faction);
+  color: #04110c;
+}
 .workspace-create-modal .modern-btn-secondary {
-  background: var(--wc-bg-2); border: 1px solid var(--wc-line-bright); color: var(--wc-ink-dim);
+  background: var(--wc-bg-2);
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-dim);
 }
-.workspace-create-modal .modern-btn-secondary:hover { color: var(--wc-faction); border-color: var(--wc-faction-deep); }
-.workspace-create-modal .modern-btn:focus-visible { outline: 2px solid var(--wc-faction); outline-offset: 2px; }
+.workspace-create-modal .modern-btn-secondary:hover {
+  color: var(--wc-faction);
+  border-color: var(--wc-faction-deep);
+}
+.workspace-create-modal .modern-btn:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
 
 /* ---------- setup / advanced cards ---------- */
 .workspace-create-modal .workspace-setup-card,
 .workspace-create-modal .workspace-advanced-details {
-  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--wc-line);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--wc-line);
 }
 .workspace-create-modal .workspace-setup-title,
-.workspace-create-modal .workspace-advanced-summary-title { color: #eef0f3; }
+.workspace-create-modal .workspace-advanced-summary-title {
+  color: #eef0f3;
+}
 .workspace-create-modal .workspace-setup-help,
-.workspace-create-modal .workspace-advanced-summary-hint { color: var(--wc-ink-faint); }
+.workspace-create-modal .workspace-advanced-summary-hint {
+  color: var(--wc-ink-faint);
+}
 .workspace-create-modal .workspace-template-list-heading {
-  font-family: var(--wc-font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--wc-ink-faint);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-ink-faint);
 }
 
 /* ---------- template blueprint cards ---------- */
 .workspace-create-modal .workspace-template-card,
 .workspace-create-modal .workspace-template-row {
-  border: 1px solid var(--wc-line); background: var(--wc-panel-2); color: var(--wc-ink);
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-2);
+  color: var(--wc-ink);
   clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 .workspace-create-modal .workspace-template-card:hover,
-.workspace-create-modal .workspace-template-row:hover { border-color: var(--wc-line-bright); transform: translateY(-2px); }
+.workspace-create-modal .workspace-template-row:hover {
+  border-color: var(--wc-line-bright);
+  transform: translateY(-2px);
+}
 .workspace-create-modal .workspace-template-card.is-selected,
 .workspace-create-modal .workspace-template-row.is-selected {
-  border-color: var(--wc-faction-deep); background: rgba(70, 211, 154, 0.08);
+  border-color: var(--wc-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
 }
 .workspace-create-modal .workspace-template-card:focus-visible,
-.workspace-create-modal .workspace-template-row:focus-visible { outline: 2px solid var(--wc-faction); outline-offset: 2px; }
-.workspace-create-modal .workspace-template-card-icon { color: var(--wc-faction); }
-.workspace-create-modal .workspace-template-card-label {
-  color: #f3f5f8; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+.workspace-create-modal .workspace-template-row:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
 }
-.workspace-create-modal .workspace-template-card-desc { color: var(--wc-ink-faint); }
+.workspace-create-modal .workspace-template-card-icon {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-template-card-label {
+  color: #f3f5f8;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-template-card-desc {
+  color: var(--wc-ink-faint);
+}
 
 .workspace-create-modal .workspace-template-agent-review {
   background: rgba(70, 211, 154, 0.06);
@@ -192,12 +277,151 @@
 }
 
 /* color picker: keep the swatch colors, tactical active ring */
-.workspace-create-modal .folder-color-btn.active { box-shadow: 0 0 0 2px var(--wc-faction); }
+.workspace-create-modal .folder-color-btn.active {
+  box-shadow: 0 0 0 2px var(--wc-faction);
+}
+
+/* Light mode keeps Construct's angular tactical layout, but uses the same
+   light neutral shell as the Workspace Map and Command views. */
+[data-bs-theme="light"] .workspace-create-modal {
+  --wc-bg: #eef1f3;
+  --wc-bg-2: #f7f8f9;
+  --wc-panel: #eceff2;
+  --wc-panel-2: #fbfcfd;
+  --wc-panel-deep: #dfe4e8;
+  --wc-line: #c8cdd3;
+  --wc-line-bright: #a8b0ba;
+  --wc-ink: #1f2128;
+  --wc-ink-dim: #5c5c5e;
+  --wc-ink-faint: #737a84;
+  --wc-ink-heading: #0a0a0a;
+  --wc-faction: #1f6b4e;
+  --wc-faction-deep: rgba(31, 107, 78, 0.34);
+  --wc-keeper: #9b641b;
+  --wc-idle: #167c99;
+  --wc-alert: #b94b3f;
+  --wc-field-bg: rgba(255, 255, 255, 0.66);
+  --wc-card-bg: linear-gradient(180deg, var(--wc-panel-2), var(--wc-panel));
+  --wc-glow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 22px 48px -28px rgba(10, 10, 10, 0.38);
+
+  --bg-primary: var(--wc-panel);
+  --text-primary: var(--wc-ink-heading);
+  --text-secondary: var(--wc-ink-dim);
+  --border-color: var(--wc-line);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modal-content {
+  color: var(--wc-ink);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modal-header,
+[data-bs-theme="light"] .workspace-create-modal .modal-footer {
+  background: var(--wc-card-bg);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modal-title,
+[data-bs-theme="light"] .workspace-create-modal .workspace-setup-title,
+[data-bs-theme="light"] .workspace-create-modal .workspace-advanced-summary-title,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-label,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-title,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model strong {
+  color: var(--wc-ink-heading);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .btn-close {
+  filter: none;
+  opacity: 0.62;
+}
+
+[data-bs-theme="light"] .workspace-create-modal .btn-close:hover {
+  opacity: 0.9;
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modern-input,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control {
+  background: var(--wc-field-bg);
+  border-color: var(--wc-line-bright);
+  color: var(--wc-ink);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modern-input::placeholder,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control::placeholder {
+  color: var(--wc-ink-faint);
+}
+
+[data-bs-theme="light"] .workspace-create-modal select.modern-input option {
+  background: var(--wc-panel-2);
+  color: var(--wc-ink);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .modern-btn-primary:hover {
+  color: #ffffff;
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-setup-card,
+[data-bs-theme="light"] .workspace-create-modal .workspace-advanced-details,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-toggle,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-row {
+  background: var(--wc-field-bg);
+  border-color: var(--wc-line);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-row {
+  background: var(--wc-card-bg);
+  color: var(--wc-ink);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card.is-selected,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-row.is-selected,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review {
+  background: rgba(31, 107, 78, 0.08);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-desc,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-summary,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-status,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-warnings,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-field,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-note,
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt summary {
+  color: var(--wc-ink-dim);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt {
+  border-top-color: var(--wc-line);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.create {
+  color: var(--wc-faction);
+  background: rgba(31, 107, 78, 0.1);
+  border-color: rgba(31, 107, 78, 0.26);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.reuse {
+  color: var(--wc-keeper);
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.entry {
+  color: var(--wc-idle);
+}
+
+[data-bs-theme="dark"] .workspace-create-modal .modern-input,
+[data-bs-theme="dark"] .workspace-create-modal .workspace-template-agent-control {
+  background: var(--wc-bg-2) !important;
+  border-color: var(--wc-line-bright) !important;
+  color: var(--wc-ink) !important;
+}
 
 /* honor the OS reduce-motion preference (drop the hover lift/transition) */
 @media (prefers-reduced-motion: reduce) {
   .workspace-create-modal .workspace-template-card,
-  .workspace-create-modal .workspace-template-row { transition: none; }
+  .workspace-create-modal .workspace-template-row {
+    transition: none;
+  }
   .workspace-create-modal .workspace-template-card:hover,
-  .workspace-create-modal .workspace-template-row:hover { transform: none; }
+  .workspace-create-modal .workspace-template-row:hover {
+    transform: none;
+  }
 }
