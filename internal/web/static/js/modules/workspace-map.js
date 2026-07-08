@@ -367,6 +367,7 @@
     var openTasks = Number(ws.open_task_count || 0);
     var mcp = Number(ws.mcp_count || 0);
     var skills = Number(ws.skill_count || 0);
+    var description = String(ws.description || '').trim();
     var delLabel = isGroup(ws) ? 'Delete group' : 'Delete workspace';
 
     var keeper = entry
@@ -388,6 +389,9 @@
       '<button type="button" class="ws-map-ov-open" data-ws-open="' + escapeHtml(ws.id) +
       '" aria-label="Open ' + escapeHtml(ws.name || 'workspace') + '">Open ▸</button>' +
       '</div>' +
+      (description
+        ? '<p class="ws-map-ov-desc" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</p>'
+        : '<p class="ws-map-ov-desc is-empty">No description yet.</p>') +
       '<div class="ws-map-ov-label">Entry agent</div>' +
       '<div class="ws-map-ov-keeperwrap">' + keeper + '</div>' +
       '<div class="ws-map-ov-label">Agents · ' + agents.length + '</div>' +

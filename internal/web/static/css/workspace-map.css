@@ -336,6 +336,14 @@
 .ws-map-ov-name { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #f3f5f8; }
 .ws-map-ov-tag { font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 3px; }
 
+/* Workspace description — sits just under the hero. Clamped so a long blurb
+   doesn't push the roster/stats out of view; the full text is on hover. */
+.ws-map-ov-desc {
+  margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ws-ink-dim);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.ws-map-ov-desc.is-empty { font-style: italic; color: var(--ws-ink-faint); }
+
 .ws-map-ov-label {
   font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint);
   margin: 14px 0 8px;

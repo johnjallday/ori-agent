@@ -224,6 +224,14 @@ test('tileHTML renders an (unchecked) multi-select checkbox affordance', () => {
   assert.doesNotMatch(html, /class="ws-map-tile[^"]*is-multi/);
 });
 
+test('overviewBodyHTML shows the workspace description, or an empty-state note', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const withDesc = overviewBodyHTML({ id: 'a', name: 'Ops', description: 'Coordinates field logistics.' });
+  assert.match(withDesc, /class="ws-map-ov-desc"[^>]*>Coordinates field logistics\./);
+  const noDesc = overviewBodyHTML({ id: 'b', name: 'Bare' });
+  assert.match(noDesc, /class="ws-map-ov-desc is-empty">No description yet\./);
+});
+
 test('overviewBodyHTML offers a delete action carrying the workspace id', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research' });
