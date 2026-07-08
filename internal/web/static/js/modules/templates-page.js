@@ -1357,7 +1357,7 @@ async function tplToolsSave() {
 const TPL_AGENT_ROLES = ['', 'orchestrator', 'specialist', 'researcher', 'analyzer', 'synthesizer', 'validator', 'general'];
 const TPL_AGENT_TYPES = ['', 'tool-calling', 'general', 'research'];
 
-const tplAgents = { templateId: '', dragIndex: -1, existingNames: [], existingLoaded: false };
+const tplAgents = { templateId: '', dragIndex: -1, existingNames: [], existingLoaded: false, promptVars: [], promptVarsLoaded: false };
 
 function tplAgentsBlank() {
   return { name: '', role: '', type: '', model: '', system_prompt: '', tools: { skills: [], mcp_servers: [] } };
@@ -1514,6 +1514,106 @@ function tplAgentsNameMatchesExisting(value) {
   return (tplAgents.existingNames || []).some((n) => String(n).toLowerCase() === v);
 }
 
+// tplAgentsEnsurePromptVars lazily loads the closed prompt-variable vocabulary
+// once, for the inserter chips (PRD FR27). Non-fatal: on failure the inserter
+// simply offers no chips.
+async function tplAgentsEnsurePromptVars() {
+  if (tplAgents.promptVarsLoaded) return tplAgents.promptVars;
+  tplAgents.promptVarsLoaded = true;
+  try {
+    const res = await fetch('/api/prompt-variables');
+    const data = await res.json().catch(() => ({}));
+    tplAgents.promptVars = Array.isArray(data.variables) ? data.variables : [];
+  } catch {
+    tplAgents.promptVars = [];
+  }
+  return tplAgents.promptVars;
+}
+
+// tplInsertAtCursor inserts text at the textarea's caret (or end), keeps focus,
+// and fires an input event so any dependent state updates.
+function tplInsertAtCursor(textarea, text) {
+  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
+  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : textarea.value.length;
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+  const pos = start + text.length;
+  textarea.selectionStart = pos;
+  textarea.selectionEnd = pos;
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// tplAgentsPromptTools wraps a system-prompt textarea with a variable inserter
+// (clickable vocabulary chips) and a live resolved-prompt preview against a
+// synthetic sample workspace (PRD FR27/FR28).
+function tplAgentsPromptTools(textarea) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tpl-prompt-tools';
+  wrap.appendChild(textarea);
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'tpl-prompt-toolbar';
+
+  const label = document.createElement('span');
+  label.className = 'tpl-prompt-toolbar-label';
+  label.textContent = 'Insert:';
+  toolbar.appendChild(label);
+
+  const chips = document.createElement('span');
+  chips.className = 'tpl-prompt-var-chips';
+  toolbar.appendChild(chips);
+
+  const previewBtn = document.createElement('button');
+  previewBtn.type = 'button';
+  previewBtn.className = 'btn btn-sm btn-outline-secondary tpl-prompt-preview-btn';
+  previewBtn.textContent = 'Preview';
+  toolbar.appendChild(previewBtn);
+  wrap.appendChild(toolbar);
+
+  const panel = document.createElement('pre');
+  panel.className = 'tpl-prompt-preview-panel';
+  panel.hidden = true;
+  wrap.appendChild(panel);
+
+  tplAgentsEnsurePromptVars().then((vars) => {
+    chips.innerHTML = '';
+    vars.forEach((v) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'tpl-prompt-var-chip';
+      chip.textContent = v.name;
+      chip.title = v.description || v.name;
+      chip.addEventListener('click', () => tplInsertAtCursor(textarea, `{{${v.name}}}`));
+      chips.appendChild(chip);
+    });
+  });
+
+  previewBtn.addEventListener('click', async () => {
+    panel.hidden = false;
+    panel.textContent = 'Resolving preview…';
+    try {
+      const res = await fetch('/api/prompt-variables/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: textarea.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        panel.textContent = data.message || data.error || 'Preview failed.';
+        return;
+      }
+      const header = data.had_variables
+        ? '# Preview — synthetic sample workspace\n(Live runtime uses the real workspace and adds context automatically.)\n\n'
+        : '# Preview — this prompt has no variables\n\n';
+      panel.textContent = header + (data.resolved || '');
+    } catch {
+      panel.textContent = 'Preview failed.';
+    }
+  });
+
+  return wrap;
+}
+
 function tplAgentsCard(agent, index) {
   const readOnly = Boolean(tplSelected() && tplSelected().builtin);
   const card = document.createElement('div');
@@ -1627,8 +1727,8 @@ function tplAgentsCard(agent, index) {
     prompt.className = 'form-control tpl-agent-prompt';
     prompt.rows = 2;
     prompt.value = agent.system_prompt || '';
-    prompt.placeholder = "This agent's instructions";
-    form.appendChild(tplAgentsField('System prompt', prompt));
+    prompt.placeholder = "This agent's instructions. Use {{variables}} to weave in workspace context.";
+    form.appendChild(tplAgentsField('System prompt', tplAgentsPromptTools(prompt)));
 
     const sm = document.createElement('div');
     sm.className = 'tpl-agent-form-row';

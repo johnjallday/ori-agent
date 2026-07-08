@@ -82,3 +82,25 @@ func TestResolve_NoWorkspaceGraceful(t *testing.T) {
 		t.Fatalf("empty blocks should omit their headers, got:\n%s", out)
 	}
 }
+
+func TestVocabularyAndSampleValues(t *testing.T) {
+	vocab := Vocabulary()
+	if len(vocab) != 11 {
+		t.Fatalf("expected 11 vocabulary entries, got %d", len(vocab))
+	}
+	for _, sp := range vocab {
+		if sp.Name == "" || sp.Description == "" {
+			t.Errorf("vocabulary entry missing name/description: %+v", sp)
+		}
+		if !Known(sp.Name) {
+			t.Errorf("Vocabulary returned unknown name %q", sp.Name)
+		}
+	}
+	// Every vocabulary variable has a sample value so previews never leave a
+	// literal token behind.
+	sample := SampleValues()
+	out := Resolve("{{workspace.name}} {{workspace.memory}} {{agent.role}} {{task.goal}} {{runtime.date}}", sample)
+	if strings.Contains(out, "{{") {
+		t.Errorf("sample values should resolve every variable, got: %s", out)
+	}
+}

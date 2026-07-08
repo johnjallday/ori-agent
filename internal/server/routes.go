@@ -679,6 +679,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 			s.Handlers.TemplateOnboarding.RegisterRoutes(mux)
 		}
 
+		// Closed prompt-variable vocabulary + preview (template authoring UI)
+		mux.HandleFunc("GET /api/prompt-variables", s.handlePromptVariablesList)
+		mux.HandleFunc("POST /api/prompt-variables/preview", s.handlePromptVariablesPreview)
+
 		// Project template library (used by the workspace creation flow)
 		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
 		mux.HandleFunc("POST /api/project-templates", s.handleProjectTemplateCreate)

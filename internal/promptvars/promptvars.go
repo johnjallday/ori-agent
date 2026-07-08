@@ -12,6 +12,7 @@ package promptvars
 import (
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Kind distinguishes how a variable renders.
@@ -36,21 +37,61 @@ type Spec struct {
 	// authoritative instructions, for variables that carry untrusted content
 	// (notes, memory, task goal). Prevents prompt-injection via interpolated data.
 	Fenced bool
+	// Description is a short authoring-UI hint (what the variable resolves to).
+	Description string
 }
 
 // vocabulary is the complete closed set of variables (PRD Phase 3 table).
 var vocabulary = map[string]Spec{
-	"workspace.name":                {Name: "workspace.name", Kind: Scalar},
-	"workspace.description":         {Name: "workspace.description", Kind: Scalar},
-	"workspace.custom_instructions": {Name: "workspace.custom_instructions", Kind: Scalar},
-	"workspace.memory":              {Name: "workspace.memory", Kind: Block, Header: "Workspace memory", Fenced: true},
-	"workspace.notes.recent":        {Name: "workspace.notes.recent", Kind: Block, Header: "Recent notes", Fenced: true},
-	"workspace.tools":               {Name: "workspace.tools", Kind: Block, Header: "Available tools"},
-	"agent.name":                    {Name: "agent.name", Kind: Scalar},
-	"agent.role":                    {Name: "agent.role", Kind: Scalar},
-	"agent.description":             {Name: "agent.description", Kind: Scalar},
-	"task.goal":                     {Name: "task.goal", Kind: Block, Header: "Current task", Fenced: true},
-	"runtime.date":                  {Name: "runtime.date", Kind: Scalar},
+	"workspace.name":                {Name: "workspace.name", Kind: Scalar, Description: "The workspace's display name."},
+	"workspace.description":         {Name: "workspace.description", Kind: Scalar, Description: "The workspace's description / goal."},
+	"workspace.custom_instructions": {Name: "workspace.custom_instructions", Kind: Scalar, Description: "The workspace owner's per-agent refinement slot."},
+	"workspace.memory":              {Name: "workspace.memory", Kind: Block, Header: "Workspace memory", Fenced: true, Description: "The workspace's MEMORY.md (fenced as reference)."},
+	"workspace.notes.recent":        {Name: "workspace.notes.recent", Kind: Block, Header: "Recent notes", Fenced: true, Description: "Recent workspace notes (fenced as reference)."},
+	"workspace.tools":               {Name: "workspace.tools", Kind: Block, Header: "Available tools", Description: "The agent's effective tools in this workspace."},
+	"agent.name":                    {Name: "agent.name", Kind: Scalar, Description: "This agent's name."},
+	"agent.role":                    {Name: "agent.role", Kind: Scalar, Description: "The agent's workspace-specific role label."},
+	"agent.description":             {Name: "agent.description", Kind: Scalar, Description: "The agent's workspace-specific responsibility note."},
+	"task.goal":                     {Name: "task.goal", Kind: Block, Header: "Current task", Fenced: true, Description: "The current task's goal (task runs only; fenced)."},
+	"runtime.date":                  {Name: "runtime.date", Kind: Scalar, Description: "Today's date."},
+}
+
+// vocabularyOrder is the stable, author-facing ordering for the vocabulary
+// (grouped by namespace), used by Vocabulary().
+var vocabularyOrder = []string{
+	"workspace.name", "workspace.description", "workspace.custom_instructions",
+	"workspace.memory", "workspace.notes.recent", "workspace.tools",
+	"agent.name", "agent.role", "agent.description",
+	"task.goal", "runtime.date",
+}
+
+// Vocabulary returns the full vocabulary in a stable, author-facing order.
+// Intended for authoring UIs (the variable inserter / reference).
+func Vocabulary() []Spec {
+	out := make([]Spec, 0, len(vocabularyOrder))
+	for _, name := range vocabularyOrder {
+		out = append(out, vocabulary[name])
+	}
+	return out
+}
+
+// SampleValues returns deterministic placeholder values for every variable, for
+// previewing a prompt when no real workspace is selected. All values are
+// synthetic — no real workspace data or secrets are involved.
+func SampleValues() map[string]string {
+	return map[string]string{
+		"workspace.name":                "Acme Q3 Campaign",
+		"workspace.description":         "Launch the Q3 product campaign across social and email.",
+		"workspace.custom_instructions": "In this workspace, keep everything on-brand and short.",
+		"workspace.memory":              "- Brand voice: confident, warm, never salesy.\n- Primary audience: existing customers.",
+		"workspace.notes.recent":        "- Draft hero copy approved.\n- Waiting on final image assets.",
+		"workspace.tools":               "filesystem, web_search, notes",
+		"agent.name":                    "Brand Copywriter",
+		"agent.role":                    "Voice keeper",
+		"agent.description":             "Owns tone and consistency across all copy.",
+		"task.goal":                     "Write three launch-day social posts.",
+		"runtime.date":                  time.Now().Format("January 2, 2006"),
+	}
 }
 
 // placeholderRe matches a `{{ name }}` token, capturing the (trimmed) name.
