@@ -32,6 +32,7 @@ type Handler struct {
 	workspaceRootResolver func() string
 	templatesRootResolver func() string // resolves the project templates library directory
 	agentStore            store.Store
+	systemModelReader     SystemModelReader
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
 	templateOnboarding    *templateonboarding.Service
@@ -51,6 +52,13 @@ type Handler struct {
 	// walks; lastRescanAt backs the cooldown for background-initiated rescans.
 	rescanMu     sync.Mutex
 	lastRescanAt time.Time
+}
+
+// SystemModelReader exposes the configured system model used as the default
+// for workspace-created agents that do not declare a model of their own.
+type SystemModelReader interface {
+	GetSystemModel() (provider, model string)
+	GetSystemReasoningEffort() string
 }
 
 // New creates a new session handler.
@@ -82,6 +90,11 @@ func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
 // SetAgentStore sets the agent store used for workspace entry-agent provisioning.
 func (h *Handler) SetAgentStore(agentStore store.Store) {
 	h.agentStore = agentStore
+}
+
+// SetSystemModelReader sets the source for the configured system model.
+func (h *Handler) SetSystemModelReader(reader SystemModelReader) {
+	h.systemModelReader = reader
 }
 
 // SetTemplateToolApplier injects the function that binds a template's declared

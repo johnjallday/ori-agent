@@ -24,6 +24,20 @@ func wsHasAgent(ws *session.Workspace, name string) bool {
 	return false
 }
 
+type fakeSystemModelReader struct {
+	provider        string
+	model           string
+	reasoningEffort string
+}
+
+func (f fakeSystemModelReader) GetSystemModel() (string, string) {
+	return f.provider, f.model
+}
+
+func (f fakeSystemModelReader) GetSystemReasoningEffort() string {
+	return f.reasoningEffort
+}
+
 func TestSeedTemplateAgents_CreatesRosterAndSetsEntry(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
@@ -53,6 +67,66 @@ func TestSeedTemplateAgents_CreatesRosterAndSetsEntry(t *testing.T) {
 	}
 	if got := currentWorkspaceEntryAgentName(ws); got != "Lead" {
 		t.Fatalf("expected entry agent Lead, got %q", got)
+	}
+}
+
+func TestSeedTemplateAgents_BlankModelInheritsSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider:        "codex",
+		model:           "gpt-5.3-codex",
+		reasoningEffort: "high",
+	})
+
+	ws := &session.Workspace{ID: "ws1", Name: "Campaign"}
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Role: "orchestrator"})
+
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	if !res.EntrySet {
+		t.Fatal("expected EntrySet true")
+	}
+	created, ok := handler.agentStore.GetAgent("Lead")
+	if !ok {
+		t.Fatal("expected Lead agent to be created")
+	}
+	if created.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model = %q, want gpt-5.3-codex", created.Settings.Model)
+	}
+	if created.Settings.Provider != "codex" {
+		t.Fatalf("provider = %q, want codex", created.Settings.Provider)
+	}
+	if created.Settings.ReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", created.Settings.ReasoningEffort)
+	}
+}
+
+func TestSeedTemplateAgents_ExplicitModelWinsOverSystemModel(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{
+		provider: "codex",
+		model:    "gpt-5.3-codex",
+	})
+
+	ws := &session.Workspace{ID: "ws1", Name: "Campaign"}
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Model: "gpt-5-mini"})
+
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	if !res.EntrySet {
+		t.Fatal("expected EntrySet true")
+	}
+	created, ok := handler.agentStore.GetAgent("Lead")
+	if !ok {
+		t.Fatal("expected Lead agent to be created")
+	}
+	if created.Settings.Model != "gpt-5-mini" {
+		t.Fatalf("model = %q, want explicit gpt-5-mini", created.Settings.Model)
+	}
+	if created.Settings.Provider != "" {
+		t.Fatalf("provider = %q, want empty provider for explicit model-only template", created.Settings.Provider)
 	}
 }
 

@@ -89,11 +89,14 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		isEntry := i == 0
 		_, exists := h.agentStore.GetAgent(spec.Name)
 		if !exists {
+			model, provider, reasoningEffort := h.templateAgentModelDefaults(spec)
 			cfg := &store.CreateAgentConfig{
-				Type:         canonicalAgentType(spec.Type),
-				Role:         types.AgentRole(canonicalAgentRole(spec.Role)),
-				Model:        spec.Model, // empty -> the store's global default model
-				SystemPrompt: spec.SystemPrompt,
+				Type:            canonicalAgentType(spec.Type),
+				Role:            types.AgentRole(canonicalAgentRole(spec.Role)),
+				Model:           model,
+				LLMProvider:     provider,
+				ReasoningEffort: reasoningEffort,
+				SystemPrompt:    spec.SystemPrompt,
 			}
 			if err := h.agentStore.CreateAgent(spec.Name, cfg); err != nil {
 				if isEntry {
@@ -133,6 +136,24 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 	}
 
 	return result
+}
+
+func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (model, provider, reasoningEffort string) {
+	model = strings.TrimSpace(spec.Model)
+	if model != "" || h == nil || h.systemModelReader == nil {
+		return model, "", ""
+	}
+
+	provider, model = h.systemModelReader.GetSystemModel()
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if provider == "" || model == "" {
+		return "", "", ""
+	}
+	if strings.EqualFold(provider, "codex") {
+		reasoningEffort = h.systemModelReader.GetSystemReasoningEffort()
+	}
+	return model, provider, reasoningEffort
 }
 
 // bindSeededAgentTools binds per-agent tools for the agents the seeder created,
