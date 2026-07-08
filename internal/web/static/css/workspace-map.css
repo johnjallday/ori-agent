@@ -3,7 +3,7 @@
  *
  * Everything is scoped under `.ws-map`. The map is an intentional DARK surface
  * regardless of the app's `data-bs-theme`, so its tokens are defined here.
- * Rules must NOT leak into Cards/Tree. No ui-refresh.css edits, no `!important`.
+ * Rules must NOT leak into the launcher shell or Tree. No ui-refresh.css edits, no `!important`.
  *
  * Phase 1 = command-bar + theatre chrome + empty Overview (the shell).
  * Building tiles / districts / populated Overview land in Phase 2–3.
@@ -343,6 +343,66 @@
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
 }
 .ws-map-ov-desc.is-empty { font-style: italic; color: var(--ws-ink-faint); }
+
+.ws-map-folder {
+  display: grid; gap: 7px; min-width: 0;
+}
+.ws-map-folder-badge {
+  justify-self: start; max-width: 100%; padding: 3px 9px;
+  border: 1px solid rgba(70, 211, 154, 0.26); background: rgba(70, 211, 154, 0.08); color: var(--ws-faction);
+  font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.ws-map-folder.is-unlinked .ws-map-folder-badge {
+  border-color: rgba(232, 181, 75, 0.35); background: rgba(232, 181, 75, 0.1); color: var(--ws-keeper);
+}
+.ws-map-folder-path {
+  display: block; min-width: 0;
+  font-family: var(--ws-font-mono); font-size: 10.5px; color: var(--ws-ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-map-folder.is-unlinked .ws-map-folder-path { color: var(--ws-ink-faint); }
+
+.ws-map-tags {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.ws-map-tag {
+  display: inline-flex; align-items: stretch; max-width: 100%;
+  border: 1px solid rgba(70, 211, 154, 0.24); background: rgba(70, 211, 154, 0.08); color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 0.7px;
+  overflow: hidden;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.ws-map-tag-label,
+.ws-map-tag-remove {
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.ws-map-tag-label {
+  min-width: 0; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-map-tag-remove {
+  flex: 0 0 auto; width: 24px; border-left: 1px solid rgba(70, 211, 154, 0.2);
+}
+.ws-map-tag-label:hover,
+.ws-map-tag-remove:hover {
+  background: rgba(70, 211, 154, 0.14); color: var(--ws-faction);
+}
+.ws-map-tag-more {
+  padding: 4px 8px; color: var(--ws-ink-faint);
+}
+
+.ws-map-group-preview {
+  display: grid; gap: 5px; padding: 9px 10px;
+  border: 1px dashed rgba(232, 134, 77, 0.28); background: rgba(232, 134, 77, 0.05);
+}
+.ws-map-group-count {
+  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ws-keeper);
+}
+.ws-map-group-names {
+  min-width: 0; font-size: 12px; line-height: 1.4; color: var(--ws-ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .ws-map-ov-label {
   font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint);
