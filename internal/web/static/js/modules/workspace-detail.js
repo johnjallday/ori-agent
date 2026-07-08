@@ -3103,13 +3103,34 @@ export class WorkspaceDetailPage {
     `;
     }
 
-    const safeHref = this.escapeAttribute(target.href);
     const safeTitle = this.escapeAttribute(target.title || `Open ${agentName} details`);
     const safeAriaLabel = this.escapeAttribute(target.ariaLabel || target.title || `Open ${agentName} details`);
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+
+    // Workspace-local agents have no global detail route; open their details
+    // in-page (system prompt view) instead of navigating away.
+    if (target.action === 'agent-details') {
+      const encodedForCall = this.escapeAttribute(encodedAgentName);
+      return `
+      <button type="button"
+              class="workspace-detail-agent-link"
+              data-agent-detail-kind="${safeKind}"
+              title="${safeTitle}"
+              aria-label="${safeAriaLabel}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.openAgentPromptModal('${encodedForCall}');">
+        <span class="workspace-detail-agent-link-label">${safeAgentName}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+        </svg>
+      </button>
+    `;
+    }
+
+    const safeHref = this.escapeAttribute(target.href);
     return `
       <a href="${safeHref}"
          class="workspace-detail-agent-link"
-         data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+         data-agent-detail-kind="${safeKind}"
          title="${safeTitle}"
          aria-label="${safeAriaLabel}"
          onclick="event.stopPropagation();">
@@ -3163,13 +3184,16 @@ export class WorkspaceDetailPage {
     }
 
     if (this.hasWorkspaceAgentSnapshot(normalizedName)) {
-      // Workspace-local agents (entry/manager agents) are hydrated into the
-      // agent store on startup, so /agents/<name> renders their detail page.
-      // The page degrades gracefully to a repair view if a snapshot is missing.
-      const title = `Open ${normalizedName} details (workspace-local agent)`;
+      // Workspace-local agents (entry/manager agents defined in the workspace's
+      // config.json) are NOT part of the global agent store, so /agents/<name>
+      // would 404. They live only inside this workspace, so open their details
+      // in-page instead of navigating to a global detail route.
+      const title = `View ${normalizedName} details in this workspace`;
       return {
         kind: 'workspace-local',
-        href: `/agents/${encodedAgentName}`,
+        href: '',
+        action: 'agent-details',
+        agentName: normalizedName,
         interactive: true,
         title,
         ariaLabel: title
@@ -3234,10 +3258,35 @@ export class WorkspaceDetailPage {
           `;
     }
 
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+
+    // Workspace-local agents open their details in-page (no global detail route).
+    if (target.action === 'agent-details') {
+      const encodedForCall = this.escapeAttribute(encodeURIComponent(group.name));
+      return `
+            <button type="button"
+               class="workspace-detail-agent-identity-link"
+               data-agent-detail-kind="${safeKind}"
+               title="${this.escapeAttribute(title)}"
+               aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
+               aria-describedby="${summaryId}"
+               onclick="event.stopPropagation(); window.workspaceDetail?.openAgentPromptModal('${encodedForCall}');">
+              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              <span class="workspace-detail-agent-identity-copy">
+                <span class="workspace-detail-agent-name">${safeName}</span>
+                <span class="workspace-detail-agent-subtitle">${this.escapeHtml(subtitle)}</span>
+              </span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+              </svg>
+            </button>
+          `;
+    }
+
     return `
             <a href="${this.escapeAttribute(target.href)}"
                class="workspace-detail-agent-identity-link"
-               data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+               data-agent-detail-kind="${safeKind}"
                title="${this.escapeAttribute(title)}"
                aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
                aria-describedby="${summaryId}"

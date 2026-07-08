@@ -3739,6 +3739,21 @@
       outline: none;
     }
 
+    /* When rendered as a <button> (workspace-local agents open details in-page),
+       strip the native button chrome so it matches the anchor variant. */
+    button.workspace-detail-agent-identity-link,
+    button.workspace-detail-agent-link {
+      appearance: none;
+      -webkit-appearance: none;
+      background: none;
+      border: none;
+      margin: 0;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
     .workspace-detail-agent-identity-link.is-static {
       cursor: default;
     }
