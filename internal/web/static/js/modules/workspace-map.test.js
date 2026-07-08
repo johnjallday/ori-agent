@@ -232,6 +232,96 @@ test('overviewBodyHTML shows the workspace description, or an empty-state note',
   assert.match(noDesc, /class="ws-map-ov-desc is-empty">No description yet\./);
 });
 
+test('overviewBodyHTML renders linked folder state from map metadata', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML(
+    { id: 'a', name: 'Ops' },
+    {
+      metadata: {
+        folderDisplayById: {
+          a: {
+            linked: true,
+            badgeLabel: '2 folders linked',
+            badgeClass: 'is-linked',
+            detail: '/tmp/ops (+1 more)',
+            detailTitle: '/tmp/ops | /tmp/ops-extra'
+          }
+        }
+      }
+    }
+  );
+
+  assert.match(html, /ws-map-folder is-linked/);
+  assert.match(html, />2 folders linked</);
+  assert.match(html, /\/tmp\/ops \(\+1 more\)/);
+  assert.match(html, /title="\/tmp\/ops \| \/tmp\/ops-extra"/);
+});
+
+test('overviewBodyHTML renders unlinked folder state from map metadata', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML(
+    { id: 'a', name: 'Ops' },
+    {
+      metadata: {
+        folderDisplayById: {
+          a: {
+            linked: false,
+            badgeLabel: 'No folder linked',
+            badgeClass: 'is-unlinked',
+            detail: 'No local folder attached.'
+          }
+        }
+      }
+    }
+  );
+
+  assert.match(html, /ws-map-folder is-unlinked/);
+  assert.match(html, /No folder linked/);
+  assert.match(html, /No local folder attached\./);
+});
+
+test('overviewBodyHTML renders filterable and removable tag chips from map metadata', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML(
+    { id: 'song', name: 'Song' },
+    {
+      metadata: {
+        tagsById: {
+          song: ['music', 'reaper', 'client:acme', 'archive', 'mix']
+        }
+      }
+    }
+  );
+
+  assert.match(html, /class="ws-map-tags"/);
+  assert.match(html, /data-ws-tag-filter="music"/);
+  assert.match(html, /data-ws-tag-remove="song"/);
+  assert.match(html, /data-ws-tag="reaper"/);
+  assert.match(html, /\+1 more/);
+});
+
+test('overviewBodyHTML renders group child previews from map metadata', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML(
+    { id: 'grp-1', name: 'Research Fleet', kind: 'group' },
+    {
+      metadata: {
+        groupPreviewById: {
+          'grp-1': {
+            childCount: 4,
+            previewNames: ['Alpha', 'Beta', 'Gamma'],
+            overflowCount: 1
+          }
+        }
+      }
+    }
+  );
+
+  assert.match(html, /Group Preview/);
+  assert.match(html, /4 workspaces/);
+  assert.match(html, /Alpha · Beta · Gamma \+1 more/);
+});
+
 test('overviewBodyHTML offers a delete action carrying the workspace id', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research' });
