@@ -3390,6 +3390,15 @@ console.log('[workspace-hub.js] FILE LOADED');
     // Top-level ids only: a checked group is deleted as one branch, so its
     // selected descendants are deduped under it instead of deleted separately.
     const selected = getTopLevelSelectedIds();
+    await confirmAndDeleteWorkspaces(selected);
+  }
+
+  // Confirm-then-delete a batch of workspace ids. Shared by the launcher's
+  // "delete selected" toolbar and the Map view's multi-select action bar. A
+  // single id defers to the per-item confirm (which handles group modals); two
+  // or more show a batch confirm before moving everything to Trash.
+  async function confirmAndDeleteWorkspaces(ids) {
+    const selected = (Array.isArray(ids) ? ids : []).filter(Boolean);
     if (selected.length === 0) return;
 
     if (selected.length === 1) {
@@ -4607,6 +4616,13 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
+  // Single-item delete entry point reused by the Map view's Overview panel. It
+  // routes groups to the confirmed group-delete modal and plain workspaces to
+  // the trash confirm, then reloads (which re-mounts the map).
+  window.WorkspaceHub.deleteWorkspace = confirmDeleteWorkspace;
+  // Batch delete (confirm + Trash + Undo) reused by the Map view's multi-select
+  // action bar; also reloads on success, which re-mounts the map.
+  window.WorkspaceHub.deleteWorkspaces = confirmAndDeleteWorkspaces;
   window.WorkspaceHub.__test = {
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,

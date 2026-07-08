@@ -214,3 +214,33 @@ test('overviewBodyHTML renders the select-a-workspace placeholder when nothing i
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   assert.match(overviewBodyHTML(null), /Select a workspace to see its agents, tasks, tools, and skills\./);
 });
+
+test('tileHTML renders an (unchecked) multi-select checkbox affordance', () => {
+  const { tileHTML } = loadOriWorkspaceMap();
+  const html = tileHTML({ ws: { id: 'w1', name: 'Ops' }, col: 0, row: 0 }, '', 0);
+  assert.match(html, /class="ws-map-tile-check" data-ws-check role="checkbox"/);
+  assert.match(html, /aria-checked="false"/);
+  // Nothing is multi-selected by default, so the tile is not marked is-multi.
+  assert.doesNotMatch(html, /class="ws-map-tile[^"]*is-multi/);
+});
+
+test('overviewBodyHTML shows the workspace description, or an empty-state note', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const withDesc = overviewBodyHTML({ id: 'a', name: 'Ops', description: 'Coordinates field logistics.' });
+  assert.match(withDesc, /class="ws-map-ov-desc"[^>]*>Coordinates field logistics\./);
+  const noDesc = overviewBodyHTML({ id: 'b', name: 'Bare' });
+  assert.match(noDesc, /class="ws-map-ov-desc is-empty">No description yet\./);
+});
+
+test('overviewBodyHTML offers a delete action carrying the workspace id', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research' });
+  assert.match(html, /class="ws-map-ov-delete" data-ws-delete="ws-42"/);
+  assert.match(html, /Delete workspace/);
+});
+
+test('overviewBodyHTML labels the delete action "Delete group" for group workspaces', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({ id: 'grp-1', name: 'Research Fleet', kind: 'group' });
+  assert.match(html, /data-ws-delete="grp-1"[^>]*>✕ Delete group</);
+});
