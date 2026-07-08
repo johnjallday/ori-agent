@@ -333,6 +333,7 @@
     var openTasks = Number(ws.open_task_count || 0);
     var mcp = Number(ws.mcp_count || 0);
     var skills = Number(ws.skill_count || 0);
+    var delLabel = isGroup(ws) ? 'Delete group' : 'Delete workspace';
 
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' + avatarHTML(entry, 'is-keeper') +
@@ -362,7 +363,11 @@
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tools · MCP</span>' +
       '<span class="ws-map-ov-v">' + mcp + '</span></div>' +
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Skills</span>' +
-      '<span class="ws-map-ov-v">' + skills + '</span></div>'
+      '<span class="ws-map-ov-v">' + skills + '</span></div>' +
+      '<div class="ws-map-ov-actions">' +
+      '<button type="button" class="ws-map-ov-delete" data-ws-delete="' + escapeHtml(ws.id) +
+      '" aria-label="' + escapeHtml(delLabel + ' ' + (ws.name || '')) + '">✕ ' + escapeHtml(delLabel) + '</button>' +
+      '</div>'
     );
   }
 
@@ -465,11 +470,26 @@
     if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
   }
 
+  function deleteWorkspace(id) {
+    if (!id) return;
+    // Reuse the hub's single-item delete flow (confirm modal, group handling,
+    // Trash + Undo, toasts). It reloads on success, which re-mounts the map.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspace === 'function') {
+      window.WorkspaceHub.deleteWorkspace(id);
+    }
+  }
+
   function bindOverviewActions(container) {
     var opens = container.querySelectorAll('[data-ws-open]');
     Array.prototype.forEach.call(opens, function (el) {
       el.addEventListener('click', function () {
         openWorkspace(el.getAttribute('data-ws-open'));
+      });
+    });
+    var deletes = container.querySelectorAll('[data-ws-delete]');
+    Array.prototype.forEach.call(deletes, function (el) {
+      el.addEventListener('click', function () {
+        deleteWorkspace(el.getAttribute('data-ws-delete'));
       });
     });
   }

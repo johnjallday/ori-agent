@@ -324,6 +324,18 @@
 .ws-map-ov-open:hover { background: var(--ws-faction); color: #04110c; }
 .ws-map-ov-open:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
 
+/* Destructive action sits at the bottom of the panel, visually separated from
+   the read-only stats above it and de-emphasized versus the primary Open. */
+.ws-map-ov-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
+.ws-map-ov-delete {
+  padding: 8px 14px; cursor: pointer;
+  background: rgba(226, 96, 96, 0.08); border: 1px solid rgba(226, 96, 96, 0.4); color: #e78a8a;
+  font-family: var(--ws-font-display); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; transition: 0.15s; white-space: nowrap;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.ws-map-ov-delete:hover { background: #c0392b; border-color: #c0392b; color: #fff; }
+.ws-map-ov-delete:focus-visible { outline: 2px solid #e78a8a; outline-offset: 2px; }
+
 @media (max-width: 900px) {
   .ws-map-layout { grid-template-columns: 1fr; }
 

@@ -4607,6 +4607,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
+  // Single-item delete entry point reused by the Map view's Overview panel. It
+  // routes groups to the confirmed group-delete modal and plain workspaces to
+  // the trash confirm, then reloads (which re-mounts the map).
+  window.WorkspaceHub.deleteWorkspace = confirmDeleteWorkspace;
   window.WorkspaceHub.__test = {
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,
