@@ -403,9 +403,13 @@ func (s *fileStore) saveUnlocked() error {
 }
 
 func (s *fileStore) load() error {
-	b, err := os.ReadFile(s.path)
-	if err != nil {
-		return err
+	// The index file (s.path) is only a compatibility stub; the agents/ directory
+	// is the source of truth. A missing index must therefore NOT abort loading —
+	// otherwise agents present on disk (e.g. freshly adopted from a legacy
+	// location) would be ignored until a later save recreated the index.
+	b, readErr := os.ReadFile(s.path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
 	}
 
 	s.mu.Lock()
@@ -416,29 +420,31 @@ func (s *fileStore) load() error {
 		s.agents = make(map[string]*agent.Agent)
 	}
 
-	// Try to parse the JSON first
-	var rawConfig map[string]any
-	if err := json.Unmarshal(b, &rawConfig); err != nil {
-		return err
-	}
-
-	// Check if this is the old format with "agents" key
-	if _, hasAgents := rawConfig["agents"]; hasAgents {
-		// Old format: {"agents": {...}, "current": "..."}
-		var in struct {
-			Agents map[string]*agent.Agent `json:"agents"`
-		}
-		if err := json.Unmarshal(b, &in); err != nil {
+	if readErr == nil {
+		// Try to parse the JSON index.
+		var rawConfig map[string]any
+		if err := json.Unmarshal(b, &rawConfig); err != nil {
 			return err
 		}
-		if in.Agents != nil {
-			s.agents = in.Agents
+
+		// Check if this is the old format with "agents" key
+		if _, hasAgents := rawConfig["agents"]; hasAgents {
+			// Old format: {"agents": {...}, "current": "..."}
+			var in struct {
+				Agents map[string]*agent.Agent `json:"agents"`
+			}
+			if err := json.Unmarshal(b, &in); err != nil {
+				return err
+			}
+			if in.Agents != nil {
+				s.agents = in.Agents
+			}
+			// Normalize migrated agents from legacy schema.
+			for _, ag := range s.agents {
+				s.normalizeLoadedAgent(ag)
+			}
+			return nil
 		}
-		// Normalize migrated agents from legacy schema.
-		for _, ag := range s.agents {
-			s.normalizeLoadedAgent(ag)
-		}
-		return nil
 	}
 
 	// Load individual agent files from agents/ directory (nested structure)

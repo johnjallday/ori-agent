@@ -292,6 +292,17 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if responded {
 		return
 	}
+
+	// Local creation implies this data directory owns the workspace: allowlist it
+	// so its agent snapshots are restored (and not wiped) on subsequent startups,
+	// mirroring the import flow. Best-effort; a failure only affects later agent
+	// hydration, not this creation.
+	if h.workspaceAllowlist != nil && ws != nil {
+		if err := h.workspaceAllowlist.Add(ws.ID); err != nil {
+			logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": ws.ID, "error": err.Error()})
+		}
+	}
+
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
 
 	// Completeness/ordering backstop: when the workspace was created with an

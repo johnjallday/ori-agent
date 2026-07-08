@@ -182,14 +182,25 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		// allowlist, which means nothing in the shared workspaces tree will
 		// auto-hydrate into this data directory. Workspaces are added to the
 		// allowlist when explicitly imported via the workspace import API.
-		allowlist, err := workspace.LoadAllowlist(workspace.DefaultAllowlistFilename)
+		allowlistPath := resolveAllowlistPath()
+		allowlist, err := workspace.LoadAllowlist(allowlistPath)
 		if err != nil {
 			logger.Warn("Failed to load workspace allowlist", logger.Fields{"error": err.Error()})
-			allowlist = workspace.NewAllowlist(workspace.DefaultAllowlistFilename)
+			allowlist = workspace.NewAllowlist(allowlistPath)
 		}
 		b.workspaceAllowlist = allowlist
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceAllowlist(allowlist)
+		}
+
+		// Treat the local workspace tree (~/Ori Workspaces) as owned by this data
+		// directory: backfill every workspace physically present there into the
+		// allowlist so agents from workspaces created locally are restored (and
+		// not wiped) on startup. Foreign workspaces that are not in the local
+		// folder tree stay gated, preserving cross-worktree isolation. Runs before
+		// the wipe/restore below.
+		if fileStore != nil {
+			workspace.BackfillLocalWorkspacesIntoAllowlist(fileStore, allowlist)
 		}
 
 		// First wipe agents whose only source is a non-allowlisted workspace

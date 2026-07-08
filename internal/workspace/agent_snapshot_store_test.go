@@ -417,3 +417,32 @@ func TestReferencedAgentNames_Dedupes(t *testing.T) {
 		t.Fatalf("expected 3 unique names, got %v", got)
 	}
 }
+
+func TestBackfillLocalWorkspacesIntoAllowlist(t *testing.T) {
+	local := NewInMemoryStore()
+	live := &Workspace{ID: "ws-live", Name: "Live", AgentInstances: AgentInstancesFromNames("Research Lead")}
+	trashed := &Workspace{ID: "ws-trashed", Name: "Trashed", Status: StatusTrashed}
+	if err := local.Save(live); err != nil {
+		t.Fatalf("save live: %v", err)
+	}
+	if err := local.Save(trashed); err != nil {
+		t.Fatalf("save trashed: %v", err)
+	}
+
+	allowlist := NewAllowlist(filepath.Join(t.TempDir(), "workspace_allowlist.json"))
+
+	BackfillLocalWorkspacesIntoAllowlist(local, allowlist)
+
+	if !allowlist.Contains("ws-live") {
+		t.Errorf("expected live workspace to be allowlisted")
+	}
+	if allowlist.Contains("ws-trashed") {
+		t.Errorf("trashed workspace must not be allowlisted")
+	}
+
+	// Idempotent: a second run adds nothing and does not error.
+	BackfillLocalWorkspacesIntoAllowlist(local, allowlist)
+	if ids := allowlist.IDs(); len(ids) != 1 {
+		t.Errorf("expected exactly 1 allowlisted id after re-run, got %v", ids)
+	}
+}

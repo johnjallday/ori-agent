@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestLoadDefaultSettings(t *testing.T) {
@@ -273,6 +274,116 @@ func TestLoadLocationZones_NonExistentFile(t *testing.T) {
 	zones := loadLocationZones("/nonexistent/path/zones.json")
 	if len(zones) != 0 {
 		t.Errorf("Expected 0 zones for missing file, got %d", len(zones))
+	}
+}
+
+func TestResolveAgentStorePath_DefaultsToStableDataDir(t *testing.T) {
+	// With ORI_DATA_DIR set, the default agent store must live inside it and be
+	// independent of the current working directory.
+	dataDir := t.TempDir()
+	t.Setenv("ORI_DATA_DIR", dataDir)
+	t.Setenv("AGENT_STORE_PATH", "")
+
+	got := resolveAgentStorePath()
+	want := filepath.Join(dataDir, "agents.json")
+	if got != want {
+		t.Fatalf("expected agent store %q, got %q", want, got)
+	}
+}
+
+// chdir switches the working directory for the duration of the test.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+}
+
+// writeAgent creates a minimal agent folder under agentsDir.
+func writeAgent(t *testing.T, agentsDir, name string) {
+	t.Helper()
+	dir := filepath.Join(agentsDir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir agent: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent_settings.json"), []byte(`{"type":"tool-calling","Settings":{}}`), 0o644); err != nil {
+		t.Fatalf("write agent settings: %v", err)
+	}
+}
+
+func TestResolveAllowlistPath_AnchoredToDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ORI_DATA_DIR", dataDir)
+
+	got := resolveAllowlistPath()
+	want := filepath.Join(dataDir, workspace.DefaultAllowlistFilename)
+	if got != want {
+		t.Fatalf("expected allowlist path %q, got %q", want, got)
+	}
+}
+
+func TestMigrateLegacyAgentStore_AdoptsCWDAgents(t *testing.T) {
+	// Legacy agents live under <cwd>/agents; the stable store is empty.
+	cwd := t.TempDir()
+	chdir(t, cwd)
+	writeAgent(t, filepath.Join(cwd, "agents"), "alice")
+	writeAgent(t, filepath.Join(cwd, "agents"), "bob")
+
+	dataDir := t.TempDir()
+	storePath := filepath.Join(dataDir, "agents.json")
+
+	if err := migrateLegacyAgentStore(storePath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, name := range []string{"alice", "bob"} {
+		p := filepath.Join(dataDir, "agents", name, "agent_settings.json")
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected adopted agent %q at %s: %v", name, p, err)
+		}
+	}
+}
+
+func TestMigrateLegacyAgentStore_SkipsWhenDestPopulated(t *testing.T) {
+	cwd := t.TempDir()
+	chdir(t, cwd)
+	writeAgent(t, filepath.Join(cwd, "agents"), "legacy")
+
+	dataDir := t.TempDir()
+	storePath := filepath.Join(dataDir, "agents.json")
+	// Destination already has an agent; migration must not touch it or import legacy.
+	writeAgent(t, filepath.Join(dataDir, "agents"), "existing")
+
+	if err := migrateLegacyAgentStore(storePath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dataDir, "agents", "legacy")); !os.IsNotExist(err) {
+		t.Errorf("legacy agent should not be adopted into a populated store (err=%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "agents", "existing")); err != nil {
+		t.Errorf("existing agent should be untouched: %v", err)
+	}
+}
+
+func TestMigrateLegacyAgentStore_NoopWhenSameDir(t *testing.T) {
+	// When the stable store resolves to the CWD itself, there is nothing to move.
+	cwd := t.TempDir()
+	chdir(t, cwd)
+	writeAgent(t, filepath.Join(cwd, "agents"), "solo")
+
+	storePath := filepath.Join(cwd, "agents.json")
+	if err := migrateLegacyAgentStore(storePath); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	// Agent stays exactly where it was; no duplication.
+	if _, err := os.Stat(filepath.Join(cwd, "agents", "solo")); err != nil {
+		t.Errorf("agent should remain in place: %v", err)
 	}
 }
 
