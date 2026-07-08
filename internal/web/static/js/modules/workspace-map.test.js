@@ -334,3 +334,11 @@ test('overviewBodyHTML labels the delete action "Delete group" for group workspa
   const html = overviewBodyHTML({ id: 'grp-1', name: 'Research Fleet', kind: 'group' });
   assert.match(html, /data-ws-delete="grp-1"[^>]*>✕ Delete group</);
 });
+
+test('selBarHTML offers group, delete, and clear actions for the multi-select set', () => {
+  const { selBarHTML } = loadOriWorkspaceMap();
+  const html = selBarHTML();
+  assert.match(html, /data-ws-selbar-group/);
+  assert.match(html, /data-ws-selbar-delete/);
+  assert.match(html, /data-ws-selbar-clear/);
+});

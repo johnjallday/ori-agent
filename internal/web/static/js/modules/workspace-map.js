@@ -342,6 +342,7 @@
       '<div class="ws-map-selbar" data-ws-selbar' + (n ? '' : ' hidden') + '>' +
       '<span class="ws-map-selbar-count" data-ws-selbar-count>' + n + ' selected</span>' +
       '<div class="ws-map-selbar-actions">' +
+      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group>⊕ Group</button>' +
       '<button type="button" class="ws-map-selbar-del" data-ws-selbar-delete>✕ Delete</button>' +
       '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
       '</div>' +
@@ -552,7 +553,6 @@
       '<div class="ws-map-theatre-tag"><span class="ws-map-ix">MAP</span><h3>All Workspaces</h3></div>' +
       '<div class="ws-map-compass">N<b>▲</b></div>' +
       canvas +
-      selBarHTML() +
       '</section>' +
       '<aside class="ws-map-overview" role="region" aria-label="Workspace overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
@@ -560,7 +560,13 @@
       overviewBodyHTML(findWs(workspaces, selectedId), options) +
       '</div>' +
       '</aside>' +
-      '</div>'
+      '</div>' +
+      // The selbar is position:fixed, so it must live OUTSIDE .ws-map-theatre —
+      // that panel's clip-path + overflow:hidden would otherwise clip the bar
+      // (fixed descendants are still clipped by an ancestor's clip-path), making
+      // it invisible at the viewport bottom. Kept inside the container so
+      // bindSelBar/updateSelBar still resolve it.
+      selBarHTML()
     );
   }
 
@@ -725,7 +731,19 @@
     }
   }
 
+  function groupMulti() {
+    var ids = multiIds();
+    if (!ids.length) return;
+    // Reuse the hub's Create Group modal + create/reparent flow. On success it
+    // reloads and re-mounts the map, where mount() prunes the grouped ids.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.groupWorkspaces === 'function') {
+      window.WorkspaceHub.groupWorkspaces(ids);
+    }
+  }
+
   function bindSelBar(container) {
+    var group = container.querySelector('[data-ws-selbar-group]');
+    if (group) group.addEventListener('click', function () { groupMulti(); });
     var del = container.querySelector('[data-ws-selbar-delete]');
     if (del) del.addEventListener('click', function () { deleteMulti(); });
     var clr = container.querySelector('[data-ws-selbar-clear]');
@@ -811,6 +829,7 @@
     computeStats: computeStats,
     computeMaxCols: computeMaxCols,
     tileHTML: tileHTML,
-    overviewBodyHTML: overviewBodyHTML
+    overviewBodyHTML: overviewBodyHTML,
+    selBarHTML: selBarHTML
   };
 })();
