@@ -179,7 +179,7 @@
 
   function buildCard(agent, idx) {
     var li = document.createElement('li');
-    li.className = 'roster-card';
+    li.className = 'roster-card' + (isPermanent(agent) ? ' is-permanent' : '');
     li.setAttribute('role', 'option');
     li.id = 'roster-opt-' + idx;
     li.dataset.name = agent.name;
@@ -191,14 +191,21 @@
     var wc = agent.workspace_count || 0;
     metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
 
+    var permanent = isPermanent(agent);
+
     // Concise spoken label so screen readers don't read the raw dot markup.
     var wcLabel = wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
-    li.setAttribute('aria-label', agent.name + ', ' + status + ', ' + wcLabel);
+    li.setAttribute('aria-label', agent.name + (permanent ? ', built-in' : '') + ', ' + status + ', ' + wcLabel);
 
+    var badge = permanent
+      ? '<span class="roster-card__badge" title="Built-in agent — always available and cannot be deleted">Built-in</span>'
+      : '';
     li.innerHTML =
       avatarMarkup(agent, 'roster-card__avatar') +
       '<div class="roster-card__body">' +
-      '<p class="roster-card__name">' + esc(agent.name) + '</p>' +
+      '<div class="roster-card__namerow">' +
+      '<span class="roster-card__name">' + esc(agent.name) + '</span>' + badge +
+      '</div>' +
       '<p class="roster-card__meta">' + esc(metaBits.join(' · ')) + '</p>' +
       '</div>' +
       '<span class="roster-card__status is-' + status + '" title="' + esc(status) + '"></span>';
@@ -950,6 +957,18 @@
     var sum = 0;
     String(name || '').split('').forEach(function (c) { sum += c.charCodeAt(0); });
     return palette[sum % palette.length];
+  }
+
+  // "Permanent residency" agents: the built-in CLI agents (Claude Code, Codex,
+  // Gemini CLI) and the Ori system assistant. They're always available and the
+  // server won't delete them.
+  function isPermanent(agent) {
+    if (!agent) return false;
+    var source = String(agent.source || '').toLowerCase();
+    var role = String(agent.role || '').toLowerCase();
+    if (source === 'cli' || role === 'cli_agent') return true;
+    var name = String(agent.name || '').trim().toLowerCase();
+    return name === 'ori' || name === '__assistant__';
   }
 
   function healthKind(agent) {
