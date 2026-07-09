@@ -232,6 +232,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.ShowSidebarToggle = true // Enable sidebar toggle
+	// Opt-in roster/stage redesign (Agents page redesign, G2). Off by default so
+	// the group lands inert; ?view=roster serves the new page. G5 flips the
+	// default once the flow reaches parity.
+	if r.URL.Query().Get("view") == "roster" {
+		s.renderAndWritePage(w, "agents-roster", data)
+		return
+	}
 	s.renderAndWritePage(w, "agents", data)
 }
 

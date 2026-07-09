@@ -1,0 +1,434 @@
+/*
+ * Agents roster + stage layout (game-inspired, "themed not skinned").
+ * Reuses the app's existing design tokens; no new palette. Roster rail on the
+ * left, selected-agent stage on the right.
+ */
+
+.agents-roster-page {
+  --roster-rail-width: 340px;
+  --roster-gap: 18px;
+  --roster-radius: 14px;
+}
+
+.roster-layout {
+  display: grid;
+  grid-template-columns: var(--roster-rail-width) minmax(0, 1fr);
+  gap: var(--roster-gap);
+  padding: 20px;
+  max-width: 1500px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+/* ---- Roster rail ---------------------------------------------------------- */
+
+.roster-rail {
+  position: sticky;
+  top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100vh - 96px);
+}
+
+.roster-rail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.roster-rail__title {
+  font-size: 24px;
+  margin: 0;
+  line-height: 1.1;
+}
+
+.roster-rail__subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.roster-rail__classic {
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--text-secondary, #6b7280);
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 999px;
+  padding: 5px 11px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.roster-rail__classic:hover,
+.roster-rail__classic:focus-visible {
+  color: var(--primary-color, #4f46e5);
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.roster-rail__controls {
+  display: flex;
+  gap: 8px;
+}
+
+.roster-search {
+  flex: 1 1 auto;
+  display: block;
+}
+
+.roster-search input,
+.roster-sort select {
+  width: 100%;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+}
+
+.roster-sort select {
+  width: auto;
+  cursor: pointer;
+}
+
+.roster-search input:focus-visible,
+.roster-sort select:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.roster-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--roster-radius);
+}
+
+.roster-list:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* Roster card */
+.roster-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--bg-primary, #fff);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.05s ease;
+}
+
+.roster-card:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+}
+
+.roster-card[aria-selected="true"] {
+  border-color: var(--primary-color, #4f46e5);
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, var(--bg-primary, #fff));
+  box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5);
+}
+
+.roster-card__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  overflow: hidden;
+}
+
+.roster-card__body {
+  min-width: 0;
+}
+
+.roster-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary, #111827);
+}
+
+.roster-card__meta {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.roster-card__status {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border-color, #9ca3af);
+  flex: none;
+}
+
+.roster-card__status.is-idle { background: #9ca3af; }
+.roster-card__status.is-active { background: #22c55e; }
+.roster-card__status.is-error { background: #ef4444; }
+.roster-card__status.is-disabled { background: #d1d5db; }
+
+.roster-empty {
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  padding: 20px;
+}
+
+.roster-linkbtn {
+  background: none;
+  border: none;
+  color: var(--primary-color, #4f46e5);
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+/* ---- Stage ---------------------------------------------------------------- */
+
+.roster-stage {
+  min-height: 420px;
+}
+
+.stage-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 420px;
+  border: 1px dashed var(--border-color, #d1d5db);
+  border-radius: var(--roster-radius);
+  color: var(--text-secondary, #6b7280);
+  text-align: center;
+  padding: 24px;
+}
+
+.stage-placeholder__art {
+  font-size: 46px;
+  opacity: 0.4;
+}
+
+.stage {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: var(--roster-radius);
+  background: var(--bg-primary, #fff);
+  overflow: hidden;
+}
+
+.stage__hero {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-areas:
+    "avatar ident"
+    "vitals vitals";
+  gap: 14px 16px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent), transparent);
+}
+
+.stage__avatar {
+  grid-area: avatar;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 24px;
+  color: #fff;
+  overflow: hidden;
+}
+
+.stage__ident { grid-area: ident; align-self: center; min-width: 0; }
+
+.stage__name {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.stage__class {
+  margin-top: 4px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #6b7280);
+}
+
+.stage__vitals {
+  grid-area: vitals;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vital {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--bg-secondary, #f3f4f6);
+  border: 1px solid var(--border-color, #e5e7eb);
+  color: var(--text-primary, #111827);
+}
+
+.vital b { font-weight: 600; }
+.vital span { color: var(--text-secondary, #6b7280); }
+
+/* Tabs */
+.stage__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.stage__tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+}
+
+.stage__tab:hover { color: var(--text-primary, #111827); }
+
+.stage__tab.is-active {
+  color: var(--primary-color, #4f46e5);
+  border-bottom-color: var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+
+.stage__tab:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: -2px;
+  border-radius: 4px 4px 0 0;
+}
+
+.stage__panels { padding: 20px 24px; }
+.stage__panel[hidden] { display: none; }
+
+.stage-facts {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+}
+
+.stage-facts dt { color: var(--text-secondary, #6b7280); font-size: 13px; }
+.stage-facts dd { margin: 0; font-size: 14px; color: var(--text-primary, #111827); }
+
+.stage-desc {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary, #111827);
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color, #eee);
+}
+
+.stage-prompt pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--bg-secondary, #f8f9fb);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  max-height: 460px;
+  overflow: auto;
+  color: var(--text-primary, #111827);
+}
+
+.stage-hint { color: var(--text-secondary, #6b7280); font-size: 13px; margin: 0; }
+
+.stage-workspaces { display: flex; flex-direction: column; gap: 8px; }
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ws-row a { text-decoration: none; color: var(--text-primary, #111827); }
+.ws-row a:hover { color: var(--primary-color, #4f46e5); }
+
+.ws-entry-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 14%, transparent);
+  color: var(--primary-color, #4f46e5);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0;
+}
+
+/* ---- Dark theme nudges ---------------------------------------------------- */
+
+[data-bs-theme="dark"] .vital,
+[data-bs-theme="dark"] .stage-prompt pre {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-bs-theme="dark"] .roster-card,
+[data-bs-theme="dark"] .stage,
+[data-bs-theme="dark"] .roster-search input,
+[data-bs-theme="dark"] .roster-sort select {
+  background: var(--bg-primary, #1f2430);
+}
+
+/* ---- Responsive ----------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .roster-layout {
+    grid-template-columns: 1fr;
+  }
+  .roster-rail {
+    position: static;
+    max-height: none;
+  }
+  .roster-list {
+    max-height: 320px;
+  }
+}

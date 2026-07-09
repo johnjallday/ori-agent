@@ -1,0 +1,107 @@
+{{define "agents-roster"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/agents-roster.css">
+
+<body class="bg-light agents-roster-page" data-sidebar-default="hidden">
+  <a class="skip-link" href="#roster-main">Skip to Main Content</a>
+
+  {{template "navbar.tmpl" .}}
+
+  <div class="app-shell">
+    {{template "sidebar.tmpl" .}}
+
+    <main class="main-content" id="roster-main" role="main" aria-labelledby="roster-title">
+      <div class="roster-layout">
+        <!-- Roster rail: browse + select -->
+        <section class="roster-rail" aria-label="Agent roster">
+          <header class="roster-rail__header">
+            <div class="roster-rail__titles">
+              <h1 id="roster-title" class="roster-rail__title">Agents</h1>
+              <p class="roster-rail__subtitle" id="rosterCount" aria-live="polite">Loading roster…</p>
+            </div>
+            <a class="roster-rail__classic" href="/agents" title="Switch back to the classic dashboard">Classic view</a>
+          </header>
+
+          <div class="roster-rail__controls">
+            <label class="roster-search" for="rosterSearch">
+              <span class="visually-hidden">Search agents</span>
+              <input id="rosterSearch" type="search" placeholder="Search agents…" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="roster-sort" for="rosterSort">
+              <span class="visually-hidden">Sort agents</span>
+              <select id="rosterSort" aria-label="Sort agents">
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+                <option value="workspaces-desc">Most workspaces</option>
+                <option value="active-desc">Recently active</option>
+              </select>
+            </label>
+          </div>
+
+          <ul class="roster-list" id="rosterList" role="listbox" aria-label="Agents" tabindex="0" aria-activedescendant="">
+            <!-- roster cards injected here -->
+          </ul>
+
+          <div class="roster-empty" id="rosterEmpty" hidden>
+            <p>No agents match your search.</p>
+            <button type="button" id="rosterClearSearch" class="roster-linkbtn">Clear search</button>
+          </div>
+        </section>
+
+        <!-- Stage: selected agent -->
+        <section class="roster-stage" aria-label="Selected agent" aria-live="polite">
+          <div class="stage-placeholder" id="stagePlaceholder">
+            <div class="stage-placeholder__art" aria-hidden="true">◈</div>
+            <p>Select an agent from the roster to view its details.</p>
+          </div>
+
+          <article class="stage" id="stage" hidden>
+            <header class="stage__hero">
+              <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
+              <div class="stage__ident">
+                <h2 class="stage__name" id="stageName"></h2>
+                <div class="stage__class" id="stageClass"></div>
+              </div>
+              <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
+                <!-- vitals chips injected -->
+              </div>
+            </header>
+
+            <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
+              <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
+              <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
+              <button class="stage__tab" role="tab" id="tab-workspaces" aria-controls="panel-workspaces" aria-selected="false" data-tab="workspaces" type="button" tabindex="-1">Workspaces</button>
+            </nav>
+
+            <div class="stage__panels">
+              <section class="stage__panel is-active" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0">
+                <dl class="stage-facts" id="overviewFacts"></dl>
+                <div class="stage-desc" id="overviewDesc"></div>
+              </section>
+              <section class="stage__panel" role="tabpanel" id="panel-prompt" aria-labelledby="tab-prompt" tabindex="0" hidden>
+                <div class="stage-prompt" id="promptBody">
+                  <p class="stage-hint">Loading system prompt…</p>
+                </div>
+              </section>
+              <section class="stage__panel" role="tabpanel" id="panel-workspaces" aria-labelledby="tab-workspaces" tabindex="0" hidden>
+                <div class="stage-workspaces" id="workspacesBody"></div>
+              </section>
+            </div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  {{template "theme-init.tmpl" .}}
+  {{template "scripts-dx-utils.tmpl" .}}
+  <script defer src="/js/app.js"></script>
+  <script defer src="/js/modules/sidebar.js"></script>
+  <script defer src="/js/modules/themeManager.js"></script>
+  <script defer src="/js/agents-roster.js"></script>
+</body>
+
+</html>
+{{end}}
