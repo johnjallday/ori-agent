@@ -3,8 +3,8 @@
  *
  * Owns the dedicated project-template library page: master list (search + tag
  * filter), detail Overview (edit name/description/tags), and lifecycle actions
- * (create blank, import folder, duplicate, delete, reveal). The Files and
- * Onboarding tabs are placeholders here — they are filled in by later seams.
+ * (create blank, import folder, duplicate, delete, reveal), plus Files,
+ * Tools, and Agents tabs.
  *
  * The library is disk-first (a template is a folder), so every action is a thin
  * veneer over the project-templates HTTP API. Tag editing/filtering reuse the
@@ -102,12 +102,10 @@ async function tplRefresh(selectId) {
   }
 
   // If the selected template changed out from under a loaded Files tree or
-  // onboarding editor, drop them so neither tab shows another template's data.
+  // Tools editor, drop them so neither tab shows another template's data.
   if ((tplFiles.templateId && tplFiles.templateId !== tplState.selectedId) ||
-      (tplOnb.templateId && tplOnb.templateId !== tplState.selectedId) ||
       (tplTools.templateId && tplTools.templateId !== tplState.selectedId)) {
     tplFilesReset();
-    tplOnbReset();
     tplToolsReset();
   }
 
@@ -273,28 +271,89 @@ function tplRenderDetail() {
   tplApplyReadOnly();
 }
 
-// tplStarterTasksToText serializes starter tasks to one-per-line text, with
-// optional details after a pipe.
-function tplStarterTasksToText(tasks) {
-  return (Array.isArray(tasks) ? tasks : [])
-    .map((t) => (t && t.details ? `${t.description} | ${t.details}` : (t ? t.description : '')))
-    .filter(Boolean)
-    .join('\n');
+// --- Starter tasks row editor ---
+
+// tplStarterTaskRow builds one editable starter-task row: description input,
+// Markdown details textarea, a setup toggle (at most one across rows —
+// checking one unchecks the others), and a remove button.
+function tplStarterTaskRow(task) {
+  const row = document.createElement('div');
+  row.className = 'modern-card p-2';
+  row.dataset.role = 'starter-task';
+
+  const top = document.createElement('div');
+  top.className = 'd-flex gap-2 align-items-center mb-2';
+  const desc = document.createElement('input');
+  desc.className = 'modern-input flex-grow-1';
+  desc.placeholder = 'Task description';
+  desc.dataset.k = 'description';
+  desc.value = task && task.description ? task.description : '';
+  top.appendChild(desc);
+
+  const setupWrap = document.createElement('label');
+  setupWrap.className = 'd-flex align-items-center gap-1 mb-0';
+  setupWrap.style.cssText = 'font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer;';
+  const setup = document.createElement('input');
+  setup.type = 'checkbox';
+  setup.className = 'form-check-input mt-0';
+  setup.dataset.k = 'setup';
+  setup.checked = Boolean(task && task.setup);
+  setup.title = 'Auto-starts once when the workspace is first opened';
+  setup.addEventListener('change', () => {
+    if (!setup.checked) return;
+    // At most one setup task: checking this one unchecks the rest.
+    document.querySelectorAll('#tplStarterTasksList input[data-k="setup"]').forEach((other) => {
+      if (other !== setup) other.checked = false;
+    });
+  });
+  setupWrap.appendChild(setup);
+  setupWrap.appendChild(document.createTextNode('Setup task'));
+  top.appendChild(setupWrap);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'modern-btn modern-btn-secondary btn-sm';
+  removeBtn.style.color = '#ef4444';
+  removeBtn.textContent = 'Remove';
+  removeBtn.addEventListener('click', () => row.remove());
+  top.appendChild(removeBtn);
+  row.appendChild(top);
+
+  const details = document.createElement('textarea');
+  details.className = 'form-control';
+  details.rows = 3;
+  details.dataset.k = 'details';
+  details.style.cssText = 'background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
+  details.placeholder = 'Details for the agent (Markdown). For a setup task, consider headings:\n## Created defaults\n## Questions to ask\n## Validation\n## How to apply changes';
+  details.value = task && task.details ? task.details : '';
+  row.appendChild(details);
+
+  return row;
 }
 
-// tplParseStarterTasks parses the textarea back into {description, details}
-// objects: one task per non-empty line, details after the first pipe.
-function tplParseStarterTasks(text) {
-  return String(text || '')
-    .split('\n')
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return null;
-      const idx = trimmed.indexOf('|');
-      if (idx === -1) return { description: trimmed, details: '' };
-      return { description: trimmed.slice(0, idx).trim(), details: trimmed.slice(idx + 1).trim() };
+function tplStarterTasksRender(tasks) {
+  const list = tplEl('tplStarterTasksList');
+  if (!list) return;
+  list.innerHTML = '';
+  (Array.isArray(tasks) ? tasks : []).forEach((t) => list.appendChild(tplStarterTaskRow(t)));
+}
+
+// tplStarterTasksCollect reads the rows back into starter-task objects,
+// dropping rows without a description. The at-most-one setup rule is enforced
+// by the row toggles; the server validates it again on save.
+function tplStarterTasksCollect() {
+  const list = tplEl('tplStarterTasksList');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[data-role="starter-task"]'))
+    .map((row) => {
+      const val = (k) => row.querySelector(`[data-k="${k}"]`);
+      const description = (val('description')?.value || '').trim();
+      if (!description) return null;
+      const task = { description, details: (val('details')?.value || '').trim() };
+      if (val('setup')?.checked) task.setup = true;
+      return task;
     })
-    .filter((t) => t && t.description);
+    .filter(Boolean);
 }
 
 function tplResetOverviewFields() {
@@ -309,8 +368,7 @@ function tplResetOverviewFields() {
   if (iconInput) iconInput.value = template.icon || '';
   const behaviorSelect = tplEl('tplEditBehavior');
   if (behaviorSelect) behaviorSelect.value = template.behavior_profile || 'general';
-  const starterInput = tplEl('tplEditStarterTasks');
-  if (starterInput) starterInput.value = tplStarterTasksToText(template.starter_tasks);
+  tplStarterTasksRender(template.starter_tasks);
   tplEnsureTagsWidget();
   if (tplState.tagsWidget) tplState.tagsWidget.setTags(template.tags || []);
 }
@@ -322,7 +380,6 @@ async function tplSaveOverview() {
   const descInput = tplEl('tplEditDescription');
   const iconInput = tplEl('tplEditIcon');
   const behaviorSelect = tplEl('tplEditBehavior');
-  const starterInput = tplEl('tplEditStarterTasks');
   const tags = tplState.tagsWidget ? tplState.tagsWidget.getTags() : (template.tags || []);
   try {
     await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
@@ -334,7 +391,7 @@ async function tplSaveOverview() {
         tags,
         icon: iconInput ? iconInput.value.trim() : '',
         behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
-        starter_tasks: tplParseStarterTasks(starterInput ? starterInput.value : '')
+        starter_tasks: tplStarterTasksCollect()
       })
     });
     tplToast('Template saved.', 'success');
@@ -360,14 +417,17 @@ function tplApplyReadOnly() {
     if (el) el.hidden = builtin;
   });
   [
-    'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplEditStarterTasks',
+    'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplStarterTaskAddBtn',
     'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
     'tplFileNewBtn', 'tplFolderNewBtn', 'tplFileRenameBtn', 'tplFileDeleteBtn', 'tplEditorSaveBtn',
-    'tplOnbSaveBtn', 'tplToolsSaveBtn', 'tplAgentsAddBtn', 'tplAgentsSaveBtn'
+    'tplToolsSaveBtn', 'tplAgentsAddBtn', 'tplAgentsSaveBtn'
   ].forEach((id) => {
     const el = tplEl(id);
     if (el) el.disabled = builtin;
   });
+  // The starter-tasks row editor is built dynamically; disable its controls too.
+  document.querySelectorAll('#tplStarterTasksList input, #tplStarterTasksList textarea, #tplStarterTasksList button')
+    .forEach((el) => { el.disabled = builtin; });
   // The tags widget is a custom component; dim + block interaction for built-ins.
   const tagsWrap = tplEl('tplEditTags');
   if (tagsWrap) {
@@ -517,7 +577,6 @@ function tplApiBase() {
 function tplSelectTemplate(id) {
   tplState.selectedId = id;
   tplFilesReset();
-  tplOnbReset();
   tplToolsReset();
   tplRenderList();
   tplRenderDetail();
@@ -638,7 +697,7 @@ async function tplOpenFile(path) {
     if (data.binary) {
       notice = 'Binary file — read-only. Use Reveal to open it on disk.';
     } else if (data.read_only) {
-      notice = 'template.json is managed by the Overview and Onboarding tabs — read-only here.';
+      notice = 'template.json is managed by the Overview, Tools, and Agents tabs — read-only here.';
     }
     tplEditorShow(data.path || path, data.content || '', Boolean(data.read_only), notice);
   } catch (error) {
@@ -799,406 +858,6 @@ async function tplFileDelete() {
   } catch (error) {
     tplToast(error.message || 'Failed to delete', 'error');
   }
-}
-
-// --- Onboarding tab: visual intake editor ---
-
-const tplOnb = { templateId: '', present: false, rawMode: false };
-
-function tplOnbApi() {
-  return `/api/project-templates/${encodeURIComponent(tplState.selectedId)}/onboarding`;
-}
-
-function tplOnbReset() {
-  tplOnb.templateId = '';
-  tplOnb.present = false;
-  tplOnb.rawMode = false;
-  const empty = tplEl('tplOnbEmpty');
-  const editor = tplEl('tplOnbEditor');
-  if (empty) empty.hidden = true;
-  if (editor) editor.hidden = true;
-}
-
-function tplOnbEnsure() {
-  if (!tplState.selectedId) return;
-  if (tplOnb.templateId === tplState.selectedId) return;
-  void tplOnbLoad();
-}
-
-async function tplOnbLoad() {
-  const empty = tplEl('tplOnbEmpty');
-  const editor = tplEl('tplOnbEditor');
-  if (!editor) return;
-  try {
-    const data = await tplFetchJSON(tplOnbApi());
-    tplOnb.templateId = tplState.selectedId;
-    tplOnb.present = Boolean(data.present);
-    tplOnbHideProblems();
-    if (!data.present) {
-      if (empty) empty.hidden = false;
-      editor.hidden = true;
-      return;
-    }
-    if (empty) empty.hidden = true;
-    editor.hidden = false;
-    if (data.onboarding) {
-      tplOnbSetRawMode(false);
-      tplOnbRenderForm(data.onboarding);
-    } else {
-      // Present but unparseable on disk — drop into JSON mode to repair it.
-      tplOnbSetRawMode(true);
-      const ta = tplEl('tplOnbJsonText');
-      if (ta) ta.value = data.raw || '';
-      if (data.error) tplOnbShowProblems([data.error]);
-    }
-  } catch (error) {
-    tplToast(error.message || 'Failed to load onboarding', 'error');
-  }
-}
-
-function tplOnbStartNew() {
-  tplOnb.templateId = tplState.selectedId;
-  tplOnb.present = true;
-  const empty = tplEl('tplOnbEmpty');
-  const editor = tplEl('tplOnbEditor');
-  if (empty) empty.hidden = true;
-  if (editor) editor.hidden = false;
-  tplOnbSetRawMode(false);
-  tplOnbRenderForm({ version: '1', fields: [], completion: { type: 'none' }, dependencies: [] });
-}
-
-function tplOnbRenderForm(spec) {
-  const fields = tplEl('tplOnbFields');
-  if (fields) {
-    fields.innerHTML = '';
-    (spec.fields || []).forEach((f) => fields.appendChild(tplOnbFieldCard(f)));
-  }
-  tplOnbRenderCompletion(spec.completion || { type: 'none' });
-  const deps = tplEl('tplOnbDeps');
-  if (deps) {
-    deps.innerHTML = '';
-    (spec.dependencies || []).forEach((d) => deps.appendChild(tplOnbDepRow(d)));
-  }
-}
-
-// --- DOM helpers ---
-
-function onbCol(width, node) {
-  const c = document.createElement('div');
-  c.className = `col-${width}`;
-  c.appendChild(node);
-  return c;
-}
-
-function onbLabeled(labelText, control) {
-  const wrap = document.createElement('div');
-  const lbl = document.createElement('label');
-  lbl.textContent = labelText;
-  lbl.style.cssText = 'font-size: 11px; color: var(--text-secondary); display: block;';
-  wrap.appendChild(lbl);
-  wrap.appendChild(control);
-  return wrap;
-}
-
-function onbInput(value, placeholder, key) {
-  const i = document.createElement('input');
-  i.className = 'modern-input w-100';
-  i.value = value == null ? '' : String(value);
-  if (placeholder) i.placeholder = placeholder;
-  if (key) i.dataset.k = key;
-  return i;
-}
-
-function onbSelect(options, value, key) {
-  const s = document.createElement('select');
-  s.className = 'form-select form-select-sm';
-  s.style.cssText = 'background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);';
-  for (const [v, label] of options) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = label;
-    if (v === value) o.selected = true;
-    s.appendChild(o);
-  }
-  if (key) s.dataset.k = key;
-  return s;
-}
-
-function onbCheckbox(checked, key) {
-  const c = document.createElement('input');
-  c.type = 'checkbox';
-  c.className = 'form-check-input';
-  c.checked = Boolean(checked);
-  if (key) c.dataset.k = key;
-  return c;
-}
-
-function onbActionBtn(label, onClick, danger) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'modern-btn modern-btn-secondary btn-sm';
-  b.style.fontSize = '12px';
-  if (danger) b.style.color = '#ef4444';
-  b.textContent = label;
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-function tplOnbFieldCard(f) {
-  const card = document.createElement('div');
-  card.className = 'modern-card p-2';
-  card.dataset.role = 'field';
-
-  const grid = document.createElement('div');
-  grid.className = 'row g-2';
-  grid.appendChild(onbCol(4, onbLabeled('Field id', onbInput(f.id, 'snake_case', 'id'))));
-  grid.appendChild(onbCol(5, onbLabeled('Label', onbInput(f.label, 'Question label', 'label'))));
-  grid.appendChild(onbCol(3, onbLabeled('Type', onbSelect(
-    [['string', 'string'], ['number', 'number'], ['enum', 'enum'], ['boolean', 'boolean']], f.type || 'string', 'type'))));
-  grid.appendChild(onbCol(6, onbLabeled('Prompt', onbInput(f.prompt, 'Chat prompt (optional)', 'prompt'))));
-  grid.appendChild(onbCol(3, onbLabeled('Default', onbInput(f.default == null ? '' : f.default, 'optional', 'default'))));
-  grid.appendChild(onbCol(3, onbLabeled('Required', onbCheckbox(f.required, 'required'))));
-  grid.appendChild(onbCol(12, onbLabeled('Options (enum, comma-separated)', onbInput((f.options || []).join(', '), 'a, b, c', 'options'))));
-  const v = f.validation || {};
-  grid.appendChild(onbCol(4, onbLabeled('Min', onbInput(v.min == null ? '' : v.min, 'min', 'min'))));
-  grid.appendChild(onbCol(4, onbLabeled('Max', onbInput(v.max == null ? '' : v.max, 'max', 'max'))));
-  grid.appendChild(onbCol(4, onbLabeled('Pattern', onbInput(v.pattern, 'regex', 'pattern'))));
-  card.appendChild(grid);
-
-  const actions = document.createElement('div');
-  actions.className = 'd-flex gap-2 mt-1';
-  actions.appendChild(onbActionBtn('↑', () => {
-    const prev = card.previousElementSibling;
-    if (prev) card.parentNode.insertBefore(card, prev);
-  }));
-  actions.appendChild(onbActionBtn('↓', () => {
-    const next = card.nextElementSibling;
-    if (next) card.parentNode.insertBefore(next, card);
-  }));
-  actions.appendChild(onbActionBtn('Remove', () => card.remove(), true));
-  card.appendChild(actions);
-  return card;
-}
-
-function tplOnbRenderCompletion(c) {
-  const root = tplEl('tplOnbCompletion');
-  if (!root) return;
-  root.innerHTML = '';
-
-  const grid = document.createElement('div');
-  grid.className = 'row g-2';
-  grid.appendChild(onbCol(4, onbLabeled('Type', onbSelect([
-    ['none', 'none'], ['task', 'task'],
-    ['tool', 'tool (reserved — not run in v1)'],
-    ['workflow_template', 'workflow_template (reserved — not run in v1)']
-  ], c.type || 'none', 'type'))));
-  grid.appendChild(onbCol(8, onbLabeled('Ref (required for reserved types)', onbInput(c.ref, 'ref', 'ref'))));
-
-  const instr = document.createElement('textarea');
-  instr.className = 'form-control';
-  instr.rows = 2;
-  instr.style.cssText = 'background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em;';
-  instr.value = c.instructions || '';
-  instr.dataset.k = 'instructions';
-  grid.appendChild(onbCol(12, onbLabeled('Instructions', instr)));
-  grid.appendChild(onbCol(8, onbLabeled('Skill refs (comma-separated)', onbInput((c.skill_refs || []).join(', '), 'skill-a, skill-b', 'skill_refs'))));
-  grid.appendChild(onbCol(4, onbLabeled('Instantiate skeleton', onbCheckbox(c.instantiate_skeleton, 'instantiate_skeleton'))));
-  root.appendChild(grid);
-
-  const inputsWrap = document.createElement('div');
-  inputsWrap.className = 'mt-2';
-  const hdr = document.createElement('div');
-  hdr.className = 'd-flex justify-content-between align-items-center mb-1';
-  const h = document.createElement('span');
-  h.textContent = 'Inputs (literal or ${fields.id})';
-  h.style.cssText = 'font-size: 11px; color: var(--text-secondary);';
-  const list = document.createElement('div');
-  list.className = 'd-flex flex-column gap-1';
-  list.dataset.role = 'inputs';
-  hdr.appendChild(h);
-  hdr.appendChild(onbActionBtn('Add input', () => list.appendChild(tplOnbInputRow('', ''))));
-  Object.entries(c.inputs || {}).forEach(([k, val]) => list.appendChild(tplOnbInputRow(k, val)));
-  inputsWrap.appendChild(hdr);
-  inputsWrap.appendChild(list);
-  root.appendChild(inputsWrap);
-}
-
-function tplOnbInputRow(k, val) {
-  const row = document.createElement('div');
-  row.className = 'd-flex gap-2';
-  row.dataset.role = 'input-row';
-  row.appendChild(onbInput(k, 'key', 'key'));
-  row.appendChild(onbInput(val, 'value or ${fields.id}', 'value'));
-  row.appendChild(onbActionBtn('×', () => row.remove(), true));
-  return row;
-}
-
-function tplOnbDepRow(d) {
-  const row = document.createElement('div');
-  row.className = 'd-flex gap-2';
-  row.dataset.role = 'dep';
-  row.appendChild(onbSelect([
-    ['skill', 'skill'], ['mcp_server', 'mcp_server'], ['tool', 'tool'], ['workflow_template', 'workflow_template']
-  ], d.type || 'skill', 'type'));
-  row.appendChild(onbInput(d.ref, 'ref', 'ref'));
-  row.appendChild(onbActionBtn('×', () => row.remove(), true));
-  return row;
-}
-
-// tplOnbBuildSpec reads the visual form into an OnboardingSpec object. The server
-// is the validation authority; this only assembles the shape.
-function tplOnbBuildSpec() {
-  const spec = { version: '1', fields: [], completion: { type: 'none' } };
-
-  tplEl('tplOnbFields')?.querySelectorAll('[data-role="field"]').forEach((card) => {
-    const get = (k) => card.querySelector(`[data-k="${k}"]`);
-    const type = get('type').value;
-    const field = { id: get('id').value.trim(), label: get('label').value.trim(), type };
-    if (get('required').checked) field.required = true;
-    const prompt = get('prompt').value.trim();
-    if (prompt) field.prompt = prompt;
-    const opts = get('options').value.split(',').map((s) => s.trim()).filter(Boolean);
-    if (opts.length) field.options = opts;
-    const def = get('default').value.trim();
-    if (def !== '') {
-      if (type === 'number') field.default = Number(def);
-      else if (type === 'boolean') field.default = def === 'true';
-      else field.default = def;
-    }
-    const validation = {};
-    const min = get('min').value.trim();
-    if (min !== '') validation.min = Number(min);
-    const max = get('max').value.trim();
-    if (max !== '') validation.max = Number(max);
-    const pattern = get('pattern').value.trim();
-    if (pattern) validation.pattern = pattern;
-    if (Object.keys(validation).length) field.validation = validation;
-    spec.fields.push(field);
-  });
-
-  const cRoot = tplEl('tplOnbCompletion');
-  if (cRoot) {
-    const get = (k) => cRoot.querySelector(`[data-k="${k}"]`);
-    const completion = { type: get('type').value };
-    const ref = get('ref').value.trim();
-    if (ref) completion.ref = ref;
-    const instructions = get('instructions').value.trim();
-    if (instructions) completion.instructions = instructions;
-    const skillRefs = get('skill_refs').value.split(',').map((s) => s.trim()).filter(Boolean);
-    if (skillRefs.length) completion.skill_refs = skillRefs;
-    if (get('instantiate_skeleton').checked) completion.instantiate_skeleton = true;
-    const inputs = {};
-    cRoot.querySelectorAll('[data-role="input-row"]').forEach((row) => {
-      const key = row.querySelector('[data-k="key"]').value.trim();
-      if (key) inputs[key] = row.querySelector('[data-k="value"]').value;
-    });
-    if (Object.keys(inputs).length) completion.inputs = inputs;
-    spec.completion = completion;
-  }
-
-  const deps = [];
-  tplEl('tplOnbDeps')?.querySelectorAll('[data-role="dep"]').forEach((row) => {
-    deps.push({ type: row.querySelector('[data-k="type"]').value, ref: row.querySelector('[data-k="ref"]').value.trim() });
-  });
-  if (deps.length) spec.dependencies = deps;
-
-  return spec;
-}
-
-function tplOnbSetRawMode(on) {
-  tplOnb.rawMode = on;
-  const visual = tplEl('tplOnbVisual');
-  const json = tplEl('tplOnbJson');
-  const toggle = tplEl('tplOnbJsonToggle');
-  if (visual) visual.hidden = on;
-  if (json) json.hidden = !on;
-  if (toggle) toggle.textContent = on ? 'Edit visually' : 'Edit as JSON';
-}
-
-function tplOnbToggleJson() {
-  if (!tplOnb.rawMode) {
-    const ta = tplEl('tplOnbJsonText');
-    if (ta) ta.value = JSON.stringify(tplOnbBuildSpec(), null, 2);
-    tplOnbSetRawMode(true);
-    return;
-  }
-  const ta = tplEl('tplOnbJsonText');
-  try {
-    tplOnbRenderForm(JSON.parse(ta.value));
-    tplOnbHideProblems();
-    tplOnbSetRawMode(false);
-  } catch (error) {
-    tplOnbShowProblems([`Invalid JSON: ${error.message}`]);
-  }
-}
-
-async function tplOnbSave() {
-  let body;
-  if (tplOnb.rawMode) {
-    try {
-      body = JSON.parse(tplEl('tplOnbJsonText').value);
-    } catch (error) {
-      tplOnbShowProblems([`Invalid JSON: ${error.message}`]);
-      return;
-    }
-  } else {
-    body = tplOnbBuildSpec();
-  }
-  try {
-    const res = await fetch(tplOnbApi(), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 400 && Array.isArray(data.problems)) {
-      tplOnbShowProblems(data.problems);
-      return;
-    }
-    if (!res.ok) {
-      tplToast(data.message || data.error || 'Failed to save onboarding', 'error');
-      return;
-    }
-    tplOnbHideProblems();
-    tplToast('Onboarding saved.', 'success');
-    tplOnb.templateId = '';
-    await tplOnbLoad();
-  } catch (error) {
-    tplToast(error.message || 'Failed to save onboarding', 'error');
-  }
-}
-
-async function tplOnbRemove() {
-  if (!window.confirm('Remove the onboarding intake from this template?')) return;
-  try {
-    await tplFetchJSON(tplOnbApi(), { method: 'DELETE' });
-    tplToast('Onboarding removed.', 'success');
-    tplOnb.templateId = '';
-    await tplOnbLoad();
-  } catch (error) {
-    tplToast(error.message || 'Failed to remove onboarding', 'error');
-  }
-}
-
-function tplOnbShowProblems(problems) {
-  const box = tplEl('tplOnbProblems');
-  if (!box) return;
-  box.innerHTML = '';
-  const ul = document.createElement('ul');
-  ul.className = 'mb-0';
-  ul.style.paddingLeft = '18px';
-  for (const p of problems) {
-    const li = document.createElement('li');
-    li.textContent = p;
-    ul.appendChild(li);
-  }
-  box.appendChild(ul);
-  box.hidden = false;
-}
-
-function tplOnbHideProblems() {
-  const box = tplEl('tplOnbProblems');
-  if (box) box.hidden = true;
 }
 
 // --- Tools tab: default skills / MCP servers / plugins ---
@@ -1824,6 +1483,10 @@ async function tplAgentsSave() {
   const template = tplSelected();
   if (!template) return;
   const agents = tplAgentsCollect().filter((a) => a.name);
+  if (agents.length === 0) {
+    tplToast('A template needs at least one agent — the first is the workspace entry agent.', 'error');
+    return;
+  }
   try {
     await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}/agents`, {
       method: 'PUT',
@@ -1858,6 +1521,9 @@ function tplInit() {
   tplEl('tplDeleteBtn')?.addEventListener('click', () => void tplDelete());
 
   tplEl('tplSaveBtn')?.addEventListener('click', () => void tplSaveOverview());
+  tplEl('tplStarterTaskAddBtn')?.addEventListener('click', () => {
+    tplEl('tplStarterTasksList')?.appendChild(tplStarterTaskRow(null));
+  });
   tplEl('tplResetBtn')?.addEventListener('click', tplResetOverviewFields);
   tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', tplDuplicate);
 
@@ -1915,19 +1581,6 @@ function tplInit() {
       });
     });
   }
-
-  // Onboarding tab wiring.
-  tplEl('tplTabOnboarding')?.addEventListener('shown.bs.tab', () => tplOnbEnsure());
-  tplEl('tplOnbAddBtn')?.addEventListener('click', tplOnbStartNew);
-  tplEl('tplOnbAddFieldBtn')?.addEventListener('click', () => {
-    tplEl('tplOnbFields')?.appendChild(tplOnbFieldCard({ type: 'string' }));
-  });
-  tplEl('tplOnbAddDepBtn')?.addEventListener('click', () => {
-    tplEl('tplOnbDeps')?.appendChild(tplOnbDepRow({ type: 'skill' }));
-  });
-  tplEl('tplOnbJsonToggle')?.addEventListener('click', tplOnbToggleJson);
-  tplEl('tplOnbRemoveBtn')?.addEventListener('click', () => void tplOnbRemove());
-  tplEl('tplOnbSaveBtn')?.addEventListener('click', () => void tplOnbSave());
 
   // Tools tab wiring.
   tplEl('tplTabTools')?.addEventListener('shown.bs.tab', () => tplToolsEnsure());
