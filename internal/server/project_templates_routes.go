@@ -427,7 +427,8 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, projecttemplates.ErrTemplateNotFound), errors.Is(err, projecttemplates.ErrFileNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable):
+	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
+		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrRosterRequired):
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())

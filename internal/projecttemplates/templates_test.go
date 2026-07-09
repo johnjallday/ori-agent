@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,5 +141,80 @@ func TestLoadFolder(t *testing.T) {
 	}
 	if _, err := LoadFolder(filepath.Join(dir, "anywhere", ManifestFileName)); !errors.Is(err, ErrTemplateNotFound) {
 		t.Errorf("expected ErrTemplateNotFound for file path, got %v", err)
+	}
+}
+
+func TestStarterTaskSetupFlagRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "song", ManifestFileName),
+		`{"name":"Song","starter_tasks":[{"description":"Adjust tempo","details":"## Questions to ask","setup":true},{"description":"Write lyrics"}]}`)
+
+	tpl, err := FindLibraryTemplate(dir, "song")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if len(tpl.StarterTasks) != 2 {
+		t.Fatalf("expected 2 starter tasks, got %+v", tpl.StarterTasks)
+	}
+	if !tpl.StarterTasks[0].Setup || tpl.StarterTasks[1].Setup {
+		t.Fatalf("setup flag not carried: %+v", tpl.StarterTasks)
+	}
+}
+
+func TestNormalizeStarterTasksDemotesExtraSetupFlags(t *testing.T) {
+	// A hand-edited manifest with two setup tasks loads (never fails), but only
+	// the first flag survives so downstream seeding sees at most one setup task.
+	out := normalizeStarterTasks([]StarterTask{
+		{Description: "", Setup: true}, // dropped: no description, flag dies with it
+		{Description: "first", Setup: true},
+		{Description: "second", Setup: true},
+	})
+	if len(out) != 2 {
+		t.Fatalf("expected 2 tasks, got %+v", out)
+	}
+	if !out[0].Setup || out[1].Setup {
+		t.Fatalf("expected only the first surviving setup flag to be kept: %+v", out)
+	}
+}
+
+func TestValidateStarterTasksRejectsMultipleSetup(t *testing.T) {
+	if err := validateStarterTasks([]StarterTask{{Description: "a", Setup: true}, {Description: "b"}}); err != nil {
+		t.Fatalf("single setup task should validate, got %v", err)
+	}
+	err := validateStarterTasks([]StarterTask{{Description: "a", Setup: true}, {Description: "b", Setup: true}})
+	if !errors.Is(err, ErrInvalidStarterTasks) {
+		t.Fatalf("expected ErrInvalidStarterTasks, got %v", err)
+	}
+	for _, want := range []string{`"a"`, `"b"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name offending task %s, got %q", want, err.Error())
+		}
+	}
+}
+
+func TestManifestWarnings(t *testing.T) {
+	dir := t.TempDir()
+	// Legacy onboarding block + no roster → both warnings.
+	writeFile(t, filepath.Join(dir, "legacy", ManifestFileName), `{"name":"Legacy","onboarding":{"version":"1"}}`)
+	// Roster present, no onboarding → no warnings.
+	writeFile(t, filepath.Join(dir, "clean", ManifestFileName), `{"name":"Clean","agents":[{"name":"Lead"}]}`)
+
+	legacy, err := FindLibraryTemplate(dir, "legacy")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(legacy): %v", err)
+	}
+	if len(legacy.Warnings) != 2 {
+		t.Fatalf("expected onboarding + roster warnings, got %v", legacy.Warnings)
+	}
+	if !strings.Contains(legacy.Warnings[0], "onboarding") || !strings.Contains(legacy.Warnings[1], "agents") {
+		t.Fatalf("unexpected warning wording: %v", legacy.Warnings)
+	}
+
+	clean, err := FindLibraryTemplate(dir, "clean")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(clean): %v", err)
+	}
+	if len(clean.Warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", clean.Warnings)
 	}
 }

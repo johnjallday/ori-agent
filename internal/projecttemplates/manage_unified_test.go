@@ -2,7 +2,9 @@ package projecttemplates
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +98,62 @@ func TestUpdateManifestMetaRoundTrip(t *testing.T) {
 	// behavior_profile was not in this edit (nil) so it is preserved.
 	if tpl.BehaviorProfile != BehaviorProfileResearch {
 		t.Errorf("behavior_profile should be preserved, got %q", tpl.BehaviorProfile)
+	}
+}
+
+func TestUpdateManifestRejectsMultipleSetupTasks(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := CreateBlank(dir, "Demo"); err != nil {
+		t.Fatalf("CreateBlank: %v", err)
+	}
+
+	_, err := UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{
+		StarterTasks: &[]StarterTask{
+			{Description: "one", Setup: true},
+			{Description: "two", Setup: true},
+		},
+	})
+	if !errors.Is(err, ErrInvalidStarterTasks) {
+		t.Fatalf("expected ErrInvalidStarterTasks, got %v", err)
+	}
+
+	// A single setup task saves and round-trips.
+	tpl, err := UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{
+		StarterTasks: &[]StarterTask{
+			{Description: "one", Setup: true},
+			{Description: "two"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateManifest(setup): %v", err)
+	}
+	if len(tpl.StarterTasks) != 2 || !tpl.StarterTasks[0].Setup || tpl.StarterTasks[1].Setup {
+		t.Fatalf("setup flag did not persist correctly: %+v", tpl.StarterTasks)
+	}
+}
+
+func TestUpdateManifestStripsLegacyOnboarding(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "legacy", ManifestFileName),
+		`{"name":"Legacy","custom_key":"kept","onboarding":{"version":"1","fields":[]}}`)
+
+	tpl, err := UpdateManifest(dir, "legacy", "Legacy", "still legacy", nil, nil)
+	if err != nil {
+		t.Fatalf("UpdateManifest: %v", err)
+	}
+	if tpl.HasOnboarding() {
+		t.Fatalf("expected onboarding stripped from reloaded template")
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "legacy", ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"onboarding"`) {
+		t.Errorf("legacy onboarding key should be removed on save: %s", data)
+	}
+	// Unknown keys the author added are still preserved.
+	if !strings.Contains(string(data), `"custom_key"`) {
+		t.Errorf("unknown keys should survive the save: %s", data)
 	}
 }
