@@ -24,7 +24,7 @@
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;
-  --ws-ink-faint: #5a5f6a;
+  --ws-ink-faint: #7d838e;
 
   /* semantic accents */
   --ws-faction: #46d39a;
@@ -451,6 +451,22 @@
   color: var(--ws-faction);
   border-color: var(--ws-faction-deep);
   background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-mission-status.is-running {
+  color: var(--ws-idle);
+  border-color: color-mix(in srgb, var(--ws-idle) 46%, var(--ws-line));
+  background: color-mix(in srgb, var(--ws-idle) 8%, transparent);
+}
+.ws-cmd-mission-status.is-completed {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-mission-status.is-failed,
+.ws-cmd-mission-status.is-blocked {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.42);
+  background: rgba(226, 101, 77, 0.07);
 }
 .ws-cmd-mission-status.is-paused,
 .ws-cmd-mission-status.is-manual {
@@ -1332,6 +1348,714 @@
   outline-offset: 2px;
 }
 
+/* ---------- agent command deck ---------- */
+.ws-cmd-garrison {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel), #0f1014);
+  background-size:
+    28px 28px,
+    28px 28px,
+    auto;
+}
+.ws-cmd-deck {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.62fr) minmax(220px, 0.85fr) minmax(320px, 1.45fr);
+  min-height: 540px;
+}
+.ws-cmd-roster,
+.ws-cmd-agent-stage,
+.ws-cmd-agent-overview {
+  min-width: 0;
+}
+.ws-cmd-roster {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ws-line);
+  background: rgba(7, 8, 11, 0.58);
+}
+.ws-cmd-roster-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-roster-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.ws-cmd-roster-head span,
+.ws-cmd-stage-kicker,
+.ws-cmd-overview-label,
+.ws-cmd-loadout-kicker,
+.ws-cmd-unassigned-kicker {
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-roster-head strong {
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-faction);
+}
+.ws-cmd-roster-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-roster-item {
+  position: relative;
+  width: 100%;
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 6px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ws-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease;
+}
+.ws-cmd-roster-item::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px -1px;
+  width: 2px;
+  background: transparent;
+}
+.ws-cmd-roster-item:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-roster-item.is-selected {
+  border-color: rgba(70, 211, 154, 0.45);
+  background: linear-gradient(90deg, rgba(70, 211, 154, 0.13), rgba(70, 211, 154, 0.025));
+  transform: translateX(2px);
+}
+.ws-cmd-roster-item.is-selected::before {
+  background: var(--ws-faction);
+  box-shadow: 0 0 12px var(--ws-faction);
+}
+.ws-cmd-roster-item.is-entry.is-selected {
+  border-color: rgba(232, 181, 75, 0.45);
+  background: linear-gradient(90deg, rgba(232, 181, 75, 0.13), rgba(232, 181, 75, 0.025));
+}
+.ws-cmd-roster-item.is-entry.is-selected::before {
+  background: var(--ws-keeper);
+  box-shadow: 0 0 12px var(--ws-keeper);
+}
+.ws-cmd-roster-item:focus-visible,
+.ws-cmd-agent-tab:focus-visible,
+.ws-cmd-agent-action:focus-visible,
+.ws-cmd-loadout-edit:focus-visible,
+.ws-cmd-activity-item:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-roster-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ws-cmd-roster-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+  color: #f3f5f8;
+}
+.ws-cmd-roster-role {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-roster-copy .ws-cmd-state {
+  margin-top: 1px;
+  font-size: 8px;
+}
+.ws-cmd-roster-entry,
+.ws-cmd-roster-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 4px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  font-family: var(--ws-font-mono);
+  font-size: 7px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-roster-entry {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+}
+.ws-cmd-roster-count {
+  top: auto;
+  bottom: 6px;
+}
+.ws-cmd-character {
+  --character-accent: hsl(var(--agent-character-hue) 64% 54%);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
+}
+.ws-cmd-character.is-roster {
+  width: 46px;
+  height: 58px;
+}
+.ws-cmd-character.is-stage {
+  width: min(220px, 82%);
+  aspect-ratio: 100 / 118;
+}
+.ws-cmd-character svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ws-cmd-character-body {
+  fill: color-mix(in srgb, var(--character-accent) 20%, #12171c);
+  stroke: color-mix(in srgb, var(--character-accent) 56%, var(--ws-line-bright));
+  stroke-width: 2;
+}
+.ws-cmd-character-head {
+  fill: color-mix(in srgb, var(--character-accent) 28%, #151a20);
+  stroke: var(--character-accent);
+  stroke-width: 2;
+}
+.ws-cmd-character-visor {
+  fill: color-mix(in srgb, var(--character-accent) 70%, white);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 5px var(--character-accent));
+}
+.ws-cmd-character-shoulders,
+.ws-cmd-character-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--character-accent) 70%, var(--ws-line-bright));
+  stroke-width: 2;
+}
+.ws-cmd-character-line.is-soft {
+  opacity: 0.36;
+}
+.ws-cmd-character-emblem {
+  fill: var(--character-accent);
+  filter: drop-shadow(0 0 4px var(--character-accent));
+}
+.ws-cmd-character.alert {
+  --character-accent: var(--ws-alert);
+}
+.ws-cmd-character.working {
+  --character-accent: var(--ws-working);
+}
+.ws-cmd-agent-stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  border-right: 1px solid var(--ws-line);
+  padding: 18px 16px 16px;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(70, 211, 154, 0.13), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent);
+}
+.ws-cmd-agent-stage.alert {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(226, 101, 77, 0.14), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent);
+}
+.ws-cmd-stage-grid {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.28;
+  background:
+    linear-gradient(90deg, transparent 49.5%, rgba(70, 211, 154, 0.15) 50%, transparent 50.5%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(255, 255, 255, 0.035) 24px);
+  mask-image: linear-gradient(to bottom, black, transparent 80%);
+}
+.ws-cmd-stage-character {
+  min-height: 220px;
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+.ws-cmd-stage-copy {
+  width: 100%;
+  text-align: center;
+}
+.ws-cmd-stage-copy h3 {
+  margin: 5px 0 7px;
+  font-size: clamp(17px, 2vw, 22px);
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+  color: #f3f5f8;
+}
+.ws-cmd-stage-badges {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ws-cmd-stage-role {
+  margin: 8px 0;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-stage-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-stage-status strong {
+  color: var(--ws-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.ws-cmd-stage-actions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 16px;
+}
+.ws-cmd-agent-action,
+.ws-cmd-loadout-edit {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  text-decoration: none;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-agent-action:hover,
+.ws-cmd-loadout-edit:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  text-decoration: none;
+}
+.ws-cmd-agent-action.is-primary {
+  color: #06120d;
+  border-color: var(--ws-faction);
+  background: var(--ws-faction);
+}
+.ws-cmd-agent-action.is-danger:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.48);
+}
+.ws-cmd-agent-lock {
+  align-self: center;
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  color: var(--ws-keeper);
+  text-transform: uppercase;
+}
+.ws-cmd-agent-overview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(12, 13, 16, 0.72);
+}
+.ws-cmd-agent-tabs {
+  display: flex;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ws-line);
+  scrollbar-width: thin;
+}
+.ws-cmd-agent-tab {
+  position: relative;
+  min-height: 54px;
+  flex: 1 0 auto;
+  padding: 10px 11px;
+  border: 0;
+  border-right: 1px solid var(--ws-line);
+  background: transparent;
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 8.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-agent-tab::after {
+  content: "";
+  position: absolute;
+  inset: auto 10px 0;
+  height: 2px;
+  background: transparent;
+}
+.ws-cmd-agent-tab:hover {
+  color: var(--ws-ink);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-agent-tab.is-active {
+  color: var(--ws-faction);
+}
+.ws-cmd-agent-tab.is-active::after {
+  background: var(--ws-faction);
+  box-shadow: 0 0 9px var(--ws-faction);
+}
+.ws-cmd-agent-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 486px;
+  overflow: auto;
+  padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-agent-tabpanel[hidden] {
+  display: none;
+}
+.ws-cmd-overview-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-overview-hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ws-cmd-overview-hero strong {
+  color: #f1f3f6;
+  font-size: 14px;
+}
+.ws-cmd-overview-hero p,
+.ws-cmd-overview-brief p {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.ws-cmd-overview-signal {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-overview-signal.working {
+  color: var(--ws-working);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-overview-signal.alert {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.42);
+}
+.ws-cmd-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.ws-cmd-overview-stats > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.13);
+}
+.ws-cmd-overview-stats span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ws-font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-overview-stats strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 17px;
+}
+.ws-cmd-overview-brief {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: baseline;
+  margin-top: 12px;
+  padding: 12px 2px;
+}
+.ws-cmd-agent-tabpanel .ws-cmd-questlog {
+  margin: 0;
+}
+.ws-cmd-agent-task-list {
+  display: grid;
+  gap: 7px;
+}
+.ws-cmd-agent-task-list .workspace-detail-item {
+  margin: 0;
+}
+.ws-cmd-loadout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.ws-cmd-loadout-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-loadout-card:first-child {
+  grid-column: 1 / -1;
+}
+.ws-cmd-loadout-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-loadout-card strong {
+  color: #f1f3f6;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+}
+.ws-cmd-loadout-edit {
+  min-height: 24px;
+  padding: 4px 7px;
+  font-size: 8px;
+}
+.ws-cmd-loadout-readonly {
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.ws-cmd-loadout-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 6px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+}
+.ws-cmd-loadout-chip.skill {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-loadout-chip.mcp {
+  color: var(--ws-idle);
+}
+.ws-cmd-loadout-empty {
+  color: var(--ws-ink-faint);
+  font-size: 10px;
+  font-style: italic;
+}
+.ws-cmd-loadout-prompt {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 9px;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-loadout-prompt > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-title {
+  color: var(--ws-ink);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-prompt p {
+  margin: 5px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.ws-cmd-loadout-prompt.is-error {
+  border-color: rgba(226, 101, 77, 0.42);
+}
+.ws-cmd-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-cmd-activity-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--ws-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-cmd-activity-item:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-activity-kind {
+  padding: 3px 5px;
+  border: 1px solid var(--ws-faction-deep);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 7.5px;
+  text-transform: uppercase;
+}
+.ws-cmd-activity-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-cmd-activity-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.ws-cmd-activity-copy span,
+.ws-cmd-activity-item time {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: capitalize;
+}
+.ws-cmd-tab-empty,
+.ws-cmd-deck-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  min-height: 220px;
+  padding: 24px;
+  text-align: center;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-tab-empty strong,
+.ws-cmd-deck-empty strong {
+  color: var(--ws-ink);
+  text-transform: uppercase;
+}
+.ws-cmd-tab-empty span,
+.ws-cmd-deck-empty span {
+  font-size: 11px;
+}
+.ws-cmd-deck-empty-glyph {
+  color: var(--ws-faction);
+  font-size: 44px;
+  text-shadow: 0 0 18px rgba(70, 211, 154, 0.5);
+}
+.ws-cmd-unassigned {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  align-items: center;
+  margin: 8px;
+  padding: 9px;
+  border: 1px dashed rgba(232, 181, 75, 0.45);
+  background: rgba(232, 181, 75, 0.045);
+}
+.ws-cmd-unassigned > div {
+  min-width: 0;
+}
+.ws-cmd-unassigned strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ws-keeper);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.ws-cmd-unassigned-count {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 16px;
+}
+.ws-cmd-unassigned .ws-cmd-agent-action {
+  grid-column: 1 / -1;
+  min-height: 25px;
+  margin-top: 3px;
+  padding: 4px 7px;
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+}
+.ws-cmd-mission.is-empty {
+  min-height: 0;
+  max-height: 160px;
+}
+
 /* ---------- stat manager modal (agents / tasks / mcp / skills) ---------- */
 /* Lives inside the .ws-cmd container so it inherits the tactical tokens, but is
    position:fixed so it overlays the viewport regardless of scroll position. */
@@ -1704,7 +2428,7 @@
 
   --ws-ink: #1f2128;
   --ws-ink-dim: #5c5c5e;
-  --ws-ink-faint: #737a84;
+  --ws-ink-faint: #626a74;
   --ws-ink-heading: #0a0a0a;
 
   --ws-faction: #1f6b4e;
@@ -1727,6 +2451,10 @@
 [data-bs-theme="light"] .ws-cmd-panel-title h4,
 [data-bs-theme="light"] .ws-cmd-rail-t,
 [data-bs-theme="light"] .ws-cmd-unit-name,
+[data-bs-theme="light"] .ws-cmd-roster-name,
+[data-bs-theme="light"] .ws-cmd-stage-copy h3,
+[data-bs-theme="light"] .ws-cmd-overview-hero strong,
+[data-bs-theme="light"] .ws-cmd-loadout-card strong,
 [data-bs-theme="light"] .ws-cmd-rv,
 [data-bs-theme="light"] .ws-cmd-q-name,
 [data-bs-theme="light"] .ws-cmd-modal-title,
@@ -1753,6 +2481,25 @@
   background: linear-gradient(165deg, var(--ws-panel-2), var(--ws-panel-deep));
 }
 
+[data-bs-theme="light"] .ws-cmd-roster,
+[data-bs-theme="light"] .ws-cmd-agent-overview {
+  background: rgba(247, 248, 249, 0.78);
+}
+
+[data-bs-theme="light"] .ws-cmd-agent-stage {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(31, 107, 78, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52), transparent);
+}
+
+[data-bs-theme="light"] .ws-cmd-overview-hero,
+[data-bs-theme="light"] .ws-cmd-overview-stats > div,
+[data-bs-theme="light"] .ws-cmd-loadout-card,
+[data-bs-theme="light"] .ws-cmd-loadout-prompt,
+[data-bs-theme="light"] .ws-cmd-activity-item {
+  background: rgba(255, 255, 255, 0.62);
+}
+
 [data-bs-theme="light"] .ws-cmd-identity-editor,
 [data-bs-theme="light"] .ws-cmd-files-drop,
 [data-bs-theme="light"] .ws-cmd-files-browse,
@@ -1769,6 +2516,34 @@
 
 [data-bs-theme="light"] .ws-cmd-q-run:hover {
   color: var(--ws-on-accent);
+}
+
+[data-bs-theme="light"] .ws-cmd-agent-action.is-primary {
+  color: var(--ws-on-accent);
+}
+
+@media (max-width: 1199px) {
+  .ws-cmd-mission.is-empty {
+    max-height: none;
+  }
+  .ws-cmd-deck {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr);
+  }
+  .ws-cmd-roster {
+    grid-column: 1 / -1;
+    border-right: 0;
+    border-bottom: 1px solid var(--ws-line);
+  }
+  .ws-cmd-roster-list {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .ws-cmd-roster-item {
+    flex: 0 0 210px;
+    margin-bottom: 0;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -1811,6 +2586,34 @@
     max-height: none;
   }
 }
+@media (max-width: 767px) {
+  .ws-cmd-deck {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-agent-stage {
+    min-height: 450px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ws-line);
+  }
+  .ws-cmd-agent-panel-body {
+    max-height: none;
+  }
+  .ws-cmd-overview-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-loadout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-loadout-card:first-child {
+    grid-column: auto;
+  }
+  .ws-cmd-activity-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .ws-cmd-activity-item time {
+    grid-column: 2;
+  }
+}
 @media (max-width: 640px) {
   .ws-cmd-nav-btn {
     flex: 1 1 calc(50% - 8px);
@@ -1836,6 +2639,22 @@
   .ws-cmd-mission-actions .ws-cmd-mission-btn {
     flex: 1 1 calc(50% - 8px);
   }
+  .ws-cmd-agent-stage {
+    min-height: 420px;
+  }
+  .ws-cmd-stage-character {
+    min-height: 190px;
+  }
+  .ws-cmd-agent-tab {
+    min-width: max-content;
+  }
+  .ws-cmd-overview-hero,
+  .ws-cmd-loadout-prompt {
+    flex-direction: column;
+  }
+  .ws-cmd-overview-brief {
+    grid-template-columns: 1fr;
+  }
   /* Reserve space for the floating Workspace Assistant FAB so the last rail/panel
      controls are never trapped underneath it (PRD FR5.20). */
   .ws-cmd {
@@ -1855,6 +2674,16 @@
     opacity: 0.35;
   }
 }
+@keyframes ws-cmd-character-breathe {
+  50% {
+    transform: translateY(-4px) scale(1.012);
+  }
+}
+@keyframes ws-cmd-character-scan {
+  50% {
+    opacity: 0.58;
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd-topbar {
     animation: ws-cmd-rise 0.35s ease both;
@@ -1867,6 +2696,12 @@
   }
   .ws-cmd-led.working {
     animation: ws-cmd-pulse 1.5s ease-in-out infinite;
+  }
+  .ws-cmd-agent-stage .ws-cmd-character.is-stage {
+    animation: ws-cmd-character-breathe 3.8s ease-in-out infinite;
+  }
+  .ws-cmd-character.working .ws-cmd-character-visor {
+    animation: ws-cmd-character-scan 1.25s ease-in-out infinite;
   }
   .ws-cmd-modal-panel {
     animation: ws-cmd-rise 0.22s ease both;

@@ -25,10 +25,7 @@ test.describe('Smoke Tests', () => {
     });
 
     // Filter out expected errors (add patterns as needed)
-    const unexpectedErrors = errors.filter(e =>
-      !e.includes('favicon') &&
-      !e.includes('404')
-    );
+    const unexpectedErrors = errors.filter(e => !e.includes('favicon') && !e.includes('404'));
 
     expect(unexpectedErrors).toHaveLength(0);
   });
@@ -64,7 +61,7 @@ test.describe('Smoke Tests', () => {
 
 test.describe('Onboarding', () => {
   async function installBaseOnboardingRoutes(page) {
-    await page.route('**/api/onboarding/status', async (route) => {
+    await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -79,7 +76,7 @@ test.describe('Onboarding', () => {
         })
       });
     });
-    await page.route('**/api/onboarding/names', async (route) => {
+    await page.route('**/api/onboarding/names', async route => {
       const body = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
@@ -90,7 +87,7 @@ test.describe('Onboarding', () => {
         })
       });
     });
-    await page.route('**/api/onboarding/step', async (route) => {
+    await page.route('**/api/onboarding/step', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -107,24 +104,24 @@ test.describe('Onboarding', () => {
     await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
     await expect(page.locator('#onboardingWorkspaceRoot')).toHaveCount(0);
     await expect(page.locator('#onboardingVaultRoot')).toHaveCount(0);
-    await expect(page.getByText('Storage locations can be changed later in Settings when you need them.')).toBeVisible();
+    await expect(
+      page.getByText('Storage locations can be changed later in Settings when you need them.')
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
   });
 
   test('auto-selects a recommended model before continuing', async ({ page }) => {
     await installBaseOnboardingRoutes(page);
-    await page.route('**/api/providers', async (route) => {
+    await page.route('**/api/providers', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          providers: [
-            { name: 'ollama', display_name: 'Ollama', available: true }
-          ]
+          providers: [{ name: 'ollama', display_name: 'Ollama', available: true }]
         })
       });
     });
-    await page.route('**/api/settings/available-models?provider=ollama', async (route) => {
+    await page.route('**/api/settings/available-models?provider=ollama', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -132,7 +129,12 @@ test.describe('Onboarding', () => {
           available: true,
           model_options: [
             { id: 'llama-small', label: 'Llama Small', description: 'Fast', recommended: false },
-            { id: 'llama-balanced', label: 'Llama Balanced', description: 'Recommended', recommended: true }
+            {
+              id: 'llama-balanced',
+              label: 'Llama Balanced',
+              description: 'Recommended',
+              recommended: true
+            }
           ]
         })
       });
@@ -151,7 +153,7 @@ test.describe('Onboarding', () => {
 
   test('blocks progress when no usable provider is available', async ({ page }) => {
     await installBaseOnboardingRoutes(page);
-    await page.route('**/api/providers', async (route) => {
+    await page.route('**/api/providers', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -169,7 +171,10 @@ test.describe('Onboarding', () => {
 });
 
 test.describe('Home First Run', () => {
-  test('makes workspace creation the primary next step when no workspaces exist', async ({ page, request }) => {
+  test('makes workspace creation the primary next step when no workspaces exist', async ({
+    page,
+    request
+  }) => {
     const response = await request.get('/api/workspaces');
     const data = await response.json();
     test.skip((data.workspaces || []).length !== 0, 'requires an empty workspace store');
@@ -177,8 +182,13 @@ test.describe('Home First Run', () => {
     await page.goto('/');
     await expect(page.locator('#homeFirstRunHero')).toBeVisible();
     await expect(page.locator('#homeFirstRunStart')).toHaveText('Create Workspace');
-    await expect(page.locator('#homeAssistantInput')).toHaveAttribute('placeholder', 'Plan a product launch…');
-    await expect(page.getByText('Create a workspace for a software project', { exact: true })).toBeVisible();
+    await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
+      'placeholder',
+      'Plan a product launch…'
+    );
+    await expect(
+      page.getByText('Create a workspace for a software project', { exact: true })
+    ).toBeVisible();
   });
 });
 
@@ -188,7 +198,9 @@ test.describe('Agent Management', () => {
     await expect(page.locator('body')).toBeVisible();
 
     // Look for create agent button (adjust selector based on your UI)
-    const createBtn = page.locator('button:has-text("Create"), [data-bs-target="#addAgentModal"]').first();
+    const createBtn = page
+      .locator('button:has-text("Create"), [data-bs-target="#addAgentModal"]')
+      .first();
 
     if (await createBtn.isVisible()) {
       await createBtn.click();
@@ -226,7 +238,7 @@ test.describe('Agent Management', () => {
 
 test.describe('Workspace Import Flow', () => {
   test('import modal supports picker selection and duplicate override', async ({ page }) => {
-    await page.route('**/api/folder-picker/select-path', async (route) => {
+    await page.route('**/api/folder-picker/select-path', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -238,7 +250,7 @@ test.describe('Workspace Import Flow', () => {
       });
     });
 
-    await page.route('**/api/workspaces/import/check*', async (route) => {
+    await page.route('**/api/workspaces/import/check*', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -253,7 +265,7 @@ test.describe('Workspace Import Flow', () => {
       });
     });
 
-    await page.route('**/api/workspaces/import/duplicate-action', async (route) => {
+    await page.route('**/api/workspaces/import/duplicate-action', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -262,7 +274,7 @@ test.describe('Workspace Import Flow', () => {
     });
 
     let importAttemptCount = 0;
-    await page.route('**/api/workspaces/import', async (route) => {
+    await page.route('**/api/workspaces/import', async route => {
       importAttemptCount += 1;
       const body = route.request().postDataJSON();
 
@@ -404,7 +416,12 @@ test.describe('Workspace Agent Character Roster', () => {
       shared_data: {},
       skill_bindings: [
         { id: 'skill-planning', skill_name: 'workspace-planning', enabled: true, trusted: true },
-        { id: 'skill-research', skill_name: 'browser:control-in-app-browser', enabled: true, trusted: true }
+        {
+          id: 'skill-research',
+          skill_name: 'browser:control-in-app-browser',
+          enabled: true,
+          trusted: true
+        }
       ],
       agent_skill_access: [
         { agent_instance_id: 'manager-1', enabled_binding_ids: ['skill-planning'] },
@@ -419,23 +436,81 @@ test.describe('Workspace Agent Character Roster', () => {
       status: 'active'
     };
     const tasks = [
-      { id: 'task-1', workspace_id: 'roster-ws', to: 'Roster Manager', status: 'pending', description: 'Plan the work' },
-      { id: 'task-2', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'waiting_for_choice', description: 'Choose source' },
-      { id: 'task-3', workspace_id: 'roster-ws', to: 'Research Analyst', status: 'in_progress', description: 'Read source', parent_task_id: 'task-1' }
+      {
+        id: 'task-1',
+        workspace_id: 'roster-ws',
+        to: 'Roster Manager',
+        status: 'pending',
+        description: 'Plan the work'
+      },
+      {
+        id: 'task-2',
+        workspace_id: 'roster-ws',
+        to: 'Research Analyst',
+        status: 'waiting_for_choice',
+        description: 'Choose source'
+      },
+      {
+        id: 'task-3',
+        workspace_id: 'roster-ws',
+        to: 'Research Analyst',
+        status: 'in_progress',
+        description: 'Read source',
+        parent_task_id: 'task-1'
+      }
     ];
     const catalogAgents = [
       ...(options.omitRosterManagerFromCatalog
         ? []
-        : [{ name: 'Roster Manager', type: 'general', source: 'user', model: 'claude-opus-4', provider: 'anthropic', capabilities: ['files'] }]),
-      { name: 'Research Analyst', type: 'research', source: 'user', model: 'claude-sonnet-4', provider: 'anthropic', allow_web_search: true }
+        : [
+            {
+              name: 'Roster Manager',
+              type: 'general',
+              source: 'user',
+              model: 'claude-opus-4',
+              provider: 'anthropic',
+              capabilities: ['files']
+            }
+          ]),
+      {
+        name: 'Research Analyst',
+        type: 'research',
+        source: 'user',
+        model: 'claude-sonnet-4',
+        provider: 'anthropic',
+        allow_web_search: true
+      }
     ];
     const snapshotAgents = Array.isArray(options.snapshotAgents) ? options.snapshotAgents : [];
 
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: false,
+          current_step: 3,
+          completed: true,
+          skipped: false,
+          steps_completed: [0, 1, 2],
+          user_name: 'Tester',
+          assistant_name: 'Ori'
+        })
+      });
+    });
     await page.route('**/api/orchestration/workspace?id=roster-ws', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(workspace) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(workspace)
+      });
     });
     await page.route('**/api/workspaces/roster-ws/agent-snapshots', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: snapshotAgents }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ agents: snapshotAgents })
+      });
     });
     await page.route('**/api/agents/dashboard/list', async route => {
       await route.fulfill({
@@ -457,55 +532,177 @@ test.describe('Workspace Agent Character Roster', () => {
       });
     });
     await page.route('**/api/orchestration/tasks?workspace_id=roster-ws', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ tasks })
+      });
     });
     await page.route('**/api/sessions?folder_id=roster-ws', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: [] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sessions: [] })
+      });
     });
     await page.route('**/api/workspaces/roster-ws/notes', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ notes: [] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ notes: [] })
+      });
+    });
+    await page.route('**/api/workspaces/roster-ws/mission', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          mission: '',
+          mission_enabled: false,
+          cadence: null,
+          mission_execution_count: 0,
+          mission_failure_count: 0,
+          open_findings_count: 0
+        })
+      });
+    });
+    await page.route('**/api/workspaces/roster-ws/agents/*/effective-prompt', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          base_system_prompt: 'You are a focused workspace agent.',
+          effective_prompt: 'You are a focused workspace agent.'
+        })
+      });
     });
     await page.route('**/api/workspaces/roster-ws', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(workspace) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(workspace)
+      });
     });
     await page.route('**/api/workspaces?tree=true', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ workspaces: [workspace], folders: [workspace] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces: [workspace], folders: [workspace] })
+      });
     });
     await page.route('**/api/orchestration/workspace/activate?id=roster-ws', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     });
     await page.route('**/api/project-templates', async route => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ templates: [] })
+      });
     });
   }
 
-  // The Detailed agent character cards were deleted with the Detailed view;
-  // the Command Garrison unit cards are the roster surface now. (The old
-  // local-agent identity-routing test died with the links — Garrison renders
-  // no per-agent identity links, so local agents can't be mis-routed to
-  // missing global pages.)
-  test('garrison renders truthful unit cards from the roster data', async ({ page }) => {
+  test('command deck selects roster characters and updates the shared agent overview', async ({
+    page
+  }) => {
     await installRosterRoutes(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/workspaces/roster-ws');
 
-    const units = page.locator('#workspaceCommandView .ws-cmd-unit');
-    await expect(units).toHaveCount(2);
+    const roster = page.locator('#workspaceCommandView .ws-cmd-roster-item');
+    await expect(roster).toHaveCount(2);
+    await expect(roster.first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(roster.first()).toContainText('Roster Manager');
+    await expect(roster.first()).toContainText('Entry');
+    await expect(roster.first().locator('.ws-cmd-character svg')).toBeVisible();
+    await expect(roster.nth(1)).toContainText('Working');
+    await expect(roster.nth(1)).toContainText('2×');
 
-    // Entry agent leads with the keeper badge and truthful status/identity.
-    await expect(units.first()).toHaveClass(/is-keeper/);
-    await expect(units.first().locator('.ws-cmd-av')).toHaveText('RM');
-    await expect(units.first().locator('.ws-cmd-unit-name')).toHaveText('Roster Manager');
-    await expect(units.first().locator('.ws-cmd-badge.is-keeper')).toContainText('Entry Agent');
-    await expect(units.first().locator('.ws-cmd-state')).toContainText('Idle');
-    await expect(units.nth(1).locator('.ws-cmd-state')).toContainText('Working');
+    const stage = page.locator('#workspaceCommandView .ws-cmd-agent-stage');
+    await expect(stage.locator('h3')).toHaveText('Roster Manager');
+    await expect(stage).toContainText('Entry Agent');
+    await expect(stage).toContainText('Idle');
 
-    // Model and skills rows render for real agents.
-    await expect(units.first().locator('.ws-cmd-unit-rows')).toContainText('Model');
-    await expect(units.first().locator('.ws-cmd-unit-rows')).toContainText('Skills');
+    await roster.nth(1).click();
+    await expect(stage.locator('h3')).toHaveText('Research Analyst');
+    await expect(stage).toContainText('Working');
 
-    // Quest logs list the roster tasks.
-    await expect(units.first().locator('.ws-cmd-questlog')).toBeVisible();
+    await page.getByRole('tab', { name: 'Tasks' }).click();
+    await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Choose source');
+
+    await page.getByRole('tab', { name: 'Loadout' }).click();
+    await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Model');
+    await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Skills');
+    await expect(page.locator('.ws-cmd-loadout-prompt')).toContainText(
+      'You are a focused workspace agent.'
+    );
+  });
+
+  test('command deck uses the required desktop, tablet, and mobile layouts without page overflow', async ({
+    page
+  }) => {
+    await installRosterRoutes(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+    await expect(page.locator('.ws-cmd-roster-item')).toHaveCount(2);
+    await expect(page.locator('.ws-cmd-deck')).toBeVisible();
+
+    const mission = page.locator('#workspace-command-mission-card');
+    await expect(mission).toBeVisible();
+    expect((await mission.boundingBox())?.height || 0).toBeLessThanOrEqual(160);
+
+    const desktopGeometry = await page.locator('.ws-cmd-deck').evaluate(element => {
+      const roster = element.querySelector('.ws-cmd-roster')?.getBoundingClientRect();
+      const stage = element.querySelector('.ws-cmd-agent-stage')?.getBoundingClientRect();
+      const overview = element.querySelector('.ws-cmd-agent-overview')?.getBoundingClientRect();
+      return {
+        rosterTop: roster?.top,
+        stageTop: stage?.top,
+        overviewTop: overview?.top,
+        rosterRight: roster?.right,
+        stageLeft: stage?.left,
+        stageRight: stage?.right,
+        overviewLeft: overview?.left
+      };
+    });
+    expect(
+      Math.abs((desktopGeometry.rosterTop || 0) - (desktopGeometry.stageTop || 0))
+    ).toBeLessThan(2);
+    expect(
+      Math.abs((desktopGeometry.stageTop || 0) - (desktopGeometry.overviewTop || 0))
+    ).toBeLessThan(2);
+    expect(desktopGeometry.rosterRight).toBeLessThanOrEqual(desktopGeometry.stageLeft || 0);
+    expect(desktopGeometry.stageRight).toBeLessThanOrEqual(desktopGeometry.overviewLeft || 0);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const tabletGeometry = await page.locator('.ws-cmd-deck').evaluate(element => {
+      const roster = element.querySelector('.ws-cmd-roster')?.getBoundingClientRect();
+      const stage = element.querySelector('.ws-cmd-agent-stage')?.getBoundingClientRect();
+      const overview = element.querySelector('.ws-cmd-agent-overview')?.getBoundingClientRect();
+      return { rosterBottom: roster?.bottom, stageTop: stage?.top, overviewTop: overview?.top };
+    });
+    expect(tabletGeometry.rosterBottom).toBeLessThanOrEqual(tabletGeometry.stageTop || 0);
+    expect(
+      Math.abs((tabletGeometry.stageTop || 0) - (tabletGeometry.overviewTop || 0))
+    ).toBeLessThan(2);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileGeometry = await page.locator('.ws-cmd-deck').evaluate(element => {
+      const stage = element.querySelector('.ws-cmd-agent-stage')?.getBoundingClientRect();
+      const overview = element.querySelector('.ws-cmd-agent-overview')?.getBoundingClientRect();
+      return {
+        stageBottom: stage?.bottom,
+        overviewTop: overview?.top,
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth
+      };
+    });
+    expect(mobileGeometry.stageBottom).toBeLessThanOrEqual(mobileGeometry.overviewTop || 0);
+    expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
   });
 });
 
@@ -550,15 +747,27 @@ test.describe('Task Output Contracts', () => {
       expect(taskId).toBeTruthy();
 
       await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
-      await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
-      await expect(page.locator('#workspace-task-automation-columns')).toContainText('date, location, pollen_count');
+      await expect(page.locator('#workspace-task-automation-storage')).toContainText(
+        'Storage destination'
+      );
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText(
+        'date, location, pollen_count'
+      );
 
       await page.locator('.workspace-task-advanced-summary').click();
-      await expect(page.locator('#workspace-task-automation-storage [data-action="open-automation-storage-modal"]')).toBeVisible();
-      await page.locator('#workspace-task-automation-storage [data-action="open-automation-storage-modal"]').click();
+      await expect(
+        page.locator(
+          '#workspace-task-automation-storage [data-action="open-automation-storage-modal"]'
+        )
+      ).toBeVisible();
+      await page
+        .locator('#workspace-task-automation-storage [data-action="open-automation-storage-modal"]')
+        .click();
       await expect(page.locator('#taskModalOutputContractSection')).toBeVisible();
       await expect(page.locator('#taskModalAutoSaveWriteMode')).toHaveValue('append');
-      await expect(page.locator('#taskModalOutputContractRows [data-output-contract-name]').first()).toHaveValue('date');
+      await expect(
+        page.locator('#taskModalOutputContractRows [data-output-contract-name]').first()
+      ).toHaveValue('date');
     } finally {
       if (workspaceId) {
         await request.delete(`/api/orchestration/workspace?id=${workspaceId}`);
@@ -566,7 +775,10 @@ test.describe('Task Output Contracts', () => {
     }
   });
 
-  test('shows storage destination immediately after enabling CSV storage', async ({ page, request }) => {
+  test('shows storage destination immediately after enabling CSV storage', async ({
+    page,
+    request
+  }) => {
     let workspaceId = '';
     const workspaceResp = await request.post('/api/orchestration/workspace', {
       data: {
@@ -578,7 +790,7 @@ test.describe('Task Output Contracts', () => {
     const workspaceData = await workspaceResp.json();
     workspaceId = workspaceData.workspace_id;
 
-    await page.route('**/api/orchestration/tasks/output-spec/suggest', async (route) => {
+    await page.route('**/api/orchestration/tasks/output-spec/suggest', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -616,13 +828,21 @@ test.describe('Task Output Contracts', () => {
 
       await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
       await page.locator('.workspace-task-advanced-summary').click();
-      await expect(page.locator('#workspace-task-automation-columns')).toContainText('Save each run of this task to a dataset');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText(
+        'Save each run of this task to a dataset'
+      );
 
-      await page.locator('#workspace-task-automation-columns [data-action="toggle-csv-storage"]').check();
+      await page
+        .locator('#workspace-task-automation-columns [data-action="toggle-csv-storage"]')
+        .check();
 
-      await expect(page.locator('#workspace-task-automation-storage')).toContainText('Storage destination');
+      await expect(page.locator('#workspace-task-automation-storage')).toContainText(
+        'Storage destination'
+      );
       await expect(page.locator('#workspace-task-automation-storage')).toContainText('Custom path');
-      await expect(page.locator('#workspace-task-automation-columns')).toContainText('What each run returns');
+      await expect(page.locator('#workspace-task-automation-columns')).toContainText(
+        'What each run returns'
+      );
       await expect(page.locator('#workspace-task-automation-columns')).toContainText('date');
     } finally {
       if (workspaceId) {
@@ -633,7 +853,10 @@ test.describe('Task Output Contracts', () => {
 });
 
 test.describe('Workspace File Folders', () => {
-  test('creates a folder, uploads into it, browses it, and moves the file', async ({ page, request }) => {
+  test('creates a folder, uploads into it, browses it, and moves the file', async ({
+    page,
+    request
+  }) => {
     test.setTimeout(60000);
 
     let workspaceId = '';
@@ -648,7 +871,7 @@ test.describe('Workspace File Folders', () => {
     workspaceId = workspaceData.workspace_id;
 
     try {
-      await page.addInitScript((id) => {
+      await page.addInitScript(id => {
         window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
       }, workspaceId);
       await page.goto(`/workspaces/${workspaceId}`);
@@ -657,7 +880,9 @@ test.describe('Workspace File Folders', () => {
         Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
       );
 
-      await page.locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-primary-section="files"]').click();
+      await page
+        .locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-primary-section="files"]')
+        .click();
       await expect(page.locator('#hubAddFileModal')).toBeVisible();
 
       page.once('dialog', async dialog => {
@@ -674,36 +899,51 @@ test.describe('Workspace File Folders', () => {
       });
       await expect(page.locator('#hubSelectedFilesPreview')).toBeVisible();
 
-      const uploadResponse = page.waitForResponse(response =>
-        response.url().includes(`/api/workspaces/${workspaceId}/files`) &&
-        response.request().method() === 'POST'
+      const uploadResponse = page.waitForResponse(
+        response =>
+          response.url().includes(`/api/workspaces/${workspaceId}/files`) &&
+          response.request().method() === 'POST'
       );
       await page.locator('#hubAddFileSubmitBtn').click();
       expect((await uploadResponse).ok()).toBeTruthy();
       await expect(page.locator('#hubAddFileModal.show')).toHaveCount(0);
-      await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toContainText('folder-smoke-report.txt');
+      await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toContainText(
+        'folder-smoke-report.txt'
+      );
 
-      await page.locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-open-section="files"]').first().click();
+      await page
+        .locator('#workspaceCommandView .ws-cmd-files-panel [data-cmd-open-section="files"]')
+        .first()
+        .click();
       const explorer = page.locator('#workspace-directory-explorer-modal');
       await expect(explorer).toBeVisible();
-      await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'research' })).toBeVisible();
+      await expect(
+        explorer.locator('.workspace-directory-tree-main', { hasText: 'research' })
+      ).toBeVisible();
 
-      await expect(explorer.locator('.workspace-directory-preview-code')).toContainText('workspace folder smoke test');
+      await expect(explorer.locator('.workspace-directory-preview-code')).toContainText(
+        'workspace folder smoke test'
+      );
 
       page.once('dialog', async dialog => {
         expect(dialog.type()).toBe('prompt');
         await dialog.accept('archive');
       });
       await explorer.locator('[data-action="move-workspace-file"]').click();
-      await expect(explorer.locator('.workspace-directory-tree-main', { hasText: 'archive' })).toBeVisible();
-      await expect(explorer.locator('.workspace-directory-preview-subtitle')).toContainText('archive/');
+      await expect(
+        explorer.locator('.workspace-directory-tree-main', { hasText: 'archive' })
+      ).toBeVisible();
+      await expect(explorer.locator('.workspace-directory-preview-subtitle')).toContainText(
+        'archive/'
+      );
 
       const treeResp = await request.get(`/api/workspaces/${workspaceId}/files/tree`);
       expect(treeResp.ok()).toBeTruthy();
       const treeData = await treeResp.json();
-      const movedFile = (treeData.files || []).find((item: any) =>
-        item.relative_path?.includes('archive/') &&
-        item.relative_path?.endsWith('folder-smoke-report.txt')
+      const movedFile = (treeData.files || []).find(
+        (item: any) =>
+          item.relative_path?.includes('archive/') &&
+          item.relative_path?.endsWith('folder-smoke-report.txt')
       );
       expect(movedFile).toBeTruthy();
 
@@ -742,7 +982,7 @@ test.describe('Floating Workspace Assistant', () => {
   }
 
   async function suppressOnboarding(page) {
-    await page.route('**/api/onboarding/status', async (route) => {
+    await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -760,7 +1000,7 @@ test.describe('Floating Workspace Assistant', () => {
   }
 
   async function suppressEntryAgentPrompt(page, workspaceId: string) {
-    await page.addInitScript((id) => {
+    await page.addInitScript(id => {
       window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
     }, workspaceId);
   }
@@ -772,7 +1012,10 @@ test.describe('Floating Workspace Assistant', () => {
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
   }
 
-  test('replaces the workspace-detail inline bar with a full floating assistant panel', async ({ page, request }) => {
+  test('replaces the workspace-detail inline bar with a full floating assistant panel', async ({
+    page,
+    request
+  }) => {
     let workspaceId = '';
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Floating Assistant');
 
@@ -800,7 +1043,10 @@ test.describe('Floating Workspace Assistant', () => {
     }
   });
 
-  test('creates a workspace task from the floating assistant task mode', async ({ page, request }) => {
+  test('creates a workspace task from the floating assistant task mode', async ({
+    page,
+    request
+  }) => {
     test.setTimeout(45000);
 
     let workspaceId = '';
@@ -826,7 +1072,10 @@ test.describe('Floating Workspace Assistant', () => {
     }
   });
 
-  test('saves a workspace note from the floating assistant note mode', async ({ page, request }) => {
+  test('saves a workspace note from the floating assistant note mode', async ({
+    page,
+    request
+  }) => {
     test.setTimeout(45000);
 
     let workspaceId = '';
@@ -871,9 +1120,16 @@ test.describe('Floating Workspace Assistant', () => {
 
       await gotoWorkspaceCommand(page, workspaceId);
       await page.locator('#hubSupportChatLauncher').click();
-      await page.locator('#hubSupportChatPanel').getByRole('button', { name: 'Note', exact: true }).click();
+      await page
+        .locator('#hubSupportChatPanel')
+        .getByRole('button', { name: 'Note', exact: true })
+        .click();
 
-      for (const selector of ['#homeAssistantQuickPlan', '#homeAssistantQuickTasks', '#homeAssistantQuickReview']) {
+      for (const selector of [
+        '#homeAssistantQuickPlan',
+        '#homeAssistantQuickTasks',
+        '#homeAssistantQuickReview'
+      ]) {
         const button = page.locator('#hubSupportChatPanel').locator(selector);
         const prompt = await button.getAttribute('data-home-prompt');
         expect(prompt).toBeTruthy();
@@ -898,7 +1154,7 @@ test.describe('Floating Workspace Assistant', () => {
 
     try {
       await suppressOnboarding(page);
-      await page.route('**/api/chat', async (route) => {
+      await page.route('**/api/chat', async route => {
         chatPayload = route.request().postDataJSON();
         chatSessionId = route.request().headers()['x-session-id'] || '';
         await route.fulfill({
@@ -919,20 +1175,25 @@ test.describe('Floating Workspace Assistant', () => {
       await page.locator('#homeAssistantInput').fill('What should happen next in this workspace?');
       await page.locator('#homeAssistantSendBtn').click();
 
-      await expect(page.locator('#homeAssistantConversation')).toContainText('Workspace manager inline response');
+      await expect(page.locator('#homeAssistantConversation')).toContainText(
+        'Workspace manager inline response'
+      );
       expect(chatPayload?.route_context?.workspace_id).toBe(workspaceId);
       expect(chatPayload?.route_context?.surface).toBe('workspace_detail');
       expect(chatSessionId).toBeTruthy();
 
-      await page.locator('#homeAssistantActions').getByRole('button', { name: 'Open Chat' }).click();
+      await page
+        .locator('#homeAssistantActions')
+        .getByRole('button', { name: 'Open Chat' })
+        .click();
       await expect(page.locator('#chatPanel')).toHaveAttribute('aria-hidden', 'false');
       const activeSessionId = await page.evaluate(() => {
         const manager = (window as any).sessionManager;
         return String(
           manager?.getActiveSessionId?.() ||
-          manager?.activeSessionId ||
-          manager?.currentSessionId ||
-          ''
+            manager?.activeSessionId ||
+            manager?.currentSessionId ||
+            ''
         );
       });
       expect(activeSessionId).toBe(chatSessionId);
@@ -943,7 +1204,10 @@ test.describe('Floating Workspace Assistant', () => {
     }
   });
 
-  test('keeps home dashboard and workspace canvas inline assistant bars', async ({ page, request }) => {
+  test('keeps home dashboard and workspace canvas inline assistant bars', async ({
+    page,
+    request
+  }) => {
     let workspaceId = '';
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Inline Assistant Regression');
 
@@ -956,7 +1220,10 @@ test.describe('Floating Workspace Assistant', () => {
 
       await page.goto(`/workspaces/${workspaceId}/canvas`);
       await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
-      await expect(page.locator('#homeAssistantInput')).toHaveAttribute('placeholder', /from this canvas/);
+      await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
+        'placeholder',
+        /from this canvas/
+      );
       await expect(page.locator('#homeAssistantWorkspaceModeSwitch')).toBeVisible();
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
     } finally {
@@ -976,7 +1243,7 @@ test.describe('Home Workspace Routing', () => {
       onChat?: () => void;
     }
   ) {
-    await page.route(`**/api/workspaces/${options.workspaceId}`, async (route) => {
+    await page.route(`**/api/workspaces/${options.workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -986,7 +1253,7 @@ test.describe('Home Workspace Routing', () => {
         })
       });
     });
-    await page.route('**/api/chat', async (route) => {
+    await page.route('**/api/chat', async route => {
       options.onChat?.();
       await route.fulfill({
         status: 200,
@@ -999,7 +1266,7 @@ test.describe('Home Workspace Routing', () => {
   }
 
   test('asks the user to choose when workspace routing is ambiguous', async ({ page }) => {
-    await page.route('**/api/home-assistant/route', async (route) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1019,7 +1286,12 @@ test.describe('Home Workspace Routing', () => {
           workspace_resolution: {
             state: 'ambiguous',
             candidates: [
-              { id: 'ws-alpha', name: 'Launch Alpha', score: 8, reasons: ['matched workspace goal'] },
+              {
+                id: 'ws-alpha',
+                name: 'Launch Alpha',
+                score: 8,
+                reasons: ['matched workspace goal']
+              },
               { id: 'ws-beta', name: 'Launch Beta', score: 7, reasons: ['matched workspace goal'] }
             ]
           }
@@ -1038,7 +1310,7 @@ test.describe('Home Workspace Routing', () => {
   });
 
   test('offers workspace creation when no existing workspace fits', async ({ page }) => {
-    await page.route('**/api/home-assistant/route', async (route) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1079,9 +1351,11 @@ test.describe('Home Workspace Routing', () => {
     await installWorkspaceAssistantMocks(page, {
       workspaceId: 'ws-cabinet',
       entryAgentName: 'Cabinet Manager',
-      onChat: () => { chatCalls += 1; }
+      onChat: () => {
+        chatCalls += 1;
+      }
     });
-    await page.route('**/api/home-assistant/route', async (route) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1126,12 +1400,14 @@ test.describe('Home Workspace Routing', () => {
     await page.locator('#homeAssistantSendBtn').click();
 
     await expect.poll(() => chatCalls).toBe(1);
-    await expect(page.locator('#homeAssistantConversation')).toContainText('Workspace manager is ready.');
+    await expect(page.locator('#homeAssistantConversation')).toContainText(
+      'Workspace manager is ready.'
+    );
     await expect(page.locator('#homeAssistantActions')).toContainText('Choose Another Workspace');
   });
 
   test('lets the user override a confident workspace match', async ({ page }) => {
-    await page.route('**/api/workspaces/ws-cabinet', async (route) => {
+    await page.route('**/api/workspaces/ws-cabinet', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1141,7 +1417,7 @@ test.describe('Home Workspace Routing', () => {
         })
       });
     });
-    await page.route('**/api/workspaces/ws-ops', async (route) => {
+    await page.route('**/api/workspaces/ws-ops', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1151,7 +1427,7 @@ test.describe('Home Workspace Routing', () => {
         })
       });
     });
-    await page.route('**/api/chat', async (route) => {
+    await page.route('**/api/chat', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1160,7 +1436,7 @@ test.describe('Home Workspace Routing', () => {
         })
       });
     });
-    await page.route('**/api/home-assistant/route', async (route) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1207,15 +1483,24 @@ test.describe('Home Workspace Routing', () => {
     await page.locator('#homeAssistantInput').fill('build the cabinet roadmap');
     await page.locator('#homeAssistantSendBtn').click();
 
-    await expect.poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds)).toEqual(['ws-cabinet']);
-    await page.locator('#homeAssistantActions').getByText('Choose Another Workspace', { exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds))
+      .toEqual(['ws-cabinet']);
+    await page
+      .locator('#homeAssistantActions')
+      .getByText('Choose Another Workspace', { exact: true })
+      .click();
     await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Choose Workspace');
     await page.locator('#homeAssistantActions').getByText('Ops Hub', { exact: true }).click();
-    await expect.poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds)).toEqual(['ws-cabinet', 'ws-ops']);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__handoffWorkspaceIds))
+      .toEqual(['ws-cabinet', 'ws-ops']);
   });
 
-  test('shows a repair-required state when the matched workspace has no runnable entry agent', async ({ page }) => {
-    await page.route('**/api/home-assistant/route', async (route) => {
+  test('shows a repair-required state when the matched workspace has no runnable entry agent', async ({
+    page
+  }) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1238,7 +1523,12 @@ test.describe('Home Workspace Routing', () => {
             selected_workspace_name: 'Broken Ops',
             repair_reason: 'workspace has no entry agent',
             candidates: [
-              { id: 'ws-broken', name: 'Broken Ops', score: 12, reasons: ['matched workspace name'] }
+              {
+                id: 'ws-broken',
+                name: 'Broken Ops',
+                score: 12,
+                reasons: ['matched workspace name']
+              }
             ]
           }
         })
@@ -1249,8 +1539,12 @@ test.describe('Home Workspace Routing', () => {
     await page.locator('#homeAssistantInput').fill('build the broken ops roadmap');
     await page.locator('#homeAssistantSendBtn').click();
 
-    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Entry Agent Required');
-    await expect(page.locator('#homeAssistantActions').getByText('Open Workspace Setup', { exact: true })).toBeVisible();
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText(
+      'Entry Agent Required'
+    );
+    await expect(
+      page.locator('#homeAssistantActions').getByText('Open Workspace Setup', { exact: true })
+    ).toBeVisible();
   });
 
   test('resumes a created workspace prompt once the new workspace is ready', async ({ page }) => {
@@ -1258,9 +1552,11 @@ test.describe('Home Workspace Routing', () => {
     await installWorkspaceAssistantMocks(page, {
       workspaceId: 'ws-new',
       entryAgentName: 'New Workspace Manager',
-      onChat: () => { chatCalls += 1; }
+      onChat: () => {
+        chatCalls += 1;
+      }
     });
-    await page.route('**/api/home-assistant/route', async (route) => {
+    await page.route('**/api/home-assistant/route', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1297,12 +1593,17 @@ test.describe('Home Workspace Routing', () => {
     });
     await page.locator('#homeAssistantInput').fill('build a robotics dashboard from scratch');
     await page.locator('#homeAssistantSendBtn').click();
-    await page.locator('#homeAssistantActions').getByText('Create Workspace', { exact: true }).click();
+    await page
+      .locator('#homeAssistantActions')
+      .getByText('Create Workspace', { exact: true })
+      .click();
 
     await page.evaluate(() => {
-      window.dispatchEvent(new CustomEvent('ori:workspace-created', {
-        detail: { workspaceId: 'ws-new', workspaceName: 'New Workspace' }
-      }));
+      window.dispatchEvent(
+        new CustomEvent('ori:workspace-created', {
+          detail: { workspaceId: 'ws-new', workspaceName: 'New Workspace' }
+        })
+      );
       return (window as any).OriAskRouting.refreshWorkspaceIdentity({
         workspace_id: 'ws-new',
         page_path: '/workspaces/ws-new',
@@ -1317,19 +1618,23 @@ test.describe('Home Workspace Routing', () => {
   test('waits for repair before resuming a preserved workspace prompt', async ({ page }) => {
     let workspaceReady = false;
     let chatCalls = 0;
-    await page.route('**/api/workspaces/ws-broken', async (route) => {
+    await page.route('**/api/workspaces/ws-broken', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(workspaceReady ? {
-          id: 'ws-broken',
-          entry_agent_name: 'Broken Ops Manager'
-        } : {
-          id: 'ws-broken'
-        })
+        body: JSON.stringify(
+          workspaceReady
+            ? {
+                id: 'ws-broken',
+                entry_agent_name: 'Broken Ops Manager'
+              }
+            : {
+                id: 'ws-broken'
+              }
+        )
       });
     });
-    await page.route('**/api/chat', async (route) => {
+    await page.route('**/api/chat', async route => {
       chatCalls += 1;
       await route.fulfill({
         status: 200,
@@ -1340,20 +1645,23 @@ test.describe('Home Workspace Routing', () => {
 
     await page.goto('/');
     await page.evaluate(() => {
-      window.sessionStorage.setItem('ori.homeAssistant.pendingWorkspacePrompt', JSON.stringify({
-        prompt: 'finish the broken ops roadmap',
-        routeContext: {
-          surface: 'dashboard',
-          page_path: '/',
-          workspace_id: '',
-          session_id: '',
-          origin: 'ask_ori'
-        },
-        expectedWorkspaceId: 'ws-broken',
-        intentKey: 'general_task',
-        source: 'repair',
-        createdAt: Date.now()
-      }));
+      window.sessionStorage.setItem(
+        'ori.homeAssistant.pendingWorkspacePrompt',
+        JSON.stringify({
+          prompt: 'finish the broken ops roadmap',
+          routeContext: {
+            surface: 'dashboard',
+            page_path: '/',
+            workspace_id: '',
+            session_id: '',
+            origin: 'ask_ori'
+          },
+          expectedWorkspaceId: 'ws-broken',
+          intentKey: 'general_task',
+          source: 'repair',
+          createdAt: Date.now()
+        })
+      );
       (window as any).sessionManager = {
         sessions: [],
         async createSessionWithAgentInFolder(agentName: string, folderId: string) {
@@ -1362,21 +1670,25 @@ test.describe('Home Workspace Routing', () => {
       };
     });
 
-    await page.evaluate(() => (window as any).OriAskRouting.refreshWorkspaceIdentity({
-      workspace_id: 'ws-broken',
-      page_path: '/workspaces/ws-broken',
-      surface: 'workspace_detail',
-      origin: 'ask_ori'
-    }));
+    await page.evaluate(() =>
+      (window as any).OriAskRouting.refreshWorkspaceIdentity({
+        workspace_id: 'ws-broken',
+        page_path: '/workspaces/ws-broken',
+        surface: 'workspace_detail',
+        origin: 'ask_ori'
+      })
+    );
     expect(chatCalls).toBe(0);
 
     workspaceReady = true;
-    await page.evaluate(() => (window as any).OriAskRouting.refreshWorkspaceIdentity({
-      workspace_id: 'ws-broken',
-      page_path: '/workspaces/ws-broken',
-      surface: 'workspace_detail',
-      origin: 'ask_ori'
-    }));
+    await page.evaluate(() =>
+      (window as any).OriAskRouting.refreshWorkspaceIdentity({
+        workspace_id: 'ws-broken',
+        page_path: '/workspaces/ws-broken',
+        surface: 'workspace_detail',
+        origin: 'ask_ori'
+      })
+    );
     await expect.poll(() => chatCalls).toBe(1);
   });
 });
