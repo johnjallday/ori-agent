@@ -1,5 +1,5 @@
 /*
- * Agents roster + stage controller (game-inspired Agents page, G2 + G3).
+ * Agents roster + stage controller (game-inspired Agents page, G2–G4).
  *
  * Browse the roster, select an agent, and inspect/edit it on the stage across
  * three tabs (Overview / Prompt / Workspaces). Selection persists across
@@ -10,7 +10,11 @@
  * PATCH /api/agents/{name} (expected_version), inline validation, a stale-edit
  * conflict banner with reload, shared-definition confirmation, and an
  * unsaved-changes guard on tab/card switches. CLI/built-in agents (no version
- * token) stay read-only. Workspaces editing + create/delete land in G4.
+ * token) stay read-only.
+ *
+ * G4 adds the Workspaces tab editor (reconcile membership via
+ * PUT /api/agents/{name}/workspaces) plus create-agent and delete-agent
+ * lifecycle from the roster/stage.
  */
 (function () {
   'use strict';
@@ -29,7 +33,9 @@
     query: '',
     sort: 'name-asc',
     focusIndex: -1,
-    dirty: { overview: false, prompt: false },
+    dirty: { overview: false, prompt: false, workspaces: false },
+    allWorkspaces: null,
+    creating: false,
   };
 
   var els = {};
@@ -54,6 +60,11 @@
       overviewDesc: document.getElementById('overviewDesc'),
       promptBody: document.getElementById('promptBody'),
       workspacesBody: document.getElementById('workspacesBody'),
+      stageDelete: document.getElementById('stageDelete'),
+      newAgentBtn: document.getElementById('newAgentBtn'),
+      createPanel: document.getElementById('createPanel'),
+      createBody: document.getElementById('createBody'),
+      createCancel: document.getElementById('createCancel'),
     };
 
     els.search.addEventListener('input', onSearch);
@@ -65,6 +76,9 @@
     });
     els.list.addEventListener('click', onListClick);
     els.list.addEventListener('keydown', onListKeydown);
+    els.newAgentBtn.addEventListener('click', openCreate);
+    els.createCancel.addEventListener('click', closeCreate);
+    els.stageDelete.addEventListener('click', onDeleteClick);
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
@@ -224,20 +238,22 @@
 
   function renderStage(name) {
     var listItem = state.byName[name];
+    state.creating = false;
+    els.createPanel.hidden = true;
     els.placeholder.hidden = true;
     els.stage.hidden = false;
 
     setActiveTab('overview');
     els.promptBody.dataset.loadedFor = '';
     els.promptBody.innerHTML = '<p class="stage-hint">Loading system prompt…</p>';
+    els.stageDelete.hidden = true;
 
     els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar');
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
     els.klass.textContent = titleCase(listItem.role || listItem.type || 'agent');
 
-    renderWorkspaces(listItem);
-
+    els.workspacesBody.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewFacts.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewDesc.textContent = '';
     fetchDetail(name)
@@ -245,11 +261,16 @@
         if (state.selected !== name) return;
         renderVitals(listItem, detail);
         renderOverview(name, detail);
+        renderWorkspaces(name, listItem, detail);
+        // Deletable only for editable (non-CLI) agents; the server still guards
+        // system-assistant and workspace-attached deletes.
+        els.stageDelete.hidden = !isEditable(detail);
       })
       .catch(function (err) {
         if (state.selected !== name) return;
         renderVitals(listItem, null);
         els.overviewFacts.innerHTML = '<p class="stage-hint">Could not load agent details.</p>';
+        renderWorkspaces(name, listItem, null);
         console.error('[roster] detail failed', err);
       });
   }
@@ -468,18 +489,217 @@
 
   /* ---- workspaces (read-only in G3) ---------------------------------------- */
 
-  function renderWorkspaces(listItem) {
-    var workspaces = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
-    if (workspaces.length === 0) {
-      els.workspacesBody.innerHTML = '<p class="stage-hint">Not attached to any workspace — this is a reusable library agent.</p>';
+  function renderWorkspaces(name, listItem, detail) {
+    var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
+
+    // CLI / built-in agents cannot be attached — show the membership read-only.
+    if (!isEditable(detail)) {
+      els.workspacesBody.innerHTML = members.length === 0
+        ? '<p class="stage-hint">Not attached to any workspace.</p>'
+        : members.map(readonlyWsRow).join('');
       return;
     }
-    els.workspacesBody.innerHTML = workspaces.map(function (ws) {
-      var nm = esc(ws.name || 'Workspace');
-      var link = ws.id ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>' : nm;
-      var pill = ws.entry_point ? '<span class="ws-entry-pill">Entry agent</span>' : '';
-      return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
+
+    els.workspacesBody.innerHTML = '<p class="stage-hint">Loading workspaces…</p>';
+    fetchWorkspaces()
+      .then(function (all) {
+        if (state.selected !== name) return;
+        renderWorkspacesEditor(name, members, all);
+      })
+      .catch(function () {
+        if (state.selected !== name) return;
+        // Fall back to a read-only view of current memberships.
+        els.workspacesBody.innerHTML = (members.length === 0
+          ? '<p class="stage-hint">Not attached to any workspace.</p>'
+          : members.map(readonlyWsRow).join('')) +
+          '<p class="stage-hint">Could not load the full workspace list to edit assignments.</p>';
+      });
+  }
+
+  function readonlyWsRow(ws) {
+    var nm = esc(ws.name || 'Workspace');
+    var link = ws.id ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>' : nm;
+    var pill = ws.entry_point ? '<span class="ws-entry-pill">Entry agent</span>' : '';
+    return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
+  }
+
+  function renderWorkspacesEditor(name, members, all) {
+    var memberIds = {};
+    var entryIds = {};
+    members.forEach(function (m) { memberIds[m.id] = true; if (m.entry_point) entryIds[m.id] = true; });
+
+    var rows = all.map(function (ws) {
+      var isMember = !!memberIds[ws.id];
+      var isEntry = !!entryIds[ws.id];
+      // The agent can't be unassigned from a workspace it's the entry agent of;
+      // lock that checkbox and explain, matching the server guard.
+      var disabled = isEntry ? ' disabled' : '';
+      var pill = isEntry ? '<span class="ws-entry-pill">Entry agent</span>' : '';
+      return '<label class="ws-check' + (disabled ? ' is-locked' : '') + '">' +
+        '<input type="checkbox" data-ws-id="' + esc(ws.id) + '"' + (isMember ? ' checked' : '') + disabled + '>' +
+        '<span class="ws-check__name">' + esc(ws.name || ws.id) + '</span>' + pill + '</label>';
     }).join('');
+
+    els.workspacesBody.innerHTML =
+      (all.length === 0 ? '<p class="stage-hint">No workspaces exist yet. Create one from the Workspaces page.</p>' : '') +
+      '<form class="ws-list" id="workspacesForm">' + rows + '</form>' +
+      saveBar('workspaces');
+
+    wireDirty('workspaces', document.getElementById('workspacesForm'));
+    wireSaveBar('workspaces', function () { saveWorkspaces(name, members); });
+  }
+
+  function saveWorkspaces(name, members) {
+    var checks = els.workspacesBody.querySelectorAll('input[data-ws-id]');
+    var desired = [];
+    checks.forEach(function (c) { if (c.checked) desired.push(c.getAttribute('data-ws-id')); });
+    // Entry-agent memberships have disabled (unchecked-proof) boxes but must stay
+    // in the desired set so the server doesn't try to remove them.
+    members.forEach(function (m) { if (m.entry_point && desired.indexOf(m.id) === -1) desired.push(m.id); });
+
+    setSaving('workspaces', true);
+    fetch('/api/agents/' + encodeURIComponent(name) + '/workspaces', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_ids: desired }),
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) { return { status: r.status, data: data }; });
+      })
+      .then(function (res) {
+        setSaving('workspaces', false);
+        if (res.status >= 200 && res.status < 300) {
+          state.dirty.workspaces = false;
+          // Reflect the reconciled membership everywhere.
+          var item = state.byName[name];
+          if (item) { item.workspaces = res.data.workspaces || []; item.workspace_count = res.data.workspace_count || 0; }
+          refreshRosterMeta(name, state.detailCache[name] || {});
+          renderWorkspaces(name, item, state.detailCache[name]);
+          showStatus('workspaces', 'Saved.', 'ok');
+        } else if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked') {
+          showStatus('workspaces', res.data.message || 'Cannot remove the entry agent.', 'error');
+        } else {
+          showStatus('workspaces', (res.data && res.data.message) || ('Save failed (' + res.status + ').'), 'error');
+        }
+      })
+      .catch(function () { setSaving('workspaces', false); showStatus('workspaces', 'Network error — not saved.', 'error'); });
+  }
+
+  function fetchWorkspaces() {
+    if (state.allWorkspaces) return Promise.resolve(state.allWorkspaces);
+    return fetch('/api/workspaces')
+      .then(function (r) { if (!r.ok) throw new Error('workspaces ' + r.status); return r.json(); })
+      .then(function (data) {
+        var list = (data && data.workspaces) || [];
+        // Only assignable (non-trashed / non-missing) workspaces.
+        list = list.filter(function (w) { var s = String(w.status || '').toLowerCase(); return s !== 'trashed' && s !== 'missing'; });
+        list.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        state.allWorkspaces = list;
+        return list;
+      });
+  }
+
+  /* ---- create agent -------------------------------------------------------- */
+
+  function openCreate() {
+    if (!guardUnsaved()) return;
+    state.creating = true;
+    els.stage.hidden = true;
+    els.placeholder.hidden = true;
+    els.createPanel.hidden = false;
+    els.createBody.innerHTML =
+      '<form class="stage-form" id="createForm" novalidate>' +
+      field('Name', textInput('cr-name', '', 'Unique agent name')) +
+      field('Role', selectInput('cr-role', ROLES, 'general', titleCase)) +
+      field('Model', textInput('cr-model', 'gpt-4o-mini')) +
+      field('Description', textareaInput('cr-description', '', 3)) +
+      '</form>' +
+      '<div class="save-bar" id="savebar-create">' +
+      '<span class="save-status is-muted"></span>' +
+      '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
+      '<button type="button" class="btn-primary" id="createSubmit">Create agent</button>' +
+      '</div>';
+    document.getElementById('createSubmit').addEventListener('click', submitCreate);
+    document.getElementById('createCancel2').addEventListener('click', closeCreate);
+    var nameInput = document.getElementById('cr-name');
+    if (nameInput) nameInput.focus();
+  }
+
+  function closeCreate() {
+    state.creating = false;
+    els.createPanel.hidden = true;
+    if (state.selected) { els.stage.hidden = false; }
+    else { els.placeholder.hidden = false; }
+  }
+
+  function submitCreate() {
+    var name = val('cr-name').trim();
+    var status = document.querySelector('#savebar-create .save-status');
+    if (!name) { status.textContent = 'Name is required.'; status.className = 'save-status is-error'; return; }
+    var body = {
+      name: name,
+      type: 'tool-calling',
+      role: val('cr-role'),
+      model: val('cr-model').trim(),
+      description: val('cr-description'),
+    };
+    var submit = document.getElementById('createSubmit');
+    submit.disabled = true; submit.textContent = 'Creating…';
+    fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        submit.disabled = false; submit.textContent = 'Create agent';
+        if (res.status >= 200 && res.status < 300) {
+          reloadThenSelect(name);
+          closeCreate();
+        } else {
+          status.textContent = (res.data && res.data.message) || ('Create failed (' + res.status + ').');
+          status.className = 'save-status is-error';
+        }
+      })
+      .catch(function () { submit.disabled = false; submit.textContent = 'Create agent'; status.textContent = 'Network error.'; status.className = 'save-status is-error'; });
+  }
+
+  // Reload the roster from the server, then select the named agent if present.
+  function reloadThenSelect(name) {
+    fetch('/api/agents/dashboard/list?sort_by=name&order=asc')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var agents = Array.isArray(data) ? data : (data && data.agents) || [];
+        state.agents = agents;
+        state.byName = {};
+        agents.forEach(function (a) { state.byName[a.name] = a; });
+        state.detailCache = {};
+        applyFilterSort();
+        if (name && state.byName[name]) selectAgent(name, { push: true });
+        else if (state.filtered[0]) selectAgent(state.filtered[0].name, { push: false });
+        else { els.stage.hidden = true; els.placeholder.hidden = false; state.selected = null; }
+      });
+  }
+
+  /* ---- delete agent -------------------------------------------------------- */
+
+  function onDeleteClick() {
+    var name = state.selected;
+    if (!name) return;
+    if (!window.confirm('Delete “' + name + '”? This permanently removes the agent and cannot be undone.')) return;
+    deleteAgent(name);
+  }
+
+  function deleteAgent(name) {
+    fetch('/api/agents?name=' + encodeURIComponent(name), { method: 'DELETE' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (res.status >= 200 && res.status < 300) {
+          resetDirty();
+          safeStorageSet('');
+          reloadThenSelect(null);
+        } else {
+          // Attached-to-workspace (409) or built-in (400): surface on the stage.
+          window.alert((res.data && res.data.message) || ('Delete failed (' + res.status + ').'));
+        }
+      })
+      .catch(function () { window.alert('Network error — agent not deleted.'); });
   }
 
   function refreshRosterMeta(name, detail) {
@@ -569,6 +789,7 @@
       state.dirty[tab] = false;
       if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
       else if (tab === 'prompt') { els.promptBody.dataset.loadedFor = ''; renderPrompt(state.selected); }
+      else if (tab === 'workspaces') renderWorkspaces(state.selected, state.byName[state.selected], state.detailCache[state.selected]);
     });
     markDirty(tab, false);
   }
@@ -617,7 +838,7 @@
 
   /* ---- unsaved guard ------------------------------------------------------- */
 
-  function anyDirty() { return !!(state.dirty.overview || state.dirty.prompt); }
+  function anyDirty() { return !!(state.dirty.overview || state.dirty.prompt || state.dirty.workspaces); }
 
   function guardUnsaved() {
     if (!anyDirty()) return true;
@@ -626,7 +847,7 @@
     return ok;
   }
 
-  function resetDirty() { state.dirty.overview = false; state.dirty.prompt = false; }
+  function resetDirty() { state.dirty.overview = false; state.dirty.prompt = false; state.dirty.workspaces = false; }
 
   /* ---- roster interaction -------------------------------------------------- */
 
