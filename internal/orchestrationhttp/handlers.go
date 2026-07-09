@@ -382,6 +382,17 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ExecuteTaskHandler(w, r)
 }
 
+// StartTaskAsync starts one task through the same execution path as the
+// manual execute endpoint. It is the non-HTTP seam the template-setup
+// first-open auto-start uses (injected into sessionhttp by the server
+// builder).
+func (h *Handler) StartTaskAsync(workspaceID, taskID string) error {
+	if h == nil || h.taskHandlerSub == nil {
+		return fmt.Errorf("task execution not available")
+	}
+	return h.taskHandlerSub.StartTaskAsync(workspaceID, taskID)
+}
+
 // TasksPathHandler handles requests to /api/orchestration/tasks/{id}...
 // Routes to appropriate handler based on path and method
 // Delegates to TaskHandler for modular organization

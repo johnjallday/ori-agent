@@ -399,6 +399,12 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 	b.orchestrationHandler = handler
 
+	// Template-setup first-open auto-start runs seeded tasks through the same
+	// execution path as the manual execute endpoint.
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetTemplateSetupTaskStarter(handler.StartTaskAsync)
+	}
+
 	// Initialize auto-task handler for natural language task creation
 	b.autoTaskHandler = orchestrationhttp.NewAutoTaskHandler(b.st, b.workspaceStore, b.llmFactory, b.configManager, b.eventBus)
 

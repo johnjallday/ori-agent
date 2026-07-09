@@ -36,6 +36,11 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 		t.Fatalf("failed to create workspace file store: %v", err)
 	}
 	handler.SetWorkspaceStore(fileStore)
+	// Mirror production task wiring: task mutations go through the SyncStore
+	// (SQLite primary via the session adapter + disk write-through), so the
+	// session row's TasksJSON stays consistent with workspace.json and the
+	// portable-state sync cannot clobber folder-seeded tasks.
+	handler.SetWorkspaceTaskStore(agentworkspace.NewSyncStore(session.NewWorkspaceStoreAdapter(handler.store), fileStore))
 
 	libDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(libDir, "demo-template"), 0o750); err != nil {

@@ -1,9 +1,13 @@
 package sessionhttp
 
 import (
+	"errors"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -11,12 +15,12 @@ import (
 
 // Context keys stamped onto template-seeded tasks. They record template
 // provenance and drive the first-open auto-start of the setup task; the
-// consumed marker (template_setup_autostart_consumed_at) is written by the
-// setup-start endpoint, never here.
+// consumed marker is written by the setup-start endpoint, never at seed time.
 const (
 	taskContextTemplateID          = "template_id"
 	taskContextTemplateStarterTask = "template_starter_task"
 	taskContextTemplateSetup       = "template_setup"
+	taskContextSetupConsumedAt     = "template_setup_autostart_consumed_at"
 )
 
 // seedTemplateStarterTasks creates the template's starter tasks on the folder
@@ -95,3 +99,86 @@ func (h *Handler) seedTemplateStarterTasksLogged(workspaceID string, tpl project
 	}
 	return seeded
 }
+
+// handleTemplateSetupStart serves POST /api/workspaces/{id}/template-setup/start:
+// the first-open auto-start trigger for a template's setup task. Inside a
+// single store Update it finds the unconsumed setup task and stamps the
+// consumed marker, then starts the task through the injected manual-execution
+// path. The endpoint is idempotent — repeat calls (reloads, concurrent tabs)
+// find the marker and no-op — and an execution failure leaves the task
+// manually startable but never auto-retried (the marker stays).
+//
+// An unassigned setup task (create_template_agents opt-out) is left
+// unconsumed: it cannot run without an agent, and the claim-on-agent-add
+// sweep assigns it later so a subsequent open still auto-starts it.
+func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	store := h.taskMutationStore()
+	if store == nil {
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "no_task_store"})
+		return
+	}
+
+	var (
+		taskID string
+		reason = "no_setup_task"
+	)
+	err := store.Update(workspaceID, func(ws *agentworkspace.Workspace) error {
+		for i := range ws.Tasks {
+			task := &ws.Tasks[i]
+			if task.Context[taskContextTemplateSetup] != true {
+				continue
+			}
+			if _, consumed := task.Context[taskContextSetupConsumedAt]; consumed {
+				reason = "already_consumed"
+				return errTemplateSetupNoChange
+			}
+			assignee := strings.TrimSpace(task.To)
+			if assignee == "" || strings.EqualFold(assignee, "unassigned") {
+				// Not consumable yet: no agent to run it. Leave the marker off so
+				// the next open (after an agent joins and the claim sweep assigns
+				// the task) still auto-starts it.
+				reason = "unassigned"
+				return errTemplateSetupNoChange
+			}
+			task.Context[taskContextSetupConsumedAt] = time.Now().UTC().Format(time.RFC3339)
+			taskID = task.ID
+			return nil
+		}
+		return errTemplateSetupNoChange
+	})
+	if err != nil && !errors.Is(err, errTemplateSetupNoChange) {
+		// A missing folder workspace is a normal state (folder-less workspace),
+		// not a client error: report not-started rather than failing first open.
+		logger.Warn("Template setup start sweep failed", logger.Fields{"workspace_id": workspaceID, "error": err})
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "workspace_unavailable"})
+		return
+	}
+
+	if taskID == "" {
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": reason})
+		return
+	}
+
+	// Marker committed: from here the outcome is started or consumed-but-failed,
+	// never retried automatically.
+	if h.templateSetupStarter == nil {
+		logger.Warn("Template setup task consumed but no starter is wired", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "execution_unavailable", "task_id": taskID})
+		return
+	}
+	if err := h.templateSetupStarter(workspaceID, taskID); err != nil {
+		logger.Warn("Template setup task failed to start", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "start_failed", "task_id": taskID})
+		return
+	}
+	logger.Info("Template setup task auto-started on first open", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": true, "task_id": taskID})
+}
+
+// errTemplateSetupNoChange skips the folder-store save (and its task-markdown
+// rewrite) when the sweep found nothing to consume, mirroring errNoTasksClaimed.
+var errTemplateSetupNoChange = errors.New("no template setup task to start")

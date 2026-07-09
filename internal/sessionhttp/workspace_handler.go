@@ -94,6 +94,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "restore":
 			h.restoreWorkspace(w, r, id)
 			return
+		case "template-setup":
+			if len(parts) == 3 && parts[2] == "start" {
+				h.handleTemplateSetupStart(w, r, id)
+				return
+			}
 		}
 	}
 

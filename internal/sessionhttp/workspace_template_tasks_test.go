@@ -1,9 +1,13 @@
 package sessionhttp
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -181,5 +185,172 @@ func TestCreateWorkspaceWithoutTemplateSeedsNothing(t *testing.T) {
 	wsID, _ := folder["id"].(string)
 	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 0 {
 		t.Fatalf("expected no tasks, got %+v", tasks)
+	}
+}
+
+func postTemplateSetupStart(t *testing.T, handler *Handler, wsID string) map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/template-setup/start", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("template-setup/start = %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode setup-start response: %v", err)
+	}
+	return resp
+}
+
+func TestTemplateSetupStartConsumesOnce(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writeStarterTaskTemplate(t, handler.templatesRootResolver(), "starter-template", true)
+
+	var started []string
+	handler.SetTemplateSetupTaskStarter(func(workspaceID, taskID string) error {
+		started = append(started, taskID)
+		return nil
+	})
+
+	_, resp := postCreateWorkspace(t, handler, `{"name":"Once","template_id":"starter-template"}`)
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+
+	first := postTemplateSetupStart(t, handler, wsID)
+	if first["started"] != true || first["task_id"] == "" {
+		t.Fatalf("first open should start the setup task: %v", first)
+	}
+	if len(started) != 1 {
+		t.Fatalf("starter called %d times, want 1", len(started))
+	}
+
+	// Consumed marker persisted on the task.
+	tasks := workspaceTasksFromStore(t, handler, wsID)
+	var setupTask *agentworkspace.Task
+	for i := range tasks {
+		if tasks[i].Context[taskContextTemplateSetup] == true {
+			setupTask = &tasks[i]
+		}
+	}
+	if setupTask == nil {
+		t.Fatal("setup task missing")
+	}
+	if _, ok := setupTask.Context[taskContextSetupConsumedAt].(string); !ok {
+		t.Fatalf("consumed marker not persisted: %+v", setupTask.Context)
+	}
+
+	// Second open no-ops and never re-invokes the starter.
+	second := postTemplateSetupStart(t, handler, wsID)
+	if second["started"] != false || second["reason"] != "already_consumed" {
+		t.Fatalf("second open should no-op: %v", second)
+	}
+	if len(started) != 1 {
+		t.Fatalf("starter re-invoked on second open: %d calls", len(started))
+	}
+}
+
+func TestTemplateSetupStartFailureKeepsMarker(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writeStarterTaskTemplate(t, handler.templatesRootResolver(), "starter-template", true)
+
+	calls := 0
+	handler.SetTemplateSetupTaskStarter(func(workspaceID, taskID string) error {
+		calls++
+		return fmt.Errorf("boom")
+	})
+
+	_, resp := postCreateWorkspace(t, handler, `{"name":"Flaky","template_id":"starter-template"}`)
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+
+	first := postTemplateSetupStart(t, handler, wsID)
+	if first["started"] != false || first["reason"] != "start_failed" {
+		t.Fatalf("expected start_failed: %v", first)
+	}
+	// Consumed despite the failure: no auto-retry on the next open.
+	second := postTemplateSetupStart(t, handler, wsID)
+	if second["started"] != false || second["reason"] != "already_consumed" {
+		t.Fatalf("failed start must not retry: %v", second)
+	}
+	if calls != 1 {
+		t.Fatalf("starter calls = %d, want 1", calls)
+	}
+	// The task itself is still pending and manually startable.
+	for _, task := range workspaceTasksFromStore(t, handler, wsID) {
+		if task.Context[taskContextTemplateSetup] == true && task.Status != agentworkspace.TaskStatusPending {
+			t.Fatalf("setup task status = %q, want pending", task.Status)
+		}
+	}
+}
+
+func TestTemplateSetupStartSkipsUnassignedTask(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writeStarterTaskTemplate(t, handler.templatesRootResolver(), "optout-template", true)
+
+	calls := 0
+	handler.SetTemplateSetupTaskStarter(func(workspaceID, taskID string) error {
+		calls++
+		return nil
+	})
+
+	_, resp := postCreateWorkspace(t, handler, `{"name":"NoAgent","template_id":"optout-template","create_template_agents":false}`)
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+
+	// Unassigned setup task: not consumable, not started, marker left off so a
+	// later open (after an agent joins) still fires.
+	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 2 {
+		t.Fatalf("tasks before first open = %d, want 2", len(tasks))
+	}
+	first := postTemplateSetupStart(t, handler, wsID)
+	if first["started"] != false || first["reason"] != "unassigned" {
+		t.Fatalf("expected unassigned no-op: %v", first)
+	}
+	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 2 {
+		t.Fatalf("tasks after first open = %d, want 2", len(tasks))
+	}
+	if calls != 0 {
+		t.Fatalf("starter must not run for unassigned setup task")
+	}
+
+	// An agent joins → claim sweep assigns the task → next open starts it.
+	if err := handler.agentStore.CreateAgent("Helper", nil); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/agents", strings.NewReader(`{"agent_name":"Helper"}`))
+	req.Header.Set("Content-Type", "application/json")
+	addW := httptest.NewRecorder()
+	handler.HandleWorkspaces(addW, req)
+	if addW.Code != http.StatusCreated {
+		t.Fatalf("add agent = %d: %s", addW.Code, addW.Body.String())
+	}
+
+	// Regression guard: the add-agent portable-state sync must not clobber
+	// folder-store tasks (it once did when the session row lacked task data).
+	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 2 {
+		t.Fatalf("tasks after add-agent = %d, want 2 (portable-state sync wiped them)", len(tasks))
+	}
+
+	second := postTemplateSetupStart(t, handler, wsID)
+	if second["started"] != true {
+		t.Fatalf("setup should start after agent joins: %v", second)
+	}
+	if calls != 1 {
+		t.Fatalf("starter calls = %d, want 1", calls)
+	}
+}
+
+func TestTemplateSetupStartNoSetupTask(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	_, resp := postCreateWorkspace(t, handler, `{"name":"Plain Two"}`)
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+
+	result := postTemplateSetupStart(t, handler, wsID)
+	if result["started"] != false || result["reason"] != "no_setup_task" {
+		t.Fatalf("expected no_setup_task no-op: %v", result)
 	}
 }

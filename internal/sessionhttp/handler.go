@@ -46,6 +46,11 @@ type Handler struct {
 	// present); MCP servers — which have no per-agent scope — bind at the
 	// workspace level. Injected by the server, which holds the skills manager.
 	applyAgentTools func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)
+	// templateSetupStarter starts a task through the same execution path as the
+	// manual execute endpoint. Injected by the server (backed by the
+	// orchestration task handler); used by the template-setup first-open
+	// auto-start after the consumed marker is stamped.
+	templateSetupStarter func(workspaceID, taskID string) error
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -126,6 +131,12 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 // workspace onboarding sessions.
 func (h *Handler) SetTemplateOnboardingService(service *templateonboarding.Service) {
 	h.templateOnboarding = service
+}
+
+// SetTemplateSetupTaskStarter injects the function that starts a task through
+// the manual-execution path, used by the template-setup first-open auto-start.
+func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
+	h.templateSetupStarter = fn
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which
