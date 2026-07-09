@@ -21,7 +21,10 @@
               <h1 id="roster-title" class="roster-rail__title">Agents</h1>
               <p class="roster-rail__subtitle" id="rosterCount" aria-live="polite">Loading roster…</p>
             </div>
-            <a class="roster-rail__classic" href="/agents" title="Switch back to the classic dashboard">Classic view</a>
+            <div class="roster-rail__actions">
+              <button type="button" id="newAgentBtn" class="roster-rail__new" title="Create a new agent">+ New</button>
+              <a class="roster-rail__classic" href="/agents" title="Switch back to the classic dashboard">Classic view</a>
+            </div>
           </header>
 
           <div class="roster-rail__controls">
@@ -67,6 +70,7 @@
               <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
                 <!-- vitals chips injected -->
               </div>
+              <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
             </header>
 
             <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
@@ -89,6 +93,15 @@
                 <div class="stage-workspaces" id="workspacesBody"></div>
               </section>
             </div>
+          </article>
+
+          <!-- Create-agent panel (toggled from the roster "+ New" button) -->
+          <article class="create-panel" id="createPanel" hidden aria-label="Create a new agent">
+            <header class="create-panel__head">
+              <h2>New agent</h2>
+              <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
+            </header>
+            <div class="create-panel__body" id="createBody"></div>
           </article>
         </section>
       </div>
