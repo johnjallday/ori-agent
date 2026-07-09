@@ -487,10 +487,10 @@
 .ws-cmd-map-belt {
   position: absolute;
   right: 18px;
-  bottom: 18px;
+  top: 18px;
   z-index: 3;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 8px;
 }
 .ws-cmd-map-belt-btn {
@@ -807,6 +807,29 @@
 }
 .ws-cmd-map-agent.alert .ws-cmd-map-agent-path {
   background: linear-gradient(90deg, transparent, rgba(226, 101, 77, 0.9), transparent);
+}
+.ws-cmd-map-entry-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.12);
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+  padding: 4px 6px;
+}
+.ws-cmd-map-entry-badge i {
+  font-size: 10px;
+  line-height: 1;
 }
 .ws-cmd-map-agent-copy {
   width: 100%;
@@ -3433,17 +3456,18 @@
     min-height: 560px;
   }
   .ws-cmd-map-world {
-    padding: 24px 16px 88px;
+    padding: 78px 16px 24px;
   }
   .ws-cmd-map-floor {
     inset: 14px;
   }
   .ws-cmd-map-belt {
-    left: 50%;
-    right: auto;
-    bottom: 16px;
+    top: 16px;
+    right: 16px;
+    bottom: auto;
+    left: auto;
     flex-direction: row;
-    transform: translateX(-50%);
+    transform: none;
   }
   .ws-cmd-map-belt-btn {
     width: 44px;

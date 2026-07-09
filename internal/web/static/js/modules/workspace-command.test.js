@@ -2106,6 +2106,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
         getAgentRosterStatus() {
           return { key: 'working', label: 'Working', detail: 'Task in progress' };
         },
+        isWorkspaceEntryAgent(name) {
+          return name === 'Researcher';
+        },
         getAgentSkillSummary() {
           return { count: 0, names: [] };
         },
@@ -2130,6 +2133,8 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(html, /data-map-zone="agents"/);
     assert.match(html, /data-cmd-map-window="inventory"/);
     assert.match(html, /Researcher/);
+    assert.match(html, /ws-cmd-map-entry-badge/);
+    assert.match(html, /Entry Agent/);
     assert.doesNotMatch(html, /data-map-zone="mission"/);
     assert.doesNotMatch(html, /data-map-zone="tasks"/);
     assert.doesNotMatch(html, /data-map-zone="tools"/);

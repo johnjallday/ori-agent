@@ -724,6 +724,26 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(page.locator('#workspaceCommandView [data-map-zone="agents"]')).toContainText(
       'Research Analyst'
     );
+    const beltGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt')
+      .evaluate(node => {
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        const mapRect = node.closest('.ws-cmd-opmap').getBoundingClientRect();
+        return {
+          flexDirection: style.flexDirection,
+          rightGap: Math.round(mapRect.right - rect.right),
+          topGap: Math.round(rect.top - mapRect.top)
+        };
+      });
+    expect(beltGeometry.flexDirection).toBe('row');
+    expect(beltGeometry.rightGap).toBeLessThanOrEqual(24);
+    expect(beltGeometry.topGap).toBeLessThanOrEqual(24);
+    const entryUnit = page
+      .locator('#workspaceCommandView .ws-cmd-map-agent')
+      .filter({ hasText: 'Roster Manager' });
+    await expect(entryUnit.locator('.ws-cmd-map-entry-badge')).toBeVisible();
+    await expect(entryUnit).toHaveAttribute('aria-label', /Entry Agent/);
 
     await page.locator('#workspaceCommandView [data-cmd-map-window="inventory"]').click();
     const inventoryWindow = page.locator('#workspaceCommandView .ws-cmd-map-window');

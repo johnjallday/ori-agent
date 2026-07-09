@@ -2876,6 +2876,9 @@ export class WorkspaceCommandView {
       .map((agent, index) => {
         const selected = agent.key === this.selectedAgentKey;
         const destination = agent.destination || 'hub';
+        const entryBadge = agent.entry
+          ? '<span class="ws-cmd-map-entry-badge" title="Entry Agent"><i class="bi bi-star-fill" aria-hidden="true"></i><span>Entry</span></span>'
+          : '';
         return (
           '<button type="button" class="ws-cmd-map-agent ' +
           escapeHtml(agent.tone) +
@@ -2893,9 +2896,11 @@ export class WorkspaceCommandView {
           '" aria-label="Select ' +
           escapeHtml(agent.name) +
           ', ' +
+          (agent.entry ? 'Entry Agent, ' : '') +
           escapeHtml(agent.status?.label || 'Idle') +
           '">' +
           '<span class="ws-cmd-map-agent-path" aria-hidden="true"></span>' +
+          entryBadge +
           this.agentCharacterHTML(agent, 'roster') +
           '<span class="ws-cmd-map-agent-copy"><strong>' +
           escapeHtml(agent.name) +
