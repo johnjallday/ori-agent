@@ -14,7 +14,6 @@ import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
-import { TemplateOnboardingPanel } from './template-onboarding.js';
 
 /**
  * Format a date for display
@@ -238,11 +237,6 @@ export class WorkspaceDetailPage {
     this.skillsManager = new WorkspaceSkillsManager(this);
     this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
-    this.templateOnboardingPanel = new TemplateOnboardingPanel({
-      workspaceId: this.workspaceId,
-      mountId: 'workspace-template-onboarding',
-      onRefresh: () => this.loadWorkspace()
-    });
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
     this.workspaceTaskMarkdownStatus = null;
@@ -315,7 +309,6 @@ export class WorkspaceDetailPage {
     this.setupNotesPanelVaultDrop();
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
-    await this.templateOnboardingPanel.init();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([

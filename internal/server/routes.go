@@ -680,9 +680,6 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
-		if s.Handlers.TemplateOnboarding != nil {
-			s.Handlers.TemplateOnboarding.RegisterRoutes(mux)
-		}
 
 		// Closed prompt-variable vocabulary + preview (template authoring UI)
 		mux.HandleFunc("GET /api/prompt-variables", s.handlePromptVariablesList)
@@ -704,9 +701,6 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/{templateID}/files/rename", s.handleProjectTemplateFileRename)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}/files", s.handleProjectTemplateFileDelete)
 		// Onboarding intake block authoring
-		mux.HandleFunc("GET /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingGet)
-		mux.HandleFunc("PUT /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingSet)
-		mux.HandleFunc("DELETE /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingDelete)
 		// Default tool bindings (skills / MCP servers / plugins), applied if present at creation
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/tools", s.handleProjectTemplateToolsSet)
 		// Agent roster (first = entry agent, rest = specialists), seeded at creation

@@ -79,7 +79,7 @@ func TestListLibraryPreservesOnboardingRawAndToleratesGarbage(t *testing.T) {
 		`{"name":"With","onboarding":{"version":"1","completion":{"type":"none"}}}`)
 	// Garbage onboarding (a string, not an object): this package must NOT
 	// interpret it — the template still lists with its display name, and the raw
-	// bytes are carried for templateonboarding to reject later.
+	// bytes are carried only for warning detection and strip-on-save.
 	writeFile(t, filepath.Join(dir, "badonb", ManifestFileName),
 		`{"name":"Bad","onboarding":"not-an-object"}`)
 	// No onboarding key at all.

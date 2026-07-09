@@ -114,11 +114,6 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		tasksClaimed = h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
 	}
 
-	onboardingSummary, _, onboardingErr := h.resumeTemplateOnboardingForEntryAgent(r.Context(), workspace)
-	if onboardingErr != nil {
-		logger.Warn("Failed to resume template onboarding after adding workspace agent", logger.Fields{"id": workspaceID, "error": onboardingErr})
-	}
-
 	logger.Info("Agent added to workspace", logger.Fields{
 		"workspace_id":    workspaceID,
 		"agent_name":      req.AgentName,
@@ -130,9 +125,6 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		"success":        true,
 		"agent_instance": newInstance,
 		"workspace":      workspace,
-	}
-	if onboardingSummary != nil {
-		response["onboarding"] = onboardingSummary
 	}
 	if tasksClaimed > 0 {
 		response["tasks_claimed"] = tasksClaimed

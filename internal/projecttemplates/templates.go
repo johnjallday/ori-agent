@@ -118,9 +118,10 @@ type Template struct {
 	HasSkeleton bool `json:"has_skeleton"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
-	// Onboarding is the verbatim `onboarding` block from template.json, if any.
-	// This package only carries the bytes; the templateonboarding package parses
-	// and validates them at workspace-creation time. Excluded from API JSON.
+	// Onboarding is the verbatim legacy `onboarding` block from template.json,
+	// if any. The intake engine that executed it has been removed: the bytes are
+	// carried only so warnings can flag the block and the authoring save path
+	// can strip it. Never parsed or executed. Excluded from API JSON.
 	Onboarding json.RawMessage `json:"-"`
 	// Tools are the default skills/MCP servers/plugins a workspace created from
 	// this template binds (apply-if-present). Names only — bound in the
@@ -138,9 +139,9 @@ type Template struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// HasOnboarding reports whether the template carries a non-empty onboarding
-// block. It does not validate the block — ParseSpec/Validate in the
-// templateonboarding package do that.
+// HasOnboarding reports whether the template still carries a legacy intake-era
+// onboarding block (detection only — the block is ignored at runtime and
+// stripped on the next authoring save).
 func (t Template) HasOnboarding() bool {
 	s := bytes.TrimSpace(t.Onboarding)
 	return len(s) > 0 && !bytes.Equal(s, []byte("null"))
@@ -152,10 +153,10 @@ func (t Template) HasAgents() bool {
 }
 
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
-// by design. Display fields (name/description/tags) are metadata only; the
-// optional onboarding block is preserved verbatim as raw JSON and parsed by the
-// templateonboarding package at workspace-creation time. This package never
-// interprets it, so the file-copy engine stays domain-blind.
+// by design. Display fields (name/description/tags) are metadata only; a
+// legacy `onboarding` block is preserved verbatim as raw JSON purely for
+// warning detection and strip-on-save — never interpreted, so the file-copy
+// engine stays domain-blind.
 type manifest struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description"`

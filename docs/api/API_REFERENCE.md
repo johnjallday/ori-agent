@@ -870,7 +870,7 @@ GET /api/project-templates
 }
 ```
 
-The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template. The optional `template.json` carries declarative metadata: `name`, `description`, `tags`, `icon`, `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks`, `tools`, `onboarding`, and `builtin`. `has_skeleton` is derived (false ⇒ a metadata-only template that scaffolds no project folder). Built-ins (`builtin: true`) are read-only.
+The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template. The optional `template.json` carries declarative metadata: `name`, `description`, `tags`, `icon`, `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (each task may set `setup: true`; at most one per template — it auto-starts on the workspace's first open), `tools`, `agents`, and `builtin`. A legacy `onboarding` block from the removed intake engine is ignored, surfaced as a load-time warning, and stripped on the next authoring save. `has_skeleton` is derived (false ⇒ a metadata-only template that scaffolds no project folder). Built-ins (`builtin: true`) are read-only.
 
 **Create a workspace with a project** — `POST /api/workspaces` accepts three additional optional fields:
 
@@ -897,6 +897,14 @@ POST /api/workspaces/:id/project
 
 Responds `201` with `project_path` and the refreshed workspace; `409` when the workspace already has a project, `400` for groups/invalid templates. The created project is also registered as the workspace's primary linked directory.
 
+**Template setup task (first-open auto-start):**
+
+```http
+POST /api/workspaces/:id/template-setup/start
+```
+
+Called by the workspace detail page on load. Finds the seeded starter task marked `setup: true` that has not yet auto-started, stamps a once-only consumed marker in the task's context (`template_setup_autostart_consumed_at`), and starts it through the same path as a manual task start. Responds `{ "success": true, "started": true, "task_id": "..." }` on the first open, and `{ "started": false, "reason": "already_consumed" | "no_setup_task" | "unassigned" | "start_failed" | ... }` otherwise — idempotent by design, so reloads and concurrent tabs never re-run setup. An unassigned setup task (created with `create_template_agents: false`) is left unconsumed until an agent joins and the claim sweep assigns it.
+
 **Managing the library:**
 
 ```http
@@ -908,7 +916,7 @@ DELETE /api/project-templates/:id             → { "success": true, "trashed": 
 POST   /api/project-templates/reveal          { "id": "..." }   // empty id opens the library root (local-first)
 ```
 
-Mutating a built-in template (`PUT`/`DELETE`, file edits, onboarding/tools) is rejected with `403` — duplicate it first. The same `template.json` config (`behavior_profile`, `starter_tasks`, `tools`, `onboarding`) is also editable via the `/templates` page; see [Project Templates](../features/project-templates.md).
+Mutating a built-in template (`PUT`/`DELETE`, file edits, tools/agents) is rejected with `403` — duplicate it first. The same `template.json` config (`behavior_profile`, `starter_tasks`, `tools`, `agents`) is also editable via the `/templates` page; see [Project Templates](../features/project-templates.md).
 
 Import copies the folder **verbatim** (no token substitution — `{{name}}` in file names is preserved for instantiation time; symlinks skipped). Delete prefers the system Trash; deleted starter templates are re-materialized on the next server start. Metadata updates preserve unknown `template.json` fields.
 

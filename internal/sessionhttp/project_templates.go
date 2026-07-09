@@ -85,34 +85,6 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 // copy it removes the project folder again so the workspace never ends up
 // with an orphaned project or a dangling ProjectPath.
 func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string) error {
-	return h.instantiateWorkspaceProjectWithFields(ctx, ws, folderWS, templateID, templatePath, projectName, nil)
-}
-
-// InstantiateProject creates a deferred onboarding project from the stored
-// template metadata. It implements templateonboarding.ProjectInstantiator.
-func (h *Handler) InstantiateProject(ctx context.Context, workspaceID, templateID, templatePath, projectName string, fieldValues map[string]any) (string, error) {
-	if h == nil || h.store == nil {
-		return "", fmt.Errorf("workspace session store is unavailable")
-	}
-	ws, err := h.store.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		return "", err
-	}
-	h.hydrateWorkspaceMetadataInto(ws)
-	if h.workspaceStore == nil {
-		return "", fmt.Errorf("workspace folder storage is unavailable")
-	}
-	folderWS, err := h.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return "", fmt.Errorf("workspace folder is unavailable: %w", err)
-	}
-	if err := h.instantiateWorkspaceProjectWithFields(ctx, ws, folderWS, templateID, templatePath, projectName, fieldValues); err != nil {
-		return "", err
-	}
-	return ws.ProjectPath, nil
-}
-
-func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string, fieldValues map[string]any) error {
 	if err := projecttemplates.ValidateTarget(ws.IsGroup(), ws.ProjectPath); err != nil {
 		return err
 	}
@@ -135,7 +107,7 @@ func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws 
 	}
 	displayProjectName := strings.TrimSpace(projectName)
 
-	relPath, err := projecttemplates.InstantiateWithFields(tpl.Path, folderPath, projectName, fieldValues)
+	relPath, err := projecttemplates.Instantiate(tpl.Path, folderPath, projectName)
 	if err != nil {
 		return err
 	}

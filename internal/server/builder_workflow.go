@@ -18,8 +18,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
-	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
@@ -138,16 +136,11 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 
 		b.workspaceFileStore = fileStore
-		b.templateOnboardingStore = templateonboarding.NewStore(fileStore)
-		b.templateOnboardingService = templateonboarding.NewService(b.templateOnboardingStore)
-		b.templateOnboardingHTTPHandler = templateonboardinghttp.NewHandler(
-			b.templateOnboardingStore,
-			templateonboardinghttp.NewWorkspaceStoreEntryAgentResolver(b.sessionStore),
-		)
-		b.templateOnboardingHTTPHandler.SetExtractionDeps(b.llmFactory, b.configManager)
+		// The template-intake engine is gone; remove any of its per-workspace
+		// session sidecars left on disk. Best-effort and non-fatal.
+		cleanupLegacyTemplateOnboardingSidecars(fileStore)
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
-			b.sessionHandler.SetTemplateOnboardingService(b.templateOnboardingService)
 			// Disk is the source of truth for grouping: reconcile the session
 			// store's structure with the on-disk layout once at startup so
 			// groups that arrived via git/cloud sync show up without a manual
@@ -329,20 +322,6 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
-
-	if b.templateOnboardingHTTPHandler != nil && b.templateOnboardingStore != nil {
-		var memoryAppender templateonboarding.MemoryAppender
-		if b.workspaceFileStore != nil {
-			memoryAppender = workspace.NewMemoryStore(b.workspaceFileStore)
-		}
-		b.templateOnboardingHTTPHandler.SetCompletionRunner(templateonboarding.NewExecutor(
-			b.templateOnboardingStore,
-			templateonboarding.WithProjectInstantiator(b.sessionHandler),
-			templateonboarding.WithTaskHandler(taskExecutionHandler),
-			templateonboarding.WithRuntimeResolver(runtimeResolver),
-			templateonboarding.WithMemoryAppender(memoryAppender),
-		))
-	}
 
 	b.taskScheduler = workspace.NewTaskScheduler(b.workspaceStore, workspace.SchedulerConfig{
 		PollInterval:  1 * time.Minute,
@@ -587,4 +566,35 @@ func (b *ServerBuilder) initializeTemplateManager() {
 
 	// Initialize workflow HTTP handler
 	b.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.workspaceStore)
+}
+
+// cleanupLegacyTemplateOnboardingSidecars removes the per-workspace
+// template-onboarding.json session files the removed template-intake engine
+// used to persist. Best-effort by design: failures are logged and never block
+// startup, and workspaces without a sidecar are untouched.
+func cleanupLegacyTemplateOnboardingSidecars(fileStore *workspace.FileStore) {
+	if fileStore == nil {
+		return
+	}
+	ids, err := fileStore.List()
+	if err != nil {
+		logger.Warn("Legacy template-onboarding cleanup: listing workspaces failed", logger.Fields{"error": err})
+		return
+	}
+	removed := 0
+	for _, id := range ids {
+		folder, err := fileStore.GetFolderPath(id)
+		if err != nil {
+			continue
+		}
+		sidecar := filepath.Join(folder, "template-onboarding.json")
+		if err := os.Remove(sidecar); err == nil {
+			removed++
+		} else if !os.IsNotExist(err) {
+			logger.Warn("Legacy template-onboarding cleanup: remove failed", logger.Fields{"workspace_id": id, "error": err})
+		}
+	}
+	if removed > 0 {
+		logger.Info("Removed legacy template-onboarding session files", logger.Fields{"count": removed})
+	}
 }

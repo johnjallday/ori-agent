@@ -81,12 +81,9 @@ var nowFunc = time.Now
 // substituteTokens replaces the supported tokens in a path name. Replacement
 // values are slug/date strings (lowercase alphanumerics and hyphens), so
 // substitution can never introduce path separators.
-func substituteTokens(name, projectSlug string, fieldTokens map[string]string) string {
+func substituteTokens(name, projectSlug string) string {
 	name = strings.ReplaceAll(name, "{{name}}", projectSlug)
 	name = strings.ReplaceAll(name, "{{date}}", nowFunc().Format("2006-01-02"))
-	for id, value := range fieldTokens {
-		name = strings.ReplaceAll(name, "{{fields."+id+"}}", value)
-	}
 	return name
 }
 
@@ -97,18 +94,7 @@ func substituteTokens(name, projectSlug string, fieldTokens map[string]string) s
 // skipped, the root template.json is excluded, and any failure removes the
 // partially created project folder.
 func Instantiate(templatePath, workspaceFolder, projectName string) (string, error) {
-	return InstantiateWithFields(templatePath, workspaceFolder, projectName, nil)
-}
-
-// InstantiateWithFields is Instantiate plus token replacement for
-// {{fields.<id>}} in file and folder names. Field values are slugified before
-// replacement, matching {{name}} safety guarantees.
-func InstantiateWithFields(templatePath, workspaceFolder, projectName string, fieldValues map[string]any) (string, error) {
 	slug, err := SanitizeProjectName(projectName)
-	if err != nil {
-		return "", err
-	}
-	fieldTokens, err := fieldReplacementTokens(fieldValues)
 	if err != nil {
 		return "", err
 	}
@@ -132,7 +118,7 @@ func InstantiateWithFields(templatePath, workspaceFolder, projectName string, fi
 		return "", fmt.Errorf("failed to inspect project folder %q: %w", destRoot, err)
 	}
 
-	if err := copyTemplateTree(templatePath, destRoot, slug, fieldTokens, srcInfo.Mode().Perm()); err != nil {
+	if err := copyTemplateTree(templatePath, destRoot, slug, srcInfo.Mode().Perm()); err != nil {
 		// Best-effort cleanup so a failed instantiation leaves no partial
 		// project folder behind (and the caller never persists ProjectPath).
 		_ = os.RemoveAll(destRoot)
@@ -143,7 +129,7 @@ func InstantiateWithFields(templatePath, workspaceFolder, projectName string, fi
 }
 
 // copyTemplateTree walks the template and materializes it under destRoot.
-func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[string]string, rootPerm fs.FileMode) error {
+func copyTemplateTree(templatePath, destRoot, slug string, rootPerm fs.FileMode) error {
 	if err := os.MkdirAll(destRoot, normalizeDirPerm(rootPerm)); err != nil {
 		return fmt.Errorf("failed to create project folder: %w", err)
 	}
@@ -171,7 +157,7 @@ func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[strin
 			return nil
 		}
 
-		destRel, err := substituteRelPath(relPath, slug, fieldTokens)
+		destRel, err := substituteRelPath(relPath, slug)
 		if err != nil {
 			return err
 		}
@@ -203,10 +189,10 @@ func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[strin
 // substituteRelPath applies token substitution to every segment of a
 // slash-separated fs.WalkDir path and re-validates the result so a template
 // cannot smuggle in traversal segments.
-func substituteRelPath(relPath, slug string, fieldTokens map[string]string) (string, error) {
+func substituteRelPath(relPath, slug string) (string, error) {
 	segments := strings.Split(relPath, "/")
 	for i, segment := range segments {
-		substituted := substituteTokens(segment, slug, fieldTokens)
+		substituted := substituteTokens(segment, slug)
 		if strings.Contains(substituted, "{{fields.") {
 			return "", fmt.Errorf("template entry %q references an unknown field token", relPath)
 		}
@@ -221,25 +207,6 @@ func substituteRelPath(relPath, slug string, fieldTokens map[string]string) (str
 		return "", fmt.Errorf("template entry %q escapes the project folder", relPath)
 	}
 	return joined, nil
-}
-
-func fieldReplacementTokens(values map[string]any) (map[string]string, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	tokens := make(map[string]string, len(values))
-	for id, raw := range values {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return nil, fmt.Errorf("field token id is required")
-		}
-		token := workspace.Slugify(fmt.Sprint(raw))
-		if token == "" {
-			return nil, fmt.Errorf("field token %q is empty after slugification", id)
-		}
-		tokens[id] = token
-	}
-	return tokens, nil
 }
 
 // normalizeDirPerm keeps template-provided directory modes but guarantees the

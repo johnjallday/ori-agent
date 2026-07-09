@@ -16,7 +16,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -345,9 +344,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if seededStarterTasks > 0 {
 		response["seeded_starter_tasks"] = seededStarterTasks
 	}
-	if prov.onboardingSummary != nil {
-		response["onboarding"] = prov.onboardingSummary
-	}
 	_ = orihttp.RespondCreated(w, response)
 }
 
@@ -457,7 +453,6 @@ type createTemplateContext struct {
 // createWorkspace's response assembly.
 type createProvisionOutcome struct {
 	projectWarning    string
-	onboardingSummary any
 	agentToolWarnings []string
 }
 
@@ -555,53 +550,33 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
 	if tc.wantsProject {
-		out.projectWarning, out.onboardingSummary = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
+		out.projectWarning = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
 	}
 	return out, false
 }
 
 // applyCreateWorkspaceTemplate applies the selected project template to a
-// freshly-provisioned (non-group) workspace folder: template onboarding when
-// declared, direct instantiation otherwise, plus the template's default tool
-// bindings. Never fatal — a failure is reported via the returned warning.
-func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string, onboardingSummary any) {
-	onboardingHandled := false
-	if tc.resolved && h.templateOnboarding != nil && tc.template.HasOnboarding() {
-		summary, handled, err := h.templateOnboarding.ResolveAndStart(ctx, ws, tc.template, templateonboarding.StartOptions{
-			TemplateID:   req.TemplateID,
-			TemplatePath: tc.template.Path,
-			ProjectName:  req.ProjectName,
-		})
-		onboardingHandled = handled
-		if summary != nil {
-			onboardingSummary = summary
-		}
-		if handled {
-			if err != nil {
-				projectWarning = fmt.Sprintf("workspace was created, but template onboarding could not start: %v", err)
-				logger.Warn("Template onboarding session creation failed", logger.Fields{"id": ws.ID, "template": tc.template.ID, "error": err})
-			} else {
-				logger.Info("Template onboarding session created", logger.Fields{"id": ws.ID, "template": tc.template.ID})
+// freshly-provisioned (non-group) workspace folder: direct skeleton
+// instantiation plus the template's default tool bindings. A legacy
+// `onboarding` block in the manifest is ignored (the intake engine was
+// replaced by setup starter tasks). Never fatal — a failure is reported via
+// the returned warning.
+func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string) {
+	switch {
+	case tc.resolved && !tc.template.HasSkeleton:
+		// Metadata-only template (no files): there is no project to
+		// scaffold by design. Its behavior/tools/starter-tasks still
+		// apply; skip instantiation without surfacing a warning.
+		logger.Info("Metadata-only template: skipping project scaffold", logger.Fields{"id": ws.ID, "template": tc.template.ID})
+	default:
+		// Non-fatal by design: a failed instantiation must not fail
+		// workspace creation. The warning is surfaced to the user.
+		if err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+			if tc.resolveErr != nil {
+				err = tc.resolveErr
 			}
-		}
-	}
-	if !onboardingHandled {
-		switch {
-		case tc.resolved && !tc.template.HasSkeleton:
-			// Metadata-only template (no files): there is no project to
-			// scaffold by design. Its behavior/tools/starter-tasks still
-			// apply; skip instantiation without surfacing a warning.
-			logger.Info("Metadata-only template: skipping project scaffold", logger.Fields{"id": ws.ID, "template": tc.template.ID})
-		default:
-			// Non-fatal by design: a failed instantiation must not fail
-			// workspace creation. The warning is surfaced to the user.
-			if err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
-				if tc.resolveErr != nil {
-					err = tc.resolveErr
-				}
-				projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
-				logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
-			}
+			projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
+			logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
 		}
 	}
 
@@ -624,7 +599,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 			}
 		}
 	}
-	return projectWarning, onboardingSummary
+	return projectWarning
 }
 
 func workspacePathsEqual(a, b string) bool {

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 )
 
 // handleProjectTemplates serves GET /api/project-templates: the project
@@ -264,83 +262,6 @@ func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "path": path})
-}
-
-// handleProjectTemplateOnboardingGet serves GET
-// /api/project-templates/{templateID}/onboarding: the parsed onboarding spec
-// (plus the raw block for the JSON editor), or an absent/invalid state.
-func (s *Server) handleProjectTemplateOnboardingGet(w http.ResponseWriter, r *http.Request) {
-	tpl, err := projecttemplates.FindLibraryTemplate(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
-	if err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-
-	resp := map[string]any{
-		"present":    false,
-		"onboarding": nil,
-		"raw":        strings.TrimSpace(string(tpl.Onboarding)),
-	}
-	spec, perr := templateonboarding.ParseSpec(tpl.Onboarding)
-	switch {
-	case perr != nil:
-		// Malformed block on disk: report it so the raw-JSON editor can repair it.
-		resp["present"] = true
-		resp["error"] = perr.Error()
-	case spec != nil:
-		resp["present"] = true
-		resp["onboarding"] = spec
-	}
-	_ = orihttp.RespondSuccess(w, resp)
-}
-
-// handleProjectTemplateOnboardingSet serves PUT
-// /api/project-templates/{templateID}/onboarding: validate the submitted spec
-// (ParseSpec + Validate) and write it into template.json. A `null` body clears
-// onboarding. Validation problems are returned as a 400 with a problems list.
-func (s *Server) handleProjectTemplateOnboardingSet(w http.ResponseWriter, r *http.Request) {
-	var body json.RawMessage
-	if !orihttp.ParseJSONBody(w, r, &body) {
-		return
-	}
-
-	spec, perr := templateonboarding.ParseSpec(body)
-	if perr != nil {
-		_ = orihttp.RespondBadRequest(w, perr.Error())
-		return
-	}
-	if spec != nil {
-		if res := templateonboarding.Validate(spec); !res.OK() {
-			_ = orihttp.RespondJSON(w, http.StatusBadRequest, map[string]any{
-				"error":    "onboarding spec is invalid",
-				"problems": res.Problems,
-			})
-			return
-		}
-	}
-
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
-		return
-	}
-	tpl, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), body)
-	if err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "present": tpl.HasOnboarding()})
-}
-
-// handleProjectTemplateOnboardingDelete serves DELETE
-// /api/project-templates/{templateID}/onboarding: remove the onboarding block.
-func (s *Server) handleProjectTemplateOnboardingDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
-		return
-	}
-	if _, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), nil); err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "present": false})
 }
 
 // handleProjectTemplateToolsSet serves PUT

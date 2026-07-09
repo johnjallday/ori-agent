@@ -15,7 +15,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -35,7 +34,6 @@ type Handler struct {
 	systemModelReader     SystemModelReader
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
-	templateOnboarding    *templateonboarding.Service
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds
@@ -74,9 +72,6 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
-	if ws != nil && h.templateOnboarding == nil {
-		h.templateOnboarding = templateonboarding.NewService(templateonboarding.NewStore(ws))
-	}
 }
 
 // SetWorkspaceTaskStore sets the primary workspace store used for task
@@ -125,12 +120,6 @@ func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 // events.
 func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 	h.eventBus = bus
-}
-
-// SetTemplateOnboardingService sets the service that owns template-authored
-// workspace onboarding sessions.
-func (h *Handler) SetTemplateOnboardingService(service *templateonboarding.Service) {
-	h.templateOnboarding = service
 }
 
 // SetTemplateSetupTaskStarter injects the function that starts a task through
