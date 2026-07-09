@@ -411,6 +411,11 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		AvatarColor    *string                    `json:"avatar_color,omitempty"`
 		Favorite       *bool                      `json:"favorite,omitempty"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
+		// ExpectedVersion is the optimistic-concurrency token the client received
+		// from GET /api/agents/{name}. When present and no longer matching the
+		// stored agent, the update is rejected as stale (PRD FR13). Omitted =
+		// no concurrency check (back-compat for existing callers).
+		ExpectedVersion *string `json:"expected_version,omitempty"`
 		// ConfirmSharedEdit acknowledges that this edit changes a definition
 		// shared by multiple workspaces (PRD FR9). Required when the agent is
 		// attached to >1 workspace and a shared-definition field is being
@@ -420,6 +425,21 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+
+	// Stale-edit guard (PRD FR13): if the caller sent the version it loaded and the
+	// stored definition has since changed, reject before mutating so a concurrent
+	// edit is not silently clobbered. Checked against the current stored agent.
+	if req.ExpectedVersion != nil {
+		current := agentConfigVersion(agent)
+		if *req.ExpectedVersion != current {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":           "stale_agent_edit",
+				"message":         fmt.Sprintf("%q was changed since you loaded it. Reload the latest version and reapply your edit.", agentName),
+				"current_version": current,
+			})
+			return
+		}
 	}
 
 	// Workspace membership drives the shared-edit / rename guards (PRD FR9/FR10).
