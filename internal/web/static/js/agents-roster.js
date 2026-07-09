@@ -1,19 +1,24 @@
 /*
- * Agents roster + stage controller (game-inspired Agents page, G2).
+ * Agents roster + stage controller (game-inspired Agents page, G2 + G3).
  *
- * Read-only shell: browse the roster, select an agent, inspect its vitals and
+ * Browse the roster, select an agent, and inspect/edit it on the stage across
  * three tabs (Overview / Prompt / Workspaces). Selection persists across
  * reloads (URL ?agent= + localStorage). The system prompt is loaded lazily —
- * its DOM is only built the first time the Prompt tab is opened for an agent.
+ * fetched/built only the first time the Prompt tab is opened for an agent.
  *
- * Editing (Overview/Prompt saves, workspace assignment, create/delete) arrives
- * in later groups; this file deliberately renders everything read-only.
+ * G3 adds editing to Overview and Prompt: version-checked saves against
+ * PATCH /api/agents/{name} (expected_version), inline validation, a stale-edit
+ * conflict banner with reload, shared-definition confirmation, and an
+ * unsaved-changes guard on tab/card switches. CLI/built-in agents (no version
+ * token) stay read-only. Workspaces editing + create/delete land in G4.
  */
 (function () {
   'use strict';
 
   var STORAGE_KEY = 'ori.roster.selectedAgent';
   var TAB_ORDER = ['overview', 'prompt', 'workspaces'];
+  var ROLES = ['general', 'orchestrator', 'researcher', 'analyzer', 'synthesizer', 'validator', 'specialist'];
+  var REASONING = ['', 'minimal', 'low', 'medium', 'high'];
 
   var state = {
     agents: [],
@@ -24,6 +29,7 @@
     query: '',
     sort: 'name-asc',
     focusIndex: -1,
+    dirty: { overview: false, prompt: false },
   };
 
   var els = {};
@@ -62,13 +68,17 @@
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
-      tab.addEventListener('click', function () { activateTab(tab.dataset.tab, true); });
+      tab.addEventListener('click', function () { requestTab(tab.dataset.tab, true); });
       tab.addEventListener('keydown', onTabKeydown);
     });
 
     window.addEventListener('popstate', function () {
       var name = new URLSearchParams(window.location.search).get('agent');
       if (name && state.byName[name]) selectAgent(name, { push: false });
+    });
+
+    window.addEventListener('beforeunload', function (e) {
+      if (anyDirty()) { e.preventDefault(); e.returnValue = ''; }
     });
 
     loadAgents();
@@ -96,8 +106,8 @@
       });
   }
 
-  function fetchDetail(name) {
-    if (state.detailCache[name]) return Promise.resolve(state.detailCache[name]);
+  function fetchDetail(name, force) {
+    if (!force && state.detailCache[name]) return Promise.resolve(state.detailCache[name]);
     return fetch('/api/agents/' + encodeURIComponent(name) + '/detail')
       .then(function (r) {
         if (!r.ok) throw new Error('detail ' + r.status);
@@ -200,8 +210,10 @@
   function selectAgent(name, opts) {
     opts = opts || {};
     if (!state.byName[name]) return;
+    if (name !== state.selected && !guardUnsaved()) return;
     state.selected = name;
     state.focusIndex = state.filtered.findIndex(function (a) { return a.name === name; });
+    resetDirty();
     safeStorageSet(name);
     syncUrl(name, opts.push !== false);
     highlightSelected();
@@ -215,12 +227,10 @@
     els.placeholder.hidden = true;
     els.stage.hidden = false;
 
-    // Reset to Overview and clear the lazy Prompt tab for the new agent.
-    activateTab('overview', false);
+    setActiveTab('overview');
     els.promptBody.dataset.loadedFor = '';
     els.promptBody.innerHTML = '<p class="stage-hint">Loading system prompt…</p>';
 
-    // Hero + roster-derived vitals render immediately from the list item.
     els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar');
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
@@ -228,14 +238,13 @@
 
     renderWorkspaces(listItem);
 
-    // Detail (model config) fills Overview; may fail gracefully.
     els.overviewFacts.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewDesc.textContent = '';
     fetchDetail(name)
       .then(function (detail) {
-        if (state.selected !== name) return; // selection moved on
+        if (state.selected !== name) return;
         renderVitals(listItem, detail);
-        renderOverview(listItem, detail);
+        renderOverview(name, detail);
       })
       .catch(function (err) {
         if (state.selected !== name) return;
@@ -257,25 +266,90 @@
     els.vitals.innerHTML = vitals.join('');
   }
 
-  function renderOverview(listItem, detail) {
-    var facts = [
-      ['Role', titleCase(listItem.role || '—')],
-      ['Type', titleCase(listItem.type || '—')],
-      ['Model', detail.model || '—'],
-      ['Provider', detail.provider ? titleCase(detail.provider) : '—'],
-      ['Temperature', detail.temperature != null ? String(detail.temperature) : '—'],
-    ];
-    if (detail.reasoning_effort) facts.push(['Reasoning effort', titleCase(detail.reasoning_effort)]);
-    if (detail.max_output_tokens) facts.push(['Max output tokens', String(detail.max_output_tokens)]);
-    facts.push(['Web search', detail.allow_web_search ? 'Allowed' : 'Off']);
+  /* ---- overview (editable) ------------------------------------------------- */
 
-    els.overviewFacts.innerHTML = facts.map(function (f) {
-      return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>';
-    }).join('');
-
-    var desc = (listItem.metadata && listItem.metadata.description) || '';
-    els.overviewDesc.textContent = desc || 'No description written yet.';
+  function isEditable(detail) {
+    // CLI / built-in agents come back without a version token and reject PATCH.
+    return !!(detail && detail.version);
   }
+
+  function renderOverview(name, detail) {
+    els.overviewDesc.textContent = '';
+    var editable = isEditable(detail);
+
+    if (!editable) {
+      els.overviewFacts.className = 'stage-facts';
+      els.overviewFacts.innerHTML = readonlyFacts(detail);
+      els.overviewDesc.innerHTML = '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
+      return;
+    }
+
+    // The editable form manages its own layout, so drop the read-only facts grid.
+    els.overviewFacts.className = 'stage-editwrap';
+    els.overviewFacts.innerHTML =
+      '<form class="stage-form" id="overviewForm" novalidate>' +
+      field('Role', selectInput('ov-role', ROLES, detail.role, titleCase)) +
+      field('Model', textInput('ov-model', detail.model || '')) +
+      field('Provider', textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…')) +
+      field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1')) +
+      field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; })) +
+      field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1')) +
+      field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
+      field('Description', textareaInput('ov-description', (detail.metadata && detail.metadata.description) || '', 3)) +
+      '</form>' +
+      saveBar('overview');
+
+    els.overviewDesc.innerHTML = '';
+    wireDirty('overview', document.getElementById('overviewForm'));
+    wireSaveBar('overview', function () { saveOverview(name); });
+  }
+
+  function readonlyFacts(detail) {
+    var facts = [
+      ['Role', titleCase((detail && detail.role) || '—')],
+      ['Model', (detail && detail.model) || '—'],
+      ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
+      ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—'],
+    ];
+    return facts.map(function (f) { return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>'; }).join('');
+  }
+
+  function overviewEdits(detail) {
+    // Diff current inputs against the loaded detail; return only changed fields
+    // keyed by the PATCH request's field names.
+    var out = {};
+    var role = val('ov-role');
+    if (role !== (detail.role || '')) out.role = role;
+    var model = val('ov-model').trim();
+    if (model !== (detail.model || '')) out.model = model;
+    var provider = val('ov-provider').trim();
+    if (provider !== (detail.provider || '')) out.llm_provider = provider;
+    var temp = parseFloat(val('ov-temperature'));
+    if (!isNaN(temp) && temp !== Number(detail.temperature)) out.temperature = temp;
+    var reasoning = val('ov-reasoning');
+    if (reasoning !== (detail.reasoning_effort || '')) out.reasoning_effort = reasoning;
+    var maxRaw = val('ov-maxtokens').trim();
+    var maxNum = maxRaw === '' ? 0 : parseInt(maxRaw, 10);
+    if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0)) out.max_output_tokens = maxNum;
+    var web = checked('ov-websearch');
+    if (web !== !!detail.allow_web_search) out.allow_web_search = web;
+    var desc = val('ov-description');
+    if (desc !== ((detail.metadata && detail.metadata.description) || '')) out.description = desc;
+    return out;
+  }
+
+  function saveOverview(name) {
+    var detail = state.detailCache[name];
+    if (!detail) return;
+    var edits = overviewEdits(detail);
+    if (Object.keys(edits).length === 0) {
+      showStatus('overview', 'No changes to save.', 'muted');
+      return;
+    }
+    submitPatch(name, 'overview', edits);
+  }
+
+  /* ---- prompt (lazy + editable) -------------------------------------------- */
 
   function renderPrompt(name) {
     if (els.promptBody.dataset.loadedFor === name) return;
@@ -284,20 +358,115 @@
     fetchDetail(name)
       .then(function (detail) {
         if (state.selected !== name) return;
-        var prompt = (detail && detail.system_prompt) || '';
-        if (!prompt.trim()) {
-          els.promptBody.innerHTML = '<p class="stage-hint">This agent has no custom system prompt.</p>';
+        if (!isEditable(detail)) {
+          var prompt = (detail && detail.system_prompt) || '';
+          els.promptBody.innerHTML = prompt.trim()
+            ? '<pre></pre>'
+            : '<p class="stage-hint">This agent has no custom system prompt.</p>';
+          if (prompt.trim()) els.promptBody.querySelector('pre').textContent = prompt;
           return;
         }
-        var pre = document.createElement('pre');
-        pre.textContent = prompt;
-        els.promptBody.innerHTML = '';
-        els.promptBody.appendChild(pre);
+        els.promptBody.innerHTML =
+          '<form class="stage-form" id="promptForm" novalidate>' +
+          '<textarea id="pr-prompt" class="stage-textarea" rows="16" spellcheck="false" ' +
+          'placeholder="No system prompt set. Add one to steer this agent."></textarea>' +
+          '</form>' + saveBar('prompt');
+        document.getElementById('pr-prompt').value = (detail.system_prompt) || '';
+        wireDirty('prompt', document.getElementById('promptForm'));
+        wireSaveBar('prompt', function () { savePrompt(name); });
       })
       .catch(function () {
         els.promptBody.innerHTML = '<p class="stage-hint">Could not load the system prompt.</p>';
       });
   }
+
+  function savePrompt(name) {
+    var detail = state.detailCache[name];
+    if (!detail) return;
+    var next = val('pr-prompt');
+    if (next === (detail.system_prompt || '')) {
+      showStatus('prompt', 'No changes to save.', 'muted');
+      return;
+    }
+    submitPatch(name, 'prompt', { system_prompt: next });
+  }
+
+  /* ---- shared save path ---------------------------------------------------- */
+
+  function submitPatch(name, tab, fields, confirmShared) {
+    var detail = state.detailCache[name];
+    var body = Object.assign({ expected_version: detail.version }, fields);
+    if (confirmShared) body.confirm_shared_edit = true;
+    setSaving(tab, true);
+    clearBanner(tab);
+
+    fetch('/api/agents/' + encodeURIComponent(name), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) { return { status: r.status, data: data }; });
+      })
+      .then(function (res) {
+        setSaving(tab, false);
+        if (res.status >= 200 && res.status < 300) return onSaved(name, tab);
+        if (res.status === 409 && res.data && res.data.error === 'stale_agent_edit') return onStale(name, tab, res.data);
+        if (res.status === 409 && res.data && res.data.error === 'shared_agent_edit_requires_confirmation') return onSharedConfirm(name, tab, fields, res.data);
+        if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked') return showStatus(tab, res.data.message || 'Blocked.', 'error');
+        // Validation / other errors surface their message inline.
+        showStatus(tab, (res.data && res.data.message) || ('Save failed (' + res.status + ').'), 'error');
+      })
+      .catch(function (err) {
+        setSaving(tab, false);
+        showStatus(tab, 'Network error — save not applied.', 'error');
+        console.error('[roster] save failed', err);
+      });
+  }
+
+  function onSaved(name, tab) {
+    // Refetch to reseed the version token and reflect any server normalization,
+    // then re-render the tab and the roster meta.
+    fetchDetail(name, true).then(function (detail) {
+      state.dirty[tab] = false;
+      if (state.selected !== name) return;
+      refreshRosterMeta(name, detail);
+      if (tab === 'overview') {
+        renderVitals(state.byName[name], detail);
+        renderOverview(name, detail);
+      } else if (tab === 'prompt') {
+        els.promptBody.dataset.loadedFor = '';
+        renderPrompt(name);
+      }
+      showStatus(tab, 'Saved.', 'ok');
+    });
+  }
+
+  function onStale(name, tab, data) {
+    showBanner(tab,
+      'This agent was changed elsewhere since you loaded it. Reload the latest version to continue — your unsaved edits in this tab will be replaced.',
+      'Reload latest', function () {
+        fetchDetail(name, true).then(function (detail) {
+          if (state.selected !== name) return;
+          state.dirty[tab] = false;
+          if (tab === 'overview') { renderVitals(state.byName[name], detail); renderOverview(name, detail); }
+          else if (tab === 'prompt') { els.promptBody.dataset.loadedFor = ''; renderPrompt(name); }
+        });
+      });
+    if (data && data.current_version && state.detailCache[name]) {
+      // Keep the cached version in sync so a subsequent explicit reload lines up.
+      state.detailCache[name]._staleVersion = data.current_version;
+    }
+  }
+
+  function onSharedConfirm(name, tab, fields, data) {
+    var n = (data && data.workspace_count) || 'multiple';
+    var ok = window.confirm('“' + name + '” is attached to ' + n + ' workspaces. This change affects all of them. Apply it?');
+    if (ok) submitPatch(name, tab, fields, true);
+    else showStatus(tab, 'Save cancelled.', 'muted');
+  }
+
+  /* ---- workspaces (read-only in G3) ---------------------------------------- */
 
   function renderWorkspaces(listItem) {
     var workspaces = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
@@ -306,16 +475,39 @@
       return;
     }
     els.workspacesBody.innerHTML = workspaces.map(function (ws) {
-      var name = esc(ws.name || 'Workspace');
-      var link = ws.id ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + name + '</a>' : name;
+      var nm = esc(ws.name || 'Workspace');
+      var link = ws.id ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>' : nm;
       var pill = ws.entry_point ? '<span class="ws-entry-pill">Entry agent</span>' : '';
       return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
     }).join('');
   }
 
+  function refreshRosterMeta(name, detail) {
+    var item = state.byName[name];
+    if (!item) return;
+    if (detail.model) item.model = detail.model;
+    if (detail.metadata) item.metadata = Object.assign({}, item.metadata, { description: (detail.metadata.description || '') });
+    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
+    if (card) {
+      var meta = card.querySelector('.roster-card__meta');
+      var wc = item.workspace_count || 0;
+      if (meta) meta.textContent = [detail.model, wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's')].filter(Boolean).join(' · ');
+    }
+  }
+
   /* ---- tabs ---------------------------------------------------------------- */
 
-  function activateTab(tabName, focus) {
+  function requestTab(tabName, focus) {
+    var current = currentTab();
+    if (tabName !== current && state.dirty[current] && !guardUnsaved()) {
+      return; // stay on the dirty tab
+    }
+    setActiveTab(tabName);
+    if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
+    if (focus) document.getElementById('tab-' + tabName).focus();
+  }
+
+  function setActiveTab(tabName) {
     TAB_ORDER.forEach(function (t) {
       var tab = document.getElementById('tab-' + t);
       var panel = document.getElementById('panel-' + t);
@@ -326,8 +518,11 @@
       panel.hidden = !active;
       panel.classList.toggle('is-active', active);
     });
-    if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
-    if (focus) document.getElementById('tab-' + tabName).focus();
+  }
+
+  function currentTab() {
+    var active = document.querySelector('.stage__tab.is-active');
+    return active ? active.dataset.tab : 'overview';
   }
 
   function onTabKeydown(e) {
@@ -336,15 +531,102 @@
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault();
       var next = e.key === 'ArrowRight' ? (idx + 1) % TAB_ORDER.length : (idx - 1 + TAB_ORDER.length) % TAB_ORDER.length;
-      activateTab(TAB_ORDER[next], true);
+      requestTab(TAB_ORDER[next], true);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      activateTab(TAB_ORDER[0], true);
+      requestTab(TAB_ORDER[0], true);
     } else if (e.key === 'End') {
       e.preventDefault();
-      activateTab(TAB_ORDER[TAB_ORDER.length - 1], true);
+      requestTab(TAB_ORDER[TAB_ORDER.length - 1], true);
     }
   }
+
+  /* ---- dirty tracking + save bar ------------------------------------------- */
+
+  function wireDirty(tab, form) {
+    if (!form) return;
+    form.addEventListener('input', function () { markDirty(tab, true); });
+    form.addEventListener('change', function () { markDirty(tab, true); });
+  }
+
+  function markDirty(tab, on) {
+    state.dirty[tab] = on;
+    var bar = document.getElementById('savebar-' + tab);
+    if (!bar) return;
+    bar.classList.toggle('is-dirty', on);
+    var save = bar.querySelector('[data-role="save"]');
+    if (save) save.disabled = !on;
+    var dot = bar.querySelector('.dirty-note');
+    if (dot) dot.textContent = on ? 'Unsaved changes' : '';
+  }
+
+  function wireSaveBar(tab, onSave) {
+    var bar = document.getElementById('savebar-' + tab);
+    if (!bar) return;
+    bar.querySelector('[data-role="save"]').addEventListener('click', onSave);
+    var revert = bar.querySelector('[data-role="revert"]');
+    if (revert) revert.addEventListener('click', function () {
+      state.dirty[tab] = false;
+      if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
+      else if (tab === 'prompt') { els.promptBody.dataset.loadedFor = ''; renderPrompt(state.selected); }
+    });
+    markDirty(tab, false);
+  }
+
+  function setSaving(tab, on) {
+    var bar = document.getElementById('savebar-' + tab);
+    if (!bar) return;
+    var save = bar.querySelector('[data-role="save"]');
+    if (save) { save.disabled = on || !state.dirty[tab]; save.textContent = on ? 'Saving…' : 'Save'; }
+  }
+
+  function showStatus(tab, msg, kind) {
+    var bar = document.getElementById('savebar-' + tab);
+    if (!bar) return;
+    var status = bar.querySelector('.save-status');
+    if (!status) return;
+    status.textContent = msg;
+    status.className = 'save-status is-' + (kind || 'muted');
+    if (kind === 'ok' || kind === 'muted') {
+      window.clearTimeout(status._t);
+      status._t = window.setTimeout(function () { status.textContent = ''; }, 2600);
+    }
+  }
+
+  function showBanner(tab, msg, actionLabel, onAction) {
+    var panel = document.getElementById('panel-' + tab);
+    clearBanner(tab);
+    var banner = document.createElement('div');
+    banner.className = 'conflict-banner';
+    banner.id = 'banner-' + tab;
+    banner.setAttribute('role', 'alert');
+    banner.innerHTML = '<span>' + esc(msg) + '</span>';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'conflict-banner__action';
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', function () { clearBanner(tab); onAction(); });
+    banner.appendChild(btn);
+    panel.insertBefore(banner, panel.firstChild);
+  }
+
+  function clearBanner(tab) {
+    var existing = document.getElementById('banner-' + tab);
+    if (existing) existing.remove();
+  }
+
+  /* ---- unsaved guard ------------------------------------------------------- */
+
+  function anyDirty() { return !!(state.dirty.overview || state.dirty.prompt); }
+
+  function guardUnsaved() {
+    if (!anyDirty()) return true;
+    var ok = window.confirm('You have unsaved changes that will be lost. Continue?');
+    if (ok) resetDirty();
+    return ok;
+  }
+
+  function resetDirty() { state.dirty.overview = false; state.dirty.prompt = false; }
 
   /* ---- roster interaction -------------------------------------------------- */
 
@@ -357,19 +639,10 @@
     var n = state.filtered.length;
     if (n === 0) return;
     var idx = state.focusIndex < 0 ? 0 : state.focusIndex;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      selectByIndex(Math.min(idx + 1, n - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      selectByIndex(Math.max(idx - 1, 0));
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      selectByIndex(0);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      selectByIndex(n - 1);
-    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); selectByIndex(Math.min(idx + 1, n - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); selectByIndex(Math.max(idx - 1, 0)); }
+    else if (e.key === 'Home') { e.preventDefault(); selectByIndex(0); }
+    else if (e.key === 'End') { e.preventDefault(); selectByIndex(n - 1); }
   }
 
   function selectByIndex(i) {
@@ -380,18 +653,49 @@
     if (opt && opt.scrollIntoView) opt.scrollIntoView({ block: 'nearest' });
   }
 
-  function onSearch() {
-    state.query = els.search.value || '';
-    applyFilterSort();
+  function onSearch() { state.query = els.search.value || ''; applyFilterSort(); }
+  function onSort() { state.sort = els.sort.value || 'name-asc'; applyFilterSort(); if (state.selected) highlightSelected(); }
+
+  /* ---- form field builders ------------------------------------------------- */
+
+  function field(label, control) {
+    return '<div class="field"><label class="field__label">' + esc(label) + '</label>' +
+      '<div class="field__control">' + control + '</div></div>';
+  }
+  function textInput(id, value, placeholder) {
+    return '<input id="' + id + '" type="text" value="' + esc(value) + '"' +
+      (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>';
+  }
+  function numInput(id, value, min, max, step) {
+    return '<input id="' + id + '" type="number" value="' + esc(value === '' ? '' : value) + '"' +
+      (min !== '' ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '') + '>';
+  }
+  function checkInput(id, on) {
+    return '<label class="check"><input id="' + id + '" type="checkbox"' + (on ? ' checked' : '') + '> Allowed</label>';
+  }
+  function selectInput(id, options, value, labeler) {
+    var opts = options.map(function (o) {
+      var label = labeler ? labeler(o) : o;
+      return '<option value="' + esc(o) + '"' + (o === value ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    return '<select id="' + id + '">' + opts + '</select>';
+  }
+  function textareaInput(id, value, rows) {
+    return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
+  }
+  function saveBar(tab) {
+    return '<div class="save-bar" id="savebar-' + tab + '">' +
+      '<span class="dirty-note"></span>' +
+      '<span class="save-status is-muted"></span>' +
+      '<button type="button" class="btn-ghost" data-role="revert">Revert</button>' +
+      '<button type="button" class="btn-primary" data-role="save" disabled>Save</button>' +
+      '</div>';
   }
 
-  function onSort() {
-    state.sort = els.sort.value || 'name-asc';
-    applyFilterSort();
-    if (state.selected) highlightSelected();
-  }
+  /* ---- misc helpers -------------------------------------------------------- */
 
-  /* ---- helpers ------------------------------------------------------------- */
+  function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+  function checked(id) { var el = document.getElementById(id); return !!(el && el.checked); }
 
   function vital(label, value) {
     return '<span class="vital"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></span>';
@@ -450,12 +754,8 @@
     else window.history.replaceState({ agent: name }, '', url);
   }
 
-  function safeStorageGet() {
-    try { return window.localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
-  }
-  function safeStorageSet(v) {
-    try { window.localStorage.setItem(STORAGE_KEY, v); } catch (e) { /* ignore */ }
-  }
+  function safeStorageGet() { try { return window.localStorage.getItem(STORAGE_KEY); } catch (e) { return null; } }
+  function safeStorageSet(v) { try { window.localStorage.setItem(STORAGE_KEY, v); } catch (e) { /* ignore */ } }
 
   function cssEscape(s) {
     if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
