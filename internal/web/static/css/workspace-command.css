@@ -491,9 +491,18 @@
   z-index: 3;
   display: flex;
   flex-direction: row;
-  gap: 8px;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  background:
+    linear-gradient(180deg, rgba(17, 22, 29, 0.9), rgba(6, 8, 12, 0.9)), rgba(6, 8, 12, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(6px);
 }
 .ws-cmd-map-belt-btn {
+  position: relative;
   width: 46px;
   height: 46px;
   display: grid;
@@ -504,15 +513,73 @@
   cursor: pointer;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
 }
+.ws-cmd-map-belt-btn .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .ws-cmd-map-belt-btn i {
   font-size: 18px;
   line-height: 1;
+}
+.ws-cmd-map-belt-btn::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 2;
+  min-width: max-content;
+  max-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid rgba(70, 211, 154, 0.24);
+  background: rgba(7, 10, 14, 0.94);
+  color: var(--ws-ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.ws-cmd-map-belt-btn:first-child::after {
+  left: 0;
+  transform: translate(0, -2px);
+}
+.ws-cmd-map-belt-btn:last-child::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, -2px);
 }
 .ws-cmd-map-belt-btn:hover,
 .ws-cmd-map-belt-btn.is-active {
   color: var(--ws-faction);
   border-color: var(--ws-faction);
   background: rgba(70, 211, 154, 0.1);
+}
+.ws-cmd-map-belt-btn:hover::after,
+.ws-cmd-map-belt-btn:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ws-cmd-map-belt-btn:first-child:hover::after,
+.ws-cmd-map-belt-btn:first-child:focus-visible::after,
+.ws-cmd-map-belt-btn:last-child:hover::after,
+.ws-cmd-map-belt-btn:last-child:focus-visible::after {
+  transform: translate(0, 0);
 }
 .ws-cmd-map-window-backdrop {
   position: fixed;

@@ -739,6 +739,43 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(beltGeometry.flexDirection).toBe('row');
     expect(beltGeometry.rightGap).toBeLessThanOrEqual(24);
     expect(beltGeometry.topGap).toBeLessThanOrEqual(24);
+    const beltLabelGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt-btn')
+      .evaluateAll(buttons =>
+        buttons.map(button => {
+          const label = button.querySelector('.sr-only');
+          const labelStyle = label ? window.getComputedStyle(label) : null;
+          const labelRect = label ? label.getBoundingClientRect() : null;
+          const buttonRect = button.getBoundingClientRect();
+          return {
+            ariaLabel: button.getAttribute('aria-label'),
+            buttonHeight: Math.round(buttonRect.height),
+            buttonWidth: Math.round(buttonRect.width),
+            labelHeight: labelRect ? Math.round(labelRect.height) : 0,
+            labelOverflow: labelStyle?.overflow || '',
+            labelText: label?.textContent?.trim() || '',
+            labelWidth: labelRect ? Math.round(labelRect.width) : 0
+          };
+        })
+      );
+    expect(beltLabelGeometry).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ariaLabel: 'Workspace Objective',
+          labelText: 'Workspace Objective'
+        })
+      ])
+    );
+    expect(
+      beltLabelGeometry.every(
+        item =>
+          item.buttonHeight >= 44 &&
+          item.buttonWidth >= 44 &&
+          item.labelHeight <= 1 &&
+          item.labelWidth <= 1 &&
+          item.labelOverflow === 'hidden'
+      )
+    ).toBeTruthy();
     const entryUnit = page
       .locator('#workspaceCommandView .ws-cmd-map-agent')
       .filter({ hasText: 'Roster Manager' });
