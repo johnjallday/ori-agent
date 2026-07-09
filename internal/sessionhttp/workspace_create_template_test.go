@@ -514,8 +514,11 @@ func TestCreateWorkspaceWithOnboardingTemplateDefersProject(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected onboarding summary in response: %#v", resp["onboarding"])
 	}
-	if got := onboarding["status"]; got != string(templateonboarding.StatusPendingEntryAgent) {
-		t.Fatalf("onboarding status = %v, want pending_entry_agent", got)
+	// Template-created workspaces always get an entry agent now (roster-less
+	// templates fall back to an auto-created manager), so onboarding starts
+	// collecting immediately instead of pending_entry_agent.
+	if got := onboarding["status"]; got != string(templateonboarding.StatusCollecting) {
+		t.Fatalf("onboarding status = %v, want collecting", got)
 	}
 	fields, ok := onboarding["fields"].([]any)
 	if !ok || len(fields) != 2 {
@@ -527,8 +530,8 @@ func TestCreateWorkspaceWithOnboardingTemplateDefersProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load onboarding session: %v", err)
 	}
-	if session.Status != templateonboarding.StatusPendingEntryAgent {
-		t.Fatalf("stored onboarding status = %q, want pending_entry_agent", session.Status)
+	if session.Status != templateonboarding.StatusCollecting {
+		t.Fatalf("stored onboarding status = %q, want collecting", session.Status)
 	}
 	if len(session.Spec.Fields) != 2 || session.Spec.Fields[0].ID != "bpm" {
 		t.Fatalf("stored spec snapshot = %+v", session.Spec)

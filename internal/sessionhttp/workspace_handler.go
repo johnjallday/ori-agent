@@ -305,12 +305,19 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
 
+	// Seed the template's starter tasks server-side, after the skeleton is
+	// instantiated and the roster is attached, so they are assigned to a real
+	// entry agent and the setup task only ever adjusts files that already
+	// exist. Best-effort: a failure logs and never fails creation.
+	seededStarterTasks := 0
+	if templateResolved && kind != session.WorkspaceKindGroup {
+		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
+	}
+
 	// Completeness/ordering backstop: when the workspace was created with an
-	// entry agent (an explicit one, or a group's auto-created manager), claim any
-	// tasks that already exist on the folder workspace. The common flow seeds
-	// starter tasks from the client after this response — where default-on-create
-	// assigns them to the coordinator directly — so this is a no-op there and the
-	// safety net for create-time/import-style seeds.
+	// entry agent, claim any tasks that already exist on the folder workspace
+	// (e.g. import-style seeds). Template starter tasks are assigned at seed
+	// time above, so this is a no-op for them.
 	if seed.EntrySet {
 		h.claimUnassignedTasksForEntryAgentLogged(ws.ID)
 	}
@@ -329,6 +336,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(seed.ReuseNotices) > 0 {
 		response["agent_reuse_notices"] = seed.ReuseNotices
+	}
+	if seededStarterTasks > 0 {
+		response["seeded_starter_tasks"] = seededStarterTasks
 	}
 	if prov.onboardingSummary != nil {
 		response["onboarding"] = prov.onboardingSummary
@@ -379,8 +389,9 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 
 // selectCreateWorkspaceEntryAgent applies the create-time entry-agent policy:
 // an explicitly named agent wins; otherwise a template roster seeds agents
-// (first = entry agent); otherwise groups auto-create a "<Name> Manager".
-// Concrete workspaces without any of those stay agent-less so the UI can
+// (first = entry agent), with a "<Name> Manager" auto-created when the
+// template declares no roster; otherwise groups auto-create a "<Name>
+// Manager". Concrete non-template workspaces stay agent-less so the UI can
 // prompt the user to create one with their choice of model/provider.
 // Returns ok=false when an error response has already been written.
 func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool) (seedAgentsResult, bool) {
@@ -397,14 +408,26 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			seed.EntrySet = true
 		}
-	case templateResolved && tmpl.HasAgents() && createTemplateAgentsEnabled(req):
+	case templateResolved && createTemplateAgentsEnabled(req):
 		// The template declares an agent roster: seed it (first = entry agent,
-		// rest = specialists). A seeded entry agent suppresses the mandatory
-		// "create an entry agent" prompt; if it fails, the workspace is left
-		// agent-less and the prompt fires as the fallback.
-		seed = h.seedTemplateAgents(ws, tmpl)
+		// rest = specialists). Every template-created workspace must end up with
+		// an entry agent to own its seeded starter tasks, so a roster-less
+		// (legacy) template — or a roster whose seeding failed — falls back to
+		// an auto-created "<Name> Manager". An explicit create_template_agents:
+		// false opt-out skips this case entirely: the caller chose to pick
+		// agents post-create, and the claim-on-agent-add sweep hands the seeded
+		// tasks over when the first agent joins.
+		if tmpl.HasAgents() {
+			seed = h.seedTemplateAgents(ws, tmpl)
+		}
+		if !seed.EntrySet {
+			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+				setWorkspaceEntryAgent(ws, agentName)
+				seed.EntrySet = true
+			}
+		}
 	case kind == session.WorkspaceKindGroup:
-		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
+		if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
 			seed.EntrySet = true
 		}
