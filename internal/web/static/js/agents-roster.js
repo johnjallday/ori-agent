@@ -191,6 +191,10 @@
     var wc = agent.workspace_count || 0;
     metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
 
+    // Concise spoken label so screen readers don't read the raw dot markup.
+    var wcLabel = wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
+    li.setAttribute('aria-label', agent.name + ', ' + status + ', ' + wcLabel);
+
     li.innerHTML =
       avatarMarkup(agent, 'roster-card__avatar') +
       '<div class="roster-card__body">' +
@@ -299,24 +303,21 @@
     var editable = isEditable(detail);
 
     if (!editable) {
-      els.overviewFacts.className = 'stage-facts';
-      els.overviewFacts.innerHTML = readonlyFacts(detail);
+      els.overviewFacts.innerHTML = '<dl class="stage-facts">' + readonlyFacts(detail) + '</dl>';
       els.overviewDesc.innerHTML = '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
       return;
     }
 
-    // The editable form manages its own layout, so drop the read-only facts grid.
-    els.overviewFacts.className = 'stage-editwrap';
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
-      field('Role', selectInput('ov-role', ROLES, detail.role, titleCase)) +
-      field('Model', textInput('ov-model', detail.model || '')) +
-      field('Provider', textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…')) +
-      field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1')) +
-      field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; })) +
-      field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1')) +
+      field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
+      field('Model', textInput('ov-model', detail.model || ''), 'ov-model') +
+      field('Provider', textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…'), 'ov-provider') +
+      field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1'), 'ov-temperature') +
+      field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }), 'ov-reasoning') +
+      field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
       field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
-      field('Description', textareaInput('ov-description', (detail.metadata && detail.metadata.description) || '', 3)) +
+      field('Description', textareaInput('ov-description', (detail.metadata && detail.metadata.description) || '', 3), 'ov-description') +
       '</form>' +
       saveBar('overview');
 
@@ -609,10 +610,10 @@
     els.createPanel.hidden = false;
     els.createBody.innerHTML =
       '<form class="stage-form" id="createForm" novalidate>' +
-      field('Name', textInput('cr-name', '', 'Unique agent name')) +
-      field('Role', selectInput('cr-role', ROLES, 'general', titleCase)) +
-      field('Model', textInput('cr-model', 'gpt-4o-mini')) +
-      field('Description', textareaInput('cr-description', '', 3)) +
+      field('Name', textInput('cr-name', '', 'Unique agent name'), 'cr-name') +
+      field('Role', selectInput('cr-role', ROLES, 'general', titleCase), 'cr-role') +
+      field('Model', textInput('cr-model', 'gpt-4o-mini'), 'cr-model') +
+      field('Description', textareaInput('cr-description', '', 3), 'cr-description') +
       '</form>' +
       '<div class="save-bar" id="savebar-create">' +
       '<span class="save-status is-muted"></span>' +
@@ -879,9 +880,13 @@
 
   /* ---- form field builders ------------------------------------------------- */
 
-  function field(label, control) {
-    return '<div class="field"><label class="field__label">' + esc(label) + '</label>' +
-      '<div class="field__control">' + control + '</div></div>';
+  function field(label, control, forId) {
+    // Associate the label with its control (forId) for a11y; controls that carry
+    // their own wrapping label (e.g. the checkbox) pass no forId and get a span.
+    var lab = forId
+      ? '<label class="field__label" for="' + forId + '">' + esc(label) + '</label>'
+      : '<span class="field__label">' + esc(label) + '</span>';
+    return '<div class="field">' + lab + '<div class="field__control">' + control + '</div></div>';
   }
   function textInput(id, value, placeholder) {
     return '<input id="' + id + '" type="text" value="' + esc(value) + '"' +
@@ -940,7 +945,8 @@
   }
 
   function colorFor(name) {
-    var palette = ['#4f46e5', '#0891b2', '#7c3aed', '#059669', '#d97706', '#db2777', '#2563eb', '#dc2626'];
+    // 700-level shades so white initials clear WCAG AA contrast (>= 4.5:1).
+    var palette = ['#4338ca', '#0e7490', '#6d28d9', '#047857', '#b45309', '#be185d', '#1d4ed8', '#b91c1c'];
     var sum = 0;
     String(name || '').split('').forEach(function (c) { sum += c.charCodeAt(0); });
     return palette[sum % palette.length];
@@ -968,7 +974,7 @@
 
   function syncUrl(name, push) {
     var params = new URLSearchParams(window.location.search);
-    params.set('view', 'roster');
+    params.delete('view'); // roster is the default Agents page now
     params.set('agent', name);
     var url = window.location.pathname + '?' + params.toString();
     if (push) window.history.pushState({ agent: name }, '', url);

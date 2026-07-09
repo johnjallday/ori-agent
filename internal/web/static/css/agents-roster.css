@@ -8,6 +8,14 @@
   --roster-rail-width: 340px;
   --roster-gap: 18px;
   --roster-radius: 14px;
+  /* Accent used for small text/links. Lightened on dark so the brand primary
+     (which may be dark) still clears AA contrast on near-black surfaces. */
+  --roster-accent: var(--primary-color, #4f46e5);
+}
+
+[data-bs-theme="dark"] .agents-roster-page,
+.agents-roster-page[data-bs-theme="dark"] {
+  --roster-accent: color-mix(in srgb, var(--primary-color, #4f46e5) 38%, white);
 }
 
 .roster-layout {
@@ -218,7 +226,7 @@
 .roster-linkbtn {
   background: none;
   border: none;
-  color: var(--primary-color, #4f46e5);
+  color: var(--roster-accent, #4f46e5);
   cursor: pointer;
   font-size: 13px;
   text-decoration: underline;
@@ -358,7 +366,9 @@
 .stage__tab:hover { color: var(--text-primary, #111827); }
 
 .stage__tab.is-active {
-  color: var(--primary-color, #4f46e5);
+  /* High-contrast text; the colored underline + weight signal the active tab
+     (the brand primary can be too dark for AA as text on dark surfaces). */
+  color: var(--text-primary, #111827);
   border-bottom-color: var(--primary-color, #4f46e5);
   font-weight: 600;
 }
@@ -428,7 +438,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--primary-color, #4f46e5) 14%, transparent);
-  color: var(--primary-color, #4f46e5);
+  color: var(--roster-accent, #4f46e5);
 }
 
 /* ---- Editable forms (G3) -------------------------------------------------- */
@@ -509,12 +519,16 @@
   color: var(--text-secondary, #9ca3af);
   margin-right: auto;
 }
-.save-bar.is-dirty .dirty-note { color: var(--primary-color, #4f46e5); }
+.save-bar.is-dirty .dirty-note { color: var(--roster-accent, #4f46e5); }
 
 .save-status { font-size: 12px; }
-.save-status.is-ok { color: #16a34a; }
+.save-status.is-ok { color: #15803d; }
 .save-status.is-error { color: #dc2626; }
 .save-status.is-muted { color: var(--text-secondary, #9ca3af); }
+
+/* Brighter status text for sufficient contrast on dark surfaces. */
+[data-bs-theme="dark"] .save-status.is-ok { color: #4ade80; }
+[data-bs-theme="dark"] .save-status.is-error { color: #f87171; }
 
 .btn-primary,
 .btn-ghost {
@@ -650,12 +664,33 @@
 @media (max-width: 860px) {
   .roster-layout {
     grid-template-columns: 1fr;
+    padding: 14px;
+    gap: 14px;
   }
   .roster-rail {
     position: static;
     max-height: none;
   }
+  /* Roster becomes a scrollable strip above the full-width stage. */
   .roster-list {
-    max-height: 320px;
+    max-height: 44vh;
+  }
+  .stage__hero {
+    grid-template-columns: 52px minmax(0, 1fr);
+    padding: 18px 18px 16px;
+  }
+  .stage__avatar { width: 52px; height: 52px; font-size: 20px; }
+  .stage__delete { top: 12px; right: 14px; }
+  .stage__panels { padding: 16px; }
+  .stage-facts { grid-template-columns: 1fr; gap: 2px 0; }
+  .stage-facts dt { margin-top: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roster-card,
+  .roster-rail__classic,
+  .btn-primary,
+  .btn-ghost {
+    transition: none;
   }
 }
