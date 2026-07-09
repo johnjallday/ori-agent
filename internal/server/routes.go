@@ -195,6 +195,11 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			avatarHandler.ServeHTTP(w, r)
 			return
 		}
+		// Agent-centric workspace assignment: PUT /api/agents/{name}/workspaces
+		if strings.HasSuffix(r.URL.Path, "/workspaces") && r.Method == http.MethodPut {
+			agentHandler.AssignWorkspaces(w, r)
+			return
+		}
 		// Regular agent requests - delegate to agentHandler
 		agentHandler.ServeHTTP(w, r)
 	})

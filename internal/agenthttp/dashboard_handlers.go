@@ -99,6 +99,10 @@ type AgentDetailResponse struct {
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
+	// Version is an optimistic-concurrency token over the editable definition.
+	// The Agents page echoes it back on update so the server can reject stale
+	// edits (PRD FR13). Empty for CLI agents, which are read-only.
+	Version string `json:"version,omitempty"`
 	// ClaudeSync carries read-only ~/.claude state for the Claude Code agent.
 	ClaudeSync any `json:"claude_sync,omitempty"`
 	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
@@ -324,6 +328,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		MaxOutputTokens: ag.Settings.MaxOutputTokens,
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
+		Version:         agentConfigVersion(ag),
 	}
 
 	// Return JSON response
